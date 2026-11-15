@@ -2021,3 +2021,85 @@ impl UnitDiff for Runner {
         rust(&case.parse()?)
     }
 }
+
+#[cfg(test)]
+mod swap_uv_tests {
+    use super::*;
+
+    /// Rows that moved when `SwapUV` stopped negating the distance a second time for an
+    /// offset with a stored extension (WR-164): each is a script with a `swap` step.
+    const MOVED: [&str; 3] = ["extension_sequence", "extension_sequence_negative", "gen2137"];
+
+    /// Replays every script with a `swap` step up to that step and swaps: the offset after
+    /// the swap is the offset before it with its parameters exchanged,
+    /// `S'(u, v) = S(v, u)` (the same points, on the same side of the base), on a 9 x 9
+    /// grid over its natural domain, and its distance is negated once (the swapped base's
+    /// normal is reversed). Outside the domain the extension is rebuilt after the swap,
+    /// so points there are not compared.
+    #[test]
+    fn swap_uv_exchanges_the_parameters_of_the_same_offset() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: MIN_GENERATED,
+        };
+        let k = Kernel::default();
+        let mut checked = Vec::new();
+        for c in Runner.cases(&ctx).unwrap() {
+            let Ok(Inputs::Script { off, steps }) = c.parse::<Inputs>() else {
+                continue;
+            };
+            let Some(at) = steps.iter().position(|s| matches!(s, StepIn::Swap)) else {
+                continue;
+            };
+            let Ok(Ok(mut s)) = rust_off(&k, &off) else {
+                continue;
+            };
+            let mut scratch = Vec::new();
+            if !steps[..at]
+                .iter()
+                .all(|st| run_step(&k, &mut s, st, &mut scratch).is_ok())
+            {
+                continue;
+            }
+            let mut before = s.clone();
+            if s.swap_uv(&k).is_err() {
+                continue;
+            }
+            assert_eq!(
+                s.offset_distance(),
+                -before.offset_distance(),
+                "{}: the distance is negated once",
+                c.name
+            );
+            let d = before.natural_uv_domain();
+            let mut compared = 0;
+            for i in 0..=8 {
+                for j in 0..=8 {
+                    let fu = f64::from(i) / 8.0;
+                    let fv = f64::from(j) / 8.0;
+                    let pu = d.min().x + fu * d.x_length();
+                    let pv = d.min().y + fv * d.y_length();
+                    let (Ok(want), Ok(got)) = (
+                        before.evaluate_point_extending(&k, Point2::new(pu, pv)),
+                        s.evaluate_point_extending(&k, Point2::new(pv, pu)),
+                    ) else {
+                        continue;
+                    };
+                    let scale = 1.0 + want.x.abs().max(want.y.abs()).max(want.z.abs());
+                    assert!(
+                        (got - want).length() <= 1e-9 * scale,
+                        "{}: S'({pv}, {pu}) = {got:?}, S({pu}, {pv}) = {want:?}",
+                        c.name
+                    );
+                    compared += 1;
+                }
+            }
+            if compared > 0 {
+                checked.push(c.name.clone());
+            }
+        }
+        for m in MOVED {
+            assert!(checked.iter().any(|n| n == m), "{m} not among the checked scripts");
+        }
+    }
+}

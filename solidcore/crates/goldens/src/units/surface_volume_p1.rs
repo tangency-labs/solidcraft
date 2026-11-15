@@ -1038,3 +1038,86 @@ impl UnitDiff for Runner {
         rust(k, &case.parse()?)
     }
 }
+
+#[cfg(test)]
+mod lift_third_derivative_tests {
+    use super::*;
+
+    /// Rows that moved when `smvol_ConcatEvals` took the exact third-derivative
+    /// chain-rule terms (WR-45): an oriented unbend volume mapped to order 3.
+    const MOVED: [&str; 2] = ["map_unbend_or_n3", "map_unbend_or_nocomp"];
+
+    /// Replays each moved row: every third partial `Map` returns agrees with the central
+    /// differences of its second partials (which WR-45 does not change; the maps are
+    /// analytic), at steps `h` and `h / 2` of 1e-4 of the point's size, to 1e-6 of the
+    /// size, and the two steps agree with each other as closely. Measured, not certified.
+    #[test]
+    fn third_partials_match_differences_of_the_second() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: MIN_GENERATED,
+        };
+        let mut checked = Vec::new();
+        for c in Runner.cases(&ctx).unwrap() {
+            if !MOVED.contains(&c.name.as_str()) {
+                continue;
+            }
+            let i: Inputs = c.parse().unwrap();
+            let Inputs::Map {
+                vol,
+                p,
+                n,
+                left,
+                nz,
+                comp,
+            } = &i
+            else {
+                panic!("{}: not a map", c.name);
+            };
+            assert_eq!(*n, 3, "{}", c.name);
+            let v = build(vol).unwrap();
+            let o = opts(*left, *nz, *comp);
+            let p = v3(*p);
+            let d3 = v.map(p, 3, &o).unwrap();
+            let s3 = |a: usize, b: usize, w: usize| (a * 4 + b) * 4 + w;
+            let s2 = |a: usize, b: usize, w: usize| (a * 3 + b) * 3 + w;
+            let h = 1e-4 * (1.0 + p.length());
+            let mut slots = 0;
+            for a in 0..=3 {
+                for b in 0..=3 - a {
+                    let w = 3 - a - b;
+                    // differentiate the second partial one order lower along the first
+                    // axis with an order
+                    let (axis, lower) = if a > 0 {
+                        (0, (a - 1, b, w))
+                    } else if b > 0 {
+                        (1, (a, b - 1, w))
+                    } else {
+                        (2, (a, b, w - 1))
+                    };
+                    let fd = |h: f64| {
+                        let mut e = [0.0; 3];
+                        e[axis] = h;
+                        let dp = Vec3::new(e[0], e[1], e[2]);
+                        let up = v.map(p + dp, 2, &o).unwrap()[s2(lower.0, lower.1, lower.2)];
+                        let dn = v.map(p - dp, 2, &o).unwrap()[s2(lower.0, lower.1, lower.2)];
+                        (up - dn) / (2.0 * h)
+                    };
+                    let (f1, f2) = (fd(h), fd(h / 2.0));
+                    let got = d3[s3(a, b, w)];
+                    let tol = 1e-6 * (1.0 + f2.length());
+                    assert!((f1 - f2).length() <= tol, "{} ({a}, {b}, {w}): {f1:?} {f2:?}", c.name);
+                    assert!(
+                        (got - f2).length() <= tol,
+                        "{} ({a}, {b}, {w}): {got:?} against the differences {f2:?}",
+                        c.name
+                    );
+                    slots += 1;
+                }
+            }
+            assert_eq!(slots, 10);
+            checked.push(c.name.clone());
+        }
+        assert_eq!(checked.len(), MOVED.len(), "{checked:?}");
+    }
+}

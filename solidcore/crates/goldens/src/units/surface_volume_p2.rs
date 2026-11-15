@@ -1949,3 +1949,89 @@ impl UnitDiff for Runner {
         rust(&case.parse()?)
     }
 }
+
+#[cfg(test)]
+mod representational_continuity_tests {
+    use super::*;
+
+    /// The lowest representational class among a B-spline direction's interior knots
+    /// (`C^(deg - mult)`, `C^inf` past `C3`), counted straight from its knot vector; the
+    /// ends are not continuities of the volume (WR-49). `CInfinity` when the direction
+    /// has no interior knot, or fewer than two distinct knots.
+    fn lowest_interior(deg: usize, knots: &[f64]) -> ContinuityType {
+        let mut mults: Vec<usize> = Vec::new();
+        let mut last = None;
+        for &t in knots {
+            match (last, mults.last_mut()) {
+                (Some(l), Some(m)) if l == t => *m += 1,
+                _ => mults.push(1),
+            }
+            last = Some(t);
+        }
+        let mut min = ContinuityType::CInfinity;
+        let n = mults.len();
+        for &m in mults.iter().take(n.saturating_sub(1)).skip(1) {
+            let c = match deg.saturating_sub(m) {
+                0 => ContinuityType::C0,
+                1 => ContinuityType::C1,
+                2 => ContinuityType::C1C2,
+                3 => ContinuityType::C1C2C3,
+                _ => ContinuityType::CInfinity,
+            };
+            if (c as i32) < (min as i32) {
+                min = c;
+            }
+        }
+        min
+    }
+
+    fn below_g1(c: ContinuityType) -> bool {
+        (c as i32) < (ContinuityType::G1 as i32)
+    }
+
+    /// Replays every representational (`geometric == false`) `HasDiscontinuities` case: a
+    /// chain has discontinuities exactly when one of its B-spline maps has an interior
+    /// knot below `G1` (no other kind of map has any), and a B-spline head map reports
+    /// each direction's lowest interior class. Every moved row of this unit is one of
+    /// these cases.
+    #[test]
+    fn representational_discontinuities_are_the_interior_knots() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: MIN_GENERATED,
+        };
+        let k = Kernel::default();
+        let mut checked = 0;
+        for c in Runner.cases(&ctx).unwrap() {
+            let Ok(Inputs::HasDisc {
+                vol,
+                geometric: false,
+                ..
+            }) = c.parse::<Inputs>()
+            else {
+                continue;
+            };
+            let Ok(v) = build(&vol) else {
+                continue;
+            };
+            let mut d = Discontinuities3d::new();
+            let r = v.has_discontinuities(&k, Some(&mut d), false).unwrap();
+            let lowest = |m: &MapIn| -> Option<[ContinuityType; 3]> {
+                let bs = m.bs.as_ref().filter(|_| m.kind == 3)?;
+                Some([0, 1, 2].map(|e| lowest_interior(bs.deg[e], &bs.knots[e])))
+            };
+            let want = vol
+                .iter()
+                .filter_map(lowest)
+                .any(|dirs| dirs.into_iter().any(below_g1));
+            assert_eq!(r, want, "{}", c.name);
+            if let Some(dirs) = vol.first().and_then(lowest) {
+                for (e, (got, want)) in [&d.u, &d.v, &d.w].into_iter().zip(dirs).enumerate() {
+                    assert_eq!(got.min_cont, want, "{} direction {e}", c.name);
+                }
+            }
+            checked += 1;
+        }
+        assert!(checked > 0);
+    }
+}

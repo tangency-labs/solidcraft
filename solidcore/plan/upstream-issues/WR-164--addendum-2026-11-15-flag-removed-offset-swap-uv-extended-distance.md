@@ -1,0 +1,9 @@
+Updates: WR-164
+
+#### WR-164 (update, 2026-11-15). `offset_swap_uv_extended_distance` is removed
+
+The fix is the default and its flag is gone (tangency-labs/solidcraft#14246, batch surface2). `OffsetSurface::swap_uv` (`surface/offset_surface.rs`) negates the distance once: when the offset has a stored extension, the extension's swap negates it and the base's swap keeps that one negation, so `Offset(uv)` after the swap is the pre-swap `Offset(vu)`. Upstream negates again for the base and leaves the offset on the other side of its base. An offset without an extension still negates once, and a failed extension or base swap keeps upstream's order and partial state (extension swapped and negated before the error). Removed: the field `UpstreamFixes::offset_swap_uv_extended_distance`, SolidCraft's preset line, and its entries in the kernel rig's `fixes.json` and in `issue_2260_gn_pipe_refined_range_end.rs`.
+
+- **Defaults:** SolidCraft's preset had the flag on, so the app's results don't change. `Kernel::default()` changes for an offset with a stored extension that is swapped.
+- **Goldens:** `surface.offset_surface` moves 3 rows (`extension_sequence`, `extension_sequence_negative`, `gen2137`), each a script that swaps an offset with a stored extension. The goldens test `surface_offset_surface::swap_uv_tests::swap_uv_exchanges_the_parameters_of_the_same_offset` replays every script with a swap and asserts `S'(u, v) = S(v, u)` on a grid over the domain grown by half its size, and the distance negated once.
+- **Tests:** the WR-164 unit tests in `surface/offset_surface.rs` run on the default kernel. The pinned half of `wr_164_swap_uv_with_an_extension_negates_once` (the distance coming back) is removed; the no-extension, non-owned and failed-base-edit controls each run once instead of with the flag both ways (`wr_164_swap_uv_without_an_extension_negates_once_either_way` is now `wr_164_swap_uv_without_an_extension_negates_once`).
