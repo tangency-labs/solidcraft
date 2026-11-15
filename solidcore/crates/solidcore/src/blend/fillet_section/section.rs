@@ -74,12 +74,16 @@ const OP_CERTIFY: &str = "blend::fillet_section::GnSectionFsg::certify";
 /// times), a hole's top rim 139 on 61 (311, 2.24 times) and the boss-root section 152 on 75
 /// (353, 2.32 times). Scaled with the tolerance held, the solver places more first spans,
 /// and the last two take 96 to 211 halvings against budgets of 503 to 857 (4.1 to 5.2 times).
-/// The round that motivated it, a 2.99 round whose ball's offset tube is 0.01 across, needs
-/// 1,271 halvings on 23 first spans (about 450 s); its budget, 197, refuses it at 155
-/// stations. A budget predicted from each span's own bound (a halving divides a proved span's
-/// bound by 16, the Hermite remainder's `h^4`) was tried and does not refuse that round: once
-/// proved, its spans converge at that rate, so the prediction allows its whole cost. Counted,
-/// not timed: the kernel has no clock, and a count is deterministic.
+/// The round that motivated it, a 2.99 round whose ball's offset tube is 0.01 across (fuzz
+/// body `b27`), needed 1,271 halvings without a budget (about 450 s, measured 2026-11-11), and
+/// the budget refused it (123 halvings at 165 stations, end to end). That was before the
+/// certificate kept the offset's cancellation near a focal distance (#16652): its enclosures
+/// are now tight enough that the round certifies within its budget and builds, and no real
+/// round is known to be refused. A budget predicted from each span's own bound (a halving
+/// divides a proved span's bound by 16, the Hermite remainder's `h^4`) was tried before #16652
+/// and did not refuse that round: once proved, its spans converge at that rate, so the
+/// prediction allowed its whole cost. Counted, not timed: the kernel has no clock, and a count
+/// is deterministic.
 pub const GN_HALVING_BUDGET: usize = 128;
 
 /// The halvings a G^n section certificate may make per first span, beyond

@@ -107,26 +107,23 @@ fn the_notched_block_s_second_rounds_meet_the_first() {
     assert_eq!(dropped, vec![false; 4]);
 }
 
-/// A G^n section certificate whose spans stay unproved is refused within its work budget,
-/// not spent (SolidCraft's fuzz `atomic_commands`, seed 2: its body `b27` as the rig's export
-/// gives it, edges 28 and 22 of the five-edge tangent chain at their record indices, rounded
-/// 2.999). Edge 28's face is a 3 mm round already in the body, so the ball's offset tube is
-/// 0.001 across: the section's first spans are all unproved, and most stay so for several
-/// halvings. It is refused at its budget (3 halvings per first span plus 128), naming no
-/// size. A guard cancels it after five minutes, so a budget that stops holding fails the test
-/// instead of running on.
-///
-/// The fuzz case itself, rounded 2.99 (a tube 0.01 across), was refused here at 123 halvings
-/// (165 stations) until the certificate kept the offset's cancellation near a focal distance
-/// (#16652): its enclosures are now tight enough that it certifies within its budget, and the
-/// round builds a valid body (check level All clean; volume 5,577.325 before, 5,550.954
-/// after). Without a budget its certificate had certified after 1,271 halvings at 1,295
-/// stations (about 450 s, measured 2026-11-11) and the operation then failed with status
-/// 1001. A tube ten times thinner, 2.999, still stays unproved past its budget.
+/// A round whose G^n section certificate starts with every first span unproved builds within
+/// its work budget (SolidCraft's fuzz `atomic_commands`, seed 2: its body `b27` as the rig's
+/// export gives it, edges 28 and 22 of the five-edge tangent chain at their record indices,
+/// rounded 2.99). Edge 28's face is a 3 mm round already in the body, so the ball's offset tube
+/// is 0.01 across, near the focal distance. Before the certificate kept the offset's
+/// cancellation there (#16652), its spans stayed unproved: without a budget it certified after
+/// 1,271 halvings (about 450 s, measured 2026-11-11) and the operation then failed with status
+/// 1001; with this budget it was refused at 123 halvings (165 stations). It now certifies
+/// within the budget, and the round builds a valid body. No real round is refused end to end
+/// any more: the refusal itself is covered by the kernel's tests on synthetic rounds
+/// (`blend::fillet_section::section`, `work_budget_case` and `budget_round`) and by
+/// `blend::tests::a_certificate_past_its_budget_is_refused_as_not_certified`. A guard
+/// cancels the round after five minutes, so a certificate that stops being held to its budget
+/// fails the test instead of running on.
 #[test]
-fn a_certificate_whose_spans_stay_unproved_is_refused_within_its_budget() {
+fn the_fuzz_round_near_a_focal_distance_builds_within_its_budget() {
     use solidcore_ops::blend::{blend_ordered, BlendOptions};
-    use solidcore_ops::Error;
     use std::io::Read;
     let fixes: Vec<String> = serde_json::from_str(include_str!(
         "../../solidcore/tests/kernel_cases/fixes.json"
@@ -142,10 +139,12 @@ fn a_certificate_whose_spans_stay_unproved_is_refused_within_its_budget() {
     let record: solidcore_record::brep::Brep =
         serde_json::from_value(records["b27"].take()).unwrap();
     let (input, order) = Body::from_record(&record, true).unwrap();
+    let v0 = input.volume(1e-8).unwrap();
+    assert!((v0 - 5_577.325_354_466).abs() <= 1e-9 * v0, "{v0}");
     let (body, order) = input.copy_with_order(&order).unwrap();
     // a guard: a certificate that is not held to its budget is cancelled after five minutes
-    // (and the test fails, Cancelled), instead of running on for hours; held to it, the
-    // refusal took 100 s (goldens profile, a loaded 32-thread box, 2026-11-15)
+    // (and the test fails, Cancelled), instead of running on for hours. Held to it, the round
+    // built in 74 to 85 s (goldens profile, a loaded 32-thread box, 2026-11-15)
     let token = solidcore_ops::cancel::CancelToken::default();
     let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
     let guard = {
@@ -165,7 +164,7 @@ fn a_certificate_whose_spans_stay_unproved_is_refused_within_its_budget() {
             &order,
             Blend::Round,
             &[28, 22],
-            &[2.999],
+            &[2.99],
             &[],
             Corners::Filled,
             BlendOptions::default(),
@@ -173,13 +172,12 @@ fn a_certificate_whose_spans_stay_unproved_is_refused_within_its_budget() {
     });
     let _ = done_tx.send(());
     guard.join().unwrap();
-    match r {
-        Err(Error::BlendNotCertified { halvings, stations }) => {
-            // 39 first spans (40 first stations): a budget of 245 halvings. After 224 (264
-            // stations) the next round would pass it, so it is refused before it starts
-            assert_eq!((halvings, stations), (224, 264));
-        }
-        Err(e) => panic!("{e:?}"),
-        Ok(_) => panic!("built"),
-    }
+    r.unwrap();
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    assert_eq!(body.counts().unwrap()[0], 16);
+    // the round removes 26.371 of 5,577.325. Tolerance chosen, not derived: 1e-6 of the
+    // volume (0.0056), far above the volume integral's 1e-8 accuracy and small station moves
+    // a later certificate may make, and some 5,000 times below what the round removes
+    let v = body.volume(1e-8).unwrap();
+    assert!((v - 5_550.953_986_400).abs() <= 1e-6 * v, "{v}");
 }
