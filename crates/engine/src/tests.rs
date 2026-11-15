@@ -1657,7 +1657,7 @@ fn step_insert_delete_removes_assembly_and_undo_restores_it() {
     assert!(reopened.find_feature("Imported").unwrap().inserted, "the insert keeps its mark through save");
     run(&mut s, "solid.mirror", json!({"bodies": ["Part"], "plane": {"origin": [0, 30, 0], "normal": [0, 1, 0]}}));
     assert!(s.model.state().body("Part (3)").is_some());
-    assert!(!s.doc.assembly.joints.is_empty());
+    assert!(!s.doc.assembly.rigid_groups.is_empty());
     assert!(!s.doc.body_components.is_empty());
     let before = s.doc.clone();
     let history = s.undo.len();
@@ -1666,7 +1666,7 @@ fn step_insert_delete_removes_assembly_and_undo_restores_it() {
     assert_eq!(s.undo.len(), history + 1);
     assert_eq!(s.doc.components.iter().map(|c| c.id).collect::<Vec<_>>(), [kept]);
     assert_eq!(s.doc.occurrences, [kept_occurrence]);
-    assert!(s.doc.assembly.joints.is_empty());
+    assert!(s.doc.assembly.joints.is_empty() && s.doc.assembly.rigid_groups.is_empty());
     assert!(s.doc.body_components.is_empty());
     assert!(s.doc.body_offsets.is_empty());
     let state = s.model.state();

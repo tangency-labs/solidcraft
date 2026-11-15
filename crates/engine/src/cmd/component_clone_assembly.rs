@@ -41,6 +41,7 @@ fn budget(assembly: &Assembly) -> Result<()> {
         assembly.contact_sets.len(),
         assembly.studies.len(),
         assembly.exploded.len(),
+        assembly.rigid_groups.len(),
     ];
     if counts.iter().any(|n| *n > MAX_RECORDS) {
         return Err(invalid("too many assembly records"));
@@ -453,6 +454,18 @@ pub(super) fn clone_assembly_with_joint_ids(
         } else {
             report(&mut messages, "exploded view", &old.name);
         }
+    }
+    // A rigid group goes with its component: the copy of the component's first placement says
+    // which component in the copy it holds.
+    for old in &source.assembly.rigid_groups {
+        let copied =
+            source.occurrence_of(old.component).and_then(|o| occurrences.get(&o.id)).and_then(|new| doc.occurrences.iter().find(|o| o.id == *new));
+        let Some(component) = copied.map(|o| o.component) else { continue };
+        if component == 0 || a.rigid_groups.iter().any(|g| g.component == component) {
+            continue;
+        }
+        let name = doc.components.iter().find(|c| c.id == component).map_or_else(|| old.name.clone(), |c| c.name.clone());
+        a.rigid_groups.push(solidcraft_doc::joints::RigidGroup { id: next_id(&mut item_id)?, name, component });
     }
     budget(&a)?;
     doc.next_id = item_id.checked_add(1).ok_or_else(|| invalid("assembly identifier space is exhausted"))?;

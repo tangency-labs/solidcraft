@@ -1140,7 +1140,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
                 .on(moved || joints.iter().any(|j| j.captured.is_some() && j.kind != solidcraft_engine::doc::joints::JointKind::Rigid)),
         ];
         // An imported assembly moves as one until its rigid group is released.
-        if !app.session.contents_joints(id).is_empty() {
+        if app.session.contents_held(id) {
             placement.push(cmd(app, "component.unlock", "Unlock Contents").with(json!({ "component": id })));
         }
         v.push(group("Placement", "move", placement));

@@ -216,9 +216,16 @@ fn an_imported_assembly_moves_as_one_until_it_is_unlocked() {
     let pin = corner_of(&s, "Pin:2");
     let arm = corner_of(&s, "Arm:1");
 
-    // The whole import is one rigid body: no part of it moves against the others.
+    // The whole import is one rigid body: no part of it moves against the others. One rigid
+    // group holds it, not a joint per placement.
     let (dof, r) = dofs(&mut s);
     assert!(r["conflicts"].as_array().unwrap().is_empty(), "{r}");
+    assert!(s.doc.assembly.joints.is_empty(), "{r}");
+    assert_eq!(
+        r["rigid_groups"],
+        json!([{"id": s.doc.assembly.rigid_groups[0].id, "name": "rig", "component": s.doc.components.iter().find(|c| c.name == "rig").unwrap().id, "members": 6}]),
+        "{r}"
+    );
     for o in &inside {
         assert_eq!(dof.get(o), dof.get(&rig), "occurrence {o} moves only with the import: {r}");
     }
@@ -247,17 +254,35 @@ fn an_imported_assembly_moves_as_one_until_it_is_unlocked() {
     }
     assert!(r["conflicts"].as_array().unwrap().is_empty(), "{r}");
 
+    // A joint from my part to a part inside the import moves the whole import there.
+    let arm_now = corner_of(&s, "Arm:1");
+    let pin_now = corner_of(&s, "Pin:2");
+    let mine = occurrence_named(&s, "Mine:1");
+    let pin1 = occurrence_named(&s, "Pin:1");
+    let slider = run(&mut s, "joint.as_built", json!({"type": "slider", "a": mine, "b": pin1, "name": "Slide"}));
+    run(&mut s, "joint.drive", json!({"joint": slider["joint"], "value": 7}));
+    let shift = corner_of(&s, "Pin:2") - pin_now;
+    assert!(shift.dist(Vec3::ZERO) > 1e-6, "the import moved");
+    assert!(close(corner_of(&s, "Arm:1"), arm_now + shift), "the arm moved with the pin: {:?} {:?}", corner_of(&s, "Arm:1"), arm_now + shift);
+    run(&mut s, "joint.delete", json!({"joint": slider["joint"]}));
+    let pin = corner_of(&s, "Pin:2") - Vec3::new(0.0, 0.0, 50.0);
+    let arm = corner_of(&s, "Arm:1") - Vec3::new(0.0, 0.0, 50.0);
+
+    // A component inside the import is held by the import's group: unlocking it says so.
+    let e = s.execute("component.unlock", &json!({"component": "Pin"})).unwrap_err().to_string();
+    assert!(e.contains("`rig`"), "{e}");
+
     // Unlocked (one undo step), the parts move one by one.
     let undo = s.undo.len();
     let r = run(&mut s, "component.unlock", json!({"component": "rig"}));
-    assert_eq!(r["joints"].as_array().unwrap().len(), 6, "{r}");
+    assert!(r["rigid_group"].is_u64() && s.doc.assembly.rigid_groups.is_empty(), "{r}");
     assert_eq!(s.undo.len(), undo + 1);
     run(&mut s, "occurrence.move", json!({"occurrence": "Pin:2", "translate": [30, 0, 0]}));
     assert!(close(corner_of(&s, "Pin:2"), pin + Vec3::new(30.0, 0.0, 50.0)), "{:?}", corner_of(&s, "Pin:2"));
     assert!(close(corner_of(&s, "Arm:1"), arm + Vec3::new(0.0, 0.0, 50.0)), "the others stay");
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "edit.undo", json!({}));
-    assert_eq!(s.doc.assembly.joints.len(), 6, "undo locks it again");
+    assert_eq!(s.doc.assembly.rigid_groups.len(), 1, "undo locks it again");
     assert!(s.execute("component.unlock", &json!({"component": "Mine"})).is_err(), "nothing holds my own component");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -467,9 +492,8 @@ fn corpus(name: &str) -> String {
     format!("{}/../../tests/step-conformance/{name}.step", env!("CARGO_MANIFEST_DIR"))
 }
 
-/// With `folder: true`, a file that brings more than one item into the history (its Import
-/// feature and the rigid joints holding its parts: one cylinder placed twice, an assembly) gets a
-/// history folder of its own, `Group #N` with the first free number, holding its Import feature and those joints,
+/// With `folder: true`, an assembly's file (one cylinder placed twice, an assembly) gets a
+/// history folder of its own, `Group #N` with the first free number, holding its Import feature,
 /// made by the same command and undone with it; a file with one object gets none. Inserted
 /// between the features of a folder, the import's folder nests in it.
 #[test]
@@ -489,11 +513,7 @@ fn a_multi_object_step_insert_is_one_history_folder() {
         (r["group"].clone(), "Group #1", &[feature][..], None),
         "{r}"
     );
-    let mut rigid: Vec<u64> = s.doc.assembly.joints.iter().map(|j| j.id).collect();
-    rigid.sort_unstable();
-    let mut held = folder.joints.clone();
-    held.sort_unstable();
-    assert!(!rigid.is_empty() && held == rigid, "the folder holds the import's joints: {held:?} of {rigid:?}");
+    assert!(folder.joints.is_empty() && s.doc.assembly.rigid_groups.len() == 1, "a rigid group holds the parts: {folder:?}");
     run(&mut s, "edit.undo", json!({}));
     assert!(s.doc.timeline_groups.is_empty() && s.doc.feature(feature).is_none(), "undo takes the folder with the import");
 
@@ -527,7 +547,7 @@ fn a_step_import_told_no_folder_makes_none() {
     let mut s = Session::default();
     let r = run(&mut s, "file.insert_step", json!({"path": corpus("cylinder_twice"), "folder": false}));
     assert!(r.get("group").is_none() && s.doc.timeline_groups.is_empty(), "no folder: {r}");
-    assert_eq!(s.doc.assembly.joints.len(), 2, "its rigid joints are there all the same");
+    assert_eq!(s.doc.assembly.rigid_groups.len(), 1, "its rigid group is there all the same");
     let r = run(&mut s, "doc.open", json!({"path": corpus("cylinder_twice"), "folder": false}));
     assert!(s.doc.timeline_groups.is_empty(), "opened as a design, no folder either: {r}");
     let e = s.execute("file.insert_step", &json!({"path": corpus("cylinder_twice"), "folder": "no"})).unwrap_err();

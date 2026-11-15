@@ -64,6 +64,7 @@ impl Document {
         self.body_components.retain(|_, c| !inside.contains(c));
         self.body_offsets.retain(|name, _| !bodies.contains(name));
         self.components.retain(|c| !inside.contains(&c.id));
+        self.assembly.rigid_groups.retain(|g| !inside.contains(&g.component));
         self.parts.retain(|c, _| !inside.contains(c));
         self.links.retain(|c, _| !inside.contains(c));
         self.remove_configuration_components(&components);

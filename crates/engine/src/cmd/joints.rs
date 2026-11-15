@@ -19,9 +19,9 @@ use crate::schema::joints::{
     AsBuiltJointParams, BudgetStop, CamLift, CamParams, CamResult, ContactStop, CouplingResult, CreateJointParams, DeleteJointParams,
     DeleteJointResult, DriveJointParams, DriveJointResult, EditJointResult, FloatingChain, GearParams, HeldValue, InspectJointParams,
     InspectJointResult, JointAddedResult, JointDeleted, JointFrame, JointLimitsParams, JointProblem, LimitSide, LimitStop, LinkInfo,
-    ListJointsParams, ListJointsResult, ListedJoint, ListedOrigin, LoopStop, MakeJointOriginParams, MakeJointOriginResult, MotionLinkParams,
-    MotionLinkResult, NamedValue, OccurrenceDof, RackPinionParams, ReachLoopStop, ReachParams, ReachResult, ReachedJoint, RigidGroupParams,
-    RigidGroupResult, ScrewParams, SolveJointsParams, SolveReport, SolveResult, ValueUnit,
+    ListJointsParams, ListJointsResult, ListedJoint, ListedOrigin, ListedRigidGroup, LoopStop, MakeJointOriginParams, MakeJointOriginResult,
+    MotionLinkParams, MotionLinkResult, NamedValue, OccurrenceDof, RackPinionParams, ReachLoopStop, ReachParams, ReachResult, ReachedJoint,
+    RigidGroupParams, RigidGroupResult, ScrewParams, SolveJointsParams, SolveReport, SolveResult, ValueUnit,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -2393,6 +2393,13 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
         links: s.doc.assembly.links.iter().map(|l| link_info(s, &st, l)).collect(),
         origins: s.doc.assembly.origins.iter().map(|o| ListedOrigin { name: o.name.clone(), occurrence: o.origin.occurrence }).collect(),
         floating: floating_chains(s, &sol),
+        rigid_groups: s
+            .doc
+            .assembly
+            .rigid_groups
+            .iter()
+            .map(|g| ListedRigidGroup { id: g.id, name: g.name.clone(), component: g.component, members: s.doc.rigid_group_members(g).len() })
+            .collect(),
         param_warnings: Vec::new(),
     };
     reply("joint.list", out)

@@ -281,7 +281,7 @@ fn replies_match_the_output_schema() {
     assert_eq!(plain["component_name"], "block", "{plain}");
     assert_eq!(plain["name"], "Block", "{plain}");
     assert!(plain["bodies"] == plain["created_bodies"] && plain["occurrence"].is_u64(), "{plain}");
-    assert!(plain.get("subcomponents").is_none() && plain.get("rigid_joints").is_none(), "{plain}");
+    assert!(plain.get("subcomponents").is_none() && plain.get("rigid_members").is_none(), "{plain}");
     assert!(plain.get("stand_up").is_none() && plain.get("group").is_none() && plain.get("transform").is_none(), "{plain}");
 
     let named = run(json!({"path": block, "name": "Brake", "up": " Z ", "names": " Solid ", "folder": false}));
@@ -293,7 +293,7 @@ fn replies_match_the_output_schema() {
     run(json!({"path": block, "matrix": null, "tolerance": []}));
 
     let stood = run(json!({"path": frame}));
-    assert!(stood["subcomponents"].is_u64() && stood["rigid_joints"].is_u64(), "{stood}");
+    assert!(stood["subcomponents"].is_u64() && stood["rigid_members"].is_u64(), "{stood}");
     assert!(stood.get("stand_up").is_none(), "{stood}");
     let turned = run(json!({"path": frame, "up": " y "}));
     assert_eq!(turned["stand_up"], turned["occurrence"], "{turned}");
