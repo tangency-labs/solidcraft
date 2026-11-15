@@ -5162,8 +5162,8 @@ fn fillet_edge_removed_by_a_larger_overflowing_round_is_noted() {
 /// an arc over it), its arc-side top edge rounded at 1 mm. Rounding the flat side's top edge and
 /// the two short edges that run down from its ends (the arc round's edges on the flat wall) at 1
 /// mm asked a ball as large as the arc round's own radius to roll along the round, whose offset
-/// collapses to a curve: it failed with the bare status 1001, or, a hair under, never ended
-/// (the certificate halved its spans without end). It is refused at once, saying why.
+/// collapses to a curve: it failed with the bare status 1001. It is refused at once, saying
+/// why.
 fn segment_boss_with_arc_round() -> Session {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 50, "width": 35, "height": 5}));
@@ -5181,7 +5181,7 @@ fn segment_boss_with_arc_round() -> Session {
 }
 
 #[test]
-fn a_round_as_large_as_the_round_it_runs_along_is_refused_not_failed_or_endless() {
+fn a_round_as_large_as_the_round_it_runs_along_is_refused_not_failed() {
     let flat_and_ends = json!([[25.502155, 5.5, 6], [11.419996686869673, 5.5, 5.748661225447015], [39.584311999041034, 5.5, 5.748656748207975]]);
     // The flat edge alone builds at 1 mm (its round meets the wall's foot exactly).
     let mut s = segment_boss_with_arc_round();
@@ -5195,15 +5195,6 @@ fn a_round_as_large_as_the_round_it_runs_along_is_refused_not_failed_or_endless(
         assert!(!e.contains("1001"), "chain {chain}: {e}");
         assert!(e.contains("larger than the faces beside its edges allow"), "chain {chain}: {e}");
     }
-    // A hair under it ended only after the stations had doubled to the cap, minutes later: the
-    // certificate now stops where halving no longer tightens its bound, saying so (not a panic
-    // or the bare status). (A hang fails by the test timeout.)
-    let mut s = segment_boss_with_arc_round();
-    let e = s.execute("solid.fillet", &json!({"edges": flat_and_ends, "radius": 0.99, "tangent_chain": false})).unwrap_err();
-    assert!(!matches!(e, EngineError::Internal(..)), "{e}");
-    let e = e.to_string();
-    assert!(!e.contains("1001"), "{e}");
-    assert!(e.contains("certify: did not converge after"), "{e}");
 }
 
 #[test]

@@ -1090,7 +1090,8 @@ pub fn ball_is_regular(
     // or contacts that meet at every one) proves nothing by itself: such an edge goes on to
     // be built, as before. It is refused only where the faces prove in closed form why no
     // ball rolls: one face is as wide as the ball by its definition (an analytic cylinder,
-    // sphere or torus of the ball's radius, or a round of one ball of that radius), so its
+    // sphere or torus of the ball's radius, a surface of revolution that is one, or a round
+    // of one ball of that radius), so its
     // offset, the surface the ball's centre rolls on, collapses over the whole face. Any other
     // face is not judged so
     if rolls && !ts.is_empty() && margins[0].iter().all(|&m| m >= BIG_DOUBLE) {

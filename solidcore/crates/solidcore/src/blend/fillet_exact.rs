@@ -2115,7 +2115,10 @@ fn round_of_one_radius(
 /// definition, never from a net or from samples:
 ///
 /// - an analytic cylinder, sphere or torus ([`BlendQuadric::from_surface`] reads their own
-///   data): its offset is its axis, its centre or its tube's circle
+///   data), or a surface of revolution that is one (a round turned about an axis, as a
+///   round along a circular edge is: its rational net is the surface itself, the profile
+///   turned exactly, not an approximation of a definition, so the torus the recognisers read
+///   off it is the face): its offset is its axis, its centre or its tube's circle
 ///   ([`QuadricKind::Line`], [`QuadricKind::Point`], [`QuadricKind::Circle`]), its radius
 ///   (a torus's tube radius) the ball's within `tol` with the ball on its inner side;
 /// - a round of one radius ([`round_of_one_radius`]) with the ball on its spine's side
@@ -2123,8 +2126,8 @@ fn round_of_one_radius(
 ///   spine, so its offset by that radius toward the spine is the spine.
 ///
 /// The collapse is of the whole face's offset, so it holds wherever along the edge the
-/// ball would touch it. Any other face (a B-spline, even one recognised as a quadric from
-/// its net) is not judged collapsed (`false`).
+/// ball would touch it. Any other face (a B-spline, or a procedural blend's net, even one
+/// recognised as a quadric) is not judged collapsed (`false`).
 ///
 /// # Errors
 ///
@@ -2137,7 +2140,10 @@ fn offset_collapses_by_definition(
     tol: f64,
 ) -> Result<bool> {
     match surface.kind() {
-        SurfaceKind::Cone(_) | SurfaceKind::Sphere(_) | SurfaceKind::Torus(_) => {
+        SurfaceKind::Cone(_)
+        | SurfaceKind::Sphere(_)
+        | SurfaceKind::Torus(_)
+        | SurfaceKind::SurfOfRevolution(_) => {
             let face = BlendQuadric::from_surface(k, surface, uv, tol)?;
             Ok(matches!(
                 face.offset(off, tol).kind,
