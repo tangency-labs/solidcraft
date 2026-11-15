@@ -350,6 +350,22 @@ impl Mapper<'_> {
         Some(Value::Object(m))
     }
 
+    /// An explicit plane whose `origin` has length expressions: the origin (kept as expressions)
+    /// and the directions in the active frame, none of them evaluated.
+    fn expressed_plane(&mut self, v: &Value) -> Option<Value> {
+        let o = v.as_object()?;
+        let mut m = o.clone();
+        if let Some(x) = o.get("origin").and_then(|x| self.make(x)) {
+            m.insert("origin".into(), x);
+        }
+        for k in ["x_dir", "y_dir"] {
+            if let Some(x) = o.get(k).and_then(|x| self.dir(x)) {
+                m.insert(k.into(), x);
+            }
+        }
+        Some(Value::Object(m))
+    }
+
     /// The component's body name for a world (instance) body name.
     fn own_name(&mut self, world: &str) -> Option<String> {
         let own = self.f.bodies(self.s).iter().find(|(w, _, _)| w == world).map(|(_, own, _)| own.clone())?;
@@ -901,10 +917,10 @@ fn map_local_with_input(
                     }
                     m.here = true;
                     // Body names stay: the sketch's view of the model keeps them.
-                    // A plane whose origin has length expressions (#8192) can't be mapped here: it
-                    // stays as given and goes into the active component's frame as a whole.
+                    // A plane whose origin has length expressions (#8192) is mapped without
+                    // evaluating them: the origin stays expressions, written in the frame.
                     let expressed = v.get("origin").and_then(Value::as_array).is_some_and(|a| a.iter().any(Value::is_string));
-                    let r = if *kind == HerePlane { if expressed { None } else { m.plane(v) } } else { m.picks(v, None) };
+                    let r = if *kind == HerePlane { if expressed { m.expressed_plane(v) } else { m.plane(v) } } else { m.picks(v, None) };
                     m.here = false;
                     m.f.sketch = keep;
                     r

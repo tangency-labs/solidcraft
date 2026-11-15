@@ -2718,3 +2718,22 @@ fn a_grounded_part_moved_by_an_expression_with_move_grounded_follows_parameter_c
     at(centre(&mut s, occ), [105.0, 5.0, 5.0]);
     assert!(s.doc.occurrences.iter().find(|o| o.id == occ).unwrap().grounded);
 }
+
+/// #8192: when the moves of an ungrounded part cancel each other on a parameter change, each still
+/// takes in what it now works out to, so a later change doesn't carry the part by the difference.
+#[test]
+fn moves_that_cancel_each_other_still_keep_up_with_their_parameter() {
+    let (mut s, occ) = expressed_block();
+    run(&mut s, "parameters.add", json!({"name": "p", "expression": "0 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "q", "expression": "0 mm"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": ["p", 0, 0]}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": true}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": ["-p", 0, 0], "move_grounded": true}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": false}));
+    run(&mut s, "parameters.change", json!({"name": "p", "expression": "10 mm"}));
+    at(centre(&mut s, occ), [1.0, 0.5, 0.5]);
+    // Grounded again, a change of something else must not carry it by what B worked out to.
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": true}));
+    run(&mut s, "parameters.change", json!({"name": "q", "expression": "5 mm"}));
+    at(centre(&mut s, occ), [1.0, 0.5, 0.5]);
+}

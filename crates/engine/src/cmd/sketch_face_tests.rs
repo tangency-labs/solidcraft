@@ -752,6 +752,12 @@ fn a_custom_plane_origin_that_is_not_numbers_is_refused_not_zeroed() {
     };
     assert_eq!(origin_of(&mut s, json!({"origin": [20, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]})), json!([20.0, 0.0, 0.0]));
     assert_eq!(origin_of(&mut s, json!({"x_dir": [0, 1, 0], "y_dir": [0, 0, 1]})), json!([0.0, 0.0, 0.0]));
+    // Since #8192 the inputs this test once refused are evaluated: `w` is 40 mm, so "w/2" is 20 mm
+    // and "20 mm" is 20 mm, and the sketch's plane sits there, not at the origin.
+    for x in ["w/2", "20 mm"] {
+        let o = origin_of(&mut s, json!({"origin": [x, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}));
+        assert_eq!(o, json!([20.0, 0.0, 0.0]), "origin [{x}, 0, 0]");
+    }
 }
 /// A sketch on a body's face projects that face's edges from the body's display mesh. The body
 /// it projects from is the model's own, not a copy that meshes it again: on a body whose curved

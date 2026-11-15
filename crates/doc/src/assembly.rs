@@ -284,7 +284,10 @@ impl ExpressedMove {
     pub fn shift(&self, now: &ExpressedAt) -> Vec3 {
         let d = |a: [f64; 3], b: [f64; 3]| Vec3::new(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
         let o = d(now.origin, self.origin_at);
-        let kept = o - apply_vector(&self.rotation, o);
+        // The primitive refuses only a number that is not finite: `now.origin` is bounded by `eval`
+        // and `rotation` is a rigid matrix the commands checked, so for a stored move it does not
+        // fail. Were it to, no extra move (the turn's own part is gone) is the safe reading.
+        let kept = solidcore_ops::affine::pivot_displacement(&self.rotation, [o.x, o.y, o.z]).map_or(Vec3::ZERO, |k| Vec3::new(k[0], k[1], k[2]));
         apply_vector(&self.frame, d(now.translate, self.at) + kept)
     }
 
@@ -609,7 +612,7 @@ impl Document {
                 }
                 at.push(now);
             }
-            if o.grounded && shift == Vec3::ZERO {
+            if shift == Vec3::ZERO {
                 if o.expressed_moves.iter().zip(&at).any(|(m, now)| m.applied() != *now) {
                     out.push(ExpressedShift { occurrence: o.id, shift: Vec3::ZERO, at });
                 }
