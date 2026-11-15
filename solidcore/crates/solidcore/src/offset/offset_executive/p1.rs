@@ -239,6 +239,12 @@ pub struct OffsetExecutive {
     /// convex round thinner than the wall), mated across instead of offset
     /// (`m_sCollapsedFaces`).
     pub(super) collapsed_faces: Vec<FaceId>,
+    /// Not upstream (WR-346): for each of [`Self::collapsed_faces`], the signed distance its
+    /// surface was offset by along its own NURB normal (the offset distance, negated where
+    /// the offset face use is opposite its face), for [`OffsetFailure::Collapses`]'s radius.
+    ///
+    /// [`OffsetFailure::Collapses`]: crate::error::offset::OffsetFailure::Collapses
+    pub(super) collapsed_displacements: Vec<(FaceId, f64)>,
     /// Not upstream (solidcraft#16983): the offset faces with an edge whose offset is
     /// inverted (its neighbours' offsets crossed over it; `TrimmedEdge`), which
     /// `resolve_crossing_loops` resolves when they have one loop.
@@ -305,6 +311,7 @@ impl OffsetExecutive {
             kept_edgeuses: BTreeSet::new(),
             crossing_edgeuses: BTreeSet::new(),
             collapsed_faces: Vec::new(),
+            collapsed_displacements: Vec::new(),
             inverted_faces: BTreeSet::new(),
             unmated_edgeuses: BTreeSet::new(),
             local_faces: Vec::new(),

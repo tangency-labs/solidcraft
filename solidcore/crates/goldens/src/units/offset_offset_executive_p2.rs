@@ -2800,6 +2800,9 @@ mod tests {
         assert_eq!(sphere.ints["status"], [1000]);
         assert_eq!(sphere.ints["result.present"], [1]);
         assert_eq!(sphere.ints["result.counts"], [1, 0, 0, 0, 0, 0, 0]);
+        // [input transferred, source lifetime, result origin]: the source is kept (1) and
+        // the empty body is a new allocation (1); main refused, so had no result (0)
+        assert_eq!(sphere.ints["ownership"], [0, 1, 1]);
 
         for (name, d) in [
             ("member_cylinder_extend_inset_at_radius", 1.0),
@@ -2832,11 +2835,14 @@ mod tests {
     /// - the shell succeeds with one body that is sound (`check_brep` level 2 reports
     ///   nothing, a manifold solid of positive volume: [`crate::soundness`]);
     /// - its planar walls are planes (face kind 1), where they were ruled B-spline walls:
-    ///   on a one-face plane or cylinder sheet every face but the sheet's two copies; on
-    ///   the half pipes (whose walls along the bent rims are not flat) at least four;
-    /// - where the sheet has a closed form (a plane sheet: area times thickness; a
-    ///   cylinder sheet r, h thickened by d: `pi |(r + d)^2 - r^2| h`), the volume's
-    ///   certified enclosure holds it.
+    ///   on a plane sheet every face, on a cylinder sheet every face but the sheet's two
+    ///   copies, on the half pipes (whose walls along the bent rims are not flat) exactly
+    ///   the four walls along their two straight edges and two end arcs;
+    /// - the volume's certified enclosure holds the closed form: a plane sheet, area times
+    ///   thickness; a cylinder sheet r, h thickened by d, `pi |(r + d)^2 - r^2| h`; a half
+    ///   pipe, a radial thickening of a region of the r 25 cylinder, `((25 + d)^2 - 25^2) / 2`
+    ///   (sign taken to make it positive) times the region's integral over z of its angular
+    ///   width, enclosed by [`half_pipe_angular_integral`].
     #[test]
     fn wr564_thickened_sheet_walls_are_planes_and_sound() {
         use solidcore::mass::enclosure::VolumeSign;
@@ -2895,9 +2901,20 @@ mod tests {
                 }
                 _ => None,
             };
+            // a half pipe: [lo, hi] holding its volume
+            let half_pipe = HALF_PIPE_ARC_RADII
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|&(_, arc)| {
+                    let (lo, hi) = half_pipe_angular_integral(arc);
+                    let ring = ((HALF_PIPE_R + d) * (HALF_PIPE_R + d) - HALF_PIPE_R * HALF_PIPE_R).abs()
+                        / 2.0;
+                    (ring * lo, ring * hi)
+                });
+            assert!(closed_form.is_some() != half_pipe.is_some(), "{name}");
 
             // the half pipes' refinement ends at its cell budget long before 1e-9 (below)
-            crate::soundness::start_enclosing(if closed_form.is_some() { 1e-9 } else { 1e-4 });
+            crate::soundness::start_enclosing(if closed_form.is_some() { 1e-9 } else { 1e-6 });
             let output = Runner.run_rust(case).unwrap();
             let found = crate::soundness::take();
             assert!(output.deferred.is_none() && output.error.is_none(), "{name}");
@@ -2919,9 +2936,10 @@ mod tests {
                 };
                 assert_eq!(planes, want, "{name}: {kinds:?}");
             } else {
-                // the half pipes' walls along their straight edges and end arcs lie in
-                // planes; at least those four are planes
-                assert!(planes >= 4, "{name}: {kinds:?}");
+                // a half pipe's walls along its two straight edges (radial planes through
+                // the z axis) and its two end arcs (rings in z = -40 and z = ze) are flat:
+                // those four are planes; the walls along the two bent rims are not
+                assert_eq!(planes, 4, "{name}: {kinds:?}");
             }
             assert_eq!(found.len(), 1, "{name}: {found:?}");
             let body = &found[0];
@@ -2944,42 +2962,73 @@ mod tests {
             assert!(e.lo > 0.0 && e.hi - e.lo <= width * e.hi, "{name}: [{}, {}]", e.lo, e.hi);
             if let Some(v) = closed_form {
                 assert!(e.lo <= v && v <= e.hi, "{name}: {v} not in [{}, {}]", e.lo, e.hi);
-            } else {
-                // no closed form in the test: only the walls' surface type changed, so the
-                // body's enclosure overlaps main's (merge base 7e0c36cf8, measured there
-                // with the same refinement)
-                let (lo, hi) = MAIN_HALF_PIPE_ENCLOSURES
-                    .iter()
-                    .find(|(n, _, _)| *n == name)
-                    .map(|&(_, lo, hi)| (lo, hi))
-                    .unwrap();
-                assert!(e.lo <= hi && lo <= e.hi, "{name}: [{}, {}] vs main [{lo}, {hi}]", e.lo, e.hi);
+            }
+            if let Some((lo, hi)) = half_pipe {
+                // the closed form's own enclosure, inside the body's
+                eprintln!("WR564 {name}: closed form in [{lo:e}, {hi:e}]");
+                assert!(hi - lo <= 1e-7 * hi, "{name}: [{lo}, {hi}]");
+                assert!(
+                    e.lo <= lo && hi <= e.hi,
+                    "{name}: closed form [{lo}, {hi}] not in [{}, {}]",
+                    e.lo,
+                    e.hi
+                );
             }
         }
     }
 
-    /// The four `issue2611` half pipes' volume enclosures on main (merge base 7e0c36cf8,
-    /// `enclose_volume` to 1e-9 of the volume), where their walls were ruled B-splines.
-    const MAIN_HALF_PIPE_ENCLOSURES: [(&str, f64, f64); 4] = [
-        (
-            "issue2611_half_pipe_arc_r12_api_shell_in",
-            7089.417717594905,
-            7089.432425854226,
-        ),
-        (
-            "issue2611_half_pipe_arc_r12_api_shell_out",
-            7680.204448755749,
-            7680.213546959549,
-        ),
-        (
-            "issue2611_half_pipe_arc_r20_api_shell_in",
-            7856.4160674458435,
-            7857.218689812394,
-        ),
-        (
-            "issue2611_half_pipe_arc_r20_api_shell_out",
-            8511.15312601672,
-            8511.949227984296,
-        ),
+    /// The `issue2611` half pipes' cylinder radius: the sheet is the outer face of a half
+    /// annulus r 23..25 about z (`tests/issue_2611_thicken_arc_trim.rs`).
+    const HALF_PIPE_R: f64 = 25.0;
+
+    /// The four `issue2611` half pipes and their trim arcs' radii (swept 45 degrees).
+    const HALF_PIPE_ARC_RADII: [(&str, f64); 4] = [
+        ("issue2611_half_pipe_arc_r12_api_shell_in", 12.0),
+        ("issue2611_half_pipe_arc_r12_api_shell_out", 12.0),
+        ("issue2611_half_pipe_arc_r20_api_shell_in", 20.0),
+        ("issue2611_half_pipe_arc_r20_api_shell_out", 20.0),
     ];
+
+    /// A certified enclosure `[lo, hi]` of the integral over z of the `issue2611` sheet's
+    /// angular width, for its trim arc of radius `arc` (`tests/issue_2611_thicken_arc_trim.rs`
+    /// builds it): the sheet is the r 25 cylinder about z over z -40..40, cut away below
+    /// y = 1 for z < 0, below the arc `y = 1 + arc - sqrt(arc^2 - z^2)` for 0 <= z <= ze =
+    /// arc sin 45deg, and wholly past ze. At height y the cylinder's angular width above it
+    /// is `w(y) = pi - 2 asin(y / 25)`, so the integral is `40 w(1)` plus that of
+    /// `f(z) = w(1 + arc - sqrt(arc^2 - z^2))` over [0, ze].
+    ///
+    /// `f` decreases on [0, ze] (the arc rises with z for z < arc and `asin` increases), so
+    /// over each of 2^20 cells `[a, b]` the integral lies in `[(b - a) f(b), (b - a) f(a)]`.
+    /// Rounding: each term carries a few ulps (the `sqrt`, `asin` and products are well
+    /// conditioned here: `y / 25 <= 0.3`), and the sums at most `n` ulps of the total
+    /// (the a-priori bound of recursive summation), so both ends are widened outward by
+    /// `(n + 64) eps` of the upper total.
+    fn half_pipe_angular_integral(arc: f64) -> (f64, f64) {
+        use std::f64::consts::PI;
+        let w = |y: f64| PI - 2.0 * (y / HALF_PIPE_R).asin();
+        let f = |z: f64| w(1.0 + arc - (arc * arc - z * z).sqrt());
+        // as `arc_end` in the generator
+        let ze = arc * 45.0_f64.to_radians().sin();
+        let n: u32 = 1 << 20;
+        let z = |i: u32| {
+            if i == n {
+                ze
+            } else {
+                ze * (f64::from(i) / f64::from(n))
+            }
+        };
+        let (mut lo, mut hi) = (0.0, 0.0);
+        let mut fa = f(0.0);
+        for i in 0..n {
+            let (a, b) = (z(i), z(i + 1));
+            let fb = f(b);
+            lo += (b - a) * fb;
+            hi += (b - a) * fa;
+            fa = fb;
+        }
+        let straight = 40.0 * w(1.0);
+        let (lo, hi) = (straight + lo, straight + hi);
+        let margin = (f64::from(n) + 64.0) * f64::EPSILON * hi;
+        (lo - margin, hi + margin)
+    }
 }

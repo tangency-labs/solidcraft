@@ -277,19 +277,25 @@ fn refuse_singular_offset(
 }
 
 /// Not upstream (WR-346): the radius of curvature that collapsed face `face` attains on
-/// the side the offset by `distance` moves it to, for [`OffsetFailure::Collapses`]: the
-/// least [`crate::offset::construction::sheets::proved_singular`] finds over the face's
-/// parameter box, on the face's own surface, whichever way its NURB normal faces the
-/// displacement. A face the proof finds nothing on (no NURB, or a radius it does not
-/// reach) reports `|distance|`: its collapse test (`Surface::offset_collapses`) found the
-/// radius left below the tolerance, so the radius is at most that.
+/// the side the offset moves it to, for [`OffsetFailure::Collapses`]: the least
+/// [`crate::offset::construction::sheets::proved_singular`] finds over the face's parameter
+/// box, on the face's own surface displaced by `displacement` along its NURB normal (the
+/// signed distance its collapse test offset it by, recorded with the collapsed face). A
+/// face without a recorded displacement, or that the proof finds nothing on (no NURB, or a
+/// radius it does not reach), reports `|distance|`: its collapse test
+/// (`Surface::offset_collapses`) found the radius left below the tolerance, so the radius
+/// is at most that.
 fn collapsed_face_radius(
     kernel: &Kernel,
     original: &Brep,
     face: FaceId,
     distance: f64,
+    displacement: Option<f64>,
 ) -> Result<f64> {
     use crate::offset::construction::sheets::proved_singular;
+    let Some(displacement) = displacement else {
+        return Ok(distance.abs());
+    };
     let surface = original
         .face(face)?
         .surface
@@ -303,13 +309,10 @@ fn collapsed_face_radius(
     };
     let domain = crate::topology::face::p2::uv_domain(original, face)?;
     let uv_box = [domain.min.x, domain.max.x, domain.min.y, domain.max.y];
-    let mut least: Option<f64> = None;
-    for d in [distance, -distance] {
-        if let Some(singular) = proved_singular(base, d, Some(uv_box), original.tolerance())? {
-            least = Some(least.map_or(singular.radius, |r| r.min(singular.radius)));
-        }
-    }
-    Ok(least.unwrap_or_else(|| distance.abs()))
+    Ok(
+        proved_singular(base, displacement, Some(uv_box), original.tolerance())?
+            .map_or_else(|| distance.abs(), |singular| singular.radius),
+    )
 }
 
 /// Not upstream (WR-718, #2350 S1): refuses the offset of `face` (whose implicit offset
@@ -1021,7 +1024,13 @@ impl OffsetExecutive {
                 }
                 if let Some(face) = unbridged {
                     let distance = self.offset_distance();
-                    let radius = collapsed_face_radius(kernel, original, face, distance)?;
+                    let displacement = self
+                        .collapsed_displacements
+                        .iter()
+                        .find(|&&(f, _)| f == face)
+                        .map(|&(_, d)| d);
+                    let radius =
+                        collapsed_face_radius(kernel, original, face, distance, displacement)?;
                     return Err(Failure::new(
                         OP_EXTENDED,
                         OffsetFailure::Collapses {
@@ -1527,6 +1536,14 @@ impl OffsetExecutive {
         // beside it are mated across it in `do_extended_offset`, as at a sharp edge.
         if extended && surface.is_none() && self.inset() && self.extend_convex_edges() {
             self.collapsed_faces.push(id);
+            // the sign `OffsetGeometryCreation` offsets the surface with
+            let sense = if eu::faceuse_orientation(original, faceuse)? == OrientType::Opposite {
+                -1.0
+            } else {
+                1.0
+            };
+            self.collapsed_displacements
+                .push((id, sense * self.offset_distance()));
             return Ok(());
         }
         if self.skip_offset_face_geometry(extended, surface.is_some(), ssi.curves_3d.len())? {
@@ -2277,7 +2294,7 @@ fn merge_sheet_side_walls(
         // every wall onto its plane, in GetFaces order (#1599)
         for f in bp1::faces(shell, None)? {
             if walls.contains(&f) {
-                put_planar_face_on_its_plane(kernel, shell, f, true, notifications)?;
+                put_planar_face_on_its_plane(kernel, shell, f, notifications)?;
             }
         }
         if !merge || merging.is_empty() {
@@ -2301,7 +2318,7 @@ fn merge_sheet_side_walls(
 /// with as much again round them; `ReplaceSurface(.., FALSE, NULL, TRUE)` remakes its
 /// UV trim curves. A face on a plane, or on a surface that is not planar, is left.
 ///
-/// With `delete_seams` (WR-564, #1599; the fork's tangency-labs/smlib#62) the face's
+/// Then (WR-564, #1599; the fork's tangency-labs/smlib#62) the face's
 /// edges that are seams of its old surface (`SmEdge::IsSeam`, found before the
 /// replacement) are deleted after it: a surface closed round on itself (the wall
 /// between a circle and its offset about one axis, a flat ring) bounds the face along
@@ -2316,7 +2333,6 @@ fn put_planar_face_on_its_plane(
     kernel: &mut Kernel,
     b: &mut Brep,
     f: FaceId,
-    delete_seams: bool,
     notifications: &mut OffsetNotifications<'_>,
 ) -> Result<()> {
     use crate::nurbs::knots::Side;
@@ -2375,13 +2391,11 @@ fn put_planar_face_on_its_plane(
         crate::math::Point2::new(u_max + margin, v_max + margin),
     );
 
-    // the old surface's seams (#1599; only with the opt-in)
+    // the old surface's seams (#1599)
     let mut seams: Vec<EdgeId> = Vec::new();
-    if delete_seams {
-        for e in crate::topology::face::p4::edges(&*b, f, None, false, None)? {
-            if crate::topology::edge::is_seam_of_surface(kernel, b, e, f)? {
-                seams.push(e);
-            }
+    for e in crate::topology::face::p4::edges(&*b, f, None, false, None)? {
+        if crate::topology::edge::is_seam_of_surface(kernel, b, e, f)? {
+            seams.push(e);
         }
     }
 
