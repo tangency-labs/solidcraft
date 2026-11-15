@@ -590,22 +590,19 @@ fn leaving_directions_match_one_to_one() {
 /// keep their ids, though no constraint holds them: an extrude picks its profile by them.
 #[test]
 fn a_rebuilt_face_keeps_the_ids_of_lines_that_did_not_move() {
-    let hole = |c: Vec2, r: f64, at: f64| {
-        let a = c + Vec2::new(at.cos(), at.sin()) * r;
-        let b = c - Vec2::new(at.cos(), at.sin()) * r;
-        [LinkGeom::Arc { c, a, b }, LinkGeom::Arc { c, a: b, b: a }]
-    };
+    // A round hole about `c`, split into two arcs at `c + to` and `c - to`.
+    let hole = |c: Vec2, to: Vec2| [LinkGeom::Arc { c, a: c + to, b: c - to }, LinkGeom::Arc { c, a: c - to, b: c + to }];
     let p = [Vec2::new(-96.0, 180.0), Vec2::new(-96.0, -6.0), Vec2::new(96.0, -6.0), Vec2::new(96.0, 180.0)];
-    let (big, small) = ((Vec2::new(0.0, 90.0), 57.0), (Vec2::new(-48.44, 41.56), 2.0));
+    let (big, small) = (Vec2::new(0.0, 90.0), Vec2::new(-48.44, 41.56));
     let saved: Vec<LinkGeom> = [LinkGeom::Line(p[0], p[1]), LinkGeom::Line(p[1], p[2]), LinkGeom::Line(p[3], p[0]), LinkGeom::Line(p[2], p[3])]
         .into_iter()
-        .chain(hole(big.0, big.1, std::f64::consts::PI))
-        .chain(hole(small.0, small.1, 0.75 * std::f64::consts::PI))
+        .chain(hole(big, Vec2::new(-57.0, 0.0)))
+        .chain(hole(small, Vec2::new(-1.6, 1.2)))
         .collect();
     let fresh: Vec<LinkGeom> = [LinkGeom::Line(p[1], p[0]), LinkGeom::Line(p[1], p[2]), LinkGeom::Line(p[0], p[3]), LinkGeom::Line(p[2], p[3])]
         .into_iter()
-        .chain(hole(big.0, big.1, 0.0))
-        .chain(hole(small.0, small.1, 0.0))
+        .chain(hole(big, Vec2::new(57.0, 0.0)))
+        .chain(hole(small, Vec2::new(2.0, 0.0)))
         .collect();
     let mut sk = Sketch::new();
     let link = sk.add_link(LinkKind::Project, face(), &saved).unwrap();
@@ -668,4 +665,23 @@ fn a_held_round_end_keeps_the_corner_its_free_neighbour_is_as_near_to() {
     let CurveKind::Line { a, .. } = mine.kind else { panic!("not a line") };
     assert_eq!(sk.points[a].pos, Vec2::new(100.0, 100.0), "it ends on the new corner");
     assert_eq!(sk.points[a].link.as_deref(), Some(link.as_str()), "on the projected corner, not a point of its own");
+}
+
+/// #14249: among circles about one centre that nothing holds, one that kept its radius keeps
+/// its id, even when an old circle listed before it is nearest to it too.
+#[test]
+fn a_rebuilt_face_gives_an_unchanged_concentric_circle_its_own_id() {
+    let c = Vec2::new(0.0, 0.0);
+    let rings = |radii: &[f64]| square(10.0).into_iter().chain(radii.iter().map(|r| LinkGeom::Circle(c, *r))).collect::<Vec<_>>();
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &rings(&[3.0, 4.0])).unwrap();
+    let id_of = |sk: &Sketch, r: f64| {
+        sk.link_curves(&link)
+            .into_iter()
+            .find(|i| matches!(sk.curves[*i].kind, CurveKind::Circle { r: s, .. } if s == r))
+            .map(|i| sk.curves[i].id.clone())
+    };
+    let four = id_of(&sk, 4.0).unwrap();
+    assert!(sk.update_link(&link, &rings(&[1.0, 4.0, 6.0])).unwrap());
+    assert_eq!(id_of(&sk, 4.0), Some(four), "the circle of radius 4 is where it was");
 }

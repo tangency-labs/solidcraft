@@ -235,12 +235,27 @@ impl Sketch {
                         *slot = *held;
                     }
                 }
+                // Past the work bound no point was matched, and the curves are not either.
+                let within = rest.len().saturating_mul(lay.pts.len()) <= MAX_MATCH_WORK;
+                // (a piece, how far the radius moved, old curve, new curve): the closest matches
+                // take their curve first, so a circle that kept its radius keeps its id.
+                let mut found: Vec<(bool, f64, usize, usize)> = (0..curves.len())
+                    .filter(|k| within && !needed_curves.contains(k))
+                    .filter_map(|k| {
+                        let c = cur.get(k)?;
+                        let (j, piece) = match_curve(c, &old_pos, &id_points, lay)?;
+                        let moved = match (c, lay.curves.get(j)) {
+                            (LCurve::Circle(_, r), Some(LCurve::Circle(_, s))) => (r - s).abs(),
+                            _ => 0.0,
+                        };
+                        Some((piece, moved, k, j))
+                    })
+                    .collect();
+                found.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
                 let mut taken: BTreeSet<usize> = curve_map.values().map(|(j, _)| *j).collect();
                 let mut id_curves: BTreeMap<usize, usize> = BTreeMap::new();
-                for k in (0..curves.len()).filter(|k| !needed_curves.contains(k)) {
-                    if let Some((j, _)) = cur.get(k).and_then(|c| match_curve(c, &old_pos, &id_points, lay))
-                        && taken.insert(j)
-                    {
+                for (_, _, k, j) in found {
+                    if taken.insert(j) {
                         id_curves.insert(k, j);
                     }
                 }
