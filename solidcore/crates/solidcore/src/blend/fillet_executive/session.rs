@@ -2171,6 +2171,25 @@ impl<'target> FilletSession<'target> {
                         let Some(FilletObject::Solver(id)) =
                             executive.fillet_solver_of_edgeuse(object)
                         else {
+                            return false;
+                        };
+                        solvers
+                            .get(id.0 as usize)
+                            .and_then(Option::as_ref)
+                            .is_some_and(|s| match s {
+                                // a law whose radii can change has no constant reach
+                                SolverObject::VariableRadius(vr) => {
+                                    matches!(vr.offset_radii_can_change(), Ok(false))
+                                }
+                                _ => true,
+                            })
+                    },
+                    |edgeuse| {
+                        let object =
+                            FilletObject::Topology(FilletBody::Target, EntityRef::Edgeuse(edgeuse));
+                        let Some(FilletObject::Solver(id)) =
+                            executive.fillet_solver_of_edgeuse(object)
+                        else {
                             return Err(invalid("corner edge use has no loaded solver"));
                         };
                         solvers

@@ -1126,6 +1126,21 @@ impl ExecutiveAccess<Handle> for Access {
                             let Some(Handle::Solver(idx)) =
                                 executive.fillet_solver_of_edgeuse(Handle::Edgeuse(eu))
                             else {
+                                return false;
+                            };
+                            solvers
+                                .get(idx)
+                                .is_some_and(|s| match s {
+                                    SolverEntry::VariableRadius(vr) => {
+                                        matches!(vr.offset_radii_can_change(), Ok(false))
+                                    }
+                                    _ => true,
+                                })
+                        },
+                        |eu| {
+                            let Some(Handle::Solver(idx)) =
+                                executive.fillet_solver_of_edgeuse(Handle::Edgeuse(eu))
+                            else {
                                 return missing();
                             };
                             solvers

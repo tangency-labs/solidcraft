@@ -807,6 +807,111 @@ fn a_near_straight_corner_joins_only_below_the_intersection_tolerance() {
     }
 }
 
+/// #13911: the over-side bound (`blend_corner::join_gap`) covers a three-edge ring whose
+/// unblended edge is the two walls' common edge. On the kinked plate's convex corner it
+/// gives the solvers' tolerance for that ring; a four-edge ring, or a three-edge ring whose
+/// unblended edge is another (here the bottom edge, not at the corner), falls back to the
+/// first-order bound.
+#[test]
+fn the_over_side_join_holds_only_for_a_ring_of_the_two_walls() {
+    use solidcore::blend::blend_corner::join_gap::{join_tolerance_deg, JoinBlend};
+    use solidcore::topology::edgeuse::p1 as eu1;
+    let mut k = all_fixes();
+    let (mut b, at_edges) = kinked_plate(&mut k, 1.15e-3, true);
+    let any_eu = |b: &Brep, e: EdgeId| edge::edgeuses(b, e, None, None).unwrap()[0];
+    let blend = |b: &Brep, e: EdgeId| {
+        let eu = any_eu(b, e);
+        let radial = eu1::radial(b, eu).unwrap().unwrap();
+        JoinBlend {
+            eu,
+            faces: [
+                (eu1::face(b, eu).unwrap(), 1.0),
+                (eu1::face(b, radial).unwrap(), 1.0),
+            ],
+        }
+    };
+    let (e1, e2) = (pick(&k, &b, at_edges[0]), pick(&k, &b, at_edges[1]));
+    let side = pick(&k, &b, [50.0, 0.0, 1.0]);
+    let bottom = pick(&k, &b, [25.0, 0.0, 0.0]);
+    let v = [
+        edge::vertex(&b, side).unwrap(),
+        edge::other_vertex(&b, side, edge::vertex(&b, side).unwrap()).unwrap(),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|&v| (vertex::point(&b, v).unwrap().z - 2.0).abs() < 1e-9)
+    .unwrap();
+    let (j1, j2) = (blend(&b, e1), blend(&b, e2));
+    let (eu1_, eu2_, eu_side, eu_bottom) = (j1.eu, j2.eu, any_eu(&b, side), any_eu(&b, bottom));
+    let (tangency, behind) = (10.0, 0.0);
+    let mut deg = |ring: &[_]| {
+        join_tolerance_deg(&k, &mut b, v, [&j1, &j2], ring, 2e-5, tangency, behind).unwrap()
+    };
+    assert_eq!(deg(&[eu1_, eu2_, eu_side]), tangency);
+    assert_eq!(deg(&[eu1_, eu2_, eu_side, eu_bottom]), behind);
+    assert_eq!(deg(&[eu1_, eu2_, eu_bottom]), behind);
+}
+
+/// #13911 (CodeRabbit on #17022): a variable-radius round's offset is its law at one
+/// parameter, not a constant reach, so the over-side bound (`blend_corner::join_gap`) does
+/// not take it. The kinked plate's convex corner 0.35 degrees off straight is the Join for
+/// constant rounds r 1; rounded by a variable-radius law whose radii can change
+/// (`OffsetRadiiCanChange`: a cubic law, here of control radii all 1) it falls back to the
+/// first-order bound and is the Turn.
+#[test]
+fn a_variable_radius_round_takes_only_the_first_order_join_bound() {
+    use solidcore::blend::fillet_standard_solver::p1::FilletLaw;
+    use solidcore::geom::extent1d::Extent1d;
+    use solidcore::nurbs::b_spline_curve::p1::{
+        BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
+    };
+    let mut k = all_fixes();
+    let (b, at_edges) = kinked_plate(&mut k, 0.35, true);
+    let constant = corners(
+        &mut k,
+        &mut b.clone_standing_for_self().unwrap(),
+        &at_edges,
+        1.0,
+    );
+    assert_eq!(
+        at(&constant, [50.0, 0.0, 2.0]).1.map(|e| e.0),
+        Some(BlendCornerEvent::Join)
+    );
+    let control = [Vec3::new(1.0, 0.0, 0.0); 4];
+    let curve = BSplineCurve::create_canonical(&CanonicalData {
+        dim: 3,
+        degree: 3,
+        control_points: &control,
+        form: BSplineCurveForm::default(),
+        knot_multiplicities: &[4, 4],
+        knots: &[0.0, 1.0],
+        knot_type: KnotType::default(),
+        weights: None,
+        trim: None,
+    })
+    .unwrap();
+    let law = FilletLaw::bspline(curve, &Extent1d::from_min_max(0.0, 1.0));
+    let mut target = b.clone_standing_for_self().unwrap();
+    let edges: Vec<EdgeId> = at_edges.iter().map(|&p| pick(&k, &target, p)).collect();
+    let mut s = FilletSession::new(&mut k, &mut target).unwrap();
+    s.prepare_variable_radius_edges(&mut k, &edges, 1.0, law, 1, 1)
+        .unwrap();
+    s.create_corners(&mut k, None).unwrap();
+    let mut event = None;
+    for id in s.fillet_corners().unwrap() {
+        let c = s.corner(id).unwrap();
+        let v = c.filleted_vertex().unwrap();
+        if vertex::point(s.target(), v)
+            .unwrap()
+            .distance(Point3::new(50.0, 0.0, 2.0))
+            < 1e-6
+        {
+            event = c.blend.map(|bc| bc.event);
+        }
+    }
+    assert_eq!(event, Some(BlendCornerEvent::Turn));
+}
+
 /// #16627: the Join is bounded by the B-rep's intersection tolerance, not by the solvers'
 /// approximation tolerance (four times the blended edges' tolerance). With the two top edges
 /// at tolerance 2.5e-4 (the solvers' tolerance 1e-3) and the B-rep's at 1e-5, a concave corner

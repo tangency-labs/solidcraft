@@ -1999,7 +1999,8 @@ fn issue_13911_body() -> (Body, Order) {
 
 /// The length of edge `e` of `brep`: `|r'|` integrated by 8-point Gauss-Legendre on 256 spans
 /// (exact to rounding for lines and arcs, and far below the tests' tolerances for the cubic
-/// splines and the rails).
+/// splines and the rails). Kept independent of the kernel's own edge length on purpose: it
+/// is the test's oracle, a cross-check on the kernel rather than a call into it.
 fn edge_length(k: &Kernel, brep: &solidcore::Brep, e: EdgeId) -> f64 {
     const X: [f64; 4] = [
         0.183_434_642_495_649_8,

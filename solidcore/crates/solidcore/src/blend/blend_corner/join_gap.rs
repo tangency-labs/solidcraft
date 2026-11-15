@@ -60,13 +60,21 @@
 //! needed only over that much of the edge next to `v`: [`EdgeBend`] carries a bound and the
 //! certified length of the edge it holds over, and a bound over less is refused.
 //!
-//! **The model** (verified). The shared face is a plane of unit normal `n`, and each blend's
-//! other face is a wall ruled along `n` ([`ruling_tilt`]): its B-spline net (a plane's, a
-//! cylinder's, an extrusion's or a B-spline's own) is of degree 1 across with two control
-//! points, each rung's points of one weight and every rung proved to point the same way
-//! along `n`, tilted from it by at most `delta` (`sin delta` certified, at most
-//! [`MAX_TILT`]). For a fixed parameter along, such a net is `A + t B` with `B` a positive
-//! combination of the rungs, so every ruling lies within `delta` of `n`. An upright wall
+//! **The model** (verified). The corner's ring is three edges: the two blended ones and
+//! one side edge, the two walls' common edge (a four-edge ring, or a side edge between
+//! other faces, falls back: the bound below covers no other side edge). The shared face is
+//! a plane of unit normal `n`, and each blend's other face is a wall ruled along `n`
+//! ([`ruling_tilt`]), tilted from it by at most `delta` (`sin delta` certified, at most
+//! [`MAX_TILT`]), both as it evaluates and as its B-spline net:
+//! - its net (a plane's, a cylinder's, an extrusion's or a B-spline's own) is of degree 1
+//!   across with two control points, each rung's points of one weight and every rung proved
+//!   to point the same way along `n`. For a fixed parameter along, such a net is `A + t B`
+//!   with `B` a positive combination of the rungs, so every ruling lies within `delta` of
+//!   `n`;
+//! - and the kinds that evaluate points from their analytic form are certified on it too: a
+//!   plane's normal within `sin delta` of square to `n`, a cone only of the cylinder class
+//!   (semi-angle 0) with its axis within `delta` of `n`, an extrusion's vector within
+//!   `delta` of `n`. An upright wall
 //! (`delta = 0`) is the cylinder over the edge along `n`, and a blend between it and the
 //! plane is the same in every plane square to the edge: its section's foot on the plane
 //! stands its offset `oB` off the wall from the edge, and on the wall its offset `oA` off
@@ -75,8 +83,8 @@
 //! depth `h`; the distance to a surface is 1-Lipschitz in the surface (Hausdorff), and the
 //! distance to the upright wall grows at unit rate along `b`, so each section's foot moves
 //! by at most that much: taken over `h <= 2 (oA + oB)` (ARGUED: the contacts lie within
-//! `oA + oB` of the plane), the shift `e = 2 (oA + oB) tan(delta)`. On #13911 `delta` is
-//! about `2.4e-18`.
+//! `oA + oB` of the plane), the shift `e = 2 (oA + oB) tan(delta)`, with `tan delta <=
+//! sin delta / (1 - sin delta)`. On #13911 `delta` is about `2.4e-18`.
 //!
 //! **The second joint vertex** (PROVEN under the model). The Join's section ends on the
 //! first wall too. With both walls upright through `v`, the line `v + t n` lies in both:
@@ -84,8 +92,10 @@
 //! so its foot on the first wall is `v - oA1 n`, on that line. The second blend's rail on
 //! its wall is the second edge moved `oA2` down `n` and passes through `v - oA2 n`, on the
 //! same line. So the vertex there lies on the second wall and within `|oA1 - oA2|` of the
-//! second blend; tilted walls add at most each wall's shift twice. Drafted walls are
-//! refused (no bound is derived for their common edge), and fall back to #16627's bound.
+//! second blend. For walls tilted by a nonzero `delta` up to [`MAX_TILT`], each wall's shift
+//! is added twice (ARGUED: it rests on the depth `h <= 2 (oA + oB)` above). Walls tilted
+//! past [`MAX_TILT`] (drafted walls) are refused, as no bound is derived for their common
+//! edge, and fall back to #16627's bound.
 //!
 //! That the check's vertex gap is the larger of these two distances is ARGUED as the
 //! over/behind split above. MEASURED on `kinked_plate` (wr697): `sec(kink) - 1` to `1e-4`.
@@ -122,7 +132,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::kernel::Kernel;
 use crate::math::{Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BSplineCurve;
-use crate::nurbs::b_spline_surface::SurfParamType;
+use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::math::{CPoint, NOW, NOZ};
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1 as eu1;
@@ -163,6 +173,8 @@ struct AtVertex {
     /// The blend's offset off the shared face: its section's foot on the wall that far
     /// down the wall's ruling through the vertex.
     down: f64,
+    /// The blend's other face, the wall.
+    wall: FaceId,
     /// The edge's curvature bound next to the vertex.
     bend: EdgeBend,
 }
@@ -439,22 +451,57 @@ fn edge_bend(
 }
 
 /// The largest tilt a wall's rulings may make with `normal`, the sine of the angle rounded
-/// up, where `surface` is ruled along it: a B-spline net (a plane's, a cone's or cylinder's,
-/// an extrusion's or a B-spline's own) of degree 1 with two control points across, each
-/// rung's two points of one weight, every rung proved to point the same way along `normal`
-/// (module docs). `None` otherwise, or past [`MAX_TILT`].
+/// up, where `surface` is ruled along it both as it evaluates and as its B-spline net (a
+/// plane's, a cylinder's, an extrusion's or a B-spline's own): the net of degree 1 with two
+/// control points across, each rung's two points of one weight, every rung proved to point
+/// the same way along `normal`; a plane's normal, a cylinder's axis or an extrusion's vector
+/// certified too (module docs). `None` otherwise, for a cone that is not of the cylinder
+/// class, or past [`MAX_TILT`].
 fn ruling_tilt(surface: &Surface, normal: Vec3) -> Result<Option<f64>> {
-    let net = match surface.kind() {
-        SurfaceKind::Plane(p) => p.base(),
-        SurfaceKind::Cone(c) => c.rev.base(),
-        SurfaceKind::SurfOfExtrusion(e) => e.base(),
-        SurfaceKind::BSpline(s) => s,
+    let ue = unit_error();
+    // the analytic form's tilt, for the kinds that evaluate points from it
+    let along = |v: Vec3| unit(v).map(|u| cross_length(u, normal, ue, ue));
+    let (net, analytic) = match surface.kind() {
+        SurfaceKind::Plane(p) => {
+            let Some(m) = unit(p.is_planar().1) else {
+                return Ok(None);
+            };
+            // the plane holds `normal` within the sine of `|m . normal|`
+            let d = dot(m, normal, ue, ue);
+            (p.base(), Some(d.value.abs() + d.bound))
+        }
+        SurfaceKind::Cone(c) => {
+            if !c.is_cylinder_class() || c.semi_angle_deg != 0.0 {
+                return Ok(None);
+            }
+            let Some(sine) = along(c.rev.position().z_axis()) else {
+                return Ok(None);
+            };
+            (c.rev.base(), Some(sine.value + sine.bound))
+        }
+        SurfaceKind::SurfOfExtrusion(e) => {
+            let Some(sine) = along(e.extrusion_vector()) else {
+                return Ok(None);
+            };
+            (e.base(), Some(sine.value + sine.bound))
+        }
+        SurfaceKind::BSpline(s) => (s, None),
         _ => return Ok(None),
     };
+    let Some(net_tilt) = net_tilt(net, normal)? else {
+        return Ok(None);
+    };
+    let tilt = up(net_tilt.max(analytic.unwrap_or(0.0)), 1);
+    Ok((tilt <= MAX_TILT).then_some(tilt))
+}
+
+/// The tilt (a sine, rounded up) of a B-spline net's rungs from `normal` ([`ruling_tilt`]).
+/// The net is read u-major, row by row, as `BSplineSurface::control_points` returns it.
+fn net_tilt(net: &BSplineSurface, normal: Vec3) -> Result<Option<f64>> {
     let (nu, nv, points) = net.control_points()?;
     // a net linear both ways (a plane's) is tried both ways: the rungs across v, then
     // across u
-    if nv == 2 && net.degree(SurfParamType::V) == 1 {
+    if nv == 2 && net.degree(SurfParamType::V) == 1 && points.len() == 2 * nu {
         let rungs = points.chunks(2).filter_map(|c| match c {
             [a, b] => Some((*a, *b)),
             _ => None,
@@ -516,8 +563,9 @@ fn rungs_tilt(
     (seen > 0 && seen == count && tilt <= MAX_TILT).then_some(tilt)
 }
 
-/// The largest ruling tilt (a sine) [`ruling_tilt`] takes: walls drafted further are
-/// refused, as the second joint vertex is bounded only for upright walls (module docs).
+/// The largest ruling tilt (a sine) [`ruling_tilt`] takes: walls tilted further (drafted
+/// walls) are refused, as the second joint vertex is bounded only for walls this close to
+/// upright (module docs).
 pub const MAX_TILT: f64 = 1e-9;
 
 /// The blend's [`AtVertex`] on `shared`, the plane of unit normal `normal`, or `None` where
@@ -607,6 +655,7 @@ fn at_vertex(
             bound: shift,
         },
         down: o_shared,
+        wall,
         bend,
     }))
 }
@@ -619,7 +668,9 @@ fn at_vertex(
 /// ruling) are proved below the intersection tolerance `xsect_tol` (less #16627's margin
 /// for the check's own rounding), else `behind_deg`,
 /// #16627's bound ([`super::join_within_xsect_tolerance_deg`]). `behind_deg` too where the
-/// two blends share no single face or any quantity cannot be read or bounded (module docs).
+/// two blends share no single face, the ring `all_eus` is not three edges whose unblended
+/// one is the two walls' common edge, or any quantity cannot be read or bounded (module
+/// docs).
 ///
 /// # Errors
 ///
@@ -630,6 +681,7 @@ pub fn join_tolerance_deg(
     b: &mut Brep,
     vertex: VertexId,
     blends: [&JoinBlend; 2],
+    all_eus: &[EdgeuseId],
     xsect_tol: f64,
     tangency_tol_deg: f64,
     behind_deg: f64,
@@ -661,6 +713,32 @@ pub fn join_tolerance_deg(
     ) else {
         return Ok(behind_deg);
     };
+    // the ring: three edges, the unblended one the two walls' common edge (module docs)
+    if all_eus.len() != 3 || one.wall == two.wall {
+        return Ok(behind_deg);
+    }
+    let blended = [eu1::edge(b, first.eu)?, eu1::edge(b, second.eu)?];
+    let mut side = None;
+    for &eu in all_eus {
+        if blended.contains(&eu1::edge(b, eu)?) {
+            continue;
+        }
+        if side.is_some() {
+            return Ok(behind_deg);
+        }
+        side = Some(eu);
+    }
+    let Some(side) = side else {
+        return Ok(behind_deg);
+    };
+    let Some(radial) = eu1::radial(b, side)? else {
+        return Ok(behind_deg);
+    };
+    let faces = [eu1::face(b, side)?, eu1::face(b, radial)?];
+    let walls = [Some(one.wall), Some(two.wall)];
+    if !(faces == walls || faces == [walls[1], walls[0]]) {
+        return Ok(behind_deg);
+    }
     // over the other blend, either way round, proved (a NaN is not)
     let ue = unit_error();
     let over = |x: Bounded| x.value - x.bound >= 0.0;
