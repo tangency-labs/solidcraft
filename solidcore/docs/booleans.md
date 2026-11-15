@@ -290,7 +290,13 @@ more than that within its first-order reach of 3.6e-3) the region reaches as far
 distance looks. The segment runs along the edge's tangent and is widened by how far the edge
 strays from that line within the reach, enclosed by the tangent cone of a window on each side of
 the point (`Curve::stray_from_line`); an edge with no such enclosure gives the ball of the capture
-distance. A point with no crossing angle has the ball of its tolerance. Two points
+distance. A point that no curve fixes but that lies on an edge of one operand and in a face of
+the other (a face pair's single point, a degenerate interval) is where the edge crosses the face's
+surface, known along the edge to tolerance / sin θ of that angle, which nothing encloses there: its
+region reaches as far as the capture distance looks. Two drills 1e-9 apart, the lower one 1e-9
+through the plate's bottom: its rim crosses the bottom at 2.8e-5 rad, twice, 1.4e-4 apart, and both
+crossings are one point with the end of the line where its wall touches the bottom, as for drills a
+hair inside. Any other point with no crossing angle has the ball of its tolerance. Two points
 are one when their regions are not proved apart (`DeclaredContact::overlaps`: the gap between the
 two segments' projections onto the direction of their closest pair, less its rounding, which no
 pair of their points is closer than even where the near-parallel solve picks the wrong pair), and

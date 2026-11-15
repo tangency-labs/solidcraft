@@ -2122,8 +2122,14 @@ fn edge_direction<O: ClassObject>(
 /// within the reach, enclosed ([`Curve::stray_from_line`]). Where no reach is proved (the
 /// curves may run along each other within it, or have no hull) or it is longer, the region
 /// reaches `limit`, the capture distance: as far as proto vertices are looked for at all;
-/// where the edge's stray is not enclosed either, it is the ball of `limit`. Of several
-/// crossings the one known worst counts. Any other point has the ball of its tolerance.
+/// where the edge's stray is not enclosed either, it is the ball of `limit`. A point with
+/// no curve that lies on an edge of one B-rep and in a face of the other (a face pair's
+/// single point, a degenerate interval) is where that edge crosses the face's surface,
+/// known along the edge only to the tolerance over the sine of that angle, which nothing
+/// here encloses: its reach is `limit` (an edge 1e-9 into a plane crosses it at 2.8e-5 rad,
+/// so its two crossings 1.4e-4 apart are one point with the end of the line the two touch
+/// along). Of several crossings the one known worst counts. Any other point has the ball
+/// of its tolerance.
 #[allow(clippy::too_many_arguments)] // the point, what fixes it and how well
 fn crossing_region<O: ClassObject>(
     k: &Kernel,
@@ -2145,32 +2151,36 @@ fn crossing_region<O: ClassObject>(
             .map(|c| (c, pc.t_param()))
     };
     let (edge1, edge2) = (edge_of(pc1), edge_of(pc2));
-    // (the crossing curve and its parameter, the edge and its parameter, the edge's
-    // classification)
+    // (the crossing curve and its parameter, `None` for a face's surface; the edge and its
+    // parameter, the edge's classification)
     let mut crossings = Vec::new();
-    match crossing.and_then(|(c, t)| geometry.curve(c).map(|c| (c, t))) {
-        Some((curve, t)) => {
-            for (edge, pc) in [(edge1, pc1), (edge2, pc2)] {
-                if let Some((e, s)) = edge {
-                    crossings.push((curve, t, e, s, pc));
-                }
+    if let Some((curve, t)) = crossing.and_then(|(c, t)| geometry.curve(c).map(|c| (c, t))) {
+        for (edge, pc) in [(edge1, pc1), (edge2, pc2)] {
+            if let Some((e, s)) = edge {
+                crossings.push((Some((curve, t)), e, s, pc));
             }
         }
-        None => {
-            if let (Some((a, t)), Some((e, s))) = (edge1, edge2) {
-                crossings.push((a, t, e, s, pc2));
-            }
+    } else {
+        let on_face = |pc: &PointClassification<O>| pc.point_class() == PointClassType::Face;
+        match (edge1, edge2) {
+            (Some((a, t)), Some((e, s))) => crossings.push((Some((a, t)), e, s, pc2)),
+            (Some((e, s)), None) if on_face(pc2) => crossings.push((None, e, s, pc1)),
+            (None, Some((e, s))) if on_face(pc1) => crossings.push((None, e, s, pc2)),
+            _ => {}
         }
     }
     // (the edge's direction, the reach along it, the edge and its parameter)
     let mut worst: Option<(Vec3, f64, &Curve, f64)> = None;
-    for (curve, t, edge, s, pc) in crossings {
+    for (curve, edge, s, pc) in crossings {
         let Some(along) = edge_direction(k, geometry, pc)? else {
             continue;
         };
-        let reach = curve
-            .crossing_reach(k, t, edge, s, position, tolerance)?
-            .map_or(limit, |reach| reach.min(limit));
+        let reach = match curve {
+            Some((curve, t)) => curve
+                .crossing_reach(k, t, edge, s, position, tolerance)?
+                .map_or(limit, |reach| reach.min(limit)),
+            None => limit,
+        };
         if worst.is_none_or(|(_, old, _, _)| reach > old) {
             worst = Some((along, reach, edge, s));
         }

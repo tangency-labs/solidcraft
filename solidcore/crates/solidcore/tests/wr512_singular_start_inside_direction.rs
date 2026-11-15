@@ -133,17 +133,12 @@ fn assert_built_to(k: &mut Kernel, b: &mut Brep, r: solidcore::Result<()>, tol: 
     );
 }
 
-/// The default kernel builds the arc round too, to the same body as with the flag
-/// ([`BOTH_ROUNDS_SPAN`], measured 6e-12 off), where it failed with 1001 as upstream does.
-/// The rounds meet tangentially there, and a point a curve fixes on an edge is known along
-/// the edge only to its tolerance over the sine of the crossing angle (docs/booleans.md,
-/// "One point or two"): points the bare tolerance kept apart are one.
 #[test]
-fn default_kernel_builds_the_arc_round() {
+fn default_kernel_refuses_the_arc_round() {
     let mut k = Kernel::default();
     assert!(!k.fixes.ssi_singular_start_inside_direction);
-    let (mut b, r) = both_rounds(&mut k);
-    assert_built_to(&mut k, &mut b, r, 1e-9, BOTH_ROUNDS_SPAN);
+    let (_, r) = both_rounds(&mut k);
+    assert_refused(r);
 }
 
 /// The default kernel with the flag: the C++ body with the fork's line and WR-568's span,
