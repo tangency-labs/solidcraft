@@ -834,6 +834,7 @@ form_case!(move_copy, "solid.move", ["Move Type", "X Distance", "Y Distance", "Z
 form_case!(rib, "solid.rib", ["Direction", "Thickness", "Depth"]);
 form_case!(web, "solid.web", ["Direction", "Thickness", "Depth"]);
 form_case!(emboss, "solid.emboss", ["Depth", "Type"]);
+form_case!(cell_grid, "solid.cell_grid", ["Shape", "Cell size", "Web", "Through all", "Depth", "Direction", "Clip", "Angle"]);
 form_case!(replace_face, "solid.replace_face", []);
 form_case!(boundary_fill, "solid.boundary_fill", ["Cells", "Operation"]);
 form_case!(align, "solid.align", ["Object Type", "From Snap", "To Snap"]);
