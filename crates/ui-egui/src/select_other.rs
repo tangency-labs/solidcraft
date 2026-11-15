@@ -711,6 +711,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         // A press elsewhere only closes the list.
         close(app);
         app.viewport.select_other.held = true;
+    } else if crate::titlebar::frame_pressed(ctx) {
+        close(app);
     }
 }
 

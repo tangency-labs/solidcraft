@@ -1,0 +1,11 @@
+[package]
+name = "solidcraft-frame"
+description = "SolidCraft frame infrastructure: the title bar's regions for native hit testing, shared lock-free between the UI and the window procedure (pure, no GPU or windowing dependency)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]

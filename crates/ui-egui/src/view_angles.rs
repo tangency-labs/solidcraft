@@ -222,7 +222,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         apply(app, typed);
     }
     let clicked_out = ui.input(|i| i.pointer.any_pressed())
-        && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| !card.response.rect.contains(p) && !chip.contains(p));
+        && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| !card.response.rect.contains(p) && !chip.contains(p))
+        || crate::titlebar::frame_pressed(ui.ctx());
     let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
     ui.data_mut(|d| {
         if clicked_out || escape {

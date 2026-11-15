@@ -274,7 +274,8 @@ pub fn show(ui: &mut egui::Ui, bar: &Bar<'_>, menu: impl FnOnce(&str) -> Menu) -
             && ui.input(|i| {
                 i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !popup.response.rect.contains(p) && !bar.rect.contains(p))
             });
-        if outside || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        // A press the OS took on the window's frame or title bar is a press outside too.
+        if outside || ui.input(|i| i.key_pressed(egui::Key::Escape)) || crate::window_chrome::frame_pressed(ui.ctx()) {
             open.clear();
         }
     }

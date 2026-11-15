@@ -42,6 +42,7 @@ solidcraft-theme = { path = "crates/theme" }
 solidcraft-viewport = { path = "crates/viewport" }
 solidcraft-viewport-egui = { path = "crates/viewport-egui" }
 solidcraft-viewport-gpu = { path = "crates/viewport-gpu" }
+solidcraft-frame = { path = "crates/frame" }
 solidcraft-space-mouse = { path = "crates/space-mouse" }
 solidcraft-mcp = { path = "crates/mcp" }
 solidcraft-mcp-server = { path = "crates/mcp-server" }

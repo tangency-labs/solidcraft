@@ -1,19 +1,25 @@
-//! Windows: the resize border of the window without OS decorations (#1381).
+//! Windows: the frame and title bar of the window without OS decorations (#1381).
 //!
-//! The window keeps its native thick frame (`WS_THICKFRAME`, so Aero Snap, Win+arrows and the
-//! OS's own move and size loops work) but winit draws no frame: its `WM_NCCALCSIZE` makes the
-//! whole window client area, and every point then hit-tests as `HTCLIENT`. This module puts the
-//! resize border back by answering `WM_NCHITTEST` itself: within Windows' resize-border width
-//! for the window's current DPI from each edge (`solidcraft_ui_egui::titlebar::resize_hit`;
-//! 8 px at 100 %, corners win), it returns `HTLEFT`, `HTTOPRIGHT`, … So from the first message
-//! the OS shows its resize cursors and runs its own resize, whatever egui has laid out, whatever
-//! the scale; nothing waits for a first frame or a first size change.
+//! The window keeps its thick frame (`WS_THICKFRAME`), so Aero Snap, Win+arrows and the OS's own
+//! move and size loops work. Which part of the window belongs to Windows is chosen once, before
+//! the window is created (Preferences > Layout, `windows_native_frame`; [`Frame`], [`choose`]),
+//! and [`install`] puts the matching window procedure in place:
 //!
-//! It also answers `WM_GETDPISCALEDSIZE` with the size the window will really have at the new
-//! DPI (the same logical size, as winit computes it), so the rect Windows suggests while the
-//! title bar is dragged onto a monitor with another scale is the rect winit then applies: the
-//! window rescales once at the crossing and stays under the pointer, instead of the OS's move
-//! loop and winit disagreeing about a frame the window doesn't have.
+//! - [`Frame::Client`] ([`border_proc`]; the default): winit's own `WM_NCCALCSIZE` makes the whole
+//!   window client area, and every point then hit-tests as `HTCLIENT`. The procedure puts the
+//!   resize border back by answering `WM_NCHITTEST` itself: within Windows' resize-border width for
+//!   the window's current DPI from each edge (`solidcraft_ui_egui::titlebar::resize_hit`; 8 px at
+//!   100 %, corners win), it returns `HTLEFT`, `HTTOPRIGHT`, … The title bar is egui's.
+//! - [`Frame::Native`] ([`caption_proc`]; turned on in Preferences): restored, winit's
+//!   `WM_NCCALCSIZE` (vendored) keeps the system frame on the left, right and bottom and makes the
+//!   top client area, where the UI draws its title bar. The procedure answers `WM_NCHITTEST` there
+//!   from the first message on, before any frame: the band along the top edge resizes, the bare
+//!   title bar is `HTCAPTION` and the maximize button `HTMAXBUTTON` (Windows 11's snap layouts).
+//!   egui never sees the presses Windows takes there or on the frame, so they are reported to the
+//!   UI, whose open menus close as for a press outside.
+//!
+//! Both answer `WM_GETDPISCALEDSIZE` with the size the window will really have at the new DPI, so
+//! a window dragged onto a monitor with another scale rescales once and stays under the pointer.
 //!
 //! Replacing a window procedure and setting a window class's icon have no safe API, hence the
 //! `unsafe_code` allowance on this module (the app crate denies it; see `native_crash.rs` and
@@ -25,18 +31,22 @@
 //! mark even when the window is too busy to answer the taskbar's request for its icon.
 #![allow(unsafe_code)]
 
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use solidcraft_frame::CaptionHit;
 use solidcraft_ui_egui::titlebar;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM};
-use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
+use windows_sys::Win32::Graphics::Gdi::{ClientToScreen, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow, ScreenToClient};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
+use windows_sys::Win32::UI::HiDpi::{AdjustWindowRectExForDpi, GetDpiForWindow, GetSystemMetricsForDpi};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallWindowProcW, GCLP_HICON, GCLP_HICONSM, GWL_STYLE, GWLP_WNDPROC, GetClientRect, GetWindowLongPtrW, GetWindowRect, HTBOTTOM, HTBOTTOMLEFT,
-    HTBOTTOMRIGHT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, IMAGE_ICON, IsIconic, IsZoomed, LR_DEFAULTCOLOR, LoadImageW, SM_CXICON,
-    SM_CXPADDEDBORDER, SM_CXSIZEFRAME, SM_CXSMICON, SetWindowLongPtrW, WM_GETDPISCALEDSIZE, WM_NCDESTROY, WM_NCHITTEST, WNDPROC, WS_THICKFRAME,
+    CallWindowProcW, GCLP_HICON, GCLP_HICONSM, GWL_EXSTYLE, GWL_STYLE, GWLP_WNDPROC, GetClientRect, GetWindowLongPtrW, GetWindowRect, HTBOTTOM,
+    HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT, HTMAXBUTTON, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, IMAGE_ICON, IsIconic, IsZoomed,
+    LR_DEFAULTCOLOR, LoadImageW, PostMessageW, SC_MOVE, SC_SIZE, SM_CXICON, SM_CXPADDEDBORDER, SM_CXSIZEFRAME, SM_CXSMICON, SW_MAXIMIZE, SW_RESTORE,
+    SetWindowLongPtrW, ShowWindow, TITLEBARINFOEX, WM_GETDPISCALEDSIZE, WM_GETTITLEBARINFOEX, WM_MOUSEMOVE, WM_NCDESTROY, WM_NCHITTEST,
+    WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMBUTTONDBLCLK, WM_NCMBUTTONDOWN, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_NCRBUTTONDBLCLK,
+    WM_NCRBUTTONDOWN, WM_NCRBUTTONUP, WM_NCXBUTTONDBLCLK, WM_NCXBUTTONDOWN, WM_SYSCOMMAND, WNDPROC, WS_THICKFRAME,
 };
 // windows-sys has SetClassLongPtrW only on 64-bit targets; on 32-bit Windows it is SetClassLongW.
 #[cfg(target_pointer_width = "64")]
@@ -109,25 +119,80 @@ fn exe_icon(metric: i32, dpi: u32) -> Option<windows_sys::Win32::Foundation::HAN
 /// The window procedure ours replaced (winit's), as an address; 0 before [`install`].
 static PREVIOUS: AtomicIsize = AtomicIsize::new(0);
 
-/// Answer the main window's hit test and DPI-size questions from now on. Call it once, on the
-/// thread that created the window (eframe's app creator). `false` if it isn't a Win32 window.
-pub fn install(window: &impl HasWindowHandle) -> bool {
+/// Which part of the window is Windows': fixed when the window is created, so chosen before it
+/// ([`choose`]) and kept for the window's life ([`install`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Frame {
+    /// Windows' own title-bar drag, snap layouts on Maximize, resize borders just outside the
+    /// window, and presses there reported to the UI ([`caption_proc`]). Turned on in Preferences.
+    Native,
+    /// The default frame: the whole window is client area, the title bar is egui's, the resize
+    /// zones are just inside the window, and winit's own non-client calculation applies
+    /// ([`border_proc`]).
+    Client,
+}
+
+impl Frame {
+    /// The frame for the preference's value (`windows_native_frame`).
+    pub fn from_preference(native: bool) -> Self {
+        if native { Self::Native } else { Self::Client }
+    }
+}
+
+/// A window procedure, as `SetWindowLongPtrW` takes it.
+type Procedure = unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT;
+
+/// Everything a [`Frame`] decides, in one place: [`choose`] and [`install`] do only what it says.
+#[derive(Clone, Copy)]
+struct Choice {
+    /// The vendored winit keeps the system frame on the left, right and bottom (its switch,
+    /// `set_undecorated_shadow_side_frame`).
+    side_frame: bool,
+    /// The window procedure [`install`] puts in place.
+    procedure: Procedure,
+    /// [`install`] keeps the window's handle and gives the window menu Move and Size (only the
+    /// native caption's right-click opens that menu).
+    window_menu: bool,
+}
+
+fn choice(frame: Frame) -> Choice {
+    match frame {
+        Frame::Native => Choice { side_frame: true, procedure: caption_proc, window_menu: true },
+        Frame::Client => Choice { side_frame: false, procedure: border_proc, window_menu: false },
+    }
+}
+
+/// Tell the vendored winit which non-client area the main window gets. Call it before the window
+/// is created: its frame is calculated then.
+pub fn choose(frame: Frame) {
+    winit::platform::windows::set_undecorated_shadow_side_frame(choice(frame).side_frame);
+}
+
+/// Answer the main window's hit test and DPI-size questions from now on, as `frame` (the one
+/// [`choose`] chose) says. Call it once, on the thread that created the window (eframe's app
+/// creator). `false` if it isn't a Win32 window.
+pub fn install(window: &impl HasWindowHandle, frame: Frame) -> bool {
     let Ok(handle) = window.window_handle() else { return false };
     let RawWindowHandle::Win32(w) = handle.as_raw() else { return false };
     let hwnd = w.hwnd.get() as HWND;
     if PREVIOUS.load(Ordering::SeqCst) != 0 {
         return false;
     }
-    // SAFETY: `hwnd` is the live window eframe just created on this thread; `frame_proc` has the
+    let choice = choice(frame);
+    // SAFETY: `hwnd` is the live window eframe just created on this thread; the procedure has the
     // WNDPROC signature and stays valid for the life of the process. SetWindowLongPtrW returns
-    // the previous procedure, which `frame_proc` calls for every other message.
-    let previous = unsafe { SetWindowLongPtrW(hwnd, GWLP_WNDPROC, frame_proc as *const () as isize as _) };
+    // the previous procedure, which ours calls for every other message.
+    let previous = unsafe { SetWindowLongPtrW(hwnd, GWLP_WNDPROC, choice.procedure as *const () as isize as _) };
     // `as _`: on 32-bit Windows SetWindowLongPtrW is SetWindowLongW, which takes and
     // returns i32.
     if previous == 0 {
         return false;
     }
     PREVIOUS.store(previous as _, Ordering::SeqCst);
+    if choice.window_menu {
+        WINDOW.store(hwnd as isize, Ordering::SeqCst);
+        titlebar::set_system_commands(system_command);
+    }
     true
 }
 
@@ -138,7 +203,129 @@ fn previous() -> WNDPROC {
     (p != 0).then(|| unsafe { std::mem::transmute::<isize, unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT>(p) })
 }
 
-unsafe extern "system" fn frame_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+/// [`Frame::Native`]: the top resize band, the caption and the maximize button are answered here;
+/// the system frame answers for the left, right and bottom.
+unsafe extern "system" fn caption_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    let prev = previous();
+    // SAFETY: the arguments are the message as Windows delivered it to this window.
+    let call_previous = || unsafe { CallWindowProcW(prev, hwnd, msg, wparam, lparam) };
+    match msg {
+        WM_NCHITTEST => {
+            let default = call_previous();
+            // The system frame (left, right, bottom) answers for itself.
+            if default != HTCLIENT as LRESULT {
+                return default;
+            }
+            // Screen coordinates, signed (monitors left of or above the primary one).
+            let (x, y) = (i32::from(lparam as u16 as i16), i32::from((lparam >> 16) as u16 as i16));
+            // The client area: the top resize band, then the title bar the UI published.
+            if let Some(hit) = top_border_hit(hwnd, x, y) {
+                return hit as LRESULT;
+            }
+            caption_code(caption_hit(hwnd, x, y)).map_or(default, |hit| hit as LRESULT)
+        }
+        // The maximize button is HTMAXBUTTON, so its pointer arrives as non-client messages; the
+        // UI draws the button from the state reported here. Presses stop here: the default
+        // handling would run its own loop and draw a classic button.
+        WM_NCMOUSEMOVE if wparam == HTMAXBUTTON as WPARAM => {
+            // The default handling arms the hover that opens the snap layouts.
+            let result = call_previous();
+            titlebar::set_native_maximize(true, MAX_DOWN.load(Ordering::Relaxed));
+            result
+        }
+        // Off the button: no hover, and a press dragged off it is no longer a click.
+        WM_NCMOUSEMOVE | WM_MOUSEMOVE => {
+            MAX_DOWN.store(false, Ordering::Relaxed);
+            titlebar::set_native_maximize(false, false);
+            call_previous()
+        }
+        WM_NCMOUSELEAVE => {
+            MAX_DOWN.store(false, Ordering::Relaxed);
+            titlebar::set_native_maximize(false, false);
+            call_previous()
+        }
+        WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK if wparam == HTMAXBUTTON as WPARAM => {
+            titlebar::window_frame_pressed();
+            MAX_DOWN.store(true, Ordering::Relaxed);
+            titlebar::set_native_maximize(true, true);
+            0
+        }
+        // egui sees no press on the caption or the frame: the UI is told, so its open menus close
+        // (as a system menu does), and the press does what it does.
+        WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK | WM_NCMBUTTONDOWN | WM_NCMBUTTONDBLCLK | WM_NCXBUTTONDOWN | WM_NCXBUTTONDBLCLK => {
+            titlebar::window_frame_pressed();
+            call_previous()
+        }
+        WM_NCLBUTTONUP if wparam == HTMAXBUTTON as WPARAM => {
+            if MAX_DOWN.swap(false, Ordering::Relaxed) {
+                // SAFETY: plain calls on a window handle the system passed in.
+                unsafe { ShowWindow(hwnd, if IsZoomed(hwnd) != 0 { SW_RESTORE } else { SW_MAXIMIZE }) };
+            }
+            titlebar::set_native_maximize(true, false);
+            0
+        }
+        // Windows opens a window menu on a right-click only over a caption it draws itself. This
+        // caption is the UI's, so the UI's window menu opens, on release, at the pointer.
+        WM_NCRBUTTONDOWN | WM_NCRBUTTONDBLCLK if wparam == HTCAPTION as WPARAM => {
+            titlebar::window_frame_pressed();
+            0
+        }
+        WM_NCRBUTTONDOWN | WM_NCRBUTTONDBLCLK => {
+            titlebar::window_frame_pressed();
+            call_previous()
+        }
+        WM_NCRBUTTONUP if wparam == HTCAPTION as WPARAM => {
+            let mut p = POINT { x: i32::from(lparam as u16 as i16), y: i32::from((lparam >> 16) as u16 as i16) };
+            // SAFETY: `p` is a valid POINT to convert; the handle is the system's.
+            if unsafe { ScreenToClient(hwnd, &mut p) } != 0 {
+                titlebar::open_window_menu(p.x, p.y);
+            }
+            0
+        }
+        // The system derives the title bar and its buttons from the non-client frame, which has
+        // no top here: report the ones the UI drew.
+        WM_GETTITLEBARINFOEX => {
+            let result = call_previous();
+            // SAFETY: for this message lParam points to a TITLEBARINFOEX the caller reads back.
+            if let Some(info) = unsafe { (lparam as *mut TITLEBARINFOEX).as_mut() } {
+                report_title_bar(hwnd, info);
+            }
+            result
+        }
+        WM_GETDPISCALEDSIZE => {
+            let new_dpi = wparam as u32;
+            // SAFETY: for this message lParam points to a SIZE the system reads back.
+            match (resizable(hwnd), client_size(hwnd), unsafe { (lparam as *mut SIZE).as_mut() }) {
+                (true, Some(size), Some(out)) => {
+                    // SAFETY: a window handle the system passed in.
+                    let old_dpi = unsafe { GetDpiForWindow(hwnd) };
+                    match framed_size(titlebar::dpi_scaled_size(size, old_dpi, new_dpi), side_frame(hwnd, new_dpi)) {
+                        Some(size) => {
+                            *out = size;
+                            1
+                        }
+                        None => call_previous(),
+                    }
+                }
+                _ => call_previous(),
+            }
+        }
+        WM_NCDESTROY => {
+            WINDOW.store(0, Ordering::SeqCst);
+            // Hand the window back to winit's procedure for its last message.
+            if prev.is_some() {
+                // SAFETY: restores the procedure this window had before `install`.
+                unsafe { SetWindowLongPtrW(hwnd, GWLP_WNDPROC, PREVIOUS.load(Ordering::SeqCst) as _) };
+            }
+            call_previous()
+        }
+        _ => call_previous(),
+    }
+}
+
+/// [`Frame::Client`], the default: the whole window is client area; the resize border along every
+/// edge is answered here (#1381) and the title bar is egui's.
+unsafe extern "system" fn border_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let prev = previous();
     // SAFETY: the arguments are the message as Windows delivered it to this window.
     let call_previous = || unsafe { CallWindowProcW(prev, hwnd, msg, wparam, lparam) };
@@ -180,6 +367,88 @@ unsafe extern "system" fn frame_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
     }
 }
 
+/// The maximize button was pressed and not yet released (non-client press).
+static MAX_DOWN: AtomicBool = AtomicBool::new(false);
+
+/// Write the published title bar and its buttons into `info`, in screen coordinates: minimize,
+/// maximize and close (indexes 2, 3 and 5) sit side by side, each as wide as the maximize button.
+fn report_title_bar(hwnd: HWND, info: &mut TITLEBARINFOEX) {
+    let Some((bar, Some(max))) = titlebar::caption_map().bar_and_maximize() else { return };
+    let screen = |r: solidcraft_frame::PxRect| -> RECT {
+        let mut a = POINT { x: r.min_x, y: r.min_y };
+        let mut b = POINT { x: r.max_x, y: r.max_y };
+        // SAFETY: valid POINTs to convert; the handle is the system's.
+        unsafe {
+            ClientToScreen(hwnd, &mut a);
+            ClientToScreen(hwnd, &mut b);
+        }
+        RECT { left: a.x, top: a.y, right: b.x, bottom: b.y }
+    };
+    let width = max.max_x - max.min_x;
+    let beside = |dx: i32| solidcraft_frame::PxRect::new(max.min_x + dx, max.min_y, max.max_x + dx, max.max_y);
+    info.rcTitleBar = screen(bar);
+    info.rgrect[2] = screen(beside(-width));
+    info.rgrect[3] = screen(max);
+    info.rgrect[5] = screen(beside(width));
+}
+
+/// The main window, for the window menu's Move and Size; 0 before [`install`] and once it is gone.
+static WINDOW: AtomicIsize = AtomicIsize::new(0);
+
+/// Start Windows' keyboard move or size of the main window (the window menu's Move and Size).
+fn system_command(command: titlebar::SystemCommand) {
+    let hwnd = WINDOW.load(Ordering::SeqCst);
+    if hwnd == 0 {
+        return;
+    }
+    let sc = match command {
+        titlebar::SystemCommand::Move => SC_MOVE,
+        titlebar::SystemCommand::Size => SC_SIZE,
+    };
+    // SAFETY: a message posted to the main window, which `WINDOW` holds only while it exists.
+    unsafe { PostMessageW(hwnd as HWND, WM_SYSCOMMAND, sc as WPARAM, 0) };
+}
+
+/// What the published title bar has at screen point (`x`, `y`) (the UI's layout, in client
+/// pixels).
+fn caption_hit(hwnd: HWND, x: i32, y: i32) -> CaptionHit {
+    let mut p = POINT { x, y };
+    // SAFETY: `p` is a valid POINT to convert; the handle is the system's.
+    if unsafe { ScreenToClient(hwnd, &mut p) } == 0 {
+        return CaptionHit::Outside;
+    }
+    titlebar::caption_map().hit(p.x, p.y)
+}
+
+/// The `HT*` code for what the published title bar has at a point: the caption, the maximize
+/// button, or `None` (the UI's controls, or off the bar: the default answer stands).
+fn caption_code(hit: CaptionHit) -> Option<u32> {
+    match hit {
+        CaptionHit::Drag => Some(HTCAPTION),
+        CaptionHit::MaximizeButton => Some(HTMAXBUTTON),
+        _ => None,
+    }
+}
+
+/// [`Frame::Native`]: the window's size at the new DPI, the system frame ([`side_frame`]) around
+/// the scaled client size; `None` when either is unknown (the default handling answers).
+fn framed_size(client: Option<(i32, i32)>, frame: Option<(i32, i32, i32)>) -> Option<SIZE> {
+    let ((cx, cy), (left, right, bottom)) = (client?, frame?);
+    Some(SIZE { cx: cx + left + right, cy: cy + bottom })
+}
+
+/// The window's frame at `dpi` as winit's `WM_NCCALCSIZE` keeps it: left, right and bottom.
+fn side_frame(hwnd: HWND, dpi: u32) -> Option<(i32, i32, i32)> {
+    let mut r = RECT { left: 0, top: 0, right: 100, bottom: 100 };
+    // SAFETY: plain queries on a window handle the system passed in; `r` is a valid RECT.
+    let ok = unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+        let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        AdjustWindowRectExForDpi(&mut r, style, 0, ex_style, dpi)
+    };
+    (ok != 0).then_some((-r.left, r.right - 100, r.bottom - 100))
+}
+
 /// The window can be resized by its border now: it has the thick frame (not fullscreen, which
 /// drops it) and is neither maximized nor minimized.
 fn resizable(hwnd: HWND) -> bool {
@@ -190,7 +459,7 @@ fn resizable(hwnd: HWND) -> bool {
     }
 }
 
-/// The client area's size in pixels (the whole window: winit gives it no frame).
+/// The client area's size in pixels (with [`Frame::Client`], the whole window).
 fn client_size(hwnd: HWND) -> Option<(i32, i32)> {
     let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
     // SAFETY: `r` is a valid RECT to fill.
@@ -209,7 +478,7 @@ fn border_px(hwnd: HWND) -> f32 {
     if metric > 0 { metric as f32 } else { titlebar::resize_border_px(scale) }
 }
 
-/// The `HT*` resize code at screen point (`x`, `y`), if it is on the border.
+/// [`Frame::Client`]: the `HT*` resize code at screen point (`x`, `y`), if it is on the border.
 fn border_hit(hwnd: HWND, x: i32, y: i32) -> Option<u32> {
     if !resizable(hwnd) {
         return None;
@@ -219,8 +488,38 @@ fn border_hit(hwnd: HWND, x: i32, y: i32) -> Option<u32> {
     if unsafe { GetWindowRect(hwnd, &mut r) } == 0 {
         return None;
     }
+    border_code(r, x, y, border_px(hwnd))
+}
+
+/// [`Frame::Client`]: the resize code at screen point (`x`, `y`) of window rect `r`, whose
+/// borders along every edge are `edge` wide.
+fn border_code(r: RECT, x: i32, y: i32, edge: f32) -> Option<u32> {
     let w = egui::Rect::from_min_max(egui::pos2(r.left as f32, r.top as f32), egui::pos2(r.right as f32, r.bottom as f32));
-    titlebar::resize_hit(w, egui::pos2(x as f32, y as f32), border_px(hwnd)).map(hit_code)
+    titlebar::resize_hit(w, egui::pos2(x as f32, y as f32), edge).map(hit_code)
+}
+
+/// [`Frame::Native`]: the `HT*` resize code at screen point (`x`, `y`) on the band along the top
+/// edge, Windows' resize border wide. The frame has no top, so the band is client area; its ends
+/// are corners.
+fn top_border_hit(hwnd: HWND, x: i32, y: i32) -> Option<u32> {
+    if !resizable(hwnd) {
+        return None;
+    }
+    let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    // SAFETY: `r` is a valid RECT to fill.
+    if unsafe { GetWindowRect(hwnd, &mut r) } == 0 {
+        return None;
+    }
+    top_border_code(r, x, y, border_px(hwnd))
+}
+
+/// [`Frame::Native`]: the resize code at screen point (`x`, `y`) of window rect `r` on the
+/// `edge`-high band along its top.
+fn top_border_code(r: RECT, x: i32, y: i32, edge: f32) -> Option<u32> {
+    if (y - r.top) as f32 >= edge {
+        return None;
+    }
+    border_code(r, x, y, edge)
 }
 
 fn hit_code(d: egui::ResizeDirection) -> u32 {
@@ -246,5 +545,79 @@ mod tests {
         use egui::ResizeDirection::*;
         let codes: Vec<u32> = [North, South, West, East, NorthWest, NorthEast, SouthWest, SouthEast].into_iter().map(hit_code).collect();
         assert_eq!(codes, vec![HTTOP, HTBOTTOM, HTLEFT, HTRIGHT, HTTOPLEFT, HTTOPRIGHT, HTBOTTOMLEFT, HTBOTTOMRIGHT]);
+    }
+
+    /// A restored window at (100, 50), 1000 × 700 pixels, with Windows' 8 px resize border.
+    const WINDOW: RECT = RECT { left: 100, top: 50, right: 1100, bottom: 750 };
+    const EDGE: f32 = 8.0;
+
+    /// Points along the window's edges, at its corners and inside it.
+    fn probes() -> [(i32, i32); 10] {
+        [(101, 400), (1098, 400), (600, 51), (600, 748), (101, 51), (1098, 52), (102, 747), (1099, 749), (600, 400), (600, 70)]
+    }
+
+    #[test]
+    fn the_client_frame_resizes_from_every_edge_just_inside_the_window() {
+        // The default frame's hit test: every edge and corner, from inside.
+        let client: Vec<Option<u32>> = probes().into_iter().map(|(x, y)| border_code(WINDOW, x, y, EDGE)).collect();
+        assert_eq!(
+            client,
+            vec![
+                Some(HTLEFT),
+                Some(HTRIGHT),
+                Some(HTTOP),
+                Some(HTBOTTOM),
+                Some(HTTOPLEFT),
+                Some(HTTOPRIGHT),
+                Some(HTBOTTOMLEFT),
+                Some(HTBOTTOMRIGHT),
+                None,
+                None
+            ]
+        );
+        // The same answer as the shared rule (`titlebar::resize_hit`), point for point, at 150 %.
+        let w = egui::Rect::from_min_max(egui::pos2(100.0, 50.0), egui::pos2(1100.0, 750.0));
+        for (x, y) in probes() {
+            assert_eq!(border_code(WINDOW, x, y, 12.0), titlebar::resize_hit(w, egui::pos2(x as f32, y as f32), 12.0).map(hit_code), "({x}, {y})");
+        }
+        // Outside the window nothing is the app's.
+        assert_eq!(border_code(WINDOW, 99, 400, EDGE), None);
+    }
+
+    #[test]
+    fn the_native_frame_answers_only_the_band_along_the_top() {
+        // The system frame answers for the left, right and bottom, outside the client area.
+        let native: Vec<Option<u32>> = probes().into_iter().map(|(x, y)| top_border_code(WINDOW, x, y, EDGE)).collect();
+        assert_eq!(native, vec![None, None, Some(HTTOP), None, Some(HTTOPLEFT), Some(HTTOPRIGHT), None, None, None, None]);
+        assert_eq!((caption_code(CaptionHit::Drag), caption_code(CaptionHit::MaximizeButton)), (Some(HTCAPTION), Some(HTMAXBUTTON)));
+        assert_eq!((caption_code(CaptionHit::Client), caption_code(CaptionHit::Outside)), (None, None));
+    }
+
+    #[test]
+    fn only_the_native_frame_adds_the_system_frame_to_a_dpi_scaled_size() {
+        assert_eq!(framed_size(Some((1500, 1000)), Some((8, 8, 8))).map(|s| (s.cx, s.cy)), Some((1516, 1008)));
+        assert_eq!(framed_size(None, Some((8, 8, 8))).map(|s| (s.cx, s.cy)), None);
+        assert_eq!(framed_size(Some((1500, 1000)), None).map(|s| (s.cx, s.cy)), None);
+    }
+
+    /// The procedure's address, to tell the two apart.
+    fn address(procedure: Procedure) -> usize {
+        procedure as *const () as usize
+    }
+
+    #[test]
+    fn the_preference_picks_the_frame_winit_s_side_frame_the_procedure_and_the_window_menu() {
+        assert_eq!(Frame::from_preference(true), Frame::Native);
+        assert_eq!(Frame::from_preference(false), Frame::Client);
+        // What `choose` tells winit and what `install` puts in place, for each frame.
+        let native = choice(Frame::Native);
+        assert!(native.side_frame, "the native frame keeps the system frame on the left, right and bottom");
+        assert_eq!(address(native.procedure), address(caption_proc), "the native frame answers the caption");
+        assert!(native.window_menu, "the native caption's right-click opens the window menu, with Move and Size");
+        let client = choice(Frame::Client);
+        assert!(!client.side_frame, "the client frame keeps winit's own non-client area");
+        assert_eq!(address(client.procedure), address(border_proc), "the client frame answers only the border");
+        assert!(!client.window_menu, "no window handle kept, no Move and Size");
+        assert_ne!(address(caption_proc), address(border_proc));
     }
 }

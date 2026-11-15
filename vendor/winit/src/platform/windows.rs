@@ -765,3 +765,16 @@ impl IconExtWindows for Icon {
         Ok(Icon { inner: win_icon })
     }
 }
+
+/// SolidCraft: the non-client area of an undecorated window with the undecorated shadow
+/// ([`WindowAttributesExtWindows::with_undecorated_shadow`]), for every window of the process.
+///
+/// `false` (the default) is winit's own: the whole window is client area but for a 1 px row at
+/// the top. `true` keeps the system frame on the left, right and bottom (its invisible resize
+/// borders and drop shadow) and none at the top, so the top of the window is client area and
+/// Windows 11 offers snap layouts on a maximize button the app's hit test reports there; requested
+/// and saved inner sizes grow by that frame. Call it before the first window is created: a
+/// window's frame is calculated when it is created and when its style changes.
+pub fn set_undecorated_shadow_side_frame(on: bool) {
+    crate::platform_impl::set_undecorated_shadow_side_frame(on);
+}

@@ -10,6 +10,8 @@ pub(crate) use self::icon::{SelectedCursor, WinIcon};
 pub(crate) use self::keyboard::{physicalkey_to_scancode, scancode_to_physicalkey};
 pub(crate) use self::monitor::{MonitorHandle, VideoModeHandle};
 pub(crate) use self::window::Window;
+// SolidCraft: the undecorated shadow's non-client area (`platform::windows`).
+pub(crate) use self::window_state::set_undecorated_shadow_side_frame;
 
 pub(crate) use self::icon::WinCursor as PlatformCustomCursor;
 pub use self::icon::WinIcon as PlatformIcon;
