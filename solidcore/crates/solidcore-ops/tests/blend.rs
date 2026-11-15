@@ -1812,7 +1812,7 @@ fn a_session_failure_says_what_its_session_noted() {
 /// mirror symmetric about z = 0. A round on the ring's outer circle builds alike at the bottom
 /// and at the top. It runs the whole closed edge, so its end section is its start one, but the
 /// two are solved apart: at the bottom the turn measured between them came out a rounding short
-/// of 360 degrees, a sweep SMLib's check refuses (SmSurfOfRevolution Test #7), at r 0.14 and 2
+/// of 360 degrees, a sweep SMLib's check refuses (`SmSurfOfRevolution` Test #7), at r 0.14 and 2
 /// here (r 0.13 rounds the other way). Each round takes off the ring's corner, by Pappus
 /// 2 pi r^2 ((R - r)(1 - pi/4) + r/6), and its face is the torus R - r, r about the ring's axis.
 #[test]
