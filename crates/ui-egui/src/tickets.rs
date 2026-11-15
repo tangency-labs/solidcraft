@@ -67,6 +67,8 @@ pub enum SignIn {
 /// Where sending a report is.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Step {
+    /// Open a report draft (no account needed); its files go with the draft's upload token.
+    Draft,
     Ticket,
     Open(usize),
     Resume(usize),
@@ -85,11 +87,18 @@ pub struct Sending {
     missing: std::collections::VecDeque<usize>,
     pub sent: usize,
     pub total: usize,
+    /// Through a draft the person files in the browser (no sign-in in the app), rather than
+    /// filed directly with a remembered token.
+    via_draft: bool,
+    /// The draft, once the server opened it.
+    draft: Option<api::Draft>,
 }
 
 /// How the last report went.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Outcome {
+    /// The draft is on the server with its files, and its page opened in the browser.
+    Opened,
     Filed(u64),
     Queued,
     Failed(String),
@@ -113,6 +122,11 @@ pub struct Tickets {
     pub queue_dir: Option<PathBuf>,
     memory_queue: Vec<payload::Outgoing>,
     retry_at: f64,
+    /// A draft's page to open in the browser (on the next frame, which has the context).
+    open_url: Option<String>,
+    /// A draft opened in the browser, watched until it is filed: (draft, next poll, give up at,
+    /// the poll on its way).
+    watch: Option<(api::Draft, f64, f64, Option<Call>)>,
 }
 
 impl Tickets {
@@ -174,22 +188,53 @@ pub fn load_apps(app: &mut SolveApp) {
     app.tickets.apps_call = Some(Call::start(&http, api::apps(&token)));
 }
 
-/// Send `report` (signing in first when there is no token).
+/// Send `report`: as a draft whose page opens in the browser, where the person signs in if
+/// needed and files it; or filed directly when this computer has a remembered token.
 pub fn send(app: &mut SolveApp, report: payload::Outgoing) {
     app.tickets.outcome = None;
-    if token(app).is_none() {
-        app.tickets.pending = Some(report);
-        if matches!(app.tickets.sign_in, SignIn::Idle | SignIn::Failed(_)) {
-            begin_sign_in(app);
-        }
-        return;
-    }
-    start(app, report, None);
+    let via_draft = token(app).is_none();
+    start(app, report, None, via_draft);
 }
 
-fn start(app: &mut SolveApp, report: payload::Outgoing, folder: Option<PathBuf>) {
+/// Send the oldest report waiting in the queue now (the dialog's Send waiting reports).
+pub fn send_waiting(app: &mut SolveApp) {
+    if app.tickets.sending.is_some() {
+        return;
+    }
+    let via_draft = token(app).is_none();
+    app.tickets.outcome = None;
+    if !app.tickets.memory_queue.is_empty() {
+        let report = app.tickets.memory_queue.remove(0);
+        start(app, report, None, via_draft);
+        return;
+    }
+    let Some(dir) = app.tickets.queue_dir.clone() else { return };
+    if let Some(folder) = queue::list(&dir).into_iter().next() {
+        match queue::load(&folder) {
+            Ok(report) => start(app, report, Some(folder), via_draft),
+            Err(_) => queue::remove(&folder),
+        }
+    }
+}
+
+fn start(app: &mut SolveApp, mut report: payload::Outgoing, folder: Option<PathBuf>, via_draft: bool) {
+    if via_draft {
+        // A draft is new each time: every file goes with it.
+        for f in &mut report.files {
+            f.upload = None;
+            f.done = f.done && f.bytes.is_empty();
+        }
+        report.files.retain(|f| !f.done);
+        report.filed = None;
+    }
     let total = 1 + report.files.iter().filter(|f| !f.done).map(|f| f.bytes.len()).sum::<usize>();
-    let step = if report.filed.is_some() { next_file(&report, 0) } else { Some(Step::Ticket) };
+    let step = if via_draft {
+        Some(Step::Draft)
+    } else if report.filed.is_some() {
+        next_file(&report, 0)
+    } else {
+        Some(Step::Ticket)
+    };
     let mut sending = Sending {
         report,
         folder,
@@ -199,6 +244,8 @@ fn start(app: &mut SolveApp, report: payload::Outgoing, folder: Option<PathBuf>)
         missing: Default::default(),
         sent: 0,
         total,
+        via_draft,
+        draft: None,
     };
     if step.is_none() {
         // Filed and uploaded already: only the queue entry is left.
@@ -257,13 +304,60 @@ fn keep_for_later(app: &mut SolveApp, report: payload::Outgoing, folder: Option<
     app.tickets.retry_at = crate::now_ms() + RETRY_MS;
 }
 
+/// How long a draft opened in the browser is watched for being filed, in ms.
+const WATCH_MS: f64 = 30.0 * 60_000.0;
+/// Between two looks at it.
+const WATCH_EVERY_MS: f64 = 5_000.0;
+
 fn finish(app: &mut SolveApp, s: Sending) {
     if let Some(folder) = &s.folder {
         queue::remove(folder);
         // The next waiting report goes now, not in five minutes.
         app.tickets.retry_at = 0.0;
     }
-    app.tickets.outcome = s.report.filed.map(Outcome::Filed);
+    match s.draft {
+        Some(draft) => {
+            app.tickets.open_url = Some(draft.url.clone());
+            app.tickets.outcome = Some(Outcome::Opened);
+            let now = crate::now_ms();
+            app.tickets.watch = Some((draft, now + WATCH_EVERY_MS, now + WATCH_MS, None));
+        }
+        None => app.tickets.outcome = s.report.filed.map(Outcome::Filed),
+    }
+}
+
+/// Watch the draft opened in the browser: once it is filed, say so (with the ticket's number),
+/// and keep the token the person asked this computer to remember.
+fn tick_watch(app: &mut SolveApp, now: f64) {
+    let Some((draft, next, until, call)) = app.tickets.watch.take() else { return };
+    let Some(http) = app.services.tickets_http.clone() else { return };
+    if now > until {
+        return;
+    }
+    let call = match call {
+        Some(call) => match call.poll() {
+            None => Some(call),
+            Some(reply) => match api::answer(reply).map(|v| api::parse_draft_status(&v)) {
+                Ok(api::DraftStatus::Claimed { number, token }) => {
+                    if let Some(token) = token {
+                        keep_token(app, token);
+                    }
+                    if matches!(app.tickets.outcome, Some(Outcome::Opened)) && number > 0 {
+                        app.tickets.outcome = Some(Outcome::Filed(number));
+                    }
+                    return;
+                }
+                Ok(api::DraftStatus::Expired) | Err(api::Failure::SignedOut | api::Failure::Refused(_)) => return,
+                Ok(api::DraftStatus::Open) | Err(api::Failure::Offline(_)) => {
+                    app.tickets.watch = Some((draft, now + WATCH_EVERY_MS, until, None));
+                    return;
+                }
+            },
+        },
+        None if now >= next => Some(Call::start(&http, api::draft_status(&draft.id, &draft.upload_token))),
+        None => None,
+    };
+    app.tickets.watch = Some((draft, next, until, call));
 }
 
 /// Advance sign-in, the apps list and a report being sent; try waiting reports again now and
@@ -280,7 +374,14 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
     tick_send(app);
+    tick_watch(app, now);
+    if let Some(url) = app.tickets.open_url.take() {
+        ctx.open_url(egui::OpenUrl::new_tab(url));
+    }
     retry_queue(app, now);
+    if app.tickets.watch.is_some() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(1000));
+    }
     if app.tickets.sending.is_some() || app.tickets.apps_call.is_some() || matches!(app.tickets.sign_in, SignIn::Asking(_) | SignIn::Waiting { .. }) {
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
@@ -321,7 +422,7 @@ fn tick_sign_in(app: &mut SolveApp, ctx: &egui::Context, now: f64) {
                             app.tickets.sign_in = SignIn::Idle;
                             load_apps(app);
                             if let Some(report) = app.tickets.pending.take() {
-                                start(app, report, None);
+                                start(app, report, None, false);
                             }
                             // Reports kept while signed out go next.
                             retry_now(app);
@@ -366,9 +467,21 @@ fn tick_sign_in(app: &mut SolveApp, ctx: &egui::Context, now: f64) {
 
 fn tick_send(app: &mut SolveApp) {
     let Some(mut s) = app.tickets.sending.take() else { return };
-    let (Some(http), Some(token)) = (app.services.tickets_http.clone(), token(app)) else {
+    let Some(http) = app.services.tickets_http.clone() else {
         enqueue(app, s);
         return;
+    };
+    // A draft's files go with its upload token; a direct report with this computer's token.
+    let token = if s.via_draft {
+        s.draft.as_ref().map(|d| d.upload_token.clone()).unwrap_or_default()
+    } else {
+        match token(app) {
+            Some(t) => t,
+            None => {
+                start_as_draft(app, s);
+                return;
+            }
+        }
     };
     let Some(call) = s.call.take() else {
         s.call = Some(Call::start(&http, request(&s, &token)));
@@ -383,14 +496,14 @@ fn tick_send(app: &mut SolveApp) {
     let value = match api::answer(reply) {
         Ok(v) => v,
         Err(api::Failure::Offline(_)) => return enqueue(app, s),
+        Err(api::Failure::SignedOut) if s.via_draft => {
+            app.tickets.outcome = Some(Outcome::Failed("The report's draft expired on the server. Send it again.".into()));
+            return;
+        }
         Err(api::Failure::SignedOut) => {
+            // The remembered token was revoked: forget it and go through the browser instead.
             sign_out(app);
-            if s.folder.is_some() {
-                // A queued report waits for the next sign-in.
-                return;
-            }
-            app.tickets.pending = Some(s.report);
-            begin_sign_in(app);
+            start_as_draft(app, s);
             return;
         }
         Err(api::Failure::Refused(e)) => {
@@ -403,6 +516,17 @@ fn tick_send(app: &mut SolveApp) {
         }
     };
     let step = match s.step {
+        Step::Draft => match api::parse_draft(&value) {
+            Ok(d) => {
+                s.draft = Some(d);
+                s.sent += 1;
+                next_file(&s.report, 0)
+            }
+            Err(e) => {
+                app.tickets.outcome = Some(Outcome::Failed(e.text()));
+                return;
+            }
+        },
         Step::Ticket => match api::parse_ticket(&value) {
             Ok(n) => {
                 s.report.filed = Some(n);
@@ -451,7 +575,10 @@ fn tick_send(app: &mut SolveApp) {
         Step::Finish(i) => {
             if let Some(f) = s.report.files.get_mut(i) {
                 f.done = true;
-                f.bytes = Vec::new();
+                // A draft that goes again later needs its files again; a filed ticket doesn't.
+                if !s.via_draft {
+                    f.bytes = Vec::new();
+                }
             }
             next_file(&s.report, i + 1)
         }
@@ -470,6 +597,17 @@ fn tick_send(app: &mut SolveApp) {
     }
 }
 
+/// Go on as a draft (the remembered token is gone): the ticket wasn't filed, so nothing is lost.
+fn start_as_draft(app: &mut SolveApp, s: Sending) {
+    if s.report.filed.is_some() {
+        app.tickets.outcome = Some(Outcome::Failed("Your sign-in on this computer is no longer valid. Sign in again to finish the upload.".into()));
+        return;
+    }
+    let outcome = app.tickets.outcome.clone();
+    start(app, s.report, s.folder, true);
+    app.tickets.outcome = outcome;
+}
+
 fn chunk_or_finish(s: &Sending, i: usize) -> Step {
     if s.missing.is_empty() { Step::Finish(i) } else { Step::Chunk(i) }
 }
@@ -482,10 +620,11 @@ fn part(s: &Sending, i: usize, n: usize) -> &[u8] {
 }
 
 fn request(s: &Sending, token: &str) -> HttpRequest {
-    let filed = s.report.filed.unwrap_or(0);
+    let filed = if s.via_draft { None } else { s.report.filed };
     let file = |i: usize| s.report.files.get(i);
     let upload = |i: usize| file(i).and_then(|f| f.upload.clone()).unwrap_or_default();
     match s.step {
+        Step::Draft => api::create_draft(&s.report.ticket),
         Step::Ticket => api::create_ticket(token, &s.report.ticket),
         Step::Open(i) => {
             let f = file(i);
@@ -516,7 +655,7 @@ fn retry_queue(app: &mut SolveApp, now: f64) {
     app.tickets.retry_at = now + RETRY_MS;
     if !app.tickets.memory_queue.is_empty() && token(app).is_some() {
         let report = app.tickets.memory_queue.remove(0);
-        start(app, report, None);
+        start(app, report, None, false);
         return;
     }
     let Some(dir) = app.tickets.queue_dir.clone() else { return };
@@ -528,7 +667,7 @@ fn retry_queue(app: &mut SolveApp, now: f64) {
         Ok(report) => {
             // A queued report goes quietly: its result is not the dialog's.
             let outcome = app.tickets.outcome.clone();
-            start(app, report, Some(folder));
+            start(app, report, Some(folder), false);
             app.tickets.outcome = outcome;
         }
         Err(_) => queue::remove(&folder),

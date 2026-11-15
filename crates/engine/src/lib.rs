@@ -29,7 +29,6 @@ pub mod panels;
 pub mod params;
 pub mod plugin;
 pub mod product_scene;
-pub mod recent_commands;
 pub mod recovery;
 pub mod render_jobs;
 pub mod render_lights;
@@ -1876,7 +1875,6 @@ impl Session {
         } else {
             None
         };
-        let doc_before = before.doc.clone();
         let changed = !Arc::ptr_eq(&self.doc, &before.doc);
         // Hiding or showing (`browser.visibility`) leaves the document alone, so it needs its own
         // test: it is saved with the design and has an undo step of its own.
@@ -1941,15 +1939,6 @@ impl Session {
         // lost link marked, so it can be repaired from inside it (#12085).
         if outermost {
             self.model.hold_failed_sketch(&self.doc, self.active_sketch);
-        }
-        // What a problem report's "What you were doing" lists: commands that changed the design
-        // or failed, never a live gesture's frames.
-        if outermost && live.is_none() {
-            match &result {
-                Ok(v) if !Arc::ptr_eq(&self.doc, &doc_before) => recent_commands::record(self.uid, spec.id, given, Ok(v)),
-                Err(e) => recent_commands::record(self.uid, spec.id, given, Err(&e.to_string())),
-                Ok(_) => {}
-            }
         }
         if let Some((before, changed, failed)) = crash_outcome {
             // Refresh and body-name pinning can copy the shared document. Remember the final

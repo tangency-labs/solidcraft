@@ -1,14 +1,17 @@
 //! Report a problem: the in-app report that files a private ticket on tickets.solidcraft.io.
-//! Each attachment is a box with what it holds said in plain words and shown before it goes;
-//! the design is never sent unless its box is ticked.
+//! Submit sends the report as a draft, uploads the ticked attachments and opens the draft's
+//! page in the browser, where the person signs in if needed and files it. Each attachment is a
+//! box with what it holds said in plain words and shown before it goes; the design is never
+//! sent unless its box is ticked.
 
 use std::sync::Arc;
 
 use egui::{ColorImage, Id, Ui, vec2};
+use serde_json::{Value, json};
 use solidcraft_ui_text::{format, tr};
 
 use super::Draft;
-use crate::tickets::{self, Outcome, SignIn, api, payload};
+use crate::tickets::{self, Outcome, api, payload};
 use crate::{SolveApp, ui_kit};
 
 /// How many lines of the log go with a report.
@@ -19,35 +22,62 @@ pub struct TicketDraft {
     pub form: payload::Form,
     pub ticks: payload::Ticks,
     pub evidence: payload::Evidence,
+    /// The report is about a failed operation (its Report… or Create Issue button).
+    pub from_failure: bool,
     /// The title was found empty on Send.
     missing_title: bool,
 }
 
-/// Whether Report a bug files a ticket here (rather than opening a GitHub draft).
+/// Whether this build can file reports on the ticket server (the GitHub draft otherwise).
 pub fn enabled(app: &SolveApp) -> bool {
-    !app.preferences.report_on_github && app.services.tickets_http.is_some()
+    app.services.tickets_http.is_some()
 }
 
-/// The text "System info" sends, exactly as shown: nothing about the design.
-pub fn system_text(app: &SolveApp, ctx: Option<&egui::Context>) -> String {
+/// The build and machine: what "System info" sends, as fields and as the exact text shown.
+/// Nothing about the design.
+pub fn system(app: &SolveApp, ctx: Option<&egui::Context>) -> (serde_json::Map<String, Value>, String) {
     use crate::help::{BUILD_DATE, COMMIT, VERSION};
-    let mut s = format!("SolidCraft {VERSION} ({COMMIT}, built {BUILD_DATE})\nOS: {} {}\n", std::env::consts::OS, std::env::consts::ARCH);
+    let (os, arch) = (std::env::consts::OS, std::env::consts::ARCH);
     let renderer = if app.viewport.gpu.is_some() { "GPU" } else { "CPU" };
-    s.push_str(&format!("Renderer: {renderer}{}\n", app.help.gpu.as_ref().map(|g| format!(", {g}")).unwrap_or_default()));
+    let gpu = app.help.gpu.clone().unwrap_or_default();
+    let mut f = serde_json::Map::new();
+    f.insert("app_version".into(), json!(VERSION));
+    f.insert("commit".into(), json!(COMMIT));
+    f.insert("built".into(), json!(BUILD_DATE));
+    f.insert("target".into(), json!(format!("{arch}-{os}")));
+    f.insert("os".into(), json!(os));
+    f.insert("arch".into(), json!(arch));
+    f.insert("renderer".into(), json!(renderer));
+    if !gpu.is_empty() {
+        f.insert("gpu".into(), json!(gpu));
+    }
+    let mut s = format!("SolidCraft {VERSION} ({COMMIT}, built {BUILD_DATE})\nTarget: {arch}-{os}\nRenderer: {renderer}");
+    if !gpu.is_empty() {
+        s.push_str(&format!(", {gpu}"));
+    }
+    s.push('\n');
     if let Some(api) = app.services.graphics_backend {
+        f.insert("graphics_api".into(), json!(api));
         s.push_str(&format!("Graphics API: {api}\n"));
     }
-    for (name, label) in app.services.graphics_adapters.iter().take(4) {
-        s.push_str(&format!("Adapter: {name} ({label})\n"));
+    let adapters: Vec<String> = app.services.graphics_adapters.iter().take(4).map(|(n, l)| format!("{n} ({l})")).collect();
+    if !adapters.is_empty() {
+        s.push_str(&format!("Adapters: {}\n", adapters.join("; ")));
+        f.insert("adapters".into(), json!(adapters));
     }
     if let Some(ws) = app.services.window_system {
+        f.insert("window_system".into(), json!(ws));
         s.push_str(&format!("Window system: {ws}\n"));
     }
     if let Some(ctx) = ctx {
         let r = ctx.content_rect();
-        s.push_str(&format!("Window: {:.0}×{:.0} points at {:.2} pixels per point\n", r.width(), r.height(), ctx.pixels_per_point()));
+        let w = format!("{:.0}×{:.0} points at {:.2} pixels per point", r.width(), r.height(), ctx.pixels_per_point());
+        s.push_str(&format!("Window: {w}\n"));
+        f.insert("window".into(), json!(w));
     }
-    s
+    let locale = solidcraft_ui_text::language();
+    f.insert("locale".into(), json!(locale));
+    (f, s)
 }
 
 /// The last lines of the log (the design's command log, then the Messages), home folder as `~`.
@@ -70,26 +100,9 @@ pub fn log_lines(app: &SolveApp) -> Vec<String> {
     lines
 }
 
-/// Everything the boxes can attach, collected when the report opens.
-pub fn evidence(
-    app: &SolveApp,
-    ctx: Option<&egui::Context>,
-    error: Option<(Option<String>, String)>,
-    crash: Option<(String, String)>,
-) -> payload::Evidence {
-    let steps = solidcraft_engine::recent_commands::of(app.session.uid)
-        .into_iter()
-        .map(|r| payload::Step { command: r.command, params: r.params, ok: r.ok, result: r.result })
-        .collect::<Vec<_>>();
-    // The failing command: the one the report was made for, else a feature that failed.
-    let failing = error.or_else(|| {
-        app.session.doc.features.iter().find_map(|f| {
-            let e = app.session.model.result(f.id)?.error.as_deref()?;
-            Some((Some(format!("{} ({})", f.name, f.kind.type_name())), super::limited(e, 2000)))
-        })
-    });
-    let name = app
-        .session
+/// The design's file name as it goes with a report.
+fn design_name(app: &SolveApp) -> String {
+    app.session
         .path
         .as_deref()
         .and_then(|p| std::path::Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()))
@@ -98,18 +111,74 @@ pub fn evidence(
             let n: String =
                 app.session.doc.name.chars().filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')).take(80).collect();
             format!("{}.sc", if n.trim().is_empty() { "design" } else { n.trim() })
-        });
+        })
+}
+
+/// Everything the boxes can attach, collected when the report opens. `failing`: the operation
+/// the report is about, if any.
+pub fn evidence(
+    app: &SolveApp,
+    ctx: Option<&egui::Context>,
+    failing: Option<payload::Failing>,
+    crash: Option<(String, String)>,
+) -> payload::Evidence {
+    let design = solidcraft_engine::io::write_design(&app.session.doc);
+    // How to get back to where the failure happened: the design (its history is in the file)
+    // plus the one failed operation, on this exact build.
+    let mut session = serde_json::Map::new();
+    session.insert("session_start".into(), json!(if app.session.path.is_some() { "opened" } else { "new" }));
+    session.insert("design_sha256".into(), json!(api::sha256_hex(&design)));
+    session.insert("format_version".into(), json!(solidcraft_engine::doc::format::FORMAT));
+    session.insert("undo_steps".into(), json!(app.session.undo.len()));
+    session.insert("redo_steps".into(), json!(app.session.redo.len()));
+    session.insert("commit".into(), json!(crate::help::COMMIT));
+    let (system_fields, system_text) = system(app, ctx);
     payload::Evidence {
-        system: system_text(app, ctx),
+        system: system_text,
+        system_fields,
         app_version: crate::help::VERSION.to_string(),
         os: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
-        steps,
+        session,
         failing,
         log: log_lines(app),
         screenshot: None,
-        design: Some((name, solidcraft_engine::io::write_design(&app.session.doc))),
+        design: Some((design_name(app), design)),
         crash,
     }
+}
+
+/// The failed operation a draft was made for: its command and parameters as the command API
+/// took them, and its error.
+fn failing_of(draft: &Draft) -> Option<payload::Failing> {
+    if let Some((id, json)) = &draft.crash {
+        let v: Value = serde_json::from_str(json).unwrap_or_default();
+        let command = v.get("command").and_then(|c| c.get("command")).and_then(Value::as_str).map(str::to_string);
+        let params = v.get("command").and_then(|c| c.get("params")).cloned();
+        let error = v.get("message").and_then(Value::as_str).unwrap_or("internal error").to_string();
+        return Some(payload::Failing { command, params, error, origin: None, code: Some(format!("crash {id}")) });
+    }
+    let super::Origin::View { error: Some(error) } = &draft.origin else { return None };
+    let (command, params) = draft.failed_command.clone().map_or((None, None), |(c, p)| (Some(c), Some(p)));
+    Some(payload::Failing { command, params, error: error.clone(), origin: None, code: None })
+}
+
+/// The description a failed operation's report starts with: what failed, how, and a line
+/// for the person to say what they were trying to do.
+fn template(label: &str, failing: &payload::Failing) -> String {
+    let mut s = format!("**Failed:** {label}");
+    if let Some(c) = &failing.command {
+        s.push_str(&format!(" (`{c}`)"));
+    }
+    s.push_str(&format!("\n**Error:** {}\n", super::limited(&failing.error, 1000)));
+    if let Some(Value::Object(p)) = &failing.params {
+        // The settings a person reads; the full parameters go in the report details.
+        let key: Vec<String> = p.iter().filter(|(_, v)| !v.is_object() && !v.is_array()).take(8).map(|(k, v)| format!("{k} = {v}")).collect();
+        if !key.is_empty() {
+            s.push_str(&format!("**Settings:** {}\n", key.join(", ")));
+        }
+    }
+    s.push_str(&format!("\n{}\n", tr("report.trying_to_do")));
+    s
 }
 
 /// The 3D view's part of a window screenshot (`view` in points), or the whole of it.
@@ -131,7 +200,7 @@ pub fn crop(image: &Arc<ColorImage>, view: Option<egui::Rect>, pixels_per_point:
     Arc::new(ColorImage::new([x1 - x0, y1 - y0], pixels))
 }
 
-fn png(image: &ColorImage) -> Option<Vec<u8>> {
+pub fn png(image: &ColorImage) -> Option<Vec<u8>> {
     solidcraft_control_egui::screenshot::encode(image, "view.png").ok()
 }
 
@@ -142,6 +211,29 @@ pub fn outgoing(draft: &Draft, ticket: &TicketDraft) -> payload::Outgoing {
         evidence.screenshot = draft.view.as_ref().or(draft.image.as_ref()).and_then(|i| png(i));
     }
     payload::build(&ticket.form, ticket.ticks, &evidence, &format!("solidcraft {}", crate::help::VERSION))
+}
+
+/// The form for a draft, pre-filled with what the app knows.
+pub fn new_ticket(app: &mut SolveApp, draft: &Draft, ctx: Option<&egui::Context>) -> TicketDraft {
+    let failing = failing_of(draft);
+    let evidence = evidence(app, ctx, failing.clone(), draft.crash.clone());
+    let label = draft.title_prefix.trim_end_matches(": ").to_string();
+    let (title, description) = match &failing {
+        Some(f) if draft.crash.is_none() => {
+            let first = f.error.lines().next().unwrap_or_default();
+            (super::limited(&format!("{label}: {first}"), payload::MAX_TITLE), template(&label, f))
+        }
+        _ => (draft.title.clone(), draft.description.clone()),
+    };
+    let form = payload::Form { app: api::DEFAULT_APP.into(), title, description, kind: payload::Kind::Bug };
+    tickets::load_apps(app);
+    TicketDraft {
+        form,
+        ticks: payload::Ticks { crash: draft.crash.is_some(), ..Default::default() },
+        evidence,
+        from_failure: failing.is_some(),
+        missing_title: false,
+    }
 }
 
 fn heading(ui: &mut Ui, id: &str) {
@@ -165,27 +257,26 @@ fn shown(ui: &mut Ui, id: &str, title: &str, text: &str) {
     });
 }
 
-/// The attachment boxes, each with what it holds.
+/// The model box, right under the description where it is seen: what it holds, who sees it,
+/// and what a report about a failure loses without it.
+fn model_box(ticket: &mut TicketDraft, ui: &mut Ui) {
+    let Some((name, bytes)) = ticket.evidence.design.clone() else { return };
+    check(ui, "report.design", &mut ticket.ticks.design);
+    note(ui, "report.design_note", tr("report.design_note"));
+    note(ui, "report.design_file", &format("report.design_file", &[("name", &name), ("size", &payload::size_text(bytes.len()))]));
+    if !ticket.ticks.design {
+        if ticket.from_failure {
+            ui_kit::text(ui, tr("report.design_warning"), ui_kit::Text::Error("report.design_warning"));
+        } else {
+            note(ui, "report.design_hint", tr("report.design_hint"));
+        }
+    }
+}
+
+/// The other attachment boxes, each with what it holds.
 fn attachments(app: &SolveApp, draft: &mut Draft, ticket: &mut TicketDraft, ui: &mut Ui) -> bool {
     let mut retake = false;
     heading(ui, "report.attach");
-    let ev = &ticket.evidence;
-    check(ui, "report.system", &mut ticket.ticks.system);
-    note(ui, "report.system_note", tr("report.system_note"));
-    shown(ui, "report-system", tr("report.system_show"), &ev.system);
-
-    check(ui, "report.repro", &mut ticket.ticks.repro);
-    note(ui, "report.repro_note", &format("report.repro_note", &[("count", &ev.steps.len().to_string())]));
-    shown(ui, "report-repro", tr("report.repro_show"), &payload::steps_text(&ev.steps, ev.failing.as_ref()));
-
-    check(ui, "report.log", &mut ticket.ticks.log);
-    if ev.log.is_empty() {
-        note(ui, "report.log_note", tr("report.log_empty"));
-    } else {
-        note(ui, "report.log_note", &format("report.log_note", &[("count", &ev.log.len().to_string())]));
-        shown(ui, "report-log", tr("report.log_show"), &ev.log.join("\n"));
-    }
-
     check(ui, "report.screenshot", &mut ticket.ticks.screenshot);
     let image = draft.view.clone().or_else(|| draft.image.clone());
     if let Some(image) = image {
@@ -198,11 +289,23 @@ fn attachments(app: &SolveApp, draft: &mut Draft, ticket: &mut TicketDraft, ui: 
     crate::scenario::publish_target("report:retake", r.rect);
     retake |= r.clicked();
 
-    if let Some((name, bytes)) = &ev.design {
-        check(ui, "report.design", &mut ticket.ticks.design);
-        note(ui, "report.design_note", tr("report.design_note"));
-        note(ui, "report.design_file", &format("report.design_file", &[("name", name), ("size", &payload::size_text(bytes.len()))]));
+    let ev = &ticket.evidence;
+    check(ui, "report.log", &mut ticket.ticks.log);
+    if ev.log.is_empty() {
+        note(ui, "report.log_note", tr("report.log_empty"));
+    } else {
+        note(ui, "report.log_note", &format("report.log_note", &[("count", &ev.log.len().to_string())]));
+        shown(ui, "report-log", tr("report.log_show"), &ev.log.join("\n"));
     }
+
+    check(ui, "report.system", &mut ticket.ticks.system);
+    note(ui, "report.system_note", tr("report.system_note"));
+    shown(ui, "report-system", tr("report.system_show"), &ev.system);
+
+    check(ui, "report.repro", &mut ticket.ticks.repro);
+    note(ui, "report.repro_note", tr("report.repro_note"));
+    shown(ui, "report-repro", tr("report.repro_show"), &payload::repro_text(ev));
+
     if ev.crash.is_some() {
         check(ui, "report.crash", &mut ticket.ticks.crash);
         note(ui, "report.crash_note", tr("report.crash_note"));
@@ -210,25 +313,8 @@ fn attachments(app: &SolveApp, draft: &mut Draft, ticket: &mut TicketDraft, ui: 
     retake
 }
 
-/// Sign-in, progress and how the last report went.
+/// Progress and how the last report went.
 fn status(app: &mut SolveApp, ui: &mut Ui) {
-    match &app.tickets.sign_in {
-        SignIn::Asking(_) => note(ui, "report.signing_in", tr("report.signing_in")),
-        SignIn::Waiting { code, .. } => {
-            note(ui, "report.sign_in_needed", tr("report.sign_in_needed"));
-            let r = ui_kit::text(ui, &code.user_code, ui_kit::Text::Heading("report.user_code"));
-            crate::scenario::publish_target("report:user_code", r.rect);
-            note(ui, "report.sign_in_waiting", tr("report.sign_in_waiting"));
-            let url = code.verification.clone();
-            if ui_kit::button(ui, tr("report.sign_in_open"), ui_kit::Button::Normal).clicked() {
-                ui.ctx().open_url(egui::OpenUrl::new_tab(url));
-            }
-        }
-        SignIn::Failed(e) => {
-            ui_kit::text(ui, &format("report.failed", &[("error", e)]), ui_kit::Text::Error("report.sign_in_failed"));
-        }
-        SignIn::Idle => {}
-    }
     if let Some(s) = &app.tickets.sending {
         let (done, total) = (s.sent, s.total.max(1));
         note(ui, "report.sending", &format("report.sending", &[("done", &payload::size_text(done)), ("total", &payload::size_text(total))]));
@@ -240,6 +326,7 @@ fn status(app: &mut SolveApp, ui: &mut Ui) {
         }
     }
     match app.tickets.outcome.clone() {
+        Some(Outcome::Opened) => note(ui, "report.opened", tr("report.opened")),
         Some(Outcome::Filed(n)) => {
             ui.horizontal_wrapped(|ui| {
                 ui_kit::text(ui, &format("report.filed", &[("number", &n.to_string())]), ui_kit::Text::Heading("report.filed"));
@@ -258,8 +345,16 @@ fn status(app: &mut SolveApp, ui: &mut Ui) {
         Some(Outcome::Cancelled(None)) => note(ui, "report.cancelled", tr("report.cancelled")),
         None => {}
     }
-    if app.tickets.token_unsaved {
-        note(ui, "report.token_unsaved", tr("report.token_unsaved"));
+    let waiting = tickets::queued(app);
+    if waiting > 0 && app.tickets.sending.is_none() {
+        ui.horizontal_wrapped(|ui| {
+            note(ui, "report.waiting", &format("prefs.reports.queued", &[("count", &waiting.to_string())]));
+            let r = ui_kit::button(ui, tr("report.send_waiting"), ui_kit::Button::Normal);
+            crate::scenario::publish_target("report:send_waiting", r.rect);
+            if r.clicked() {
+                tickets::send_waiting(app);
+            }
+        });
     }
 }
 
@@ -268,44 +363,19 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
     let mut ticket = match draft.ticket.take() {
         Some(t) => t,
         None => {
-            let error = match &draft.origin {
-                super::Origin::View { error: Some(e) } => {
-                    let command = draft.title_prefix.trim_end_matches(": ").to_string();
-                    Some((Some(command).filter(|c| !c.is_empty()), e.clone()))
-                }
-                _ => None,
-            };
-            let mut evidence = evidence(app, Some(ctx), error, draft.crash.clone());
-            if draft.crash.is_some() {
-                // Made from a crash report: the failing command is the crash's.
-                evidence.failing = Some((None, super::limited(&draft.description, 2000)));
-            }
-            let form = payload::Form {
-                app: api::DEFAULT_APP.into(),
-                title: draft.title.clone(),
-                description: draft.description.clone(),
-                ..Default::default()
-            };
-            tickets::load_apps(app);
             if app.tickets.sending.is_none() {
                 app.tickets.outcome = None;
             }
-            Box::new(TicketDraft {
-                form,
-                ticks: payload::Ticks { crash: draft.crash.is_some(), ..Default::default() },
-                evidence,
-                missing_title: false,
-            })
+            Box::new(new_ticket(app, draft, Some(ctx)))
         }
     };
     let mut retake = false;
+    let mut github = false;
     let t = solidcraft_theme::Tokens::get();
     let screen = ctx.content_rect();
     let cards = ((screen.width() - 2.0 * t.space_16) / t.form_card_width).clamp(0.5, 2.0);
-    // Filed or queued: Send again would file it twice; the report is done.
-    let busy = app.tickets.sending.is_some()
-        || matches!(app.tickets.sign_in, SignIn::Asking(_) | SignIn::Waiting { .. })
-        || matches!(app.tickets.outcome, Some(Outcome::Filed(_) | Outcome::Queued));
+    // Sent (or being sent): Send again would send it twice.
+    let busy = app.tickets.sending.is_some() || matches!(app.tickets.outcome, Some(Outcome::Filed(_) | Outcome::Queued | Outcome::Opened));
     let (closed, action) = ui_kit::Window::new(Id::unique("sc_issue_report"), "bug_report", tr("report.title"))
         .cards(cards)
         .placed(egui::Align2::CENTER_TOP, egui::pos2(screen.center().x, screen.top() + t.space_16))
@@ -366,10 +436,6 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                             payload::MAX_TITLE,
                         );
                         crate::scenario::publish_target("report:title", r.rect);
-                        if !draft.focus_requested {
-                            r.request_focus();
-                            draft.focus_requested = true;
-                        }
                         if ticket.missing_title {
                             if ticket.form.title.trim().is_empty() {
                                 ui_kit::text(ui, tr("report.title_needed"), ui_kit::Text::Error("report.title_needed"));
@@ -383,15 +449,27 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                             tr("report.description"),
                             Id::unique("ticket_report_body"),
                             &mut ticket.form.description,
-                            4,
+                            5,
                             payload::MAX_DESCRIPTION,
                         );
                         crate::scenario::publish_target("report:description", r.rect);
+                        // The cursor starts where the person writes: the title of a plain report,
+                        // the end of a failure's template (its "What were you trying to do?").
+                        if !draft.focus_requested {
+                            r.request_focus();
+                            draft.focus_requested = true;
+                        }
                         note(ui, "report.description_hint", tr("report.description_hint"));
+                        ui_kit::divider(ui, "report-model");
+                        model_box(&mut ticket, ui);
                         ui_kit::divider(ui, "report-attach");
                         retake = attachments(app, draft, &mut ticket, ui);
                         ui_kit::divider(ui, "report-status");
                         status(app, ui);
+                        note(ui, "report.browser_note", tr("report.browser_note"));
+                        let r = ui.link(tr("report.github_instead"));
+                        crate::scenario::publish_target("report:github", r.rect);
+                        github = r.clicked();
                     });
             });
         });
@@ -401,6 +479,12 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
             let report = outgoing(draft, &ticket);
             tickets::send(app, report);
         }
+    }
+    if github {
+        // The public GitHub draft, as before tickets: same answers.
+        draft.github = true;
+        draft.title.clone_from(&ticket.form.title);
+        draft.description.clone_from(&ticket.form.description);
     }
     draft.ticket = Some(ticket);
     let close = closed || action == ui_kit::Action::Cancel;

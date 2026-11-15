@@ -91,7 +91,7 @@ pub fn device_code() -> Request {
 }
 
 /// This computer's name, for the sign-in's name on the server; None where it isn't known.
-fn hostname() -> Option<String> {
+pub fn hostname() -> Option<String> {
     #[cfg(target_arch = "wasm32")]
     {
         None
@@ -205,6 +205,73 @@ pub fn ticket_url(number: u64) -> String {
     format!("{}/t/{number}", server())
 }
 
+// ---- report drafts (no account needed) --------------------------------------------------------
+
+/// A report draft for `ticket` (the same fields as a ticket): the server keeps it for 24 hours
+/// and its page, opened in the browser, files it once the person signs in and confirms.
+pub fn create_draft(ticket: &Value) -> Request {
+    let mut body = ticket.clone();
+    body["client_id"] = json!(CLIENT_ID);
+    if let Some(host) = hostname() {
+        body["hostname"] = json!(host);
+    }
+    request("POST", "/api/drafts", None, Some(body))
+}
+
+/// A draft the server opened: its id, the token its files are uploaded with, and the page to
+/// open (its secret is in the fragment: never logged, never shown).
+#[derive(Clone, PartialEq)]
+pub struct Draft {
+    pub id: String,
+    pub upload_token: String,
+    pub url: String,
+}
+
+impl std::fmt::Debug for Draft {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Draft").field("id", &self.id).finish_non_exhaustive()
+    }
+}
+
+pub fn parse_draft(v: &Value) -> Result<Draft, Failure> {
+    let bad = || Failure::Refused("The server's answer to the report was incomplete.".into());
+    let id = text(v, "draft_id")
+        .filter(|i| !i.is_empty() && i.len() <= 128 && i.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+        .ok_or_else(bad)?;
+    let upload_token = text(v, "upload_token").filter(|t| !t.is_empty() && t.len() < 1000).ok_or_else(bad)?;
+    // Only the ticket server's own page opens in the browser.
+    let url = text(v, "url").filter(|u| u.starts_with(&format!("{}/draft/", server()))).ok_or_else(bad)?;
+    Ok(Draft { id, upload_token, url })
+}
+
+/// Whether the draft was filed yet (with the draft's upload token).
+pub fn draft_status(id: &str, upload_token: &str) -> Request {
+    request("GET", &format!("/api/drafts/{id}/status"), Some(upload_token), None)
+}
+
+/// What a draft's status says.
+#[derive(Clone, Debug, PartialEq)]
+pub enum DraftStatus {
+    Open,
+    Expired,
+    /// Filed as ticket `number`; with a token when the person ticked Remember this computer.
+    Claimed {
+        number: u64,
+        token: Option<String>,
+    },
+}
+
+pub fn parse_draft_status(v: &Value) -> DraftStatus {
+    match v.get("status").and_then(Value::as_str) {
+        Some("claimed") => DraftStatus::Claimed {
+            number: v.get("ticket_id").and_then(Value::as_u64).unwrap_or(0),
+            token: text(v, "access_token").filter(|t| !t.is_empty() && t.len() < 1000),
+        },
+        Some("expired") => DraftStatus::Expired,
+        _ => DraftStatus::Open,
+    }
+}
+
 // ---- resumable uploads ------------------------------------------------------------------------
 
 /// The largest part the app sends, whatever the server allows (it asks for 8 MB parts).
@@ -216,21 +283,20 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     sha2::Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Open an upload for a file of `ticket`: its name, size, hash, type and kind.
-pub fn create_upload(token: &str, ticket: u64, name: &str, bytes: &[u8], content_type: &str, kind: &str) -> Request {
-    request(
-        "POST",
-        "/api/uploads",
-        Some(token),
-        Some(json!({
-            "ticket_id": ticket,
-            "filename": name,
-            "size": bytes.len(),
-            "sha256": sha256_hex(bytes),
-            "content_type": content_type,
-            "kind": kind,
-        })),
-    )
+/// Open an upload for a file: its name, size, hash, type and kind. `ticket`: the ticket it goes
+/// to with a person's token; None with a draft's upload token (the token names the draft).
+pub fn create_upload(token: &str, ticket: Option<u64>, name: &str, bytes: &[u8], content_type: &str, kind: &str) -> Request {
+    let mut body = json!({
+        "filename": name,
+        "size": bytes.len(),
+        "sha256": sha256_hex(bytes),
+        "content_type": content_type,
+        "kind": kind,
+    });
+    if let Some(ticket) = ticket {
+        body["ticket_id"] = json!(ticket);
+    }
+    request("POST", "/api/uploads", Some(token), Some(body))
 }
 
 /// An upload the server holds: its id, its part size and the parts still to send (numbered
@@ -279,5 +345,5 @@ pub fn finish_upload(token: &str, upload: &str) -> Request {
 // ---- the user's own tickets -------------------------------------------------------------------
 
 pub fn mine(token: &str) -> Request {
-    request("GET", "/api/tickets?reporter=me&sort=updated&limit=50", Some(token), None)
+    request("GET", "/api/tickets?reporter=me&status=all&sort=updated&limit=50", Some(token), None)
 }

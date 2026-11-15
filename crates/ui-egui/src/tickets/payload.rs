@@ -42,26 +42,35 @@ impl Default for Ticks {
     }
 }
 
-/// One command in "What you were doing".
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Step {
-    pub command: String,
-    pub params: String,
-    pub ok: bool,
-    pub result: String,
+/// The operation that failed, as the command API took it: what a triager replays on the
+/// attached design (`solidcraft-cli run replay.json --in design.sc`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Failing {
+    /// The command id (`solid.fillet`), when the failure came from one.
+    pub command: Option<String>,
+    /// Its parameters exactly as the command API takes them.
+    pub params: Option<Value>,
+    pub error: String,
+    /// `solidcore-ops`, `solidcore-kernel` or `app`, from the error's type.
+    pub origin: Option<String>,
+    /// The kernel's error code or type name, when there is one.
+    pub code: Option<String>,
 }
 
 /// What the dialog collected, shown to the user before anything is sent.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Evidence {
-    /// App version, OS, GPU and driver: the exact text sent.
+    /// App version, commit, target, OS and GPU: the exact text shown.
     pub system: String,
+    /// The same as fields.
+    pub system_fields: serde_json::Map<String, Value>,
     pub app_version: String,
     pub os: String,
-    /// The last commands, oldest first.
-    pub steps: Vec<Step>,
-    /// The failing command and its error, when one failed.
-    pub failing: Option<(Option<String>, String)>,
+    /// How the session started and where the design is: `session_start`, the design's hash,
+    /// its format version and the undo steps around it. Nothing of its content.
+    pub session: serde_json::Map<String, Value>,
+    /// The failed operation, when the report is about one.
+    pub failing: Option<Failing>,
     /// The last lines of the log.
     pub log: Vec<String>,
     /// The 3D view as PNG.
@@ -114,22 +123,47 @@ fn cut(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
 
-/// The text of "What you were doing", as the dialog shows it: one command a line, its settings
-/// and its result under it.
-pub fn steps_text(steps: &[Step], failing: Option<&(Option<String>, String)>) -> String {
-    let mut out = String::new();
-    for (i, s) in steps.iter().enumerate() {
-        let outcome = if s.ok { "done" } else { "failed" };
-        out.push_str(&format!("{}. {} ({outcome})\n    settings: {}\n    result: {}\n", i + 1, s.command, s.params, s.result));
+/// The failed operation's JSON as the ticket carries it.
+pub fn failing_json(f: &Failing) -> Value {
+    let mut v = json!({ "error": cut(&f.error, 20_000) });
+    if let Some(c) = &f.command {
+        v["command"] = json!(c);
     }
-    if let Some((command, error)) = failing {
-        out.push_str(&format!("\nFailing: {}{error}\n", command.as_deref().map(|c| format!("{c}: ")).unwrap_or_default()));
+    if let Some(p) = &f.params {
+        v["params"] = p.clone();
     }
-    if out.is_empty() { "No commands recorded yet.".into() } else { out }
+    if let Some(o) = &f.origin {
+        v["error_origin"] = json!(o);
+    }
+    if let Some(c) = &f.code {
+        v["error_code"] = json!(c);
+    }
+    v
+}
+
+/// The text of "The failed operation", as the dialog shows it: exactly what is sent.
+pub fn repro_text(evidence: &Evidence) -> String {
+    let mut v = Value::Object(evidence.session.clone());
+    if let Some(f) = &evidence.failing {
+        v["failing"] = failing_json(f);
+    }
+    serde_json::to_string_pretty(&v).unwrap_or_default()
+}
+
+/// Who agreed to the attachments: the person at the dialog, or an agent's call (with whoever
+/// confirmed the design or crash report, if anyone did).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Via {
+    Dialog,
+    Agent { confirmed_by: Option<String> },
 }
 
 /// The report for `form` with the boxes in `ticks` and nothing more.
 pub fn build(form: &Form, ticks: Ticks, evidence: &Evidence, client: &str) -> Outgoing {
+    build_via(form, ticks, evidence, client, &Via::Dialog)
+}
+
+pub fn build_via(form: &Form, ticks: Ticks, evidence: &Evidence, client: &str, via: &Via) -> Outgoing {
     // A box with nothing behind it sends nothing, and the consent record says so.
     let ticks = Ticks {
         system: ticks.system && !evidence.system.is_empty(),
@@ -139,33 +173,46 @@ pub fn build(form: &Form, ticks: Ticks, evidence: &Evidence, client: &str) -> Ou
         design: ticks.design && evidence.design.is_some(),
         crash: ticks.crash && evidence.crash.is_some(),
     };
+    let kinds: Vec<&str> = [
+        (ticks.system, "system"),
+        (ticks.repro, "repro"),
+        (ticks.log, "log"),
+        (ticks.screenshot, "screenshot"),
+        (ticks.design, "design"),
+        (ticks.crash, "crash"),
+    ]
+    .into_iter()
+    .filter_map(|(on, k)| on.then_some(k))
+    .collect();
+    let now = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let mut consent = json!({ "kinds": kinds, "at": solidcraft_engine::crash::utc(now), "client": client });
+    match via {
+        Via::Dialog => consent["via"] = json!("dialog"),
+        Via::Agent { confirmed_by } => {
+            consent["via"] = json!("agent");
+            if let Some(who) = confirmed_by {
+                consent["confirmed_by"] = json!(who);
+            }
+        }
+    }
     let mut ticket = json!({
         "app": if form.app.is_empty() { super::api::DEFAULT_APP } else { form.app.as_str() },
         "title": cut(form.title.trim(), MAX_TITLE),
         "body": cut(&form.description, MAX_DESCRIPTION),
         "type": form.kind.id(),
-        "consent": {
-            "system": ticks.system,
-            "repro": ticks.repro,
-            "log": ticks.log,
-            "screenshot": ticks.screenshot,
-            "design": ticks.design,
-            "crash": ticks.crash,
-            "client": client,
-        },
+        "consent": consent,
     });
     if ticks.system {
-        ticket["system"] = json!(evidence.system);
+        let mut system = evidence.system_fields.clone();
+        system.insert("text".into(), json!(evidence.system));
+        ticket["system"] = Value::Object(system);
         ticket["appVersion"] = json!(cut(&evidence.app_version, 100));
         ticket["os"] = json!(cut(&evidence.os, 100));
     }
     if ticks.repro {
-        let mut repro = json!({ "commands": evidence.steps });
-        if let Some((command, error)) = &evidence.failing {
-            repro["failing"] = json!({ "error": error });
-            if let Some(command) = command {
-                repro["failing"]["command"] = json!(command);
-            }
+        let mut repro = Value::Object(evidence.session.clone());
+        if let Some(f) = &evidence.failing {
+            repro["failing"] = failing_json(f);
         }
         ticket["repro"] = repro;
     }

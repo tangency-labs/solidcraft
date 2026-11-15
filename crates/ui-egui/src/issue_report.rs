@@ -151,6 +151,11 @@ pub struct Draft {
     view: Option<Arc<ColorImage>>,
     /// The crash report a crash draft was made from: its id and JSON.
     crash: Option<(String, String)>,
+    /// The command that failed, as the command API takes it, for a report made from a failed
+    /// operation (`draft_for` with an error and its dialog).
+    failed_command: Option<(String, serde_json::Value)>,
+    /// The person chose the public GitHub draft over the ticket server.
+    github: bool,
 }
 
 impl Draft {
@@ -175,6 +180,8 @@ impl Draft {
             ticket: None,
             view: None,
             crash: None,
+            failed_command: None,
+            github: false,
         }
     }
 
@@ -516,6 +523,13 @@ pub fn draft_for(app: &SolveApp, dialog: Option<&dialogs::Dialog>, error: Option
     draft.title_prefix = format!("{label}: ");
     // More than the details show of it, so a rebuild shows the same.
     draft.origin = Origin::View { error: error.map(|e| limited(e, 8000)) };
+    // The failed operation exactly as the command API takes it: the attached design plus this
+    // command replays the failure (`solidcraft-cli run replay.json --in design.sc`).
+    if error.is_some()
+        && let Some(d) = dialog
+    {
+        draft.failed_command = dialogs::apply_commands(app, d).ok().and_then(|c| c.last().cloned());
+    }
     draft.built_body.clone_from(&draft.body);
     draft
 }
@@ -945,7 +959,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         ctx.memory_mut(|m| m.request_focus(id));
     }
     let Some(mut draft) = app.issue_report.draft.take() else { return };
-    let (retake, close) = if ticket::enabled(app) { ticket::show(app, &mut draft, ctx) } else { form::show(app, &mut draft, ctx) };
+    let (retake, close) = if ticket::enabled(app) && !draft.github { ticket::show(app, &mut draft, ctx) } else { form::show(app, &mut draft, ctx) };
     if !close {
         app.issue_report.draft = Some(draft);
         if retake {
@@ -2389,6 +2403,12 @@ mod tests {
                 ("POST", "/api/device/token") => json!({"access_token":"tkt_secret_token_123","token_type":"Bearer"}),
                 ("GET", "/api/apps") => json!({"apps":[{"slug":"solidcraft","name":"SolidCraft"},{"slug":"pcbcraft","name":"PCBCraft"}]}),
                 ("POST", "/api/tickets") => json!({"id": 42}),
+                ("POST", "/api/drafts") => {
+                    json!({"draft_id":"d1","draft_secret":"sec","upload_token":"tdu_draft_token","url":format!("{}/draft/d1#sec", tickets::api::server()),"expires_at":"x","max_bytes":524288000,"max_files":20})
+                }
+                ("GET", "/api/drafts/d1/status") => {
+                    json!({"status":"claimed","ticket_id":77,"ticket_url":"x","access_token":"tkt_remembered_456","token_type":"Bearer","scope":"tickets:report"})
+                }
                 ("POST", "/api/uploads") => {
                     // Parts of 8 bytes, so a file goes in several.
                     let b: serde_json::Value = serde_json::from_slice(r.body.as_deref().unwrap()).unwrap();
@@ -2420,12 +2440,21 @@ mod tests {
     }
 
     fn evidence_with_design() -> payload::Evidence {
+        let mut session = serde_json::Map::new();
+        session.insert("session_start".into(), json!("opened"));
         payload::Evidence {
-            system: "SolidCraft 1.0\nOS: linux x86_64\n".into(),
+            system: "SolidCraft 1.0\nTarget: x86_64-linux\n".into(),
+            system_fields: serde_json::Map::new(),
             app_version: "1.0".into(),
             os: "linux x86_64".into(),
-            steps: vec![payload::Step { command: "solid.box".into(), params: "{}".into(), ok: true, result: "{}".into() }],
-            failing: Some((Some("Fillet".into()), "radius too large".into())),
+            session,
+            failing: Some(payload::Failing {
+                command: Some("solid.fillet".into()),
+                params: Some(json!({"radius": 2.0})),
+                error: "radius too large".into(),
+                origin: None,
+                code: None,
+            }),
             log: vec!["[error] radius too large".into()],
             screenshot: Some(vec![1, 2, 3]),
             design: Some(("SecretBracket.sc".into(), b"SECRET-DESIGN-BYTES".to_vec())),
@@ -2437,6 +2466,16 @@ mod tests {
         payload::Form { app: "solidcraft".into(), title: "Fillet fails".into(), description: "It refused".into(), ..Default::default() }
     }
 
+    fn run_ticks(app: &mut SolveApp, ctx: &egui::Context, n: usize) {
+        for _ in 0..n {
+            tickets::tick(app, ctx);
+        }
+    }
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("sc-report-{tag}-{}-{}", std::process::id(), crate::now_ms() as u64))
+    }
+
     #[test]
     fn ticket_report_payload_carries_only_the_ticked_boxes() {
         let evidence = evidence_with_design();
@@ -2444,20 +2483,24 @@ mod tests {
         let out = payload::build(&form(), ticks, &evidence, "solidcraft test");
         let t = &out.ticket;
         assert!(t.get("system").is_none() && t.get("appVersion").is_none() && t.get("os").is_none(), "system info unticked: {t}");
-        assert!(t.get("repro").is_none(), "what you were doing unticked: {t}");
+        assert!(t.get("repro").is_none(), "the failed operation unticked: {t}");
         assert_eq!(out.files.iter().map(|f| f.kind.as_str()).collect::<Vec<_>>(), ["log"]);
-        assert_eq!(
-            t["consent"],
-            json!({"system":false,"repro":false,"log":true,"screenshot":false,"design":false,"crash":false,"client":"solidcraft test"})
-        );
+        assert_eq!(t["consent"]["kinds"], json!(["log"]));
+        assert_eq!((t["consent"]["via"].as_str(), t["consent"]["client"].as_str()), (Some("dialog"), Some("solidcraft test")));
         assert_eq!((t["app"].as_str(), t["type"].as_str(), t["title"].as_str()), (Some("solidcraft"), Some("bug"), Some("Fillet fails")));
 
         let all = payload::Ticks { system: true, repro: true, log: true, screenshot: true, design: true, crash: true };
         let out = payload::build(&form(), all, &evidence, "solidcraft test");
-        assert_eq!(out.ticket["system"], json!(evidence.system), "the exact text the dialog shows");
-        assert_eq!(out.ticket["repro"]["failing"]["error"], "radius too large");
+        assert_eq!(out.ticket["system"]["text"], json!(evidence.system), "the exact text the dialog shows");
+        let failing = &out.ticket["repro"]["failing"];
+        assert_eq!(
+            (failing["command"].as_str(), failing["params"]["radius"].as_f64()),
+            (Some("solid.fillet"), Some(2.0)),
+            "replayable as the command API takes it"
+        );
+        assert_eq!(out.ticket["repro"]["session_start"], "opened");
         assert_eq!(out.files.iter().map(|f| f.kind.as_str()).collect::<Vec<_>>(), ["log", "screenshot", "design"]);
-        assert_eq!(out.ticket["consent"]["crash"], false, "a box with nothing behind it is not consented to");
+        assert!(!out.ticket["consent"]["kinds"].as_array().unwrap().contains(&json!("crash")), "a box with nothing behind it is not consented to");
     }
 
     #[test]
@@ -2466,7 +2509,7 @@ mod tests {
         let evidence = evidence_with_design();
         let out = payload::build(&form(), payload::Ticks::default(), &evidence, "solidcraft test");
         let ticket = out.ticket.to_string();
-        assert!(!ticket.contains("SecretBracket") && out.ticket["consent"]["design"] == false);
+        assert!(!ticket.contains("SecretBracket") && !out.ticket["consent"]["kinds"].as_array().unwrap().contains(&json!("design")));
         for f in &out.files {
             assert!(f.kind != "design" && !f.name.contains("SecretBracket"));
             assert!(!f.bytes.windows(6).any(|w| w == b"SECRET"), "{} carries the design", f.name);
@@ -2476,29 +2519,66 @@ mod tests {
         let design = out.files.iter().find(|f| f.kind == "design").unwrap();
         assert_eq!((design.name.as_str(), design.bytes.as_slice()), ("SecretBracket.sc", &b"SECRET-DESIGN-BYTES"[..]));
 
-        // The dialog's own evidence: System info says nothing about the open design.
+        // The dialog's own evidence: System info and the failed operation's details say nothing
+        // of the design but its hash.
         let mut app = app();
         app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"PrivateWidget"})).unwrap();
         Arc::make_mut(&mut app.session.doc).name = "PrivateWidget".into();
         let evidence = ticket::evidence(&app, None, None, None);
         assert!(!evidence.system.contains("PrivateWidget"), "{}", evidence.system);
         assert!(evidence.design.as_ref().is_some_and(|(name, bytes)| name == "PrivateWidget.sc" && !bytes.is_empty()));
-        let out = payload::build(&form(), payload::Ticks { repro: false, ..Default::default() }, &evidence, "t");
+        assert_eq!(evidence.session["session_start"], "new");
+        assert_eq!(evidence.session["design_sha256"].as_str().map(str::len), Some(64));
+        let out = payload::build(&form(), payload::Ticks::default(), &evidence, "t");
         assert!(!out.ticket.to_string().contains("PrivateWidget"));
         assert!(out.files.iter().all(|f| f.kind != "design"));
-        // What you were doing lists the command that made it, with its settings.
-        assert!(evidence.steps.iter().any(|s| s.command == "solid.box" && s.ok && s.params.contains("PrivateWidget")));
     }
 
-    fn run_ticks(app: &mut SolveApp, ctx: &egui::Context, n: usize) {
-        for _ in 0..n {
-            tickets::tick(app, ctx);
+    #[test]
+    fn ticket_report_submit_makes_a_draft_uploads_its_files_and_opens_it_in_the_browser() {
+        let (mut app, _, requests, keyring) = ticket_app(true, None);
+        let ctx = crate::fonts::test_context();
+        let report = payload::build(&form(), payload::Ticks { design: true, ..Default::default() }, &evidence_with_design(), "t");
+        tickets::send(&mut app, report);
+        let mut opened = Vec::new();
+        for _ in 0..60 {
+            let out = ctx.run_ui(Default::default(), |ui| tickets::tick(&mut app, ui.ctx()));
+            opened.extend(out.platform_output.commands.into_iter().filter_map(|c| match c {
+                egui::OutputCommand::OpenUrl(u) => Some(u.url),
+                _ => None,
+            }));
+            if app.tickets.sending.is_none() {
+                break;
+            }
         }
+        assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Opened));
+        assert_eq!(opened, [format!("{}/draft/d1#sec", tickets::api::server())], "the draft's page opens in the browser");
+        let requests = requests.lock().unwrap().clone();
+        let draft = requests.iter().find(|r| r.url.ends_with("/api/drafts")).unwrap();
+        assert!(!draft.headers.iter().any(|(k, _)| k == "Authorization"), "no account needed");
+        assert!(!requests.iter().any(|r| r.url.contains("/api/device/") || r.url.ends_with("/api/tickets")), "no sign-in, no direct filing");
+        let uploads: Vec<_> = requests.iter().filter(|r| r.url.contains("/api/uploads")).collect();
+        assert!(uploads.iter().all(|r| r.headers.iter().any(|(k, v)| k == "Authorization" && v == "Bearer tdu_draft_token")));
+        let opened_uploads = uploads.iter().filter(|r| r.method == "POST" && r.url.ends_with("/api/uploads"));
+        assert!(opened_uploads.clone().all(|r| !String::from_utf8_lossy(r.body.as_deref().unwrap()).contains("ticket_id")));
+        let bytes: Vec<u8> = uploads.iter().filter(|r| r.method == "PUT").flat_map(|r| r.body.clone().unwrap_or_default()).collect();
+        assert!(bytes.windows(19).any(|w| w == b"SECRET-DESIGN-BYTES"), "the ticked design goes with the draft");
+
+        // Filed in the browser with Remember this computer: the app says so and keeps the token,
+        // in the keyring only.
+        let until = crate::now_ms() + 12_000.0;
+        while app.tickets.outcome == Some(tickets::Outcome::Opened) && crate::now_ms() < until {
+            run_ticks(&mut app, &ctx, 1);
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Filed(77)));
+        assert_eq!(keyring.0.lock().unwrap().get(tickets::SECRET_ID).map(String::as_str), Some("tkt_remembered_456"));
+        assert!(!serde_json::to_string(&app.preferences).unwrap().contains("tkt_remembered_456"));
     }
 
     #[test]
     fn ticket_report_made_offline_waits_in_the_queue_and_sends_when_online() {
-        let dir = std::env::temp_dir().join(format!("sc-report-queue-{}-{}", std::process::id(), crate::now_ms() as u64));
+        let dir = temp_dir("queue");
         let (mut app, online, requests, _) = ticket_app(false, Some("tkt_good"));
         app.tickets.queue_dir = Some(dir.clone());
         let ctx = crate::fonts::test_context();
@@ -2510,55 +2590,58 @@ mod tests {
         assert_eq!(waiting.len(), 1, "one report waits");
         let kept = std::fs::read_to_string(waiting[0].join("report.json")).unwrap();
         assert!(!kept.contains("tkt_good"), "the queue holds no token");
-        // Nothing else goes until a retry is due, and only for the queued report.
         let sent = requests.lock().unwrap().len();
         run_ticks(&mut app, &ctx, 4);
         assert_eq!(requests.lock().unwrap().len(), sent, "no background requests while nothing is due");
 
+        // Back online with a remembered token: it is filed directly, no browser.
         online.store(true, std::sync::atomic::Ordering::SeqCst);
         tickets::retry_now(&mut app);
         run_ticks(&mut app, &ctx, 40);
         assert!(tickets::queue::list(&dir).is_empty(), "sent and removed from the queue");
         assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Filed(42)));
-        let requests = requests.lock().unwrap();
-        let ticket = requests.iter().find(|r| r.url.ends_with("/api/tickets") && r.method == "POST").unwrap();
-        assert!(ticket.headers.iter().any(|(k, v)| k == "Authorization" && v == "Bearer tkt_good"));
-        let uploaded: Vec<u8> = requests.iter().filter(|r| r.method == "PUT").flat_map(|r| r.body.clone().unwrap_or_default()).collect();
-        assert!(requests.iter().filter(|r| r.method == "PUT").all(|r| r.body.as_ref().is_some_and(|b| !b.is_empty() && b.len() <= 8)));
-        assert!(uploaded.windows(19).any(|w| w == b"SECRET-DESIGN-BYTES"), "the ticked design was uploaded");
+        {
+            let requests = requests.lock().unwrap();
+            let ticket = requests.iter().find(|r| r.url.ends_with("/api/tickets") && r.method == "POST").unwrap();
+            assert!(ticket.headers.iter().any(|(k, v)| k == "Authorization" && v == "Bearer tkt_good"));
+            let uploaded: Vec<u8> = requests.iter().filter(|r| r.method == "PUT").flat_map(|r| r.body.clone().unwrap_or_default()).collect();
+            assert!(uploaded.windows(19).any(|w| w == b"SECRET-DESIGN-BYTES"), "the ticked design was uploaded");
+        }
         let _ = std::fs::remove_dir_all(&dir);
 
-        // Offline before ever signing in: the report waits too, and no sign-in is left pending.
-        let (mut app, _, _, _) = ticket_app(false, None);
+        // Without a token a waiting report goes only when the person asks (it opens a browser).
+        let (mut app, online, requests, _) = ticket_app(false, None);
         app.tickets.queue_dir = Some(dir.clone());
         tickets::send(&mut app, payload::build(&form(), payload::Ticks::default(), &evidence_with_design(), "t"));
         run_ticks(&mut app, &ctx, 4);
         assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Queued));
-        assert!(matches!(app.tickets.sign_in, tickets::SignIn::Idle));
-        assert_eq!(tickets::queue::list(&dir).len(), 1);
+        online.store(true, std::sync::atomic::Ordering::SeqCst);
+        let before = requests.lock().unwrap().len();
+        tickets::retry_now(&mut app);
+        run_ticks(&mut app, &ctx, 10);
+        assert_eq!(requests.lock().unwrap().len(), before, "nothing goes by itself without a token");
+        tickets::send_waiting(&mut app);
+        run_ticks(&mut app, &ctx, 40);
+        assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Opened));
+        assert!(tickets::queue::list(&dir).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn ticket_report_sign_in_keeps_the_token_in_the_keyring_only() {
-        let dir = std::env::temp_dir().join(format!("sc-report-token-{}-{}", std::process::id(), crate::now_ms() as u64));
+    fn ticket_report_device_sign_in_keeps_the_token_in_the_keyring_only() {
+        let dir = temp_dir("token");
         let (mut app, online, requests, keyring) = ticket_app(true, None);
         app.tickets.queue_dir = Some(dir.clone());
         let ctx = crate::fonts::test_context();
-        let report = payload::build(&form(), payload::Ticks::default(), &evidence_with_design(), "t");
-        tickets::send(&mut app, report);
-        // No token: the code is asked for and shown, and the verification page opened.
+        tickets::begin_sign_in(&mut app);
         run_ticks(&mut app, &ctx, 2);
         assert!(matches!(&app.tickets.sign_in, tickets::SignIn::Waiting { code, .. } if code.user_code == "WDJB-MJHT"));
-        // Polling (the fake's interval is a second).
         let until = crate::now_ms() + 5000.0;
-        while app.tickets.outcome.is_none() && crate::now_ms() < until {
+        while !tickets::signed_in(&mut app) && crate::now_ms() < until {
             run_ticks(&mut app, &ctx, 1);
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Filed(42)), "the report goes once signed in");
         assert_eq!(keyring.0.lock().unwrap().get(tickets::SECRET_ID).map(String::as_str), Some("tkt_secret_token_123"));
-        // Queue a report offline: neither the queue nor the preferences hold the token.
         online.store(false, std::sync::atomic::Ordering::SeqCst);
         tickets::send(&mut app, payload::build(&form(), payload::Ticks::default(), &evidence_with_design(), "t"));
         run_ticks(&mut app, &ctx, 4);
@@ -2572,28 +2655,42 @@ mod tests {
         written.extend(serde_json::to_vec(&app.preferences).unwrap());
         assert!(!written.windows(20).any(|w| w == b"tkt_secret_token_123"), "the token is written nowhere but the keyring");
         assert!(requests.lock().unwrap().iter().filter(|r| r.url.contains("/device/")).all(|r| !r.headers.iter().any(|(k, _)| k == "Authorization")));
-        // Sign out removes it from the keyring.
         tickets::sign_out(&mut app);
         assert!(keyring.0.lock().unwrap().get(tickets::SECRET_ID).is_none() && !tickets::signed_in(&mut app));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn ticket_report_opens_from_the_bug_button_and_the_old_draft_stays_behind_a_preference() {
+    fn ticket_report_opens_from_the_bug_button_and_a_failure_prefills_it() {
         let (mut app, _, _, _) = ticket_app(true, Some("tkt_good"));
         app.home.open = false;
-        assert!(ticket::enabled(&app), "the in-app report is the default");
+        assert!(ticket::enabled(&app));
         let ctx = crate::fonts::test_context();
         help::run(&mut app, &ctx, "report");
         cancel_capture(&mut app);
         let _ = ctx.run_ui(Default::default(), |ui| show(&mut app, ui.ctx()));
         let draft = app.issue_report.draft.as_ref().unwrap();
-        assert!(draft.ticket.as_ref().is_some_and(|t| t.ticks == payload::Ticks::default() && t.form.app == "solidcraft"));
+        let t = draft.ticket.as_ref().unwrap();
+        assert!(t.ticks == payload::Ticks::default() && t.form.app == "solidcraft" && !t.from_failure);
+        assert!(t.form.title.is_empty(), "the bug button starts empty");
         app.issue_report.draft = None;
 
-        app.preferences.report_on_github = true;
-        assert!(!ticket::enabled(&app));
-        help::run(&mut app, &ctx, "report");
+        // From a failed operation: the title, the description template and the failed command.
+        let mut app = failing_sample();
+        app.services.tickets_http = ticket_app(true, None).0.services.tickets_http.take();
+        let dialog = app.dialog.clone();
+        let error = dialog.as_ref().and_then(|d| d.error.clone()).or_else(|| app.preview.error.clone()).unwrap_or_else(|| "operation failed".into());
+        let draft = draft_for(&app, dialog.as_ref(), Some(&error));
+        let t = ticket::new_ticket(&mut app, &draft, None);
+        assert!(t.from_failure && t.form.kind == payload::Kind::Bug);
+        assert!(t.form.title.contains(error.lines().next().unwrap()), "{}", t.form.title);
+        assert!(t.form.description.contains("**Error:**") && t.form.description.contains(solidcraft_ui_text::tr("report.trying_to_do")));
+        assert_eq!(t.evidence.failing.as_ref().map(|f| f.error.clone()), Some(limited(&error, 8000)));
+
+        // The public GitHub draft stays one click away.
+        let mut draft = draft;
+        draft.github = true;
+        app.issue_report.draft = Some(draft);
         cancel_capture(&mut app);
         let _ = ctx.run_ui(Default::default(), |ui| show(&mut app, ui.ctx()));
         assert!(app.issue_report.draft.as_ref().unwrap().ticket.is_none(), "the GitHub draft, as before");
