@@ -1763,8 +1763,6 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "ssi_low_angle_start_on_probation" => &mut k.fixes.ssi_low_angle_start_on_probation,
         "fillet_nx1_tangent_side_edge" => &mut k.fixes.fillet_nx1_tangent_side_edge,
         "fillet_mitre_concave_face_corners" => &mut k.fixes.fillet_mitre_concave_face_corners,
-        "fillet_mitre_gap_patch" => &mut k.fixes.fillet_mitre_gap_patch,
-        "fillet_corner_per_vertex_fan" => &mut k.fixes.fillet_corner_per_vertex_fan,
         "fillet_trace_reaches_rails" => &mut k.fixes.fillet_trace_reaches_rails,
         "offset_extension_as_itself" => &mut k.fixes.offset_extension_as_itself,
         _ => k
