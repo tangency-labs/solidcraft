@@ -923,7 +923,7 @@ fn registry() -> PanelResult<PanelRegistry> {
                 _ => Zone::Left,
             },
             min_size: Size {
-                width: 240.0,
+                width: if product == Product::Browser { 180.0 } else { 240.0 },
                 height: match product {
                     Product::RenderLibrary => 180.0,
                     Product::Bom => 200.0,
@@ -1390,7 +1390,10 @@ impl FramePanelContent for ProductionFrame<'_> {
             )
         });
         match product {
-            Product::Browser | Product::RenderBrowser => crate::browser::panel_contents(self.app, ui),
+            Product::Browser | Product::RenderBrowser => {
+                let compact = context.outer.size.width < 240.0;
+                crate::browser::panel_contents(self.app, ui, compact);
+            }
             Product::History if context.flow == Flow::Wide => crate::timeline::panel_inline(self.app, ui),
             Product::History => crate::timeline_left::panel_contents(self.app, ui),
             Product::Assistant => crate::agent_chat::shared_content(self.app, ui, context.flow),
