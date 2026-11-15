@@ -2499,7 +2499,7 @@ mod prefs_writer_tests {
         app.preferences.background_shader = "dusk/dusk".into();
         app.preferences.language = "de".into();
         let mut disk = Disk::default();
-        disk.set_string(STORAGE_KEY, app.prefs());
+        disk.pending.insert(STORAGE_KEY.into(), app.prefs());
         assert!(super::clear_stored_background(&mut disk), "a stored effect is turned off");
         assert_eq!(disk.flushes, 1);
         app.preferences.background_shader.clear();
