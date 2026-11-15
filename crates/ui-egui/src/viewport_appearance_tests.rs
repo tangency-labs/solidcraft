@@ -644,3 +644,221 @@ fn a_pbr_appearance_reaches_the_model_palette_and_the_finish_preference_the_shad
     crate::prefs::set(&mut app, &json!({"viewport_material_finish": false})).unwrap();
     assert_eq!(sky(&app), [0.0, 0.0, 1.0, 0.0], "off: shaded flat, as before");
 }
+
+/// A part holding 40 x 20 x 10 blocks `Block` (from rectangle `Base`) and `Block2` (at x = 60),
+/// and sketch Outline on a construction plane 30 off XZ projecting both front faces beside a circle;
+/// then the block's front side drawn again, so its face takes a new name and Outline fails for
+/// its projection. `peg`: Peg is extruded from the circle first, so Outline is used by a feature.
+/// Returns (harness, Outline, the part's placement).
+fn part_lost(peg: bool) -> (crate::scenario::Harness, u64, u64) {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let part = h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]})).unwrap();
+    h.app.finish_sketch();
+    h.app.run("solid.extrude", json!({"sketch":"Base","distance":10,"body_name":"Block"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base2"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[60,0],"p1":[100,20]})).unwrap();
+    h.app.finish_sketch();
+    h.app.run("solid.extrude", json!({"sketch":"Base2","distance":10,"body_name":"Block2"})).unwrap();
+    h.app.run("construct.plane.offset", json!({"base":"XZ","offset":30,"name":"Guide"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"Guide","name":"Outline"})).unwrap();
+    let outline = h.app.session.active_sketch.unwrap();
+    h.app.run("sketch.project", json!({"refs":[{"face":[20,0,5],"body":"Block"}]})).unwrap();
+    h.app.run("sketch.project", json!({"refs":[{"face":[80,0,5],"body":"Block2"}]})).unwrap();
+    let circle = h.app.run("sketch.circle.center", json!({"center":[50,5],"radius":3})).unwrap()["created"]["curves"][0].clone();
+    h.app.finish_sketch();
+    if peg {
+        h.app.run("solid.extrude", json!({"sketch":"Outline","profiles":[{"curves":[circle]}],"distance":5,"name":"Peg"})).unwrap();
+    }
+    h.app.run("sketch.edit", json!({"sketch":"Base"})).unwrap();
+    h.app.run("sketch.delete", json!({"entities":["l1"]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[40,0]]})).unwrap();
+    h.app.finish_sketch();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    h.frames(3);
+    let error = h.app.session.model.result(outline).and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(error.contains("projected face of Block"), "{error}");
+    (h, outline, part)
+}
+
+/// The sketch scene's lines drawn in `colour`.
+fn sketch_lines_in(app: &SolveApp, colour: egui::Color32) -> usize {
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let scene = super::build_sketch_scene(app, &super::projection(app, rect));
+    [&scene.lines, &scene.overlay]
+        .into_iter()
+        .flat_map(|buffer| buffer.as_chunks::<{ crate::gpu::LINE_SIZE }>().0)
+        .filter(|line| line_color(&scene, &line[..]) == super::c4(colour))
+        .count()
+}
+
+/// A sketch that failed for a lost projection, shown, draws its last geometry with the
+/// projection in the lost colour; used by the extrude built on it, or hidden, it draws nothing.
+/// Display only: it is no sketch of the model's, so nothing in it can be picked or framed.
+#[test]
+fn a_shown_sketch_failing_for_a_lost_projection_draws_its_last_geometry() {
+    let (mut h, outline, _) = part_lost(true);
+    let t = solidcraft_theme::Tokens::get();
+    assert!(!solidcraft_engine::view::sketch_shown(&h.app.session, outline), "used by Peg");
+    assert_eq!(sketch_lines_in(&h.app, t.sketch_lost), 0, "used by Peg");
+    h.app.session.visibility.shown_sketches.push(outline);
+    assert!(sketch_lines_in(&h.app, t.sketch_lost) > 0, "the lost projection is drawn");
+    assert!(sketch_lines_in(&h.app, t.sketch_projected) > 0, "so is the projection still found");
+    assert!(!super::visible_sketches(&h.app).contains(&outline), "not one to pick or frame");
+    assert!(crate::open_meshing::session_world(&h.app.session).sketch(outline).is_none());
+    h.app.session.visibility.hidden_sketches.push(outline);
+    assert_eq!(sketch_lines_in(&h.app, t.sketch_lost), 0, "hidden");
+}
+
+/// A 40 x 20 x 10 block and, in the same design (no components), `copies` sketches (Outline,
+/// Outline2, ...) on a plane `offset` off XZ, each projecting the block's front face beside a
+/// circle; then the block's front side drawn again, so each fails for its projection. Returns
+/// (harness, the sketches).
+fn lost_without_components(offset: f64, copies: usize) -> (crate::scenario::Harness, Vec<u64>) {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]})).unwrap();
+    h.app.finish_sketch();
+    h.app.run("solid.extrude", json!({"sketch":"Base","distance":10,"body_name":"Block"})).unwrap();
+    h.app.run("construct.plane.offset", json!({"base":"XZ","offset":offset,"name":"Guide"})).unwrap();
+    let mut sketches = Vec::new();
+    for n in 0..copies {
+        let name = if n == 0 { "Outline".to_string() } else { format!("Outline{}", n + 1) };
+        h.app.run("sketch.create", json!({"plane":"Guide","name":name})).unwrap();
+        sketches.push(h.app.session.active_sketch.unwrap());
+        h.app.run("sketch.project", json!({"refs":[{"face":[20,0,5],"body":"Block"}]})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center":[50,5],"radius":3})).unwrap();
+        h.app.finish_sketch();
+    }
+    h.app.run("sketch.edit", json!({"sketch":"Base"})).unwrap();
+    h.app.run("sketch.delete", json!({"entities":["l1"]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[40,0]]})).unwrap();
+    h.app.finish_sketch();
+    h.frames(3);
+    assert!(h.app.session.doc.occurrences.is_empty());
+    for sketch in &sketches {
+        let error = h.app.session.model.result(*sketch).and_then(|r| r.error.clone()).unwrap_or_default();
+        assert!(error.contains("projected face of Block"), "{error}");
+    }
+    (h, sketches)
+}
+
+/// Without components the world is the model's own state, and a failing sketch evaluated
+/// again leaves it as it was: what is drawn follows the shown failed sketch all the same,
+/// after an edit of it and after Redefine Sketch Plane.
+#[test]
+fn a_shown_failed_sketch_follows_its_edits_in_a_design_without_components() {
+    let (mut h, sketches) = lost_without_components(30.0, 1);
+    let outline = sketches[0];
+    let t = solidcraft_theme::Tokens::get();
+    let drawn = |h: &crate::scenario::Harness| {
+        let (shown, _) = super::failed_sketches(&h.app);
+        shown.iter().find(|ss| ss.feature == outline).map(|ss| (ss.sketch.curves.len(), ss.plane.origin))
+    };
+    let (curves, origin) = drawn(&h).expect("shown");
+    assert!(sketch_lines_in(&h.app, t.sketch_lost) > 0);
+    let world = crate::open_meshing::session_world(&h.app.session);
+    h.app.edit_sketch(outline);
+    h.frames(2);
+    assert_eq!(h.app.session.active_sketch, Some(outline));
+    h.app.run("sketch.circle.center", json!({"center":[10,5],"radius":2})).unwrap();
+    h.app.finish_sketch();
+    h.frames(2);
+    assert!(std::sync::Arc::ptr_eq(&world, &crate::open_meshing::session_world(&h.app.session)), "the same world as before the edit");
+    assert!(h.app.session.model.result(outline).is_some_and(|r| r.error.is_some()), "it still fails");
+    assert_eq!(drawn(&h).map(|(n, _)| n), Some(curves + 1), "the edit's circle is drawn");
+    h.app.run("sketch.redefine", json!({"sketch":outline,"plane":"XZ"})).unwrap();
+    h.frames(2);
+    assert!(std::sync::Arc::ptr_eq(&world, &crate::open_meshing::session_world(&h.app.session)));
+    let moved = drawn(&h).expect("still shown").1;
+    assert!((moved.y - origin.y).abs() > 1.0, "drawn on its new plane: {moved:?} {origin:?}");
+    assert!(sketch_lines_in(&h.app, t.sketch_lost) > 0);
+}
+
+/// Dragging in a sketch that comes after a failed one builds the failed one no more: it is
+/// built for its own result and the model before it, which the drag leaves as they were.
+#[test]
+fn dragging_in_a_later_sketch_does_not_build_an_earlier_failed_one_again() {
+    let (mut h, _) = lost_without_components(30.0, 1);
+    let t = solidcraft_theme::Tokens::get();
+    h.app.run("sketch.create", json!({"plane":"XY","offset":50,"name":"Later"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
+    h.app.finish_sketch();
+    h.app.run("sketch.edit", json!({"sketch":"Later"})).unwrap();
+    h.frames(2);
+    assert!(sketch_lines_in(&h.app, t.sketch_lost) > 0);
+    let (builds, _) = super::failed_sketch_counts(&h.app);
+    for i in 0..5 {
+        let (from, to) = ([10 + i, i], [11 + i, i + 1]);
+        h.app.run("sketch.drag", json!({"entity":"l1.end","from":from,"to":to,"live":true})).unwrap();
+        h.frames(1);
+    }
+    assert!(sketch_lines_in(&h.app, t.sketch_lost) > 0, "still drawn");
+    assert_eq!(super::failed_sketch_counts(&h.app).0, builds, "five drag frames, no build");
+}
+
+/// A shown failed sketch 10 m from the bodies is in the depth range the picture is drawn
+/// with, so it is not clipped away; Fit frames the bodies and the sketches it can pick only.
+#[test]
+fn a_failed_sketch_far_from_the_bodies_is_in_the_depth_range_not_in_fit() {
+    let (h, _) = lost_without_components(10_000.0, 1);
+    let (shown, far) = super::failed_sketches(&h.app);
+    assert_eq!(shown.len(), 1);
+    let inside = |b: &solidcraft_engine::geom::Aabb3| {
+        [(b.min.x, b.max.x, far.min.x, far.max.x), (b.min.y, b.max.y, far.min.y, far.max.y), (b.min.z, b.max.z, far.min.z, far.max.z)]
+            .into_iter()
+            .all(|(lo, hi, flo, fhi)| lo <= flo + 1e-6 && fhi <= hi + 1e-6)
+    };
+    assert!(far.min.y.abs() > 9_000.0, "{far:?}");
+    assert!(inside(&super::scene_bounds(&h.app)), "{:?} {far:?}", super::scene_bounds(&h.app));
+    assert!(!inside(&super::view_bounds(&h.app)), "{:?}", super::view_bounds(&h.app));
+}
+
+/// Each failed sketch drawn is sampled with a budget of its own (#6524): two alike, under a
+/// budget one of them uses up, both draw their lost projection.
+#[test]
+fn failed_sketches_drawn_each_have_their_own_sampling_budget() {
+    let (mut h, sketches) = lost_without_components(30.0, 2);
+    let t = solidcraft_theme::Tokens::get();
+    h.app.session.visibility.hidden_sketches.push(sketches[1]);
+    let one = sketch_lines_in(&h.app, t.sketch_lost);
+    assert!(one > 0);
+    let (shown, _) = super::failed_sketches(&h.app);
+    let ss = &shown[0];
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let proj = super::projection(&h.app, rect);
+    let ppp = h.app.viewport.pixels_per_point();
+    let mut all = solidcraft_engine::render::SamplingBudget::new(131_072, 1_048_576);
+    let need: usize = (0..ss.sketch.curves.len())
+        .filter(|i| solidcraft_engine::view::sketch_curve_visible(&ss.sketch, *i))
+        .map(|i| crate::sketch_display::curve_with_budget(&ss.sketch, i, &ss.plane, &proj, ppp, &mut all).vertex_count)
+        .sum();
+    h.app.session.visibility.hidden_sketches.clear();
+    crate::sketch_display::UNCACHED_VERTICES.with(|v| v.set(Some(need)));
+    let both = sketch_lines_in(&h.app, t.sketch_lost);
+    crate::sketch_display::UNCACHED_VERTICES.with(|v| v.set(None));
+    assert_eq!(both, 2 * one, "a budget of {need} vertices each");
+}
+
+/// While the model can't be placed (here an uncaptured move that is no rigid motion) no
+/// failed sketch is drawn or placed, on any call; placed again once it can be.
+#[test]
+fn a_failed_sketch_is_not_drawn_while_the_model_cannot_be_placed() {
+    let (mut h, outline, part) = part_lost(false);
+    let t = solidcraft_theme::Tokens::get();
+    assert!(solidcraft_engine::view::sketch_shown(&h.app.session, outline));
+    assert!(sketch_lines_in(&h.app, t.sketch_lost) > 0);
+    h.app.session.pending_moves.insert(part, [[0.0; 4]; 4]);
+    assert!(h.app.session.world_state().is_err(), "the model can't be placed");
+    let (_, placements) = super::failed_sketch_counts(&h.app);
+    for _ in 0..3 {
+        assert!(super::failed_sketches(&h.app).0.is_empty());
+    }
+    assert_eq!(super::failed_sketch_counts(&h.app).1, placements, "nothing placed while it can't be");
+    assert_eq!(sketch_lines_in(&h.app, t.sketch_lost), 0);
+    h.app.session.pending_moves.remove(&part);
+    assert!(sketch_lines_in(&h.app, t.sketch_lost) > 0, "placed again");
+}

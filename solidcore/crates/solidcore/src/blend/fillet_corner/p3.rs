@@ -16,7 +16,7 @@
 //! | [`FilletCorner::new`] with [`FilletCornerKind::Open`] | `SmFilletOpenCorner::SmFilletOpenCorner`           |
 //! | [`FilletCorner::new`] with [`FilletCornerKind::Degenerate`] | `SmFilletDegenerateCorner::SmFilletDegenerateCorner` |
 //! | [`FilletCorner::corner_type`], [`FilletCornerKind::name`] | `GetCornerType`, `GetName` (per derived class)   |
-//! | [`FilletCorner::create`] | `SmFilletCorner::Create` (with `fixes.fillet_corner_per_vertex_fan`, the fork's knife-edge refusal of a two-edge corner, `e418750`, WR-665; with `fixes.fillet_refuse_mixed_corner_crossing_rails`, not upstream, the refusal of a 3x2 mixed-convexity corner whose rails cross, WR-710) |
+//! | [`FilletCorner::create`] | `SmFilletCorner::Create` (with `fixes.fillet_corner_per_vertex_fan`, the fork's knife-edge refusal of a two-edge corner, `e418750`, WR-665; not upstream, the refusal of a 3x2 mixed-convexity corner whose rails cross, WR-710) |
 //! | [`FilletCorner::is_mitre`], [`FilletCorner::filleted_edgeuses`] | the fork's `SmFilletNx2Corner::IsMitre`, `GetFilletedEdgeuses` (`9ba2b12`, WR-634) |
 //! | [`FilletCorner::create_with_solver_lookup`] | `Create` with borrowed executive solvers |
 //! | [`FilletCorner::calc_corner_geom`]                 | `SmFilletCorner::CalcCornerGeom`                      |
@@ -561,8 +561,14 @@ pub(super) fn primary_eu(pseudo: &FilletBrep, e: EdgeId, op: &'static str) -> Re
         .ok_or_else(|| SolidError::blend_missing(op, "the edge's primary edge use"))
 }
 
-/// The largest offset of `solver`'s surfaces (a round's radius, a chamfer's setback): how far
-/// its ball's centre stands off the faces. `0` where it has no offset surface yet.
+/// The largest offset of `solver`'s surfaces: how far its section's centre (a round's ball
+/// centre, the corner of a chamfer's offset planes) stands off each face, a round's radius
+/// and a chamfer's `(d' - d cos w) / sin w` off the face with setback `d` (`d'` on the other,
+/// wedge angle `w`), not its setbacks. #16627: the centre lies on its side face's offset at
+/// this distance, so where the side faces meet at an angle `a` the shared section of a Join
+/// stands at most `2 size tan(a / 2)` off the blends
+/// (`blend_corner::join_within_xsect_tolerance_deg` derives it). `0` where it has no offset
+/// surface yet.
 ///
 /// # Errors
 ///
@@ -739,9 +745,8 @@ impl FilletCorner {
     /// clockwise neighbour, radial partner or edge, a filleted edge use without a
     /// solver (or a solver id past `solvers`) or a solver without surface generator
     /// (upstream dereferences them), and a walk that does not close; those of the
-    /// sector convexity test; [`SolidError::Unported`] (module docs). With
-    /// `fixes.fillet_refuse_mixed_corner_crossing_rails` (WR-710, not upstream),
-    /// [`SolidError::Unsupported`] with the reason [`MIXED_CORNER_RAILS_CROSS`] for a 3x2
+    /// sector convexity test; [`SolidError::Unported`] (module docs). Not upstream
+    /// (WR-710), [`SolidError::Unsupported`] with the reason [`MIXED_CORNER_RAILS_CROSS`] for a 3x2
     /// mixed-convexity corner whose two filleted edges leave the vertex along one
     /// tangent, so their rails cross before the corner. [`SolidError::Unsupported`] with
     /// the reason [`MIXED_CORNER_OF_FOUR_EDGES`] for a convex and a concave blend at a
@@ -1107,22 +1112,19 @@ impl FilletCorner {
                                 if mixed.is_none() {
                                     return Ok(None); // MSG: Corner Case Not Implemented
                                 }
-                                // Not upstream (WR-710, opt-in
-                                // `fillet_refuse_mixed_corner_crossing_rails`, #2256):
+                                // Not upstream (WR-710, #2256):
                                 // where the two edges leave the vertex along one tangent,
                                 // their common face closes to a cusp there and the rails
                                 // cross before the corner; the corner patch built across
                                 // them leaves the faces, so the corner is refused.
-                                if k.fixes.fillet_refuse_mixed_corner_crossing_rails
-                                    && mixed_corner_rails_cross(
-                                        k,
-                                        b,
-                                        vertex,
-                                        edge_of(b, eu0)?,
-                                        edge_of(b, eu1_)?,
-                                        tan_tol_deg,
-                                    )?
-                                {
+                                if mixed_corner_rails_cross(
+                                    k,
+                                    b,
+                                    vertex,
+                                    edge_of(b, eu0)?,
+                                    edge_of(b, eu1_)?,
+                                    tan_tol_deg,
+                                )? {
                                     return Err(SolidError::Unsupported {
                                         operation: OP_CREATE,
                                         reason: MIXED_CORNER_RAILS_CROSS,
@@ -1134,12 +1136,16 @@ impl FilletCorner {
                                 // one convexity among three or four edges are the blend
                                 // corner's (SmBlendCorner::Classify: a Turn or a Join), built
                                 // by the two-blend construction moved from SmFilletNx2Corner
-                                // the blends join only where their balls are one within
-                                // the corner's tolerance (`blend_corner::join_tolerance_deg`)
+                                // the blends join only where their sections at the joint
+                                // vertex stand strictly within the B-rep's intersection
+                                // tolerance, which the check holds every vertex to (#16627;
+                                // `blend_corner::join_within_xsect_tolerance_deg`)
                                 let mut size = 0.0_f64;
                                 for &eu in solver_eus {
                                     size = size.max(round_size(solver_of(eu)?)?);
                                 }
+                                let xsect_tol =
+                                    crate::topology::vertex::corner::xsect_tol_3d_of_brep(k, b);
                                 let blend = crate::blend::blend_corner::classify(
                                     k,
                                     b,
@@ -1147,9 +1153,9 @@ impl FilletCorner {
                                     solver_eus,
                                     &all_eus,
                                     tan_tol_deg,
-                                    crate::blend::blend_corner::join_tolerance_deg(
+                                    crate::blend::blend_corner::join_within_xsect_tolerance_deg(
                                         size,
-                                        approx_tol_3d,
+                                        xsect_tol,
                                         tan_tol_deg,
                                     ),
                                 )?;
@@ -2420,8 +2426,8 @@ pub const MIXED_CORNER_OF_FOUR_EDGES: &str = "a convex and a concave round meeti
     seam: they lie on opposite sides of their faces there and have no crossing to mitre on, \
     at any size (#10876)";
 
-/// The reason of the [`SolidError::Unsupported`] that [`FilletCorner::create`] returns,
-/// with `Kernel::fixes.fillet_refuse_mixed_corner_crossing_rails` (WR-710, #2256), for a
+/// The reason of the [`SolidError::Unsupported`] that [`FilletCorner::create`] returns
+/// (WR-710, #2256) for a
 /// corner of two filleted edges of differing convexity whose rails cross before the
 /// corner (see [`FilletCorner::create`]).
 pub const MIXED_CORNER_RAILS_CROSS: &str =

@@ -246,6 +246,9 @@
     "gen2966": "tangency-labs/solidcore#2717: step 0 names D(3,0), overwritten by D(1,2) at out[11]",
     "upper_half_slot_overwrite": "tangency-labs/solidcore#2717: step 1 names D(2,0), overwritten by D(1,2) at out[26]"
   },
+  "surface.volume_p2": {
+    "gen0106": "tangency-labs/solidcraft#16502: the unbend pseudo box (unexpanded boxes of the 12 mapped box edges, through a twist) is not an enclosure: 200k samples per mapped edge reach 3.3e-4 below its interval 1 and 1.3e-6 above its interval 2, before and after the twist Duw sign fix, which moves the box by up to 1.07e-6"
+  },
   "topology.brep_local_operation": {
     "gen0014": "tangency-labs/solidcore#2981: tilted disk returns three non-collinear straight boundary carriers; an affine image of the semicircle-and-diameter boundary has only one",
     "gen0019": "tangency-labs/solidcore#2981: tilted disk returns three non-collinear straight boundary carriers; an affine image of the semicircle-and-diameter boundary has only one",

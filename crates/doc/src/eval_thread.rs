@@ -188,7 +188,15 @@ impl FaceEnds<'_> {
 
 /// A thread on the cylindrical face at `p`: its size, and the part of the face it runs over.
 pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk) -> Result<ThreadOn> {
-    let (bi, cyl) = st
+    thread_on_in(st, feature, None, p, ask)
+}
+
+/// [`thread_on`] for a feature of `component`: a cylindrical face of one of that component's own
+/// bodies is the one meant, when it has one at `p`. Bodies of other components are in their own
+/// coordinates, so two parts built alike (two screws of one size) each have a face at the same
+/// point, and without this the second part's thread went on the first part's body.
+pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>, p: Vec3, ask: &ThreadAsk) -> Result<ThreadOn> {
+    let found: Vec<(usize, kernel::CylinderFace)> = st
         .bodies
         .iter()
         .enumerate()
@@ -198,6 +206,12 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
             super::cost_tests::count(|c| c.cylinder_search += 1);
             kernel::cylinder_face_at(&b.body, p).map(|c| (i, c))
         })
+        .collect();
+    let own = |i: &usize| component.is_some_and(|c| st.bodies.get(*i).is_some_and(|b| b.component == c));
+    let any_own = found.iter().any(|(i, _)| own(i));
+    let (bi, cyl) = found
+        .into_iter()
+        .filter(|(i, _)| !any_own || own(i))
         .min_by(|a, b| {
             let dist = |c: &kernel::CylinderFace| ((p - c.axis_point - c.axis * (p - c.axis_point).dot(c.axis)).len() - c.radius).abs();
             dist(&a.1).total_cmp(&dist(&b.1))
@@ -809,7 +823,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         return Err(DocError::Invalid("a runout is cut only on a modelled thread".into()));
     }
     let ask = ThreadAsk { ease_out: runout(vals, ease_out)?, ..ask };
-    let on = thread_on(st, f.id, face.0, &ask)?;
+    let on = thread_on_in(st, f.id, Some(f.component), face.0, &ask)?;
     if !*modeled {
         st.threads.push(on.info);
         return Ok(());

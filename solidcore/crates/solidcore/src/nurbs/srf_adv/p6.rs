@@ -11,6 +11,11 @@
 //! | [`fill_n_sided_hole`], [`NSidedFill`]        | `N_FillNSidedHole`     |
 //!
 //! Deviations:
+//! - A piece of a sweep without rails along which the profile's first or last control
+//!   point stays within `MODEL_TOL` (a horn bend: the profile's end on the arc's centre)
+//!   is skinned at the trajectory parameters with C1 derivative constraints. G1
+//!   rescaling by that end's chord length would collapse its cross derivatives. Every
+//!   other piece is skinned as upstream.
 //! - Out-params become return values (the swept surface; the patches with the center
 //!   point and normal); the `NL_STACKS` arguments have no counterpart. The optional
 //!   arguments of `N_CreateSweepScale` (`curZ`, `curS`, `tflg`, `tc`, `deg`, `dir`,
@@ -49,7 +54,8 @@ use crate::nurbs::crv_nurb::LinearSeg;
 use crate::nurbs::crv_tool::p2::make_compatible_adj_knots;
 use crate::nurbs::funcs_basic::CurveFunction;
 use crate::nurbs::geom::{
-    normalize, project_pt_plane, pt_along_vector, transform_matrix_from_axes, Frame, Plane,
+    dist_cpolygon, normalize, project_pt_plane, pt_along_vector, transform_matrix_from_axes, Frame,
+    Plane,
 };
 use crate::nurbs::index::{at, oob, put};
 use crate::nurbs::knots::Side;
@@ -254,6 +260,24 @@ pub struct SweepTrace {
     pub chain: Vec<f64>,
     /// The unit normal the chain began from.
     pub start_normal: Vec3,
+    /// Per piece of a sweep without rails: whether its skin is interpolated at the
+    /// trajectory parameters (a piece along which an end of the profile stays put),
+    /// rather than at the chord-length parameters of G1 skinning.
+    pub path_parameters: Vec<bool>,
+}
+
+/// Whether the first or the last control point of the placed sections stays within
+/// `MODEL_TOL` along the piece: the chord length G1 skinning rescales by is then no
+/// magnitude (`create_skin_srf_boundary_continuity` measures the same polygons).
+fn profile_end_is_fixed(sections: &[Curve]) -> Result<bool> {
+    let mut first = Vec::new();
+    let mut last = Vec::new();
+    for section in sections {
+        let points = section.cpts();
+        first.push(at(points, 0, OP_SWEEP)?);
+        last.push(at(points, section.n(), OP_SWEEP)?);
+    }
+    Ok(dist_cpolygon(&first) <= MODEL_TOL || dist_cpolygon(&last) <= MODEL_TOL)
 }
 
 /// [`create_sweep_scale`] that also reports its [`SweepTrace`] (and, as
@@ -708,15 +732,28 @@ fn sweep_scale(
             let de0 =
                 cross_boundary_derivs_vector_field(rf(&sects1, np, OP)?, &ct11, Boundary::Bottom)?;
 
-            let (ts, rail) = if tflg {
+            // Without rails, G1 skinning rescales the cross derivatives by the chord
+            // length of the sections' first and last control points. Where either end
+            // stays within MODEL_TOL (the skinner's coincidence tolerance) over the
+            // piece, as at a horn bend where the profile's end sits on the arc's
+            // centre, that length is no magnitude and the rescaled derivatives collapse.
+            // Such a piece keeps the derivatives as computed, in the trajectory
+            // parameter, and is interpolated at those same parameters (C1).
+            let fixed_end = !tflg && !ruled && profile_end_is_fixed(&sects1)?;
+            if let Some(trace) = trace.as_mut() {
+                trace.path_parameters.push(fixed_end);
+            }
+            let (ts, rail, cnt) = if tflg {
                 let r = if tc == us {
                     [Some(seg.clone()), None]
                 } else {
                     [None, Some(seg.clone())]
                 };
-                (Some(sp.clone()), Some(r))
+                (Some(sp.clone()), Some(r), cnt)
+            } else if fixed_end {
+                (Some(sp.clone()), None, [BoundaryContinuity::C1; 2])
             } else {
-                (None, None)
+                (None, None, cnt)
             };
             // If ruled ignore end derivatives.
             let der = if ruled {
@@ -1610,6 +1647,106 @@ mod tests {
         assert_eq!(p, 2);
         let p0 = s.cpt(0, 0).unwrap().to_euclid();
         assert!(p0.length().is_finite());
+    }
+
+    /// A piece along which the profile's end stays put (a horn bend: profile radius equal
+    /// to the bend's, its seam on the bend's centre) is skinned at the path's parameters,
+    /// including a nonzero origin and a nonunit range; any other piece keeps the chord-length
+    /// parameters of G1 skinning. Either way the certificate compares the right points.
+    #[test]
+    fn only_a_fixed_profile_end_skins_at_the_path_parameter() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::geom::extent1d::Extent1d;
+        use crate::math::Point2;
+        use crate::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::surface::procedural_sweep::ProceduralSweep;
+
+        let mut path = BSplineCurve::create_circle_segment(
+            3,
+            &Axis2Placement::IDENTITY,
+            10.0,
+            0.0,
+            90.0,
+            NurbCircleParam::Quadratic,
+        )
+        .unwrap();
+        path.edit_parameterization(&Extent1d::from_min_max(3.0, 11.0))
+            .unwrap();
+        // A circle of the bend's radius passes through the bend's centre (the origin);
+        // only a seam there leaves the profile's end in place. Which seam that is follows
+        // from the sweep's start frame, so read it from the net's own corners.
+        let mut horns = 0;
+        for (radius, start) in [
+            (0.75, 0.0),
+            (10.0, 0.0),
+            (10.0, -90.0),
+            (10.0, -180.0),
+            (10.0, -270.0),
+        ] {
+            let profile = BSplineCurve::create_circle_segment(
+                3,
+                &Axis2Placement::new(Vec3::ZERO, Vec3::Y, Vec3::Z),
+                radius,
+                start,
+                start + 360.0,
+                NurbCircleParam::Quadratic,
+            )
+            .unwrap();
+            let (net, trace) = BSplineSurface::create_sweep_surface_traced(
+                &profile, &path, None, false, 1e-6, None, None,
+            )
+            .unwrap();
+            let trace = trace.unwrap();
+            let domain = net.natural_uv_domain();
+            let horn = [domain.min().x, domain.max().x].iter().all(|&u| {
+                net.evaluate_point(Point2::new(u, domain.min().y))
+                    .unwrap()
+                    .length()
+                    <= 1e-9
+            });
+            assert_eq!(trace.path_parameters, vec![horn]);
+            if radius > 1.0 && !horn {
+                // the profile's interior meets the centre: a pole the face builder splits at
+                continue;
+            }
+            horns += usize::from(horn);
+            let definition = ProceduralSweep::create_path(&profile, &path, &trace, &net).unwrap();
+            let motion = definition.path().unwrap();
+            if horn {
+                assert_eq!(domain.u_interval(), path.natural_interval());
+                assert!(motion.nodes().iter().all(|&(v, t)| v == t));
+            } else {
+                assert_eq!(domain.u_interval(), Extent1d::from_min_max(0.0, 1.0));
+            }
+            let mut radial_error = 0.0_f64;
+            let mut definition_error = 0.0_f64;
+            for i in 0..32 {
+                let fraction = (f64::from(i) + 0.31) / 32.0;
+                let t = path.natural_interval().evaluate(fraction);
+                let u = domain.u_interval().evaluate(fraction);
+                for j in 0..16 {
+                    let v = profile
+                        .natural_interval()
+                        .evaluate((f64::from(j) + 0.27) / 16.0);
+                    let point = net.evaluate_point(Point2::new(u, v)).unwrap();
+                    if horn {
+                        let center = path.evaluate_point(t).unwrap();
+                        radial_error = radial_error.max((point.distance(center) - radius).abs());
+                    }
+                    definition_error = definition_error.max(
+                        point.distance(
+                            definition
+                                .evaluate_definition_point(Point2::new(u, v))
+                                .unwrap(),
+                        ),
+                    );
+                }
+            }
+            assert!(radial_error < 2e-5 * radius, "{radial_error}");
+            assert!(definition_error <= definition.bound(), "{definition_error}");
+        }
+        assert_eq!(horns, 1);
     }
 
     #[test]
