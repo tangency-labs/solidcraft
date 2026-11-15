@@ -61,6 +61,7 @@ fn pick(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.world_state()?;
     let occ = occurrence_map(s);
     let comps = component_names(s);
+    let names: BTreeMap<u64, &str> = s.doc.components.iter().map(|c| (c.id, c.name.as_str())).collect();
     let shown: Vec<_> = st.bodies.iter().filter(|b| s.body_visible(&b.name)).collect();
     let mut hits = Vec::with_capacity(inputs.len());
     for (raw, o, d) in inputs {
@@ -83,11 +84,15 @@ fn pick(s: &mut Session, p: &Value) -> Result<Value> {
             if let Some(v) = h.vertex {
                 j["vertex"] = json!({"index": v});
             }
-            if let Some((path, name)) = occ.get(&b.name) {
+            // A placed body's component is the one its placement places (every placement's world
+            // name differs); a body that is not placed is named by the component that owns it.
+            let mut component = comps.get(&b.name).map(String::as_str);
+            if let Some((path, name, id)) = occ.get(&b.name) {
                 j["occurrence"] = json!(path);
                 j["occurrence_name"] = json!(name);
+                component = names.get(id).copied().or(component);
             }
-            if let Some(name) = comps.get(&b.name) {
+            if let Some(name) = component {
                 j["component"] = json!(name);
             }
             let at = depths.partition_point(|x| *x <= h.depth);
@@ -99,9 +104,9 @@ fn pick(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"frame": "rays", "hits": hits}))
 }
 
-/// Body world name → its outermost placement (path, name), shallower placements first, bounded
-/// as the app's pick bounds it.
-fn occurrence_map(s: &Session) -> BTreeMap<String, (Vec<u64>, String)> {
+/// Body world name → its outermost placement (path, name) and the component it places,
+/// shallower placements first, bounded as the app's pick bounds it.
+fn occurrence_map(s: &Session) -> BTreeMap<String, (Vec<u64>, String, u64)> {
     let mut out = BTreeMap::new();
     let mut queue: VecDeque<Vec<u64>> = VecDeque::from([vec![]]);
     let mut budget = 10_000usize;
@@ -113,7 +118,7 @@ fn occurrence_map(s: &Session) -> BTreeMap<String, (Vec<u64>, String)> {
             }
             budget -= 1;
             for b in &placement.bodies {
-                out.entry(b.world.clone()).or_insert_with(|| (placement.path.clone(), placement.name.clone()));
+                out.entry(b.world.clone()).or_insert_with(|| (placement.path.clone(), placement.name.clone(), placement.component));
             }
             queue.push_back(placement.path.clone());
         }
@@ -173,6 +178,26 @@ mod tests {
         let depths: Vec<f64> = list.iter().filter_map(|h| h["depth"].as_f64()).collect();
         assert_eq!(list.len(), 2, "{r}");
         assert!((depths[0] - (50.0 - z)).abs() < 1e-9 && (depths[1] - 100.0).abs() < 1e-9, "{r}");
+    }
+
+    /// Every placement of a part names the part's component, also the copies whose bodies carry
+    /// their placement in their world name.
+    #[test]
+    fn every_placement_of_a_part_names_its_component() {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Plate"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 2, "corner": [0, 0, 0]}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        run(&mut s, "occurrence.copy", json!({"component": "Plate", "translate": [50, 0, 0]}));
+        let rays: Vec<Value> = [5, 55].iter().map(|x| json!({"origin": [x, 5, 20], "dir": [0, 0, -1]})).collect();
+        let r = run(&mut s, "view.pick", json!({ "rays": rays }));
+        let hits = r["hits"].as_array().cloned().unwrap_or_default();
+        assert_eq!(hits.len(), 2, "{r}");
+        assert_ne!(hits[0]["body"], hits[1]["body"], "two placements, two world bodies: {r}");
+        assert_ne!(hits[0]["occurrence"], hits[1]["occurrence"], "{r}");
+        for h in &hits {
+            assert_eq!(h["component"], "Plate", "{h}");
+        }
     }
 
     /// Pixels need the running app's view, and a ray must be finite with a direction.
