@@ -1882,14 +1882,14 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let curve = brep
             .edge_curve(b)
             .ok_or(invalid(OP_SET_RELS, "edge handle is unknown"))?;
-        let curve = curve_of(&*brep, curve)?;
+        let curve = curve_of(brep, curve)?;
         let interval = brep
             .edge_interval(b)
             .ok_or(invalid(OP_SET_RELS, "edge handle is unknown"))?;
         let curve_a = brep
             .edge_curve(a)
             .ok_or(invalid(OP_SET_RELS, "edge handle is unknown"))?;
-        let curve_a = curve_of(&*brep, curve_a)?;
+        let curve_a = curve_of(brep, curve_a)?;
         let interval_a = brep
             .edge_interval(a)
             .ok_or(invalid(OP_SET_RELS, "edge handle is unknown"))?;
