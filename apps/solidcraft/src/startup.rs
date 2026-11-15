@@ -1158,10 +1158,19 @@ mod tests {
         // Non-AMD OpenGL adapters are untouched.
         assert!(counts_as_hardware(true, Backend::Gl, "Intel(R) HD Graphics 530"));
         assert!(counts_as_hardware(true, Backend::Gl, "NVIDIA Quadro P2200"));
-        // The automatic order on such a machine ends at the software renderer: GL is passed
-        // over, and no backend with a usable GPU is left.
-        let probe = |b: Backends| b == Backends::GL;
+        // The automatic order on such a machine ends at the software renderer: the only
+        // hardware adapter it could enumerate is the AMD one on GL, the filter passes it over,
+        // and no backend with a usable GPU is left. The probe models that machine: GL alone
+        // enumerates hardware, and the filter is applied to it, so GL is probed but not taken.
+        let probe = |b: Backends| b == Backends::GL && counts_as_hardware(true, Backend::Gl, "AMD Radeon HD 5450");
         assert_eq!(choose_backends(true, false, false, None, probe), Some(Backends::DX12));
+        // Without the filter the same machine would have started on GL and drawn nothing.
+        let unfiltered = |b: Backends| b == Backends::GL;
+        assert_eq!(choose_backends(true, false, false, None, unfiltered), Some(Backends::GL));
+        // A modern AMD card is never hurt by the filter: its GL adapter counts as hardware,
+        // so a machine where GL alone enumerates hardware still starts on GL.
+        let modern_amd_gl = |b: Backends| b == Backends::GL && counts_as_hardware(true, Backend::Gl, "AMD Radeon RX 6800");
+        assert_eq!(choose_backends(true, false, false, None, modern_amd_gl), Some(Backends::GL));
     }
 
     #[test]
