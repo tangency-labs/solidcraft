@@ -263,6 +263,8 @@ impl Value {
             _ => {
                 let hint = if k == Kind::Unitless && self.len == 1 && self.ang == 0 {
                     " (a count needs a unit-less value: divide by a length, e.g. `floor(L / (210 mm))`)"
+                } else if k == Kind::Length && self.len > 1 && self.ang == 0 {
+                    " (a length needs a 1D value: divide by a length, e.g. `(L * L) / (1 mm)`, or set the parameter's Unit to none in Parameters)"
                 } else {
                     ""
                 };
@@ -1504,6 +1506,21 @@ mod tests {
         assert!(e.contains("expected a unit-less number, got a length") && e.contains("divide by a length"), "{e}");
         assert_eq!(ev("floor(width / (6 mm))", Kind::Unitless).unwrap(), 6.0);
         let e = ev("45 deg", Kind::Unitless).unwrap_err().to_string();
+        assert!(!e.contains("divide"), "{e}");
+    }
+
+    /// A squared or higher-dimension length where a length is expected names the fix (#17257).
+    #[test]
+    fn a_squared_length_where_a_length_is_expected_says_to_divide_by_a_length() {
+        let e = ev("width * width", Kind::Length).unwrap_err().to_string();
+        assert!(
+            e.contains("expected a length, got a value in length^2")
+                && e.contains("divide by a length, e.g. `(L * L) / (1 mm)`, or set the parameter's Unit to none in Parameters"),
+            "{e}"
+        );
+        let e = ev("width ^ 3", Kind::Length).unwrap_err().to_string();
+        assert!(e.contains("expected a length, got a value in length^3") && e.contains("divide by a length"), "{e}");
+        let e = ev("45 deg", Kind::Length).unwrap_err().to_string();
         assert!(!e.contains("divide"), "{e}");
     }
 

@@ -139,7 +139,7 @@ use crate::nurbs::b_spline_curve::p3::DerivedOverrides;
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::crv_basic::ConicType;
-use crate::nurbs::crv_common::{elliptical_arc_tol, EllipseArc};
+use crate::nurbs::crv_common::{elliptical_arc_tol, EllipseArc, DEFAULT_ANGLE_TOL};
 use crate::nurbs::index::at;
 use crate::nurbs::math::gamma;
 use crate::nurbs::nurbs_crv::to_euclid;
@@ -1837,7 +1837,7 @@ impl Ellipse {
                 unit: "geom.tol",
             });
         } else {
-            0.01 // Preserves behavior
+            DEFAULT_ANGLE_TOL // Preserves behavior (0.01)
         };
 
         // Build the circular arc

@@ -29,6 +29,18 @@ impl CurveEval {
     }
 }
 
+/// Where a piece `on` of `curve`, its angle about the axis through `origin` (from unit `x`
+/// towards unit `y`) monotone and under half a turn, reaches angle `theta`
+/// ([`k::ruling::angle_crossing`]): `(true, point, parameter)` where it does, else `(false, the
+/// end nearer in angle, its parameter)`. `None` where the curve can't be evaluated.
+pub(crate) fn angle_crossing(curve: &CurveEval, origin: Vec3, x: Vec3, y: Vec3, on: [f64; 2], theta: f64) -> Option<(bool, Vec3, f64)> {
+    use k::ruling::AngleCrossing as A;
+    Some(match k::ruling::angle_crossing(&curve.0, c::vec3(origin), c::vec3(x), c::vec3(y), on, theta)? {
+        A::At { point, t } => (true, c::record_vec3(point), t),
+        A::Nearer { point, t } => (false, c::record_vec3(point), t),
+    })
+}
+
 /// A closed spline or polyline with its seam moved to `start`, exactly.
 pub(crate) fn restart_curve(curve: &Curve, start: f64) -> Result<Curve, Error> {
     let curve = c::curve(curve).map_err(|e| e.to_string())?;
@@ -68,6 +80,13 @@ impl SurfaceEval {
     /// ([`k::SurfaceEval::pole_within`]); refused where that cannot be decided.
     pub(crate) fn pole_within(&self, uv: [f64; 2], reach: f64) -> Result<[bool; 2], String> {
         self.0.pole_within(uv, reach).map_err(|e| e.to_string())
+    }
+    /// `pc` with its control points put on the knot range and a certified bound on how far that
+    /// moves the surface under it; `None` when it is on the range, refused where the move is past
+    /// `tolerance` or not bounded ([`k::SurfaceEval::pcurve_onto_knots`]).
+    pub(crate) fn pcurve_onto_knots(&self, pc: &Curve2, tolerance: f64) -> Result<Option<(Curve2, f64)>, String> {
+        let moved = self.0.pcurve_onto_knots(&c::curve2(pc), tolerance).map_err(|e| e.to_string())?;
+        Ok(moved.map(|m| (c::record_curve2(m.pcurve), m.displacement)))
     }
 }
 

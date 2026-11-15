@@ -5,6 +5,9 @@ use std::fmt::Write as _;
 
 use solidcore::geom::assert_array::{obj_type_string, AssertArray, AssertReport};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel as KernelCheckLevel};
+
+/// What a check holds the tolerance pass to: [`ValidityScope::Stitched`] for a body a stitch produced.
+pub use solidcore::topology::brep::validation::ValidityScope;
 use solidcore::topology::NamingScheme;
 use solidcore::SolidError;
 

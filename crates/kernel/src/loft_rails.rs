@@ -496,11 +496,13 @@ pub(crate) fn section_normals(sections: &[Section], direction: impl Fn(f64) -> O
 /// The rail `pts` from its end nearer `start` (the first section's middle), and where it meets
 /// each section, on the section's curve within `tol`.
 ///
-/// A rail runs from the first section to the last: it meets the last section at its end. In
-/// between it meets each section where it first crosses the section's plane after the section
-/// before. The end is not a crossing: a rail that lies in the last section's plane (a keel drawn
-/// in the bow's sketch plane) crosses that plane all along, first at the far section, and meets the
-/// section only where it ends.
+/// A rail runs from the first section to the last. It meets each section but the last where it
+/// first crosses the section's plane after the section before, and the last where it last
+/// crosses that plane: the first crossing walking back from its end. A rail that ends in the
+/// last section's plane meets it at its end, so one that lies in that plane (a keel drawn in the
+/// bow's sketch plane), crossing it all along, meets the section only where it ends. A rail may
+/// run on past the last section (#17238), as it may start before the first: it meets the
+/// section where it crosses the plane, and the loft ends there.
 fn rail(pts: &[Vec3], start: Vec3, sections: &[Section], tol: f64) -> Result<Rail> {
     let mut pts =
         crate::sweep_path::clean(pts).map_err(|_| KernelError::Invalid("a guide rail needs 2…100000 finite points along its length".into()))?;
@@ -520,11 +522,15 @@ fn rail(pts: &[Vec3], start: Vec3, sections: &[Section], tol: f64) -> Result<Rai
     for (i, s) in sections.iter().enumerate() {
         let (plane, curves) = (&s.plane, &s.curves);
         let (hit, at) = if i + 1 == sections.len() {
-            let end = *pts.last().ok_or_else(|| not_reached(i))?;
-            if plane.height(end).abs() > tol {
+            // The reversed rail's segment k is the rail's segment n − 2 − k, run the other way.
+            let back: Vec<Vec3> = pts.iter().rev().copied().collect();
+            let (hit, (k, u)) = crate::sweep_path::rail_crossing(&back, plane.origin, plane.normal(), (0, 0.0), tol).ok_or_else(|| not_reached(i))?;
+            let at = (pts.len().saturating_sub(2).saturating_sub(k), 1.0 - u);
+            // The last crossing has to come after the section before.
+            if at < cursor {
                 return Err(not_reached(i));
             }
-            (end, (pts.len().saturating_sub(2), 1.0))
+            (hit, at)
         } else {
             crate::sweep_path::rail_crossing(&pts, plane.origin, plane.normal(), cursor, tol).ok_or_else(|| not_reached(i))?
         };
