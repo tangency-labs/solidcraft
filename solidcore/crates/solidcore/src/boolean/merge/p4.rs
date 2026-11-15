@@ -1865,6 +1865,15 @@ fn manifold_boolean_translated(
                 a,
                 &mut env,
             );
+            let removed = removed.and_then(|_| {
+                // Not upstream (#16640): the faces of no area between edges that coincide
+                // to within tolerance go too.
+                crate::topology::brep::p3::collapse_zero_area_two_edge_faces(
+                    &mut *kernels.primary,
+                    a,
+                    &mut env,
+                )
+            });
             a.set_editing_enabled(editing);
             removed?;
         }

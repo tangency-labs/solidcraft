@@ -60,17 +60,22 @@ pub struct EllipseArc {
 }
 
 /// Recognize the ellipse supporting a rational quadratic with endpoint weights 1.
-/// Weights close to 1 and degenerate/non-finite extractions return `None`; callers can
-/// retain the original rational curve. The axis ratio is never clamped into range.
+/// Weights close to 1, degenerate/non-finite extractions, and local displacements lost
+/// beyond their arithmetic rounding bound return `None`; callers can retain the original
+/// rational curve. The axis ratio is never clamped into range.
 pub fn conic_ellipse(a: Vec2, apex: Vec2, b: Vec2, w: f64) -> Option<EllipseArc> {
     if !(a.is_finite() && apex.is_finite() && b.is_finite() && w > 1e-9 && w < 1.0 - 1e-6) {
         return None;
     }
     let m = (a + b) * 0.5;
-    let center = m - (apex - m) * (w * w / (1.0 - w * w));
+    let factor = w * w / (1.0 - w * w);
+    let center = m - (apex - m) * factor;
     let alpha = w.acos();
     let left = m - center;
     let right = b - m;
+    if !conic_local_displacements_certified(a, apex, b, factor, left, right)? {
+        return None;
+    }
     let sin_alpha = alpha.sin();
     let (u, v) = (
         Vec2::new(left.x / w, left.y / w),
@@ -95,6 +100,78 @@ pub fn conic_ellipse(a: Vec2, apex: Vec2, b: Vec2, w: f64) -> Option<EllipseArc>
         start,
         end,
     })
+}
+
+// Bound the same construction in an apex-relative frame. Its local operation
+// roundoff is the budget; a large world-coordinate ULP cannot enlarge it. Compare
+// the original displacements against compensated expressions in the stored inputs.
+// Failure retains the original rational conic instead of emitting a changed arc.
+fn conic_local_displacements_certified(
+    a: Vec2,
+    apex: Vec2,
+    b: Vec2,
+    factor: f64,
+    left: Vec2,
+    right: Vec2,
+) -> Option<bool> {
+    for (a, apex, b, left, right) in [
+        (a.x, apex.x, b.x, left.x, right.x),
+        (a.y, apex.y, b.y, left.y, right.y),
+    ] {
+        let da = a - apex;
+        let db = b - apex;
+        let sum = da + db;
+        let local_midpoint = sum * 0.5;
+        let product = -local_midpoint * factor;
+        let local_center = local_midpoint - product;
+        if ![da, db, sum, local_midpoint, product, local_center]
+            .into_iter()
+            .all(f64::is_finite)
+        {
+            return None;
+        }
+        let midpoint_error = ellipse_bound_add(
+            ellipse_bound_mul(
+                ellipse_bound_add(
+                    ellipse_bound_add(rounding_radius(da), rounding_radius(db)),
+                    rounding_radius(sum),
+                ),
+                0.5,
+            ),
+            rounding_radius(local_midpoint),
+        );
+        let product_error = ellipse_bound_add(
+            ellipse_bound_mul(midpoint_error, factor.abs()),
+            rounding_radius(product),
+        );
+        let center_error = ellipse_bound_add(
+            ellipse_bound_add(midpoint_error, product_error),
+            rounding_radius(local_center),
+        );
+        let left_budget = ellipse_bound_add(
+            ellipse_bound_add(midpoint_error, center_error),
+            rounding_radius(local_midpoint - local_center),
+        );
+        let right_budget = ellipse_bound_add(
+            ellipse_bound_add(rounding_radius(db), midpoint_error),
+            rounding_radius(db - local_midpoint),
+        );
+        let a = EllipseScalar::exact(a)?;
+        let b = EllipseScalar::exact(b)?;
+        let midpoint = a.plus(b)?.exact_half()?;
+        let half_chord = b.minus(a)?.exact_half()?;
+        let offset = EllipseScalar::exact(apex)?.minus(midpoint)?;
+        let expected_left = offset.times(EllipseScalar::exact(factor)?)?;
+        for (expected, actual, budget) in [
+            (expected_left, left, left_budget),
+            (half_chord, right, right_budget),
+        ] {
+            if !expected.minus(EllipseScalar::exact(actual)?)?.fits(budget) {
+                return Some(false);
+            }
+        }
+    }
+    Some(true)
 }
 
 fn ellipse_axes(u: Vec2, v: Vec2) -> Option<(Vec2, Vec2, f64, f64)> {

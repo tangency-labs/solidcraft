@@ -3,12 +3,16 @@
 //! Not upstream. Relocated from the application DXF converter without changing arithmetic.
 //! Admission precedes recognition and conversion. A failed conversion returns no partial path;
 //! piece errors always refer to the original input, including after arc splitting or fitting.
+//! Arc degree conversion is bounded by canonical one-turn arithmetic roundoff before the
+//! caller's scalar encoding; an unreduced phase cannot enlarge that error budget.
 
 use std::f64::consts::{PI, TAU};
 
 use super::profile::{Loop2, Seg2, MAX_BEZIER_DEGREE};
-use super::recognition::{conic_ellipse, loop_circle, loop_ellipse, RecognitionVector};
-use crate::geom::certified::{next_down, next_up};
+use super::recognition::{
+    conic_ellipse, loop_circle, loop_ellipse, EllipseScalar, RecognitionVector,
+};
+use crate::geom::certified::{gamma, next_down, next_up};
 use crate::math::Vec2;
 
 /// A refused path conversion, including its original piece index when applicable.
@@ -418,6 +422,56 @@ fn ellipse_representable(
     minor.is_finite() && extent.is_finite() && (c - extent).is_finite() && (c + extent).is_finite()
 }
 
+// Certify the unchanged conversion against the error of evaluating a canonical
+// one-turn angle: one rounded 180/pi constant, one multiplication, and at most
+// one addition of 360 for a negative remainder. The budget never scales with
+// the unreduced input angle. A chord moves by at most radius * angular error.
+fn arc_degrees_certified(start: f64, sweep: f64, d0: f64, d1: f64) -> Option<bool> {
+    // PI + lo +/- 2^-105 encloses mathematical pi. The split is certified by
+    // pi = 16 atan(1/5) - 4 atan(1/239), with alternating rational remainder
+    // bounds; this radius is arithmetic uncertainty, not geometric tolerance.
+    let pi = EllipseScalar {
+        hi: PI,
+        lo: 1.2246467991473532e-16,
+        radius: 2.465190328815662e-32,
+    };
+    let degree_scale = EllipseScalar::exact(180.0)?.divided_by(pi)?;
+    let budget = next_up(next_up(next_up(gamma(2)) * 360.0) + (next_up(360.0) - 360.0) * 0.5);
+    let source_start = EllipseScalar::exact(start)?;
+    let source_end = source_start.plus(EllipseScalar::exact(sweep)?)?;
+    let endpoints = if sweep > 0.0 {
+        [(source_start, start, d0), (source_end, start + sweep, d1)]
+    } else {
+        [(source_end, start + sweep, d0), (source_start, start, d1)]
+    };
+    for (source_angle, rounded_angle, degrees) in endpoints {
+        // This is only an integer candidate. The enclosure proves its phase;
+        // an inaccurate quotient or exhausted precision produces a refusal.
+        let turns = ((rounded_angle.to_degrees() - degrees) / 360.0).round();
+        // Keep the exact source sum in the certificate; the rounded endpoint
+        // above only predicts the integral number of turns.
+        let residual = source_angle
+            .times(degree_scale)?
+            .minus(EllipseScalar::exact(turns)?.times(EllipseScalar::exact(360.0)?)?)?
+            .minus(EllipseScalar::exact(degrees)?)?;
+        if !residual.fits(budget) {
+            return Some(false);
+        }
+    }
+    // Also certify the directed span, so a wrap or a rounded start+sweep
+    // cannot silently select a different arc with individually close ends.
+    let mut written_span = EllipseScalar::exact(d1)?.minus(EllipseScalar::exact(d0)?)?;
+    if d1 < d0 {
+        written_span = written_span.plus(EllipseScalar::exact(360.0)?)?;
+    }
+    let source_span = EllipseScalar::exact(sweep.abs())?.times(degree_scale)?;
+    Some(
+        source_span
+            .minus(written_span)?
+            .fits(next_up(budget + budget)),
+    )
+}
+
 fn exact(seg: &Seg2, piece: Piece, encoding: ScalarEncoding) -> Result<DxfShape> {
     let shape = match *seg {
         Seg2::Line { a, b } => {
@@ -449,10 +503,16 @@ fn exact(seg: &Seg2, piece: Piece, encoding: ScalarEncoding) -> Result<DxfShape>
             } else {
                 (start + sweep, start)
             };
-            let (a0, a1) = (
+            let (d0, d1) = (
                 a0.to_degrees().rem_euclid(360.0),
                 a1.to_degrees().rem_euclid(360.0),
             );
+            if arc_degrees_certified(start, sweep, d0, d1) != Some(true) {
+                return Err(
+                    piece.invalid("arc degree endpoints exceed the angular rounding budget")
+                );
+            }
+            let (a0, a1) = (d0, d1);
             let encoded_a0 = encoded_scalar(a0, encoding)
                 .ok_or_else(|| piece.invalid("arc angle cannot be encoded"))?;
             let encoded_a1 = encoded_scalar(a1, encoding)
