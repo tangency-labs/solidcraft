@@ -522,7 +522,7 @@ fn polyline(points: &[[f64; 3]], ts: f64, te: f64, plane: &Plane, level: f64, to
 
 /// A circle (`o + r (cos t x + sin t y)`) from `ts` to `te`, ending at `a` and `b` in `plane`, as
 /// the arc it is: `None` when it doesn't lie in a plane parallel to `plane`. A whole circle comes
-/// back as its two halves.
+/// back as one arc of a full turn.
 #[allow(clippy::too_many_arguments)]
 fn circle(o: Vec3, x: Vec3, y: Vec3, radius: f64, ts: f64, te: f64, a: Vec2, b: Vec2, plane: &Plane, tol: f64) -> Option<Vec<Seg2>> {
     let n = plane.normal();
@@ -544,8 +544,7 @@ fn circle(o: Vec3, x: Vec3, y: Vec3, radius: f64, ts: f64, te: f64, a: Vec2, b: 
         return None;
     }
     if (sweep.abs() - std::f64::consts::TAU).abs() <= angular_tol {
-        let h = sweep.signum() * std::f64::consts::PI;
-        return Some(vec![Seg2::Arc { center, radius, start, sweep: h }, Seg2::Arc { center, radius, start: start + h, sweep: h }]);
+        return Some(vec![Seg2::Arc { center, radius, start, sweep: sweep.signum() * std::f64::consts::TAU }]);
     }
     Some(vec![Seg2::Arc { center, radius, start, sweep }])
 }
@@ -684,8 +683,7 @@ fn arc(
         if (sweep.abs() - std::f64::consts::TAU).abs() > angular_tol {
             return None;
         }
-        let h = sweep.signum() * std::f64::consts::PI;
-        Some(vec![Seg2::Arc { center, radius, start, sweep: h }, Seg2::Arc { center, radius, start: start + h, sweep: h }])
+        Some(vec![Seg2::Arc { center, radius, start, sweep: sweep.signum() * std::f64::consts::TAU }])
     } else {
         Some(vec![Seg2::Arc { center, radius, start, sweep }])
     }
