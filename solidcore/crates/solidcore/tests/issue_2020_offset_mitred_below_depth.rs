@@ -300,8 +300,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.offset_extension_from_base = true;
     k.fixes.offset_resolve_crossing_loops = true;
     k.fixes.offset_stitch_at_body_tolerance = true;
-    k.fixes.planar_path_profile_placement_statuses = true;
-    k.fixes.planar_path_sweep_statuses = true;
     k.fixes.point_solve_keeps_triangle_guess = true;
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
@@ -309,8 +307,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.revolution_round_offset_collapses = true;
     k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.revolve_holed_profile_void = true;
-    k.fixes.revolve_nested_shells_as_cavities = true;
-    k.fixes.revolve_splits_curves_on_axis = true;
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.simple_coincidence_crossing_is_point = true;
     k.fixes.ssi_low_angle_start_on_probation = true;

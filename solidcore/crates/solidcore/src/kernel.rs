@@ -634,26 +634,12 @@ pub struct UpstreamFixes {
     pub cylinder_rebuild_mean_radius: bool,
     /// `SmCylinder::IsNurbSurfaceCylinder` gives an inside-out NURB (its iso circles turning against the line through their centres) the frame `IsNurbSurfaceCone` gives one: Z against the NURB's linear direction, origin at its top-knot circle; upstream keeps the bottom-knot circle and the NURB's direction, so the cylinder's Z is reversed and its STEP evaluation is mirrored in height (WR-496, #1463).
     pub nurb_cylinder_inside_out_frame: bool,
-    /// `PositionProfileCurves` returns the first failing status of its two
-    /// `SmAxis2Placement::SetCanonical` calls, its three profile `Transform` calls and
-    /// `MakeUnitOrthoVectors`, instead of ignoring them and positioning the profiles
-    /// with the partial frame: a path start tangent whose squared length overflows
-    /// (a `1e300` component) unitizes to zero, `MakeUnitOrthoVectors` fails `SM_ERR`,
-    /// and upstream then transforms the profiles by an invalid partial frame (WR-632,
-    /// #483). The edits made before the first failure stay (no rollback); the identity
-    /// `SetCanonical` on the profile-normal frame (always successful upstream) is
-    /// elided. Off by default for pinned C++ parity.
-    pub planar_path_profile_placement_statuses: bool,
     /// A rotational sweep (whole or partial turn) makes each line and circular arc of its profile its cylinder, cone, sphere or torus, not only a one-curve profile's (WR-448, #545; SolidCraft change, tangency-labs/smlib 0b143f7 (commit not in fork history at 26cc451)).
     pub revolve_analytic_profile_faces: bool,
     /// A taper extrude with linear-extension (tangent) corners of a profile of lines and circular arcs with a sharp corner continues each wall as its tangent plane to meet its neighbour along their exact seam (a line's wall is its own plane, so two lines meet at a corner edge), and refuses a corner it cannot close (`create_taper_extrude_with_corner` reports why and where), instead of ruling separate corner faces from offset extension lines; with fillet corners, or a profile with another curve kind, nothing changes (WR-521, #1449; SolidCraft change, tangency-labs/smlib e8f23e0).
     pub taper_tangent_corner_planes: bool,
-    /// A full-turn rotational sweep makes a closed shell inside another solid its cavity (WR-403, #478).
-    pub revolve_nested_shells_as_cavities: bool,
-    /// With `revolve_nested_shells_as_cavities`, a full-turn rotational sweep whose stitch left one shell in the infinite region but nested the others itself (a profile with a hole: the hole's ring lies inside the ring around it, in that ring's region) sets every region's void flag from the nesting (`SetRegionIsVoidFlagsForNestedSolids`) when every shell is a closed face-use shell, so the hole's ring is a void, not material (WR-529; the fork's tangency-labs/smlib@38b4212).
+    /// A full-turn rotational sweep whose stitch left one shell in the infinite region but nested the others itself (a profile with a hole: the hole's ring lies inside the ring around it, in that ring's region) sets every region's void flag from the nesting (`SetRegionIsVoidFlagsForNestedSolids`) when every shell is a closed face-use shell, so the hole's ring is a void, not material (WR-529; the fork's tangency-labs/smlib@38b4212).
     pub revolve_holed_profile_void: bool,
-    /// A partial-turn rotational sweep first splits each profile curve where it meets the axis inside itself (`IntersectWithLine` on the axis at the B-rep tolerance, as `CheckCurveSweep` finds them), joining a closed curve's last piece back onto its first; upstream's `CheckCurveSweep` refuses such a curve (`SM_SC_ROT_ON_CURVE`) and the sweep fails with `SM_ERR`, so a whole circle tangent to the axis (a horn torus) turned part way fails unless its seam lies on the axis (WR-590; the fork's tangency-labs/smlib@e4f1377).
-    pub revolve_splits_curves_on_axis: bool,
     /// `SmTrimmingTools::OrderCurvesIntoLoops`, at a vertex where several curve ends meet (a hole whose corner touches the outline), goes on from the end (of a curve it has not used, or its first curve's start) whose leaving tangent comes next round the vertex from the arriving curve's, counterclockwise about one normal for the whole list, from the curves' area vectors and turned against the loops' area, so loops touching from outside each other close apart (ends leaving tangent to each other in the order they bend; tangency-labs/smlib@b0ee3f9). Upstream takes the first such end by index in the input, so the input order decides whether the loop closes, ends on a curve it already used (`SM_ERR`) or runs round the hole the wrong way, crossing itself and counting the hole as material (WR-591; the fork's tangency-labs/smlib@9209e76).
     pub loops_go_on_round_the_vertex: bool,
     /// `SmTrimmingTools::MirrorCurve` keeps the Euclidean control points `GetCanonical`
@@ -662,12 +648,6 @@ pub struct UpstreamFixes {
     /// `plan/upstream-issues/WR-98--addendum-2026-10-31-euclidean-mirror.md`). Off by
     /// default: the pinned C++ divides twice.
     pub mirror_curve_keeps_euclidean_control_points: bool,
-    /// A curve sweep along a closed path whose end sections lie on its start sections
-    /// (within the B-rep's tolerance) leaves both caps off, so the stitch joins the side
-    /// faces' end edges to their start edges: one closed tube, where upstream caps both
-    /// ends anyway and leaves two coincident caps, a second region, and a body booleans
-    /// cannot use (tangency-labs/solidcore#2192; SolidCraft #2005).
-    pub curve_sweep_closed_path_joins_ends: bool,
     /// `CreateLinearSweep` makes a circular arc short of a whole turn that is swept square to its plane an `SmCylinder` bounded 0..its sweep angle by 0..the distance, its frame turned to the arc's start (for a sweep against the arc's normal, to its end and then flipped), where upstream makes a cylinder only of a whole circle and an `SmSurfOfExtrusion` of any other arc; a sweep that is not square stays a surface of extrusion (WR-565, #1477; SolidCraft change, tangency-labs/smlib 12918e9).
     pub linear_sweep_arc_is_cylinder: bool,
     /// Planar faces from curves join a loop touching another loop at a vertex into that loop (WR-405, #892).
@@ -727,11 +707,6 @@ pub struct UpstreamFixes {
     pub bspline_trim_keeps_rational_end_spans: bool,
     /// The Boolean's topology intersector treats a self-loop proto edge whose ends a vertex definition on a vertex combined (`CanCombineVertexDefinitions`) as degenerate, instead of `SmProtoEdge::Resolve` splitting it onto that one vertex, after which `SmMerge::MakeFaceuse` returns `SM_ERR` (WR-214, #480; `plan/upstream-issues/WR-214--smprotoedge-resolve-splits-a-self-loop-proto-edge-onto-one.md`).
     pub proto_edge_self_loop_on_vertex_degenerate: bool,
-    /// Planar path sweeps propagate mandatory operation failures and delete their
-    /// owned temporary B-reps on failure (#483); the mitre's `BrepIntersect` and
-    /// `GlobalCurveSolve` searches are returned too, as the fork does (tangency-labs/smlib
-    /// c8f6a31; changed by #2009 group C, WR-662). Off by default for pinned compatibility.
-    pub planar_path_sweep_statuses: bool,
     /// The B-rep's own edits, its `StitchAndOrient`, the offset and shell stitches and the
     /// Boolean merge, stitch and topology-intersection passes pass on the statuses SMLib
     /// drops: a failed list edit, evaluation, trim, stitch or orientation returns its error
@@ -752,8 +727,8 @@ pub struct UpstreamFixes {
     /// stitch or orientation returns its error instead of the sweep carrying on with an
     /// unset value and reporting success (WR-662, #2009 group C; tangency-labs/smlib
     /// c8f6a31). Complements the path-curve statuses pivot selection and path extension
-    /// always return (#483), `planar_path_sweep_statuses` and
-    /// `planar_path_profile_placement_statuses`. Off by default for pinned parity.
+    /// always return (#483), and the planar-path sweep and profile placement statuses
+    /// that always return (WR-632). Off by default for pinned parity.
     pub sweep_statuses_pass_on: bool,
     /// Surface/surface intersection and proto-topology pass on the statuses SMLib drops;
     /// where a helper answers a question it answers "no" when a point it compares cannot

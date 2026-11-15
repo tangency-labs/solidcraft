@@ -85,7 +85,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.cylinder_rebuild_mean_radius = true;
     f.revolve_analytic_profile_faces = true;
     f.taper_tangent_corner_planes = true;
-    f.revolve_nested_shells_as_cavities = true;
     f.revolve_holed_profile_void = true;
     f.join_touching_loops = true;
     f.offset_resolve_crossing_loops = true;
@@ -139,7 +138,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.boolean_new_face_closure_both_sides = true;
     f.linear_sweep_arc_is_cylinder = true;
     f.loops_go_on_round_the_vertex = true;
-    f.revolve_splits_curves_on_axis = true;
     f.fillet_trace_reaches_rails = true;
     f.delete_vertex_joins_seam_iso_curve = true;
     f.box_face_failures_propagate = true;
@@ -156,8 +154,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ssi_low_angle_start_on_probation = true;
     f.fillet_variable_span_follows_fillet = true;
     f.simple_coincidence_crossing_is_point = true;
-    f.planar_path_sweep_statuses = true;
-    f.planar_path_profile_placement_statuses = true;
     f.fillet_trim_status = true;
     f.brep_edit_statuses_pass_on = true;
     f.fillet_run_on_bspline_trims = true;
@@ -191,7 +187,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.geometric_g2_continuity = true;
     f.degen_param_tiebreak_uses_actual_param = true;
     f.local_surface_intersect_guards_max_boundary_retry = true;
-    f.curve_sweep_closed_path_joins_ends = true;
     f.validate_tolerances_fixes_reported_gaps = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
