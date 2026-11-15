@@ -1469,6 +1469,14 @@ impl FilletBrep {
 
                 i_try += 1;
                 let last_tsp_idx = tsect_pnts.len().saturating_sub(1);
+                // Not upstream (#17016): on a closed solver edge the points are in the order
+                // the geometry runs, exactly: by their parameter along the edge, a piece that
+                // crosses the edge's seam taking its points past the seam one period on (above).
+                // A point on a closed surface's seam then only needs its UV moved to the
+                // seam's other side; upstream's sm_MoveTSP would also reorder it by the traced
+                // curve's tangent at the first point, whose sense need not be the march's (the
+                // tangent the intersector reports runs either way along the curve), and so
+                // put a piece's seam end before its start.
                 // sm_CheckSeamOn(pSurf, sTsectPnts[i]->UVPos(which), ..) takes the UV by
                 // reference: a point on a seam moves to the other side in the vertex
                 // use's own SmTsectPnt, which the next DoPointIntersection try traces
@@ -1491,11 +1499,13 @@ impl FilletBrep {
                 // case 1 .. 4 fall through to the next when not on a seam
                 if i_try == 1 {
                     if on_seam(self, &off(&*solver, 0)?, 0, SrfIndex::First, surf_closure1)? {
-                        // fork 9b7cd48 passes this on (SER)
-                        ignore_status(crate::error::passed_on(
-                            move_tsp(&mut tsect_pnts, 0, last_tsp_idx, |vu| self.tsect_of(*vu)),
-                            k.fixes.fillet_statuses_pass_on,
-                        )?)?;
+                        if !is_closed_solver_edge {
+                            // fork 9b7cd48 passes this on (SER)
+                            ignore_status(crate::error::passed_on(
+                                move_tsp(&mut tsect_pnts, 0, last_tsp_idx, |vu| self.tsect_of(*vu)),
+                                k.fixes.fillet_statuses_pass_on,
+                            )?)?;
+                        }
                         continue;
                     }
                     i_try += 1;
@@ -1508,22 +1518,26 @@ impl FilletBrep {
                         SrfIndex::First,
                         surf_closure1,
                     )? {
-                        // fork 9b7cd48 passes this on (SER)
-                        ignore_status(crate::error::passed_on(
-                            move_tsp(&mut tsect_pnts, last_tsp_idx, 0, |vu| self.tsect_of(*vu)),
-                            k.fixes.fillet_statuses_pass_on,
-                        )?)?;
+                        if !is_closed_solver_edge {
+                            // fork 9b7cd48 passes this on (SER)
+                            ignore_status(crate::error::passed_on(
+                                move_tsp(&mut tsect_pnts, last_tsp_idx, 0, |vu| self.tsect_of(*vu)),
+                                k.fixes.fillet_statuses_pass_on,
+                            )?)?;
+                        }
                         continue;
                     }
                     i_try += 1;
                 }
                 if i_try == 3 {
                     if on_seam(self, &off(&*solver, 1)?, 0, SrfIndex::Second, surf_closure2)? {
-                        // fork 9b7cd48 passes this on (SER)
-                        ignore_status(crate::error::passed_on(
-                            move_tsp(&mut tsect_pnts, 0, last_tsp_idx, |vu| self.tsect_of(*vu)),
-                            k.fixes.fillet_statuses_pass_on,
-                        )?)?;
+                        if !is_closed_solver_edge {
+                            // fork 9b7cd48 passes this on (SER)
+                            ignore_status(crate::error::passed_on(
+                                move_tsp(&mut tsect_pnts, 0, last_tsp_idx, |vu| self.tsect_of(*vu)),
+                                k.fixes.fillet_statuses_pass_on,
+                            )?)?;
+                        }
                         continue;
                     }
                     i_try += 1;
@@ -1537,11 +1551,13 @@ impl FilletBrep {
                         surf_closure2,
                     )?
                 {
-                    // fork 9b7cd48 passes this on (SER)
-                    ignore_status(crate::error::passed_on(
-                        move_tsp(&mut tsect_pnts, last_tsp_idx, 0, |vu| self.tsect_of(*vu)),
-                        k.fixes.fillet_statuses_pass_on,
-                    )?)?;
+                    if !is_closed_solver_edge {
+                        // fork 9b7cd48 passes this on (SER)
+                        ignore_status(crate::error::passed_on(
+                            move_tsp(&mut tsect_pnts, last_tsp_idx, 0, |vu| self.tsect_of(*vu)),
+                            k.fixes.fillet_statuses_pass_on,
+                        )?)?;
+                    }
                     continue;
                 }
                 // case 4 without a seam, and default: that's all.
