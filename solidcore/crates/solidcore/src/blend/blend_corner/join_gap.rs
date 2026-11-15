@@ -464,7 +464,9 @@ fn ruling_tilt(surface: &Surface, normal: Vec3) -> Result<Option<f64>> {
         }
     }
     if nu == 2 && net.degree(SurfParamType::U) == 1 && points.len() == 2 * nv {
-        let (first, second) = points.split_at(nv);
+        let (Some(first), Some(second)) = (points.get(..nv), points.get(nv..)) else {
+            return Ok(None);
+        };
         let rungs = first.iter().zip(second).map(|(a, b)| (*a, *b));
         return Ok(rungs_tilt(rungs, nv, normal));
     }
