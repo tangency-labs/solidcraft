@@ -313,21 +313,28 @@ fn a_read_refuses_identities_that_name_no_object() {
         key: ObjectKey(7),
         ..notify_ref(e)
     };
+    let cases: [(&dyn Fn(EntityRef) -> ObjectRef, &str); 2] = [
+        (
+            &untyped,
+            "an object identity does not carry its object's type code",
+        ),
+        (&shared, "two objects share one identity"),
+    ];
     for pass_on in [false, true] {
-        for key_of in [&untyped as &dyn Fn(EntityRef) -> ObjectRef, &shared] {
+        for (key_of, expected) in cases {
             let mut k = Kernel::default();
             k.fixes.brep_edit_statuses_pass_on = pass_on;
             let (r, _) = read_box(&mut k, key_of);
-            assert!(
-                matches!(
-                    r,
-                    Err(SolidError::InvalidInput {
-                        operation: "topology::brep::p10::make_topology_from_data",
-                        ..
-                    })
-                ),
-                "pass_on {pass_on}: {r:?}"
-            );
+            match r {
+                Err(SolidError::InvalidInput { operation, reason }) => {
+                    assert_eq!(
+                        operation, "topology::brep::p10::make_topology_from_data",
+                        "pass_on {pass_on}"
+                    );
+                    assert_eq!(reason, expected, "pass_on {pass_on}");
+                }
+                r => panic!("pass_on {pass_on}: expected {expected:?}, got {r:?}"),
+            }
         }
     }
 }

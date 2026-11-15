@@ -239,12 +239,10 @@ fn a_gap_between_faces_is_closed_by_its_strips() {
 /// the upstream test files are not present.
 fn nurb_fillet(k: &mut Kernel) -> Option<Brep> {
     use solidcore::geom::attribute::AttributeStore;
-
     use solidcore::topology::brep::p10::TopologyEnv;
     use solidcore::topology::brep::p7::read_from_file;
     use solidcore::topology::database_io::FileType;
     use solidcore::topology::topology::NotifyRecords;
-
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../upstream/TestFiles/pt_TestFiles/Solids/nurb_fillet.smb");
     let Ok(bytes) = std::fs::read(&path) else {

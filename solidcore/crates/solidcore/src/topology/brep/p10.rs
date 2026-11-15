@@ -537,13 +537,17 @@ fn make_topology(
 ///
 /// # Errors
 ///
-/// Those of the healer and of binding the UV trims it makes.
+/// [`SolidError::InvalidInput`] for identities that do not name each object of `b`
+/// distinctly under its own type code (as [`make_topology_from_data`] refuses them);
+/// those of the healer and of binding the UV trims it makes.
 pub fn heal_made(
     k: &mut Kernel,
     b: &mut Brep,
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
     make_uv_trim_curves: bool,
 ) -> Result<()> {
+    // the healer resolves geometry owners through these identities
+    check_identities(b, key_of)?;
     // Run the Assert/Heal sequences as needed (status ignored upstream)
     p1::heal_brep(
         k,
