@@ -58,6 +58,48 @@ fn lines_align_left_center_or_right_on_the_anchor() {
     assert!((left.0.y - center.0.y).abs() < 1e-12, "alignment moves lines along, not up");
 }
 
+/// #16738: a text box lays the lines out inside its own width, so left, centre and right align
+/// to the box's edges instead of to the text's own start.
+#[test]
+fn a_text_box_sets_the_lines_inside_its_own_width() {
+    let w = 100.0;
+    let boxed = |align: TextAlign| points(&styled("HH", &TextStyle { align, width: Some(w), ..TextStyle::default() }, None));
+    let plain = |align: TextAlign| points(&styled("HH", &TextStyle { align, ..TextStyle::default() }, None));
+    // Left: the text still starts at the box's left edge, where it started without a box.
+    let (left, plain_left) = (boxed(TextAlign::Left), plain(TextAlign::Left));
+    assert!(left.iter().zip(&plain_left).all(|(p, q)| p.dist(*q) < 1e-9), "{left:?} {plain_left:?}");
+    // Centre: the text moves half the box's width along, so it sits in the middle of the box.
+    let (center, plain_center) = (boxed(TextAlign::Center), plain(TextAlign::Center));
+    assert!(
+        center.iter().zip(&plain_center).all(|(p, q)| (p.x - q.x - w / 2.0).abs() < 1e-9 && (p.y - q.y).abs() < 1e-9),
+        "{center:?} {plain_center:?}"
+    );
+    // Right: the text moves the box's whole width along, so it ends at the box's right edge.
+    let (right, plain_right) = (boxed(TextAlign::Right), plain(TextAlign::Right));
+    assert!(right.iter().zip(&plain_right).all(|(p, q)| (p.x - q.x - w).abs() < 1e-9 && (p.y - q.y).abs() < 1e-9), "{right:?} {plain_right:?}");
+    // Every line of a text box is laid out in the box: two lines of different lengths move alike.
+    let two = |width| points(&styled("H\nHH", &TextStyle { align: TextAlign::Right, width, ..TextStyle::default() }, None));
+    let (two, plain_two) = (two(Some(w)), two(None));
+    assert!(two.iter().zip(&plain_two).all(|(p, q)| (p.x - q.x - w).abs() < 1e-9 && (p.y - q.y).abs() < 1e-9), "{two:?} {plain_two:?}");
+}
+
+#[test]
+fn a_text_box_width_must_be_positive() {
+    for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let style = TextStyle { width: Some(bad), ..TextStyle::default() };
+        assert!(text_geometry_styled(None, "H", Vec2::ZERO, 10.0, 0.0, &style, None).is_err(), "{bad}");
+    }
+}
+
+/// A text on a path is placed by the path: a text box does not move it along the curve.
+#[test]
+fn text_on_a_path_keeps_its_place_when_it_has_a_text_box() {
+    let path = [v(0.0, 0.0), v(100.0, 0.0)];
+    let on = |width| points(&styled("Hi", &TextStyle { path: Some("l".into()), width, ..TextStyle::default() }, Some(&path)));
+    let (a, b) = (on(None), on(Some(100.0)));
+    assert!(a.iter().zip(&b).all(|(p, q)| p.dist(*q) < 1e-9), "{a:?} {b:?}");
+}
+
 #[test]
 fn the_block_of_lines_sits_on_its_baseline_top_middle_or_bottom() {
     let at = |text: &str, vertical_align: TextVerticalAlign| extent(&styled(text, &TextStyle { vertical_align, ..TextStyle::default() }, None));
@@ -223,12 +265,14 @@ fn a_style_is_saved_only_when_it_is_not_plain_and_reads_back() {
             line_spacing: 1.5,
             path: Some("l3".into()),
             reverse: true,
+            width: Some(40.0),
         },
         exprs: Default::default(),
     };
     let json = serde_json::to_value(&styled).unwrap();
     assert_eq!(json["style"]["align"], "right");
     assert_eq!(json["style"]["vertical_align"], "bottom");
+    assert_eq!(json["style"]["width"], 40.0);
     assert_eq!(serde_json::from_value::<LinkSource>(json).unwrap(), styled);
     // Saved without a style (before styles): plain.
     let mut old = serde_json::to_value(&plain).unwrap();

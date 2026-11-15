@@ -1409,6 +1409,15 @@ fn text_line_spacing_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1e9})
 }
 
+/// The width of a text's box in mm (above 0); `null` takes the box away.
+fn text_width<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    nullable(d, |v| v.as_f64().and_then(params::finite).filter(|w| *w > 0.0).map_or_else(|| refuse("`width` must be a positive length in mm"), Ok))
+}
+
+fn text_width_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1e9})
+}
+
 fn text_path<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     nullable(d, |v| match v {
         Value::String(c) => Ok(c),
@@ -1490,6 +1499,12 @@ pub struct TextKeys {
     #[serde(default, deserialize_with = "text_path", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "string_schema")]
     pub path: Option<String>,
+    /// The width of the box the text is laid out in, in mm (above 0): its lines are aligned to
+    /// the box's edges, so left, centre and right justify against them. `null` takes the box
+    /// away and the text hangs from its start. When editing, kept when left out.
+    #[serde(default, deserialize_with = "text_width", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "text_width_schema")]
+    pub width: Option<f64>,
 }
 
 /// The text keys of `value`, with the handler's messages: `text` and `text_expression` together

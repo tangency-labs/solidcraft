@@ -265,6 +265,7 @@ fn creation_schemas_and_the_key_check_agree() {
             "sketch",
             "text",
             "text_expression",
+            "width",
         ],
     );
     assert_keys(
@@ -288,6 +289,7 @@ fn creation_schemas_and_the_key_check_agree() {
             "sketch",
             "text",
             "text_expression",
+            "width",
         ],
     );
     // Every command has a contract and an output schema, and the edit's items too.

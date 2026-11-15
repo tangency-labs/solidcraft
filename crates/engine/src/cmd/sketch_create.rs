@@ -9,7 +9,7 @@ use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, Shape, 
 /// The style parameters of `sketch.text` and `sketch.edit_text`.
 macro_rules! text_style_doc {
     () => {
-        "bold?, italic?: bool (an installed family's bold or italic face; italic without one is slanted), align?: left|center|right (the lines against `at`, or along the path), vertical_align?: baseline|top|middle|bottom (the block of lines against `at` or the path: the first line's baseline (default), its capitals' tops, halfway between those and the last line's baseline, or the bottom of the last line's descenders), letter_spacing?: extra mm between letters, line_spacing?: times the font's line distance (default 1), path?: a curve id of the sketch the baseline follows (\"\": none; `at` and `angle` then do not place the text; the curve becomes construction, a guide the letters stand on), reverse?: bool (the other way along the path)"
+        "bold?, italic?: bool (an installed family's bold or italic face; italic without one is slanted), align?: left|center|right (the lines against `at`, or along the path), vertical_align?: baseline|top|middle|bottom (the block of lines against `at` or the path: the first line's baseline (default), its capitals' tops, halfway between those and the last line's baseline, or the bottom of the last line's descenders), letter_spacing?: extra mm between letters, line_spacing?: times the font's line distance (default 1), path?: a curve id of the sketch the baseline follows (\"\": none; `at` and `angle` then do not place the text; the curve becomes construction, a guide the letters stand on), reverse?: bool (the other way along the path), width?: mm of the box the text is laid out in (the lines are aligned to its edges, so left, center and right justify against them; null: no box, the text hangs from its start; kept when left out)"
     };
 }
 
@@ -310,6 +310,14 @@ fn text_style(p: &Value, cmd: &str, old: TextStyle) -> Result<TextStyle> {
         Some(Value::String(c)) if c.trim().is_empty() => style.path = None,
         Some(Value::String(c)) => style.path = Some(c.trim().to_string()),
         Some(_) => return Err(bad(cmd, "`path` must be a curve id")),
+    }
+    // A text box: `null` takes it away, a number sets its width. Left out, the old box stays.
+    match p.get("width") {
+        None => {}
+        Some(Value::Null) => style.width = None,
+        Some(_) => {
+            style.width = Some(num(p, "width").filter(|v| *v > 0.0).ok_or_else(|| bad(cmd, "`width` must be a positive length in mm"))?);
+        }
     }
     Ok(style)
 }

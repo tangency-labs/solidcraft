@@ -185,6 +185,10 @@ pub struct TextStyle {
     /// Along the path the other way round, so the text sits on its other side.
     #[serde(default, skip_serializing_if = "is_false")]
     pub reverse: bool,
+    /// The width (mm) of the box the text is laid out in: its lines are aligned to the box's
+    /// edges, not to the text's own start. Without one, the text hangs from its start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<f64>,
 }
 
 impl Default for TextStyle {
@@ -198,6 +202,7 @@ impl Default for TextStyle {
             line_spacing: 1.0,
             path: None,
             reverse: false,
+            width: None,
         }
     }
 }
@@ -234,6 +239,11 @@ const LINE_SPACING_RANGE: (f64, f64) = (0.05, 100.0);
 /// A capital height (mm) text can be set at: finite, above a micrometre and below a kilometre.
 pub(crate) fn check_height(height: f64) -> Result<()> {
     if height.is_finite() && height > 1e-6 && height < 1e6 { Ok(()) } else { Err(SketchError::Invalid("text height must be positive".into())) }
+}
+
+/// The width (mm) of a text's box: finite, above a micrometre and below a kilometre, as a height.
+fn check_width(width: f64) -> Result<()> {
+    if width.is_finite() && width > 1e-6 && width < 1e6 { Ok(()) } else { Err(SketchError::Invalid("the text box width must be positive".into())) }
 }
 
 /// A style's spacing: a finite letter spacing of at most [`MAX_LETTER_SPACING`] either way, and a line spacing in
@@ -535,6 +545,9 @@ pub fn text_geometry_styled(
         return Err(SketchError::Invalid("the text's place and angle must be finite".into()));
     }
     check_spacing(style)?;
+    if let Some(width) = style.width {
+        check_width(width)?;
+    }
     let (data, slant) = font_data_styled(font, style.bold, style.italic)?;
     let metrics = TextMetrics::new(&data, style)?;
     let (k, pitch) = (metrics.scale(height)?, metrics.line_pitch(height)?);
@@ -543,11 +556,23 @@ pub fn text_geometry_styled(
     let anchor = along.as_ref().map(|p| p.anchor(style.align)).unwrap_or(0.0);
     let (sin, cos) = angle.sin_cos();
     let lift = style.vertical_align.shift(text.split('\n').count(), height, pitch, metrics.descent(height)?);
+    // A text box sets the lines inside its own width, so their alignment is measured from its
+    // edges. Text on a path keeps the path's anchor, which already places it along the curve.
+    let box_width = if along.is_none() { style.width } else { None };
     let mut out = Vec::new();
     for (row, line) in text.split('\n').enumerate() {
         let base_y = lift - (row as f64) * pitch;
         let laid = metrics.laid_out(line, k);
-        let start = style.align.start(laid.width);
+        // A text box sets the lines inside its own width, so their alignment is measured from
+        // its edges. Without a box the text hangs from its start, as it always did.
+        let start = match box_width {
+            Some(w) => match style.align {
+                TextAlign::Left => 0.0,
+                TextAlign::Center => (w - laid.width) / 2.0,
+                TextAlign::Right => w - laid.width,
+            },
+            None => style.align.start(laid.width),
+        };
         for Glyph { id: gid, x, advance, rise, .. } in laid.glyphs {
             // The glyph's frame: its origin on the baseline and the way the baseline runs.
             let (origin, dir) = match &along {
