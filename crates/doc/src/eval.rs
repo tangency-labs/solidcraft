@@ -10685,7 +10685,12 @@ fn eval_feature(
             st.bodies.push(ModelBody::traced_new(name, b, f.id));
             Ok(())
         }
-        FeatureKind::Move { bodies, translate, rotate_axis, origin, angle, copy } => {
+        FeatureKind::Move { bodies, translate, rotate_axis, origin, angle, copy, copy_frames } => {
+            if !copy_frames.is_empty()
+                && (!*copy || copy_frames.len() != bodies.len() || copy_frames.iter().any(|m| !crate::valid_transfer_matrix(m)))
+            {
+                return Err(DocError::Invalid("invalid Move copy placements".into()));
+            }
             let t =
                 Vec3::new(val(vals, &translate[0], Kind::Length)?, val(vals, &translate[1], Kind::Length)?, val(vals, &translate[2], Kind::Length)?);
             let ang = match angle {
@@ -10702,9 +10707,16 @@ fn eval_feature(
                 let Some(mb) = st.bodies.get(i).cloned() else { continue };
                 let nb = kernel::transform(&mb.body, t, origin, axis, ang)?;
                 if *copy {
+                    let mut motion = crate::rigid(t, origin, axis, ang);
+                    let nb = if let Some(frame) = copy_frames.get(output).filter(|m| !crate::is_identity(m)) {
+                        motion = crate::mat_mul(frame, &motion);
+                        kernel::transform_matrix(&nb, *frame)?
+                    } else {
+                        nb
+                    };
                     let traced = moved_copy(&mb, nb, 1);
                     let name = copy_body_name(st, f, output, &mb.name);
-                    copy_sheet(st, &mb.name, &name, &crate::rigid(t, origin, axis, ang));
+                    copy_sheet(st, &mb.name, &name, &motion);
                     st.bodies.push(ModelBody::traced_new(name, traced, f.id));
                     output += 1;
                 } else if let Some(slot) = st.bodies.get_mut(i) {

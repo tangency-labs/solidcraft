@@ -1532,6 +1532,34 @@ fn editing_a_placed_body_move_preserves_its_world_transform() {
     assert!(before.min.dist(after.min) < 1e-6 && before.max.dist(after.max) < 1e-6, "{before:?} -> {after:?}");
 }
 
+#[test]
+fn editing_a_copy_of_a_turned_instance_keeps_its_captured_frame() {
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+    s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 8, "body_name": "B"})).unwrap();
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    let occurrence = s.execute("occurrence.copy", &json!({"component": "Part", "translate": [100, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    s.execute("occurrence.move", &json!({"occurrence": occurrence, "axis": [0, 0, 1], "angle": "90 deg"})).unwrap();
+    let name = s.occurrence_bodies(&[occurrence], true).unwrap().remove(0);
+    let reply = s.execute("solid.move", &json!({"bodies": [name], "copy": true, "translate": [5, 0, 0]})).unwrap();
+    let id = reply["feature"].as_u64().unwrap();
+    let copy = reply["created_bodies"][0].as_str().unwrap();
+    let before = s.world_state().unwrap().body(copy).unwrap().body.exact_bounds().unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    let d = crate::dialogs::for_feature(&app, id, None).unwrap();
+    let Kind::Move { x, y, z, .. } = &d.kind else { panic!("not a move") };
+    let shown = Vec3::new(len(&app, x).unwrap(), len(&app, y).unwrap(), len(&app, z).unwrap());
+    assert!(shown.dist(Vec3::new(5.0, 0.0, 0.0)) < 1e-7, "{shown:?}");
+    let commands = crate::dialogs::preview_commands(&app, &d).unwrap();
+    let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get());
+    assert!(crate::move_preview::MovePreview::default().compute(&app, &commands, colors).is_none(), "captured copies use the evaluated preview");
+    for (command, params) in crate::dialogs::apply_commands(&app, &d).unwrap() {
+        app.run(&command, params).unwrap();
+    }
+    let after = app.session.world_state().unwrap().body(copy).unwrap().body.exact_bounds().unwrap();
+    assert!(before.min.dist(after.min) < 1e-7 && before.max.dist(after.max) < 1e-7, "{before:?} -> {after:?}");
+}
+
 /// The rings stay on the world axes, so a turn dragged on one goes about the axis it shows, on
 /// top of the turns already made. It went about that axis as the earlier turn had left it, when
 /// the angles always applied about X, then Y, then Z. The body's centre stays where it is.

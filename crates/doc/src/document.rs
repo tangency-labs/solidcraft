@@ -2188,6 +2188,10 @@ pub enum FeatureKind {
         /// of each instead of moving them in place.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         copy: bool,
+        /// For each copied body, its captured source frame in the copy's component. Applied
+        /// after the source-local move. Empty in older designs, which copy local geometry.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        copy_frames: Vec<crate::Mat>,
     },
     /// A non-parametric base feature: bodies imported from a STEP file. The STEP text is kept
     /// in the design (it is the B-rep), so the design reopens without the original file.
