@@ -1380,9 +1380,11 @@ impl Body {
             }
             let first = *pts.first()?;
             let center = plane.to_local(origin + axis * (first - origin).dot(axis));
-            // A quick reject on the samples: their angle must keep going one way.
+            // A quick reject on the samples: their angle must keep going one way, and no more
+            // than once round.
             let angles: Vec<f64> = pts.iter().map(|p| (plane.to_local(*p) - center).angle()).collect();
             let mut sign = 0.0;
+            let mut sampled = 0.0;
             for w in angles.windows(2) {
                 let [a, b] = w else { continue };
                 let d = (b - a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
@@ -1393,6 +1395,10 @@ impl Body {
                     return None;
                 }
                 sign = d.signum();
+                sampled += d;
+            }
+            if sampled.abs() > std::f64::consts::TAU + tol / radius {
+                return None;
             }
             // The proof (solidcore): the edge turns one way round the axis all along its
             // interval, the same way the samples went; else no arc, and the caller fits.
@@ -1416,6 +1422,11 @@ impl Body {
                 }
                 if turn > 0.0 { d } else { d - std::f64::consts::TAU }
             };
+            // The vertices' sweep is only taken where the samples agree with it: an edge that
+            // winds past a full turn (a helix seen along its axis) is no arc.
+            if (sampled - sweep).abs() > std::f64::consts::FRAC_PI_2 {
+                return None;
+            }
             Some(vec![solidcore_record::Seg2::Arc { center, radius, start, sweep }])
         })
     }
