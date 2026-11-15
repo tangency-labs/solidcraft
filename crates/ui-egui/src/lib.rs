@@ -254,6 +254,8 @@ mod plugin_images;
 pub mod plugin_install;
 pub(crate) mod plugin_menu;
 mod plugin_slots;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod plugin_shaders;
 pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod policy;
@@ -870,6 +872,9 @@ pub struct SolveApp {
     pub mesh_units: Option<mesh_units::Ask>,
     /// The Plugins menu and the open plugin entry dialog (`plugin_menu`).
     pub(crate) plugin_menu: plugin_menu::State,
+    /// The view background a plugin draws (`shaders@0.1`), when one is chosen.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) plugin_shaders: plugin_shaders::State,
     /// The bodies of a just-opened Y-up file, offered to be stood up (`stand_up`).
     pub stand_up: Option<Vec<String>>,
     /// The placement of the component that file came in as: the offer turns it.
@@ -1177,6 +1182,8 @@ impl SolveApp {
             quick_measure: Default::default(),
             mesh_units: None,
             plugin_menu: Default::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            plugin_shaders: Default::default(),
             stand_up: None,
             stand_up_occurrence: None,
             stand_up_digest: None,
@@ -1349,6 +1356,8 @@ impl SolveApp {
         if safe_graphics::blur(self) {
             self.blur.install(rs, built.blur);
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.plugin_shaders.install(rs);
         if built.msaa_fallback {
             self.msaa_compatibility = true;
         }

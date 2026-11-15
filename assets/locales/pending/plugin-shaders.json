@@ -1,0 +1,44 @@
+{
+  "en": {
+    "plugin_install.shaders": "Background effects for the 3D view: {names}",
+    "prefs.background_shader": "Background effect",
+    "prefs.background_shader_failed": "Couldn't draw the background effect",
+    "prefs.background_shader_missing": "its plugin is not installed or is turned off",
+    "prefs.background_shader_none": "None"
+  },
+  "ar": {
+    "plugin_install.shaders": "تأثيرات خلفية للعرض ثلاثي الأبعاد: {names}",
+    "prefs.background_shader": "تأثير الخلفية",
+    "prefs.background_shader_failed": "تعذّر رسم تأثير الخلفية",
+    "prefs.background_shader_missing": "الإضافة الخاصة به غير مثبتة أو معطّلة",
+    "prefs.background_shader_none": "بلا"
+  },
+  "he": {
+    "plugin_install.shaders": "אפקטי רקע לתצוגת התלת־ממד: {names}",
+    "prefs.background_shader": "אפקט רקע",
+    "prefs.background_shader_failed": "לא ניתן היה לצייר את אפקט הרקע",
+    "prefs.background_shader_missing": "התוסף שלו אינו מותקן או כבוי",
+    "prefs.background_shader_none": "ללא"
+  },
+  "ja": {
+    "plugin_install.shaders": "3D ビューの背景エフェクト: {names}",
+    "prefs.background_shader": "背景エフェクト",
+    "prefs.background_shader_failed": "背景エフェクトを描画できませんでした",
+    "prefs.background_shader_missing": "そのプラグインがインストールされていないか、オフになっています",
+    "prefs.background_shader_none": "なし"
+  },
+  "vi": {
+    "plugin_install.shaders": "Hiệu ứng nền cho khung nhìn 3D: {names}",
+    "prefs.background_shader": "Hiệu ứng nền",
+    "prefs.background_shader_failed": "Không thể vẽ hiệu ứng nền",
+    "prefs.background_shader_missing": "plugin của nó chưa được cài đặt hoặc đang tắt",
+    "prefs.background_shader_none": "Không có"
+  },
+  "zh": {
+    "plugin_install.shaders": "三维视图的背景效果：{names}",
+    "prefs.background_shader": "背景效果",
+    "prefs.background_shader_failed": "无法绘制背景效果",
+    "prefs.background_shader_missing": "其插件未安装或已关闭",
+    "prefs.background_shader_none": "无"
+  }
+}

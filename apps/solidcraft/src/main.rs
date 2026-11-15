@@ -1761,6 +1761,15 @@ fn main() -> eframe::Result {
             // A design that stopped the last session while it was being reopened is skipped this
             // time, so one bad file cannot brick every launch (#5064).
             app.reopen_guard_dir = recovery_dir.clone();
+            // A plugin's background effect may be what the driver gave up on: after a lost device
+            // it starts turned off, and the note says so.
+            if after_loss && !app.preferences.background_shader.is_empty() {
+                notes.push(format!(
+                    "The background effect {} was turned off in case it caused the reset; turn it on again in Preferences > Appearance.",
+                    app.preferences.background_shader
+                ));
+                app.preferences.background_shader.clear();
+            }
             let files = if files.is_empty() && !sample && control_port.is_none() {
                 let (reopen, skipped) = solidcraft_ui_egui::documents::reopen_plan(&app, recovery_dir.as_deref());
                 if !skipped.is_empty() {
