@@ -1405,7 +1405,11 @@ impl crate::SolveApp {
                 }
             });
         // Legacy drawing chrome needs the measured ribbon and Browser bounds.
-        if crate::drawing_workspace::active(self) && self.preferences.drawing_sheets_visibility == "legacy" {
+        if crate::drawing_workspace::active(self)
+            && self.preferences.drawing_sheets_visibility == "legacy"
+            && render_domain.is_positive()
+            && render_domain.is_finite()
+        {
             let mut bounds = render_domain;
             if let Some(bottom) = self.shell.cards.iter().map(egui::Rect::bottom).max_by(f32::total_cmp) {
                 bounds.min.y = bottom.clamp(bounds.top(), bounds.bottom());
