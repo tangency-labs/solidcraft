@@ -101,8 +101,6 @@ use crate::offset::offset_geometry_creation::{OffsetGeometryCreation, SsiData};
 
 use super::edgeuse::{CapNotifications, MarkSource};
 use super::p2::OffsetNotifications;
-use crate::surface::extend::Continuity;
-use crate::surface::side::BoxSide;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p1::{self as bp1, SetRegionVoidType};
@@ -832,7 +830,9 @@ impl OffsetExecutive {
 
     /// Returns a cached extension, creating it `margin` past every side of `base`'s box
     /// (none for a margin of zero: the base itself), every side exactly ruled
-    /// ([`Surface::extended_sides_keeping_parameters`], [`Continuity::Ruled`]): a plane,
+    /// ([`Surface::extended_sides_keeping_parameters`],
+    /// [`Continuity::Ruled`](crate::surface::extend::Continuity::Ruled); the construction is
+    /// [`super::reach::extended_by_margin`], which the local reach's ball check builds too): a plane,
     /// cone, sphere or torus as itself, a ball patch with its pole (a side collapsed to a
     /// point) as a ball patch on the same sphere (one without a pole takes the generic ruled
     /// extension), a procedural blend by its definition, an offset surface as the offset of
@@ -871,35 +871,7 @@ impl OffsetExecutive {
             std::collections::btree_map::Entry::Vacant(entry) => {
                 // The obsolete offset-specific `else` at cpp:2158 is unreachable:
                 // NER(pBase) already established pOrigSurf == pBase != NULL.
-                let extension = if margin == 0.0 {
-                    base.clone()
-                } else {
-                    let extend = |asked: f64| {
-                        base.extended_sides_keeping_parameters(
-                            kernel,
-                            &BoxSide::ALL,
-                            Continuity::Ruled,
-                            asked,
-                        )
-                    };
-                    // An extension meets its distance at the middle of each side; a margin is
-                    // needed at every station of it (#2908): where the rows narrow along a side
-                    // it is asked again, scaled by the shortest length across (Ruled: the
-                    // lengths at a station grow together).
-                    let mut made = extend(margin)?;
-                    if let Some(shortest) = super::reach::shortest_across(kernel, base, &made)? {
-                        if shortest < margin * (1.0 - 1.0e-9) {
-                            // a surface that cannot go that far keeps what it has: the extension
-                            // above is what its faces have always had
-                            match extend(margin * margin / shortest) {
-                                Ok(grown) => made = grown,
-                                Err(SolidError::ExtendRefused { .. }) => {}
-                                Err(e) => return Err(e),
-                            }
-                        }
-                    }
-                    made.surface
-                };
+                let extension = super::reach::extended_by_margin(kernel, base, margin)?;
                 Ok(entry.insert(extension))
             }
         }
@@ -2102,26 +2074,17 @@ impl OffsetExecutive {
         let faceuse = original.faceuse(faceuse)?;
         let face_id = required(faceuse.face)?;
         let orientation = faceuse.orientation;
-        // Not upstream (WR-342, tangency-labs/solidcore#974), opt-in
-        // `Kernel::fixes.offset_clip_right_side_out`: a face that does not fit the offset
-        // surface's domain is clipped to it by a 2D boolean of planar faces made from its
-        // UV loops, which need them counterclockwise (the SM_OT_SAME faceuse's sense); an
-        // inset's SM_OT_OPPOSITE loops made that face inside out and the clip empty.
-        let right_side_out = kernel.fixes.offset_clip_right_side_out;
-        let loop_orientation = if right_side_out {
-            let fits = original
-                .face(face_id)?
-                .uv_domain
-                .is_contained_by(&surface.natural_uv_domain_with_nurb(kernel)?, EFF_ZERO)
-                || self.operation == OffsetOperation::LocalOperation;
-            if fits {
-                orientation
-            } else {
-                OrientType::Same
-            }
-        } else {
-            orientation
-        };
+        // Not upstream (WR-342, tangency-labs/solidcore#974): a face that does not fit the
+        // offset surface's domain is clipped to it by a 2D boolean of planar faces made
+        // from its UV loops, which need them counterclockwise (the SM_OT_SAME faceuse's
+        // sense); upstream takes an inset's SM_OT_OPPOSITE loops, which made that face
+        // inside out and the clip empty.
+        let fits = original
+            .face(face_id)?
+            .uv_domain
+            .is_contained_by(&surface.natural_uv_domain_with_nurb(kernel)?, EFF_ZERO)
+            || self.operation == OffsetOperation::LocalOperation;
+        let loop_orientation = if fits { orientation } else { OrientType::Same };
         // The translated-3D-curve plane case (cpp:3560–3600) is `#if 0` upstream.
         let mut curves = face::create_curves_from_face(
             kernel,
@@ -2400,18 +2363,13 @@ impl OffsetExecutive {
         let result_faces = bp1::faces(&result, None)?;
         let mut new_faces = Vec::new();
         for (index, &result_face) in result_faces.iter().enumerate() {
-            // (WR-342 opt-in: the loops in the sense of the faceuse's orientation, which
-            // the offset face is made with)
-            let result_orientation = if kernel.fixes.offset_clip_right_side_out {
-                orientation
-            } else {
-                OrientType::Same
-            };
+            // (not upstream, WR-342: the loops in the sense of the faceuse's orientation,
+            // which the offset face is made with; upstream takes SM_OT_SAME)
             let made = face::create_curves_from_face(
                 kernel,
                 &mut result,
                 result_face,
-                result_orientation,
+                orientation,
                 true,
                 false,
             )?;
@@ -3417,7 +3375,9 @@ mod tests {
     use crate::geom::vector2d::Vec2;
     use crate::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
     use crate::nurbs::b_spline_surface::BSplineSurface;
+    use crate::surface::extend::Continuity;
     use crate::surface::plane::Plane;
+    use crate::surface::side::BoxSide;
     use crate::topology::{Edge, Edgeuse, Face, Faceuse, ShellId, Vertex, Vertexuse};
 
     /// The fork's tangency-labs/smlib@9d8ace9 (tangency-labs/solidcore#1795, WR-344):
@@ -5464,17 +5424,16 @@ mod tests {
     /// tangency-labs/solidcore#974: an inset (`SM_OT_OPPOSITE`) face use whose face does
     /// not fit its offset surface's domain is clipped by a 2D boolean of planar faces made
     /// from its UV loops. Taken in the face use's sense the loops run clockwise, the planar
-    /// face is inside out and the clip empty: the face gets no offset. With the opt-in the
-    /// loops are taken counterclockwise and the clipped face is made.
+    /// face is inside out and the clip empty: the face gets no offset (upstream). The loops
+    /// are taken counterclockwise and the clipped face is made.
     #[test]
     #[ignore = "fixture does not reproduce the inside-out clip: on this create_plane sheet \
-                the default path also clips to one offset face; needs the shell/4567 vase's \
+                upstream's path also clipped to one offset face; needs the shell/4567 vase's \
                 inset bottom"]
     fn issue_974_inset_face_clipped_right_side_out() {
         use crate::primitive::api_primitives::create_plane;
-        let offsets = |right_side_out: bool| -> usize {
+        let offsets = || -> usize {
             let mut kernel = Kernel::default();
-            kernel.fixes.offset_clip_right_side_out = right_side_out;
             let mut original = create_plane(&mut kernel, Vec3::ZERO, 10.0, 10.0).unwrap();
             let inset = original
                 .faceuses()
@@ -5526,7 +5485,6 @@ mod tests {
             .unwrap();
             executive.offset_faces(inset).len()
         };
-        assert_eq!(offsets(false), 0);
-        assert!(offsets(true) >= 1);
+        assert!(offsets() >= 1);
     }
 }

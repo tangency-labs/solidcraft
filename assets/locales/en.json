@@ -2938,7 +2938,7 @@
   "prefs.keep_unsaved_in_browser": "Keep unsaved work in this browser",
   "prefs.keep_unsaved_in_browser_tip": "Each open design's unsaved changes are kept up to date in this browser's private storage. The next visit offers to restore them.",
   "prefs.keep_work_on_tab_switch": "Keep dialogs and tools open when switching designs",
-  "prefs.keep_work_on_tab_switch_note": "Each design tab keeps its open dialog or tool, with what you picked and typed in it, and its toolbar tab. They are there again when you come back to the design. Off: switching designs cancels them and shows the Model tab.",
+  "prefs.keep_work_on_tab_switch_note": "Each design tab keeps its open dialog or tool, with what you picked and typed in it, and its toolbar tab. They are there again when you come back to the design. Off: switching designs cancels them, and Remember each design's toolbar tab decides the toolbar tab.",
   "prefs.labels": "Labels",
   "prefs.language_system": "System",
   "prefs.layout": "Layout",

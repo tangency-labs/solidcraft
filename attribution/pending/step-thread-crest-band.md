@@ -1,0 +1,1 @@
+| tests/step-regressions/thread_crest_band.step | SolidCraft contributors | written entity by entity from formulas (a cylinder face round a helical groove two turns long); import regression fixture | MIT OR Apache-2.0 |

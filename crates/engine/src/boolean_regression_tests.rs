@@ -1941,3 +1941,66 @@ fn fins_meeting_at_the_axis_join_into_their_hub() {
     let v = volume(&s, "Body1");
     assert!((v - 4624.24).abs() < 0.05, "{v}");
 }
+
+/// #17004: a body whose 2 mm round has two pieces swept 0.45 degrees (plane-to-cone rounds kept as
+/// surfaces of revolution) could not be read back into the kernel, so every later operation on it
+/// failed with "an exact net's NURBS form is not a surface of revolution's parametrisation". The
+/// design is #16948's; a 1 mm round on the cylinder's top rim, far from those pieces, now builds.
+#[test]
+fn a_body_with_round_pieces_swept_under_a_degree_takes_a_later_round() {
+    use std::f64::consts::PI;
+    let mut s = replay(include_str!("../../../examples/regressions/round_pieces_swept_under_a_degree.json"));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let counts = |s: &Session| {
+        let m = solidcraft_kernel::measure(&s.model.state().body("Body1").unwrap().body).unwrap();
+        (m.merged.faces, m.merged.edges, m.merged.vertices)
+    };
+    assert_eq!(counts(&s), (17, 39, 24));
+    let before = volume(&s, "Body1");
+    s.execute("solid.fillet", &json!({"body": "Body1", "edges": [[0.0, 22.5, 30.0]], "radius": 1})).unwrap();
+    let state = s.model.state();
+    let body = &state.body("Body1").unwrap().body;
+    assert_eq!(body.shell_count(), 1);
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    // The rim, one circle with one vertex, becomes the round's face between two circles, with its
+    // seam: one face, two edges (the second circle and the seam) and the second circle's vertex more.
+    assert_eq!(counts(&s), (18, 41, 25));
+    // Pappus: the round takes off the corner between a square and its 1 mm quarter circle,
+    // r^2 (1 - pi/4), whose centroid lies r (10 - 3 pi) / (12 - 3 pi) in from each face, swept
+    // round the rim of radius 22.5.
+    let (r, rim) = (1.0, 22.5);
+    let removed = 2.0 * PI * (rim - r * (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI)) * r * r * (1.0 - PI / 4.0);
+    let got = before - volume(&s, "Body1");
+    assert!((got - removed).abs() < 1e-5, "removed {got} mm³, the rim's round takes {removed}");
+}
+
+/// #15603: a circle (R 55) with a handle, extruded 16 mm. The concave arc (R 49) from the handle's
+/// top meets the circle at a 6° bend, not tangentially, and the two circles cross again 5.5 mm on.
+/// The 2 mm fillet of the arc and the handle's top was refused (status 1001): the kernel ran the
+/// round on past the bend to end it on the circle's wall, where the sliver of the disc between
+/// the two crossings stands across it. The round now ends at the bend, on a face square to the
+/// arc. It takes its section, (1 - pi/4) r^2, along exactly the two edges: straight along the
+/// handle and, by Pappus, round the arc's centre at the section's centroid (outside the arc).
+#[test]
+fn a_fillet_of_a_tangent_chain_ends_at_a_slight_bend() {
+    let script = include_str!("../../../examples/regressions/fillet_ending_at_a_slight_bend.json");
+    let s = replay(script);
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let state = s.model.state();
+    let body = &state.body("Body2").unwrap().body;
+    assert_eq!(body.shell_count(), 1);
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    let mut before: Value = serde_json::from_str(script).unwrap();
+    before["commands"].as_array_mut().unwrap().pop();
+    let removed = volume(&replay(&before.to_string()), "Body2") - volume(&s, "Body2");
+    // the sketch's points: the arc's centre and its ends (the bend last), the handle's far end
+    let centre = [63.456_646_255_239_15_f64, 82.214_682_667_011_74];
+    let (arc_start, bend) = ([74.971_633_941_353_83_f64, 34.586_906_542_268_86], [35.728_226_336_305_426_f64, 41.814_995_430_607_56]);
+    let handle_end = [156.619_250_155_198_76_f64, 54.326_885_432_751_18];
+    let about = |p: [f64; 2]| (p[1] - centre[1]).atan2(p[0] - centre[0]);
+    let (sweep, handle) = (about(arc_start) - about(bend), (handle_end[0] - arc_start[0]).hypot(handle_end[1] - arc_start[1]));
+    let r = 2.0_f64;
+    let (area, c) = ((1.0 - std::f64::consts::FRAC_PI_4) * r * r, r * (10.0 - 3.0 * std::f64::consts::PI) / (3.0 * (4.0 - std::f64::consts::PI)));
+    let want = area * (sweep * (49.0 + c) + handle);
+    assert!((removed - want).abs() < 1e-4, "removed {removed}, expected {want}");
+}

@@ -167,12 +167,7 @@
   },
   {
    "name": "round_4_over_hole",
-   "refused_by": {
-    "issue": "tangency-labs/solidcore#422",
-    "step": "result",
-    "error": "blend::fillet_executive::session::keep_features: upstream status 1001"
-   },
-   "note": "#324's own request: an R4 round that runs into the hole and contours it, i.e. the block less the hole and the round's corner. Not fixed on truck, which refuses it; SMLib returns a body that is not a closed manifold solid (tangency-labs/solidcore#422). Keep features is the default since #2426: with every fix on it builds this volume, and the default kernel's keep features refuses it.",
+   "note": "#324's own request: an R4 round that runs into the hole and contours it, i.e. the block less the hole and the round's corner. Not fixed on truck, which refuses it; SMLib returns a body that is not a closed manifold solid (tangency-labs/solidcore#422). The round's rail on the top face runs over the hole, a cliff: it is built as a cliff overflow (the only path since tangency-labs/solidcraft#13841), as if the top went on, and only what lies in the block is removed.",
    "steps": [
     {
      "op": "box",
