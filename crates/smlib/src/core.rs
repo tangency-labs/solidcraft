@@ -89,8 +89,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_analytic_mate_edges = true;
     f.nurb_cylinder_inside_out_frame = true;
     f.local_operation_refuses_loose_tangent_edges = true;
-    f.torus_major_radius_from_origin = true;
-    f.torus_iso_circle_axis_from_midpoint = true;
     f.internal_pole_row_through_knot = true;
     f.extrusion_origin_scaled_zero = true;
     f.transform_scales_each_tolerance = true;
@@ -105,7 +103,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ellipse_trim_seam_lines_span_cone_height = true;
     f.degenerate_proto_edge_in_one_vertex = true;
     f.new_edge_vertex_tolerance_covers_gap = true;
-    f.torus_signed_gen_curve_interval = true;
     f.point_solve_keeps_triangle_guess = true;
     f.imprint_extends_edge_to_proto_vertex = true;
     f.fillet_point_step_per_point = true;

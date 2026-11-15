@@ -225,9 +225,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.taper_tangent_corner_planes = true;
     k.fixes.thicken_planar_side_walls = true;
     k.fixes.torus_check_spindle_apex = true;
-    k.fixes.torus_iso_circle_axis_from_midpoint = true;
-    k.fixes.torus_major_radius_from_origin = true;
-    k.fixes.torus_signed_gen_curve_interval = true;
     k.fixes.transform_model_size_from_body_box = true;
     k.fixes.transform_scales_each_tolerance = true;
     k.fixes.uv_trim_corner_end_points_only = true;
