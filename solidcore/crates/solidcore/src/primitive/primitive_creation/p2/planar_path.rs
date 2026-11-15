@@ -371,10 +371,7 @@ impl PrimitiveCreation {
         let mut path_normal = if checked {
             None
         } else {
-            Some(
-                ignored(crate::curve::curve::p3::compute_crvs_normal(k, paths))?
-                    .unwrap_or(Vec3::UNDEF),
-            )
+            Some(crate::curve::curve::p3::compute_crvs_normal_written(k, paths)?.0)
         };
 
         // Prepare for loop where we position profile curves, sweep, and trim

@@ -38,7 +38,7 @@ pub use primitives::{analytic_rotational_sweep, create_circle, create_rectangle,
 use std::collections::BTreeMap;
 
 use crate::curve::curve::p2::Curve;
-use crate::curve::curve::p3::compute_crvs_normal;
+use crate::curve::curve::p3::{compute_crvs_normal, compute_crvs_normal_written};
 use crate::error::{checked_or_ignored, ignore_status, ignored, EntityRef, Result};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent3d::Extent3d;
@@ -344,8 +344,12 @@ fn position_profile_curves_legacy(
             ignore_status(status)?;
         }
     }
-    let normal =
-        checked_or_ignored(compute_crvs_normal(k, profiles), checked)?.unwrap_or(Vec3::UNDEF);
+    // (unchecked, upstream reads the normal `ComputeCrvsNormal` wrote: (0, 0, 1) for a
+    // zero normal)
+    let (normal, status) = compute_crvs_normal_written(k, profiles)?;
+    if let (true, Some(e)) = (checked, status) {
+        return Err(e);
+    }
     let mut orientation = Axis2Placement::IDENTITY;
     let angle = checked_or_ignored(Vec3::X.angle_between(normal), checked)?.unwrap_or(0.0);
     orientation.rotate_about_axis(-angle, Vec3::X.cross(normal));

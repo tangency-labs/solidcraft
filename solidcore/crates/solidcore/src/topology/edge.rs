@@ -351,12 +351,9 @@ fn cover_other_coincident_surface(
                 "covered surface owned by another face",
             ));
         };
-        // (passed on with the opt-in fix: the fork's `SER` in CoverCoincidentSurface,
-        // WR-663, tangency-labs/smlib 21dcf69)
-        crate::error::ignore_or_pass_on(
-            crate::topology::face::p1::remove_uv_trim_curves(b, face),
-            k.fixes.query_statuses_pass_on,
-        )?;
+        // (passed on: the fork's `SER` in CoverCoincidentSurface, WR-663,
+        // tangency-labs/smlib 21dcf69)
+        crate::topology::face::p1::remove_uv_trim_curves(b, face)?;
     }
     Ok(Cover {
         max_dist: r.max_dist,

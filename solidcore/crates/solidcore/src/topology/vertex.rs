@@ -52,10 +52,10 @@
 //!   failed `GetEndTangent` (`SE`) and then read the tangent it did not write. That is
 //!   the `SmVector3d` default, `SM_UNDEF_DOUBLE` in every component ([`Vec3::UNDEF`]),
 //!   or in `IsTopologicalVertex` the line vector `IsLine` wrote for that edge.
-//!   `AngleBetween` then sees a zero-length vector and reports `0`, so both answer true
-//!   by default (WR-256; UB-106 assumed the tangent uninitialised; with
-//!   [`crate::kernel::UpstreamFixes::query_statuses_pass_on`], `IsTopologicalVertex`
-//!   returns `Ok(false)` when `AngleBetween` fails). `IsTopologicalVertex` also returns
+//!   `AngleBetween` then sees a zero-length vector and reports `0`, so upstream both
+//!   answer true (WR-256; UB-106 assumed the tangent uninitialised). As the fork
+//!   (tangency-labs/smlib 7a35f33, WR-663), `IsTopologicalVertex` returns `Ok(false)` when
+//!   `AngleBetween` fails. `IsTopologicalVertex` also returns
 //!   the failed status of `GetEndTangent` at an edge's start (`SER`) as its `SmBoolean`,
 //!   which is true, and accepts `180°` cusps (`|angle_rad ± PI| <= ang_limit_rad`)
 //!   because it compares unoriented curve tangents; the port propagates a failed
@@ -970,12 +970,12 @@ pub fn is_topological_vertex(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bo
         if !at_start2 {
             t2 = -t2;
         }
-        // AngleBetween sets the angle to 0 on failure (status ignored); with
-        // `query_statuses_pass_on` the curves are not shown to meet G1 without it, so the
-        // vertex stays (tangency-labs/smlib 7a35f33)
+        // AngleBetween sets the angle to 0 on failure (status ignored upstream); the
+        // curves are not shown to meet G1 without it, so the vertex stays
+        // (tangency-labs/smlib 7a35f33)
         match t1.angle_between(t2) {
-            Err(_) if k.fixes.query_statuses_pass_on => return Ok(false),
-            r => r.unwrap_or(0.0),
+            Err(_) => return Ok(false),
+            Ok(a) => a,
         }
     } else {
         0.0
@@ -1898,9 +1898,7 @@ mod tests {
         let e0 = b.edge_mut(e[0]).unwrap();
         e0.curve = Some(Curve::from(CompositeCurve::new(3)));
         e0.interval = Extent1d::from_min_max(-1.0, 0.0);
-        let mut k = Kernel::default();
-        assert!(is_topological_vertex(&k, &mut b, v[1]).unwrap());
-        k.fixes.query_statuses_pass_on = true;
+        let k = Kernel::default();
         assert!(!is_topological_vertex(&k, &mut b, v[1]).unwrap());
     }
 
@@ -2254,14 +2252,12 @@ mod tests {
             Err(e) if crate::error::upstream_status(&e) == Some(SM_ERR)
         ));
 
-        // 3. Composition with query_statuses_pass_on when GetEndTangent(false) fails
-        // (WR-256): -Vec3::UNDEF still fails AngleBetween and keeps the vertex.
+        // 3. When GetEndTangent(false) fails (WR-256): -Vec3::UNDEF still fails
+        // AngleBetween and keeps the vertex (WR-663).
         let (mut b, v, e) = chain(true, Vec3::X, Vec3::Y);
         let e0 = b.edge_mut(e[0]).unwrap();
         e0.curve = Some(Curve::from(CompositeCurve::new(3)));
         e0.interval = Extent1d::from_min_max(-1.0, 0.0);
-        let mut k_both = Kernel::default();
-        k_both.fixes.query_statuses_pass_on = true;
-        assert!(!is_topological_vertex(&k_both, &mut b, v[1]).unwrap());
+        assert!(!is_topological_vertex(&k, &mut b, v[1]).unwrap());
     }
 }

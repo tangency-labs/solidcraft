@@ -40,10 +40,12 @@
 //!   solution as guess, when that solution reached a domain boundary and no boundary
 //!   was tried (the second call then starts on that boundary). The port carries a
 //!   depth and returns `SM_ERR` past [`MAX_RECURSION`] calls (upstream reaches depth 1).
-//! - **Statuses.** Every status upstream checks (`SER`) is propagated; the two
-//!   `Unitize` calls of the plane normal ignore theirs (a zero normal becomes
-//!   `(0, 0, 1)`, [`Vec3::unitize_or_z`]), and the leaf solves ignore
-//!   `SmExtent2d::Intersect`'s (a failure leaves the patch domain).
+//! - **Statuses.** Every status upstream checks (`SER`) is propagated. Upstream
+//!   ignores the statuses of the two `Unitize` calls of the plane normal, of
+//!   `SmExtent2d::Intersect` in the leaf solves and of the boundary curve evaluations
+//!   and trims; as the fork (WR-663, tangency-labs/smlib 21dcf69) the unitizations,
+//!   evaluations and trims pass them on, and a patch or span outside the solve domain
+//!   or interval of interest has no answers.
 //!   `AddSortedSolution` returns `void` upstream; its Rust errors (bad solution data)
 //!   are propagated as in the sibling leaf solves. [`SolidError::Unported`] always
 //!   propagates.
@@ -72,7 +74,7 @@ use crate::curve::composite_curve::CompositeCurve;
 use crate::curve::crv_on_surf::{CrvOnSurf, CONTINUITY_ANGLE};
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignored, ignored_or_pass_on, Result, SolidError};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -494,14 +496,9 @@ impl Surface {
             n
         };
 
-        // build plane containing answers (SE: Unitize status ignored; passed on with the
-        // opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
-        plane_norm = if pass {
-            plane_norm.unitize()?
-        } else {
-            plane_norm.unitize_or_z()
-        };
+        // build plane containing answers (SE: Unitize status ignored upstream; passed on
+        // as the fork does, WR-663, tangency-labs/smlib 21dcf69)
+        plane_norm = plane_norm.unitize()?;
         let plane_surface = Plane::from_normal(plane_orig, plane_norm);
 
         // instance SmSSPIntersectENFO surf/surf/plane NewtonRaphson Solver
@@ -762,12 +759,8 @@ impl Surface {
                             plane_norm = new_plane_norm;
                         }
                     }
-                    // (SE: Unitize status ignored; passed on with the opt-in fix)
-                    plane_norm = if pass {
-                        plane_norm.unitize()?
-                    } else {
-                        plane_norm.unitize_or_z()
-                    };
+                    // (SE: Unitize status ignored upstream; passed on as the fork does)
+                    plane_norm = plane_norm.unitize()?;
                     let plane_d = -p1.dot(plane_norm);
 
                     let ivls2 = intervals(uv_domain, other_uv_domain);
@@ -954,15 +947,13 @@ type LimitedDomain = (Extent2d, [ContinuityType; 2], [ContinuityType; 2]);
 
 /// The patch domain limited to the solve domain with the patch side continuities
 /// (sides on the solve domain's boundary become discontinuous); `None` when the
-/// limited domain has a zero length side (no work), and with `no_work_off_domain` (the
-/// opt-in `Kernel::fixes.query_statuses_pass_on`, WR-663; tangency-labs/smlib 21dcf69)
-/// also when the patch lies outside the solve domain.
+/// limited domain has a zero length side (no work), and, as the fork (WR-663;
+/// tangency-labs/smlib 21dcf69), also when the patch lies outside the solve domain.
 fn limit_domain(
     patch_domain: Extent2d,
     solve_domain: &Extent2d,
     mut u_conts: [ContinuityType; 2],
     mut v_conts: [ContinuityType; 2],
-    no_work_off_domain: bool,
 ) -> Result<Option<LimitedDomain>> {
     let mut domain = patch_domain;
     if solve_domain.min().x >= domain.min().x {
@@ -978,11 +969,11 @@ fn limit_domain(
         v_conts[1] = ContinuityType::Discontinuous;
     }
     if !domain.is_contained_by(solve_domain, EFF_ZERO) {
-        // (SE: SmExtent2d::Intersect's status is ignored; a failure leaves the domain)
+        // (SE: SmExtent2d::Intersect's status is ignored upstream, which leaves the
+        // domain; a failure is no work)
         match ignored(domain.intersect(solve_domain))? {
             Some(d) => domain = d,
-            None if no_work_off_domain => return Ok(None),
-            None => (),
+            None => return Ok(None),
         }
         // Check for zero in either domain bound
         if are_same(domain.max().x, domain.min().x) || are_same(domain.max().y, domain.min().y) {
@@ -1077,7 +1068,6 @@ impl<'t, O: SolutionObject + 't> CsGlobalSolver<'t, '_, O> {
             &self.uv_domain,
             patch.u_curve_conts,
             patch.v_curve_conts,
-            k.fixes.query_statuses_pass_on,
         )?
         else {
             return Ok(false);
@@ -1090,13 +1080,11 @@ impl<'t, O: SolutionObject + 't> CsGlobalSolver<'t, '_, O> {
             t_conts[1] = ContinuityType::Discontinuous;
         }
         if !ivl.is_contained_by(&self.interval, EFF_ZERO) {
-            // (SER: checked; with the opt-in fix a branch outside the interval of
-            // interest has no answers, WR-663, tangency-labs/smlib 21dcf69)
+            // (SER: checked; as the fork, a branch outside the interval of interest has
+            // no answers, WR-663, tangency-labs/smlib 21dcf69)
             ivl = match ivl.intersect(&self.interval) {
                 Ok(i) => i,
-                Err(e) if k.fixes.query_statuses_pass_on && !e.is_unported_or_cancelled() => {
-                    return Ok(false);
-                }
+                Err(e) if !e.is_unported_or_cancelled() => return Ok(false),
                 Err(e) => return Err(e),
             };
             // Check for zero length intervals
@@ -1511,7 +1499,6 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
             &self.uv_domain1,
             patch1.u_curve_conts,
             patch1.v_curve_conts,
-            k.fixes.query_statuses_pass_on,
         )?
         else {
             return Ok(false);
@@ -1521,7 +1508,6 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
             &self.uv_domain2,
             patch2.u_curve_conts,
             patch2.v_curve_conts,
-            k.fixes.query_statuses_pass_on,
         )?
         else {
             return Ok(false);
@@ -1800,9 +1786,6 @@ impl Surface {
         let this_bdry = boundary_curves(k, self, uv_domain, approx_tol_3d)?;
         let that_bdry = boundary_curves(k, other, other_uv_domain, approx_tol_3d)?;
 
-        // sCrvPt keeps its last value when an evaluation fails
-        let mut crv_pt = Point3::UNDEF;
-
         // For every other-surface boundary, intersect it with all of our boundaries
         // and classify each segment as In or Out. Save the Ins.
         for other_crv in &that_bdry {
@@ -1853,14 +1836,9 @@ impl Surface {
                 }
 
                 let crv_t = ivl.mid();
-                // (SE: status ignored; passed on with the opt-in fix, WR-663,
+                // (SE: status ignored upstream; passed on as the fork does, WR-663,
                 // tangency-labs/smlib 21dcf69)
-                if let Some(p) = ignored_or_pass_on(
-                    other_crv.evaluate_point(k, crv_t),
-                    k.fixes.query_statuses_pass_on,
-                )? {
-                    crv_pt = p;
-                }
+                let crv_pt = other_crv.evaluate_point(k, crv_t)?;
 
                 // (SE: status ignored: a failed drop is no success; DropPoint is not
                 // virtual, its solves run with the caller's kernel)
@@ -1888,12 +1866,9 @@ impl Surface {
                         continue;
                     }
 
-                    // may snap sIvl by tol to existing knots (SE: status ignored; passed
-                    // on with the opt-in fix)
-                    ignored_or_pass_on(
-                        copy.trim(k, &mut ivl, TrimMode::Notify),
-                        k.fixes.query_statuses_pass_on,
-                    )?;
+                    // may snap sIvl by tol to existing knots (SE: status ignored
+                    // upstream; passed on as the fork does)
+                    copy.trim(k, &mut ivl, TrimMode::Notify)?;
 
                     out.curves_3d.push(copy);
                     out.deviations.push(drop.gap);
