@@ -40,13 +40,12 @@
 //! one-sided limit from inside the piece (WR-670, #2091): upstream takes the span above.
 //! An edge's tube area, volume and moments each have an error scale of their own size
 //! (#2887): upstream's are `BIG_DOUBLE`, so only the edge's length was under error control.
-//! [`brep_mass_properties_estimated`] with [`MassPropertyRequest::exact_box`] (and
-//! [`brep_properties_in_box`] given that box) integrates
-//! about the middle of the body's exact box and scales its errors by that box's size
-//! (#17361): the loose box upstream takes holds the control points of every span of an
-//! edge's curve that the edge touches, so a short arc of a circle of large radius puts it
-//! a quarter of that circle away, and the body's first moments became large terms that
-//! cancel, under an error scale as large.
+//! [`brep_mass_properties`] and [`brep_mass_properties_estimated`] (through
+//! [`brep_properties_in_box`]) integrate about the middle of the body's exact box and
+//! scale their errors by that box's size (#17361): the loose box upstream takes holds the
+//! control points of every span of an edge's curve that the edge touches, so a short arc
+//! of a circle of large radius puts it a quarter of that circle away, and the body's
+//! first moments became large terms that cancel, under an error scale as large.
 use super::{OdeIntegrator, OdeOptions};
 use crate::curve::curve::Curve;
 use crate::error::mass::MassFailure;
@@ -1321,8 +1320,8 @@ fn valid_api_number(value: f64) -> Result<()> {
     }
 }
 /// `SmApiBrepComputeMassProperties`, with upstream validation: integrated once about the
-/// bounding-box midpoint, the moments then shifted to `origin` (which avoids
-/// cancellation for a distant origin).
+/// exact bounding box's midpoint (#17361), the moments then shifted to `origin` (which
+/// avoids cancellation for a distant origin).
 ///
 /// The accuracy is the integrator's requested accuracy: its error ESTIMATE is held under
 /// it, which is not a proved bound (see [`EstimatedMassProperties`]).
@@ -1382,12 +1381,6 @@ pub struct MassPropertyRequest {
     /// For a body with no material region: its faces' area, volume and mass 0, the
     /// centroid of the area, no moments (otherwise refused as no mass).
     pub area_centroid_without_material: bool,
-    /// Integrate about the middle of the body's exact box
-    /// ([`qbrep::calculate_tight_bounding_box`]) and scale the errors by its size, not the
-    /// loose box's (`SmApiBrepComputeMassProperties`, whose box holds the whole spans of
-    /// the edges' curves: a short arc of a large circle takes it a quarter of the circle
-    /// away, #17361).
-    pub exact_box: bool,
 }
 
 impl MassPropertyRequest {
@@ -1401,13 +1394,12 @@ impl MassPropertyRequest {
             manifold_solid_only: true,
             sheet_faces_area: false,
             area_centroid_without_material: false,
-            exact_box: false,
         }
     }
 
     /// Every body at unit density: moments about the centroid, the sum over material
-    /// regions, sheet faces' area counted, a body with no material measured by its
-    /// area and the area's centroid, all about the middle of the exact box.
+    /// regions, sheet faces' area counted, and a body with no material measured by its
+    /// area and the area's centroid.
     #[must_use]
     pub const fn centroidal() -> Self {
         Self {
@@ -1416,7 +1408,6 @@ impl MassPropertyRequest {
             manifold_solid_only: false,
             sheet_faces_area: true,
             area_centroid_without_material: true,
-            exact_box: true,
         }
     }
 }
@@ -1462,10 +1453,10 @@ impl EstimatedMassProperties {
 
 /// Mass properties as `request` asks (one implementation:
 /// [`brep_mass_properties`] is its `SmApiBrepComputeMassProperties` request). Integrated
-/// once about the bounding box's middle: volume and moments over the material regions
-/// (`SmBrep::ComputePreciseProperties`), the area of the faces between a solid and a
-/// void, then the moments moved to the point asked, or to the centroid. **The accuracy is
-/// requested and estimated, not proved** ([`EstimatedMassProperties`]).
+/// once about the exact bounding box's middle (#17361): volume and moments over the
+/// material regions (`SmBrep::ComputePreciseProperties`), the area of the faces between a
+/// solid and a void, then the moments moved to the point asked, or to the centroid. **The
+/// accuracy is requested and estimated, not proved** ([`EstimatedMassProperties`]).
 ///
 /// `accuracy` must be finite and positive; it is clamped to
 /// [[`ESTIMATE_ACCURACY_FINEST`], [`ESTIMATE_ACCURACY_COARSEST`]] ([`estimate_accuracy`]),
@@ -1557,11 +1548,7 @@ fn estimate(
     if request.manifold_solid_only && !manifold_solid(b)? {
         return Err(SolidError::invalid_input(OP, "not a manifold solid"));
     }
-    let bbox = if request.exact_box {
-        qbrep::calculate_tight_bounding_box(k, &mut *b)?
-    } else {
-        qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?
-    };
+    let bbox = qbrep::calculate_tight_bounding_box(k, &mut *b)?;
     let mid = bbox.mid();
     if request.area_centroid_without_material && !has_material(b)? {
         return area_centroid(k, b, accuracy, mid);
