@@ -35,6 +35,8 @@
 //! within the zone tolerance of a bounded face's wall along a line (the larger of the
 //! cone's and the plane's face tolerances, 0 without a face) and that line lies in the
 //! face's sweep, else its crossings are tested; bare surfaces keep upstream's test.
+//! WR-787 (#15429): parallel cylinders that both bound faces and overlap past touching by
+//! less than [`contact_tol_3d`] touch along one line; bare surfaces keep two crossings.
 //! No input-driven recursion is introduced.
 
 use super::{Cone, ConeStepInversion};

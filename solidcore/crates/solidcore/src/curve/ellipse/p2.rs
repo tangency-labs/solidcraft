@@ -74,6 +74,9 @@
 //!   `SM_NO_POST_EDIT`, whose `SmEllipse::Notify` override rebuilds the polar
 //!   converter (status ignored); the port calls [`Ellipse::set_up_polar_conversion`]
 //!   at those points. The other notifications only drop caches and are omitted.
+//! - **Circles a hair less than tangent.** [`Ellipse::intersect_with_ellipse`] takes a
+//!   contact tolerance apart from `tol` (WR-787, #15429): coplanar circles overlapping past
+//!   touching by less than it touch at one point; zero keeps upstream's two crossings.
 //! - **Two crossings stay two.** `IntersectWithLine` and `IntersectWithEllipse` find
 //!   their candidate points with `smgu_LineCoPlanarCircleIntersect` at ten times the
 //!   intersection tolerance, which upstream also uses to merge the line's two

@@ -94,10 +94,14 @@
 //!   (WR-787, #15429). Upstream's band for an overlap is `SM_EFF_ZERO · (1 + r1 + r2)`
 //!   alone, which [`circle_coplanar_circle_intersect`] keeps (contact tolerance zero), and
 //!   an overlap δ above it gives two crossings `2√(2δ r1 r2 / (r1 ± r2))` apart, far
-//!   beyond δ, while the circles stay within δ of each other between them.
-//!   The tangent point is on the side the smaller of the two overlaps names (upstream:
-//!   the inside formula whenever the centres are nearer than the radii's sum by more
-//!   than `SM_EFF_ZERO · (1 + |c1|)`, which put a near-outside tangent point off by r2).
+//!   beyond δ, while the circles stay within δ of each other between them. Nested circles
+//!   that stay within the contact tolerance of each other all round keep their crossings:
+//!   they touch along no single point.
+//!   In both functions the tangent point is on the side the smaller of the two overlaps
+//!   names. Upstream takes the inside formula whenever the centres are nearer than the
+//!   radii's sum by more than `SM_EFF_ZERO · (1 + |c1|)`, so circles overlapping from
+//!   outside by between that and its band `SM_EFF_ZERO · (1 + r1 + r2)` got a tangent
+//!   point off by the smaller radius.
 //! - `SM_ASSERT*` and `SM_DEBUG_CODE` blocks are not compiled upstream (release build)
 //!   and are not ported.
 
@@ -973,7 +977,16 @@ pub fn circle_coplanar_circle_intersect_in_contact(
     let outside = circle1_radius + circle2_radius - cc_dist;
     let inside = cc_dist - (circle1_radius - circle2_radius).abs();
     let zero = EFF_ZERO * (1.0 + circle1_radius + circle2_radius);
-    if outside.min(inside) < zero.max(contact_tolerance) {
+    // nested circles within the contact tolerance of each other all round touch nowhere in
+    // particular: only their overlap past upstream's zero is tangent
+    let contact = if inside < outside
+        && (circle1_radius - circle2_radius).abs() + cc_dist <= contact_tolerance
+    {
+        0.0
+    } else {
+        contact_tolerance
+    };
+    if outside.min(inside) < zero.max(contact) {
         // Tangent intersection - from either inside or outside.
         let mut vec = circle2_center - circle1_center;
         vec /= cc_dist; // Unitize
@@ -1969,6 +1982,36 @@ mod tests {
                 v(3.0 + delta / 2.0, 0., 0.),
             );
         }
+        // nested circles within the contact tolerance all round (equal radii, centres 7e-6
+        // apart) keep their two crossings, on either side of the line of centres
+        let hit = circle_coplanar_circle_intersect_in_contact(
+            Vec3::Z,
+            Vec3::ZERO,
+            2.5,
+            v(7e-6, 0., 0.),
+            2.5,
+            5e-6,
+            1e-5,
+        )
+        .unwrap();
+        let CircleCircle::Crossing(p, q) = hit else {
+            panic!("nearly coincident: two crossings expected, {hit:?}");
+        };
+        assert!((p.y + q.y).abs() < 1e-9 && (p.y.abs() - 2.5).abs() < 1e-6, "{p:?} {q:?}");
+        // without a contact tolerance, an overlap from outside below upstream's zero (2e-12
+        // at radius 1) touches midway on the outside, not a radius off towards circle 1
+        touch(
+            circle_coplanar_circle_intersect(
+                Vec3::Z,
+                Vec3::ZERO,
+                1.0,
+                v(2.0 - 2e-12, 0., 0.),
+                1.0,
+                1e-6,
+            )
+            .unwrap(),
+            v(1.0 - 1e-12, 0., 0.),
+        );
         // without a contact tolerance (δ = 1e-9, within the band) and past it (δ = 1e-4):
         // two crossings, 2√(2δ r1 r2 / (r1 + r2)) apart from outside and
         // 2√(2δ r1 r2 / (r1 − r2)) inside, to first order in δ

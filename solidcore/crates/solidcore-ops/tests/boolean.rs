@@ -233,13 +233,15 @@ fn drill(x: f64, z: f64, depth: f64) -> Body {
 /// tangency-labs/solidcraft#15429 left two drill centres 2.3e-9 closer than their diameter, the
 /// upper one with its wall on the plate's top face, and the second cut failed in the merge;
 /// through holes, and the two cylinders' union, failed as not a solid from ε = 1e-9. The walls
-/// and the rims touch within the intersection tolerance, as for holes a hair apart (ε = −1e-9):
+/// and the rims touch within the contact tolerance, as for holes a hair apart (ε = −1e-9):
 /// each cut is one valid solid of the counts of the holes a hair apart and the volume less the
 /// overlap (the lens of the two circles; the points' overlap is below 1e-12), in either order,
 /// also for ε up to the contact tolerance (the zone tolerance, 1e-5), past the wall
 /// intersection's search band (5e-6), where the walls and the rims must still agree; past the
 /// intersection tolerance (2e-5) the walls cross in two lines, as the circles do, and the cut is
-/// one valid solid of the volume. The two cylinders unite to two solids touching along the
+/// one valid solid of the volume. Between the two (ε = 1.5e-5) the cut may be refused, but never
+/// a valid solid of another volume (a contact tolerance of 2e-5 kept the second tool whole, as a
+/// void, 39.27 short). The two cylinders unite to two solids touching along the
 /// line (to ε = 1e-7: beyond it their coplanar caps are not decided here). The drills keep the
 /// counts of drills a hair apart to the issue's ε; from 1e-8 their points, which only the
 /// marching intersection meets, add edges, and they are one valid solid of the volume.
@@ -275,6 +277,24 @@ fn parallel_holes_a_hair_less_than_tangent_cut_as_touching() {
         for (y1, y2) in orders(10.0, 5.0 + eps) {
             let c = cut_twice(cylinder(y1), cylinder(y2));
             one_valid_solid(&c, counts, through);
+        }
+    }
+    let eps = 1.5e-5;
+    let through = 4000.0 - (2.0 * PI * r * r - lens(eps)) * 10.0;
+    for (y1, y2) in orders(10.0, 5.0 + eps) {
+        let first = boolean(plate(), cylinder(y1), BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        // a refusal is allowed here; an empty result is not
+        if let Ok(c) = boolean(first, cylinder(y2), BooleanOp::Subtract) {
+            let c = c.unwrap();
+            let report = c.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{eps}: {}", report.text);
+            assert!(
+                near(volume(&c), through),
+                "{eps}: {}, closed form {through}",
+                volume(&c)
+            );
         }
     }
     for eps in [-1e-9, 1e-9, 2.3e-9, 1e-8, 1e-7] {

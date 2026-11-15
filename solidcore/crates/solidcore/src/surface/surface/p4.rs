@@ -60,7 +60,9 @@
 //!   [`XsectClassification`]; an out-of-domain guess keeps its unclamped values, as
 //!   upstream. `SmCurve::EvaluateGeometric` failing with `SM_ERR` marks the point touching
 //!   (other failures propagate; upstream would read uninitialised vectors). The shape
-//!   variables only read on paths where they were set start at zero.
+//!   variables only read on paths where they were set start at zero. With an edge and a
+//!   face, osculating circles overlapping past touching by less than [`contact_tol_3d`]
+//!   are tangent (WR-787, #15429); a bare curve or surface keeps upstream's zero.
 //! - **Kernel.** `is_on_seam` and `global_point_solve` (and `global_point_solve_starts`)
 //!   take the [`Kernel`] that the tolerance, drop and cache callees now need.
 //! - **Unported callees** (return [`SolidError::Unported`]): the zone tolerance of a face's

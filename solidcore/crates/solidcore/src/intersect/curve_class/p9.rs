@@ -21,7 +21,9 @@
 //! edge's curve cache is built at that edge's live zone tolerance, as upstream's
 //! `SmTol::GetApproxTol3d(&m_crCurve)` reads it from the curve's owning edge; the
 //! classification curve's cache has no owner in reach through the caller's geometry and
-//! still builds on the system tolerance. Ignored native evaluation
+//! still builds on the system tolerance. An edge's circle and the source circle that
+//! overlap past touching by less than [`contact_tol_3d`] touch at one point (WR-787,
+//! #15429). Ignored native evaluation
 //! and drop statuses preserve initialized outputs; unported errors propagate. The
 //! native checked-drop guess aliases its output and is reset to zero before solving;
 //! the Rust call explicitly uses that zero guess. A 3D trim-boundary source returns

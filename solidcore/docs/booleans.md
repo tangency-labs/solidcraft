@@ -276,6 +276,18 @@ What the port does today:
   `topology/brep/p3.rs`, `remove_slit_loops_where_solids_touch`).
 - **Solids touching along an edge or at a vertex** are a valid result: ops checks the result with
   `is_outward_touching_solids` (§3).
+- **The sector test near tangency** steps off the edge and compares binormals until they separate
+  (§4.2); where they never do within the face, it returns the coincident or zero-sector class.
+  Tangent faces part as the square of the step over their relative radius, so fixed steps and
+  angle thresholds read the faces of a large enough part as parallel. Two readings therefore step
+  on, three times further each round, until the faces are more than the tolerance apart: a sector
+  whose own two faces look parallel (a zero sector), and a classified face that looks coincident
+  with a face the definitions show to lie on another surface (`query/face/p1.rs`,
+  `faces_on_other_surfaces`: two different analytic kinds, or two quadrics of one kind that
+  `Surface::same_analytic_surface` tells apart). A tangent pair with no definitions to compare (a
+  B-spline on a plane) is still read as coincident once its relative radius passes about 1.7e7
+  times the sum of the two edges' tolerances, 330 mm at 1e-5 each (`query/edge.rs`, the 0.01°
+  rule over eight rounds).
 - **Circles a hair less than tangent.** Two coplanar circles that overlap past touching by δ
   cross at two points `2√(2δ r1 r2 / (r1 ± r2))` apart (`2√(rδ)` for equal radii from
   outside), far beyond δ, while the circles stay within δ of each other between them; each
@@ -295,7 +307,9 @@ What the port does today:
   touch along one line and at one point on each rim. Bare curves and surfaces keep upstream's
   zero: their radius-relative bands are a search heuristic, not a modelling tolerance. Holes
   overlapping by more than the zone tolerance and less than the intersection tolerance (twice
-  it) cross in two lines at every site and are still refused as not a solid, as before.
+  it) cross in two lines at every site and are still refused as not a solid, as before; with
+  the intersection tolerance as the contact tolerance they came out a valid solid that kept the
+  second tool whole, as a void.
   Parallel cones (drill points) are met by the marching intersection and are not decided this
   way, nor are coplanar faces bounded by such circles.
 
