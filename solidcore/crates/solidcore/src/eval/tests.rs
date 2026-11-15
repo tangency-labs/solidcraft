@@ -1352,7 +1352,7 @@ fn a_loop_over_both_poles_turns_the_way_its_face_lies() {
     let (sphere, seam, bore) = sphere_seam_and_cut(0.0, 4.0);
     let below = [-FRAC_PI_2, -(0.6f64.asin())];
     let above = [0.6f64.asin(), FRAC_PI_2];
-    let outer = vec![
+    let outer = [
         (&seam, below, true),
         (&bore, [std::f64::consts::PI, TAU], true),
         (&seam, above, true),
