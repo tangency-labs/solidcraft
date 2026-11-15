@@ -16,15 +16,17 @@
 //!   is skinned at the trajectory parameters with C1 derivative constraints. G1
 //!   rescaling by that end's chord length would collapse its cross derivatives. Every
 //!   other piece is skinned as upstream.
-//! - Without `curZ` or an up direction, the frame's rate at a piece's end sections is the
+//! - Without `curZ` or an up direction, upstream takes the frame's rate at a piece's end
+//!   sections from a finite difference of the neighbouring z samples. Where a neighbour
+//!   lies past the piece's parameter range, on the next piece, the rate is instead the
 //!   projection normal method's own, `z' = -(z . x') x` from the piece's trajectory
-//!   derivatives ([`ZSource::RotationMinimizing`], #16959). Upstream takes a finite
-//!   difference of the neighbouring z samples, and at a piece's end one neighbour lies on
-//!   the next piece: along an arc whose z turns (its plane is not square to z) next to a
-//!   long line, that difference is a fraction of the rate, the cross derivatives of the
-//!   arc's skin miss the frame's turn, and the inner rows of its net run backwards there.
-//!   A closed trajectory whose z vectors were corrected to close keeps upstream's
-//!   difference: they also turn by the spread closing gap, which the method's rate omits.
+//!   derivatives ([`ZSource::RotationMinimizing`], #16959): along an arc whose z turns
+//!   (its plane is not square to z) next to a long line, the difference across the joint
+//!   is a fraction of the rate, the cross derivatives of the arc's skin miss the frame's
+//!   turn, and the inner rows of its net run backwards there. A difference within the
+//!   piece is upstream's, and so is one of a closed trajectory whose z vectors were
+//!   corrected to close: they also turn by the spread closing gap, which the method's
+//!   rate omits.
 //! - Out-params become return values (the swept surface; the patches with the center
 //!   point and normal); the `NL_STACKS` arguments have no counterpart. The optional
 //!   arguments of `N_CreateSweepScale` (`curZ`, `curS`, `tflg`, `tc`, `deg`, `dir`,
@@ -633,26 +635,31 @@ fn sweep_scale(
             placed_at += 1;
 
             if jj == 0 || jj == np {
+                // The finite difference's neighbours in the frame chain.
+                let prev = match k1.checked_sub(1) {
+                    Some(k0) => Some((at(&zl_vecs, k0, OP)?, at(&tt, k0, OP)?)),
+                    None => None,
+                };
+                let next = if k1 + 1 < zl_vecs.len() {
+                    Some((at(&zl_vecs, k1 + 1, OP)?, at(&tt, k1 + 1, OP)?))
+                } else {
+                    None
+                };
+                // (not upstream, #16959) a neighbour past this piece's parameter range
+                // lies on the next piece, whose frame can turn at another rate: there the
+                // rate is the projection normal method's own, unless the chain was
+                // corrected to close (it then also turns by the spread gap, which only
+                // the difference of the samples sees)
+                let piece = rf(&seg_pbnds, ii, OP)?;
+                let outside = |n: Option<(Vec3, f64)>| {
+                    n.is_some_and(|(_, t)| t < piece.start || t > piece.end)
+                };
+                let across = !closing && (outside(prev) || outside(next));
                 let zsrc = match (up, cur_z) {
                     (Some(up), _) => ZSource::Up(up),
                     (None, Some(cz)) => ZSource::Curve(cz),
-                    // (not upstream, #16959) the projection normal method's own rate; a
-                    // chain corrected to close also turns by the spread gap, which only
-                    // upstream's difference of the samples sees
-                    (None, None) if !closing => ZSource::RotationMinimizing(zl),
-                    (None, None) => ZSource::Samples {
-                        z: zl,
-                        prev: if k1 > 0 {
-                            Some((at(&zl_vecs, k1 - 1, OP)?, at(&tt, k1 - 1, OP)?))
-                        } else {
-                            None
-                        },
-                        next: if k1 + 1 < zl_vecs.len() {
-                            Some((at(&zl_vecs, k1 + 1, OP)?, at(&tt, k1 + 1, OP)?))
-                        } else {
-                            None
-                        },
-                    },
+                    (None, None) if across => ZSource::RotationMinimizing(zl),
+                    (None, None) => ZSource::Samples { z: zl, prev, next },
                 };
                 if jj == 0 {
                     rma1 = frame_matrix(xl, yl, zl);
