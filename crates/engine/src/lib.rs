@@ -1552,6 +1552,48 @@ impl Session {
         self.model.refingerprint_shared(&self.doc, keep);
     }
 
+    /// Store the vertex and edge names of the links whose guessed names their design dropped as
+    /// it opened (`Link::name_dropped`, #17229): each was found by its point, and keeps the name
+    /// of what it was found on from now on, as an edit of its sketch stores it. The evaluated
+    /// sketches already give the links those names, so nothing is evaluated again. A link not
+    /// found (its sketch failed or is rolled back) stays marked.
+    fn pin_dropped_link_names(&mut self) {
+        if self.model.is_stale() {
+            return;
+        }
+        let mut pins: Vec<(u64, String, Option<String>, Option<String>)> = Vec::new();
+        for f in &self.doc.features {
+            let Ok(saved) = self.doc.sketch(f.id) else { continue };
+            if !saved.links.iter().any(|l| l.name_dropped) {
+                continue;
+            }
+            let Some(r) = self.model.result(f.id).filter(|r| r.error.is_none() && !r.skipped && !r.stale) else { continue };
+            let Some(solved) = r.state.sketch(f.id) else { continue };
+            for l in saved.links.iter().filter(|l| l.name_dropped) {
+                let Some(found) = solved.sketch.links.iter().find(|x| x.id == l.id && !x.lost) else { continue };
+                if found.vertex_name.is_some() || found.edge_name.is_some() {
+                    pins.push((f.id, l.id.clone(), found.vertex_name.clone(), found.edge_name.clone()));
+                }
+            }
+        }
+        if pins.is_empty() {
+            return;
+        }
+        let ids: Vec<u64> = pins.iter().map(|(id, ..)| *id).collect();
+        let keep = self.model.pinned_prefix(&self.doc, &ids);
+        let doc = self.doc_mut();
+        for (id, link, vertex, edge) in pins {
+            let Ok(sk) = doc.sketch_mut(id) else { continue };
+            if let Some(l) = sk.links.iter_mut().find(|l| l.id == link) {
+                l.vertex_name = l.vertex_name.take().or(vertex);
+                l.edge_name = l.edge_name.take().or(edge);
+                l.name_dropped = false;
+            }
+        }
+        // The stored names are the ones the evaluation found: no result changes.
+        self.model.refingerprint_shared(&self.doc, keep);
+    }
+
     /// A hidden construction plane stays hidden when the design renames it, or undo or redo
     /// gives it another name (#4353): the hidden list keeps planes by name.
     fn follow_plane_renames(&mut self, previous: &Document) {
@@ -1920,6 +1962,7 @@ impl Session {
                     }
                     if pin {
                         self.pin_body_names();
+                        self.pin_dropped_link_names();
                     }
                 }
                 Ok(v)

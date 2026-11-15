@@ -6,9 +6,11 @@
 //! guessed names are gone, so a sketch link to a vertex, an edge or a face of such a sweep that
 //! saved one of them (or a name built on one, a later feature's face named beside it) no longer
 //! keeps that name: the link is found by its point when the design opens, as a link saved
-//! without a name is, and takes the name its geometry has now when its sketch is next edited.
-//! A link a sketch's plane was placed by (`auto_face`) keeps its name. The last release warns
-//! about the newer format number and opens the design, the links being found by their points.
+//! without a name is. A vertex or an edge link is marked (`name_dropped`), and the session that
+//! opens the design stores the name of the vertex or edge it was found on there, before any
+//! change can move it; a face link takes its name when its sketch is next edited. A link a
+//! sketch's plane was placed by (`auto_face`) keeps its name. The last release warns about the
+//! newer format number and opens the design, the links being found by their points.
 use serde_json::Value;
 
 pub fn step(v: &mut Value) -> crate::Result<()> {
@@ -36,6 +38,9 @@ pub fn step(v: &mut Value) -> crate::Result<()> {
                 }
                 if link.get(key).and_then(Value::as_str).is_some_and(|name| sweeps.iter().any(|id| names_face_of(name, *id))) {
                     link.remove(key);
+                    if key != "face_name" {
+                        link.insert("name_dropped".into(), Value::Bool(true));
+                    }
                 }
             }
         }
@@ -71,10 +76,12 @@ mod tests {
         let links = v.pointer("/features/2/sketch/links").unwrap();
         assert_eq!(links[0].get("vertex_name"), None);
         assert_eq!(links[1].get("edge_name"), None, "a name built beside a wall of the sweep");
+        assert!(links[0]["name_dropped"] == json!(true) && links[1]["name_dropped"] == json!(true));
         assert_eq!(links[2]["vertex_name"], json!("F9:side:l1|F9:side:l2|F9:start"), "a sweep along one curve");
         assert_eq!(links[3]["edge_name"], json!("F18:side:l1|F4:top"), "F18 is not F8");
         assert_eq!(links[4]["face_name"], json!("F8:side:l1#1"), "a sketch plane's own face");
         assert_eq!(links[5].get("face_name"), None);
+        assert!([2, 3, 4, 5].iter().all(|i| links[*i].get("name_dropped").is_none()));
         let mut empty = json!({"name": "Untitled"});
         super::step(&mut empty).unwrap();
         assert_eq!(empty, json!({"name": "Untitled"}));

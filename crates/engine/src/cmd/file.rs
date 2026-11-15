@@ -1829,6 +1829,9 @@ impl Session {
         let unpinned = session.doc.reserved_body_names.is_empty() && session.doc.features.iter().all(|f| f.body_names.is_empty());
         let before = session.doc.clone();
         session.pin_body_names();
+        // Links whose design dropped a guessed name as it opened keep the name of what they were
+        // found on, before a change can move it (#17229).
+        session.pin_dropped_link_names();
         if unpinned || !std::sync::Arc::ptr_eq(&before, &session.doc) {
             session.pin_rolled_back_body_names();
         }
