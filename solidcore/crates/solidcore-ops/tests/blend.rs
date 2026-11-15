@@ -2043,7 +2043,7 @@ fn a_rim_round_across_a_loft_s_creases_is_certified_or_refused() {
         .members;
     assert!(chain.len() > 1, "the rim is one edge: {chain:?}");
     match blend(&b, Blend::Round, &chain, &[2.0], &[], Corners::Filled) {
-        Ok(()) => {
+        Ok(_) => {
             // reopened from its record, as a design is: each blend face certified again
             let (record, _) = b.to_record().unwrap();
             let (reopened, _) = Body::from_record(&record, true)
