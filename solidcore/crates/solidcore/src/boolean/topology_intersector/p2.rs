@@ -1858,8 +1858,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     /// at one place: `b` is open, runs between `a`'s two vertices, and lies along `a`
     /// within the sum of the two edges' tolerances, found as WR-580 finds an edge a face
     /// already has along a curve (`SmTools::FindCoincidentEdge` over the edges of each of
-    /// `a`'s faces, with `b`'s curve over its interval at `b`'s tolerance, to which the
-    /// search adds the found edge's own).
+    /// `a`'s faces, with `b`'s curve over its interval at `b`'s tolerance), and only where
+    /// `coincidence_bound` proves the two edges within the sum of their tolerances over
+    /// their whole lengths (no bound for the pair: not at one place).
     ///
     /// # Errors
     ///
@@ -1885,11 +1886,27 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let interval = brep
             .edge_interval(b)
             .ok_or(invalid(OP_SET_RELS, "edge handle is unknown"))?;
+        let curve_a = brep
+            .edge_curve(a)
+            .ok_or(invalid(OP_SET_RELS, "edge handle is unknown"))?;
+        let curve_a = curve_of(&*brep, curve_a)?;
+        let interval_a = brep
+            .edge_interval(a)
+            .ok_or(invalid(OP_SET_RELS, "edge handle is unknown"))?;
         let (tol_a, tol_b) = (tol_of(brep, a)?, tol_of(brep, b)?);
+        // The search finds a candidate; the proof is the derived bound over the whole of both
+        // edges (not the search's samples), and a pair with no bound is not accepted.
+        // written so that a NaN bound or tolerance refuses
+        let proved =
+            crate::boolean::api_brep::coincidence_bound(curve_a, &interval_a, curve, &interval)
+                .is_some_and(|d| d <= tol_a + tol_b);
+        if !proved {
+            return Ok(false);
+        }
         for face in brep.edge_faces(a)? {
             let found = brep.face_coincident_edge(k, face, start, end, curve, interval, tol_b)?;
-            if let Some((edge, deviation)) = found {
-                if edge == a && deviation <= tol_a + tol_b {
+            if let Some((edge, _)) = found {
+                if edge == a {
                     return Ok(true);
                 }
             }
