@@ -450,12 +450,12 @@ fn offset_meet(profiles: [Profile; 2], offsets: [f64; 2], tol: f64) -> Option<(f
 /// `y` ([`Profile`]), read at the point of its surface nearest `at`: its surface a circular
 /// cylinder (a cone of the kernel's cylinder kind, read as its quadric) whose axis is parallel
 /// to `d` within [`DIR_TOL`], or planar within `tol` with its normal square to `d` within
-/// [`DIR_TOL`]. `None` for any other surface, or where `at` does not drop on it.
+/// [`DIR_TOL`]. `None` for any other surface, a face without one, or where `at` does not drop on it.
 ///
 /// # Errors
 ///
 /// Those of the evaluations, the drop and the planarity test; [`SolidError::Unported`] and a
-/// cancellation from reading the quadric; `SM_ERR` for a face without a surface.
+/// cancellation from reading the quadric.
 fn prismatic_profile(
     k: &Kernel,
     target: &Brep,
@@ -467,9 +467,10 @@ fn prismatic_profile(
 ) -> Result<Option<Profile>> {
     use crate::blend::fillet_exact::{BlendQuadric, QuadricKind};
     use crate::surface::surface::SurfaceKind;
-    let surface = crate::topology::face::p2::surface(target, face)?
-        .ok_or_else(|| SolidError::blend_failed(OP, "a face of the edge has no surface"))?
-        .clone_for_evaluation()?;
+    let Some(surface) = crate::topology::face::p2::surface(target, face)? else {
+        return Ok(None);
+    };
+    let surface = surface.clone_for_evaluation()?;
     let domain = surface.natural_uv_domain_with_nurb(k)?;
     let dropped = surface.drop_point::<NoObject>(k, at, &domain, &DropPointOptions::default())?;
     if !dropped.success {
