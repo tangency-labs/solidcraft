@@ -528,6 +528,218 @@ fn quadric_pair(a: &Implicit, b: &Implicit, tolerance: f64) -> Option<PlanePair>
     }
 }
 
+/// The ball a near-parallel pair's decision ([`near_parallel_cones`]) holds in: every point
+/// within `radius` of `pivot`. [`local_extension_reach`] takes the decision only where the
+/// face's extension lies inside it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Horizon {
+    pivot: Vec3,
+    radius: f64,
+}
+
+/// [`quadric_pair`]'s decision (holding everywhere), else [`near_parallel_cones`]'s (holding
+/// within its [`Horizon`], which reaches `at`, a point of the face); `None` where neither
+/// decides.
+fn parallel_quadrics(
+    a: &Implicit,
+    b: &Implicit,
+    tolerance: f64,
+    at: Option<Vec3>,
+) -> Option<(PlanePair, Option<Horizon>)> {
+    if let Some(pair) = quadric_pair(a, b, tolerance) {
+        return Some((pair, None));
+    }
+    near_parallel_cones(a, b, tolerance, at?).map(|(pair, horizon)| (pair, Some(horizon)))
+}
+
+/// Two cones (cylinders) whose axis directions or slopes are not exactly one, as
+/// [`quadric_pair`] asks, but differ by a little (an offset computed apart from the surface
+/// it moves off, its axis or slope a few roundings off), decided as [`quadric_pair`] decides
+/// within a ball about `b`'s origin `o_b`: the turn and the slopes' difference are counted
+/// with the axis offset `e`, as the ball's radius `D` scales them. `None` for any other
+/// pair, and for cones the exact test decides (one axis vector or its negation, one slope).
+///
+/// Each equation's surface `P` (axis `a`, `|a|² = 1 + δ`, radius `r`, slope `t`) lies near
+/// the circular cone `C` about its unit axis with radius `R = r + λ t s` (`λ = |a|`) at
+/// height `s` from its origin: `ρ² = R² + δ s²` on `P`, so the radii at one height differ by
+/// `n = |δ| s² / (ρ + |R|)`, at most `√|δ| |s|` and at most `|δ| s² / |R|`; from `C` to `P`
+/// the same where `|R| ≥ √|δ| |s|` (with `δ < 0`, `P` has no point near `C`'s apex). From a
+/// point of `b`'s surface within `D` of `o_b`:
+/// 1. to `b`'s circular cone: `n_b`;
+/// 2. turned about `o_b` onto `σ â` (`σ` the axes' sense): at most the chord `|b̂ − σ â|`
+///    per unit of distance from `o_b`;
+/// 3. to the cone about that axis with `a`'s slope `λ_a t_a` along `â`: the radii differ by
+///    `|λ_b t_b − σ λ_a t_a|` per unit of height;
+/// 4. that cone and `a`'s circular cone are exactly parallel, `e` (axis offset) and `g`
+///    (radial gap) apart as in [`quadric_pair`];
+/// 5. to `a`'s own surface: `n_a`, within `D + |o_b − o_a|` and the tolerance of `o_a`.
+///
+/// Each step's point stays within the tolerance of the last (every test below keeps the
+/// sum under it), so steps 1 to 3 are taken within `D + tolerance` of `o_b`: in all at most
+/// `m(D)`, enclosed. Apart where `|g| / √(1 + λ_a² t_a²) > tolerance + e + m(D)` and
+/// `e + m(D) ≤ tolerance` (the axes still one within the tolerance over the ball, as
+/// [`quadric_pair`] asks of `e`); no step from `C` to `P` is taken that way. One where
+/// `|g| + e + m(D) ≤ tolerance`, both ways, so each cone with `δ < 0` keeps
+/// `|R| ≥ √|δ| |s|` over the ball. `D` is the first of a fixed number of halvings, from
+/// where one term alone would use the room, at which `m(D)` takes at most half of the
+/// room each test has, so each holds strictly. A cone a real angle off (a half drafted 0.3
+/// degrees beside the half it was split from, an axis turned as much) leaves no room past a
+/// ball a fraction of a unit across and is left to [`quadric::meet`]; a cone a few
+/// roundings off holds over a ball of radius about `tolerance × 10¹⁴`. A ball that does not
+/// reach `at` (a point of the face: the edge's or the corner's vertex) decides nothing.
+fn near_parallel_cones(
+    a: &Implicit,
+    b: &Implicit,
+    tolerance: f64,
+    at: Vec3,
+) -> Option<(PlanePair, Horizon)> {
+    let (
+        Implicit::Cone {
+            origin: oa,
+            axis: aa,
+            radius: ra,
+            tan_angle: ta,
+        },
+        Implicit::Cone {
+            origin: ob,
+            axis: ab,
+            radius: rb,
+            tan_angle: tb,
+        },
+    ) = (*a, *b)
+    else {
+        return None;
+    };
+    // the axes' sense: the bound holds for either, the wrong one only fails it
+    let along = aa.dot(ab);
+    let sense = if along > 0.0 {
+        1.0
+    } else if along < 0.0 {
+        -1.0
+    } else {
+        return None;
+    };
+    // one axis vector (or its negation) and one slope along it: `quadric_pair`'s to decide
+    if (ab == aa || ab == -aa) && tb * sense == ta {
+        return None;
+    }
+    let i = Ivl::from;
+    let enclosed = |p: Vec3| [i(p.x), i(p.y), i(p.z)];
+    let dot = |x: [Ivl; 3], y: [Ivl; 3]| x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+    let minus = |x: [Ivl; 3], y: [Ivl; 3]| [x[0] - y[0], x[1] - y[1], x[2] - y[2]];
+    let scaled = |x: [Ivl; 3], s: Ivl| [x[0] * s, x[1] * s, x[2] * s];
+    let length = |x: [Ivl; 3]| dot(x, x).sqrt();
+    // each axis's length and unit direction, enclosed
+    let (la, lb) = (length(enclosed(aa)), length(enclosed(ab)));
+    if !(la.lo > 0.0 && lb.lo > 0.0) {
+        return None;
+    }
+    let unit_a = scaled(enclosed(aa), i(1.0) / la);
+    let unit_b = scaled(enclosed(ab), i(1.0) / lb);
+    let s = i(sense);
+    // step 2's chord and step 3's slopes along the unit axes, per unit of distance
+    let turn = length(minus(unit_b, scaled(unit_a, s))).hi;
+    let (ka, kb) = (i(ta) * la, i(tb) * lb);
+    let linear = round_up(turn + (kb - s * ka).mag());
+    // `|δ|` (`norm_defect` is `−δ`, its sign kept for the apex guard)
+    let (defect_a, defect_b) = (quadric::norm_defect(aa)?, quadric::norm_defect(ab)?);
+    // step 4: `b`'s origin `z` along `â` and `e` off `a`'s axis, the radial gap and the
+    // normals' scale
+    let v = minus(enclosed(ob), enclosed(oa));
+    let z = dot(v, unit_a);
+    let e = length(minus(v, scaled(unit_a, z))).hi;
+    let between = length(v).hi;
+    let gap = i(rb) - i(ra) - ka * z;
+    let scale = (i(1.0) + ka * ka).sqrt();
+    let numbers = [linear, e, between, gap.lo, gap.hi, scale.lo];
+    if !numbers.iter().all(|x| x.is_finite()) {
+        return None;
+    }
+    let tol = i(tolerance);
+    // above 0 (not a number is not)
+    let positive = |x: f64| x > 0.0;
+    // how far `b`'s steps run from `o_b` (`D` and the tolerance) and step 5 from `o_a`
+    let reach_b = |d: f64| (i(d) + tol).hi;
+    let reach_a = |d: f64| (i(d) + i(2.0) * tol + i(between)).hi;
+    // the least `|R|` within `d` of a cone's origin (0 where it may vanish)
+    let least = |r: f64, k: Ivl, d: f64| {
+        let low = (i(r.abs()) - i(k.mag()) * i(d)).lo;
+        if low > 0.0 {
+            low
+        } else {
+            0.0
+        }
+    };
+    // `n` within `d` of a cone's origin: `|δ| d² / |R|`, or `√|δ| d` where `R` may vanish
+    let defect = |defect: Ivl, r: f64, k: Ivl, d: f64| -> f64 {
+        let size = i(defect.mag());
+        let root = (size.sqrt() * i(d)).hi;
+        let low = least(r, k, d);
+        if low > 0.0 {
+            root.min((size * i(d) * i(d) / i(low)).hi)
+        } else {
+            root
+        }
+    };
+    let moved = |d: f64| {
+        let (db, da) = (reach_b(d), reach_a(d));
+        let steps = i(defect(defect_b, rb, kb, db)) + i(linear) * i(db);
+        (steps + i(defect(defect_a, ra, ka, da))).hi
+    };
+    // `C` to `P` (one surface, both ways) wants `|R| ≥ √|δ| |s|` of a cone with `δ < 0`
+    let clear = |d: f64| {
+        let clear_of = |defect: Ivl, r: f64, k: Ivl, d: f64| {
+            !positive(defect.hi) || least(r, k, d) >= (i(defect.mag()).sqrt() * i(d)).hi
+        };
+        clear_of(defect_b, rb, kb, reach_b(d)) && clear_of(defect_a, ra, ka, reach_a(d))
+    };
+    // the first of 64 halvings, from where one term alone would take half of `room`, at
+    // which the movement takes at most that (0: none)
+    let radius = |room: Ivl, both_ways: bool| -> f64 {
+        let half = (room * i(0.5)).lo;
+        if !positive(half) {
+            return 0.0;
+        }
+        let mut d = f64::INFINITY;
+        if linear > 0.0 {
+            d = d.min((i(half) / i(linear)).lo);
+        }
+        for (defect, r) in [(defect_a, ra), (defect_b, rb)] {
+            let size = defect.mag();
+            if size > 0.0 {
+                d = d.min((i(half) * i(r.abs().max(half)) / i(size)).sqrt().lo);
+            }
+        }
+        if d.is_infinite() {
+            // nothing turns, tilts or bends: the bound is the same at every radius
+            return if moved(0.0) <= half && (!both_ways || clear(0.0)) {
+                f64::INFINITY
+            } else {
+                0.0
+            };
+        }
+        for _ in 0..64 {
+            if !positive(d) {
+                return 0.0;
+            }
+            if moved(d) <= half && (!both_ways || clear(d)) {
+                return d;
+            }
+            d *= 0.5;
+        }
+        0.0
+    };
+    // a ball that does not reach `at`, a point of the face, decides nothing there
+    let need = length(minus(enclosed(at), enclosed(ob))).hi;
+    let horizon =
+        |radius: f64| (radius > 0.0 && radius >= need).then_some(Horizon { pivot: ob, radius });
+    if let Some(h) = horizon(radius(tol - i(gap.mag()) - i(e), true)) {
+        return Some((PlanePair::One, h));
+    }
+    let apart = radius(tol - i(e), false).min(radius(i(gap.mig()) / scale - tol - i(e), false));
+    horizon(apart).map(|h| (PlanePair::Apart, h))
+}
+
 /// The rounding of a unit normal and a height over it, relative to the distance of the
 /// point from the plane's point: the height's dot product (`gamma_4`), the difference
 /// (`gamma_1`), and each normal component within [`certified::unit_error`] of exact
@@ -2166,7 +2378,9 @@ fn kept_straight_edge_corner(
 /// are ([`quadric_pair`]): one surface, met as far as the edge is from it (a quadric's
 /// distance, as for the move below); or apart, listed and adding nothing (a piece of a
 /// split cylinder or sphere moved off the piece it was split from: a step's wall closes the
-/// gap). Any other two: [`quadric_pair_piece`] proves a root of both implicit equations and
+/// gap). Two cones whose axes or slopes are a little off one are decided so within a ball
+/// ([`near_parallel_cones`]), and the decision stands only where the face's extension lies
+/// inside the ball ([`extension_within`]); else the operation is refused. Any other two: [`quadric_pair_piece`] proves a root of both implicit equations and
 /// the normal-section plane, uniformly over each edge piece, with a displacement box
 /// certified by Krawczyk's operator ([`quadric::meet`]). Both cones' positive-radius
 /// sides are checked on the root box. Only a section Jacobian whose determinant excludes
@@ -2185,7 +2399,8 @@ fn kept_straight_edge_corner(
 /// ([`corner_with_quadric`]); where they meet in no one point, the edges' meetings stand.
 /// A plane and two quadrics meet by the same three-equation certificate, on the
 /// plane at the vertex ([`quadric::meet`]); a plane and two parallel quadrics
-/// ([`quadric_pair`]) meet in no one point, and the edges' meetings stand. Where two
+/// ([`parallel_quadrics`]) meet in no one point, and the edges' meetings stand; so do three
+/// quadrics every two of which are parallel. Where two
 /// quadrics are kept and share a straight edge at the vertex (a round drawn as two faces split along a ruling, or two surfaces
 /// crossing along a line), and the third's new surface a plane: faces that keep their
 /// surfaces keep their edges, so the three meet where that edge's line crosses the plane
@@ -2276,6 +2491,9 @@ pub fn local_extension_reach(
     }
     let own_moved = is_moved(own_face);
     let mut found = LocalReach::default();
+    // the balls the near-parallel pairs' decisions hold in, checked against the face's
+    // extension once its margin is known
+    let mut horizons: Vec<Horizon> = Vec::new();
     for lu in eu::faceuse_loopuses(b, faceuse, false, None)? {
         for edgeuse in loopuse::edgeuses(b, lu, None, None)? {
             let Some(e) = eu::edge(b, edgeuse)? else {
@@ -2301,6 +2519,7 @@ pub fn local_extension_reach(
                     &mut class_of,
                     &uncertified,
                     &mut found,
+                    &mut horizons,
                 )?;
             }
             let radial = match eu::radial(b, edgeuse)? {
@@ -2421,10 +2640,19 @@ pub fn local_extension_reach(
                     } else {
                         (c, a)
                     };
-                    match quadric_pair(q, r, tolerance) {
-                        Some(PlanePair::Apart) => (0.0, true, false),
+                    // a point of the edge for a near-parallel pair's ball to reach
+                    let at = match start {
+                        Some(v) => Some(crate::topology::vertex::point(b, v)?),
+                        None => None,
+                    };
+                    match parallel_quadrics(q, r, tolerance, at) {
+                        Some((PlanePair::Apart, horizon)) => {
+                            horizons.extend(horizon);
+                            (0.0, true, false)
+                        }
                         // one surface: met where it stands, as far as it is from the edge
-                        Some(PlanePair::One) => {
+                        Some((PlanePair::One, horizon)) => {
+                            horizons.extend(horizon);
                             let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
                                 Ok(quadric_distance_piece(over.0, mid.0, dt, q))
                             };
@@ -2453,7 +2681,85 @@ pub fn local_extension_reach(
             }
         }
     }
+    if !horizons.is_empty() {
+        let face = own_face.ok_or_else(uncertified)?;
+        let within = extension_within(k, b, face, &found, tolerance)?;
+        // a decision taken where the extension could leave its ball has no bound here
+        if !horizons
+            .iter()
+            .all(|h| within.as_ref().is_some_and(|f| f(h.pivot) <= h.radius))
+        {
+            return Err(uncertified());
+        }
+    }
     Ok(Some(found))
+}
+
+/// The farthest a point of `face`'s extended surface can lie from a point, as a function
+/// of the point, rounded up: the farthest corner of the box of `face`'s surface over its
+/// UV domain (a NURBS form's control points hold it), past which the surface is extended
+/// by the margin the executive gives it (its reach and its move,
+/// `record_extension_reach`), at most that far again for the move of a moved face's new
+/// surface off the old face. `None` for a box not made or not finite.
+///
+/// # Errors
+///
+/// Those of the face's surface and of its box.
+fn extension_within(
+    k: &Kernel,
+    b: &Brep,
+    face: FaceId,
+    found: &LocalReach,
+    tolerance: f64,
+) -> Result<Option<impl Fn(Vec3) -> f64>> {
+    let Some(surface) = crate::topology::face::p2::surface(b, face)? else {
+        return Ok(None);
+    };
+    let domain = crate::topology::face::p2::uv_domain(b, face)?;
+    let Some(bx) = surface
+        .calculate_bounding_box(k, &domain, [true, false, false], false)?
+        .normal_box
+    else {
+        return Ok(None);
+    };
+    let ends = [bx.min.x, bx.min.y, bx.min.z, bx.max.x, bx.max.y, bx.max.z];
+    let margin = round_up(round_up(found.reach + found.shift).max(tolerance) + found.shift);
+    let ordered = bx.min.x <= bx.max.x && bx.min.y <= bx.max.y && bx.min.z <= bx.max.z;
+    if !(ordered && margin.is_finite() && ends.iter().all(|x| x.is_finite())) {
+        return Ok(None);
+    }
+    Ok(Some(move |p: Vec3| {
+        let i = Ivl::from;
+        let side = |lo: f64, hi: f64, c: f64| {
+            let far = (i(lo) - i(c)).mag().max((i(hi) - i(c)).mag());
+            i(far) * i(far)
+        };
+        let squared = side(bx.min.x, bx.max.x, p.x)
+            + side(bx.min.y, bx.max.y, p.y)
+            + side(bx.min.z, bx.max.z, p.z);
+        let far = round_up(squared.sqrt().hi + margin);
+        // not a number: past any radius
+        if far.is_nan() {
+            f64::INFINITY
+        } else {
+            far
+        }
+    }))
+}
+
+/// Whether every two of `quadrics` are parallel ([`parallel_quadrics`], either way round):
+/// the balls their near-parallel decisions hold in (each reaching the vertex `p`), `None`
+/// where two are not.
+fn every_two_parallel(quadrics: &[Implicit], tolerance: f64, p: Vec3) -> Option<Vec<Horizon>> {
+    let mut near = Vec::new();
+    for (n, a) in quadrics.iter().enumerate() {
+        for c in quadrics.iter().skip(n + 1) {
+            for (x, y) in [(a, c), (c, a)] {
+                near.extend(parallel_quadrics(x, y, tolerance, Some(p))?.1);
+            }
+        }
+    }
+    Some(near)
 }
 
 /// A vertex of a face whose corner [`corner`] bounds, with the tolerances it decides by.
@@ -2470,9 +2776,12 @@ struct Corner {
 /// face's surface with every two others (three planes; two planes and a quadric or a net; a
 /// plane, a quadric and a net; a plane and two nets; a plane and two quadrics, on a kept
 /// straight edge where present, nowhere for parallel quadrics, otherwise by [`quadric::meet`];
+/// three quadrics on a kept straight edge, or nowhere where every two are parallel;
 /// anything else, or a meeting with a net not proved, is `refuse`d), and each moved
 /// surface's distance from the vertex (a moved net's: the farthest meeting found on it
-/// there), are taken into `found`.
+/// there), are taken into `found`; the balls near-parallel quadrics' decisions hold in into
+/// `horizons`.
+#[allow(clippy::too_many_arguments)] // the corner's context and its two outputs
 fn corner(
     k: &Kernel,
     b: &Brep,
@@ -2481,6 +2790,7 @@ fn corner(
     class_of: &mut dyn FnMut(&Brep, Option<FaceId>) -> Result<Exact>,
     refuse: &dyn Fn() -> SolidError,
     found: &mut LocalReach,
+    horizons: &mut Vec<Horizon>,
 ) -> Result<()> {
     let around = faces_around(b, at.vertex, at.own)?;
     // a corner of faces that all stay stays: it adds nothing
@@ -2564,17 +2874,22 @@ fn corner(
                         Some(CornerMeeting::Within(reach)) => Some(reach),
                         Some(CornerMeeting::Nowhere) => None,
                         Some(CornerMeeting::Uncertified) => return Err(refuse()),
-                        None => match (planes.as_slice(), quadrics.as_slice()) {
+                        None => match (
+                            planes.as_slice(),
+                            quadrics.as_slice(),
+                            every_two_parallel(&quadrics, at.tolerance, p),
+                        ) {
                             // parallel quadrics and a plane meet in no one point, as three
-                            // planes two of which are parallel: the edges' meetings stand
-                            // (parallel taken either way round: the same from every face)
-                            (&[_], [a, c])
-                                if quadric_pair(a, c, at.tolerance).is_some()
-                                    && quadric_pair(c, a, at.tolerance).is_some() =>
-                            {
+                            // planes two of which are parallel; so do three quadrics every two
+                            // of which are parallel (one surface or apart: two apart share no
+                            // point, and three that are one surface no one point): the edges'
+                            // meetings stand (parallel taken either way round: the same from
+                            // every face)
+                            (&[_], [_, _], Some(near)) | (&[], [_, _, _], Some(near)) => {
+                                horizons.extend(near);
                                 None
                             }
-                            (&[plane], [a, c]) => {
+                            (&[plane], [a, c], _) => {
                                 let section = quadric::Section::corner(p, plane.point, plane.raw);
                                 let meeting =
                                     quadric::meet(k, a, c, section, section, Ivl::from(0.0))?;
@@ -4413,5 +4728,122 @@ mod tests {
         assert_eq!(pair(&b50, &ball(on_z(8e-4), 50.0015)), both(None));
         assert_eq!(pair(&b50, &ball(on_z(0.01), 54.0)), both(None));
         assert_eq!(pair(&b50, &r50), both(None));
+    }
+
+    /// Cones a few roundings off one axis or one slope (#13722: SolidCraft's offset of a split
+    /// cylinder's band, axis `(2.3245e-16, 1.6354e-16, 1)`, and of a cone isogrid's, slope
+    /// −0.22499999999999998 against −0.22499999999999995) are one surface or apart within a
+    /// ball reaching the face and running far past any body. Cones a real angle off (an axis
+    /// turned 0.3 degrees, a half drafted 0.3 degrees, moved or not) are left to the proof,
+    /// and so is a pair whose ball does not reach the face. An axis a rounding short of unit
+    /// length is one surface only clear of its cone's apex. Exactly parallel cones keep
+    /// [`quadric_pair`]'s decision, which holds everywhere.
+    #[test]
+    #[allow(clippy::too_many_lines)] // one case per line
+    fn near_parallel_cones_are_one_or_apart_within_a_ball() {
+        let tol = 1e-6;
+        let cone = |origin: Vec3, axis: Vec3, radius: f64, tan_angle: f64| Implicit::Cone {
+            origin,
+            axis,
+            radius,
+            tan_angle,
+        };
+        let at = Vec3::new(50.0, 0.0, 50.0);
+        let both = |a: &Implicit, b: &Implicit| {
+            [
+                parallel_quadrics(a, b, tol, Some(at)),
+                parallel_quadrics(b, a, tol, Some(at)),
+            ]
+        };
+        // decided `want` both ways round, within a ball of at least `radius`
+        let decided = |found: [Option<(PlanePair, Option<Horizon>)>; 2], want, radius: f64| {
+            for f in found {
+                let (pair, horizon) = f.unwrap();
+                assert_eq!(pair, want);
+                let horizon = horizon.unwrap();
+                assert!(horizon.radius >= radius, "{horizon:?}");
+            }
+        };
+        let sam = Vec3::new(2.3245e-16, 1.6354e-16, 1.0);
+        let r50 = cone(Vec3::ZERO, Vec3::Z, 50.0, 0.0);
+        let r54 = cone(Vec3::ZERO, Vec3::Z, 54.0, 0.0);
+        // the moved band beside the kept one, and two moved pieces made apart
+        decided(
+            both(&r50, &cone(Vec3::ZERO, sam, 54.0, 0.0)),
+            PlanePair::Apart,
+            1e7,
+        );
+        decided(
+            both(&r54, &cone(Vec3::ZERO, sam, 54.0, 0.0)),
+            PlanePair::One,
+            1e7,
+        );
+        // the isogrid's slopes: the cone 4 out along its normals beside the kept one
+        let (kept, moved) = (-0.224_999_999_999_999_95, -0.224_999_999_999_999_98);
+        let grid = cone(Vec3::ZERO, Vec3::Z, 30.0, kept);
+        let out = cone(
+            Vec3::ZERO,
+            Vec3::Z,
+            30.0 + 4.0 * sqrt(1.0 + moved * moved),
+            moved,
+        );
+        decided(both(&grid, &out), PlanePair::Apart, 1e7);
+        decided(
+            both(&grid, &cone(Vec3::ZERO, Vec3::Z, 30.0, moved)),
+            PlanePair::One,
+            1e7,
+        );
+        // an axis a rounding short: apart over a wide ball; one surface beside a cylinder
+        // widely, beside a cone (apex 30 / 0.225 = 133 below its origin) only clear of the apex
+        let short = Vec3::new(0.0, 0.0, 1.0 - f64::EPSILON / 2.0);
+        decided(
+            both(&r50, &cone(Vec3::ZERO, short, 54.0, 0.0)),
+            PlanePair::Apart,
+            1e5,
+        );
+        decided(
+            both(&r50, &cone(Vec3::ZERO, short, 50.0, 0.0)),
+            PlanePair::One,
+            1e4,
+        );
+        let near_apex = both(&grid, &cone(Vec3::ZERO, short, 30.0, kept));
+        decided(near_apex, PlanePair::One, 50.0);
+        for f in near_apex {
+            assert!(f.unwrap().1.unwrap().radius < 134.0, "{f:?}");
+        }
+        // real angles: an axis turned 0.3 degrees, a half drafted 0.3 degrees, moved 4 or not
+        let turned = Vec3::new(0.3_f64.to_radians().sin(), 0.0, 0.3_f64.to_radians().cos());
+        assert_eq!(
+            both(&r50, &cone(Vec3::ZERO, turned, 54.0, 0.0)),
+            [None, None]
+        );
+        let draft = -(0.3_f64.to_radians().tan());
+        for radius in [50.0, 54.0] {
+            let drafted = cone(Vec3::new(0.0, 0.0, 50.0), Vec3::Z, radius, draft);
+            assert_eq!(both(&r50, &drafted), [None, None], "{radius}");
+        }
+        // an axis turned 1e-9: apart within a ball some hundreds across, which reaches the
+        // face at `at` but not a face 1e4 along the axis
+        let small = cone(Vec3::ZERO, Vec3::new(1e-9, 0.0, 1.0), 54.0, 0.0);
+        let (pair, horizon) = parallel_quadrics(&r50, &small, tol, Some(at)).unwrap();
+        assert_eq!(pair, PlanePair::Apart);
+        assert!(
+            (100.0..1e3).contains(&horizon.unwrap().radius),
+            "{horizon:?}"
+        );
+        let far = Some(Vec3::new(50.0, 0.0, 1e4));
+        assert_eq!(parallel_quadrics(&r50, &small, tol, far), None);
+        assert_eq!(parallel_quadrics(&r50, &small, tol, None), None);
+        // exactly parallel: `quadric_pair`'s decision, everywhere
+        assert_eq!(
+            parallel_quadrics(&r50, &r54, tol, Some(at)),
+            Some((PlanePair::Apart, None))
+        );
+        // three quadrics, every two parallel: the kept band and two moved pieces
+        let three = [r50, r54, cone(Vec3::ZERO, sam, 54.0, 0.0)];
+        let near = every_two_parallel(&three, tol, at).unwrap();
+        assert_eq!(near.len(), 4, "{near:?}");
+        let crossing = [r50, r54, cone(Vec3::ZERO, turned, 54.0, 0.0)];
+        assert_eq!(every_two_parallel(&crossing, tol, at), None);
     }
 }
