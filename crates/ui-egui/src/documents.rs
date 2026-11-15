@@ -980,6 +980,35 @@ pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
     Ok(())
 }
 
+/// Open a copy of design `i` in a new tab right after it, and show the copy: its design as it
+/// is now (unsaved changes, parameters, components and what is hidden included), named
+/// "<name> copy", with the same view. The copy has no file yet, so it counts as unsaved and
+/// closing it asks first. Its evaluated model goes with it when it is current, so a large design
+/// is not evaluated again; otherwise the copy is evaluated as an opened file is.
+pub fn duplicate(app: &mut SolveApp, i: usize) {
+    if app.file_picker_busy() || i >= app.docs.count() {
+        return;
+    }
+    let shown = if app.docs.slots.is_empty() { 0 } else { app.docs.active };
+    if i != shown {
+        switch(app, i);
+    }
+    let source = &app.session;
+    let mut doc = (*source.doc).clone();
+    let saved = source.model.saved(&source.doc);
+    doc.visibility = source.visibility.clone();
+    doc.name = solidcraft_ui_text::format("document.copy_name", &[("name", &doc.name)]);
+    let mut copy = Session::opened_validating(doc, saved.as_ref(), source.validation());
+    copy.mark_unsaved();
+    let cam = app.cam;
+    if let Err(e) = open_tab(app, copy) {
+        app.set_status(e, true);
+        return;
+    }
+    app.cancel_view_animation();
+    app.cam = cam;
+}
+
 /// Is the active design an untouched new one (it can be replaced instead of opening a tab)?
 pub fn active_is_blank(app: &SolveApp) -> bool {
     let s = &app.session;
@@ -1597,6 +1626,7 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Value {
             close_many(app, (0..app.docs.count()).filter(|k| *k != keep).collect());
         }
         Some("close_all") => close_many(app, (0..app.docs.count()).collect()),
+        Some("duplicate") => duplicate(app, i.unwrap_or(app.docs.active)),
         Some("move") => {
             let at = |k: &str| p.get(k).and_then(Value::as_u64).map(|x| x as usize);
             if let (Some(from), Some(to)) = (at("from"), at("to")) {
@@ -1741,12 +1771,16 @@ fn view_tab<'a>(view: &'a DesignView, active: bool, tip: &'a str) -> crate::app_
     }
 }
 
-/// A tab's menu: close it, the others, or all of them.
-const TAB_MENU: [crate::app_bar::TabMenuRow<'static>; 3] = [
-    crate::app_bar::TabMenuRow::new("ui.closeTab", "Close", "Ctrl+W"),
-    crate::app_bar::TabMenuRow::new("ui.closeOtherTabs", "Close Other Tabs", "").needing_others(),
-    crate::app_bar::TabMenuRow::new("ui.closeAllTabs", "Close All Tabs", ""),
-];
+/// A tab's menu: open a copy of its design (`duplicate`: the translated label), close it, the
+/// others, or all of them.
+fn tab_menu(duplicate: &str) -> [crate::app_bar::TabMenuRow<'_>; 4] {
+    [
+        crate::app_bar::TabMenuRow::new("ui.duplicateTab", duplicate, ""),
+        crate::app_bar::TabMenuRow::new("ui.closeTab", "Close", "Ctrl+W"),
+        crate::app_bar::TabMenuRow::new("ui.closeOtherTabs", "Close Other Tabs", "").needing_others(),
+        crate::app_bar::TabMenuRow::new("ui.closeAllTabs", "Close All Tabs", ""),
+    ]
+}
 
 /// The document tabs in the application bar, from `x0` to `x1` ([`crate::app_bar::tabs`]): click
 /// to switch, × to close, drag to reorder, + for the start page.
@@ -1783,6 +1817,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         .collect();
     let more_text = solidcraft_ui_text::tr("tab_strip.more");
     let plus_menu = crate::design_view_ui::plus_menu(solidcraft_theme::is_dark());
+    let duplicate_label = app.tr("ui.duplicate_design_tab").to_string();
+    let menu = tab_menu(&duplicate_label);
     let actions = {
         let mut strip = crate::app_bar::TabStrip {
             tabs: info
@@ -1809,7 +1845,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 focused: &mut r.focused,
                 max: MAX_DESIGN_NAME,
             }),
-            menu: &TAB_MENU,
+            menu: &menu,
             close_name: solidcraft_ui_text::tr("ui.close_tab"),
             close_tip: "Close",
             more_tip: solidcraft_ui_text::tr_label("All open designs"),
@@ -1869,12 +1905,13 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     }
     // A file loading into the window keeps the tabs as they are (dragging still moves it).
     let idle = !app.file_load_holds();
-    let (mut shut, mut pick, mut many, mut dropped) = (None, None, None, None);
+    let (mut shut, mut pick, mut many, mut dropped, mut copied) = (None, None, None, None, None);
     for action in actions {
         match action {
             crate::app_bar::TabAction::Select(i) => pick = Some(i),
             crate::app_bar::TabAction::Close(i) => shut = Some(i),
             crate::app_bar::TabAction::Menu { tab, id } => match id.as_str() {
+                "ui.duplicateTab" => copied = Some(tab),
                 "ui.closeTab" => shut = Some(tab),
                 "ui.closeOtherTabs" => many = Some((0..n).filter(|k| *k != tab).collect::<Vec<_>>()),
                 "ui.closeAllTabs" => many = Some((0..n).collect()),
@@ -1913,6 +1950,9 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 move_tab(app, from, to);
             }
         }
+    }
+    if let Some(tab) = copied.filter(|_| idle) {
+        duplicate(app, tab);
     }
 }
 
@@ -3129,6 +3169,58 @@ mod tests {
         h.step(&json!({"click": {"handle": "tab_menu:ui.closeOtherTabs"}})).unwrap();
         h.frames(2);
         assert_eq!(h.app.docs.count(), 1);
+    }
+
+    /// Duplicate in a tab's menu opens a copy of that design right after it: the same features
+    /// and hidden bodies, named "<name> copy", unsaved, with the same view; the original is
+    /// untouched, and an edit in the copy stays in the copy.
+    #[test]
+    fn duplicate_in_a_tabs_menu_opens_a_copy_after_it() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.custom_titlebar = true;
+        h.call("ui.resize", json!({"width": 1400, "height": 720}));
+        h.app.run("solid.box", json!({"length": 3, "width": 4, "height": 5, "body_name": "Plate"})).unwrap();
+        h.app.run("component.rename", json!({"component": 0, "name": "Bracket"})).unwrap();
+        h.app.run("solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": "Spare"})).unwrap();
+        h.app.run("browser.visibility", json!({"items": ["Spare"], "visible": false})).unwrap();
+        assert!(!h.app.session.body_visible("Spare"), "a body hidden in the original");
+        open_tab(&mut h.app, Session::default()).unwrap();
+        h.frames(3);
+        switch(&mut h.app, 0);
+        h.frames(2);
+        let (features, hidden, cam) = (h.app.session.doc.features.clone(), h.app.session.visibility.clone(), h.app.cam);
+        // From the other tab's menu: the original is shown first, and the copy lands after it.
+        switch(&mut h.app, 1);
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "tab:design:0"}, "button": "right"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "tab_menu:ui.duplicateTab"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.docs.count(), 3);
+        assert_eq!(h.app.docs.active, 1, "the copy is shown, right after its original");
+        assert_eq!(h.app.session.doc.name, "Bracket copy");
+        assert_eq!(h.app.session.doc.features, features, "the same design");
+        assert_eq!(h.app.session.visibility, hidden, "with the same bodies hidden");
+        assert!(h.app.session.path.is_none() && h.app.session.is_dirty(), "unsaved: closing it asks first");
+        assert_eq!(h.app.cam, cam, "seen from the same view");
+        assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 2, "its bodies are there");
+        // An edit in the copy stays in the copy.
+        h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Extra"})).unwrap();
+        switch(&mut h.app, 0);
+        assert_eq!(h.app.session.doc.name, "Bracket");
+        assert_eq!(h.app.session.doc.features, features, "the original is untouched");
+    }
+
+    /// `ui.documents {"action": "duplicate"}` does what the menu does, for scripts.
+    #[test]
+    fn the_control_channel_duplicates_a_design() {
+        let mut a = app();
+        a.run("solid.box", json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        let v = control(&mut a, &json!({"action": "duplicate", "index": 0}));
+        assert_eq!(v["documents"].as_array().map(Vec::len), Some(2));
+        assert_eq!(a.docs.active, 1);
+        assert_eq!(a.session.doc.name, "Untitled copy");
     }
 
     /// A middle click on a tab closes it as its × does: at once when it has nothing to save,
