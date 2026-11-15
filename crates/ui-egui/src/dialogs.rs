@@ -3297,7 +3297,12 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::pref
 /// Saved vectors/axes are real inputs even when they have no origin-axis selection chip.
 fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> {
     if let Kind::Construct {
-        command: "construct.plane.axis_point" | "construct.plane.two_edges" | "construct.plane.three_points" | "construct.plane.perpendicular",
+        command:
+            "construct.plane.axis_point"
+            | "construct.plane.two_edges"
+            | "construct.plane.three_points"
+            | "construct.plane.perpendicular"
+            | "construct.point.along_path",
         keys,
         ..
     } = &d.kind

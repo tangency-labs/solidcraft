@@ -3695,6 +3695,32 @@ fn point_along_path_previews_its_position_and_edits_in_place() {
     assert_eq!(h.app.session.doc.feature(feature.id).unwrap().kind, feature.kind);
 }
 
+/// #17154 review: a point along a model edge reopens on its saved edge, and picking another edge
+/// while editing moves the point there: the saved edge gives way to the new pick.
+#[test]
+fn editing_a_point_along_an_edge_takes_a_newly_picked_edge() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.run("construct.point.along_path", json!({"path": {"edge": [20, 0, 20]}, "t": 0.5})).unwrap();
+    h.app.set_origin_shown(false);
+    h.settle();
+    h.call("ui.view", json!({"view":"home"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    let feature = h.app.session.doc.features.last().unwrap().clone();
+    let at = |h: &crate::scenario::Harness| {
+        solidcraft_engine::view::construction_points(&h.app.session).into_iter().find(|p| p.0 == feature.id).map(|p| p.2)
+    };
+    assert!(at(&h).is_some_and(|p| p.dist(Vec3::new(20.0, 0.0, 20.0)) < 1e-6), "{:?}", at(&h));
+    h.app.edit_feature(feature.id);
+    h.frames(2);
+    assert!(h.app.dialog.as_ref().is_some_and(|d| d.extra.contains_key("path")), "the saved edge is kept until another is picked");
+    h.step(&json!({"click":{"world":[40,15,20]}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+    assert!(at(&h).is_some_and(|p| p.dist(Vec3::new(40.0, 15.0, 20.0)) < 1e-6), "the point moves to the new edge: {:?}", at(&h));
+}
+
 /// #3001: Convert Mesh opens a dialog instead of failing with "select a mesh body". With the
 /// mesh selected first it takes it, and OK rebuilds it as faces.
 #[test]

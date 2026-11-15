@@ -1619,6 +1619,20 @@ mod tests {
         assert_eq!(operation(&mut h), Some(true), "about its face again: Join");
     }
 
+    /// #17154: the preview of a point along a path in a moved component marks where the point
+    /// lands in the view, not where it lies in the component's own frame.
+    #[test]
+    fn a_point_along_a_path_in_a_moved_component_previews_where_it_lands() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": "Part:1", "translate": [50, 0, 0]})).unwrap();
+        let cmds = [("construct.point.along_path".to_string(), json!({"path": {"edge": [55, 0, 10]}, "t": 0.5}))];
+        let built = compute(&s, &cmds, colors()).unwrap();
+        assert_eq!(built.points.len(), 1, "{:?}", built.points);
+        assert!(built.points[0].dist(Vec3::new(55.0, 0.0, 10.0)) < 1e-6, "{:?}", built.points);
+    }
+
     #[test]
     fn a_hole_shows_its_cut_through_the_body() {
         let mut s = solidcraft_engine::Session::default();
