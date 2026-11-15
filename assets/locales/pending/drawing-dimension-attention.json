@@ -1,0 +1,40 @@
+{
+  "en": {
+    "ui.drawing_attention.title": "Drawing status",
+    "ui.drawing_attention.clear": "No dimensions need attention",
+    "ui.drawing_attention.count": "Dimensions needing attention: {count}",
+    "ui.drawing_attention.lost": "Lost",
+    "ui.drawing_attention.ambiguous": "Ambiguous",
+    "ui.drawing_attention.stale": "Out of date",
+    "ui.drawing_attention.inspect": "Inspection needed",
+    "ui.drawing_attention.other": "Needs attention",
+    "ui.drawing_attention.unknown": "Location unknown",
+    "ui.drawing_attention.sheet_unknown": "Sheet unknown",
+    "ui.drawing_attention.sheet_view": "{sheet} · {view}",
+    "ui.drawing_attention.view_only": "{view} · sheet unknown",
+    "ui.drawing_attention.held": "Drawing updates are held",
+    "ui.drawing_attention.waiting": "Views waiting for update: {count}",
+    "ui.drawing_attention.inspection_failed": "Inspection failed: {error}",
+    "ui.drawing_attention.changed": "The drawing changed since this dimension was updated.",
+    "ui.drawing_attention.reference": "The dimension reference needs inspection."
+  },
+  "de": {
+    "ui.drawing_attention.title": "Zeichnungsstatus",
+    "ui.drawing_attention.clear": "Keine Bemaßungen benötigen Aufmerksamkeit",
+    "ui.drawing_attention.count": "Bemaßungen mit Prüfbedarf: {count}",
+    "ui.drawing_attention.lost": "Referenz verloren",
+    "ui.drawing_attention.ambiguous": "Referenz mehrdeutig",
+    "ui.drawing_attention.stale": "Nicht aktuell",
+    "ui.drawing_attention.inspect": "Prüfung erforderlich",
+    "ui.drawing_attention.other": "Prüfung erforderlich",
+    "ui.drawing_attention.unknown": "Position unbekannt",
+    "ui.drawing_attention.sheet_unknown": "Blatt unbekannt",
+    "ui.drawing_attention.sheet_view": "{sheet} · {view}",
+    "ui.drawing_attention.view_only": "{view} · Blatt unbekannt",
+    "ui.drawing_attention.held": "Zeichnungsaktualisierung angehalten",
+    "ui.drawing_attention.waiting": "Ansichten warten auf Aktualisierung: {count}",
+    "ui.drawing_attention.inspection_failed": "Prüfung fehlgeschlagen: {error}",
+    "ui.drawing_attention.changed": "Die Zeichnung wurde seit der letzten Bemaßungsaktualisierung geändert.",
+    "ui.drawing_attention.reference": "Die Bemaßungsreferenz muss geprüft werden."
+  }
+}
