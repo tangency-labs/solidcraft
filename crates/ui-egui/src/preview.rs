@@ -113,6 +113,9 @@ pub struct Built {
     /// For a Mirror of bodies: whether a copy meets the body it was made from, with the key of
     /// the bodies and plane it was worked out for ([`mirror_key`]).
     pub mirror_meets: Option<(u64, bool)>,
+    /// Construction points the previewed feature makes or moves: the view marks each one, sized
+    /// to the view like the model's construction points (#17154).
+    pub points: Vec<Vec3>,
     /// The reply of a previewed assembly constraint (`dof`, `conflicts`): the Constrain dialog says
     /// how free the part is with the constraint it shows.
     pub placed: Option<serde_json::Value>,
@@ -174,6 +177,8 @@ pub struct PreviewState {
     pub tapered: Vec<(Vec3, solidcraft_engine::kernel::Taper)>,
     /// Whether the previewed Mirror's copy meets its body (see [`Built::mirror_meets`]).
     pub mirror_meets: Option<(u64, bool)>,
+    /// The construction points the preview shows (see [`Built::points`]).
+    pub points: Vec<Vec3>,
     /// The bodies and plane ([`mirror_key`]) the Mirror dialog last set its operation for: an
     /// operation picked by hand afterwards stays until they change.
     pub mirror_decided: Option<u64>,
@@ -213,6 +218,7 @@ impl PreviewState {
         self.tapered.clear();
         self.mirror_meets = None;
         self.mirror_decided = None;
+        self.points.clear();
         self.sketches.clear();
         self.busy = false;
         self.rolled_back = false;
@@ -251,6 +257,7 @@ impl PreviewState {
                 self.placed = b.placed;
                 self.tapered = b.tapered;
                 self.mirror_meets = b.mirror_meets;
+                self.points = b.points;
                 self.set_scene(b.scene);
             }
             // The current inputs make no feature: the last good geometry would contradict
@@ -265,6 +272,7 @@ impl PreviewState {
                 self.tapered.clear();
                 self.mirror_meets = None;
                 self.mirror_decided = None;
+                self.points.clear();
             }
         }
     }
@@ -732,6 +740,7 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         tapered: Vec::new(),
         stopped: None,
         mirror_meets: None,
+        points: Vec::new(),
         placed: None,
     }
 }
@@ -781,6 +790,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         tapered: Vec::new(),
         stopped: None,
         mirror_meets: None,
+        points: Vec::new(),
         placed: None,
     }
 }
@@ -823,9 +833,13 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
     let removed = sc.color(c.removed);
     let edge = sc.color(c.edge);
     let mut replaced = Vec::new();
+    let mut points = Vec::new();
     for construct in &after.construct {
         if before.construct.iter().any(|old| old == construct) {
             continue;
+        }
+        if let solidcraft_engine::doc::construct::ConstructGeom::Point(p) = construct.geom {
+            points.push(p);
         }
         if let solidcraft_engine::doc::construct::ConstructGeom::Plane(plane) = construct.geom {
             let (o, x, y) = (plane.origin, plane.x * 10.0, plane.y * 10.0);
@@ -940,6 +954,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         tapered: Vec::new(),
         stopped: None,
         mirror_meets: None,
+        points,
         placed: None,
     }
 }
@@ -1258,6 +1273,7 @@ mod tests {
             tapered: Vec::new(),
             stopped: None,
             mirror_meets: None,
+            points: Vec::new(),
             placed: None,
         }
     }
@@ -1601,6 +1617,20 @@ mod tests {
         assert_eq!(operation(&mut h), Some(false), "apart: New Body");
         pick(&mut h, "Face");
         assert_eq!(operation(&mut h), Some(true), "about its face again: Join");
+    }
+
+    /// #17154: the preview of a point along a path in a moved component marks where the point
+    /// lands in the view, not where it lies in the component's own frame.
+    #[test]
+    fn a_point_along_a_path_in_a_moved_component_previews_where_it_lands() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": "Part:1", "translate": [50, 0, 0]})).unwrap();
+        let cmds = [("construct.point.along_path".to_string(), json!({"path": {"edge": [55, 0, 10]}, "t": 0.5}))];
+        let built = compute(&s, &cmds, colors()).unwrap();
+        assert_eq!(built.points.len(), 1, "{:?}", built.points);
+        assert!(built.points[0].dist(Vec3::new(55.0, 0.0, 10.0)) < 1e-6, "{:?}", built.points);
     }
 
     #[test]

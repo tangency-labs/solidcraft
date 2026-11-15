@@ -3438,6 +3438,14 @@ pub struct DesignLink {
     pub path: String,
     /// The Import feature holding the linked design's bodies.
     pub feature: u64,
+    /// The source configuration row's stable id. Without one, the link follows the source's
+    /// saved state. A renamed row keeps its id; a deleted row must not select another row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub configuration: Option<u64>,
+    /// The selected row's creation identity, so undo and replacement cannot reuse its numeric id.
+    /// Legacy rows without a creation identity keep `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub configuration_identity: Option<u64>,
     /// Last inherited values, by Import body slot. Differing assembly assignments are
     /// local overrides and survive a source update. Older links start with no baseline.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

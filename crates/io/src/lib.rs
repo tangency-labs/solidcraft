@@ -50,8 +50,8 @@ pub mod vfs;
 pub use airfoil::{Airfoil, AirfoilFormat, MAX_AIRFOIL_BYTES, MAX_AIRFOIL_POINTS, read_airfoil};
 pub use dxf::{DxfWriteOptions, read_dxf, write_dxf, write_dxf_entities, write_dxf_opts};
 pub use dxf_out::{
-    DxfEntity, DxfLayer, DxfLinetype, DxfShape, loop_lwpolyline, loop_lwpolyline_scaled, loop_shapes, seg_shape, write_dxf_drawing,
-    write_dxf_drawing_units,
+    DxfEntity, DxfLayer, DxfLinetype, DxfPath, DxfPathStyle, DxfShape, DxfVertex, admit_path, loop_lwpolyline, loop_lwpolyline_scaled, path_shapes,
+    write_dxf_drawing, write_dxf_drawing_units,
 };
 pub use legacy_dir::{APP_ID, LEGACY_APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
 pub use safe_write::{backup_path, write_atomic};

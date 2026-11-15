@@ -3063,8 +3063,16 @@ fn plane_offset(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(face) = p.get("base").filter(|b| b.get("face").is_some()) {
         let base = super::sketch::face::capture(s, face, cmd)?;
         super::sketch::face::capture_positions(s, &base)?;
-        // The capture is already in the authoring frame.
-        return add_feature_in(s, p, FeatureKind::ConstructionPlane { plane: offset(base) }, false);
+        let mut plane = offset(base);
+        if let PlaneRef::ThroughPoint { point, .. } = &mut plane {
+            // The captured face is local already; only the separately picked point is world geometry.
+            let mut kind = FeatureKind::ConstructionPoint { def: solidcraft_doc::construct::PointDef::At { point: (**point).clone() } };
+            super::component::to_active_frame(s, &mut kind);
+            if let FeatureKind::ConstructionPoint { def: solidcraft_doc::construct::PointDef::At { point: local } } = kind {
+                **point = local;
+            }
+        }
+        return add_feature_in(s, p, FeatureKind::ConstructionPlane { plane }, false);
     }
     let base = plane_param(s, p.get("base"), cmd)?;
     add_feature(s, p, FeatureKind::ConstructionPlane { plane: offset(base) })

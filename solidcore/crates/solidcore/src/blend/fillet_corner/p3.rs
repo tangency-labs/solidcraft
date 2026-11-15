@@ -765,6 +765,8 @@ impl FilletCorner {
             vertex,
             solver_eus,
             &exec.earlier_pass_faces,
+            // the base solvers do not tell a variable-radius law: none is taken as constant
+            |_| false,
             |edge_use| {
                 exec.fillet_solver_of_edgeuse(edge_use)
                     .and_then(|id| usize::try_from(id.0).ok())
@@ -781,6 +783,10 @@ impl FilletCorner {
     /// `solver_of` resolves each filleted edge use to its actual borrowed solver
     /// base. Lookups occur in `solver_eus` order after the topology walk, where the
     /// native factory reads tolerances and the surface generator. No solver is copied.
+    /// `constant_offsets` tells whether an edge use's solver keeps its offsets constant
+    /// along the edge (`OffsetRadiiCanChange` false: rounds and the two-offset chamfers, by
+    /// construction): only such blends may take the second-order Join bound
+    /// (`blend_corner::join_gap`, #13911).
     ///
     /// # Errors
     ///
@@ -792,6 +798,7 @@ impl FilletCorner {
         vertex: VertexId,
         solver_eus: &[EdgeuseId],
         earlier_pass_faces: &[FaceId],
+        constant_offsets: impl Fn(EdgeuseId) -> bool,
         solver_of: impl Fn(EdgeuseId) -> Result<&'solver FilletSolver>,
     ) -> Result<Option<Self>> {
         // get number of edgeuses connected to this vertex to be filleted
@@ -1139,13 +1146,67 @@ impl FilletCorner {
                                 // the blends join only where their sections at the joint
                                 // vertex stand strictly within the B-rep's intersection
                                 // tolerance, which the check holds every vertex to (#16627;
-                                // `blend_corner::join_within_xsect_tolerance_deg`)
+                                // `blend_corner::join_within_xsect_tolerance_deg`), a first-order
+                                // gap only where the shared section lies behind the second
+                                // blend's end; over it the gap is of second order (#13911;
+                                // `blend_corner::join_gap`)
                                 let mut size = 0.0_f64;
+                                let mut blends = Vec::with_capacity(2);
                                 for &eu in solver_eus {
-                                    size = size.max(round_size(solver_of(eu)?)?);
+                                    let solver = solver_of(eu)?;
+                                    size = size.max(round_size(solver)?);
+                                    let mut faces = [(None, 0.0); 2];
+                                    for (rail, slot) in faces.iter_mut().enumerate() {
+                                        let face = match solver.edgeuse(rail)? {
+                                            Some(rail_eu) => eu1::face(b, rail_eu)?,
+                                            None => None,
+                                        };
+                                        // only offsets fixed along the edge are a
+                                        // constant reach: rounds, and two-distance and
+                                        // distance-angle chamfers (constant-radius
+                                        // solvers whose two offsets are fixed once at
+                                        // preparation, `session::two_offsets`), by
+                                        // construction. A variable-radius law, or a
+                                        // constant-distance section (its offsets solved
+                                        // per section), gets no offset, so the over-side
+                                        // bound refuses it
+                                        let offset = if constant_offsets(eu) {
+                                            solver.surface(rail)?.map_or(f64::NAN, |s| {
+                                                s.surface.offset_distance().abs()
+                                            })
+                                        } else {
+                                            f64::NAN
+                                        };
+                                        *slot = (face, offset);
+                                    }
+                                    blends.push(crate::blend::blend_corner::join_gap::JoinBlend {
+                                        eu,
+                                        faces,
+                                    });
                                 }
                                 let xsect_tol =
                                     crate::topology::vertex::corner::xsect_tol_3d_of_brep(k, b);
+                                let behind_deg =
+                                    crate::blend::blend_corner::join_within_xsect_tolerance_deg(
+                                        size,
+                                        xsect_tol,
+                                        tan_tol_deg,
+                                    );
+                                let join_deg = match blends.as_slice() {
+                                    [first, second] => {
+                                        crate::blend::blend_corner::join_gap::join_tolerance_deg(
+                                            k,
+                                            b,
+                                            vertex,
+                                            [first, second],
+                                            &all_eus,
+                                            xsect_tol,
+                                            tan_tol_deg,
+                                            behind_deg,
+                                        )?
+                                    }
+                                    _ => behind_deg,
+                                };
                                 let blend = crate::blend::blend_corner::classify(
                                     k,
                                     b,
@@ -1153,11 +1214,7 @@ impl FilletCorner {
                                     solver_eus,
                                     &all_eus,
                                     tan_tol_deg,
-                                    crate::blend::blend_corner::join_within_xsect_tolerance_deg(
-                                        size,
-                                        xsect_tol,
-                                        tan_tol_deg,
-                                    ),
+                                    join_deg,
                                 )?;
                                 let mut c = make(FilletCornerKind::NByTwo);
                                 c.blend = Some(blend);
@@ -2795,17 +2852,24 @@ mod tests {
             solver.fsg = Some(crate::blend::fillet_solver::p1::FilletSurfaceGenerator::Linear);
         }
         let seen = RefCell::new(Vec::new());
-        let corner =
-            FilletCorner::create_with_solver_lookup(&k, &mut b, vertex, &outgoing, &[], |eu| {
+        let corner = FilletCorner::create_with_solver_lookup(
+            &k,
+            &mut b,
+            vertex,
+            &outgoing,
+            &[],
+            |_| true,
+            |eu| {
                 seen.borrow_mut().push(eu);
                 let index = outgoing
                     .iter()
                     .position(|&candidate| candidate == eu)
                     .unwrap();
                 Ok(solvers.get(index).unwrap())
-            })
-            .unwrap()
-            .unwrap();
+            },
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(*seen.borrow(), outgoing);
         assert_eq!(corner.kind, FilletCornerKind::ConvexNByN);
         assert_eq!(corner.approx_tol_3d, 0.01);
@@ -2813,16 +2877,23 @@ mod tests {
 
         // The next factory call sees the same owned solver's updated state.
         solvers.get_mut(1).unwrap().approx_tol_3d = 0.001;
-        let corner =
-            FilletCorner::create_with_solver_lookup(&k, &mut b, vertex, &outgoing, &[], |eu| {
+        let corner = FilletCorner::create_with_solver_lookup(
+            &k,
+            &mut b,
+            vertex,
+            &outgoing,
+            &[],
+            |_| true,
+            |eu| {
                 let index = outgoing
                     .iter()
                     .position(|&candidate| candidate == eu)
                     .unwrap();
                 Ok(solvers.get(index).unwrap())
-            })
-            .unwrap()
-            .unwrap();
+            },
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(corner.approx_tol_3d, 0.001);
     }
 
@@ -2836,26 +2907,40 @@ mod tests {
         solver.fsg = Some(crate::blend::fillet_solver::p1::FilletSurfaceGenerator::Linear);
         let seen = RefCell::new(Vec::new());
         let failure = invalid("factory_lookup_test", "second solver unavailable");
-        let result =
-            FilletCorner::create_with_solver_lookup(&k, &mut b, vertex, &outgoing, &[], |eu| {
+        let result = FilletCorner::create_with_solver_lookup(
+            &k,
+            &mut b,
+            vertex,
+            &outgoing,
+            &[],
+            |_| true,
+            |eu| {
                 seen.borrow_mut().push(eu);
                 if seen.borrow().len() == 2 {
                     Err(failure.clone())
                 } else {
                     Ok(&solver)
                 }
-            });
+            },
+        );
         assert_eq!(result.unwrap_err(), failure);
         assert_eq!(*seen.borrow(), outgoing.get(..2).unwrap());
 
         // Invalid topology fails before the first native solver read.
         seen.borrow_mut().clear();
         b.edgeuse_mut(*outgoing.first().unwrap()).unwrap().cw = None;
-        let result =
-            FilletCorner::create_with_solver_lookup(&k, &mut b, vertex, &outgoing, &[], |eu| {
+        let result = FilletCorner::create_with_solver_lookup(
+            &k,
+            &mut b,
+            vertex,
+            &outgoing,
+            &[],
+            |_| true,
+            |eu| {
                 seen.borrow_mut().push(eu);
                 Ok(&solver)
-            });
+            },
+        );
         assert!(result.is_err());
         assert!(seen.borrow().is_empty());
     }

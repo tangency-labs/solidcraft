@@ -991,7 +991,6 @@ fn closed_rounded_rectangle_has_no_internal_pole() {
     k.fixes.closed_smooth_pole_tangent_limit = true;
     k.fixes.keep_exact_pcurves = true;
     k.fixes.face_swap_uv_transposes_trims = true;
-    k.fixes.degen_param_tiebreak_uses_actual_param = true;
     let mut curves = Vec::new();
     for (cx, cy, angle) in [
         (8.0, 2.0, -90.0),
