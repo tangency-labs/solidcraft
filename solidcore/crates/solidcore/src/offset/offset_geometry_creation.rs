@@ -1297,6 +1297,28 @@ fn curve_of<O: ClassObject>(geometry: &impl ClassGeometry<O>, h: O) -> Result<&C
         .ok_or(dangling("curve handle cannot be resolved"))
 }
 
+/// The other parameter of the point at `t` on `curve` when the curve is closed (its ends
+/// within `tol` of each other) and the point is its seam (within `tol` of its ends): the end
+/// of the curve's interval farther from `t`. `None` for an open curve or a point off the
+/// seam, which have one parameter only.
+///
+/// # Errors
+///
+/// Those of the three evaluations.
+fn seam_twin(k: &Kernel, curve: &Curve, t: f64, tol: f64) -> Result<Option<f64>> {
+    let ivl = curve.natural_interval();
+    let start = curve.evaluate_point(k, ivl.min())?;
+    let end = curve.evaluate_point(k, ivl.max())?;
+    if distance(start, end) > tol || distance(curve.evaluate_point(k, t)?, start) > tol {
+        return Ok(None);
+    }
+    Ok(Some(if t - ivl.min() <= ivl.max() - t {
+        ivl.max()
+    } else {
+        ivl.min()
+    }))
+}
+
 /// The surface behind `h` (a dereference upstream).
 fn surface_of<O: ClassObject>(geometry: &impl ClassGeometry<O>, h: O) -> Result<&Surface> {
     geometry
@@ -3759,18 +3781,32 @@ impl OffsetGeometryCreation {
             };
             let same_tol = 10.0 * self.this_approx_tol_3d;
             let first_again = |pnt: Point3| first.is_some_and(|f| distance(pnt, f) <= same_tol);
+            // (not upstream, #14062) a closed edge's second trim point is its one vertex
+            // again: where that point is the seam of a closed 3D curve (a loft's floor circle
+            // offset, its seam at the vertex) it has the curve's two ends as parameters, and
+            // the edge runs all the way round from one to the other. The point solve may
+            // give only one of them, the first trim point: its twin is the second.
+            let closed_second = i == 1 && brep.edge_is_closed(base_edge)?;
             let mut found_at = None;
             for (ix, sol) in solutions.as_slice().iter().enumerate() {
                 let t = sol.start.param(0)?;
-                let pnt = curve_of(brep, curve_3d)?.evaluate_point(k, t)?;
+                let twin = if closed_second {
+                    seam_twin(k, curve_of(brep, curve_3d)?, t, same_tol)?
+                } else {
+                    None
+                };
+                for t in std::iter::once(t).chain(twin) {
+                    let pnt = curve_of(brep, curve_3d)?.evaluate_point(k, t)?;
 
-                // search for the best solution
-                let dist_moved = distance(pnt, base_point);
-                if dist_moved < found_dist && !are_same(t, trim_ivl.min()) && !first_again(pnt) {
-                    found_param = t;
-                    found_dist = dist_moved;
-                    found = true;
-                    found_at = Some(ix);
+                    // search for the best solution
+                    let dist_moved = distance(pnt, base_point);
+                    if dist_moved < found_dist && !are_same(t, trim_ivl.min()) && !first_again(pnt)
+                    {
+                        found_param = t;
+                        found_dist = dist_moved;
+                        found = true;
+                        found_at = Some(ix);
+                    }
                 }
 
                 // If solution is a range, e.g. coincident curves, check m_vEnd
