@@ -1327,8 +1327,10 @@ mod tests {
             let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
             let name = case["name"].as_str().unwrap();
             // The edit's radius change against the rebuild's limit
-            // SM_EFF_ZERO_SQRT (1 + r): a taper is at least twice it, every other
-            // fixture at most half of it.
+            // SM_EFF_ZERO_SQRT (1 + r) = 1e-5 for r 9: a taper's scale 1 ± 2.2222e-6 makes
+            // it 1.99999999998e-5, just under twice the limit (asserted >= 1.99x); the
+            // "rounded" fixtures' 1 ± 5.5556e-7 make it 5.0000000004e-6, just over half
+            // (asserted <= 0.51x); the others are far below.
             let ModeIn::CylBounded { radius, .. } = &i.cone.mode else {
                 panic!("{name}: not a bounded cylinder");
             };

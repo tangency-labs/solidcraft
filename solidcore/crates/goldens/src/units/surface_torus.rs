@@ -1217,15 +1217,56 @@ mod tests {
             else {
                 panic!("{name}: not is_nurb");
             };
+            // the recogniser's own distance tolerance (`Torus::is_nurb_surface_torus`,
+            // solidcore/crates/solidcore/src/surface/torus.rs): tolerance_scale *
+            // ANALYTIC_TOL_SCALE (100) * SM_EFF_ZERO * (1 + |min corner| + |max corner|),
+            // its corners those of the NURB `is_nurb` tests (scaled and perturbed as there)
+            let mut nurb = t.base().base().gw_nurb().cloned().unwrap();
+            let ix = nurb.indices();
+            for a in 0..=ix.n {
+                for b in 0..=ix.m {
+                    let p = nurb.cpt_mut(a, b).unwrap();
+                    p.x *= net_scale[0];
+                    p.y *= net_scale[1];
+                    p.z *= net_scale[2];
+                }
+            }
+            for pt in perturb {
+                if pt.i <= ix.n && pt.j <= ix.m {
+                    let p = nurb.cpt_mut(pt.i, pt.j).unwrap();
+                    p.x += pt.d[0];
+                    p.y += pt.d[1];
+                    p.z += pt.d[2];
+                }
+            }
+            let tested = BSplineSurface::from_nurb(nurb, false);
+            let d = tested.natural_uv_domain();
+            let (lo, hi) = (
+                tested.evaluate_point(d.min()).unwrap(),
+                tested.evaluate_point(d.max()).unwrap(),
+            );
+            let scaled_zero = *scale
+                * 100.0
+                * solidcore::math::EFF_ZERO
+                * (1.0 + lo.max_dimension() + hi.max_dimension());
             let found = is_nurb(&k, &t, *scale, *net_scale, perturb)
                 .unwrap()
                 .unwrap_or_else(|| panic!("{name}: no torus found"));
             let s = found.base();
             let polar = s.polar_curve().map(|e| Curve::from(e.clone()));
+            // the generator must be a circle with its NURB (a lost NURB fails here)
+            let gen = s
+                .gen_curve()
+                .unwrap_or_else(|| panic!("{name}: no generator"));
+            assert!(
+                matches!(gen.kind(), CurveKind::Ellipse(_)) && nurb_of(gen).is_some(),
+                "{name}: the generator is not a circle with a NURB"
+            );
+            let present = [polar.as_ref(), Some(gen)];
             let mut circles = 0;
-            for c in [polar.as_ref(), s.gen_curve()].into_iter().flatten() {
+            for c in present.into_iter().flatten() {
                 let (CurveKind::Ellipse(e), Some(nurb)) = (c.kind(), nurb_of(c)) else {
-                    continue;
+                    panic!("{name}: a curve that is not a circle with a NURB");
                 };
                 circles += 1;
                 assert_eq!(nurb.knots(), &knots[..], "{name}");
@@ -1241,7 +1282,12 @@ mod tests {
                 let (dx, dy) = (pts[0] - o, pts[2] - o);
                 let r = dx.length();
                 let scale = o.max_dimension() + 2.0 * r;
-                let bound = 16.0 * f64::EPSILON * scale;
+                // rounding counted per coordinate, each relative to `scale`: the stored
+                // homogeneous product (1), the divide by w (1), the midpoint's sum (1), the
+                // subtraction for dx / dy (1), the two additions of `q` (2), the final
+                // difference (1) and the norm (1): gamma_8, times 2 for the 3-vector norm
+                // (sqrt 3 < 2)
+                let bound = 2.0 * solidcore::nurbs::math::gamma(8) * scale;
                 assert!((dy.length() - r).abs() <= bound, "{name}: {dy:?} {r}");
                 assert!(dx.dot(dy).abs() <= bound * r, "{name}: axes not square");
                 let expected = [
@@ -1260,14 +1306,21 @@ mod tests {
                     let e3 = pts[j];
                     assert!((e3 - q).length() <= bound, "{name} point {j}: {e3:?} {q:?}");
                 }
-                // the analytic circle is the same one, to its recovery's tolerance
+                // the analytic circle is the same one, within the recogniser's tolerance
                 let p = e.position();
                 assert_eq!(e.x_radius(), e.y_radius(), "{name}");
-                let near = 1e-9 * (1.0 + scale);
-                assert!((p.origin() - o).length() <= near, "{name}: {:?} {o:?}", p.origin());
-                assert!((e.x_radius() - r).abs() <= near, "{name}: {} {r}", e.x_radius());
+                assert!(
+                    (p.origin() - o).length() <= scaled_zero,
+                    "{name}: {:?} {o:?} {scaled_zero}",
+                    p.origin()
+                );
+                assert!(
+                    (e.x_radius() - r).abs() <= scaled_zero,
+                    "{name}: {} {r} {scaled_zero}",
+                    e.x_radius()
+                );
             }
-            assert!(circles >= 1, "{name}: no circle NURB");
+            assert_eq!(circles, 1 + usize::from(polar.is_some()), "{name}");
         }
     }
 
