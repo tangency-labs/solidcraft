@@ -767,6 +767,12 @@ impl Body {
         }
     }
 
+    /// The outward normal of `face` if it is planar, or `None`.
+    pub fn face_plane_normal(&self, face: usize) -> Option<Vec3> {
+        let (ops, order) = self.ops_body()?;
+        ops.face_plane_normal(order, face).ok().flatten().map(|n| Vec3::new(n.value[0], n.value[1], n.value[2]))
+    }
+
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
     pub fn with_cylinder_certificate(mut self, producer: u64) -> Result<Self> {
         if producer == 0 {

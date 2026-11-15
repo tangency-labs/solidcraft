@@ -27,16 +27,14 @@ pub(super) fn face_normal(s: &Session, p: Vec3) -> Option<Vec3> {
 
 /// The outward normal of the planar face at `p` of `body` (any body when `None`).
 pub(super) fn face_normal_in(s: &Session, p: Vec3, body: Option<&str>) -> Option<Vec3> {
-    let (m, f, d, _) = face_at_in(s, p, body).ok().flatten()?;
-    if !near_face(&m, d) {
+    let (_, f, d, bi) = face_at_in(s, p, body).ok().flatten()?;
+    let st = s.model.state();
+    let b = st.bodies.iter().find(|b| b.name == bi)?;
+    let tol = (b.body.size() * 1e-3).max(1e-3);
+    if d > tol * 10.0 {
         return None;
     }
-    m.triangles
-        .iter()
-        .zip(&m.tri_face)
-        .filter(|(_, tf)| **tf == f)
-        .filter_map(|(t, _)| m.tri(t))
-        .find_map(|[a, b, c]| (b - a).cross(c - a).normalized())
+    b.body.face_plane_normal(f as usize)
 }
 
 /// Is a face `d` from a point near enough to hold it: within a thousandth of the body's
@@ -111,35 +109,26 @@ fn inside_hull(sorted: &[(f64, f64)], q: (f64, f64)) -> bool {
 /// The outward normal of the planar face at the world point `p`: on the model as the view
 /// places it (moved components where they are shown).
 pub(super) fn face_normal_world(s: &Session, p: Vec3) -> Option<Vec3> {
-    let (m, f, d, _) = face_at_state(&*s.world_state().ok()?, p, None).ok().flatten()?;
-    let tol = (m.bounds().diagonal() * 1e-3).max(1e-3);
+    let st = s.world_state().ok()?;
+    let (_, f, d, bi) = face_at_state(&st, p, None).ok().flatten()?;
+    let b = st.bodies.iter().find(|b| b.name == bi)?;
+    let tol = (b.body.size() * 1e-3).max(1e-3);
     if d > tol * 10.0 {
         return None;
     }
-    m.triangles
-        .iter()
-        .zip(&m.tri_face)
-        .filter(|(_, tf)| **tf == f)
-        .filter_map(|(t, _)| m.tri(t))
-        .find_map(|[a, b, c]| (b - a).cross(c - a).normalized())
+    b.body.face_plane_normal(f as usize)
 }
 
 /// Is the body face at `p` planar (`None`: no face there)?
 pub(super) fn face_is_planar(s: &Session, p: Vec3) -> Option<bool> {
-    let (m, f, d, _) = face_at(s, p)?;
-    if !near_face(&m, d) {
+    let (_, f, d, bi) = face_at(s, p)?;
+    let st = s.model.state();
+    let b = st.bodies.iter().find(|b| b.name == bi)?;
+    let tol = (b.body.size() * 1e-3).max(1e-3);
+    if d > tol * 10.0 {
         return None;
     }
-    let ns: Vec<Vec3> = m
-        .triangles
-        .iter()
-        .zip(&m.tri_face)
-        .filter(|(_, tf)| **tf == f)
-        .filter_map(|(t, _)| m.tri(t))
-        .filter_map(|[a, b, c]| (b - a).cross(c - a).normalized())
-        .collect();
-    let n0 = *ns.first()?;
-    Some(ns.iter().all(|n| n.dot(n0) > 1.0 - 1e-6))
+    Some(b.body.face_plane_normal(f as usize).is_some())
 }
 
 /// A face given to a command: a point `[x, y, z]` on it (or `{point}`), or its name as
