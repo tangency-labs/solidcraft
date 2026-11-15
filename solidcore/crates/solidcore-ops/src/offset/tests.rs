@@ -1181,6 +1181,27 @@ fn a_box_with_a_lofted_tunnel_shells_open_at_its_side() {
     }
 }
 
+/// #14062: the box with a lofted tunnel shelled t inward with its floor (z = 0) or its top
+/// (z = 50) open instead of its side. The tunnel's floor edge mates as with the side open.
+/// Floor open: the side keeps its offset ring round the tunnel, 14 faces as with the side
+/// open; top open: the top has no hole to split it, 13 faces. Both 30 edges, 20 vertices,
+/// one shell.
+#[test]
+fn a_box_with_a_lofted_tunnel_shells_open_at_its_floor_or_top() {
+    all_fixes();
+    for (open, faces) in [([60.0, -25.0, 0.0], 14), ([60.0, -25.0, 50.0], 13)] {
+        for t in [1.0, 2.0] {
+            let b = box_with_a_lofted_tunnel();
+            let o = order(&b);
+            shell(&b, &o, &[through(&b, &o, open)], -t).unwrap();
+            assert_eq!(b.counts().unwrap(), [faces, 30, 20], "{open:?} t {t}");
+            assert_eq!(b.to_record().unwrap().0.shells.len(), 1, "{open:?} t {t}");
+            assert!(b.is_manifold_solid().unwrap(), "{open:?} t {t}");
+            b.check_solid().unwrap();
+        }
+    }
+}
+
 /// #17608: the shelled box with a lofted tunnel of
 /// [`a_box_with_a_lofted_tunnel_shells_open_at_its_side`] passes SMLib's full check. It
 /// fails test #36 ("Face Near missing Seam"): the offset loft face's seam edge ends 4e-9 of

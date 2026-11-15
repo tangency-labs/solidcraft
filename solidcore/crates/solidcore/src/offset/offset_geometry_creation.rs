@@ -1297,26 +1297,26 @@ fn curve_of<O: ClassObject>(geometry: &impl ClassGeometry<O>, h: O) -> Result<&C
         .ok_or(dangling("curve handle cannot be resolved"))
 }
 
-/// The other parameter of the point at `t` on `curve` when the curve is closed (its ends
-/// within `tol` of each other) and the point is its seam (within `tol` of its ends): the end
-/// of the curve's interval farther from `t`. `None` for an open curve or a point off the
-/// seam, which have one parameter only.
+/// The other parameter of the point at `t` on `curve` when the curve is closed
+/// ([`Curve::is_closed`] within `tol`) and the point is its seam (within `tol` of the end of
+/// the curve's interval nearer `t`): the other end. `None` for an open curve or a point off
+/// the seam, which have one parameter only.
 ///
 /// # Errors
 ///
-/// Those of the three evaluations.
+/// Those of [`Curve::is_closed`] and of the two evaluations.
 fn seam_twin(k: &Kernel, curve: &Curve, t: f64, tol: f64) -> Result<Option<f64>> {
     let ivl = curve.natural_interval();
-    let start = curve.evaluate_point(k, ivl.min())?;
-    let end = curve.evaluate_point(k, ivl.max())?;
-    if distance(start, end) > tol || distance(curve.evaluate_point(k, t)?, start) > tol {
+    if !curve.is_closed(k, &ivl, tol)? {
         return Ok(None);
     }
-    Ok(Some(if t - ivl.min() <= ivl.max() - t {
-        ivl.max()
+    let (near, far) = if t - ivl.min() <= ivl.max() - t {
+        (ivl.min(), ivl.max())
     } else {
-        ivl.min()
-    }))
+        (ivl.max(), ivl.min())
+    };
+    let on_seam = distance(curve.evaluate_point(k, t)?, curve.evaluate_point(k, near)?) <= tol;
+    Ok(on_seam.then_some(far))
 }
 
 /// The surface behind `h` (a dereference upstream).
@@ -3784,10 +3784,13 @@ impl OffsetGeometryCreation {
             // (not upstream, #14062) a closed edge's second trim point is its one vertex
             // again: where that point is the seam of a closed 3D curve (a loft's floor circle
             // offset, its seam at the vertex) it has the curve's two ends as parameters, and
-            // the edge runs all the way round from one to the other. The point solve may
-            // give only one of them, the first trim point: its twin is the second.
+            // the edge runs all the way round from one to the other. The solutions may give
+            // only one of them, the first trim point, which `are_same` below excludes: its
+            // twin is the second, taken within the tolerance that decides "the same point"
+            // for an open edge (`first_again`).
             let closed_second = i == 1 && brep.edge_is_closed(base_edge)?;
             let mut found_at = None;
+            let mut found_twin = false;
             for (ix, sol) in solutions.as_slice().iter().enumerate() {
                 let t = sol.start.param(0)?;
                 let twin = if closed_second {
@@ -3795,7 +3798,7 @@ impl OffsetGeometryCreation {
                 } else {
                     None
                 };
-                for t in std::iter::once(t).chain(twin) {
+                for (t, is_twin) in std::iter::once((t, false)).chain(twin.map(|t| (t, true))) {
                     let pnt = curve_of(brep, curve_3d)?.evaluate_point(k, t)?;
 
                     // search for the best solution
@@ -3806,6 +3809,7 @@ impl OffsetGeometryCreation {
                         found_dist = dist_moved;
                         found = true;
                         found_at = Some(ix);
+                        found_twin = is_twin;
                     }
                 }
 
@@ -3821,6 +3825,7 @@ impl OffsetGeometryCreation {
                         found_dist = dist_moved;
                         found = true;
                         found_at = Some(ix);
+                        found_twin = false;
                     }
                 }
             }
@@ -3850,6 +3855,7 @@ impl OffsetGeometryCreation {
                     tan_tol_deg,
                 )? {
                     found_param = param;
+                    found_twin = false;
                     cut = true;
                 }
             }
@@ -3866,6 +3872,12 @@ impl OffsetGeometryCreation {
             }
             if let Some(c) = cuts.get_mut(i) {
                 *c = cut;
+            }
+            // (#14062) the second trim point is the first one's twin: the edge is the whole
+            // curve, end to end, not from a first point the solutions give within their
+            // tolerance of the seam, which would leave that bit of the turn out
+            if found_twin {
+                trim_ivl = curve_of(brep, curve_3d)?.natural_interval();
             }
         } // end iter twice
 
