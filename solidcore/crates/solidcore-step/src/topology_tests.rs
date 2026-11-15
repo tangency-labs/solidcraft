@@ -347,12 +347,14 @@ fn a_corner_written_as_two_vertices_at_one_point_is_one_vertex() {
     faces_away(&s.brep, 0, |_| [5.0, 10.0, 15.0]);
 }
 
-/// Two vertices that really are apart still leave the loop open: the faces there are left out.
+/// Two vertices that really are apart (1 mm, against tolerances of 1e-7 mm) are never one: the
+/// loop stays open and the solid is refused naming it, as before vertices could join.
 #[test]
 fn a_loop_whose_ends_are_apart_is_still_refused() {
     let r = read_solids(&cube(BoxStyle { dup_vertex: Some(1.0), ..Default::default() }));
-    assert_eq!(r.solids.len(), 1);
-    assert!(r.solids[0].brep.faces.len() < 6, "{}", r.solids[0].brep.faces.len());
+    assert!(r.solids.is_empty(), "{}", r.solids.len());
+    assert_eq!(r.failures.len(), 1);
+    assert!(r.failures[0].message.contains("is not closed") || r.failures[0].message.contains("is not connected"), "{}", r.failures[0].message);
 }
 
 /// A builder over `ex` at its 1e-7 mm uncertainty, for reading single bounds and edges.
