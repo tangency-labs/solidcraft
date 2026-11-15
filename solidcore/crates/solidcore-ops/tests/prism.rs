@@ -233,6 +233,274 @@ fn a_ledge_shorter_than_the_tolerance_reads_back_as_one_region() {
     assert!((area(top) - area(&ledged)).abs() < 1e-9, "{}", area(top));
 }
 
+/// The flange outline of SolidCraft's `a_cut_passing_a_hair_off_a_flange_corner_builds`, and
+/// its corner V = (left, top) the cuts below pass near.
+fn flange_outline() -> ([Vec2; 4], Vec2) {
+    let x0 = 4.0 - 0.398_229_715_025_710_36;
+    let (left, right, top) = (x0 - 30.0, x0 - 4.0, 98.0 - 2f64.sqrt());
+    (
+        [v(right, top), v(left, top), v(left, 0.0), v(right, 0.0)],
+        v(left, top),
+    )
+}
+
+/// The cut of the same test, whose taper runs from its foot on the flange's bottom edge to
+/// its head: `along`, the head lies on the flange's side line x = left, `d` above the corner
+/// (below for d < 0); otherwise the head is 1 above the flange's top and the taper passes
+/// the corner `d` to its left along y = top (to its right for d < 0). Counter-clockwise,
+/// foot first, head second.
+fn flange_cut(d: f64, along: bool) -> [Vec2; 5] {
+    let x0 = 4.0 - 0.398_229_715_025_710_36;
+    let c = 98.0 - 2f64.sqrt();
+    let to2 = |y: f64, z: f64| v(x0 - z, y);
+    let (y, z) = if along {
+        (c + d, 30.0)
+    } else {
+        (c + 1.0, 10.0 + (c + 1.0) * (20.0 + d) / c)
+    };
+    [
+        to2(0.0, 10.0),
+        to2(y, z),
+        to2(y, 35.0),
+        to2(-5.0, 35.0),
+        to2(-5.0, 10.0),
+    ]
+}
+
+/// A polygon's signed area (positive counter-clockwise), the shoelace formula.
+fn polygon_area(p: &[Vec2]) -> f64 {
+    let n = p.len();
+    (0..n)
+        .map(|i| p[i].x * p[(i + 1) % n].y - p[(i + 1) % n].x * p[i].y)
+        .sum::<f64>()
+        / 2.0
+}
+
+/// The part of polygon `p` on the left of the directed line through `a` and `b`
+/// (Sutherland-Hodgman, one clip edge), points closer than 1e-12 to the last one dropped.
+fn clip_left(p: &[Vec2], a: Vec2, b: Vec2) -> Vec<Vec2> {
+    let side = |q: Vec2| (b.x - a.x) * (q.y - a.y) - (b.y - a.y) * (q.x - a.x);
+    let mut out: Vec<Vec2> = Vec::new();
+    let mut push = |q: Vec2| {
+        if out.last().is_none_or(|&l| dist(l, q) > 1e-12) {
+            out.push(q);
+        }
+    };
+    for i in 0..p.len() {
+        let (q, r) = (p[i], p[(i + 1) % p.len()]);
+        let (sq, sr) = (side(q), side(r));
+        if sq >= 0.0 {
+            push(q);
+        }
+        if (sq >= 0.0) != (sr >= 0.0) {
+            let t = sq / (sq - sr);
+            push(v(q.x + t * (r.x - q.x), q.y + t * (r.y - q.y)));
+        }
+    }
+    if out.len() > 1 && dist(out[0], *out.last().unwrap()) <= 1e-12 {
+        out.pop();
+    }
+    out
+}
+
+/// Where the line through `a` and `b` meets the line through `p` with direction `u`.
+fn meet(a: Vec2, b: Vec2, p: Vec2, u: Vec2) -> Vec2 {
+    let w = v(b.x - a.x, b.y - a.y);
+    let t = ((p.x - a.x) * u.y - (p.y - a.y) * u.x) / (w.x * u.y - w.y * u.x);
+    v(a.x + t * w.x, a.y + t * w.y)
+}
+
+/// The exact flange-and-cut booleans (intersection, flange minus cut, union) as polygons:
+/// the cut and the flange are convex, the cut's only edge inside the flange is the taper, so
+/// the intersection is the cut clipped by the flange, the difference the flange clipped to
+/// the right of the taper, and the union the cut with its taper replaced by the
+/// difference's boundary from the foot round to where the taper leaves the flange.
+fn flange_cut_exact(flange: &[Vec2; 4], cut: &[Vec2; 5]) -> [Vec<Vec2>; 3] {
+    let (foot, head) = (cut[0], cut[1]);
+    let mut inter = cut.to_vec();
+    for i in 0..4 {
+        inter = clip_left(&inter, flange[i], flange[(i + 1) % 4]);
+    }
+    let mut rest = clip_left(flange, head, foot);
+    let at_foot = rest.iter().position(|&q| dist(q, foot) <= 1e-12).unwrap();
+    rest.rotate_left(at_foot);
+    let mut union = rest.clone();
+    if dist(*union.last().unwrap(), head) > 1e-12 {
+        union.push(head);
+    }
+    union.extend_from_slice(&cut[2..]);
+    [inter, rest, union]
+}
+
+/// How far the area of a tolerant result may differ from the exact polygon `exact`: the
+/// exact points near the corner V that one intersection tolerance `tx` cannot tell apart
+/// (V, and where the taper meets the side line x = left or the top line y = top, or its
+/// head, each within the stretch tx / sin(angle) of V along its line, when the taper passes
+/// within tx of V) may become one vertex anywhere among them, so each exact vertex within
+/// their diameter δ of V moves at most δ. Moving vertex `p_i` by δ changes the area by at
+/// most `δ |p_(i+1) - p_(i-1)| / 2`.
+fn sliver_bound(exact: &[Vec2], corner: Vec2, foot: Vec2, head: Vec2, tx: f64) -> f64 {
+    let w = v(head.x - foot.x, head.y - foot.y);
+    let len = w.x.hypot(w.y);
+    let off = ((corner.x - foot.x) * w.y - (corner.y - foot.y) * w.x).abs() / len;
+    if off > tx {
+        return 0.0;
+    }
+    let mut near = vec![corner];
+    for (u, p) in [
+        (v(0.0, 1.0), meet(foot, head, corner, v(0.0, 1.0))),
+        (v(1.0, 0.0), meet(foot, head, corner, v(1.0, 0.0))),
+        (v(0.0, 0.0), head),
+    ] {
+        let sine = if u.x == 0.0 && u.y == 0.0 {
+            1.0
+        } else {
+            (w.x * u.y - w.y * u.x).abs() / len
+        };
+        if dist(p, corner) <= tx / sine {
+            near.push(p);
+        }
+    }
+    let delta = near
+        .iter()
+        .flat_map(|&p| near.iter().map(move |&q| dist(p, q)))
+        .fold(0.0, f64::max);
+    let n = exact.len();
+    (0..n)
+        .filter(|&i| dist(exact[i], corner) <= delta)
+        .map(|i| delta * dist(exact[(i + 1) % n], exact[(i + n - 1) % n]) / 2.0)
+        .sum()
+}
+
+/// A flange's outline intersected with a cut whose taper passes 9.8e-6 off the flange's top
+/// corner (SolidCraft's `a_cut_passing_a_hair_off_a_flange_corner_builds`, one of its calls,
+/// on a kernel with no fixes). The taper meets the flange's side 4.83e-5 below the corner,
+/// within the near-tangent stretch where the taper and the side lie within one intersection
+/// tolerance of each other, so the side's piece between the crossing and the corner runs
+/// along the taper. The intersection is one triangle under the taper, its apex on the side
+/// between the taper's crossing and the corner, and its area that of the triangle with that
+/// apex.
+#[test]
+fn a_taper_passing_a_hair_off_a_corner_intersects_to_one_triangle() {
+    session::set_thread_fixes(Vec::<&str>::new()).unwrap();
+    let ([right_top, _, left_bottom, _], corner) = flange_outline();
+    let flange = Region2 {
+        outer: Loop2::polygon(&flange_outline().0),
+        holes: vec![],
+    };
+    let cut_pts = flange_cut(1e-5, false);
+    let (foot, head) = (cut_pts[0], cut_pts[1]);
+    let cut = Region2 {
+        outer: Loop2::polygon(&cut_pts),
+        holes: vec![],
+    };
+    // the taper meets x = left at y = crossing (computed here, as the oracle)
+    let crossing = meet(foot, head, corner, v(0.0, 1.0)).y;
+    assert!(
+        crossing < corner.y && corner.y - crossing < 5e-5,
+        "{crossing}"
+    );
+    let out = planar_regions_boolean(&[flange], &[cut], BooleanOp::Intersect, 1e-7).unwrap();
+    assert_eq!(out.len(), 1, "{out:?}");
+    let tri = &out[0];
+    assert!(tri.holes.is_empty(), "{tri:?}");
+    assert_eq!(tri.outer.segs.len(), 3, "{tri:?}");
+    assert!(closed(&tri.outer, 1e-9), "{tri:?}");
+    let corners: Vec<Vec2> = tri.outer.segs.iter().map(start).collect();
+    let near = |p: Vec2| corners.iter().any(|&c| dist(c, p) <= 1e-9);
+    assert!(near(foot) && near(left_bottom), "{corners:?}");
+    let apex = corners
+        .iter()
+        .copied()
+        .find(|c| c.y > 1.0)
+        .unwrap_or_else(|| panic!("{corners:?}"));
+    assert!(
+        (apex.x - corner.x).abs() <= 1e-9 && apex.y >= crossing - 1e-9 && apex.y <= corner.y + 1e-9,
+        "{apex:?}"
+    );
+    // the area of the triangle with that apex, within the bounds the apex's range gives it
+    let half_base = (foot.x - corner.x) / 2.0;
+    let got = area(tri);
+    assert!((got - half_base * apex.y).abs() < 1e-9, "{got}");
+    assert!(
+        got >= half_base * crossing - 1e-9 && got <= half_base * corner.y + 1e-9,
+        "{got}"
+    );
+    assert!(right_top.x > foot.x);
+}
+
+/// The flange and the cut of the test above, with the taper's head moved `d` along the
+/// flange's side or past its corner (11 offsets, both ways, the three booleans: 66 planar
+/// booleans on a kernel with no fixes). Each builds one region bounded by line segments that
+/// end within one intersection tolerance of each other (a tolerant result's curve ends lie
+/// within it of their shared vertex), and the polygon of its vertices has the exact polygon
+/// boolean's area (computed here from the vertices: a convex clip) to rounding when the
+/// taper passes the corner farther than one intersection tolerance, and within the sliver
+/// the tolerance cannot resolve (`sliver_bound`) when it passes closer.
+#[test]
+fn a_taper_near_a_flange_corner_cuts_to_the_exact_area_or_within_its_sliver() {
+    session::set_thread_fixes(Vec::<&str>::new()).unwrap();
+    let tx = solidcore::kernel::Kernel::default().tolerances.xsect_tol_3d;
+    let (flange_pts, corner) = flange_outline();
+    let flange = Region2 {
+        outer: Loop2::polygon(&flange_pts),
+        holes: vec![],
+    };
+    let mut failures = Vec::new();
+    for d in [
+        0.0, 1e-5, -1e-5, 3e-5, -3e-5, 1e-4, -1e-4, 1.2e-4, -1.2e-4, 1e-3, -1e-3,
+    ] {
+        for along in [true, false] {
+            let cut_pts = flange_cut(d, along);
+            let cut = Region2 {
+                outer: Loop2::polygon(&cut_pts),
+                holes: vec![],
+            };
+            let exact = flange_cut_exact(&flange_pts, &cut_pts);
+            for (op, exact) in [BooleanOp::Intersect, BooleanOp::Subtract, BooleanOp::Union]
+                .into_iter()
+                .zip(exact)
+            {
+                let want = polygon_area(&exact);
+                let bound = sliver_bound(&exact, corner, cut_pts[0], cut_pts[1], tx) + 1e-9;
+                let case = format!("d = {d:e}, along = {along}, {op:?}");
+                match planar_regions_boolean(
+                    std::slice::from_ref(&flange),
+                    std::slice::from_ref(&cut),
+                    op,
+                    1e-7,
+                ) {
+                    Ok(out) => {
+                        let corners: Vec<Vec2> = out
+                            .iter()
+                            .flat_map(|r| r.outer.segs.iter().map(start))
+                            .collect();
+                        let got = polygon_area(&corners);
+                        let ok = out.len() == 1
+                            && out[0].holes.is_empty()
+                            && out[0]
+                                .outer
+                                .segs
+                                .iter()
+                                .all(|s| matches!(s, Seg2::Line { .. }))
+                            && closed(&out[0].outer, tx)
+                            && (got - want).abs() <= bound;
+                        if !ok {
+                            failures.push(format!(
+                                "{case}: {} regions, area {got:.12}, exact {want:.12}, off {:e}, bound {bound:e}: {out:?}",
+                                out.len(),
+                                got - want
+                            ));
+                        }
+                    }
+                    Err(e) => failures.push(format!("{case}: refused: {e:?}")),
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 fn volume(b: &Body) -> f64 {
     b.volume(1e-8).unwrap()
 }
@@ -756,6 +1024,286 @@ fn a_bent_edge_crossing_its_neighbour_by_their_corner_leaves_no_sliver() {
             );
         }
     }
+}
+
+/// Two disjoint squares intersect in nothing: the kernel's 2D boolean answers with a sheet of no
+/// faces, which is an empty result, not a sheet to read back (that refused with a query failure).
+#[test]
+fn disjoint_squares_intersect_in_nothing() {
+    let a = rectangle(v(0., 0.), v(10., 10.));
+    let b = rectangle(v(20., 0.), v(30., 10.));
+    for (x, y) in [(&a, &b), (&b, &a)] {
+        let out = planar_regions_boolean(
+            std::slice::from_ref(x),
+            std::slice::from_ref(y),
+            BooleanOp::Intersect,
+            1e-7,
+        );
+        assert_eq!(out, Ok(vec![]));
+    }
+    let union = planar_regions_boolean(
+        std::slice::from_ref(&a),
+        std::slice::from_ref(&b),
+        BooleanOp::Union,
+        1e-7,
+    )
+    .unwrap();
+    assert_eq!(union.len(), 2);
+    assert!(union.iter().all(|r| (area(r) - 100.0).abs() < 1e-9));
+}
+
+/// Whether `a` and `b` are the same regions in the same order: loop for loop, segment for
+/// segment of the same kind, every number within 1e-12.
+fn same_regions(a: &[Region2], b: &[Region2]) -> bool {
+    let near = |x: f64, y: f64| (x - y).abs() <= 1e-12;
+    let pt = |p: Vec2, q: Vec2| near(p.x, q.x) && near(p.y, q.y);
+    let seg = |s: &Seg2, t: &Seg2| match (*s, *t) {
+        (Seg2::Line { a, b }, Seg2::Line { a: c, b: d }) => pt(a, c) && pt(b, d),
+        (
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            },
+            Seg2::Arc {
+                center: c,
+                radius: r,
+                start: s0,
+                sweep: w,
+            },
+        ) => pt(center, c) && near(radius, r) && near(start, s0) && near(sweep, w),
+        _ => same_seg(s, t),
+    };
+    let lp = |l: &Loop2, m: &Loop2| {
+        l.segs.len() == m.segs.len() && l.segs.iter().zip(&m.segs).all(|(s, t)| seg(s, t))
+    };
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(r, q)| {
+            lp(&r.outer, &q.outer)
+                && r.holes.len() == q.holes.len()
+                && r.holes.iter().zip(&q.holes).all(|(h, g)| lp(h, g))
+        })
+}
+
+/// The result of a planar boolean comes in one canonical order whatever order its operands came
+/// in: each loop starts at its smallest start point (x, then y), holes and regions sorted by that
+/// point, and every arc starts at an angle in (-π, π].
+#[test]
+fn shuffled_operands_give_the_same_regions() {
+    let circle = |c: Vec2, r: f64, start: f64| Loop2 {
+        segs: vec![
+            Seg2::Arc {
+                center: c,
+                radius: r,
+                start,
+                sweep: PI,
+            },
+            Seg2::Arc {
+                center: c,
+                radius: r,
+                start: start + PI,
+                sweep: PI,
+            },
+        ],
+    };
+    let mut ring = rectangle(v(0., 0.), v(20., 20.));
+    ring.holes = vec![circle(v(6., 6.), 2., PI), circle(v(14., 14.), 3., 0.5)];
+    let a = vec![
+        ring,
+        rectangle(v(30., 0.), v(40., 10.)),
+        Region2 {
+            outer: circle(v(60., 5.), 5., -PI),
+            holes: vec![],
+        },
+    ];
+    let b = vec![rectangle(v(15., -5.), v(65., 3.))];
+    // the same regions: in another order, each loop turned to start elsewhere, holes swapped
+    let turned = |l: &Loop2, n: usize| {
+        let mut segs = l.segs.clone();
+        let len = segs.len();
+        segs.rotate_left(n % len);
+        Loop2 { segs }
+    };
+    let shuffled: Vec<Region2> = a
+        .iter()
+        .rev()
+        .map(|r| Region2 {
+            outer: turned(&r.outer, 1),
+            holes: r.holes.iter().rev().map(|h| turned(h, 1)).collect(),
+        })
+        .collect();
+    for op in [BooleanOp::Union, BooleanOp::Subtract, BooleanOp::Intersect] {
+        let one = planar_regions_boolean(&a, &b, op, 1e-7).unwrap();
+        let two = planar_regions_boolean(&shuffled, &b, op, 1e-7).unwrap();
+        let three = planar_regions_boolean(&b, &shuffled, op, 1e-7).unwrap();
+        assert!(!one.is_empty());
+        // the same regions, loops and segments in the same order; the numbers differ only by
+        // the rounding of the operands' other order (well under 1e-12 here)
+        assert!(same_regions(&one, &two), "{op:?}: {one:?} {two:?}");
+        if op != BooleanOp::Subtract {
+            assert!(same_regions(&one, &three), "{op:?}: {one:?} {three:?}");
+        }
+        let loops: Vec<&Loop2> = one
+            .iter()
+            .flat_map(|r| std::iter::once(&r.outer).chain(&r.holes))
+            .collect();
+        for l in &loops {
+            let first = start(&l.segs[0]);
+            assert!(l.segs.iter().all(|s| {
+                let p = start(s);
+                (first.x, first.y) <= (p.x, p.y)
+            }));
+            for s in &l.segs {
+                if let Seg2::Arc { start, .. } = *s {
+                    assert!(start > -PI && start <= PI, "{start}");
+                }
+            }
+        }
+        let firsts: Vec<(f64, f64)> = one
+            .iter()
+            .map(|r| {
+                let p = start(&r.outer.segs[0]);
+                (p.x, p.y)
+            })
+            .collect();
+        assert!(firsts.windows(2).all(|w| w[0] <= w[1]), "{firsts:?}");
+    }
+}
+
+/// The canonical order does not hang on rounding noise. Two regions whose leftmost edges are
+/// vertical, at x values that differ by one ulp only, one way round and then the other: compared
+/// exactly, the smaller x would pick each loop's start corner and the regions' order. On the grid
+/// of the tolerance the x values are equal, so y decides: each loop starts at its lower left
+/// corner and the lower region comes first, in both variants.
+#[test]
+fn leftmost_points_a_rounding_apart_keep_one_order() {
+    let ulp = f64::EPSILON;
+    let variant = |lo: f64, hi: f64| {
+        // lower region: left edge from (lo, 0) to (hi, 4); upper one: from (hi, 10) to (lo, 14)
+        let lower = Region2 {
+            outer: Loop2::polygon(&[v(lo, 0.), v(5., 0.), v(5., 4.), v(hi, 4.)]),
+            holes: vec![],
+        };
+        let upper = Region2 {
+            outer: Loop2::polygon(&[v(hi, 10.), v(5., 10.), v(5., 14.), v(lo, 14.)]),
+            holes: vec![],
+        };
+        let far = rectangle(v(100., 0.), v(110., 10.));
+        planar_regions_boolean(&[upper, lower], &[far], BooleanOp::Union, 1e-7).unwrap()
+    };
+    let one = variant(1.0 + ulp, 1.0);
+    let two = variant(1.0, 1.0 + ulp);
+    for out in [&one, &two] {
+        assert_eq!(out.len(), 3);
+        let firsts: Vec<Vec2> = out.iter().map(|r| start(&r.outer.segs[0])).collect();
+        for (p, y) in firsts.iter().zip([0., 10., 0.]) {
+            assert_eq!(p.y, y, "{firsts:?}");
+        }
+        assert!((firsts[0].x - 1.0).abs() <= ulp && (firsts[1].x - 1.0).abs() <= ulp);
+    }
+    assert!(same_regions(&one, &two), "{one:?} {two:?}");
+}
+
+/// The canonical order does not split the grid cell at zero. Two regions whose leftmost edges are
+/// vertical and straddle x = 0 by a hair (`-d` and `d`, `d` far under the tolerance), one way
+/// round and then the other: `-d` rounds to the cell -0, which `total_cmp` orders before the
+/// cell 0 of `d`, so the corner at `-d` would start each loop whatever its y. Both x values lie
+/// in the one cell at zero, so y decides: each loop starts at its lower left corner and the
+/// lower region comes first, in both variants.
+#[test]
+fn leftmost_points_straddling_zero_keep_one_order() {
+    let d = 1e-15;
+    let variant = |lo: f64, hi: f64| {
+        // lower region: left edge from (lo, 0) to (hi, 4); upper one: from (hi, 10) to (lo, 14)
+        let lower = Region2 {
+            outer: Loop2::polygon(&[v(lo, 0.), v(5., 0.), v(5., 4.), v(hi, 4.)]),
+            holes: vec![],
+        };
+        let upper = Region2 {
+            outer: Loop2::polygon(&[v(hi, 10.), v(5., 10.), v(5., 14.), v(lo, 14.)]),
+            holes: vec![],
+        };
+        let far = rectangle(v(100., 0.), v(110., 10.));
+        planar_regions_boolean(&[upper, lower], &[far], BooleanOp::Union, 1e-7).unwrap()
+    };
+    let one = variant(-d, d);
+    let two = variant(d, -d);
+    for out in [&one, &two] {
+        assert_eq!(out.len(), 3);
+        let firsts: Vec<Vec2> = out.iter().map(|r| start(&r.outer.segs[0])).collect();
+        for (p, y) in firsts.iter().zip([0., 10., 0.]) {
+            assert_eq!(p.y, y, "{firsts:?}");
+        }
+        assert!(
+            firsts[0].x.abs() <= d && firsts[1].x.abs() <= d,
+            "{firsts:?}"
+        );
+    }
+}
+
+/// Planar booleans SolidCraft's sheet tests make (a channel engraved, a sheet with small bends
+/// and holes, a sheet perforated with a thousand round holes: each operand pair recorded from the
+/// call), where a face of one operand lies far from the other's plane face. The 2D boolean
+/// rebuilds the faces on the first face's plane after growing it to cover them, and a plane grew
+/// only 100 of its widths: the faces beyond were rebuilt on a plane that did not hold them
+/// (WR-536), and the call failed (1001, 1006, 1007, or an edge off the plane). Each case's union,
+/// intersection and both differences now build, closed, and their areas agree: the union is the
+/// two differences and the intersection, which share no area, and it is also the operands' areas
+/// (from the inputs) less the intersection's: area(A) + area(B) - area(A and B).
+#[test]
+fn far_faces_of_recorded_sheet_cuts_build_and_their_areas_agree() {
+    use std::io::BufRead;
+    #[derive(serde::Deserialize)]
+    struct Case {
+        test: String,
+        tol: f64,
+        a: Vec<Region2>,
+        b: Vec<Region2>,
+    }
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/planar_regions_far_faces.jsonl.gz"
+    );
+    let gz = flate2::read::GzDecoder::new(std::fs::File::open(path).unwrap());
+    let mut n = 0;
+    for line in std::io::BufReader::new(gz).lines() {
+        let c: Case = serde_json::from_str(&line.unwrap()).unwrap();
+        let run = |x: &[Region2], y: &[Region2], op| {
+            let out = planar_regions_boolean(x, y, op, c.tol)
+                .unwrap_or_else(|e| panic!("case {n} ({}), {op:?}: {e:?}", c.test));
+            for l in out
+                .iter()
+                .flat_map(|r| std::iter::once(&r.outer).chain(&r.holes))
+            {
+                assert!(closed(l, c.tol * 10.0), "case {n} ({}), {op:?}", c.test);
+            }
+            out.iter().map(area).sum::<f64>()
+        };
+        let union = run(&c.a, &c.b, BooleanOp::Union);
+        let common = run(&c.a, &c.b, BooleanOp::Intersect);
+        let a_less_b = run(&c.a, &c.b, BooleanOp::Subtract);
+        let b_less_a = run(&c.b, &c.a, BooleanOp::Subtract);
+        let parts = a_less_b + b_less_a + common;
+        assert!(
+            (union - parts).abs() <= 1e-9 * union,
+            "case {n} ({}): union {union}, parts {parts}",
+            c.test
+        );
+        // the operands' own areas, from the inputs: a result that drops faces (far ones, say)
+        // loses their area from the union and from the differences alike, which the check above
+        // cannot see
+        let area_a = c.a.iter().map(area).sum::<f64>();
+        let area_b = c.b.iter().map(area).sum::<f64>();
+        let whole = area_a + area_b - common;
+        assert!(
+            (union - whole).abs() <= 1e-9 * (area_a + area_b),
+            "case {n} ({}): union {union}, area(A) + area(B) - area(A and B) {whole}",
+            c.test
+        );
+        n += 1;
+    }
+    assert_eq!(n, 35);
 }
 
 #[test]

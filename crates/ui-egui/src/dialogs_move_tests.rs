@@ -1809,3 +1809,21 @@ fn a_turned_copy_of_a_placed_component_turns_on_its_centre() {
     }
     assert!(landed.center().dist(Vec3::new(110.0, 10.0, 10.0)) < 1e-6, "{landed:?}");
 }
+
+/// A woken face keeps its points while the pointer crosses its own edges and hole rims, which
+/// offer nothing it lacks, on the way to its corners (#11476).
+#[test]
+fn a_faces_own_edges_and_rims_keep_its_points() {
+    let mut h = holed_plate_picking_from();
+    h.step(&json!({ "move": { "world": [20, 10, 10] } })).unwrap();
+    assert!(matches!(h.app.viewport.woken.item, Some(Sel::Face { .. })), "{:?}", h.app.viewport.woken.item);
+    let (corner, centre) = (Vec3::new(60.0, 40.0, 10.0), Vec3::new(45.0, 20.0, 10.0));
+    assert!(woken_has(&h, corner) && woken_has(&h, centre), "{:?}", h.app.viewport.woken.points);
+    // Points on its edges and on the hole's rim, away from the points they offer (a pointer
+    // right on a woken point hovers that point, not the edge).
+    for edge in [[15, 0, 10], [49, 20, 10], [60, 30, 10]] {
+        h.step(&json!({ "move": { "world": edge } })).unwrap();
+        assert!(matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Edge { .. })), "{edge:?}: {:?}", h.app.viewport.hover);
+        assert!(matches!(h.app.viewport.woken.item, Some(Sel::Face { .. })) && woken_has(&h, corner), "{edge:?}: {:?}", h.app.viewport.woken);
+    }
+}

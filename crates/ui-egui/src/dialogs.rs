@@ -194,8 +194,10 @@ crate::dialog_descriptor::dialog_descriptors! {
                 taper_present: bool,
                 /// Optional distance beyond the selected end object.
                 to_offset: String,
-                /// Start offset from the profile plane (empty: start on the profile plane).
+                /// Offset from the selected start (empty: no offset).
                 start: String,
+                /// Keep Offset selected while its expression is being edited.
+                offset_start: bool,
                 /// Extent type All (through everything) instead of a distance.
                 all: bool,
                 /// Thin Extrude: a wall along the picked curves (or profiles' outlines).
@@ -419,6 +421,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             },
             /// Insert SVG / DXF: where the picked drawing goes (`dialogs_insert_drawing`).
             InsertDrawing(crate::dialogs_insert_drawing::Place),
+            /// Insert Airfoil: how the picked section goes in (`dialogs_insert_airfoil`).
+            InsertAirfoil(crate::dialogs_insert_airfoil::Airfoil),
             /// Plastic features (`dialogs_plastic`).
             Plastic(crate::dialogs_plastic::Pl),
             /// Frame members (`dialogs_frame`).
@@ -475,6 +479,21 @@ pub struct HoleOpts {
     /// Tap type: tapped (a cosmetic thread) instead of simple.
     pub tapped: bool,
     pub thread: String,
+    /// Tap type: a clearance hole for a bolt (the command's `clearance` and `fit`, ISO 273).
+    pub clearance: bool,
+    /// The bolt size a clearance hole is for, as `clearance` takes it (`M4`).
+    pub clearance_size: String,
+    /// The clearance fit, an index into [`crate::dialogs_hole::CLEARANCE_FITS`].
+    pub clearance_fit: usize,
+    /// A clearance hole's diameter when it is not the table's for the size and fit (the
+    /// command's `diameter`); none: the table's.
+    pub clearance_diameter: Option<String>,
+    /// A clearance counterbore's cap screw head, an index into
+    /// [`crate::dialogs_hole::SCREW_HEADS`] (the command's `head`); 0: none, typed by hand.
+    pub head: usize,
+    /// The head and bolt size the counterbore's diameter and depth were last filled for, so a
+    /// new head or size fills them again and typed values stay otherwise.
+    pub head_filled: Option<(usize, String)>,
     /// Custom nominal diameter and pitch being edited, separate from the saved designation.
     pub custom_thread: Option<crate::dialogs_thread::HoleThreadDraft>,
     /// The Single hole's reference edge distances (`hole_refs`, #37).
@@ -504,6 +523,12 @@ impl Default for HoleOpts {
             tip_angle: "118 deg".into(),
             tapped: false,
             thread: "M5".into(),
+            clearance: false,
+            clearance_size: "M4".into(),
+            clearance_fit: crate::dialogs_hole::NORMAL_FIT,
+            clearance_diameter: None,
+            head: 0,
+            head_filled: None,
             custom_thread: None,
             refs: Default::default(),
             thread_full_depth: true,
@@ -936,6 +961,7 @@ impl Dialog {
                     taper_present: false,
                     to_offset: String::new(),
                     start: String::new(),
+                    offset_start: false,
                     all: false,
                     thin: false,
                     wall: length_default(s, "2"),
@@ -1269,6 +1295,7 @@ impl Dialog {
                     && !i.rejects(sel)
             };
             if let Some(inp) = d.inputs.iter_mut().find(|i| takes(i)) {
+                retain_profile_list_sketch(&d.kind, inp, sel);
                 if matches!(d.kind, Kind::Fillet { .. }) {
                     for x in crate::viewport::grouped_selection(s, sel) {
                         if !d.picked_edges.iter().any(|y| selection::same_item(y, &x)) {
@@ -1279,6 +1306,13 @@ impl Dialog {
                 // Fillets and chamfers take an edge with its tangent chain, as a pick does.
                 let picked = match (&d.kind, sel) {
                     (Kind::Fillet { chain, .. }, _) => fillet_edges(s, sel, *chain),
+                    // One item per edge: a click selects all the pieces of an edge a seam splits,
+                    // the clicked one first, and Measure takes that one.
+                    (Kind::Measure { .. }, Sel::Edge { .. })
+                        if crate::viewport::grouped_selection(s, sel).iter().any(|x| inp.items.iter().any(|y| selection::same_item(x, y))) =>
+                    {
+                        Vec::new()
+                    }
                     (Kind::Measure { .. }, _) => vec![crate::viewport::measurement_selection(s, sel)],
                     _ if inp.multi => crate::viewport::grouped_selection(s, sel),
                     _ => vec![sel.clone()],
@@ -1413,7 +1447,7 @@ impl Dialog {
             Kind::SketchModify(k) => return k.previews(),
             Kind::Plastic(k) => return k.previews(),
             Kind::Frame(_) | Kind::EndCap(_) => return true,
-            Kind::Part(_) | Kind::PartSize(_) | Kind::InsertDrawing(_) => return true,
+            Kind::Part(_) | Kind::PartSize(_) | Kind::InsertDrawing(_) | Kind::InsertAirfoil(_) => return true,
             // Web previews run synchronously; a modelled thread can take seconds.
             Kind::Thread { .. } => return !cfg!(target_arch = "wasm32") && self.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false),
             _ => {}
@@ -1476,7 +1510,8 @@ impl Dialog {
             Kind::Shell { thickness } => ("Thickness", ValueKind::Length, thickness),
             Kind::Draft { angle } => ("Angle", ValueKind::Angle, angle),
             Kind::Hole { diameter, opts, .. } => {
-                if opts.tapped {
+                // A thread or a bolt size sets the diameter: nothing to type on the canvas.
+                if opts.tapped || opts.clearance {
                     return None;
                 }
                 ("Diameter", ValueKind::Length, diameter)
@@ -1703,6 +1738,15 @@ impl Dialog {
         if let Some(sel) = self.circle_centre_pick(s, inp, h, snap) {
             return Some(sel);
         }
+        // A mesh body has no vertices or edges to pick, and its own surface is its triangles: a
+        // point input of a construction takes the exact point the pointer's ray meets on one (#16400).
+        if matches!(self.kind, Kind::Construct { .. })
+            && inp.accept & selection::VERTICES != 0
+            && let Hit::Face { body, point, .. } = h
+            && is_mesh_body(s, body)
+        {
+            return Some(Sel::Vertex { body: body.clone(), point: *point });
+        }
         // The snap looked the face under the cursor up already, planar or not.
         let sel = inp.accepts(h, s.active_sketch, |body, face| {
             snap.and_then(|f| f.planar(body, face)).unwrap_or_else(|| planar_face(s, body, face).is_some())
@@ -1887,11 +1931,8 @@ impl Dialog {
         let picked = if chain { fillet_edges(s, &sel, true) } else { single.clone() };
         // Extrude and revolve take profiles of one sketch; both lofts take sections
         // from several sketches and must keep their pick order.
-        if let Sel::Profile { sketch, .. } = &sel
-            && !matches!(self.kind, Kind::Loft { .. } | Kind::Surface(crate::dialogs_surface::Surf::Loft { .. }))
-            && let Some(inp) = self.inputs.get_mut(self.active)
-        {
-            inp.items.retain(|x| !matches!(x, Sel::Profile { sketch: s2, .. } if s2 != sketch));
+        if let Some(inp) = self.inputs.get_mut(self.active) {
+            retain_profile_sketch(&self.kind, inp, &sel);
         }
         let is_fillet = matches!(self.kind, Kind::Fillet { .. }) && self.active == 0;
         let Some(inp) = self.inputs.get_mut(self.active) else { return };
@@ -1983,6 +2024,7 @@ impl Dialog {
             if !fits(inp.accept, &x) {
                 continue;
             }
+            retain_profile_list_sketch(&self.kind, inp, &x);
             accepted = true;
             if !inp.multi {
                 inp.items.clear();
@@ -2221,6 +2263,26 @@ pub(crate) fn fillet_least_setback(ctx: &egui::Context, s: &Session, items: &[Se
         .reduce(f64::max);
     ctx.data_mut(|d| d.insert_temp(id, (key, least)));
     least
+}
+
+/// Profiles are indices within one sketch. Only lofts consume sections from several sketches.
+/// Keep batch and preselection inputs consistent with successive clicks: the latest sketch wins.
+fn retain_profile_list_sketch(kind: &Kind, input: &mut SelInput, sel: &Sel) {
+    if matches!(
+        kind,
+        Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. } | Kind::Sweep { .. } | Kind::Surface(_) | Kind::Frame(_) | Kind::Sheet(_)
+    ) {
+        retain_profile_sketch(kind, input, sel);
+    }
+}
+
+/// Keep the profile picks of the sketch just picked; lofts retain their separate sections.
+fn retain_profile_sketch(kind: &Kind, input: &mut SelInput, sel: &Sel) {
+    if let Sel::Profile { sketch, .. } = sel
+        && !matches!(kind, Kind::Loft { .. } | Kind::Surface(crate::dialogs_surface::Surf::Loft { .. }))
+    {
+        input.items.retain(|x| !matches!(x, Sel::Profile { sketch: other, .. } if other != sketch));
+    }
 }
 
 /// The profiles of a sketch that aren't the island inside another profile's hole: a circle in a
@@ -2833,6 +2895,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::ViewDxf { .. } => "Export Current View as DXF",
         Kind::ViewNavigator(_) => "CUSTOM VIEW NAVIGATOR",
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::title(p),
+        Kind::InsertAirfoil(_) => crate::dialogs_insert_airfoil::title(),
         Kind::Plastic(k) => k.title(),
         Kind::Frame(_) => "FRAME MEMBER",
         Kind::EndCap(_) => "ui.end_cap_title",
@@ -3077,6 +3140,12 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
     if (m == 1) != opts.multiple {
         opts.multiple = m == 1;
         d.inputs = if opts.multiple { vec![SelInput::new("Points", selection::POINTS, true)] } else { single_hole_inputs() };
+        if !opts.multiple
+            && d.editing.is_some()
+            && let Some(face) = d.inputs.first_mut()
+        {
+            face.multi = false;
+        }
         d.active = 0;
         d.extra.remove("direction");
     }
@@ -3644,13 +3713,18 @@ pub(crate) fn fillet_plain_error(error: &str, setback_in_field: bool) -> Option<
         return Some(FilletRefusal::Plain(solidcraft_ui_text::format("ui.fillet_error_setback_short", &[("least", &format!("{least} mm"))])));
     }
     let too_large = error.contains("larger than the faces beside its edges allow");
+    // The kernel tried smaller radii down to its least and none built: no radius is the cause, so
+    // a smaller one, or Largest radius, is no advice (the full refusal stays under Copy details).
+    let none_fits = too_large && error.contains("no smaller radius builds either");
     let corner = error.contains("setback") || error.contains("G2 corner") || error.contains("corner patch");
     let kernel = error.contains("SMLib")
         || error.contains("the operation failed")
         || error.contains("not supported yet")
         || error.contains("kernel internal error")
         || error.contains("the rounds would leave openings");
-    if too_large {
+    if none_fits {
+        Some(FilletRefusal::Plain(tr("ui.fillet_error_no_radius").to_string()))
+    } else if too_large {
         Some(FilletRefusal::Plain(tr("ui.fillet_error_too_large").to_string()))
     } else if corner && kernel {
         Some(FilletRefusal::Plain(tr("ui.fillet_error_corner").to_string()))
@@ -4593,9 +4667,11 @@ fn recall(app: &SolveApp, dialog: &mut Dialog) {
     let Some(last) = app.remembered_commands.iter().find(|entry| same_command(&entry.kind, &dialog.kind)) else { return };
     let mut next = last.kind.clone();
     match (&mut next, &dialog.kind) {
-        (Kind::Extrude { smart, to_offset, .. }, Kind::Extrude { smart: fresh, to_offset: fresh_offset, .. }) => {
+        (Kind::Extrude { smart, to_offset, start, offset_start, .. }, Kind::Extrude { smart: fresh, to_offset: fresh_offset, .. }) => {
             *smart = fresh.clone();
             *to_offset = fresh_offset.clone();
+            // From Object picks are not recalled; keep their retained offset visible.
+            *offset_start |= !start.is_empty();
         }
         (Kind::Revolve { axis, .. }, Kind::Revolve { axis: fresh, .. }) => *axis = fresh.clone(),
         (Kind::PathPlane { sketch, .. }, Kind::PathPlane { sketch: fresh, .. }) => *sketch = *fresh,
@@ -5472,7 +5548,11 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
                 | FeatureKind::Emboss { sketch, profiles: ProfileSel::All, .. } => Some(*sketch),
                 _ => None,
             };
+            // A thin extrude follows curves and takes no profiles: an extrude of every profile
+            // turned thin in its editor keeps only the curves the dialog sends.
+            let thin_now = params.get("thin").and_then(Value::as_bool).unwrap_or(false);
             if let Some(sketch) = original_all
+                && !thin_now
                 && !d.profile_selection_changed
                 && let Some(ss) = crate::open_meshing::session_world(&app.session).sketch(sketch.0)
             {
@@ -5569,7 +5649,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
     let need = |i: usize, what: &str| -> Result<(), String> { if sels(d, i).is_empty() { Err(format!("select {what} first")) } else { Ok(()) } };
     let profiles = || -> (Value, Value) {
         let ps: Vec<(u64, usize)> = sels(d, 0).profiles();
-        (ps.first().map(|x| json!(x.0)).unwrap_or(Value::Null), json!(ps.iter().map(|x| x.1).collect::<Vec<_>>()))
+        let sketch = ps.first().map(|x| x.0);
+        (sketch.map(|id| json!(id)).unwrap_or(Value::Null), json!(ps.iter().filter(|x| Some(x.0) == sketch).map(|x| x.1).collect::<Vec<_>>()))
     };
     let face_points = |i: usize| -> Vec<Value> { sels(d, i).face_points().into_iter().map(pt).collect() };
     // An empty Thickness is no value to shell with: OK waits for one instead of the command
@@ -5893,7 +5974,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     Sel::Profile { sketch, index } => {
                         let last = sections.last_mut().filter(|sec| sec.get("sketch").and_then(Value::as_u64) == Some(*sketch));
                         match last.and_then(|sec| sec.get_mut("profiles")).and_then(Value::as_array_mut) {
-                            Some(profiles) => profiles.push(json!(index)),
+                            Some(profiles) => {
+                                let index = json!(index);
+                                if !profiles.contains(&index) {
+                                    profiles.push(index);
+                                }
+                            }
                             None => sections.push(json!({"sketch": sketch, "profiles": [index]})),
                         }
                         profile_sketches.push(*sketch);
@@ -6326,7 +6412,17 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let mut out = Vec::new();
             for place in places {
                 let mut params = place;
-                if !opts.tapped {
+                if opts.clearance {
+                    // A clearance hole: the bolt size and fit, and the diameter only when it is
+                    // not the table's.
+                    let (_, fit) = crate::dialogs_hole::CLEARANCE_FITS.get(opts.clearance_fit).copied().ok_or("select a clearance fit")?;
+                    solidcraft_engine::cmd::clearance_diameter(&opts.clearance_size, fit).ok_or("select a bolt size from M1.6 to M64")?;
+                    params["clearance"] = json!(opts.clearance_size.trim());
+                    params["fit"] = json!(fit);
+                    if let Some(d) = opts.clearance_diameter.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+                        params["diameter"] = json!(d);
+                    }
+                } else if !opts.tapped {
                     params["diameter"] = json!(diameter);
                 } else if let Some(drill) = opts.drill.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
                     params["diameter"] = json!(drill);
@@ -6362,8 +6458,25 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 match *kind {
                     1 => {
-                        params["cb_diameter"] = json!(cb_diameter);
-                        params["cb_depth"] = json!(cb_depth);
+                        // A clearance counterbore sized to a cap screw's head sends the head,
+                        // and the diameter or depth only when they are not the head's.
+                        let head = if opts.clearance { crate::dialogs_hole::SCREW_HEADS.get(opts.head).and_then(|h| h.1) } else { None };
+                        if let Some(standard) = head {
+                            if let Some(problem) = crate::dialogs_hole::head_problem(opts) {
+                                return Err(problem);
+                            }
+                            let (d, h) = crate::dialogs_hole::head_counterbore_texts(opts).unwrap_or_default();
+                            params["head"] = json!(standard);
+                            if cb_diameter.trim() != d {
+                                params["cb_diameter"] = json!(cb_diameter);
+                            }
+                            if cb_depth.trim() != h {
+                                params["cb_depth"] = json!(cb_depth);
+                            }
+                        } else {
+                            params["cb_diameter"] = json!(cb_diameter);
+                            params["cb_depth"] = json!(cb_depth);
+                        }
                         let bridge = opts.bridge.trim();
                         if !bridge.is_empty() {
                             if !app.session.doc.eval(bridge, ValueKind::Length).is_ok_and(|t| t > 0.0) {
@@ -6473,6 +6586,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::SaveMesh(k) => return crate::dialogs_save_mesh::commands(k, &d.inputs),
         Kind::ViewDxf { .. } | Kind::ViewNavigator(_) => return Ok(Vec::new()),
         Kind::InsertDrawing(p) => return crate::dialogs_insert_drawing::commands(p),
+        Kind::InsertAirfoil(a) => return crate::dialogs_insert_airfoil::commands(a),
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
         Kind::Frame(k) => return crate::dialogs_frame::commands(app, k, &d.inputs, &d.extra),
         Kind::EndCap(k) => return crate::dialogs_end_cap::commands(app, k, &d.inputs, &d.extra),
@@ -6840,7 +6954,7 @@ const AXIS_PICK: &str =
 /// Which profiles of a sketch a profile selection means.
 pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &ProfileSel) -> Vec<usize> {
     let ps = &ss.profiles;
-    match sel {
+    let mut indices: Vec<usize> = match sel {
         ProfileSel::All => (0..ps.len()).collect(),
         ProfileSel::Indices { indices } => indices.iter().copied().filter(|i| *i < ps.len()).collect(),
         ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } => {
@@ -6853,7 +6967,12 @@ pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &P
             })
             .collect(),
         ProfileSel::Points { points } => points.iter().filter_map(|q| solidcraft_engine::doc::sketch::profile_at_point(ps, *q)).collect(),
-    }
+    };
+    // Saved places or curve references can converge on one region after a sketch changes.
+    // Refill bypasses SelInput::toggle, so keep each resolved region only once here.
+    let mut seen = std::collections::BTreeSet::new();
+    indices.retain(|index| seen.insert(*index));
+    indices
 }
 
 thread_local! {
@@ -7052,12 +7171,18 @@ fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&
     })
 }
 
+/// Is `body` an imported mesh body (no B-rep, so no vertices of its own)?
+fn is_mesh_body(s: &Session, body: &str) -> bool {
+    crate::open_meshing::session_world(s).body(body).is_some_and(|b| b.body.is_mesh())
+}
+
 /// A dialog pick as a construction reference (`construct.*`'s `{face|edge|vertex: [x,y,z]}`,
 /// `{plane}`, `{axis}` or `{sketch, point|curve}`).
 fn construct_ref(app: &SolveApp, sel: &Sel) -> Result<Value, String> {
     Ok(match sel {
         Sel::Face { point, .. } => json!({"face": pt(*point)}),
         Sel::Edge { point, .. } => json!({"edge": pt(*point)}),
+        Sel::Vertex { body, point } if is_mesh_body(&app.session, body) => json!({"point": pt(*point)}),
         Sel::Vertex { point, .. } => match crate::snap_wake::snapped(app, *point) {
             Some((item, snap)) => snap_ref(app, item, snap)?,
             None => json!({"vertex": pt(*point)}),
@@ -7278,6 +7403,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 taper_present: extent.taper.is_some(),
                 to_offset: extent.to_offset.as_deref().map(str::to_string).unwrap_or_default(),
                 start: extent.start_offset.as_deref().map(str::to_string).unwrap_or_default(),
+                offset_start: extent.start_offset.is_some(),
                 all: extent.through_all,
                 thin: thin.is_some(),
                 wall: thin.as_ref().map_or_else(|| length_default(s, "2"), |t| t.thickness.to_string()),
@@ -7517,6 +7643,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             ease_out,
             to,
             references,
+            // Not in the Hole window yet: an edit keeps it (`timeline.redefine`).
+            thread_class: _,
             old_surface_start: _,
         } => {
             let mut d = start("solid.hole")?;
@@ -8369,6 +8497,7 @@ mod refused_ok_tests {
                 added: [2; 4],
                 new_body: [3; 4],
                 removed: [4; 4],
+                mirrored: [6; 4],
                 edge: [5; 4],
                 ghost: false,
                 tint_new: true,

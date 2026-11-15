@@ -243,3 +243,74 @@ fn cone_crossing_at_mid_height() {
         )
     });
 }
+
+/// Two faces on one plane are not parted by an edge that stands off it within the edge's own
+/// tolerance: the validity contract lets an edge curve lie `τ_e + τ_f` from its face
+/// (invariant 6 of docs/validity-and-tolerances.md), while the exact edge stays on the face's
+/// plane. The top face of a block against itself, with one edge curve lifted 3e-5 off the plane
+/// under an edge tolerance of 3e-5 (past the faces' band of 2e-5, within it with the edge's
+/// tolerance): not parted. The top faces of two blocks whose heights differ by 1.5 times the
+/// faces' band part; by half of it they do not.
+#[test]
+fn an_edge_within_its_own_tolerance_does_not_part_one_plane() {
+    use solidcore::curve::line::Line;
+    use solidcore::geom::extent1d::Extent1d;
+    use solidcore::geom::tol::zone_tol3d;
+    use solidcore::topology::topology_traverser::face_edges;
+    use solidcore::{Brep, FaceId, Point3, Vec3};
+
+    // a block of height h, and its top face
+    let top = |h: f64| {
+        let (k, brep) = kernel_copy(&make_box([0.0; 3], [5.0, 5.0, h]).unwrap());
+        let on_top = |brep: &Brep, f: FaceId| {
+            face_edges(brep, f).unwrap().into_iter().all(|e| {
+                let rec = brep.edge(e).unwrap();
+                let c = rec.curve.as_ref().unwrap();
+                let ivl = rec.interval;
+                [ivl.min(), ivl.max()]
+                    .into_iter()
+                    .all(|t| (c.evaluate_point(&k, t).unwrap().z - h).abs() < 1e-12)
+            })
+        };
+        let f = *brep
+            .face_list()
+            .iter()
+            .find(|&&f| on_top(&brep, f))
+            .unwrap();
+        (k, brep, f)
+    };
+
+    let (k, mut brep, f) = top(5.0);
+    let face_tol = zone_tol3d(&k, face::tolerance(&brep, f).unwrap());
+    let lift = 3e-5;
+    assert!(lift > 2.0 * face_tol, "{face_tol}");
+    let e = face_edges(&brep, f).unwrap()[0];
+    let rec = brep.edge(e).unwrap();
+    let c = rec.curve.as_ref().unwrap();
+    let ivl = rec.interval;
+    let ends: Vec<Point3> = [ivl.min(), ivl.max()]
+        .into_iter()
+        .map(|t| c.evaluate_point(&k, t).unwrap() + Vec3::new(0.0, 0.0, lift))
+        .collect();
+    let rec = brep.edge_mut(e).unwrap();
+    rec.curve = Some(Line::from_points(ends[0], ends[1], 3).into());
+    rec.interval = Extent1d::from_min_max(0.0, 1.0);
+    rec.tolerance = lift;
+    assert!(!faces_on_other_surfaces(&k, &brep, f, &brep, f).unwrap());
+
+    let (k, low, fl) = top(5.0);
+    let band = 2.0 * face_tol;
+    for (d, parts) in [(1.5 * band, true), (0.5 * band, false)] {
+        let (_, high, fh) = top(5.0 + d);
+        assert_eq!(
+            faces_on_other_surfaces(&k, &low, fl, &high, fh).unwrap(),
+            parts,
+            "{d}"
+        );
+        assert_eq!(
+            faces_on_other_surfaces(&k, &high, fh, &low, fl).unwrap(),
+            parts,
+            "{d}"
+        );
+    }
+}

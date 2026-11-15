@@ -747,33 +747,219 @@ fn loopuse_orientation(b: &Brep, lu: LoopuseId) -> Result<OrientType> {
     crate::topology::loopuse::orientation(b, lu)
 }
 
+/// The B-rep [`compute_uv_point`] and [`compute_uv_sector`] run on: one they may change
+/// ([`Changing`], upstream's calls), or one they only read ([`Reading`]), where they give
+/// up (`None`) instead of a step that could change it. Only the steps here take the B-rep
+/// mutably; everything else reads it through `Deref`.
+trait SectorBrep: core::ops::Deref<Target = Brep> {
+    /// The surface of face `f` the computation reads; `None` where it may not read it.
+    fn surface(&self, f: FaceId) -> Option<Result<&Surface>>;
+
+    /// `pEdgeuse->NormalizedEvaluate(t, TRUE, ..)` in UV space; `None` where it could make
+    /// a UV trim curve on a B-rep only read.
+    fn normalized_evaluate(
+        &mut self,
+        k: &Kernel,
+        eu: EdgeuseId,
+        t: f64,
+        want_first_deriv: bool,
+        ok_to_make: bool,
+    ) -> Option<Result<crate::topology::edgeuse::p3::NormalizedEval>>;
+
+    /// [`global_point_solve`]; `None` on a B-rep only read (the solve builds the face's
+    /// surface cache, which can change the B-rep).
+    #[allow(clippy::too_many_arguments)]
+    fn global_point_solve(
+        &mut self,
+        k: &Kernel,
+        f: FaceId,
+        domain: &Extent2d,
+        op: SolverOperation,
+        point: Point3,
+        tol: f64,
+        request: SolutionRequested,
+        point_test: bool,
+    ) -> Option<Result<Vec<PointDrop>>>;
+}
+
+/// A B-rep the UV point and sector computations may change: every step runs.
+struct Changing<'a>(&'a mut Brep);
+
+impl core::ops::Deref for Changing<'_> {
+    type Target = Brep;
+    fn deref(&self) -> &Brep {
+        self.0
+    }
+}
+
+impl SectorBrep for Changing<'_> {
+    fn surface(&self, f: FaceId) -> Option<Result<&Surface>> {
+        Some(face_surface(self.0, f))
+    }
+
+    fn normalized_evaluate(
+        &mut self,
+        k: &Kernel,
+        eu: EdgeuseId,
+        t: f64,
+        want_first_deriv: bool,
+        ok_to_make: bool,
+    ) -> Option<Result<crate::topology::edgeuse::p3::NormalizedEval>> {
+        Some(crate::topology::edgeuse::p3::normalized_evaluate(
+            k,
+            self.0,
+            eu,
+            t,
+            true,
+            want_first_deriv,
+            ok_to_make,
+        ))
+    }
+
+    fn global_point_solve(
+        &mut self,
+        k: &Kernel,
+        f: FaceId,
+        domain: &Extent2d,
+        op: SolverOperation,
+        point: Point3,
+        tol: f64,
+        request: SolutionRequested,
+        point_test: bool,
+    ) -> Option<Result<Vec<PointDrop>>> {
+        Some(global_point_solve(
+            k, self.0, f, domain, op, point, tol, request, point_test,
+        ))
+    }
+}
+
+/// A B-rep the UV point and sector computations only read: a step that could change it
+/// gives the computation up. It reads the surface of one face, the vertex use's, from a
+/// copy that stands for it as the face surfaces of
+/// [`Brep::clone_sharing_surface_caches`] do ([`Brep::stand_surface_for`]), so what the
+/// computation makes on the surface from `&self` (a NURB a cone makes on first use) stays
+/// on the copy, as it stayed on the B-rep's copy, and never reaches the B-rep. Another
+/// face's surface gives the computation up.
+struct Reading<'a> {
+    b: &'a Brep,
+    surface: Option<(FaceId, Surface)>,
+}
+
+impl<'a> Reading<'a> {
+    /// The reading of `b` for vertex use `vu`: with a copy of the surface of its face, when
+    /// it has one.
+    fn for_vertexuse(b: &'a Brep, vu: VertexuseId) -> Self {
+        let face = faceuse(b, vu)
+            .ok()
+            .flatten()
+            .and_then(|fu| b.faceuse(fu).ok().and_then(|r| r.face));
+        let surface = face.and_then(|f| {
+            let original = b.face(f).ok()?.surface.as_ref()?;
+            let mut copy = original.clone();
+            Brep::stand_surface_for(&mut copy, original);
+            Some((f, copy))
+        });
+        Self { b, surface }
+    }
+}
+
+impl core::ops::Deref for Reading<'_> {
+    type Target = Brep;
+    fn deref(&self) -> &Brep {
+        self.b
+    }
+}
+
+impl Reading<'_> {
+    /// The copy of face `f`'s surface; `None` for another face.
+    fn surface_copy(&self, f: FaceId) -> Option<&Surface> {
+        match &self.surface {
+            Some((face, copy)) if *face == f => Some(copy),
+            _ => None,
+        }
+    }
+}
+
+impl SectorBrep for Reading<'_> {
+    fn surface(&self, f: FaceId) -> Option<Result<&Surface>> {
+        self.surface_copy(f).map(Ok)
+    }
+
+    fn normalized_evaluate(
+        &mut self,
+        k: &Kernel,
+        eu: EdgeuseId,
+        t: f64,
+        want_first_deriv: bool,
+        ok_to_make: bool,
+    ) -> Option<Result<crate::topology::edgeuse::p3::NormalizedEval>> {
+        if ok_to_make {
+            return None;
+        }
+        let this = &*self;
+        crate::topology::edgeuse::p3::normalized_evaluate_reading(
+            k,
+            this.b,
+            eu,
+            t,
+            true,
+            want_first_deriv,
+            &|f| this.surface_copy(f).map(Some),
+        )
+        .transpose()
+    }
+
+    fn global_point_solve(
+        &mut self,
+        _k: &Kernel,
+        _f: FaceId,
+        _domain: &Extent2d,
+        _op: SolverOperation,
+        _point: Point3,
+        _tol: f64,
+        _request: SolutionRequested,
+        _point_test: bool,
+    ) -> Option<Result<Vec<PointDrop>>> {
+        None
+    }
+}
+
+/// The result of a [`SectorBrep`] step, or `Ok(None)` from the enclosing computation
+/// when the step gave it up.
+macro_rules! or_give_up {
+    ($step:expr) => {
+        match $step {
+            Some(r) => r,
+            None => return Ok(None),
+        }
+    };
+}
+
 /// `pEdgeuse->NormalizedEvaluate(t, TRUE, rUVPnt, &rUVTan, bOKToMakeUVTrimCurve)`: the
 /// UV point and UV tangent of the edge use at normalised parameter `t` (making a UV
 /// trim curve when allowed and missing).
-fn normalized_evaluate(
+fn normalized_evaluate<B: SectorBrep>(
     k: &Kernel,
-    b: &mut Brep,
+    b: &mut B,
     eu: EdgeuseId,
     t: f64,
     ok_to_make: bool,
-) -> Result<(Point3, Vec3)> {
-    let r = crate::topology::edgeuse::p3::normalized_evaluate(k, b, eu, t, true, true, ok_to_make)?;
-    Ok((r.point, r.first_deriv.unwrap_or(Vec3::UNDEF)))
+) -> Option<Result<(Point3, Vec3)>> {
+    let r = b.normalized_evaluate(k, eu, t, true, ok_to_make)?;
+    Some(r.map(|r| (r.point, r.first_deriv.unwrap_or(Vec3::UNDEF))))
 }
 
 /// `pEdgeuse->NormalizedEvaluate(t, TRUE, rUVPnt, NULL, bOKToMakeUVTrimCurve)`: the UV
 /// point only.
-fn normalized_evaluate_point(
+fn normalized_evaluate_point<B: SectorBrep>(
     k: &Kernel,
-    b: &mut Brep,
+    b: &mut B,
     eu: EdgeuseId,
     t: f64,
     ok_to_make: bool,
-) -> Result<Point3> {
-    Ok(
-        crate::topology::edgeuse::p3::normalized_evaluate(k, b, eu, t, true, false, ok_to_make)?
-            .point,
-    )
+) -> Option<Result<Point3>> {
+    let r = b.normalized_evaluate(k, eu, t, false, ok_to_make)?;
+    Some(r.map(|r| r.point))
 }
 
 /// A point solve's start end (`m_vStart`): the surface parameters and the solution
@@ -986,6 +1172,19 @@ pub fn compute_uv_point(
     vu: VertexuseId,
     ok_to_make: bool,
 ) -> Result<Point2> {
+    uv_point_in(k, &mut Changing(b), vu, ok_to_make)?.ok_or_else(|| {
+        SolidError::port_invariant(OP, "ComputeUVPoint gave up on a B-rep it may change")
+    })
+}
+
+/// [`compute_uv_point`] on `b`; `None` when a step that could change a B-rep only read
+/// gave it up.
+fn uv_point_in<B: SectorBrep>(
+    k: &Kernel,
+    b: &mut B,
+    vu: VertexuseId,
+    ok_to_make: bool,
+) -> Result<Option<Point2>> {
     // Vertex and Face locals
     let v = vertex(b, vu)?.ok_or_else(|| null("ComputeUVPoint: vertex use without vertex"))?;
     let (vertex_pnt, vertex_tol) = {
@@ -1001,7 +1200,7 @@ pub fn compute_uv_point(
         return Err(ner(vu, "the face's surface"));
     }
     let uv_domain = face_uv_domain(b, f)?;
-    let nat_domain = face_surface(b, f)?.natural_uv_domain_with_nurb(k)?;
+    let nat_domain = or_give_up!(b.surface(f))?.natural_uv_domain_with_nurb(k)?;
 
     let sol = if is_edge_vertexuse(b, vu)? {
         // Edgeuse locals - thisEdgeuse->StartPt == CWEdgeuse->EndPt (with tolerances)
@@ -1013,15 +1212,17 @@ pub fn compute_uv_point(
 
         // try quick solution based on this (and prev) Vertexuse->Edgeuse->UVTrimCurve data
         // get this SurfaceUV for ThisEdgeuse start point from UVTrimCurve
-        let (this_uv_pnt, mut this_uv_tan) = normalized_evaluate(k, b, eu, 0.0, ok_to_make)?;
+        let (this_uv_pnt, mut this_uv_tan) =
+            or_give_up!(normalized_evaluate(k, b, eu, 0.0, ok_to_make))?;
         let mut uv_guess = xy(this_uv_pnt);
 
         // get SurfaceUV for PrevEdgeuse end point from UVTrimCurve
-        let (prev_uv_pnt, mut prev_uv_tan) = normalized_evaluate(k, b, prev, 1.0, ok_to_make)?;
+        let (prev_uv_pnt, mut prev_uv_tan) =
+            or_give_up!(normalized_evaluate(k, b, prev, 1.0, ok_to_make))?;
 
         // when PrevUV and ThisUV UVTrimCurve EndPts are far apart - check for
         // singularities and seams
-        let surface = face_surface(b, f)?;
+        let surface = or_give_up!(b.surface(f))?;
         let surf_uv_domain = surface.natural_uv_domain_with_nurb(k)?;
         let dist_u = (this_uv_pnt.x - prev_uv_pnt.x).abs();
         let dist_v = (this_uv_pnt.y - prev_uv_pnt.y).abs();
@@ -1139,7 +1340,7 @@ pub fn compute_uv_point(
         // try to project vertex point down onto surface
         let (mut found, mut s) = local_point_solve(
             k,
-            face_surface(b, f)?,
+            or_give_up!(b.surface(f))?,
             &uv_domain,
             SolverOperation::Minimize,
             vertex_pnt,
@@ -1158,9 +1359,8 @@ pub fn compute_uv_point(
         // If local solve fails then go back and do a global closest point
         if !found || s.value > vertex_tol + face_tolerance(b, f)? {
             let face_tol = face_tolerance(b, f)?;
-            let sols = global_point_solve(
+            let sols = or_give_up!(b.global_point_solve(
                 k,
-                b,
                 f,
                 &uv_domain,
                 SolverOperation::Minimize,
@@ -1168,7 +1368,7 @@ pub fn compute_uv_point(
                 vertex_tol + face_tol,
                 SolutionRequested::Single,
                 ok_to_make,
-            )?;
+            ))?;
             let Some(&first) = sols.first() else {
                 return Err(failed(
                     vu,
@@ -1178,7 +1378,7 @@ pub fn compute_uv_point(
 
             // Use UVTrimCurves to choose the right drop point [B678]
             if sols.len() > 1 {
-                let this_uv = normalized_evaluate_point(k, b, eu, 0.0, ok_to_make)?;
+                let this_uv = or_give_up!(normalized_evaluate_point(k, b, eu, 0.0, ok_to_make))?;
                 let guess = xy(this_uv);
                 let mut min_dist = crate::math::BIG_DOUBLE;
                 for x in &sols {
@@ -1198,9 +1398,8 @@ pub fn compute_uv_point(
         // project point down to face's surface
         let face_tol = face_tolerance(b, f)?;
 
-        let mut sols = global_point_solve(
+        let mut sols = or_give_up!(b.global_point_solve(
             k,
-            b,
             f,
             &uv_domain,
             SolverOperation::Intersect,
@@ -1208,12 +1407,11 @@ pub fn compute_uv_point(
             vertex_tol + face_tol,
             SolutionRequested::All,
             true,
-        )?;
+        ))?;
         // If that failed, try again with Minimize. [090827]
         if sols.is_empty() {
-            sols = global_point_solve(
+            sols = or_give_up!(b.global_point_solve(
                 k,
-                b,
                 f,
                 &uv_domain,
                 SolverOperation::Minimize,
@@ -1221,7 +1419,7 @@ pub fn compute_uv_point(
                 vertex_tol + face_tol,
                 SolutionRequested::All,
                 true,
-            )?;
+            ))?;
         }
         // return only solution when just 1, or any solution when many (on a pole or seam)
         sols.first()
@@ -1232,7 +1430,7 @@ pub fn compute_uv_point(
         return Err(failed(vu, "a shell vertex use has no face parameters"));
     };
 
-    Ok(sol)
+    Ok(Some(sol))
 }
 
 /// The length of the edge use's UV trim curve's natural interval, or of its edge's
@@ -1341,9 +1539,40 @@ pub fn compute_uv_sector(
     vu: VertexuseId,
     ok_to_make: bool,
 ) -> Result<UvSector> {
+    uv_sector_in(k, &mut Changing(b), vu, ok_to_make)?.ok_or_else(|| {
+        SolidError::port_invariant(OP, "ComputeUVSector gave up on a B-rep it may change")
+    })
+}
+
+/// [`compute_uv_sector`] without making anything (`ok_to_make` false), on a B-rep it only
+/// reads; `None` when the computation reaches a step that could change the B-rep (a
+/// global point solve, which builds the face's surface cache). Where it gives an answer,
+/// that answer is [`compute_uv_sector`]'s on the same B-rep, which leaves the B-rep
+/// unchanged then; a caller holding the B-rep only to read it runs
+/// [`compute_uv_sector`] on a copy when this gives up.
+///
+/// # Errors
+///
+/// As [`compute_uv_sector`].
+pub fn compute_uv_sector_read_only(
+    k: &Kernel,
+    b: &Brep,
+    vu: VertexuseId,
+) -> Result<Option<UvSector>> {
+    uv_sector_in(k, &mut Reading::for_vertexuse(b, vu), vu, false)
+}
+
+/// [`compute_uv_sector`] on `b`; `None` when a step that could change a B-rep only read
+/// gave it up.
+fn uv_sector_in<B: SectorBrep>(
+    k: &Kernel,
+    b: &mut B,
+    vu: VertexuseId,
+    ok_to_make: bool,
+) -> Result<Option<UvSector>> {
     // init output
     let mut io = UvSectorIo::new(Some(vu));
-    let fail = |io: UvSectorIo| Ok(UvSector { success: false, io });
+    let fail = |io: UvSectorIo| Ok(Some(UvSector { success: false, io }));
 
     // no work - no sector
     if is_shell_vertexuse(b, vu)? {
@@ -1372,7 +1601,7 @@ pub fn compute_uv_sector(
     let uv_domain = face_uv_domain(b, f)?;
 
     // compute the UV point - pass the call along (status ignored)
-    if let Some(p) = ignored_status(compute_uv_point(k, b, vu, ok_to_make))? {
+    if let Some(p) = ignored_status(or_give_up!(uv_point_in(k, b, vu, ok_to_make).transpose()))? {
         io.beg_edge_uv_point = p;
     }
 
@@ -1410,7 +1639,9 @@ pub fn compute_uv_sector(
             let end_edge = b.edgeuse(end)?.edge;
 
             // compute EndSector UVPoint (status ignored)
-            if let Some(p) = ignored_status(compute_uv_point(k, b, end_vu, ok_to_make))? {
+            if let Some(p) = ignored_status(or_give_up!(
+                uv_point_in(k, b, end_vu, ok_to_make).transpose()
+            ))? {
                 io.end_edge_uv_point = p;
             }
 
@@ -1459,7 +1690,7 @@ pub fn compute_uv_sector(
                 end_tan = -end_tan;
             }
 
-            let surface = face_surface(b, f)?;
+            let surface = or_give_up!(b.surface(f))?;
 
             // IsBegVertexUV on a Surface Singularity
             let (on_pole, singular_dir) =
@@ -1575,7 +1806,7 @@ pub fn compute_uv_sector(
             }
 
             // Is BegVertexUV on a Surface->Seam
-            let surface = face_surface(b, f)?;
+            let surface = or_give_up!(b.surface(f))?;
             let (on_seam, seam_dir) = is_on_seam(k, surface, io.beg_edge_uv_point)?;
             let seam_u = seam_dir == SurfParamType::U || seam_dir == SurfParamType::Both;
             let seam_v = seam_dir == SurfParamType::V || seam_dir == SurfParamType::Both;
@@ -1614,7 +1845,7 @@ pub fn compute_uv_sector(
             }
 
             // all done
-            Ok(UvSector { success: true, io })
+            Ok(Some(UvSector { success: true, io }))
         }
         // vertexuse is in an uninitialized state
         VertexuseOwner::Shell(_) | VertexuseOwner::Unknown => fail(io),
@@ -1965,5 +2196,106 @@ mod tests {
             assert_eq!(r.vertex_edge_gap.is_init(), !cleared);
             assert_eq!(r.vertex_face_gap.is_init(), !cleared);
         }
+    }
+
+    /// The seam classifications read a vertex use's sector without copying the B-rep
+    /// (`compute_uv_sector_read_only`): wherever that answers, the answer is, to the bit,
+    /// `compute_uv_sector`'s on a copy of the B-rep, as they computed it before. Every
+    /// vertex use of a drilled plate (a boolean's result: planes, a cylinder and its seam),
+    /// a sphere (poles), a torus (doubly periodic) and a cone (an apex), and it leaves the
+    /// B-rep's surfaces as they were (what it makes on one stays on a copy, as it stayed on
+    /// the B-rep's copy). Where the sector
+    /// needs a global point solve (a vertex moved off its faces), which could change the
+    /// B-rep, it gives up for the caller to compute it on a copy.
+    #[test]
+    fn read_only_uv_sector_is_the_sector_on_a_copy() {
+        use crate::primitive::api_primitives::{
+            create_box, create_cone, create_cylinder, create_sphere, create_torus,
+        };
+        let mut k = Kernel::default();
+        let mut drilled = || {
+            let plate =
+                create_box(&mut k, Point3::new(-10.0, -10.0, 0.0), 20.0, 20.0, 5.0).unwrap();
+            let hole = create_cylinder(&mut k, Point3::new(0.0, 0.0, -1.0), 3.0, 7.0).unwrap();
+            crate::boolean::api_brep::boolean_difference(&mut k, plate, hole).unwrap()
+        };
+        let plate = drilled();
+        let mut moved = drilled();
+        for v in moved.vertices().ids().collect::<Vec<_>>() {
+            moved.vertex_mut(v).unwrap().point.z += 0.25;
+        }
+        let bodies = [
+            plate,
+            moved,
+            create_sphere(&mut k, Point3::ZERO, 5.0).unwrap(),
+            create_torus(&mut k, Point3::ZERO, 8.0, 2.0).unwrap(),
+            create_cone(&mut k, Point3::ZERO, 4.0, 0.0, 6.0).unwrap(),
+        ];
+        // Each face surface as `kind()` shows it: with the NURB a cone, sphere or torus
+        // makes on first use from `&self`, once made.
+        let surfaces = |b: &Brep| -> Vec<String> {
+            b.faces()
+                .iter()
+                .map(|(_, f)| format!("{:?}", f.surface.as_ref().map(Surface::kind)))
+                .collect()
+        };
+        let (mut answered, mut gave_up) = (0, 0);
+        for b in &bodies {
+            let before = surfaces(b);
+            for vu in b.vertexuses().ids() {
+                let mut copy = b.clone_sharing_surface_caches();
+                let on_copy = compute_uv_sector(&k, &mut copy, vu, false);
+                match compute_uv_sector_read_only(&k, b, vu) {
+                    Ok(Some(read)) => {
+                        answered += 1;
+                        // Debug prints every f64 exactly (and UNDEF, signed zeros).
+                        assert_eq!(
+                            format!("{:?}", Ok::<_, SolidError>(read)),
+                            format!("{on_copy:?}")
+                        );
+                    }
+                    Ok(None) => gave_up += 1,
+                    Err(e) => assert_eq!(Err(e), on_copy),
+                }
+            }
+            // What the computations made on a surface stayed on its copy: the B-rep's
+            // surfaces are as they were.
+            assert_eq!(surfaces(b), before);
+        }
+        assert!(
+            answered > 0 && gave_up > 0,
+            "answered {answered}, gave up {gave_up}"
+        );
+    }
+
+    /// The read-only sector reads its face's surface from a copy that stands for it as the
+    /// face surfaces of `Brep::clone_sharing_surface_caches` do: the copy shares the
+    /// surface's cache slot, and not the cell of what is made on it from `&self` (a cone's
+    /// NURB), so nothing it makes reaches the B-rep. Another face's surface gives it up.
+    #[test]
+    fn read_only_uv_sector_reads_a_copy_of_its_face_surface() {
+        use crate::primitive::api_primitives::create_cone;
+        let mut k = Kernel::default();
+        let b = create_cone(&mut k, Point3::ZERO, 4.0, 0.0, 6.0).unwrap();
+        let mut checked = 0;
+        for vu in b.vertexuses().ids() {
+            let reading = Reading::for_vertexuse(&b, vu);
+            let Some(f) = faceuse(&b, vu)
+                .unwrap()
+                .and_then(|fu| b.faceuse(fu).unwrap().face)
+            else {
+                continue;
+            };
+            let original = b.face(f).unwrap().surface.as_ref().unwrap();
+            let copy = reading.surface(f).unwrap().unwrap();
+            assert!(!std::ptr::eq(copy, original));
+            assert!(copy.shares_cache_slot_with(original));
+            assert!(!copy.shares_made_kind_with(original));
+            for other in b.faces().ids().filter(|&g| g != f) {
+                assert!(reading.surface(other).is_none());
+            }
+            checked += 1;
+        }
+        assert!(checked > 0);
     }
 }

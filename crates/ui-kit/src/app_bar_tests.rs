@@ -11,6 +11,7 @@ const HANDLES: Handles<'static> = Handles {
     separator: "t:separator:",
     search: "t:search",
     report: "t:report",
+    pill: "t:",
     settings: "t:settings",
     version: "t:version",
 };
@@ -70,6 +71,7 @@ impl BarRig {
             help: BarButton { id: "help", icon: "help", tip: "Help", enabled: true, narrow: false, wide_only: false },
             settings: BarButton { id: "settings", icon: "settings", tip: "Settings", enabled: true, narrow: false, wide_only: false },
             report: Report { label: "Report", tip: "Report a problem", icon_only: false },
+            pills: vec![],
             search: false,
             search_shortcut: Some("S"),
             assistant: true,
@@ -222,7 +224,7 @@ impl TabsRig {
             focused: true,
             ..Default::default()
         };
-        let tab = |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet" };
+        let tab = |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet", security: None };
         let mut strip = TabStrip {
             tabs: vec![tab("One"), tab("Two"), tab("Three")],
             selected: 0,

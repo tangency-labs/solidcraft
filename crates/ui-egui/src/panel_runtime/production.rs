@@ -429,6 +429,7 @@ pub(crate) fn enable_production(app: &mut crate::SolveApp) -> PanelResult<()> {
     integration.production = Some(state);
     integration.tick(&app.session)?;
     let mut options = HostOptions { content_header_height: 0.0, ..Default::default() };
+    options.geometry.default_opaque = false;
     options.metrics.footer_height = 0.0;
     integration.enable_host(options)?;
     let mut catalogue = commands::InMemoryCatalogue::default();
@@ -650,6 +651,10 @@ fn place_compatibly(
             mutations.push(Mutation::Move { instance, destination });
             if width.is_some() && zone.side() {
                 mutations.push(Mutation::SetSize { section: section.clone(), size });
+                // Compatibility placement supplies a width, so it must not pin an automatic height.
+                if !source.location.zone().side() || source.preferred_extent.is_none() {
+                    mutations.push(Mutation::ResetSideHeight { section: section.clone() });
+                }
             }
             if zone == Zone::Bottom && source.collapsed {
                 mutations.push(Mutation::Collapse { section: section.clone(), collapsed: false });
@@ -932,7 +937,7 @@ fn registry() -> PanelResult<PanelRegistry> {
             default_size: Size { width: crate::prefs::DEFAULT_BROWSER_WIDTH, height: if history || shots { bottom_height } else { 320.0 } },
             max_size: Size { width: MAX_LOGICAL, height: MAX_LOGICAL },
             edge_rule: if assistant { EdgeRule::PinOuter } else { EdgeRule::None },
-            surface: PanelSurface::FollowZone,
+            surface: PanelSurface::Translucent,
             features: PanelFeatures { popout: true, hot_closable: assistant || bom, closable: !sketch, ..Default::default() },
             side_height_policy: if assistant { SideHeightPolicy::Fill } else { SideHeightPolicy::Content },
             fixed_bottom_height: (history || shots).then_some(bottom_height),

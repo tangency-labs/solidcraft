@@ -550,8 +550,8 @@ pub const SM_ERR_TESS_FAIL_FACE: i32 = 1041;
 /// SMLib fork status `SM_ERR_OFFSET_WALLS_TOUCH` (tangency-labs/smlib a759622,
 /// `SmMessages.h`; not in the pinned upstream), as carried by [`SolidError::Upstream`]:
 /// an offset (a shell, a solid offset) whose walls would meet, because loops of an offset
-/// face touch without crossing. Returned only with the opt-in
-/// `Kernel::fixes.offset_walls_touch_refused`.
+/// face touch without crossing. Returned only with
+/// `Kernel::fixes.offset_resolve_crossing_loops`.
 pub const SM_ERR_OFFSET_WALLS_TOUCH: i32 = 1042;
 
 /// SMLib fork status `SM_ERR_OFFSET_EDGE_VANISHES` (tangency-labs/smlib 34318f4,
@@ -1329,7 +1329,7 @@ pub enum ErrorKind {
     /// A fillet or chamfer is too large to build; the error names the largest size
     /// that builds.
     FilletTooLarge = 100,
-    // The blend's classes, 101 to 128 (the classes of the typed blend failure record,
+    // The blend's classes, 101 to 129 (the classes of the typed blend failure record,
     // `error::blend`), in their order: the record's numbers less 200, then the classes added
     // after them.
     /// The rolling ball does not fit a face it rolls on.
@@ -1388,13 +1388,18 @@ pub enum ErrorKind {
     StationDidNotConverge = 125,
     /// The faces the blend's rails enclose reach past its rails: a defect.
     TrimLeaks = 126,
-    /// A stage of the blend failed with no reason the kernel names: a defect.
+    /// A stage failed with no reason the kernel names: a defect. The blend's class 127, also
+    /// the class of the other areas' stage failures (`CurveFailure::StageFailed`, ...); the
+    /// failure's operation says which stage.
     StageFailed = 127,
     /// A round that ends where its edge runs on tangentially into an edge that is not
     /// blended, in a shape the kernel does not build. Not a matter of size: the way out is to
     /// blend the edge it runs on into with it
     /// ([`crate::blend::blend_refusal::BlendRefusal::ContinuesInto`]).
     TangentContinuationEnd = 128,
+    /// A blend past its faces keeps no length of its edge, no corner taking any of it: the
+    /// trim takes the whole of it.
+    OverflowKeepsNothing = 129,
     /// An offset face's offset folds: the wall is thicker than a radius of curvature.
     OffsetFolds = 200,
     /// Loops of an offset face touch without crossing: the offset walls would meet.
@@ -1432,8 +1437,9 @@ impl ErrorKind {
     }
 
     /// True for a failure that is the kernel's fault, not a fact of the geometry: report it.
-    /// The blend's defect classes, and a port invariant that did not hold. The blend's
-    /// [`ErrorKind::StageFailed`] is one: a stage failed with no reason the kernel names.
+    /// The blend's defect classes, and a port invariant that did not hold.
+    /// [`ErrorKind::StageFailed`] is one, in every area: a stage failed with no reason the
+    /// kernel names.
     #[must_use]
     pub const fn is_defect(self) -> bool {
         matches!(
@@ -1478,6 +1484,7 @@ impl ErrorKind {
                 | Self::EndRollsIntoSmoothEnd
                 | Self::EndAtSeamVertex
                 | Self::TangentContinuationEnd
+                | Self::OverflowKeepsNothing
                 | Self::OffsetFolds
                 | Self::OffsetWallsTouch
                 | Self::OffsetLoopsCross
@@ -1550,6 +1557,7 @@ impl ErrorKind {
             Self::TrimLeaks => "trim_leaks",
             Self::StageFailed => "stage_failed",
             Self::TangentContinuationEnd => "tangent_continuation_end",
+            Self::OverflowKeepsNothing => "overflow_keeps_nothing",
             Self::OffsetFolds => "offset_folds",
             Self::OffsetWallsTouch => "offset_walls_touch",
             Self::OffsetLoopsCross => "offset_loops_cross",
@@ -2020,6 +2028,20 @@ pub fn upstream_status(error: &SolidError) -> Option<i32> {
 mod tests {
     use super::*;
 
+    /// `e` is a stage of `operation` that failed with no reason the kernel names: class
+    /// [`ErrorKind::StageFailed`], a defect, keeping `status` (the one the C++ reports) for the
+    /// goldens, and worded from its class.
+    pub(in crate::error) fn assert_stage_failure(e: &SolidError, operation: &str, status: i32) {
+        assert_eq!(e.kind(), ErrorKind::StageFailed, "{e:?}");
+        assert!(e.is_defect() && !e.is_refusal() && !e.sized(), "{e:?}");
+        assert_eq!(e.operation(), operation, "{e:?}");
+        assert_eq!(e.sm_status(), Some(status), "{e:?}");
+        assert_eq!(e.upstream_status(), Some(status), "{e:?}");
+        assert!(e.is_status_answer(), "{e:?}");
+        assert!(!e.is_port_failure(), "{e:?}");
+        assert_eq!(e.to_string(), format!("{operation}: stage_failed"));
+    }
+
     #[test]
     fn native_failures_keep_upstream_statuses_and_propagate_port_errors() {
         assert_eq!(native_failure(Ok(3)), Ok(Some(3)));
@@ -2261,7 +2283,7 @@ mod tests {
 
     #[test]
     fn boolean_failures_describe_the_stage_in_solidcore_terms() {
-        use boolean::{BooleanFailure, BooleanStage};
+        use boolean::{BooleanFailure, BooleanStage, PlacedEntity, RelateSide};
 
         let face = FaceId::from_index(7);
         let cases = [
@@ -2296,6 +2318,36 @@ mod tests {
                 .into_error(),
                 "boolean::merge::p4::manifold_boolean: the union would delete face 7 and merge \
                  the solid it bounds into the outside",
+                ErrorKind::Failed,
+                SM_ERR,
+            ),
+            (
+                SolidError::boolean_relate_conflict(
+                    "boolean::topology_intersector::p1::relate",
+                    RelateSide::Brep,
+                    PlacedEntity::Edge(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 6.0, 0.0)),
+                    PlacedEntity::Edge(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 6.0, 0.0)),
+                    PlacedEntity::Edge(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 6.0, 0.5)),
+                ),
+                "boolean::topology_intersector::p1::relate: relating the operands' entities \
+                 failed: the edge from (0, 0, 0) to (0, 6, 0) of the B-rep is related to the \
+                 edge from (0, 0, 0) to (0, 6, 0) and was asked for the edge from (0, 0, 0) to \
+                 (0, 6, 0.5): another entity is already related to the other one",
+                ErrorKind::Failed,
+                SM_ERR,
+            ),
+            (
+                SolidError::boolean_relate_conflict(
+                    "boolean::topology_intersector::p1::relate",
+                    RelateSide::Other,
+                    PlacedEntity::Vertex(Point3::new(1.5, -2.0, 0.25)),
+                    PlacedEntity::Unplaced,
+                    PlacedEntity::Vertex(Point3::new(1.5, -2.0, 0.2501)),
+                ),
+                "boolean::topology_intersector::p1::relate: relating the operands' entities \
+                 failed: the vertex at (1.5, -2, 0.25) of the other B-rep is related to an \
+                 entity and was asked for the vertex at (1.5, -2, 0.2501): another entity is \
+                 already related to the other one",
                 ErrorKind::Failed,
                 SM_ERR,
             ),
@@ -2419,6 +2471,11 @@ mod tests {
                 128,
                 "tangent_continuation_end",
             ),
+            (
+                ErrorKind::OverflowKeepsNothing,
+                129,
+                "overflow_keeps_nothing",
+            ),
             (ErrorKind::OffsetFolds, 200, "offset_folds"),
             (ErrorKind::OffsetWallsTouch, 201, "offset_walls_touch"),
             (ErrorKind::OffsetLoopsCross, 202, "offset_loops_cross"),
@@ -2470,11 +2527,12 @@ mod tests {
                 ErrorKind::TrimLeaks => 40,
                 ErrorKind::StageFailed => 41,
                 ErrorKind::TangentContinuationEnd => 42,
-                ErrorKind::OffsetFolds => 43,
-                ErrorKind::OffsetWallsTouch => 44,
-                ErrorKind::OffsetLoopsCross => 45,
-                ErrorKind::OffsetEdgeVanishes => 46,
-                ErrorKind::OffsetCollapses => 47,
+                ErrorKind::OverflowKeepsNothing => 43,
+                ErrorKind::OffsetFolds => 44,
+                ErrorKind::OffsetWallsTouch => 45,
+                ErrorKind::OffsetLoopsCross => 46,
+                ErrorKind::OffsetEdgeVanishes => 47,
+                ErrorKind::OffsetCollapses => 48,
             }
         };
         for (i, &(kind, code, name)) in PINNED.iter().enumerate() {
@@ -2488,17 +2546,17 @@ mod tests {
             "codes are unique and ascending"
         );
         // the blend's classes: 101 to 127 are the record's numbers less 200, with no gap; 128
-        // follows them
+        // and 129 follow them
         let blend: Vec<u16> = PINNED
             .iter()
             .map(|r| r.1)
             .filter(|c| (101..200).contains(c))
             .collect();
-        assert_eq!(blend, (101..=128).collect::<Vec<u16>>());
+        assert_eq!(blend, (101..=129).collect::<Vec<u16>>());
         // defects, refusals and the sized ones
         let defects = [115, 125, 126, 127];
         let unsized_refusals = [102, 128];
-        for &(kind, code, _) in PINNED.iter().filter(|r| (101..=128).contains(&r.1)) {
+        for &(kind, code, _) in PINNED.iter().filter(|r| (101..=129).contains(&r.1)) {
             assert_eq!(kind.is_defect(), defects.contains(&code), "{kind:?}");
             assert_eq!(kind.is_refusal(), !defects.contains(&code), "{kind:?}");
             assert_eq!(
@@ -2508,6 +2566,21 @@ mod tests {
             );
             assert!(!kind.is_port_failure(), "{kind:?}");
         }
+        // 128, a round that ends where its edge runs on tangentially, is refused whatever its
+        // size (the way out is to blend the edge it runs on into with it): it is not sized,
+        // and its failure, as the cause builds it, offers no size that fits
+        let tangent = ErrorKind::TangentContinuationEnd;
+        assert_eq!(tangent.code(), 128);
+        assert!(tangent.is_refusal() && !tangent.sized());
+        let refused = SolidError::blend(
+            "blend::op",
+            blend::BlendFailure::NoRoom(
+                crate::blend::fillet_executive::NoRoomReason::TangentContinuationEndUnsupported,
+            ),
+        );
+        assert_eq!(refused.kind(), tangent);
+        assert!(refused.is_refusal() && !refused.sized());
+        assert_eq!(refused.fit(), None);
         assert!(ErrorKind::OffsetFolds.sized() && ErrorKind::OffsetCollapses.sized());
         assert!(ErrorKind::FilletTooLarge.sized());
         assert!(ErrorKind::PortInvariant.is_defect());

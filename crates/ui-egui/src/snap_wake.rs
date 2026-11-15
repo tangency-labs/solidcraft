@@ -12,7 +12,7 @@ use egui::{Painter, Pos2, Stroke};
 use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
-use solidcraft_engine::snap::{SnapKind, SnapPoint, snap_points};
+use solidcraft_engine::snap::{SnapKind, SnapPoint};
 
 use crate::SolveApp;
 use crate::viewport::{Hit, Proj};
@@ -33,6 +33,10 @@ pub struct Woken {
     /// The last item hovered that offered nothing the woken points lack: it is not asked again
     /// while it stays under the pointer.
     pub kept_over: Option<Sel>,
+    /// The woken holes' centres, each with a point on its rim, where the design keeps them: inside
+    /// a hole's circle the pointer is on its way to the centre, whatever shows through the hole
+    /// (#11476).
+    pub rims: Vec<(Vec3, Vec3)>,
     /// The design's revision the points were found in: an edit, undo or redo sleeps them.
     pub revision: u64,
 }
@@ -95,15 +99,20 @@ fn same_item(a: &Sel, b: &Sel) -> bool {
 /// when the input doesn't take them. So that the pointer can travel to a point it was shown:
 /// - nothing changes them while `keep` is held in a dialog's point input (the Keep Snap Points
 ///   binding, Shift by default; in a sketch, Shift targets a midpoint instead), or while the
-///   pointer is within reach of one of them (`near`: within [`REACH`] of a point, or
-///   inside a woken rim's circle on its way to the centre);
-/// - an item that offers nothing the woken points lack keeps them (a hole's rim after its wall).
+///   pointer is within reach of one of them (`near`: within [`REACH`] of a point, or inside a
+///   woken rim's or a woken face's hole's circle on its way to the centre);
+/// - an item that offers nothing the woken points lack keeps them (a hole's rim after its wall, a
+///   woken face's own edge on the way to its corners).
 ///
 /// A vertex of another body puts them to sleep.
 ///
 /// A sketch curve under the pointer wakes its points even where the input doesn't take the
 /// curve itself (Move's points), so it is looked for among all the hits (`hits`), not only the
 /// hover.
+///
+/// In a joint origin input snap points belong to a face (#11476): an edge, or a body vertex that
+/// isn't a woken point, stands for the flat face beside it ([`face_context`]; `hits` again),
+/// whose normal a pick there takes and which is lit ([`lit_face`]).
 pub fn update(app: &mut SolveApp, hits: &[Hit], keep: bool, near: Option<(&Proj, Pos2)>) {
     if app.dialog.is_none() {
         app.viewport.snapped.clear();
@@ -125,8 +134,16 @@ pub fn update(app: &mut SolveApp, hits: &[Hit], keep: bool, near: Option<(&Proj,
         app.viewport.woken = Woken { revision: app.session.revision, ..Woken::default() };
         return;
     }
+    let joint = joint_input(app);
+    let is_woken = |p: Vec3| app.viewport.woken.points.iter().any(|w| w.at.dist(p) <= 1e-6 * (1.0 + p.len()));
+    let hovered = match app.viewport.hover.as_ref() {
+        Some(h @ Hit::Edge { .. }) if joint => face_context(app, h, hits, near).or_else(|| item_of(app, h)),
+        Some(h @ Hit::Vertex { point, .. }) if joint && !is_woken(*point) => face_context(app, h, hits, near),
+        Some(h) => item_of(app, h),
+        None => None,
+    };
     let curve = hits.iter().find_map(|h| item_of(app, h)).filter(|i| matches!(i, Sel::ExternalSketchCurve { .. }));
-    let Some(item) = curve.or_else(|| app.viewport.hover.as_ref().and_then(|h| item_of(app, h))) else { return };
+    let Some(item) = curve.or(hovered) else { return };
     if app.viewport.woken.has(&item) || app.viewport.woken.kept_over.as_ref().is_some_and(|k| same_item(k, &item)) {
         return;
     }
@@ -137,12 +154,12 @@ pub fn update(app: &mut SolveApp, hits: &[Hit], keep: bool, near: Option<(&Proj,
     }
     // Crossing a face of the rim's own body on the way to its centre keeps the rim's points and
     // adds the face's; a face of another body sleeps them and wakes its own.
-    let points = snap_points(&app.session, &in_model(app, &item));
+    let (points, rims) = offered(app, &item);
     if let Sel::Face { body: face_body, .. } = &item
         && let Some(rim) = app.viewport.woken.item.clone().filter(|w| matches!(w, Sel::Edge { body, .. } if body == face_body))
     {
         // The rim's own points, without any an earlier crossed face added; then this face's.
-        let rim_points = snap_points(&app.session, &in_model(app, &rim));
+        let (rim_points, rim_rims) = offered(app, &rim);
         let w = &mut app.viewport.woken;
         w.points = rim_points;
         // Only the face's own points are remembered as the face's: a point the rim already
@@ -155,27 +172,120 @@ pub fn update(app: &mut SolveApp, hits: &[Hit], keep: bool, near: Option<(&Proj,
             }
         }
         w.points.extend(added.iter().cloned());
+        w.rims = rim_rims.into_iter().chain(rims).collect();
         w.face = Some(item.clone());
         remember(app, &item, &added);
         return;
     }
-    // An item that offers nothing the woken points lack keeps them; it is remembered, so it is
-    // not asked again while it stays under the pointer.
+    // An item that offers nothing the woken points lack (a hole's rim after its wall, a woken
+    // face's own edge) keeps them; it is remembered, so it is not asked again while it stays
+    // under the pointer.
     let within = |a: &[SnapPoint], b: &[SnapPoint]| a.iter().all(|x| b.iter().any(|y| y.at.dist(x.at) <= 1e-6 * (1.0 + x.at.len())));
     if !app.viewport.woken.points.is_empty() && within(&points, &app.viewport.woken.points) {
         app.viewport.woken.kept_over = Some(item);
         return;
     }
     remember(app, &item, &points);
-    app.viewport.woken = Woken { item: Some(item), face: None, points, kept_over: None, revision: app.session.revision };
+    app.viewport.woken = Woken { item: Some(item), face: None, points, kept_over: None, rims, revision: app.session.revision };
+}
+
+/// The points an item offers, found where the design keeps it ([`in_model`]), and the holes'
+/// centres among them, each with a point on its rim (#11476).
+fn offered(app: &SolveApp, item: &Sel) -> (Vec<SnapPoint>, Vec<(Vec3, Vec3)>) {
+    let from = solidcraft_engine::snap::snap_points_from(&app.session, &in_model(app, item));
+    let rims = from.iter().filter(|(p, _)| p.kind == SnapKind::Centre).filter_map(|(p, source)| source.edge.map(|e| (p.at, e))).collect();
+    (from.into_iter().map(|(p, _)| p).collect(), rims)
+}
+
+/// Whether the active input takes joint origins (Joint, Joint Origin, Motion Trace).
+fn joint_input(app: &SolveApp) -> bool {
+    app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept == crate::dialogs_assembly::SNAPS)
+}
+
+/// The face an edge or a body vertex under the pointer stands for in a joint origin input: of the
+/// flat faces beside the edge (or around the vertex), the one under the pointer, else the one
+/// facing the view most. `None` when no flat face is beside it (an edge between curved faces
+/// keeps its own points).
+fn face_context(app: &SolveApp, hover: &Hit, hits: &[Hit], near: Option<(&Proj, Pos2)>) -> Option<Sel> {
+    let (body, at) = match hover {
+        Hit::Edge { body, mid, .. } => (body, *mid),
+        Hit::Vertex { body, point } => (body, *point),
+        _ => return None,
+    };
+    let st = crate::open_meshing::session_world(&app.session);
+    let b = st.body(body)?;
+    let m = b.mesh();
+    let beside: Vec<u32> = match hover {
+        Hit::Edge { index, .. } => m.edge_faces.get(*index)?.clone(),
+        _ => {
+            // The faces of the edges that end at the vertex.
+            let tol = 1e-6 * (1.0 + at.len());
+            let ends_here = |e: &Vec<Vec3>| [e.first(), e.last()].into_iter().flatten().any(|p| p.dist(at) <= tol);
+            let mut fs: Vec<u32> = m
+                .edges
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| ends_here(e))
+                .flat_map(|(i, _)| m.edge_faces.get(i).cloned().unwrap_or_default())
+                .collect();
+            fs.sort_unstable();
+            fs.dedup();
+            fs
+        }
+    };
+    let flat = |f: u32| b.body.planar_face(f as usize).and_then(|p| p.normal().normalized());
+    let under = hits.iter().find_map(|h| match h {
+        Hit::Face { body: hb, index, point } if hb == body && beside.contains(&(*index as u32)) && flat(*index as u32).is_some() => {
+            Some((*index, *point))
+        }
+        _ => None,
+    });
+    let (index, point) = match under {
+        Some(x) => x,
+        None => {
+            let back = near.map(|(proj, _)| proj.cam.back())?;
+            let (f, _) = beside.iter().filter_map(|&f| flat(f).map(|n| (f, n.dot(back)))).max_by(|x, y| x.1.total_cmp(&y.1))?;
+            // A point inside the face: the middle of its triangle nearest the edge or vertex.
+            let inside = m
+                .triangles
+                .iter()
+                .zip(&m.tri_face)
+                .filter(|(_, tf)| **tf == f)
+                .filter_map(|(t, _)| m.tri(t))
+                .map(|[a, b, c]| (a + b + c) / 3.0)
+                .min_by(|x, y| x.dist(at).total_cmp(&y.dist(at)))?;
+            (f as usize, inside)
+        }
+    };
+    Some(Sel::Face { body: body.clone(), index, point })
+}
+
+/// The face to light in a joint origin input while the pointer is on one of its woken points or
+/// edges: the face a pick there lies on, and whose normal it takes (#11476). A face under the
+/// pointer lights itself.
+pub(crate) fn lit_face(app: &SolveApp) -> Option<Hit> {
+    let Some(Sel::Face { body, index, point }) = app.viewport.woken.item.as_ref().filter(|_| wanted(app) && joint_input(app)) else {
+        return None;
+    };
+    match app.viewport.hover.as_ref()? {
+        Hit::Vertex { .. } | Hit::Edge { .. } => Some(Hit::Face { body: body.clone(), index: *index, point: *point }),
+        _ => None,
+    }
 }
 
 /// Whether the pointer is still where the woken points lead it: within reach of one of them, or
-/// inside the circle a woken rim spans about its centre on screen (a hole's opening), the points
-/// where they show (see [`shown`]).
+/// inside the circle a woken rim, or a hole of a woken face, spans about its centre on screen (a
+/// hole's opening), the points where they show (see [`shown`]).
 fn in_reach(app: &SolveApp, proj: &Proj, pos: Pos2) -> bool {
     let shown = shown(app);
     if shown.iter().filter_map(|(at, _)| proj.to_screen(*at)).any(|p| p.distance(pos) <= REACH) {
+        return true;
+    }
+    let inside = |c: Vec3, rim: Vec3| match (proj.to_screen(c), proj.to_screen(rim)) {
+        (Some(c), Some(e)) => pos.distance(c) <= c.distance(e) + ON,
+        _ => false,
+    };
+    if shown_rims(app).into_iter().any(|(c, rim)| inside(c, rim)) {
         return true;
     }
     let centre = shown.iter().find(|(_, p)| p.kind == SnapKind::Centre).and_then(|(at, _)| proj.to_screen(*at));
@@ -219,6 +329,23 @@ pub fn shown(app: &SolveApp) -> Vec<(Vec3, &SnapPoint)> {
         return Vec::new();
     }
     app.viewport.woken.points.iter().filter(|p| p.body.is_empty() || app.body_visible(&p.body)).map(|p| (at(p), p)).collect()
+}
+
+/// The woken holes' rims (centre, point on the rim) where they show, as [`shown`] places the
+/// points: on the body a Move dialog moves, where the move so far draws it.
+fn shown_rims(app: &SolveApp) -> Vec<(Vec3, Vec3)> {
+    let w = &app.viewport.woken;
+    let body = match &w.item {
+        Some(Sel::Edge { body, .. } | Sel::Face { body, .. }) => body.as_str(),
+        _ => "",
+    };
+    match crate::dialogs_move::chained(app) {
+        Some((bodies, m)) if bodies.iter().any(|b| b == body) => {
+            let at = |p: Vec3| solidcraft_engine::doc::apply_point(&m, p);
+            w.rims.iter().map(|(c, e)| (at(*c), at(*e))).collect()
+        }
+        _ => w.rims.clone(),
+    }
 }
 
 /// How many woken points a dialog remembers (the oldest are forgotten first).

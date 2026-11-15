@@ -74,7 +74,8 @@ impl RailLoft {
 /// # Errors
 /// [`Error::Argument`] for a curve list refused or a count out of range;
 /// [`Error::RailPastTolerance`] where the kernel's certificate is not met within
-/// `how.max_wires`; the kernel's other refusals by their status; [`Error::Empty`],
+/// `how.max_wires`; the kernel's other refusals ([`Error::Refused`] in its words for input it
+/// refuses, else by their status); [`Error::Empty`],
 /// [`Error::NotSolid`].
 pub fn loft_rails(sections: &[RailSection], rails: &[Curve], how: &RailLoft) -> Result<Body> {
     if !(2..=solidcore::sweep::loft_rails::MAX_SECTIONS).contains(&sections.len())
@@ -170,7 +171,8 @@ pub struct BlendFrame {
 /// definition.
 ///
 /// # Errors
-/// [`Error::Argument`] for a frame not finite; the kernel's refusals by their status;
+/// [`Error::Argument`] for a frame not finite; the kernel's refusals ([`Error::Refused`] in its
+/// words for input it refuses, else by their status);
 /// [`Error::Empty`].
 pub fn loft_blend(
     sections: &[Vec<BlendFrame>],
@@ -215,7 +217,7 @@ pub fn loft_blend(
 }
 
 /// The kernel's refusal of a railed loft as ops' error.
-fn refused(e: solidcore::SolidError) -> Error {
+pub(super) fn refused(e: solidcore::SolidError) -> Error {
     use solidcore::error::sweep::SweepFailure;
     use solidcore::error::Reason;
     if let solidcore::SolidError::Failed(f) = &e {
@@ -242,7 +244,8 @@ fn refused(e: solidcore::SolidError) -> Error {
 /// face's tangent plane keeps (SolidCraft's is 0.2).
 ///
 /// # Errors
-/// [`Error::Argument`] for an edge index not in the body; the kernel's refusals by their status.
+/// [`Error::Argument`] for an edge index not in the body; the kernel's refusals
+/// ([`Error::Refused`] in its words for input it refuses, else by their status).
 pub fn section_frames(
     body: &Body,
     edges: &[usize],

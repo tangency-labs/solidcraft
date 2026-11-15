@@ -14,7 +14,7 @@ use solidcraft_kernel::Body;
 
 use super::CommandSpec;
 use super::joints::{cannot_move, effective_values, joint_id, occurrence_id, place_holding, value};
-use crate::params::{bad, bool_, str_, vec3};
+use crate::params::{bad, bool_, str_, unique_reference, vec3};
 use crate::schema::motion::{
     ContactCheck, ContactCollision, ContactCreateParams, ContactEditParams, ContactEnableParams, ContactNoParams, ContactSetChange,
     ContactSetCreated, ContactSetEdited, ContactSetInfo, ContactSets, ContactSwitch, ExplodeCreateParams, ExplodeCreated, ExplodeDeleteParams,
@@ -883,12 +883,20 @@ fn set_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
         Some(Value::String(x)) => x.clone(),
         _ => return Err(bad(cmd, "`set` must be an id or a name")),
     };
-    s.doc
-        .assembly
-        .contact_sets
-        .iter()
-        .position(|c| c.id.to_string() == key || c.name == key)
-        .ok_or_else(|| bad(cmd, format!("no contact set `{key}`")))
+    let numeric = p.get("set").is_some_and(Value::is_number);
+    unique_reference(
+        cmd,
+        "contact set",
+        &key,
+        s.doc
+            .assembly
+            .contact_sets
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.id.to_string() == key || (!numeric && c.name == key))
+            .map(|(i, c)| (c.id, i)),
+    )?
+    .ok_or_else(|| bad(cmd, format!("no contact set `{key}`")))
 }
 
 fn edit_set(s: &mut Session, p: &Value) -> Result<Value> {
@@ -937,8 +945,12 @@ fn study_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
         _ => return Err(bad(cmd, "`study` must be an id or a name")),
     };
     let studies = &s.doc.assembly.studies;
-    let (by_id, by_name) = (studies.iter().position(|m| m.id.to_string() == key), studies.iter().position(|m| m.name == key));
-    if id_first { by_id.or(by_name) } else { by_name.or(by_id) }.ok_or_else(|| bad(cmd, format!("no motion study `{key}`")))
+    let by_id = studies.iter().position(|m| m.id.to_string() == key);
+    if id_first && let Some(i) = by_id {
+        return Ok(i);
+    }
+    let by_name = unique_reference(cmd, "motion study", &key, studies.iter().enumerate().filter(|(_, m)| m.name == key).map(|(i, m)| (m.id, i)))?;
+    by_name.or(by_id).ok_or_else(|| bad(cmd, format!("no motion study `{key}`")))
 }
 
 fn study(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1415,7 +1427,14 @@ fn view_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
         Some(Value::String(x)) => x.clone(),
         _ => return Err(bad(cmd, "`view` must be an id or a name")),
     };
-    s.doc.assembly.exploded.iter().position(|e| e.id.to_string() == key || e.name == key).ok_or_else(|| bad(cmd, format!("no exploded view `{key}`")))
+    let numeric = p.get("view").is_some_and(Value::is_number);
+    unique_reference(
+        cmd,
+        "exploded view",
+        &key,
+        s.doc.assembly.exploded.iter().enumerate().filter(|(_, e)| e.id.to_string() == key || (!numeric && e.name == key)).map(|(i, e)| (e.id, i)),
+    )?
+    .ok_or_else(|| bad(cmd, format!("no exploded view `{key}`")))
 }
 
 /// World centre of each top-level occurrence's bodies.

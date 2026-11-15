@@ -83,6 +83,66 @@ fn volume(s: &Session, body: &str) -> f64 {
     s.model.state().body(body).map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).unwrap_or(0.0)
 }
 
+/// #14419: solids touching along a line and joined as one body (`touching: one_body`) keep a
+/// copy each of that line and its end points in the record. A later boolean whose tool met the
+/// line sent both copies to SMLib: a tool on one of them could not be related to both ("relate:
+/// another entity is already related to the other one"), and a cut through the line left a face
+/// with two coincident vertices. The operand now shares them, as SMLib's union made it.
+#[test]
+fn booleans_on_solids_joined_where_they_touch_along_a_line() {
+    use std::f64::consts::PI;
+    let total = |s: &Session| s.model.state().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum::<f64>();
+    let counts = |s: &Session, body: &str| {
+        let m = solidcraft_kernel::measure(&s.model.state().body(body).unwrap().body).unwrap();
+        (m.merged.faces, m.merged.edges, m.merged.vertices)
+    };
+
+    // The reported case: the joined pair intersected with a cylinder exactly on the first.
+    let s = replay(include_str!("../../../examples/regressions/tangent_cylinders_one_body_intersect.json"));
+    let got = volume(&s, "A");
+    println!("#14419 tangent cylinders ∩ coincident cylinder: {got:.6} mm³, expected {:.6}", 2.0 * PI);
+    assert!((got - 2.0 * PI).abs() < 1e-6, "{got}");
+    assert_eq!(counts(&s, "A"), (3, 3, 2));
+
+    // The pair with a gap of `gap` between them, joined as one body, then `tool` combined with it.
+    let pair = |gap: f64, tool: (&str, Value), operation: &str| {
+        let mut s = Session::default();
+        s.execute("solid.cylinder", &json!({"radius": 1, "height": 2, "base": [0, 0, 0], "axis": "Z", "body_name": "A"})).unwrap();
+        s.execute("solid.cylinder", &json!({"radius": 1, "height": 2, "base": [2.0 + gap, 0, 0], "axis": "Z", "body_name": "A2"})).unwrap();
+        s.execute("solid.combine", &json!({"target": "A", "tools": ["A2"], "operation": "join", "touching": "one_body"})).unwrap();
+        assert_eq!(s.model.state().body("A").map(|b| b.body.shell_count()), Some(2));
+        s.execute(tool.0, &tool.1).unwrap();
+        s.execute("solid.combine", &json!({"target": "A", "tools": ["T"], "operation": operation}))
+            .unwrap_or_else(|e| panic!("gap {gap}, {} {operation}: {e}", tool.0));
+        s
+    };
+    let cylinder = |height: f64| ("solid.cylinder", json!({"radius": 1, "height": height, "base": [0, 0, 0], "axis": "Z", "body_name": "T"}));
+
+    // A shorter coincident cylinder: itself.
+    let s = pair(0.0, cylinder(1.0), "intersect");
+    assert!((volume(&s, "A") - PI).abs() < 1e-6, "{}", volume(&s, "A"));
+    assert_eq!(counts(&s, "A"), (3, 3, 2));
+    // A join of the coincident cylinder adds nothing.
+    let s = pair(0.0, cylinder(2.0), "join");
+    assert!((total(&s) - 4.0 * PI).abs() < 1e-6, "{}", total(&s));
+    // A box cutting the top 1 mm off both cylinders, through the line.
+    let s = pair(0.0, ("solid.box", json!({"length": 6, "width": 4, "height": 2, "corner": [-2, -2, 1], "body_name": "T"})), "cut");
+    assert!((total(&s) - 2.0 * PI).abs() < 1e-6, "{}", total(&s));
+    // Apart by 0.1 mm, as before.
+    let s = pair(0.1, cylinder(2.0), "intersect");
+    assert!((volume(&s, "A") - 2.0 * PI).abs() < 1e-6, "{}", volume(&s, "A"));
+
+    // Two boxes touching along an edge, intersected with a box exactly on the first.
+    let mut s = Session::default();
+    let unit = |corner: [f64; 3], name: &str| json!({"length": 1, "width": 1, "height": 2, "corner": corner, "body_name": name});
+    s.execute("solid.box", &unit([0.0, 0.0, 0.0], "A")).unwrap();
+    s.execute("solid.box", &unit([1.0, 1.0, 0.0], "A2")).unwrap();
+    s.execute("solid.combine", &json!({"target": "A", "tools": ["A2"], "operation": "join", "touching": "one_body"})).unwrap();
+    s.execute("solid.box", &unit([0.0, 0.0, 0.0], "T")).unwrap();
+    s.execute("solid.combine", &json!({"target": "A", "tools": ["T"], "operation": "intersect"})).unwrap();
+    assert!((volume(&s, "A") - 2.0).abs() < 1e-9, "{}", volume(&s, "A"));
+}
+
 /// #5562: a quarter disc in a box's side face, at its corner, revolved 360° about the box's
 /// edge through the corner and cut: a hemisphere centred on the corner, its pole on that edge.
 /// Dividing one of the cut's intersection edges met a point that projects onto neither surface,
@@ -193,6 +253,20 @@ fn step_export_of_a_flanged_enclosure_finishes_and_reads_back() {
     let state = s.model.state();
     let (_, file_faces) = read_back(&s, &state.body("Unterteil").unwrap().body);
     assert_eq!(file_faces, 29);
+}
+
+/// #15418 (solidcore, PR #16594): the flanged enclosure's flange walls lie on planes 1.2e-10 to
+/// 9.8e-10 off the walls they continue (the booleans' rounding). The cleanup merges each pair,
+/// two planes covering each other within upstream's plane tolerance with no tolerance raised:
+/// 29 faces, and the body is valid.
+#[test]
+fn a_flanged_enclosure_s_near_coplanar_walls_merge_and_the_body_is_valid() {
+    let s = replay(include_str!("../../../examples/regressions/step_export_flanged_enclosure.json"));
+    let state = s.model.state();
+    let body = &state.body("Unterteil").unwrap().body;
+    assert_eq!(body.face_count(), 29);
+    let v = solidcraft_kernel::validity(body);
+    assert!(v.ok(), "{v:?}");
 }
 
 /// The body's STEP text, which reads back without warnings as one closed solid of the same
@@ -1746,4 +1820,124 @@ fn fuzz_seed_178_fillet_builds() {
     let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
     assert!(m.volume > 0.0, "the fillet result must be a real solid: {}", m.volume);
     println!("#10 seed 178: filleted body volume {volume:.2} mm³", volume = m.volume);
+}
+
+/// A cut that leaves nothing of its target, although its tools could never cover it, is a failed
+/// boolean, not an empty result (#15700). A loft with a box-shaped opening in each side, and a
+/// box mirrored into the second opening with 0.2 mm of air all round: the box does not touch the
+/// loft, yet the cut came back empty and deleted the loft without a word. Either the cut leaves
+/// the loft as it was, or it is refused and the loft stays.
+#[test]
+fn cut_never_deletes_a_target_its_tools_cannot_cover() {
+    let mut s = Session::default();
+    let ring = json!([
+        [0.0, 0.0],
+        [10.0, 2.679],
+        [17.321, 10.0],
+        [20.0, 20.0],
+        [17.321, 30.0],
+        [10.0, 37.321],
+        [0.0, 40.0],
+        [-10.0, 37.321],
+        [-17.321, 30.0],
+        [-20.0, 20.0],
+        [-17.321, 10.0],
+        [-10.0, 2.679]
+    ]);
+    for (command, params) in [
+        ("sketch.create", json!({"plane": "YZ", "offset": -30, "name": "Sec0"})),
+        ("sketch.spline.fit_point", json!({"points": ring, "periodic": true})),
+        ("sketch.finish", json!({})),
+        ("sketch.create", json!({"plane": "YZ", "offset": 30, "name": "Sec1"})),
+        ("sketch.spline.fit_point", json!({"points": ring, "periodic": true})),
+        ("sketch.finish", json!({})),
+        ("solid.loft", json!({"sections": [{"sketch": "Sec0"}, {"sketch": "Sec1"}], "body_name": "LoftBody", "operation": "new"})),
+        ("solid.box", json!({"length": 15, "width": 20, "height": 8, "corner": [-25, 10, 16], "operation": "cut", "targets": ["LoftBody"]})),
+        ("solid.box", json!({"length": 15, "width": 20, "height": 8, "corner": [10, 10, 16], "operation": "cut", "targets": ["LoftBody"]})),
+        ("solid.box", json!({"length": 14.6, "width": 13, "height": 7.6, "corner": [-24.8, 12, 16.2], "body_name": "BoxA"})),
+        ("solid.mirror", json!({"bodies": ["BoxA"], "plane": "YZ"})),
+    ] {
+        s.execute(command, &params).unwrap();
+    }
+    let faces = |s: &Session| s.model.state().body("LoftBody").map(|b| b.body.face_count());
+    let (before, before_faces) = (volume(&s, "LoftBody"), faces(&s));
+    assert!(before > 0.0 && before_faces.is_some(), "the loft must be built: {before} mm³");
+    let cut = s.execute("solid.combine", &json!({"target": "LoftBody", "tools": ["BoxA (2)"], "operation": "cut", "keep_tools": true}));
+    let after = volume(&s, "LoftBody");
+    assert!(s.model.state().body("LoftBody").is_some(), "the cut deleted the loft: {cut:?}");
+    assert!((after - before).abs() < 1e-6 * before, "the box does not touch the loft, yet its volume went from {before} to {after} mm³: {cut:?}");
+    assert_eq!(faces(&s), before_faces, "{cut:?}");
+    if let Err(e) = &cut {
+        assert!(e.to_string().contains("the cut failed: it would remove all of `LoftBody`, which the tools do not cover"), "{e}");
+    }
+}
+
+/// A cut still takes away a target that lies wholly inside its tools (#15700): a cube inside a
+/// larger one, a cube cut by its exact copy, whose faces all coincide with the target's, and a
+/// cube that only two tools together cover, each reaching past its middle.
+#[test]
+fn cut_removes_a_target_inside_its_tools() {
+    let mut s = Session::default();
+    for (command, params) in [
+        ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "Inner"})),
+        ("solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [-5, -5, -5], "operation": "new", "body_name": "Outer"})),
+        ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "operation": "new", "body_name": "Twin"})),
+        ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "operation": "new", "body_name": "Copy"})),
+        ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [80, 0, 0], "operation": "new", "body_name": "Shared"})),
+        ("solid.box", json!({"length": 11, "width": 20, "height": 20, "corner": [75, -5, -5], "operation": "new", "body_name": "Left"})),
+        ("solid.box", json!({"length": 11, "width": 20, "height": 20, "corner": [84, -5, -5], "operation": "new", "body_name": "Right"})),
+    ] {
+        s.execute(command, &params).unwrap();
+    }
+    let cuts: [(&str, &[(&str, f64)]); 3] =
+        [("Inner", &[("Outer", 8000.0)]), ("Twin", &[("Copy", 1000.0)]), ("Shared", &[("Left", 4400.0), ("Right", 4400.0)])];
+    for (target, tools) in cuts {
+        let names: Vec<&str> = tools.iter().map(|(n, _)| *n).collect();
+        let cut = s.execute("solid.combine", &json!({"target": target, "tools": names, "operation": "cut", "keep_tools": true})).unwrap();
+        assert_eq!(cut["removed_bodies"], json!([target]), "{cut}");
+        assert!(s.model.state().body(target).is_none(), "{target} must be gone: {cut}");
+        for (tool, kept) in tools {
+            assert!((volume(&s, tool) - kept).abs() < 1e-6, "{tool} is kept as it was: {cut}");
+        }
+    }
+}
+
+/// A long thin ellipse extruded off a flipped plane is a solid with positive volume. Its sketch
+/// loop is one closed spline; the kernel took the region outside the body from a ray aimed at one
+/// of its edges, which met the wall and the cap there but no edge, and classified the ray start
+/// by the wall alone: the body came out inside out ("no mass"), and an intersect or a pattern
+/// of it with this tool cut where it should have kept.
+#[test]
+fn a_long_thin_ellipse_extruded_from_a_flipped_plane_has_its_volume() {
+    let mut s = Session::default();
+    for (command, params) in [
+        ("sketch.create", json!({"plane": "XZ", "flip": true})),
+        ("sketch.ellipse", json!({"center": [0, 67.5], "major": [0, 135], "minor_radius": 5})),
+        ("solid.extrude", json!({"distance": "-4 mm"})),
+    ] {
+        s.execute(command, &params).unwrap();
+    }
+    let want = std::f64::consts::PI * 67.5 * 5.0 * 4.0;
+    let got = volume(&s, "Body1");
+    assert!((got - want).abs() < 1e-3 * want, "volume {got}, an ellipse of semi-axes 67.5 and 5 over 4 mm is {want}");
+}
+
+/// #15913: eight fins thickened from a lofted blade surface and patterned round a hub's axis,
+/// joined into the hub in one Combine. The fins' tips overlap in slivers at the axis, inside the
+/// hub. The kernel's union paired fins with each other first and refused ("the union would delete
+/// face 20"); the join now takes them into the hub one at a time, where each overlap lies inside.
+#[test]
+fn fins_meeting_at_the_axis_join_into_their_hub() {
+    let s = replay(include_str!("../../../examples/regressions/fins_joined_into_their_hub.json"));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let state = s.model.state();
+    let names: Vec<&str> = state.bodies.iter().map(|b| b.name.as_str()).collect();
+    assert_eq!(names, ["Body1", "Body2"], "the fins went into the hub; the blade surface stays");
+    let hub = &state.body("Body1").unwrap().body;
+    assert_eq!(hub.shell_count(), 1);
+    assert!(hub.validity().is_empty(), "{:?}", hub.validity());
+    // R10 x 10 hub (3141.59) and eight 278.10 fins, less what lies inside the hub and the tips'
+    // overlaps.
+    let v = volume(&s, "Body1");
+    assert!((v - 4624.24).abs() < 0.05, "{v}");
 }
