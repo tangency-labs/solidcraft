@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
+use solidcore_record::brep::Brep as Record;
 use solidcraft_smlib::CheckLevel;
 
 use crate::body::Body;
@@ -144,11 +145,11 @@ pub(crate) struct Unchecked {
     how: Checked,
     result: std::sync::Mutex<Option<solidcraft_smlib::Brep>>,
     /// The records of the bodies the step combined, to name one that already fails the check.
-    operands: Vec<Arc<solidcore_record::brep::Brep>>,
+    operands: Vec<Arc<Record>>,
 }
 
 impl Unchecked {
-    pub(crate) fn new(record: &Arc<solidcore_record::brep::Brep>, what: &str, how: Checked, result: solidcraft_smlib::Brep, operands: &[&Body]) -> Unchecked {
+    pub(crate) fn new(record: &Arc<Record>, what: &str, how: Checked, result: solidcraft_smlib::Brep, operands: &[&Body]) -> Unchecked {
         let operands = operands.iter().map(|b| b.record.arc().clone()).collect();
         Unchecked { record: Arc::downgrade(record), what: what.to_string(), how, result: std::sync::Mutex::new(Some(result)), operands }
     }
@@ -173,7 +174,7 @@ pub(crate) fn check_result(r: &solidcraft_smlib::Brep, how: Checked) -> std::res
 
 /// The record of the separate solids a boolean's result `r` exports to where it is not one
 /// manifold solid ([`Checked::Combined`]), which its check takes; `None`: `r` is checked as it is.
-fn separate(r: &solidcraft_smlib::Brep, how: Checked) -> std::result::Result<Option<solidcore_record::brep::Brep>, String> {
+fn separate(r: &solidcraft_smlib::Brep, how: Checked) -> std::result::Result<Option<Record>, String> {
     let split = matches!(how, Checked::Combined) && !r.is_manifold_solid().map_err(|e| format!("check: {e}"))?;
     split.then(|| r.to_native().map_err(|e| format!("export: {e}"))).transpose()
 }
@@ -182,11 +183,7 @@ fn separate(r: &solidcraft_smlib::Brep, how: Checked) -> std::result::Result<Opt
 /// (`checks`, in order) fails too: the fault is then theirs.
 pub(crate) fn refuses(checks: impl ExactSizeIterator<Item = solidcraft_smlib::Result<solidcraft_smlib::CheckReport>>) -> String {
     let n = checks.len();
-    let name = |i| match (n, i) {
-        (2, 0) => "the first operand".to_string(),
-        (2, _) => "the second operand".to_string(),
-        _ => format!("operand {i}"),
-    };
+    let name = |i: usize| if n == 2 { ["the first operand", "the second operand"][i.min(1)].to_string() } else { format!("operand {i}") };
     let failing: Vec<String> = checks.enumerate().filter(|(_, c)| c.as_ref().is_ok_and(|c| !c.is_valid())).map(|(i, _)| name(i)).collect();
     let whose = if failing.is_empty() { String::new() } else { format!(" ({} already fails it)", failing.join(" and ")) };
     format!("SMLib's check refuses the result{whose}")
@@ -208,7 +205,7 @@ pub fn check_kept(body: &Body) -> Result<()> {
 }
 
 /// What [`check_kept`] makes of SMLib's check of what step `what` made of `operands`.
-fn verdict(what: &str, check: std::result::Result<solidcraft_smlib::CheckReport, String>, operands: &[Arc<solidcore_record::brep::Brep>]) -> Result<()> {
+fn verdict(what: &str, check: std::result::Result<solidcraft_smlib::CheckReport, String>, operands: &[Arc<Record>]) -> Result<()> {
     match check {
         Ok(c) if c.is_valid() => Ok(()),
         Ok(c) => {
@@ -240,7 +237,7 @@ enum Kept {
     /// A mesh body: nothing to check.
     Nothing,
     /// The step's own result, taken from the body.
-    Step { what: String, how: Checked, result: solidcraft_smlib::Brep, operands: Vec<Arc<solidcore_record::brep::Brep>> },
+    Step { what: String, how: Checked, result: solidcraft_smlib::Brep, operands: Vec<Arc<Record>> },
     /// A copy of the body's SMLib form, made when the check was detached.
     Copy(Result<solidcraft_smlib::Brep>),
 }
