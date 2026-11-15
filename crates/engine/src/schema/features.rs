@@ -1116,22 +1116,38 @@ pub struct PatternFaceParams {
     /// The point of the copied bodies that goes onto the face. Default: the origin.
     #[serde(default)]
     pub anchor: Option<PointExpr3>,
-    /// Advanced: change each copy with its distance to attractor points.
+    /// Put the copies into a group in the browser's Bodies folder, named after the feature.
+    /// Default: true.
+    #[serde(default)]
+    pub group: Option<bool>,
+    /// Advanced: change each copy with its distance to attractors.
     #[serde(default)]
     pub attract: Option<AttractParams>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
 
-/// How a face pattern's copies change with their distance to the nearest attractor point: each
-/// value goes from its `_near` setting at the `near` distance (or nearer) to its `_far` setting
-/// at the `far` distance (or farther).
+/// How a face pattern's copies change with their distance to the nearest attractor: each value
+/// goes from its `_near` setting at the `near` distance (or nearer) to its `_far` setting at the
+/// `far` distance (or farther). With far attractors, a copy's place between the two sets sets it
+/// instead: the `_near` setting on the near attractors, the `_far` one on the far attractors.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct AttractParams {
-    /// The attractor points: fixed points ({"point": [x, y, z]}), vertices, sketch points or
-    /// construction points, followed as they move.
-    pub points: Vec<GeoRefParam>,
+    /// Attractor geometry: fixed points ({"point": [x, y, z]}), vertices, sketch points,
+    /// construction points, edges ({"edge": [x, y, z]}) and faces ({"face": [x, y, z]}), followed as
+    /// they move. Distances to edges and faces are exact.
+    #[serde(default)]
+    pub geometry: Option<Vec<GeoRefParam>>,
+    /// Whole bodies as attractors, by name.
+    #[serde(default)]
+    pub bodies: Option<NameList>,
+    /// Far attractors: with them, the values blend between the two sets.
+    #[serde(default)]
+    pub far_geometry: Option<Vec<GeoRefParam>>,
+    /// Far attractor bodies, by name.
+    #[serde(default)]
+    pub far_bodies: Option<NameList>,
     /// The distance that counts as near. Default: the nearest copy's.
     #[serde(default)]
     pub near: Option<LengthExpr>,

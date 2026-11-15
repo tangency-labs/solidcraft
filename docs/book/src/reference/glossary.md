@@ -72,18 +72,21 @@ An appearance sets colour and surface finish only. It has no effect on mass or s
 
 ### attractor
 
-A point whose distance from each copy of a pattern sets how that copy is scaled, raised and turned.
+A point, edge, face or body whose distance from each copy of a pattern sets how that copy is
+scaled, raised and turned.
 
 Each value goes from its near setting at the near distance to its far setting at the far distance;
 copies nearer or farther than those take the end values. A copy takes the distance to the nearest
-attractor.
+attractor, measured on the exact geometry. With *far attractors* as well, the values blend between
+the two sets instead: the near setting on the near attractors, the far one on the far attractors.
+Two opposite edges of a face, one in each set, make the values run straight across it.
 
-- **In SolidCraft:** `solid.pattern.face`'s `attract` (`points`, `near`, `far`, `scale_near`,
-  `scale_far`, `offset_near`, `offset_far`, `turn_near`, `turn_far`, `cutoff`, `falloff`); the
-  Advanced section of Pattern on Face.
-- **Don't use:** magnet, driver point, influence point.
-- **Elsewhere:** attractor point, attractor.
-- **For translators:** a point that draws an effect towards it, not a physical force or a magnet.
+- **In SolidCraft:** `solid.pattern.face`'s `attract` (`geometry`, `bodies`, `far_geometry`,
+  `far_bodies`, `near`, `far`, `scale_near`, `scale_far`, `offset_near`, `offset_far`,
+  `turn_near`, `turn_far`, `cutoff`, `falloff`); the Advanced section of Pattern on Face.
+- **Don't use:** magnet, driver, influence point.
+- **Elsewhere:** attractor point, attractor curve.
+- **For translators:** what draws an effect towards it, not a physical force or a magnet.
 
 ### bill of materials
 

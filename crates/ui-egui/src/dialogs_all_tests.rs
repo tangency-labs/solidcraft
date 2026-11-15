@@ -583,7 +583,7 @@ fn check_form(command: &str, labels: &[&str]) {
         "joint.cam" => &["Other side"],
         "frame.member" => &["All Lines", "Mirror"],
         "construct.plane.at_angle" => &["Use axis direction only"],
-        "solid.pattern.face" => &["Flip side"],
+        "solid.pattern.face" => &["Flip side", "Group copies"],
         _ => &[],
     };
     for label in checks {
@@ -920,38 +920,39 @@ form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity
 form_case!(face_pattern, "solid.pattern.face", ["Type", "Across", "Along", "Layout", "Grid angle", "Margin"]);
 
 /// Pattern on Face's attractors sit behind Advanced: off, the dialog sends a plain pattern and has
-/// no Attractors pick; on, the picked points and the near and far values go with it, and the
-/// pattern it makes scales its copies.
+/// no attractor picks; on, it has Attractors and Far attractors, which take points, edges, faces
+/// and bodies. Two opposite edges of the face, one in each, make the values ramp between them.
 #[test]
 fn face_pattern_attractors_come_from_the_advanced_option() {
+    use crate::dialogs_face_pattern::{ATTRACTORS, FAR_ATTRACTORS, set_attractor_inputs};
     let h = fixture();
     let mut d = representative(&h, "solid.pattern.face");
-    assert!(!d.inputs.iter().any(|i| i.label == crate::dialogs_face_pattern::ATTRACTORS), "no attractor pick until it is switched on");
+    assert!(!d.inputs.iter().any(|i| i.label == ATTRACTORS || i.label == FAR_ATTRACTORS), "no attractor picks until switched on");
     let (command, plain) = apply_commands(&h.app, &d).unwrap().remove(0);
     assert_eq!(command, "solid.pattern.face");
-    assert!(plain.get("attract").is_none(), "{plain}");
+    assert!(plain.get("attract").is_none() && plain.get("group").is_none(), "{plain}");
     assert_eq!(plain["bodies"], json!(["Body1"]));
     assert!(plain["face"]["face"].is_array(), "{plain}");
-    // Switched on under Advanced (as the checkbox does), with a vertex of the other body picked.
+    // Switched on under Advanced (as the checkbox does): two opposite edges of the face, and a body.
     if let Kind::FacePattern(f) = &mut d.kind {
         f.attract = true;
         f.scale_near = "2".into();
         f.scale_far = "0.5".into();
         f.falloff = 1;
+        f.group = false;
     }
-    super::set_object_accepting(
-        &mut d.inputs,
-        &mut d.active,
-        crate::dialogs_face_pattern::ATTRACTORS,
-        crate::dialogs_face_pattern::ATTRACTOR_PICKS,
-        true,
-    );
-    let attract = d.inputs.iter_mut().find(|i| i.label == crate::dialogs_face_pattern::ATTRACTORS).unwrap();
-    attract.items = vec![Sel::Vertex { body: "Body2".into(), point: Vec3::new(40.0, 0.0, 5.0) }];
+    set_attractor_inputs(&mut d, true);
+    let near = edge_sel(&h.app.session, Vec3::new(10.0, 0.0, 5.0)).unwrap();
+    let far = edge_sel(&h.app.session, Vec3::new(-10.0, 0.0, 5.0)).unwrap();
+    d.inputs.iter_mut().find(|i| i.label == ATTRACTORS).unwrap().items = vec![near, Sel::Body { name: "Body2".into() }];
+    d.inputs.iter_mut().find(|i| i.label == FAR_ATTRACTORS).unwrap().items = vec![far];
     let (_, params) = apply_commands(&h.app, &d).unwrap().remove(0);
-    assert_eq!(params["attract"]["scale_near"], json!("2"), "{params}");
-    assert_eq!(params["attract"]["falloff"], json!("smooth"));
-    assert_eq!(params["attract"]["points"].as_array().map(Vec::len), Some(1), "{params}");
+    let a = &params["attract"];
+    assert_eq!(a["scale_near"], json!("2"), "{params}");
+    assert_eq!(a["falloff"], json!("smooth"));
+    assert!(a["geometry"][0]["edge"].is_array() && a["far_geometry"][0]["edge"].is_array(), "{params}");
+    assert_eq!(a["bodies"], json!(["Body2"]));
+    assert_eq!(params["group"], json!(false));
     let mut h = h;
     let reply = h.app.run(&command, params).unwrap();
     assert!(reply["created_bodies"].as_array().is_some_and(|b| !b.is_empty()), "{reply}");

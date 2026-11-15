@@ -1,7 +1,7 @@
 {
   "en": {
     "cmd.solid.pattern.face": "Pattern on Face",
-    "help.solid.pattern.face": "Copies bodies onto a face, one on each cell of a grid across it, each standing along the face's normal. Under Advanced, attractor points can scale, raise and turn each copy by its distance from them. Use it for studs, perforations or textures that follow a curved face.",
+    "help.solid.pattern.face": "Copies bodies onto a face, one on each cell of a grid across it, each standing along the face's normal, and groups the copies. Under Advanced, attractors (points, edges, faces or bodies) scale, raise and turn each copy by its distance from them; with far attractors too, the copies change from one set to the other, such as across a face between two opposite edges. Use it for studs, perforations or textures that follow a curved face.",
     "ui.face_pattern.across": "Across",
     "ui.face_pattern.along": "Along",
     "ui.face_pattern.staggered": "Staggered",
@@ -19,13 +19,15 @@
     "ui.face_pattern.cutoff": "Cutoff",
     "ui.face_pattern.linear": "Linear",
     "ui.heading_pattern_on_face": "PATTERN ON FACE",
-    "ui.face_pattern.attract_note": "Each copy changes with its distance to the nearest attractor point",
+    "ui.face_pattern.attract_note": "Each copy changes with its distance to the nearest attractor",
     "ui.face_pattern.nearest_copy": "nearest copy",
-    "ui.face_pattern.farthest_copy": "farthest copy"
+    "ui.face_pattern.farthest_copy": "farthest copy",
+    "ui.face_pattern.group_copies": "Group copies",
+    "ui.face_pattern.far_attractors": "Far attractors"
   },
   "de": {
     "cmd.solid.pattern.face": "Muster auf Fläche",
-    "help.solid.pattern.face": "Kopiert Körper auf eine Fläche, eine Kopie je Zelle eines Rasters darüber, jede entlang der Flächennormale. Unter Erweitert können Attraktorpunkte jede Kopie nach ihrem Abstand skalieren, anheben und drehen. Für Noppen, Lochungen oder Texturen, die einer gekrümmten Fläche folgen.",
+    "help.solid.pattern.face": "Kopiert Körper auf eine Fläche, eine Kopie je Zelle eines Rasters darüber, jede entlang der Flächennormale, und gruppiert die Kopien. Unter Erweitert skalieren, heben und drehen Attraktoren (Punkte, Kanten, Flächen oder Körper) jede Kopie nach ihrem Abstand; mit fernen Attraktoren ändern sich die Kopien von einer Gruppe zur anderen, etwa über eine Fläche zwischen zwei gegenüberliegenden Kanten. Für Noppen, Lochungen oder Texturen auf gekrümmten Flächen.",
     "ui.face_pattern.across": "Quer",
     "ui.face_pattern.along": "Längs",
     "ui.face_pattern.staggered": "Versetzt",
@@ -43,13 +45,15 @@
     "ui.face_pattern.cutoff": "Grenzabstand",
     "ui.face_pattern.linear": "Linear",
     "ui.heading_pattern_on_face": "MUSTER AUF FLÄCHE",
-    "ui.face_pattern.attract_note": "Jede Kopie ändert sich mit ihrem Abstand zum nächsten Attraktorpunkt",
+    "ui.face_pattern.attract_note": "Jede Kopie ändert sich mit ihrem Abstand zum nächsten Attraktor",
     "ui.face_pattern.nearest_copy": "nächste Kopie",
-    "ui.face_pattern.farthest_copy": "entfernteste Kopie"
+    "ui.face_pattern.farthest_copy": "entfernteste Kopie",
+    "ui.face_pattern.group_copies": "Kopien gruppieren",
+    "ui.face_pattern.far_attractors": "Ferne Attraktoren"
   },
   "ar": {
     "cmd.solid.pattern.face": "نمط على وجه",
-    "help.solid.pattern.face": "ينسخ الأجسام على وجه، نسخة في كل خلية من شبكة تمتد عليه، وكل نسخة قائمة على اتجاه العمودي على الوجه. ضمن الخيارات المتقدمة، يمكن لنقاط الجذب أن تغيّر حجم كل نسخة وترفعها وتديرها بحسب بعدها عنها. استخدمه للنتوءات أو الثقوب أو الملمس الذي يتبع وجهًا منحنيًا.",
+    "help.solid.pattern.face": "ينسخ الأجسام على وجه، نسخة في كل خلية من شبكة تمتد عليه، وكل نسخة قائمة على العمودي على الوجه، ويجمع النسخ في مجموعة. ضمن الخيارات المتقدمة، تغيّر عناصر الجذب (نقاط أو حواف أو وجوه أو أجسام) حجم كل نسخة وارتفاعها ودورانها بحسب بعدها عنها؛ ومع عناصر جذب بعيدة أيضًا تتغير النسخ من مجموعة إلى أخرى، مثل عبر وجه بين حافتين متقابلتين. استخدمه للنتوءات أو الثقوب أو الملمس على الأوجه المنحنية.",
     "ui.face_pattern.across": "عرضًا",
     "ui.face_pattern.along": "طولًا",
     "ui.face_pattern.staggered": "متعاقب",
@@ -67,13 +71,15 @@
     "ui.face_pattern.cutoff": "حد القطع",
     "ui.face_pattern.linear": "خطي",
     "ui.heading_pattern_on_face": "نمط على وجه",
-    "ui.face_pattern.attract_note": "تتغير كل نسخة بحسب بعدها عن أقرب نقطة جذب",
+    "ui.face_pattern.attract_note": "تتغير كل نسخة بحسب بعدها عن أقرب عنصر جذب",
     "ui.face_pattern.nearest_copy": "أقرب نسخة",
-    "ui.face_pattern.farthest_copy": "أبعد نسخة"
+    "ui.face_pattern.farthest_copy": "أبعد نسخة",
+    "ui.face_pattern.group_copies": "جمّع النسخ",
+    "ui.face_pattern.far_attractors": "نقاط الجذب البعيدة"
   },
   "he": {
     "cmd.solid.pattern.face": "תבנית על פאה",
-    "help.solid.pattern.face": "מעתיק גופים אל פאה, עותק בכל תא של רשת הפרושה עליה, כל עותק עומד לאורך הנורמל של הפאה. תחת מתקדם, נקודות משיכה יכולות לשנות את גודלו של כל עותק, להגביה ולסובב אותו לפי מרחקו מהן. השתמשו בזה לבליטות, לניקובים או למרקמים העוקבים אחר פאה מעוקלת.",
+    "help.solid.pattern.face": "מעתיק גופים אל פאה, עותק בכל תא של רשת הפרושה עליה, כל עותק עומד לאורך הנורמל של הפאה, ומקבץ את העותקים. תחת מתקדם, גורמי משיכה (נקודות, קצוות, פאות או גופים) משנים את גודלו, גובהו וסיבובו של כל עותק לפי מרחקו מהם; עם גורמי משיכה רחוקים, העותקים משתנים מקבוצה אחת לאחרת, למשל לרוחב פאה בין שני קצוות נגדיים. לבליטות, לניקובים או למרקמים על פאות מעוקלות.",
     "ui.face_pattern.across": "לרוחב",
     "ui.face_pattern.along": "לאורך",
     "ui.face_pattern.staggered": "מדורג",
@@ -91,13 +97,15 @@
     "ui.face_pattern.cutoff": "סף",
     "ui.face_pattern.linear": "ליניארי",
     "ui.heading_pattern_on_face": "תבנית על פאה",
-    "ui.face_pattern.attract_note": "כל עותק משתנה לפי מרחקו מנקודת המשיכה הקרובה ביותר",
+    "ui.face_pattern.attract_note": "כל עותק משתנה לפי מרחקו מגורם המשיכה הקרוב ביותר",
     "ui.face_pattern.nearest_copy": "העותק הקרוב ביותר",
-    "ui.face_pattern.farthest_copy": "העותק הרחוק ביותר"
+    "ui.face_pattern.farthest_copy": "העותק הרחוק ביותר",
+    "ui.face_pattern.group_copies": "קבץ עותקים",
+    "ui.face_pattern.far_attractors": "נקודות משיכה רחוקות"
   },
   "ja": {
     "cmd.solid.pattern.face": "面上のパターン",
-    "help.solid.pattern.face": "面上の格子の各セルにボディを1つずつコピーし、それぞれを面の法線方向に立てます。詳細設定では、アトラクター点からの距離に応じて各コピーの拡大縮小・持ち上げ・回転ができます。曲面に沿う突起、穴、テクスチャーに使います。",
+    "help.solid.pattern.face": "面上の格子の各セルにボディを1つずつコピーし、それぞれを面の法線方向に立て、コピーをグループにまとめます。詳細設定では、アトラクター（点、エッジ、面、ボディ）からの距離に応じて各コピーを拡大縮小・持ち上げ・回転します。遠いアトラクターも指定すると、向かい合う2辺の間など、一方の組からもう一方へとコピーが変化します。曲面上の突起、穴、テクスチャーに使います。",
     "ui.face_pattern.across": "横方向",
     "ui.face_pattern.along": "縦方向",
     "ui.face_pattern.staggered": "千鳥",
@@ -115,13 +123,15 @@
     "ui.face_pattern.cutoff": "打ち切り距離",
     "ui.face_pattern.linear": "線形",
     "ui.heading_pattern_on_face": "面上のパターン",
-    "ui.face_pattern.attract_note": "各コピーは最も近いアトラクター点からの距離に応じて変化します",
+    "ui.face_pattern.attract_note": "各コピーは最も近いアトラクターからの距離に応じて変化します",
     "ui.face_pattern.nearest_copy": "最も近いコピー",
-    "ui.face_pattern.farthest_copy": "最も遠いコピー"
+    "ui.face_pattern.farthest_copy": "最も遠いコピー",
+    "ui.face_pattern.group_copies": "コピーをグループ化",
+    "ui.face_pattern.far_attractors": "遠いアトラクター"
   },
   "vi": {
     "cmd.solid.pattern.face": "Mẫu trên mặt",
-    "help.solid.pattern.face": "Sao chép thân lên một mặt, mỗi bản trên một ô của lưới trải trên mặt, mỗi bản đứng theo pháp tuyến của mặt. Trong phần Nâng cao, các điểm hút có thể thu phóng, nâng và xoay từng bản theo khoảng cách tới chúng. Dùng cho núm, lỗ đục hoặc vân bề mặt theo một mặt cong.",
+    "help.solid.pattern.face": "Sao chép thân lên một mặt, mỗi bản trên một ô của lưới trải trên mặt, mỗi bản đứng theo pháp tuyến của mặt, và gom các bản sao thành nhóm. Trong phần Nâng cao, các điểm hút (điểm, cạnh, mặt hoặc thân) thu phóng, nâng và xoay từng bản theo khoảng cách tới chúng; khi có thêm điểm hút xa, các bản thay đổi từ nhóm này sang nhóm kia, chẳng hạn ngang qua một mặt giữa hai cạnh đối nhau. Dùng cho núm, lỗ đục hoặc vân trên mặt cong.",
     "ui.face_pattern.across": "Theo chiều ngang",
     "ui.face_pattern.along": "Theo chiều dọc",
     "ui.face_pattern.staggered": "So le",
@@ -141,11 +151,13 @@
     "ui.heading_pattern_on_face": "MẪU TRÊN MẶT",
     "ui.face_pattern.attract_note": "Mỗi bản thay đổi theo khoảng cách tới điểm hút gần nhất",
     "ui.face_pattern.nearest_copy": "bản gần nhất",
-    "ui.face_pattern.farthest_copy": "bản xa nhất"
+    "ui.face_pattern.farthest_copy": "bản xa nhất",
+    "ui.face_pattern.group_copies": "Nhóm các bản sao",
+    "ui.face_pattern.far_attractors": "Điểm hút xa"
   },
   "zh": {
     "cmd.solid.pattern.face": "面上阵列",
-    "help.solid.pattern.face": "将实体复制到一个面上，在面上网格的每个单元中放置一份，每份沿面的法向竖立。在“高级”中，吸引点可按每份副本与其的距离对其缩放、抬高和旋转。用于沿曲面分布的凸点、孔或纹理。",
+    "help.solid.pattern.face": "将实体复制到一个面上，在面上网格的每个单元中放置一份，每份沿面的法向竖立，并将副本编组。在“高级”中，吸引对象（点、边、面或实体）按每份副本与其的距离对其缩放、抬高和旋转；同时指定远端吸引对象时，副本从一组变化到另一组，例如在一个面的两条相对边之间渐变。用于曲面上的凸点、孔或纹理。",
     "ui.face_pattern.across": "横向",
     "ui.face_pattern.along": "纵向",
     "ui.face_pattern.staggered": "交错",
@@ -163,13 +175,15 @@
     "ui.face_pattern.cutoff": "截止距离",
     "ui.face_pattern.linear": "线性",
     "ui.heading_pattern_on_face": "面上阵列",
-    "ui.face_pattern.attract_note": "每个副本随其到最近吸引点的距离而变化",
+    "ui.face_pattern.attract_note": "每个副本随其到最近吸引对象的距离而变化",
     "ui.face_pattern.nearest_copy": "最近的副本",
-    "ui.face_pattern.farthest_copy": "最远的副本"
+    "ui.face_pattern.farthest_copy": "最远的副本",
+    "ui.face_pattern.group_copies": "将副本编组",
+    "ui.face_pattern.far_attractors": "远端吸引对象"
   },
   "ko": {
     "cmd.solid.pattern.face": "면 위 패턴",
-    "help.solid.pattern.face": "면 위 격자의 각 셀에 바디를 하나씩 복사하고 각각을 면의 법선 방향으로 세웁니다. 고급에서 어트랙터 점까지의 거리에 따라 각 복사본의 크기, 높이, 회전을 바꿀 수 있습니다. 곡면을 따르는 돌기, 구멍, 질감에 사용합니다.",
+    "help.solid.pattern.face": "면 위 격자의 각 셀에 바디를 하나씩 복사해 각각을 면의 법선 방향으로 세우고 복사본을 그룹으로 묶습니다. 고급에서 어트랙터(점, 모서리, 면, 바디)까지의 거리에 따라 각 복사본의 크기, 높이, 회전을 바꿉니다. 먼 어트랙터도 지정하면 마주 보는 두 모서리 사이처럼 한 세트에서 다른 세트로 복사본이 변합니다. 곡면의 돌기, 구멍, 질감에 사용합니다.",
     "ui.face_pattern.across": "가로",
     "ui.face_pattern.along": "세로",
     "ui.face_pattern.staggered": "엇갈림",
@@ -187,8 +201,10 @@
     "ui.face_pattern.cutoff": "차단 거리",
     "ui.face_pattern.linear": "선형",
     "ui.heading_pattern_on_face": "면 위 패턴",
-    "ui.face_pattern.attract_note": "각 복사본은 가장 가까운 어트랙터 점까지의 거리에 따라 달라집니다",
+    "ui.face_pattern.attract_note": "각 복사본은 가장 가까운 어트랙터까지의 거리에 따라 달라집니다",
     "ui.face_pattern.nearest_copy": "가장 가까운 복사본",
-    "ui.face_pattern.farthest_copy": "가장 먼 복사본"
+    "ui.face_pattern.farthest_copy": "가장 먼 복사본",
+    "ui.face_pattern.group_copies": "복사본 그룹화",
+    "ui.face_pattern.far_attractors": "먼 어트랙터"
   }
 }
