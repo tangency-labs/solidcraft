@@ -106,7 +106,11 @@ pub fn show(ui: &mut egui::Ui, session: &mut Session, state: &mut RepairUiState,
                 ui.label("Confirm replacing this reference. This modifies the drawing and creates an undo step.");
                 if ui.button("Confirm repair").clicked() {
                     let status = snapshot.dimensions.iter().find(|d| d.id == id).map(|d| d.status.as_str()).unwrap_or("");
-                    let candidate = state.candidates[state.candidate_index].clone();
+                    let Some(candidate) = state.candidates.get(state.candidate_index).cloned() else {
+                        state.message = Some("Selected repair candidate is no longer available.".to_owned());
+                        state.awaiting_confirmation = false;
+                        return;
+                    };
                     match drawing_dimension_repair::prepare(&id, status, &state.slot, candidate)
                         .and_then(|request| drawing_dimension_repair::confirm(session, &request, true).map(|_| ())) {
                         Ok(()) => {
