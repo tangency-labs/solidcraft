@@ -35,10 +35,15 @@ use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData
 const OP_CURVE: &str = "prism::profile::curve_on_frame";
 const OP_AREA: &str = "prism::profile::Loop2::signed_area";
 
-/// The smallest `|sweep|` (radians) of an arc a profile takes: below it the arc has no length.
+/// An arc's `|sweep|` (radians) must be above this. ARGUED, not derived: the value is the
+/// literal [`check_regions`] already used before it was named. It is not the rounding of any
+/// computation; it only refuses an arc too short to have a usable length.
 const MIN_ARC_SWEEP: f64 = 1e-12;
 
-/// The slack (radians) past a whole turn an arc's `|sweep|` may carry, for rounding.
+/// How far (radians) an arc's `|sweep|` may go past a whole turn, `TAU`. ARGUED, not derived:
+/// the value is the literal [`check_regions`] already used before it was named. It is far wider
+/// than rounding: 1e-9 is about 1e6 ulps of `TAU` (ulp ≈ 8.9e-16), so it admits a sweep that
+/// callers sum from segment angles a little past a turn, but nothing proves a bound for those sums.
 const ARC_SWEEP_SLACK: f64 = 1e-9;
 
 /// Highest degree of a [`Seg2::Bezier`].
@@ -825,8 +830,8 @@ pub fn frame_is_orthonormal(frame: &Frame) -> bool {
 /// # Errors
 ///
 /// `InvalidInput` for a frame whose axes are not orthonormal, a malformed segment, or an arc
-/// whose `|sweep|` is not above `1e-12` and at most a whole turn (`TAU + 1e-9`), the bounds
-/// [`check_regions`] holds; those of the constructors.
+/// whose `|sweep|` is not above `MIN_ARC_SWEEP` and at most `TAU + ARC_SWEEP_SLACK` (the
+/// bounds [`check_regions`] holds); those of the constructors.
 pub fn curve_on_frame(k: &Kernel, frame: &Frame, level: f64, seg: &Seg2) -> Result<Curve> {
     if !frame_is_orthonormal(frame) || !level.is_finite() {
         return Err(SolidError::invalid_input(
@@ -873,7 +878,7 @@ pub fn curve_on_frame(k: &Kernel, frame: &Frame, level: f64, seg: &Seg2) -> Resu
             // crosses the circle's seam nor runs past a whole turn, whatever the start.
             let (c, s) = (s0.cos(), s0.sin());
             let placement = Axis2Placement::new(at(center), x * c + y * s, y * c - x * s);
-            // `.min(360.0)` only absorbs the rounding slack the check above admits.
+            // `.min(360.0)` only shaves the `ARC_SWEEP_SLACK` the check above admits.
             let deg = Extent1d::from_min_max(0.0, sweep.abs().to_degrees().min(360.0));
             let e = Ellipse::create_canonical_circle(k, &placement, radius, Some(&deg), None)?;
             Ok(Curve::from(e))

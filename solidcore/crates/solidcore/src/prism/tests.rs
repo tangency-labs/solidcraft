@@ -406,6 +406,29 @@ fn a_piece_made_a_curve_reads_back_as_itself() {
     }
 }
 
+/// The absolute tolerance of the arc closed-form checks below. Chosen, not derived: the
+/// coordinates they compare stay within |x| <= 5, where an ulp is at most 8.9e-16, so this is
+/// about 1000 ulps.
+const ARC_CLOSED_FORM_TOL: f64 = 1e-12;
+
+/// `center + radius (cos t, sin t)` on the plain frame.
+fn on_circle(center: Point2, radius: f64, t: f64) -> [f64; 3] {
+    [
+        center.x + radius * t.cos(),
+        center.y + radius * t.sin(),
+        0.0,
+    ]
+}
+
+/// The largest coordinate difference between `q` and `want`.
+fn off(q: crate::geom::vector3d::Point3, want: [f64; 3]) -> f64 {
+    [q.x, q.y, q.z]
+        .into_iter()
+        .zip(want)
+        .map(|(g, w)| (g - w).abs())
+        .fold(0.0, f64::max)
+}
+
 /// The arc `curve_on_frame` builds on the plain frame against its closed form: it starts at
 /// `center + radius (cos start, sin start)` and ends at the same with `start + sweep`, every point
 /// between lies on the circle, and its angle from the start, turned the way `sweep` runs, rises
@@ -419,22 +442,13 @@ fn assert_arc_closed_form(k: &Kernel, center: Point2, radius: f64, start: f64, s
     };
     let c = curve_on_frame(k, &xy(), 0.0, &s).unwrap();
     let iv = c.natural_interval();
-    let on = |t: f64| {
-        [
-            center.x + radius * t.cos(),
-            center.y + radius * t.sin(),
-            0.0,
-        ]
-    };
     let a = c.evaluate_point(k, iv.min()).unwrap();
     let b = c.evaluate_point(k, iv.max()).unwrap();
-    for (q, want) in [(a, on(start)), (b, on(start + sweep))] {
-        let got = [q.x, q.y, q.z];
+    for (q, t) in [(a, start), (b, start + sweep)] {
+        let want = on_circle(center, radius, t);
         assert!(
-            got.into_iter()
-                .zip(want)
-                .all(|(g, w)| (g - w).abs() < 1e-12),
-            "{s:?}: {got:?} vs {want:?}"
+            off(q, want) < ARC_CLOSED_FORM_TOL,
+            "{s:?}: {q:?} vs {want:?}"
         );
     }
     let mut last = 0.0;
@@ -445,7 +459,7 @@ fn assert_arc_closed_form(k: &Kernel, center: Point2, radius: f64, start: f64, s
             .unwrap();
         let (dx, dy) = (q.x - center.x, q.y - center.y);
         assert!(
-            (dx.hypot(dy) - radius).abs() < 1e-12 && q.z.abs() < 1e-12,
+            (dx.hypot(dy) - radius).abs() < ARC_CLOSED_FORM_TOL && q.z.abs() < ARC_CLOSED_FORM_TOL,
             "{s:?} at f = {f}: {q:?} off the circle"
         );
         let turned = (sweep.signum() * (dy.atan2(dx) - start)).rem_euclid(TAU);
@@ -486,7 +500,21 @@ fn an_arc_of_no_sweep_or_past_a_whole_turn_is_refused() {
         start: 0.5,
         sweep,
     };
-    for sweep in [TAU + 1e-6, -(TAU + 1e-6), 7.0, -12.0, 0.0, 1e-13, -1e-13] {
+    // just past each bound (`TAU + 2e-9` over the slack of 1e-9; exactly the minimum of 1e-12,
+    // which must be exceeded), and far past them
+    for sweep in [
+        TAU + 2e-9,
+        -(TAU + 2e-9),
+        1e-12,
+        -1e-12,
+        TAU + 1e-6,
+        -(TAU + 1e-6),
+        7.0,
+        -12.0,
+        0.0,
+        1e-13,
+        -1e-13,
+    ] {
         let r = curve_on_frame(&k, &xy(), 0.0, &arc(sweep));
         assert!(
             matches!(
@@ -499,8 +527,70 @@ fn an_arc_of_no_sweep_or_past_a_whole_turn_is_refused() {
             "{sweep}: {r:?}"
         );
     }
-    // the slack the bound admits still builds
-    assert!(curve_on_frame(&k, &xy(), 0.0, &arc(TAU + 5e-10)).is_ok());
+    // just above the minimum still builds, at its start. MEASURED: at 2e-12 the built end sits
+    // on the start (off `start + sweep` by r * |sweep|), so only that weaker bound is asserted
+    // for the end; the minimum keeps out no sweep, not every arc too short to resolve.
+    for sweep in [2e-12, -2e-12] {
+        let c = curve_on_frame(&k, &xy(), 0.0, &arc(sweep)).unwrap();
+        let iv = c.natural_interval();
+        let a = c.evaluate_point(&k, iv.min()).unwrap();
+        let b = c.evaluate_point(&k, iv.max()).unwrap();
+        let want = on_circle(p(0.0, 0.0), 1.0, 0.5);
+        assert!(
+            off(a, want) < ARC_CLOSED_FORM_TOL,
+            "{sweep}: {a:?} vs {want:?}"
+        );
+        let end = on_circle(p(0.0, 0.0), 1.0, 0.5 + sweep);
+        assert!(
+            off(b, end) <= 1.0 * sweep.abs() + ARC_CLOSED_FORM_TOL,
+            "{sweep}: {b:?} vs {end:?}"
+        );
+    }
+    // inside the slack, a sweep past a whole turn builds the full circle: it closes at its
+    // start, so its end is within r * 5e-10 (r = 1) of `start + sweep`
+    for sweep in [TAU + 5e-10, -(TAU + 5e-10)] {
+        let c = curve_on_frame(&k, &xy(), 0.0, &arc(sweep)).unwrap();
+        let iv = c.natural_interval();
+        let a = c.evaluate_point(&k, iv.min()).unwrap();
+        let b = c.evaluate_point(&k, iv.max()).unwrap();
+        let start = on_circle(p(0.0, 0.0), 1.0, 0.5);
+        assert!(off(a, start) < ARC_CLOSED_FORM_TOL, "{sweep}: {a:?}");
+        assert!(
+            off(b, start) < ARC_CLOSED_FORM_TOL,
+            "{sweep}: {b:?} does not close"
+        );
+        let end = on_circle(p(0.0, 0.0), 1.0, 0.5 + sweep);
+        assert!(
+            off(b, end) <= 1.0 * 5e-10 + ARC_CLOSED_FORM_TOL,
+            "{sweep}: {b:?} vs {end:?}"
+        );
+        // a whole turn, not an arc of no length: it reads back as arcs of the input circle, the
+        // first from its start, whose sweeps add up to ±TAU
+        let back = read(&k, &c, iv, true, &xy(), 1e-7).unwrap();
+        let mut total = 0.0;
+        for (i, s) in back.iter().enumerate() {
+            let Seg2::Arc {
+                center,
+                radius,
+                start: s0,
+                sweep: got,
+            } = *s
+            else {
+                panic!("{sweep}: {back:?}")
+            };
+            assert!(
+                center.distance(p(0.0, 0.0)) < ARC_CLOSED_FORM_TOL
+                    && (radius - 1.0).abs() < ARC_CLOSED_FORM_TOL
+                    && (i > 0 || (s0 - 0.5).abs() < ARC_CLOSED_FORM_TOL),
+                "{sweep}: {back:?}"
+            );
+            total += got;
+        }
+        assert!(
+            (total - sweep.signum() * TAU).abs() < ARC_CLOSED_FORM_TOL,
+            "{sweep}: reads back sweeping {total}: {back:?}"
+        );
+    }
 }
 
 /// A polynomial quadratic (a font's quadratic curve: a conic of weight 1) reads back as that
