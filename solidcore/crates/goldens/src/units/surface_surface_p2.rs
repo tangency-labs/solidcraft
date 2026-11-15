@@ -2970,6 +2970,10 @@ mod tests {
 
     /// Coefficient hulls, refined by de Casteljau, bound a degree-six residual everywhere.
     fn review_residual_bound(coefficients: [f64; 7], rounding: f64, tolerance: f64) -> f64 {
+        assert!(
+            coefficients.iter().all(|coefficient| coefficient.is_finite()),
+            "non-finite residual coefficient"
+        );
         let mut stack = vec![(coefficients, 0_u8)];
         let mut bound = 0.0_f64;
         while let Some((coefficients, depth)) = stack.pop() {
@@ -2995,6 +2999,13 @@ mod tests {
             stack.push((left, depth + 1));
         }
         bound
+    }
+
+    /// A non-finite polynomial cannot supply a certified finite residual.
+    #[test]
+    #[should_panic(expected = "non-finite residual coefficient")]
+    fn review_residual_bound_refuses_nan_coefficients() {
+        review_residual_bound([f64::NAN; 7], 1e-12, 1e-6);
     }
 
     /// Both full crossing branches are distinct, monotone in x, and enclosed on z=x²=y².
