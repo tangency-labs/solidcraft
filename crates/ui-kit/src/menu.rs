@@ -103,6 +103,24 @@ pub struct Item {
     pub tip: Option<String>,
 }
 
+/// Share of a menu row's width the note on the right may take before it is elided, so that a
+/// long file name cannot cover the label beside it (#17302).
+const KEY_ROOM: f32 = 0.5;
+
+/// Lays out the note on the right of a menu row, elided to `room` points.
+fn laid_out_key(painter: &egui::Painter, text: &str, room: f32, t: &Tokens) -> Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::simple(
+        solidcraft_ui_text::tr_label(text).to_string(),
+        FontId::monospace(t.font_small),
+        t.text_dim,
+        room,
+    );
+    job.wrap.max_rows = 1;
+    job.wrap.break_anywhere = true;
+    job.wrap.overflow_character = Some('\u{2026}');
+    painter.layout_job(job)
+}
+
 impl Item {
     /// A view action (`ui.*`).
     pub fn action(id: &str, label: &str, icon: &str) -> Item {
@@ -570,7 +588,11 @@ impl<'a> MenuItem<'a> {
             right -= check_width;
         }
         if !self.shortcut.is_empty() {
-            let key = painter.layout_no_wrap(solidcraft_ui_text::tr_label(self.shortcut).to_string(), FontId::monospace(t.font_small), dim);
+            // The note on the right is a file name for Insert Design's list, and it used to be
+            // laid out with no width at all: a long name grew leftwards over the row's label
+            // (#17302). Cap it to a share of the row and elide what does not fit.
+            let room = (r.width() * KEY_ROOM).max(0.0);
+            let key = laid_out_key(&painter, self.shortcut, room, &t);
             painter.galley(pos2(right - key.size().x, r.center().y - key.size().y / 2.0), key.clone(), dim);
             right -= key.size().x + t.space_8;
         }
@@ -923,6 +945,26 @@ mod tests {
         let named = ItemIcon::from("delete");
         assert!(named == "delete" && matches!(named.as_icon(), Icon::Kit("delete")));
         assert_eq!(serde_json::to_value(&named).unwrap(), serde_json::json!("delete"));
+    }
+
+    #[test]
+    fn a_long_note_on_the_right_of_a_row_is_elided_and_leaves_the_label_its_share() {
+        const ROOM: f32 = 120.0;
+        let ctx = crate::test_support::context();
+        let mut medidas = None;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let t = Tokens::get();
+            let painter = ui.painter().clone();
+            medidas = Some((
+                laid_out_key(&painter, "Topcraft_Messschieber_Unterteil_final_v3.sc", ROOM, &t),
+                laid_out_key(&painter, "plate.sc", ROOM, &t),
+            ));
+        });
+        output.textures_delta.clear();
+        let (key, short) = medidas.expect("the row laid the note out");
+        assert!(key.elided, "a name wider than its room must be elided");
+        assert!(key.size().x <= ROOM + 0.5, "elided note is {} wide, room is {ROOM}", key.size().x);
+        assert!(!short.elided && short.size().x < ROOM, "a short note keeps its whole text");
     }
 
     #[test]
