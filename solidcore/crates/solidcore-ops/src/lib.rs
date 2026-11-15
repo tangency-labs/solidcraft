@@ -54,6 +54,7 @@ pub mod export_geometry;
 pub mod extend;
 pub mod face_surface;
 pub mod file;
+pub mod import_geometry;
 pub mod joint_turn;
 pub mod label;
 pub mod measure;
