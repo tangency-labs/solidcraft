@@ -1366,9 +1366,7 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         let dir = h.dir.join("public-plugins");
         let sky = |id: &str, shaders: &str| {
-            format!(
-                r#"{{"id":"{id}","name":"{id}","version":"1","description":"","capabilities":["shaders@0.1"],"shaders":[{shaders}]}}"#
-            )
+            format!(r#"{{"id":"{id}","name":"{id}","version":"1","description":"","capabilities":["shaders@0.1"],"shaders":[{shaders}]}}"#)
         };
         let shader = |id: &str| format!(r#"{{"id":"{id}","name":"{id}","kind":"background","source":"{id}.wgsl"}}"#);
         write(&dir, "skies", &sky("skies", &format!("{},{}", shader("dusk"), shader("dawn"))));
