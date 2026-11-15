@@ -545,6 +545,7 @@
 {"case":"gen0147","deferred":null,"error":null,"ints":{"record":[],"status":[1001]},"topology":null,"values":{}}
 {"case":"gen0148","deferred":null,"error":null,"ints":{"record":[1,3],"status":[1007]},"topology":null,"values":{}}
 {"case":"gen0149","deferred":null,"error":null,"ints":{"record":[1,2],"status":[1007]},"topology":null,"values":{}}
+{"case":"gen0150","deferred":null,"error":null,"ints":{"record":{"blocks":[[61,478]],"n":18},"status":[0]},"topology":null,"values":{}}
 {"case":"gen0151","deferred":null,"error":null,"ints":{"record":[1,1],"status":[1007]},"topology":null,"values":{}}
 {"case":"gen0152","deferred":null,"error":null,"ints":{"record":[1,1],"status":[1007]},"topology":null,"values":{}}
 {"case":"gen0153","deferred":null,"error":null,"ints":{"record":{"blocks":[[75,758]],"n":28},"status":[0]},"topology":null,"values":{}}

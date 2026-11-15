@@ -300,6 +300,48 @@ impl Curve {
         }))
     }
 
+    /// The parameters to cut `[a, b]` at so that each piece has one hull (a line whole, a
+    /// B-spline or a conic at its knots); `None` for a kind without a hull or a curve that
+    /// cannot be read.
+    ///
+    /// # Errors
+    ///
+    /// The kernel's cancellation.
+    pub(crate) fn hull_breaks(&self, a: f64, b: f64) -> Result<Option<Vec<f64>>> {
+        if !(a.is_finite() && b.is_finite() && a <= b) {
+            return Ok(None);
+        }
+        let Some(form) = form(self) else {
+            return Ok(None);
+        };
+        soft(form.breaks(a, b))
+    }
+
+    /// A ball that holds the piece of this curve over `[a, b]`: the middle of the piece's
+    /// chord, and half the chord plus the piece's hull radius about it (module docs, "A
+    /// tube"), the middle's and the length's rounding included. `None` where the piece has
+    /// no certified hull.
+    ///
+    /// # Errors
+    ///
+    /// The kernel's cancellation.
+    pub(crate) fn piece_ball(&self, a: f64, b: f64) -> Result<Option<(Vec3, f64)>> {
+        if !(a.is_finite() && b.is_finite() && a <= b) {
+            return Ok(None);
+        }
+        let Some(form) = form(self) else {
+            return Ok(None);
+        };
+        let Some(tube) = soft(form.tube(a, b))?.flatten() else {
+            return Ok(None);
+        };
+        let centre = (tube.a + tube.b) * 0.5;
+        let half = 0.5 * (tube.b - tube.a).length();
+        let size = tube.a.length() + tube.b.length();
+        let radius = (half + tube.rho + gamma(4) * size) * (1.0 + gamma(4));
+        Ok(radius.is_finite().then_some((centre, radius)))
+    }
+
     /// How far along `edge` the crossing of this curve with it is known, enclosed: this
     /// curve at parameter `t` and `edge` at `s` meet at `p`, each known to `tolerance`
     /// across itself. Over a stretch about `p` on which every tangent of this curve makes

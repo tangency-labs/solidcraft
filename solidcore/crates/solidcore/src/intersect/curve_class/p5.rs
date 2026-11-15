@@ -429,6 +429,30 @@ fn vertex_big_gap_tolerance<O: Copy>(
     Ok(if gap > tolerance { gap } else { tolerance })
 }
 
+/// Not upstream: whether `vertex` is a pole of `face`, the face around it on every side
+/// ([`crate::topology::vertex::inside_face`]); `false` where the adapter resolves either
+/// to no topology or the two lie in different B-reps.
+fn pole_of_face<O: ClassObject>(
+    geometry: &impl ClassGeometry<O>,
+    vertex: O,
+    face: Option<O>,
+) -> Result<bool> {
+    let Some(face) = face else {
+        return Ok(false);
+    };
+    match (
+        geometry.topology_entity(vertex),
+        geometry.topology_entity(face),
+    ) {
+        (Some((b, EntityRef::Vertex(v))), Some((fb, EntityRef::Face(f))))
+            if std::ptr::eq(b, fb) =>
+        {
+            crate::topology::vertex::inside_face(b, v, f)
+        }
+        _ => Ok(false),
+    }
+}
+
 impl<O: ClassObject> CurveClassification<O> {
     fn p5_closed(&self, k: &Kernel, geometry: &impl ClassGeometry<O>) -> Result<bool> {
         let Some(handle) = self.curve() else {
@@ -823,7 +847,25 @@ impl<O: ClassObject> CurveClassification<O> {
         for &vertex in vertices {
             let geometry = access.geometry();
             let vertex_zone = object_zone_tol_3d(k, geometry, Some(vertex))?;
-            let tolerance = xsect_tol_3d_from_zones(k, source_zone, vertex_zone);
+            // Not upstream: a vertex the face surrounds on every side (a pole) bounds no
+            // material, so its tolerance adds nothing; the curve meets it only within its
+            // own reach (docs/booleans.md, "Seams and poles")
+            let summed = xsect_tol_3d_from_zones(k, source_zone, vertex_zone);
+            // whether a contact is held to the curve's region: at a pole, for every curve
+            // but the face's own seam curve (checked as upstream does)
+            let mut regional = false;
+            let tolerance = if pole_of_face(geometry, vertex, self.face())? {
+                let working = match &wrapped {
+                    Some(lifted) => lifted,
+                    None => self.curve_geometry(geometry)?,
+                };
+                let reach = self.source_reach_in(k, geometry, working)?;
+                self.set_source_reach(reach);
+                regional = reach.has_region();
+                reach.contact_tolerance(xsect_tol3d(k, source_zone), summed)
+            } else {
+                summed
+            };
             // The curve may carry a larger approximation allowance than its body.
             // Using that allowance alone captures a nearby corner and splits the
             // blend arc there, even though the retained vertex cannot satisfy the
@@ -912,6 +954,20 @@ impl<O: ClassObject> CurveClassification<O> {
                     Some(c) => c,
                     None => self.curve_geometry(geometry)?,
                 };
+                // not upstream: the curve reaches a pole across itself by its reach, along
+                // itself by its own tolerance (docs/booleans.md, "Seams and poles")
+                if regional
+                    && !super::p1::in_reach_region(
+                        k,
+                        curve,
+                        solution.start.param(0)?,
+                        point,
+                        xsect_tol3d(k, source_zone),
+                        tolerance,
+                    )?
+                {
+                    continue;
+                }
                 if solution.start.solution_value > tolerance {
                     if !has_big_gaps || solution.start.solution_value > big_tolerance {
                         continue;
