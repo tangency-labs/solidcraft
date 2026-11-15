@@ -1596,7 +1596,9 @@ impl UnitDiff for Runner {
 mod tests {
     use std::collections::BTreeMap;
 
-    use super::super::topology_proto_topology_p1::{rust_run, SKIP};
+    use solidcore::topology::proto_topology::p2::ProtoBrep;
+
+    use super::super::topology_proto_topology_p1::{proto_state_before, rust_run, SKIP};
     use super::*;
 
     /// Generated scripts keep the input contract, and most of them are comparable (not
@@ -1721,5 +1723,129 @@ mod tests {
             Err(Fail::Deferred(_)) => println!("rust deferred"),
             Err(Fail::Harness(e)) => println!("rust harness {e}"),
         }
+    }
+
+    /// The `MGR_UPDATE_EDGES` op of a proto script decoded as the runner decodes it:
+    /// which B-rep, the old edge, the new edges and the calling vertex definition.
+    fn update_edges_args(r: &ProtoRun, op: &[f64]) -> (i32, Option<H>, Vec<H>, Option<VertexDefId>) {
+        let at = |i: usize| op.get(i).copied().unwrap() as i64;
+        let edge = |j: i64| (j != -1).then(|| r.pool.h(j));
+        let n = at(3) as usize;
+        let edges = (0..n).filter_map(|i| edge(at(4 + i))).collect();
+        let vd = at(4 + n);
+        (
+            at(1) as i32,
+            edge(at(2)),
+            edges,
+            (vd != -1).then(|| r.vd(vd)).flatten(),
+        )
+    }
+
+    /// WR-533's moved rows (batch topology-1, the flag removed). `UpdateEdges` now splits
+    /// an edge definition that runs across the split point with its proto edge, so each
+    /// part lies on its own piece; upstream re-points it whole to the piece under its
+    /// midpoint, whose vertices are not its ends, and the imprint later finds no vertex for
+    /// them (`SM_ERR_NULL_POINTER`).
+    ///
+    /// Five rows end at their first `UpdateEdges` op whose definition crosses the split:
+    /// the split's new vertex definition has no position, because these scripts classify
+    /// the definition against bare stand-ins (regions and loops without geometry), so
+    /// `CreateVertexDefinition` refuses with [`SolidError::InvalidInput`] where upstream
+    /// would read an uninitialised position. The op is replayed on the state it starts
+    /// from, so the refusal is pinned to that exact call and message. In the sixth row
+    /// (gen1321) the split succeeds: at the end of the script every definition on an edge
+    /// lies within that edge's interval (upstream leaves one reaching 3.23 past its edge's
+    /// end), and the split edge's lower piece keeps its definition.
+    #[test]
+    fn wr533_update_edges_rows() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 0,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        let script = |name: &str| -> Script {
+            cases
+                .iter()
+                .find(|c| c.name == name)
+                .unwrap_or_else(|| panic!("{name}"))
+                .parse()
+                .unwrap()
+        };
+        for name in [
+            "gen0904",
+            "gen0913",
+            "gen0914",
+            "gen0976",
+            "upstream_planar_union_crossings_1e-3",
+        ] {
+            let s = script(name);
+            let Script::Proto { ops, .. } = &s else {
+                panic!("{name}: not a proto script")
+            };
+            let Ok(out) = rust_run(&s) else {
+                panic!("{name}: the script does not run")
+            };
+            // the op the record ends at (skipped)
+            let (mut at, mut index) = (0, 0);
+            while out[at + 1] != SKIP {
+                at += 3 + out[at + 2] as usize;
+                index += 1;
+            }
+            assert_eq!(at + 2, out.len(), "{name}: the record ends at the skipped op");
+            assert_eq!(ops[index][0] as i64, q::MGR_UPDATE_EDGES, "{name}");
+            let Ok(Some(mut r)) = proto_state_before(&s, index) else {
+                panic!("no state before op {index}")
+            };
+            let (w, old, edges, vd) = update_edges_args(&r, &ops[index]);
+            let e = r
+                .mgr
+                .update_edges(&r.k, &mut r.pool, w, old, &edges, vd)
+                .unwrap_err();
+            assert!(
+                matches!(e, SolidError::InvalidInput { .. })
+                    && e.to_string().contains("position and gap are uninitialised"),
+                "{name}: {e}"
+            );
+        }
+
+        // gen1321: edge 7 is [3.5456, 7.4818] and edge 8 is [7.4818, 10.7148] of the same
+        // line, and the coincident definition on edge 7 runs over the whole line, across the
+        // split point 7.4818. Upstream leaves it whole on edge 7, reaching 3.23 past that
+        // edge's end (the record's state). With the split, at the end of the script every
+        // definition on an edge lies within that edge's interval, and edge 7 keeps one.
+        let s = script("gen1321");
+        let Script::Proto { ops, .. } = &s else {
+            panic!("gen1321: not a proto script")
+        };
+        let Some(last_update) = ops.iter().rposition(|op| op[0] as i64 == q::MGR_UPDATE_EDGES) else {
+            panic!("gen1321: no UpdateEdges op")
+        };
+        let w = {
+            let Ok(Some(r)) = proto_state_before(&s, last_update) else {
+                panic!("gen1321: no state before op {last_update}")
+            };
+            update_edges_args(&r, &ops[last_update]).0
+        };
+        let Ok(Some(r)) = proto_state_before(&s, ops.len()) else {
+            panic!("gen1321: no final state")
+        };
+        let mut pieces = Vec::new();
+        for d in r.mgr.all_edge_definitions().unwrap() {
+            let d = r.mgr.edge_def(d).unwrap();
+            let Some(edge) = d.src_topo(w).filter(|h| r.pool.edge_interval(*h).is_some()) else {
+                continue;
+            };
+            let (on, edge_ivl) = (d.xsect_interval(), r.pool.edge_interval(edge).unwrap());
+            assert!(
+                on.min() >= edge_ivl.min() && on.max() <= edge_ivl.max(),
+                "gen1321: definition [{}, {}] on {edge:?} leaves its interval [{}, {}]",
+                on.min(),
+                on.max(),
+                edge_ivl.min(),
+                edge_ivl.max()
+            );
+            pieces.push(edge.0);
+        }
+        assert!(pieces.contains(&7), "gen1321: edge 7 keeps a definition");
     }
 }

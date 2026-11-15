@@ -79,7 +79,6 @@
   "cover_refuses_folded_continuation",
   "cover_wraps_across_closed_seam",
   "boolean_vertex_by_best_crossing",
-  "boolean_splits_definition_across_split",
   "proto_edge_splits_at_captured_vertices",
   "proto_edge_split_upper_keeps_the_old_max",
   "boolean_cleanup_removes_slits",

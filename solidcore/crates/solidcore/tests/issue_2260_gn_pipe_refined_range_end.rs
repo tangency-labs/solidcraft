@@ -51,7 +51,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "boolean_cleanup_removes_slits",
     "boolean_new_face_closure_both_sides",
     "boolean_outer_shell_first",
-    "boolean_splits_definition_across_split",
     "boolean_union_refuses_solid_leak",
     "boolean_vertex_by_best_crossing",
     "box_face_failures_propagate",

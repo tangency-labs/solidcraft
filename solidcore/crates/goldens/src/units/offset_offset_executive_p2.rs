@@ -2034,6 +2034,64 @@ mod tests {
     fn moved_cases_results_measured() {
         crate::soundness::probe(&Runner);
     }
+
+    /// WR-533's moved rows here (batch topology-1, `boolean_splits_definition_across_split`
+    /// removed): the rounded outward offsets of `extrudeHoles1` at k 0.36. Each case either
+    /// builds a body that `check_brep` refuses on an edge/edge gap far past its tolerance, or
+    /// is refused. `SmTrimmingTools::CheckLoop` derives that tolerance from the two edges'
+    /// zone tolerances (`xsect_tol_3d_from_zones`: `xsect_tol3d(zone_prev + zone_cur)`) and
+    /// measures the gap between the evaluated end of one edge's 3D curve and the start of
+    /// the next, both at the trims' end parameters; no sampling enters either value. The
+    /// gap is asserted to exceed the tolerance a thousand times over, so neither value's
+    /// rounding (relative `1e-12` at most) can change the verdict. With the fix every one
+    /// is refused (1001) and builds no result body; on main (upstream's re-pointing) each
+    /// builds an unsound body, as this same test asserts when run on main.
+    #[test]
+    fn wr533_overlap_offsets_refuse_or_fail_the_gap_check() {
+        let ctx = CaseContext {
+            root: repo_root(),
+            seeds: 0,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        for f in [0, 2, 3, 4, 5] {
+            let name = format!("overlap_pc_extrudeHoles1_f{f}_k0.36_out_rnd");
+            let case = cases.iter().find(|c| c.name == name).unwrap();
+            crate::soundness::start();
+            let out = Runner.run_rust(case).unwrap();
+            let found = crate::soundness::take();
+            let status = out.ints["status"][0];
+            if status == i64::from(NATIVE_SUCCESS) {
+                // a built body: its check must report the loop gap
+                let [body] = found.as_slice() else {
+                    panic!("{name}: one result body, got {}", found.len())
+                };
+                let lines = body.check.as_ref().unwrap();
+                let gap = lines
+                    .iter()
+                    .find(|l| l.contains("Edge/Edge Gap"))
+                    .unwrap_or_else(|| panic!("{name}: no edge/edge gap line in {lines:?}"));
+                let num = |key: &str| -> f64 {
+                    let at = gap.find(key).unwrap() + key.len();
+                    gap[at..]
+                        .split([',', ')'])
+                        .next()
+                        .unwrap()
+                        .trim()
+                        .parse()
+                        .unwrap()
+                };
+                let (offset, tolerance) = (num("offset="), num("tolerance="));
+                eprintln!("{name}: built, gap {offset} against {tolerance}");
+                assert!(offset > 1000.0 * tolerance, "{name}: {gap}");
+                assert_eq!(body.manifold, Some(false), "{name}");
+            } else {
+                eprintln!("{name}: refused {status}");
+                assert_eq!(status, 1001, "{name}");
+                assert!(found.is_empty(), "{name}: a refused case builds no result body");
+                assert_eq!(out.ints["result.present"], [0], "{name}");
+            }
+        }
+    }
     use std::collections::BTreeSet;
 
     use crate::case::repo_root;

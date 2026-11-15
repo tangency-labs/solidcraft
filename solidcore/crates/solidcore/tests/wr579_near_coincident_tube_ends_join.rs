@@ -116,20 +116,25 @@ fn join(fixed: bool) -> Result<f64, String> {
     Ok(volume(&k, &mut r))
 }
 
+/// With `proto_edge_splits_at_captured_vertices` the stretch's edge is split at the
+/// crossing's vertex. Without it, `UpdateEdges` now splits the coincident definition that
+/// runs across that split point (WR-533, always on since its flag was removed), and the
+/// union joins as well. Either way `join` accepts only one manifold solid whose level-2
+/// check reports nothing, and its volume lies strictly between the larger tube's and both
+/// together.
 #[test]
 fn wr579_near_coincident_tube_ends_join() {
-    let unfixed = join(false);
-    println!("flag off: {unfixed:?}");
-    assert!(unfixed.is_err(), "upstream's union succeeded: {unfixed:?}");
-
-    let v = join(true).unwrap();
     let mut k = Kernel::default();
     let (mut t, mut s) = (top(&mut k), seat(&mut k));
     let (vt, vs) = (volume(&k, &mut t), volume(&k, &mut s));
-    assert!(
-        v > vt.max(vs) && v < vt + vs,
-        "union volume {v}, tubes {vt} and {vs}"
-    );
+    for fixed in [false, true] {
+        let v = join(fixed).unwrap();
+        println!("fix {fixed}: {v}");
+        assert!(
+            v > vt.max(vs) && v < vt + vs,
+            "fix {fixed}: union volume {v}, tubes {vt} and {vs}"
+        );
+    }
 }
 
 /// The `SmClass::Test #n` labels of the check's lines, sorted, so reports compare as
