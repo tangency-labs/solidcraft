@@ -172,7 +172,7 @@ pub struct ConfigRowEditParams {
     /// rows keep their order. `from`, `values` and `rename` are then not used. Default: the row
     /// stays where it is.
     #[serde(default, deserialize_with = "rule_index", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<u64>", range(min = 0))]
+    #[schemars(with = "u64", range(min = 0))]
     pub index: Option<u64>,
 }
 
