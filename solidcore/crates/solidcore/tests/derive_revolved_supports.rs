@@ -12,7 +12,7 @@
 //! (`data/short_swept_revolution_nets.jsonl`), and one of the same round swept 286 degrees in
 //! four spans (`data/long_swept_revolution_net.jsonl`), derived with `derive_revolution`.
 
-#![allow(clippy::unwrap_used, clippy::indexing_slicing)]
+#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)] // test helpers
 
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
