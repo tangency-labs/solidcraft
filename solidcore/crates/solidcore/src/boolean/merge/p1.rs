@@ -42,10 +42,10 @@
 //! Not upstream (WR-304, #1120): after each edge removal `boolean_post_process` also
 //! checks the merged face's edges that have it on both sides (slits), skipping any a
 //! later removal deleted.
-//! Not upstream (WR-459, #423): the edges in `CleanupRelations::kept_edges` (a fillet's
-//! target), and those whose faces are all in `kept_faces`, stay.
-//! With that keep (WR-602, the fork's tangency-labs/smlib@cac11ea): of those, an edge
-//! with one face on both sides (a slit) is checked
+//! Opt-in `Kernel::fixes.fillet_cleanup_keeps_target_faces` (WR-459, #423): the edges in
+//! `CleanupRelations::kept_edges`, and those whose faces are all in `kept_faces`, stay.
+//! With that keep (WR-602, the fork's tangency-labs/smlib@cac11ea, the default since its
+//! flag was retired): of those, an edge with one face on both sides (a slit) is checked
 //! all the same, and the kept-faces test needs two faces. Not the fork's (#15768): a face a
 //! merge makes of a kept face is kept, whichever of the two ids it keeps, and the fillet
 //! passes as kept edges only the input edges it left whole (`kept_edges`).
@@ -536,10 +536,10 @@ pub struct CleanupRelations {
     pub vertices: Vec<VertexId>,
     /// Shared live mates; deleted entities must be removed by the intersector.
     pub mates: Relations,
-    /// WR-459: the edges and faces the clean-up leaves alone (the fork's
-    /// `m_sPostProcessKeptEdges`/`Faces`: a fillet's target, the input edges it left
-    /// whole), and any edge between two kept faces, or faces merged from them. Empty
-    /// outside a fillet.
+    /// WR-459 (`Kernel::fixes.fillet_cleanup_keeps_target_faces`): the edges and faces
+    /// the clean-up leaves alone (the fork's `m_sPostProcessKeptEdges`/`Faces`: a
+    /// fillet's target, the input edges it left whole), and any edge between two kept
+    /// faces, or faces merged from them. Empty otherwise.
     pub kept_edges: BTreeSet<EdgeId>,
     /// See [`CleanupRelations::kept_edges`].
     pub kept_faces: BTreeSet<FaceId>,

@@ -1,9 +1,9 @@
 //! tangency-labs/solidcore#423 (WR-459): `DoFilleting`'s `BooleanPostProcess(TRUE)` checks
 //! every edge of the target, not only the fillet's, so it also merges the target's own
 //! faces that lie on coincident surfaces (the five patches of a sphere imported in six
-//! faces became one face no patch's parameterization could carry). The port (always, since
-//! its flag was retired) removes no edge the target had and none between two of its faces,
-//! as the fork does (tangency-labs/smlib@9ddf4a8).
+//! faces became one face no patch's parameterization could carry). The opt-in
+//! `Kernel::fixes.fillet_cleanup_keeps_target_faces` removes no edge the target had and
+//! none between two of its faces, as the fork does (tangency-labs/smlib@9ddf4a8).
 //!
 //! The sphere's own failure (loops of the wrong orientation, rails off their surfaces)
 //! needs analytic patches in six faces and is not built here. The body here: a cylinder
@@ -12,10 +12,10 @@
 //! SMLib's union does. The union's own clean-up removes that slit now (WR-304), so the
 //! slit body is the union without its clean-up, then SMLib's clean-up of it by hand (each
 //! rim removed as `boolean_post_process` removes it; the rims' end vertices, which the
-//! clean-up would delete, stay). With the keep the slit is an edge of the target, but a
-//! slit, which the clean-up checks all the same (WR-602; the fork's
-//! tangency-labs/smlib@cac11ea), so it goes. Faces, slits and volume are those of the
-//! same round on the union's own body, which has no slit.
+//! clean-up would delete, stay). A round on the disc's top rim removes the slit by
+//! default. With the keep it is an edge of the target, but a slit, which the clean-up
+//! checks all the same (WR-602; the fork's tangency-labs/smlib@cac11ea), so it goes too.
+//! Faces, one-face edges and volume are the same either way.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -23,7 +23,7 @@
     clippy::indexing_slicing
 )] // test helpers
 use solidcore::blend::fillet_executive::api::fillet_edges;
-use solidcore::boolean::api_brep::{boolean_union, boolean_with_options};
+use solidcore::boolean::api_brep::boolean_with_options;
 use solidcore::boolean::merge::MergeOptions;
 use solidcore::curve::curve::Curve;
 use solidcore::curve::ellipse::Ellipse;
@@ -153,11 +153,13 @@ fn far_slits(b: &Brep) -> usize {
         .count()
 }
 
-/// The disc's top rim (its two half arcs at z = H) rounded r 1 on the union with the slit
-/// (`slit`) or on the union's own body: the target's slits at x = -R, then the result's
-/// faces, its slits at x = -R and its volume.
-fn rounded(slit: bool) -> (usize, usize, usize, f64) {
+/// The disc's top rim (its two half arcs at z = H) rounded r 1 on the union with the slit,
+/// with the keep as `keep` says: the target's slits at x = -R, then the result's faces,
+/// its edges with one face on both sides (seams and slits), its slits at x = -R and its
+/// volume.
+fn rounded(keep: bool) -> (usize, usize, usize, usize, f64) {
     let mut k = Kernel::default();
+    k.fixes.fillet_cleanup_keeps_target_faces = keep;
     let a = half_arc(&k, 0.0, 180.0);
     let b = half_arc(&k, 180.0, 360.0);
     let flange = create_cylinder(&mut k, Point3::new(0.0, 0.0, -6.0), R, 6.0).unwrap();
@@ -169,11 +171,7 @@ fn rounded(slit: bool) -> (usize, usize, usize, f64) {
         true,
     )
     .unwrap();
-    let mut disc = if slit {
-        slit_union(&mut k, flange, disc)
-    } else {
-        boolean_union(&mut k, flange, disc).unwrap()
-    };
+    let mut disc = slit_union(&mut k, flange, disc);
     let target_slits = far_slits(&disc);
     let rim: Vec<_> = p1::edges(&disc, None)
         .unwrap()
@@ -189,24 +187,26 @@ fn rounded(slit: bool) -> (usize, usize, usize, f64) {
     assert_eq!(rim.len(), 2);
     fillet_edges(&mut k, &mut disc, &rim, 1.0, 1, 1, 0.5).unwrap();
     assert!(is_manifold_solid(&disc).unwrap());
+    let seams = p1::edges(&disc, None)
+        .unwrap()
+        .into_iter()
+        .filter(|&e| edge::faces(&disc, e, None).unwrap().len() == 1)
+        .count();
     let slits = far_slits(&disc);
     let faces = p1::faces(&disc, None).unwrap().len();
-    (target_slits, faces, slits, volume(&k, &mut disc))
+    (target_slits, faces, seams, slits, volume(&k, &mut disc))
 }
 
-/// The slit on the far side is removed. (All one-face edges are not compared: the rims'
-/// end vertex at x = R, which the hand-built clean-up leaves, splits the wall's seam
-/// there in two.)
 #[test]
 fn issue_423_keep_still_removes_the_targets_own_slit() {
-    let (clean_target, faces, slits, _) = rounded(false);
-    let (slit_target, kept_faces, kept_slits, _) = rounded(true);
-    assert_eq!(
-        (clean_target, slit_target),
-        (0, 1),
-        "the target has the slit"
-    );
+    let (target, faces, seams, slits, _) = rounded(false);
+    let (kept_target, kept_faces, kept_seams, kept_slits, _) = rounded(true);
+    assert_eq!((target, kept_target), (1, 1), "the target has the slit");
     assert_eq!(kept_faces, faces);
+    assert_eq!(
+        kept_seams, seams,
+        "kept {kept_seams} one-face edges, default {seams}"
+    );
     assert_eq!(
         (kept_slits, slits),
         (0, 0),
@@ -216,7 +216,7 @@ fn issue_423_keep_still_removes_the_targets_own_slit() {
 
 #[test]
 fn issue_423_kept_faces_same_volume() {
-    let (_, _, _, merged) = rounded(false);
-    let (_, _, _, kept) = rounded(true);
+    let (_, _, _, _, merged) = rounded(false);
+    let (_, _, _, _, kept) = rounded(true);
     assert!((merged - kept).abs() <= 1e-6 * merged, "{merged} vs {kept}");
 }

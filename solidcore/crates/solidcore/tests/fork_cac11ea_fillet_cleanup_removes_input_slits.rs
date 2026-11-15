@@ -1,5 +1,5 @@
 //! WR-602 (the SolidCraft fork's tangency-labs/smlib@cac11ea): with the fork's keep
-//! (WR-459, always on since its flag was retired), `DoFilleting`'s
+//! (`Kernel::fixes.fillet_cleanup_keeps_target_faces`), `DoFilleting`'s
 //! `BooleanPostProcess` leaves every edge of the fillet's input, and every edge between two
 //! of its faces, alone. Where a round takes away the face on one side of a target edge,
 //! that edge is left with one face on both sides: a slit, kept as an input edge. The
@@ -160,6 +160,7 @@ fn cleaned() -> ((usize, usize), (usize, usize), f64) {
     let mut k = Kernel::default();
     let mut b = joined(&mut k);
     let before = (one_face_edges(&b).len(), p1::edges(&b, None).unwrap().len());
+    k.fixes.fillet_cleanup_keeps_target_faces = true;
     let relations = CleanupRelations {
         kept_edges: p1::edges(&b, None).unwrap().into_iter().collect(),
         kept_faces: p1::faces(&b, None).unwrap().into_iter().collect(),

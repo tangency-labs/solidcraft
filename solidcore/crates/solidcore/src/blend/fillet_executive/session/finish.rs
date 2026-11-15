@@ -751,15 +751,19 @@ impl FilletSession<'_> {
             ));
         }
         // WR-459: the clean-up after filleting leaves the target's own edges and faces.
-        let mut kept_edges = std::collections::BTreeMap::new();
-        for edge in p1::edges(self.objects.target, None)? {
-            let ends = crate::topology::edge::vertices(self.objects.target, edge, None)?;
-            kept_edges.insert(edge, ends);
-        }
-        self.objects.cleanup_kept = Some((
-            kept_edges,
-            p1::faces(self.objects.target, None)?.into_iter().collect(),
-        ));
+        self.objects.cleanup_kept = if k.fixes.fillet_cleanup_keeps_target_faces {
+            let mut edges = std::collections::BTreeMap::new();
+            for edge in p1::edges(self.objects.target, None)? {
+                let ends = crate::topology::edge::vertices(self.objects.target, edge, None)?;
+                edges.insert(edge, ends);
+            }
+            Some((
+                edges,
+                p1::faces(self.objects.target, None)?.into_iter().collect(),
+            ))
+        } else {
+            None
+        };
         self.with_filleting_context(k, |session, k| {
             let made = session.create_fillet_brep(k, error_out.as_deref_mut());
             if let Err(error) = &made {
