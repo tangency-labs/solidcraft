@@ -465,6 +465,14 @@ impl PrimitiveCreation {
             }
         }
         for slot in curves.iter_mut() {
+            // Not upstream (#17204): a B-spline end within the B-rep's tolerance of the
+            // axis is on it for the body, so its control point is put on the axis
+            let tolerance = a.brep(brep)?.tolerance();
+            if let Some(ended) =
+                spline_ends_on_axis(a.kernel(brep)?, slot.as_ref(), axis_base, axis, tolerance)?
+            {
+                *slot = Some(ended);
+            }
             let curve = slot
                 .as_ref()
                 .ok_or_else(|| SolidError::primitive_missing(OP, "a profile curve"))?;
@@ -689,6 +697,64 @@ impl PrimitiveCreation {
     }
 }
 
+/// Not upstream (#17204): `curve`, a B-spline, with each end that lies within `tolerance`
+/// of the axis through `axis_base` along `axis` but off it put exactly on it (the end's
+/// control point, which is the end of a curve clamped there, moved to its foot on the axis,
+/// its weight kept). Within the B-rep's tolerance the end is on the axis for the body; left
+/// a hair off it (a sketch solver's 3e-11 mm), its surface of revolution's last row of
+/// control points is a circle of that radius, no pole, and the face's degenerate edge there
+/// is a gap in its loop. `None` for another curve, or when no end moves.
+///
+/// # Errors
+///
+/// Those of the curve's ends and control points.
+fn spline_ends_on_axis(
+    k: &Kernel,
+    curve: Option<&Curve>,
+    axis_base: Point3,
+    axis: Vec3,
+    tolerance: f64,
+) -> Result<Option<Curve>> {
+    use crate::nurbs::b_spline_curve::p2::ControlPointForm;
+    let Some(curve) = curve else {
+        return Ok(None);
+    };
+    let CurveKind::BSpline(spline) = curve.kind() else {
+        return Ok(None);
+    };
+    let ends = curve.ends(k)?;
+    let count = spline.nurb_ref()?.cpts().len();
+    let rational = spline
+        .nurb_ref()?
+        .cpts()
+        .first()
+        .is_some_and(|c| c.w != crate::nurbs::math::NOW);
+    let form = if rational {
+        ControlPointForm::EuclideanRational
+    } else {
+        ControlPointForm::NonRational
+    };
+    let mut moved: Option<BSplineCurve> = None;
+    for (end, index) in [(ends.start, Some(0)), (ends.end, count.checked_sub(1))] {
+        let Some(index) = index else {
+            continue;
+        };
+        let (dist, _) = line_point_distance(axis_base, axis, end);
+        if !(dist > 0.0 && dist <= tolerance) {
+            continue;
+        }
+        let (point, weight) = spline.control_point(form, index)?;
+        // the end is that control point only where the curve is clamped
+        if point.distance(end) > EFF_ZERO * (1.0 + end.max_dimension()) {
+            continue;
+        }
+        let foot = axis_base + line_closest_point(axis_base, axis, end) * axis;
+        let target = moved.get_or_insert_with(|| spline.clone());
+        target.set_control_point(form, index, foot, weight)?;
+    }
+    Ok(moved.map(Curve::from))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::curve::curve::Curve;
@@ -835,10 +901,11 @@ mod tests {
     }
 
     /// A dome turned a whole turn about z: a cubic Bezier from the pole on the axis down
-    /// to the rim at r 10, a line across the base and one up the axis. With the pole and
-    /// the axis line a hair past the axis (3.4e-11 mm on the far side, as a sketch
-    /// solver leaves them, #17204), well within the B-rep's tolerance, the body is the
-    /// one built with them on it: the surface of revolution's frame faces the profile.
+    /// to the rim at r 10, a line across the base and one up the axis. With the spline's
+    /// pole a hair past the axis (3.4e-11 mm on the far side, as a sketch solver leaves
+    /// it; SolidCraft puts the lines' ends on the axis, not a spline's, #17204), well
+    /// within the B-rep's tolerance, the body is the one built with the pole on the axis:
+    /// the surface of revolution's frame faces the profile.
     /// Before, the frame faced the pole's side, half a turn from the profile, and the
     /// check found the face's edges 10.7 mm off its surface.
     #[test]
@@ -863,14 +930,16 @@ mod tests {
             let nurb = NurbCurve::new(pw, 3, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]).unwrap();
             let profile = [
                 Curve::from(BSplineCurve::from_nurb(nurb, 3, false)),
-                segment([10.0, 0.0, 0.0], [x, 0.0, 0.0]),
-                segment([x, 0.0, 0.0], [x, 0.0, 5.0]),
+                segment([10.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
+                segment([0.0, 0.0, 0.0], [0.0, 0.0, 5.0]),
             ];
             let curves: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
             let (o, z) = (Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
-            let mut k = Kernel::default();
-            k.fixes.revolve_analytic_profile_faces = true;
-            k.fixes.revolve_nested_shells_as_cavities = true;
+            // with the fixes SolidCraft runs
+            let mut k = Kernel {
+                fixes: crate::kernel::UpstreamFixes::all(),
+                ..Kernel::default()
+            };
             let mut b = create_rotational_sweep(&mut k, &curves, o, z, 360.0, true).unwrap();
             let check = crate::topology::brep::validation::check_brep(
                 &mut k,
