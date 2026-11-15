@@ -462,3 +462,49 @@ fn dependent_sketch_on_extruded_corners_survives_parameter_jump_15324() {
         assert!(b.dist(Vec2::new(1.5, h)) < 1e-6, "Hoehe={h}: vertex 1 moved to {b:?}");
     }
 }
+
+/// #17229: a sweep round a closed path of lines and arcs makes a wall along each segment of the
+/// path, and every one of them is named, from the sweep's exact history, by the profile curve it
+/// is swept from. A vertex where two of those walls meet, far round the path from the profile,
+/// is projected into a sketch: when an upstream parameter makes the profile taller, the link
+/// finds that vertex by its name, where it went.
+#[test]
+fn a_projected_vertex_of_a_sweep_round_a_closed_path_follows_a_taller_profile() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Hoehe", "expression": "6 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    run(&mut s, "sketch.line", json!({"points": [[-22, -20], [22, -20]], "infer": false, "ids": ["l1"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [22, -12], "start": [22, -20], "end": [30, -12], "id": "a1"}));
+    run(&mut s, "sketch.line", json!({"points": [[30, -12], [30, 12]], "infer": false, "ids": ["l2"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [22, 12], "start": [30, 12], "end": [22, 20], "id": "a2"}));
+    run(&mut s, "sketch.line", json!({"points": [[22, 20], [-22, 20]], "infer": false, "ids": ["l3"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-22, 12], "start": [-22, 20], "end": [-30, 12], "id": "a3"}));
+    run(&mut s, "sketch.line", json!({"points": [[-30, 12], [-30, -12]], "infer": false, "ids": ["l4"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-22, -12], "start": [-30, -12], "end": [-22, -20], "id": "a4"}));
+    run(&mut s, "sketch.finish", json!({}));
+    // A 2 wide, Hoehe tall section square to l1 at its middle: world y -21..-19, z 0..Hoehe.
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -20, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Prof"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-1, 0], "p1": [1, "Hoehe"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let path = json!(["l1", "a1", "l2", "a2", "l3", "a3", "l4", "a4"]);
+    run(&mut s, "solid.sweep", json!({"sketch": "Prof", "path_sketch": "Path", "path": path, "operation": "new", "body_name": "Tube"}));
+    let faces = run(&mut s, "model.faces", json!({"body": "Tube"}));
+    for f in faces["faces"].as_array().unwrap() {
+        let name = f["name"].as_str().unwrap();
+        assert!(f["exact"] == json!(true) && name.contains(":side:"), "every wall named by its profile curve exactly: {f}");
+    }
+    // The outer top corner where the arc a2 meets the line l3, half way round from the profile.
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Top"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"vertex": [22, 21, 6], "body": "Tube"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert!(stored(&s).vertex_name.is_some(), "the projected vertex stores its name");
+    for h in [9.0, 16.0, 4.0] {
+        run(&mut s, "parameters.change", json!({"name": "Hoehe", "expression": format!("{h} mm")}));
+        assert_eq!(trouble(&s), "", "Hoehe {h}");
+        assert!(!link(&s).lost, "Hoehe {h}");
+        let st = s.model.state();
+        let sk = &st.sketch(s.doc.find_feature("Top").unwrap().id).unwrap().sketch;
+        let at = sk.points[sk.link_points(&sk.links[0].id)[0]].pos;
+        assert!(at.dist(Vec2::new(21.0, h)) < 1e-6, "Hoehe {h}: the vertex is at {at:?}");
+    }
+}
