@@ -1852,7 +1852,7 @@ impl<'target> FilletSession<'target> {
     /// per edge, the offset of the second edge use's surface (`radii` gives the first's).
     /// With a linear cross-section that is a chamfer with setbacks `radii[i]` and
     /// `second_radii[i]`. It runs the same `SetFilletParameters`, so the fork's vertex-fan
-    /// split (`fixes.fillet_corner_per_vertex_fan`) applies to it.
+    /// split (WR-665) applies to it.
     ///
     /// # Errors
     /// Those of [`FilletSession::prepare_per_edge_constant_radius`]; native invalid input

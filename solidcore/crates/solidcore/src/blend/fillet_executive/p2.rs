@@ -9,7 +9,7 @@
 //! | [`FilletExecutive::set_fillet_parameters`], [`FilletParameters`] | `SmFilletExecutive::SetFilletParameters` (edge pointers, per-edge parameters; the fork's `pOptSecondRadii`, `f653ac9`) |
 //! | `reset_parameter_state` (crate-private) | `SmFilletExecutive::SetFilletParameters` reset block |
 //! | `check_edges_are_in_brep` (private) | `SmFilletExecutive::CheckEdgesAreInBrep` |
-//! | [`FilletParametersAccess::parameters_split_blended_vertex_fans`] | the fork's `SmFilletExecutive::SplitBlendedVertexFans` (`e418750`, WR-665; with `fixes.fillet_corner_per_vertex_fan`) |
+//! | [`FilletParametersAccess::parameters_split_blended_vertex_fans`] | the fork's `SmFilletExecutive::SplitBlendedVertexFans` (`e418750`, WR-665) |
 //! | [`FilletParametersAccess::parameters_runs_on_across_seams`], [`RunOn`] | none (#2864: a picked edge's blend runs on across a seam's vertex) |
 //! | [`surface_surface_fillet`], [`SurfaceFilletOptions`] | `SmFilletExecutive::SurfaceSurfaceFillet` |
 //! | [`FilletExecutive::do_surface_filleting`] | `SmFilletExecutive::DoSurfaceFilleting` |
@@ -466,9 +466,9 @@ pub trait FilletParametersAccess<O: ClassObject + SolutionObject + Ord>:
     /// # Errors
     /// Object resolution failures.
     fn parameters_edge_is_live(&self, brep: O, edge: O) -> Result<bool>;
-    /// The fork's `SplitBlendedVertexFans` (tangency-labs/smlib `e418750`, WR-665; run only
-    /// with `fixes.fillet_corner_per_vertex_fan`): each filleted edge's start and end
-    /// vertex, once each and not one made here, split into one vertex per fan of faces
+    /// The fork's `SplitBlendedVertexFans` (tangency-labs/smlib `e418750`, WR-665): each
+    /// filleted edge's start and end vertex, once each and not one made here, split into
+    /// one vertex per fan of faces
     /// (`SmBrep::SplitVertexByFans`); the points of the vertices split, in order, for
     /// `JoinBlendedVertexFans`. Only an adapter over a live target can split; the default
     /// splits nothing.
@@ -720,11 +720,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         }
         let edges = edges.as_slice();
         // the fork's SplitBlendedVertexFans (WR-665, tangency-labs/smlib@e418750)
-        if k.fixes.fillet_corner_per_vertex_fan {
-            let brep = params.brep.ok_or_else(|| null!("the B-rep"))?;
-            let points = access.parameters_split_blended_vertex_fans(k, brep, edges)?;
-            self.fan_split_points.extend(points);
-        }
+        let brep = params.brep.ok_or_else(|| null!("the B-rep"))?;
+        let points = access.parameters_split_blended_vertex_fans(k, brep, edges)?;
+        self.fan_split_points.extend(points);
 
         let single_xsect_type = single(params.xsect_types.len(), num_filleted_edges);
         let single_radius_type = single(params.radius_types.len(), num_filleted_edges);

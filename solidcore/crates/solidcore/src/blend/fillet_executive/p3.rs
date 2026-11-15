@@ -740,8 +740,8 @@ pub struct FilletExecutive<O> {
     pub mitred_edges: Vec<O>,
     /// `m_vFanSplitPoints` (the fork's, WR-665, tangency-labs/smlib@e418750; cleared by
     /// `SetFilletParameters`): where a blended edge's vertex the body touches itself at
-    /// was split into one vertex per fan (`SplitBlendedVertexFans`, with
-    /// `fixes.fillet_corner_per_vertex_fan`), for `JoinBlendedVertexFans`.
+    /// was split into one vertex per fan (`SplitBlendedVertexFans`), for
+    /// `JoinBlendedVertexFans`.
     pub fan_split_points: Vec<Point3>,
     /// `m_vEarlierPassFaces` (the fork's, tangency-labs/smlib@9822462, smlib#130; empty
     /// from the constructor, kept by `SetFilletParameters`): the faces an earlier pass of
