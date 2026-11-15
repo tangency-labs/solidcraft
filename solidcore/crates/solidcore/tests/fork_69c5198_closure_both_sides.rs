@@ -30,6 +30,7 @@ use solidcore::math::Vec3;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::brep::{p3, p6};
 use solidcore::topology::edge::NotifyEnv;
+use solidcore::topology::edgeuse::p1 as edgeuse_p1;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::topology_traverser::{
     closure_traversal, closure_traversal_from_both_sides, Entity, Marks,
@@ -239,4 +240,44 @@ fn union_of_two_boxes_is_the_corner_polyhedron() {
     }
     expected.sort_unstable();
     assert_eq!(points, expected);
+}
+
+/// A broken shell: one edge use of the open box's bottom face taken out of its edge's
+/// edge use list, so it has no radial. Both searches fail on it (the fork's skipped it
+/// and answered), and `TestClosureSplitRegion` fails before adding a shell or region.
+#[test]
+fn a_missing_radial_fails_both_searches_before_any_split() {
+    let mut k = Kernel::default();
+    let mut b = open_box(&mut k);
+    let bottom = face_at_z(&b, 0.0);
+    let fu = b.face(bottom).unwrap().faceuse.unwrap();
+    let lu = b.faceuse(fu).unwrap().loopuses[0];
+    let broken = edgeuse_p1::loopuse_edgeuses(&b, lu).unwrap()[0];
+    let edge = b.edgeuse(broken).unwrap().edge.unwrap();
+    b.edge_mut(edge).unwrap().edgeuses.retain(|&e| e != broken);
+    assert_eq!(edgeuse_p1::radial(&b, broken).unwrap(), None);
+
+    let mut lock = MarkLock::new(std::slice::from_mut(&mut k.context), 0, ALL_MARKS).unwrap();
+    let old = closure_traversal(&mut k, &b, &mut Marks::default(), fu, &lock, None);
+    lock.release(std::slice::from_mut(&mut k.context)).unwrap();
+    assert!(old.is_err(), "the one-sided walk fails: {old:?}");
+    let new = closure_traversal_from_both_sides(&b, fu);
+    assert!(new.is_err(), "the two-sided search fails too: {new:?}");
+
+    let shells = b.shells().len();
+    let regions = b.regions().len();
+    let mut records = NotifyRecords::new();
+    let mut attributes = AttributeStore::default();
+    let key_of = original_key;
+    let mut env = NotifyEnv {
+        records: &mut records,
+        attributes: &mut attributes,
+        context: None,
+        key_of: &key_of,
+    };
+    let split =
+        p6::test_closure_split_region(&mut k, &mut b, &mut Marks::default(), &mut env, false, fu);
+    assert!(split.is_err(), "{split:?}");
+    assert_eq!(b.shells().len(), shells, "no shell added");
+    assert_eq!(b.regions().len(), regions, "no region added");
 }
