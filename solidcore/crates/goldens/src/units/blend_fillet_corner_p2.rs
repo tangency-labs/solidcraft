@@ -20,8 +20,8 @@
 //!   `AdjustTopology`) or hung (in `CreateExtendedSurface`) on every refused case. The
 //!   vertices an op makes are appended to the model's export in creation order on both
 //!   sides;
-//! - `analytic`: `MakeAnalyticCornerSurface` (its `SmBoolean`, a `SER` / `NER` status
-//!   read as `1`), on corners built for it (`gen_analytic`): a sphere octant of exact
+//! - `analytic`: `MakeAnalyticCornerSurface` (its `SmBoolean`; a `SER` / `NER` status,
+//!   which upstream reads as `1`, is `0`: no surface was added, WR-254), on corners built for it (`gen_analytic`): a sphere octant of exact
 //!   rational quarter arcs (one arc may be its chord), chamfers of lines (a plane or a
 //!   bilinear patch; a rail-rail arc on a target face is recomputed as the
 //!   intersection), four-sided rail-rail corners of two coaxial arcs and two lines (the

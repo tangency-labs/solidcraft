@@ -50,6 +50,24 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+/// How many halvings in a row of a span may leave its proved bound no better than half its
+/// parent's proved bound before the certificate stops (#16768). Only halvings between two
+/// finite bounds count; a span still unproved (its feet's enclosure failing on every piece)
+/// is left to the cap of 4096 stations, since how many halvings Krawczyk's proof needs
+/// depends on how far its contraction starts from one, which no order bounds. Derived from
+/// the order of the bound on a smooth span of length h: it is the Hermite remainder
+/// `h^4 / 384` times the jets' fourth s-derivative bounded over the span's pieces
+/// (`gn_certify_span`), order 4 in h. A halving divides `h^4` by 2^4 = 16, and the half
+/// starts from its parent's pieces, whose bounds hold over it, so its fourth-derivative
+/// bound is no larger: a proved smooth span's bound falls about 16-fold with each halving.
+/// The test asks only 2-fold (order 1), the slack being the row terms taken again about the
+/// half's own first station. Four halvings in a row that each fall short of order 1 have
+/// together gained less than 2^4 = 16, what one halving of the order-4 bound gains: the
+/// bound is then not following its order, so the section is degenerate there (an offset
+/// nearly collapsing to a curve, as where a ball's radius is close to a face's own radius
+/// of curvature), and halving further only multiplies the work, the stations doubling
+/// each round to the cap.
+const MAX_STALLED_HALVINGS: u32 = 4;
 const OP: &str = "blend::fillet_section::GnSectionFsg";
 const OP_BUILD: &str = "blend::fillet_section::GnSectionFsg::build";
 const OP_CERTIFY: &str = "blend::fillet_section::GnSectionFsg::certify";
@@ -1988,6 +2006,13 @@ impl GnSectionFsg {
         // a span's finest proved level, kept while it is over the target: its halves start
         // from its pieces (not the fork's, which certifies each half afresh)
         let mut levels: Vec<Option<Arc<CertifiedLevel>>> = vec![None; bounds.len()];
+        // for each span: its parent's bound (none for a span not halved from another) and how
+        // many halvings in a row, itself included once certified, left a bound no better than
+        // half the parent's
+        let mut parents: Vec<Option<f64>> = vec![None; bounds.len()];
+        let mut stalled: Vec<u32> = vec![0; bounds.len()];
+        // the halving rounds taken so far
+        let mut rounds = 0_u32;
         loop {
             let mut all = true;
             // a span's first level tried, where it inherits none (not the fork's, which
@@ -2026,6 +2051,23 @@ impl GnSectionFsg {
                     )?;
                     // the next span's first level: one coarser than this one's first proved
                     hint = reuse.first.map_or(0, |f| f.saturating_sub(1));
+                    if let (Some(&parent), Some(count)) = (parents.get(j), stalled.get_mut(j)) {
+                        // only a halving between proved (finite) bounds counts: an unproved span
+                        // is left to the cap on the stations, since how many halvings its proof
+                        // takes is not bounded by the bound's order
+                        let stalled_here = match parent {
+                            Some(p) if p.is_finite() && bj.is_finite() => *bj > 0.5 * p,
+                            _ => false,
+                        };
+                        *count = if stalled_here { *count + 1 } else { 0 };
+                        if *bj > target && *count >= MAX_STALLED_HALVINGS {
+                            // the halving did not converge: a typed failure, the rounds it took
+                            return Err(SolidError::NotConverged {
+                                operation: OP_CERTIFY,
+                                iterations: rounds,
+                            });
+                        }
+                    }
                     let within = *bj <= target;
                     *lj = if within {
                         None
@@ -2051,13 +2093,19 @@ impl GnSectionFsg {
             let mut next: Vec<GnStation> = Vec::new();
             let mut next_bounds: Vec<f64> = Vec::new();
             let mut next_levels: Vec<Option<Arc<CertifiedLevel>>> = Vec::new();
-            for ((pair, &bj), lj) in stations.windows(2).zip(&bounds).zip(&levels) {
+            let mut next_parents: Vec<Option<f64>> = Vec::new();
+            let mut next_stalled: Vec<u32> = Vec::new();
+            for (((pair, &bj), lj), &uj) in
+                stations.windows(2).zip(&bounds).zip(&levels).zip(&stalled)
+            {
                 k.check_cancelled(OP_CERTIFY)?;
                 let [a, b] = pair else { continue };
                 next.push(*a);
                 if bj <= target {
                     next_bounds.push(bj);
                     next_levels.push(None);
+                    next_parents.push(None);
+                    next_stalled.push(0);
                     continue;
                 }
                 let mid = 0.5 * (a.s + b.s);
@@ -2097,6 +2145,10 @@ impl GnSectionFsg {
                 next_bounds.push(-1.0);
                 next_levels.push(lj.clone());
                 next_levels.push(lj.clone());
+                next_parents.push(Some(bj));
+                next_parents.push(Some(bj));
+                next_stalled.push(uj);
+                next_stalled.push(uj);
             }
             if let Some(last) = stations.last() {
                 next.push(*last);
@@ -2104,6 +2156,9 @@ impl GnSectionFsg {
             stations = next;
             bounds = next_bounds;
             levels = next_levels;
+            parents = next_parents;
+            stalled = next_stalled;
+            rounds = rounds.saturating_add(1);
         }
         let mut bound = 0.0_f64;
         for &b in &bounds {

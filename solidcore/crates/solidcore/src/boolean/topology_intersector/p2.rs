@@ -53,8 +53,7 @@
 //!   not returned, except by `check_for_squeeze_vertices_into`, which appends to the
 //!   caller's lists as upstream does (a failure after the first conflict keeps its
 //!   appends). The `NotUsed` `bMakingManifoldSolid` of `EdgeEdgeIntersect` is kept.
-//! - **Opt-in (WR-527, #1526).** With `Kernel::fixes.boolean_skips_faces_apart`,
-//!   `IntersectTopology` skips a face pair whose face boxes are disjoint by the
+//! - **Not upstream (WR-527, #1526).** `IntersectTopology` skips a face pair whose face boxes are disjoint by the
 //!   intersection tolerance (the fork's tangency-labs/smlib@60b1c6a). It then visits,
 //!   for each face of the B-rep, only the faces of the other B-rep a box search
 //!   (`SpatialIndex`) finds not disjoint from its box, in ascending order (the fork's
@@ -116,6 +115,14 @@
 //!   `FixupSplitVertexPair` read the same value. The `sbRelateFaces` block of
 //!   `SetRelationships` is compiled out (`FALSE`); `SM_DEBUG_CODE` / `SM_USE_TBB`
 //!   blocks are not built upstream and not ported.
+//! - **Not upstream (#16935).** `CloseIntersectionLoop` tries first the unmated edges whose
+//!   far vertex ends the intersection loop too (it is mated and only one of its edges is),
+//!   then the others, each group in upstream's order. A gap lies between two ends of the
+//!   loop; an edge from one end to a vertex the loop already passes through leaves the
+//!   other end open and gives that vertex a third common edge. Upstream took the first
+//!   edge in the vertex's order: where a 5 mm round's cylinder grazed a 1 mm round and the
+//!   corner patch beside it within the tolerance, the gap at the corner was "closed" up the
+//!   round's tangent line, and the round's own end stayed open.
 //! - **Recursion.** None.
 
 use crate::curve::curve::p2::{Curve, CurveKind};
@@ -997,7 +1004,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     /// `CloseIntersectionLoop(pBrepVertex, rbMadeNewTopology, rDeletedVertices,
     /// rDeletedEdges)`: tries to close a gap in
     /// the intersection loop at a B-rep vertex mated to an other-B-rep vertex. For each
-    /// unmated edge of the vertex whose far vertex is mated: when the two mated
+    /// unmated edge of the vertex whose far vertex is mated, those whose far vertex ends the
+    /// loop too first (not upstream, #16935; see the module's Deviations): when the two mated
     /// vertices of the other B-rep share exactly one edge and the edge's midpoint drops
     /// onto it (within twice the larger mated-vertex distance), the two edges are
     /// related; else, when the edge's curve is coincident with the other B-rep
@@ -1049,8 +1057,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         deleted_vertices.clear();
         deleted_edges.clear();
 
-        // get all edges connected to target vertex
-        let brep_edges = brep.vertex_edges(brep_vertex)?;
+        // get all edges connected to target vertex, those to another end of the loop first
+        let brep_edges = self.loop_ends_first(brep, brep_vertex, false)?;
 
         // for every edge connected to target vertex
         for be in brep_edges {
@@ -1163,8 +1171,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // when no topology was added to m_pOther - see if other edges can be added to this
         // m_pBrep
         if !made_new_topology {
-            // get all edges connected to other vertex
-            let other_edges = brep.vertex_edges(other_vertex)?;
+            // get all edges connected to other vertex, those to another end of the loop first
+            let other_edges = self.loop_ends_first(brep, other_vertex, true)?;
 
             // for every edge connected to otherVertex
             for oe in other_edges {
@@ -1210,6 +1218,72 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         // all done
         Ok(made_new_topology)
+    }
+
+    /// The edges of `vertex` (of the other B-rep when `other_side`), in the vertex's order,
+    /// with those whose far vertex ends the intersection loop ([`Self::ends_loop`]) first.
+    /// Not upstream (#16935): see the module's Deviations.
+    ///
+    /// # Errors
+    ///
+    /// Those of the vertex and edge walks.
+    fn loop_ends_first(
+        &self,
+        brep: &impl IntersectorBrepP2<O>,
+        vertex: O,
+        other_side: bool,
+    ) -> Result<Vec<O>> {
+        let mut to_ends = Vec::new();
+        let mut others = Vec::new();
+        for e in brep.vertex_edges(vertex)? {
+            let far = brep.edge_other_vertex(e, Some(vertex))?;
+            let to_end = match far {
+                Some(v) if v != vertex => self.ends_loop(brep, v, other_side)?,
+                _ => false,
+            };
+            if to_end {
+                to_ends.push(e);
+            } else {
+                others.push(e);
+            }
+        }
+        to_ends.extend(others);
+        Ok(to_ends)
+    }
+
+    /// Whether `vertex` (of the other B-rep when `other_side`) ends an intersection loop: it is
+    /// mated, and it has one common edge, a closed edge counting twice (the count of
+    /// `SmMerge::MarkCommon`'s single vertices).
+    ///
+    /// # Errors
+    ///
+    /// Those of the vertex and edge walks.
+    fn ends_loop(
+        &self,
+        brep: &impl IntersectorBrepP2<O>,
+        vertex: O,
+        other_side: bool,
+    ) -> Result<bool> {
+        let mate = |x: O| {
+            if other_side {
+                self.brep_mate(Some(x))
+            } else {
+                self.other_mate(Some(x))
+            }
+        };
+        if mate(vertex).is_none() {
+            return Ok(false);
+        }
+        let mut count = 0_usize;
+        for e in brep.vertex_edges(vertex)? {
+            if mate(e).is_some() {
+                count += 1;
+            }
+            if brep.edge_other_vertex(e, Some(vertex))? == Some(vertex) {
+                count += 1;
+            }
+        }
+        Ok(count == 1)
     }
 
     /// `SM_CAST_PTR`: the mate when it is of `kind`, else null.
@@ -1491,7 +1565,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
         }
 
-        // Opt-in (WR-527, #1526/#1527): each face's bounding box, for skipping the pairs
+        // Not upstream (WR-527, #1526/#1527): each face's bounding box, for skipping the pairs
         // below that lie apart. A box that cannot be computed, or holds nothing, rules
         // nothing out.
         let face_boxes = |faces: &[O]| -> Result<Vec<Extent3d>> {
@@ -1511,17 +1585,14 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
             Ok(out)
         };
-        let skip_apart = k.fixes.boolean_skips_faces_apart;
-        let (boxes1, boxes2) = if skip_apart {
-            (face_boxes(&faces1)?, face_boxes(&faces2)?)
-        } else {
-            (Vec::new(), Vec::new())
-        };
+        let (boxes1, boxes2) = (face_boxes(&faces1)?, face_boxes(&faces2)?);
         // (the fork's tangency-labs/smlib@84a7998) the other B-rep's faces whose box may
         // lie within the tolerance of a face's box: a superset of the pairs the box test
         // below keeps, in ascending order. The pairs it leaves out reach nothing before
         // that test but lookups without effect (no intersection table is registered).
-        let pair_search = (skip_apart && self.intersection_table().is_none())
+        let pair_search = self
+            .intersection_table()
+            .is_none()
             .then(|| SpatialIndex::new(boxes2.iter().copied().map(Some)));
 
         // Finally, the Face-Face intersections.
@@ -1555,7 +1626,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // No existing SSI, check coincidence or intersection.
                 let tol = self.this_approx_tol_3d();
 
-                // Opt-in (WR-527): no work - faces farther apart than the intersection
+                // (WR-527) no work - faces farther apart than the intersection
                 // tolerance cannot meet
                 if let (Some(box1), Some(box2)) = (boxes1.get(ii), boxes2.get(jj)) {
                     if box1.are_disjoint(box2, tol) {

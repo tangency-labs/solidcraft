@@ -4,7 +4,8 @@
 //! `tests/step-regressions`, the import kernel cases and solidcore-step's fixtures) is read
 //! and written back through `step_export_bodies`. The written text's digest must be the one in
 //! [`DIGESTS`]. These digests were taken from the export as it was before the AP242 product layer
-//! moved into solidcore-step, so a passing run shows the move kept every byte. A small assembly
+//! moved into solidcore-step, except the torus-ring spline whose exact torus support is now
+//! proved and written analytically (#16297). A small assembly
 //! with names and a colour goes through `step_export_products` the same way.
 //!
 //! The written file is then read again: the same bodies, each with the same face count and its
@@ -48,7 +49,8 @@ fn fixtures(root: &std::path::Path) -> Vec<String> {
     out
 }
 
-/// (fixture, digest of its export) as written before the move, plus new fixtures.
+/// (fixture, digest of its export) as written before the move, plus new fixtures; the torus-ring spline
+/// is now an exact torus (#16297).
 #[rustfmt::skip]
 const DIGESTS: &[(&str, &str)] = &[
     ("solidcore/crates/solidcore-step/tests/fixtures/closed-spline-cylinder.step", "197c80fea864545e"),
@@ -83,7 +85,7 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/step-conformance/plate_100_holes.step", "414bd143a34716e6"),
     ("tests/step-conformance/sheet_disc.step", "a88c4d5661255edc"),
     ("tests/step-conformance/tiny_pin.step", "e86130e9cc19deff"),
-    ("tests/step-conformance/torus_ring_nurbs.step", "0c2c85a98751fe67"),
+    ("tests/step-conformance/torus_ring_nurbs.step", "fb58a511c48a933c"),
     ("tests/step-conformance/washer.step", "490ba83889e1002f"),
     ("tests/step-regressions/cylinder_rim_off_its_wall.step", "e07c2fdbef7cc0c6"),
     ("tests/step-regressions/cylinder_spline_rims.step", "609aa9a609b95308"),

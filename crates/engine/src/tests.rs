@@ -1153,6 +1153,7 @@ fn hostile_params_never_panic() {
         "size",
         "web",
         "clip",
+        "margin",
         "through_all",
         "depth",
         "dot_grid",
@@ -1176,6 +1177,12 @@ fn hostile_params_never_panic() {
                         // call behind one lock, so building the box for each of the ~3000 calls
                         // ran one after another on every thread (over half an hour in CI).
                         let mut start = Session::default();
+                        // Hostile plugin ids must never name packages in the user's real install folder.
+                        start.plugin_state.plugins_dir = Some(solidcraft_io::vfs::temp_dir().join(format!(
+                            "solidcraft-hostile-plugins-{}-{}",
+                            std::process::id(),
+                            id.replace('.', "-")
+                        )));
                         let _ = start.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10}));
                         let _ = start.execute("sketch.create", &json!({"plane": "XY"}));
                         let _ = start.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [5, 5]}));
@@ -1983,6 +1990,33 @@ fn measure_origin_planes_axes_and_points() {
     // The XY plane and the Z axis meet: nothing between them.
     let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "plane", "name": "XY"}, {"type": "axis", "name": "Z"}]}));
     assert!(r["distance_mm"].as_f64().unwrap().abs() < 1e-9, "{r}");
+    // An axis runs on for ever: it meets a plane past the ends of the segment it is drawn as.
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 2e6, "name": "Far"}));
+    let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "axis", "name": "Z"}, {"type": "plane", "name": "Far"}]}));
+    assert!(r["distance_mm"].as_f64().unwrap().abs() < 1e-9, "{r}");
+    // An axis parallel to a tilted plane, 5 off it: its ends' heights differ only by rounding,
+    // which is no crossing.
+    for (i, (a, b)) in [(0.3, 0.7), (1.1, -0.45), (0.123, 2.5), (-0.77, 0.31)].into_iter().enumerate() {
+        let k = (1.0f64 + a * a + b * b).sqrt();
+        let n = [-a / k, -b / k, 1.0 / k];
+        let o = [7.0 + 5.0 * n[0], -3.0 + 5.0 * n[1], 10.0 + 7.0 * a - 3.0 * b + 5.0 * n[2]];
+        run(
+            &mut s,
+            "construct.plane.three_points",
+            json!({"a": {"point": [0, 0, 10]}, "b": {"point": [1, 0, 10.0 + a]}, "c": {"point": [0, 1, 10.0 + b]}, "name": format!("Tilt{i}")}),
+        );
+        run(
+            &mut s,
+            "construct.axis.two_points",
+            json!({"a": {"point": o}, "b": {"point": [o[0] + 1.0, o[1] + 2.0, o[2] + a + 2.0 * b]}, "name": format!("Along{i}")}),
+        );
+        let r = run(
+            &mut s,
+            "inspect.measure",
+            json!({"items": [{"type": "axis", "name": format!("Along{i}")}, {"type": "plane", "name": format!("Tilt{i}")}]}),
+        );
+        assert!((r["distance_mm"].as_f64().unwrap() - 5.0).abs() < 1e-6, "tilt {a} {b}: {r}");
+    }
 }
 
 #[test]
@@ -2427,6 +2461,73 @@ fn pipe_scale_offset_bounding_and_materials() {
     assert!((m["bodies"][0]["mass_g"].as_f64().unwrap() - 10_000.0 * 2.7 / 1000.0).abs() < 1e-6, "{m}");
     assert_eq!(m["bodies"][0]["material"], "Aluminum");
     assert!(s.execute("material.assign", &json!({"bodies": ["Cube"], "material": "unobtainium"})).is_err());
+}
+
+/// A body stretched by a non-uniform `solid.scale` keeps its flat faces flat, so a boolean whose
+/// tool crosses a stretched side wall comes out right (#14409). The faces used to become free-form
+/// surfaces, and then a cylinder standing on the x side wall made the join and the cut fail SMLib's
+/// check and the intersect silently return the whole cylinder segment, twice the volume.
+#[test]
+fn booleans_across_the_walls_of_a_non_uniformly_scaled_body() {
+    let planes = |s: &Session, name: &str| {
+        let st = s.model.state();
+        let body = st.bodies.iter().find(|b| b.name == name).unwrap();
+        body.body.record().faces.iter().all(|f| matches!(f.surface, solidcore_record::brep::Surface::Plane { .. }))
+    };
+    let measured = |s: &mut Session, name: &str| run(s, "inspect.measure", json!({"bodies": [name]}))["total"]["volume_mm3"].as_f64().unwrap();
+    // A 20 x 20 x 10 box scaled by [a, b, c], and a cylinder r5 from z = -5 to 35, its axis at
+    // (x, 10 b): on the scaled box's x = 20 a wall for x = 20 a, through the middle for x = 10 a.
+    let combined = |factors: [f64; 3], x: f64, operation: &str| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "X"}));
+        run(&mut s, "solid.scale", json!({"bodies": ["X"], "factors": factors}));
+        assert!(planes(&s, "X"), "{factors:?}: the scaled box's faces are not all planes");
+        let base = [x, 10.0 * factors[1], -5.0];
+        run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 40, "base": base, "axis": "Z", "body_name": "Z"}));
+        run(&mut s, "solid.combine", json!({"target": "X", "tools": ["Z"], "operation": operation}));
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{factors:?} {operation}: {:?}", s.model.results);
+        let st = s.model.state();
+        let body = st.bodies.iter().find(|b| b.name == "X").unwrap();
+        assert!(body.body.validity().is_empty(), "{factors:?} {operation}: {:?}", body.body.validity());
+        let faces = body.body.face_count();
+        (measured(&mut s, "X"), faces)
+    };
+    // The cylinder through the middle crosses only the top and bottom.
+    let (got, _) = combined([1.0, 1.0, 2.0], 10.0, "join");
+    assert!(rel(got, 8000.0 + 500.0 * PI) < 1e-5, "{got}");
+    for factors in [[1.0, 1.0, 0.5], [1.0, 1.0, 2.0], [2.0, 1.0, 1.0], [1.0, 2.0, 1.0], [2.0, 2.0, 1.0], [1.5, 1.5, 0.4], [1.5, 1.5, 1.0]] {
+        let [a, b, c] = factors;
+        let (stretched, cylinder, inside) = (4000.0 * a * b * c, 1000.0 * PI, 125.0 * PI * c);
+        let x = 20.0 * a;
+        let (got, _) = combined(factors, x, "join");
+        assert!(rel(got, stretched + cylinder - inside) < 1e-5, "{factors:?} join: {got} vs {}", stretched + cylinder - inside);
+        let (got, faces) = combined(factors, x, "intersect");
+        assert!(rel(got, inside) < 1e-5, "{factors:?} intersect: {got} vs {inside}");
+        // A flat side, the wall (one face or two, by where the cylinder's seams fall), top and
+        // bottom; the whole cylinder segment that came out before had three.
+        assert!(faces >= 4, "{factors:?} intersect: {faces} faces, the flat side is missing");
+        let (got, _) = combined(factors, x, "cut");
+        assert!(rel(got, stretched - inside) < 1e-5, "{factors:?} cut: {got} vs {}", stretched - inside);
+    }
+    // An L prism extruded 12 and scaled to 24 tall joins a cylinder as the same prism extruded 24.
+    let l_prism = |distance: f64, factors: Option<[f64; 3]>| {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "L"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [40, 10], [10, 10], [10, 40], [0, 40]], "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "L", "distance": distance, "body_name": "X"}));
+        if let Some(factors) = factors {
+            run(&mut s, "solid.scale", json!({"bodies": ["X"], "factors": factors}));
+            assert!(planes(&s, "X"), "the scaled L prism's faces are not all planes");
+        }
+        run(&mut s, "solid.cylinder", json!({"radius": 6, "height": 30, "base": [8, 12, -5], "axis": "Z", "body_name": "Z"}));
+        run(&mut s, "solid.combine", json!({"target": "X", "tools": ["Z"], "operation": "join"}));
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "L prism {factors:?}: {:?}", s.model.results);
+        measured(&mut s, "X")
+    };
+    let (scaled, built) = (l_prism(12.0, Some([1.0, 1.0, 2.0])), l_prism(24.0, None));
+    assert!(rel(scaled, built) < 1e-6, "{scaled} vs {built}");
+    assert!(scaled > 700.0 * 24.0, "{scaled}");
 }
 
 /// Regression: deleting a pipe's path sketch left the pipe in the timeline ("unknown sketch").
@@ -5064,6 +5165,45 @@ fn fillet_edge_removed_by_a_larger_overflowing_round_is_noted() {
     assert_eq!(warning, "the edge at (0, 0, 10) was removed by the larger round, so it is not rounded");
 }
 
+/// #16768: a 50 x 35 x 5 plate with a boss 1 mm high, a circular segment (a chord on y = 5.5 and
+/// an arc over it), its arc-side top edge rounded at 1 mm. Rounding the flat side's top edge and
+/// the two short edges that run down from its ends (the arc round's edges on the flat wall) at 1
+/// mm asked a ball as large as the arc round's own radius to roll along the round, whose offset
+/// collapses to a curve: it failed with the bare status 1001. It is refused at once, saying
+/// why.
+fn segment_boss_with_arc_round() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 50, "width": 35, "height": 5}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 5], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.line", json!({"points": [[11, 5.5], [40.004310024546356, 5.5]]}));
+    run(
+        &mut s,
+        "sketch.arc.three_point",
+        json!({"start": [40.004310024546356, 5.5], "end": [11, 5.5], "through": [25.502155012273178, 13.007100059797995]}),
+    );
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 1, "operation": "join"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[25.502155, 13.0071, 6]], "radius": 1}));
+    s
+}
+
+#[test]
+fn a_round_as_large_as_the_round_it_runs_along_is_refused_not_failed() {
+    let flat_and_ends = json!([[25.502155, 5.5, 6], [11.419996686869673, 5.5, 5.748661225447015], [39.584311999041034, 5.5, 5.748656748207975]]);
+    // The flat edge alone builds at 1 mm (its round meets the wall's foot exactly).
+    let mut s = segment_boss_with_arc_round();
+    assert!(s.execute("solid.fillet", &json!({"edges": [[25.502155, 5.5, 6]], "radius": 1, "tangent_chain": false})).is_ok());
+    // With the two edges that run on from it, a ball of the arc round's radius cannot roll: refused,
+    // with the chain off and (the chain being those edges) on.
+    for chain in [false, true] {
+        let mut s = segment_boss_with_arc_round();
+        let picks = if chain { json!([[25.502155, 5.5, 6]]) } else { flat_and_ends.clone() };
+        let e = s.execute("solid.fillet", &json!({"edges": picks, "radius": 1, "tangent_chain": chain})).unwrap_err().to_string();
+        assert!(!e.contains("1001"), "chain {chain}: {e}");
+        assert!(e.contains("larger than the faces beside its edges allow"), "chain {chain}: {e}");
+    }
+}
+
 #[test]
 fn fillet_fit_reduce_uses_the_largest_radius_that_fits() {
     // #293: 3.5 is too large for the 6 mm end faces of a 14 x 6 x 10 box; reduce gives 3 (a full
@@ -5449,6 +5589,9 @@ fn an_older_pattern_of_several_bodies_opens_with_the_names_it_was_saved_with() {
     if let Some(pending) = file["format_pending"].as_array_mut() {
         pending.retain(|change| change != "pattern-names-by-source");
     }
+    // 0.42.0 folded the change into format 56, so a build before it wrote 55.
+    file["format"] = serde_json::Value::String(solidcraft_doc::format::format_string(55));
+    file.as_object_mut().unwrap().remove("format_pending");
     let pattern = file["features"].as_array_mut().unwrap().iter_mut().find(|f| f["name"] == "Pat").unwrap();
     pattern["body_names"] = json!(["Base (2)", "Base (3)", "Base (4)", "Post (2)", "Post (3)", "Post (4)"]);
     let doc = solidcraft_doc::Document::from_json(&file.to_string()).unwrap();

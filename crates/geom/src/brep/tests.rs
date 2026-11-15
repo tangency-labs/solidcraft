@@ -797,3 +797,25 @@ fn a_disc_scaled_and_sheared_is_a_plane_bounded_by_an_ellipse() {
     let mirror = [[-1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
     assert!(placement::mapped(&disc, &mirror).is_none());
 }
+
+/// A plane given by points keeps its UV coordinates and remains importable after successive
+/// rigid turns, just as a plane given by axes does. Its conic frame stays unit and square too.
+#[test]
+fn a_plane_through_points_stays_importable_after_successive_rigid_turns() {
+    let mut disc = one_face(
+        Surface::PlaneThrough { origin: [1., 2., 3.], u_point: [2., 2., 3.], v_point: [1., 3., 3.] },
+        [[-3., 3.], [-3., 3.]],
+        vec![(Curve::Circle { frame: a_frame(), radius: 2. }, [0., TAU], [0, 0])],
+        &[[3., 2., 3.]],
+        &[(0, true)],
+    );
+    let tilt = solidcore_ops::affine::rotation([0.; 3], [1., 0., 0.], 1.5e-6).unwrap();
+    disc = placement::moved(&disc, &placement::Rigid::of_matrix(&tilt).unwrap()).unwrap();
+    let step = solidcore_ops::affine::rotation([0.; 3], [0., 0., 1.], 1_f64.to_radians()).unwrap();
+    let step = placement::Rigid::of_matrix(&step).unwrap();
+    for deg in 1..=80 {
+        disc = placement::moved(&disc, &step).unwrap();
+        assert!(solidcore_ops::Body::from_record(&disc, true).is_ok(), "{deg} degrees");
+        assert_eq!(disc.faces[0].domain, [[-3., 3.], [-3., 3.]]);
+    }
+}

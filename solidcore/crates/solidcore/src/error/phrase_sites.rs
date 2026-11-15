@@ -614,7 +614,7 @@ const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/blend/fillet_corner/topology/end_smooth.rs", 8),
     ("solidcore/src/blend/fillet_corner/topology/join.rs", 19),
     ("solidcore/src/blend/fillet_corner/topology/mixed.rs", 9),
-    ("solidcore/src/blend/fillet_corner/topology/mixed_3x2.rs", 5),
+    ("solidcore/src/blend/fillet_corner/topology/mixed_3x2.rs", 4),
     ("solidcore/src/blend/fillet_corner/topology/nx1_end.rs", 1),
     ("solidcore/src/blend/fillet_corner/topology/swept_turn.rs", 8),
     ("solidcore/src/blend/fillet_custom_solver.rs", 20),

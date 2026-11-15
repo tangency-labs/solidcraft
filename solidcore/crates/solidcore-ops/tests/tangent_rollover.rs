@@ -503,6 +503,271 @@ fn a_round_past_a_side_running_into_a_boss_rolls_onto_the_boss() {
     }
 }
 
+/// The arm and boss with the boss standing (#15767 case 2, SolidCraft #15641's test9): the arm of
+/// [`arm_and_boss`] joined with the boss's cylinder, radius 18 about B = (-54, -90) and 20 tall,
+/// whose foot on the arm's top z = 5 is rounded 5 (the foot round: the torus of tube radius 5
+/// about the circle of radius 23 at z = 10 about B's axis, which touches the top along the
+/// contact circle of radius 23 at z = 5), then the arm's inner corner C = (-36, -65) rounded `r4`
+/// (the cylinder of radius `r4` about A = (-36 + r4, -65 - r4)). The arm's top then ends on
+/// x = -36 at the contact circle, at W = (-36, -90 + sqrt(205), 5), and the side x = -36 runs on
+/// past W into the foot round tangentially.
+fn arm_boss_and_foot_round(r4: f64) -> Body {
+    let boss = solidcore_ops::make_cylinder([-54.0, -90.0, 0.0], 18.0, 20.0).unwrap();
+    let b = boolean(arm_and_boss(), boss, BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    let foot = edge_at(&b, [-54.0, -72.0, 5.0]);
+    blend(&b, Blend::Round, &[foot], &[5.0], &[], Corners::Filled).unwrap();
+    let corner = edge_at(&b, [-36.0, -65.0, 2.5]);
+    blend(&b, Blend::Round, &[corner], &[r4], &[], Corners::Filled).unwrap();
+    b
+}
+
+/// W's y: the arm's top ends on x = -36 where it meets the contact circle, 18 from B's axis in x.
+fn top_end_on_side() -> f64 {
+    -90.0 + 205.0_f64.sqrt()
+}
+
+/// The rim of the arm's top on [`arm_boss_and_foot_round`], a smooth chain: its edges on y = -65,
+/// on the corner's round and on x = -36 (from the corner's round to W), then on from W the edge
+/// between x = -36 and the foot round, down to (-36, -90, 10). That last one is a plane-torus
+/// intersection, a spline fitted to it, found by its point halfway round the tube (23 - 5 / sqrt 2
+/// from B's axis) within its fit ([`edge_near`]).
+fn top_rim(b: &Body, r4: f64) -> Vec<usize> {
+    use std::f64::consts::FRAC_1_SQRT_2;
+    let rho = 23.0 - 5.0 * FRAC_1_SQRT_2;
+    [
+        [-15.5, -65.0, 5.0],
+        [
+            -36.0 + r4 - r4 * FRAC_1_SQRT_2,
+            -65.0 - r4 + r4 * FRAC_1_SQRT_2,
+            5.0,
+        ],
+        [-36.0, (-65.0 - r4 + top_end_on_side()) / 2.0, 5.0],
+        [
+            -36.0,
+            -90.0 + (rho * rho - 18.0 * 18.0).sqrt(),
+            10.0 - 5.0 * FRAC_1_SQRT_2,
+        ],
+    ]
+    .iter()
+    .map(|&p| edge_near(b, p))
+    .collect()
+}
+
+/// The ball of radius `d` with centre at (`x`, `y`) in plan that touches the foot round (the
+/// torus of tube radius 5 about the circle of radius 23 at z = 10 about B): its centre and its
+/// contact on the torus.
+fn ball_on_foot_round(x: f64, y: f64, d: f64) -> ([f64; 3], [f64; 3]) {
+    let (bx, by) = (-54.0, -90.0);
+    let rho = ((x - bx).powi(2) + (y - by).powi(2)).sqrt();
+    let reach = 5.0 + d;
+    let z = 10.0 - (reach * reach - (23.0 - rho).powi(2)).sqrt();
+    let q = [bx + 23.0 * (x - bx) / rho, by + 23.0 * (y - by) / rho, 10.0];
+    let c = [x, y, z];
+    let t = [
+        q[0] + 5.0 / reach * (c[0] - q[0]),
+        q[1] + 5.0 / reach * (c[1] - q[1]),
+        q[2] + 5.0 / reach * (c[2] - q[2]),
+    ];
+    (c, t)
+}
+
+fn edge_near(b: &Body, p: [f64; 3]) -> usize {
+    use solidcore::query::api_queries::edge_closest_point;
+    let (k, brep) = common::kernel_copy(b);
+    let q = solidcore::Vec3::new(p[0], p[1], p[2]);
+    let (i, d) = brep
+        .edge_list()
+        .iter()
+        .enumerate()
+        .map(|(i, &e)| {
+            (
+                i,
+                edge_closest_point(&k, &brep, e, q)
+                    .unwrap()
+                    .closest
+                    .distance,
+            )
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .unwrap();
+    assert!(d < 1e-4, "no edge near {p:?}: {d}");
+    i
+}
+
+/// Whether the top's contact x = -36 - d of the ball rounding the rim `d` at V = (-36, -65 - r4),
+/// where the corner's round meets x = -36, lies inside the contact circle: (18 - d)^2 + (25 - r4)^2
+/// < 23^2. Along x = -36 the contact only nears B from V on, so the top is then narrower than the
+/// round the whole length from V to W.
+fn wholly_past(r4: f64, d: f64) -> bool {
+    (18.0 - d).powi(2) + (25.0 - r4).powi(2) < 23.0 * 23.0
+}
+
+/// The rim of the arm's top rounded `d` along [`top_rim`] on [`arm_boss_and_foot_round`]: built,
+/// valid at the full check, and its rails the closed forms, within the body's tolerance (each
+/// rail is a curve fitted to the ball's traced contacts): on the corner's round, the ball's
+/// centre r4 + d from A, before the top's contact (straight above it) meets the contact circle,
+/// its contacts on the top and on the corner's round, r4 from A. Where [`wholly_past`], also
+/// that contact meeting the contact circle, and on from there to V, and along x = -36 from V to
+/// W, the ball's contacts on the foot round ([`ball_on_foot_round`]) and on the corner's round
+/// or x = -36. (Elsewhere the rail along x = -36 rolls onto the foot round partway, in the
+/// trace's own rollover: the foot round's edge's round runs on past W to where the top's contact
+/// meets the contact circle. Its rail there lies about 1e-4 from the closed form, as before this
+/// rollover was added, and is not checked here.) No volume: the round's faces on the foot round
+/// bound no closed-form solid.
+///
+/// The model is built with the corpus's fix set ([`fixes`]; its foot round fails without it),
+/// the rim's round with that set (`corpus`) or with none, solidcore's default. Without the
+/// corpus's fixes the corner's round's piece on the foot round, which the trace's own rollover
+/// traces again from the crossing (`ProcessRollOver`), lies up to about 1.2e-4 from the closed
+/// form (r4 10, d 2) and is not checked; the rail rolled before the trace along x = -36 is.
+fn assert_rim_round_builds(r4: f64, d: f64, corpus: bool) {
+    use solidcore::query::api_queries::edge_closest_point;
+    use std::f64::consts::{FRAC_PI_2, PI};
+    fixes();
+    let b = arm_boss_and_foot_round(r4);
+    let rim = top_rim(&b, r4);
+    if !corpus {
+        session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
+    }
+    let result = blend(&b, Blend::Round, &rim, &[d], &[], Corners::Filled);
+    fixes();
+    result.unwrap_or_else(|err| panic!("r4 {r4} d {d} corpus {corpus}: {err:?}"));
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "r4 {r4} d {d} corpus {corpus}: {report}");
+    let (k, brep) = common::kernel_copy(&b);
+    let tolerance = brep.tolerance();
+    let on_rail = |p: [f64; 3], what: &str| {
+        let q = solidcore::Vec3::new(p[0], p[1], p[2]);
+        let distance = brep
+            .edge_list()
+            .iter()
+            .map(|&e| {
+                edge_closest_point(&k, &brep, e, q)
+                    .unwrap()
+                    .closest
+                    .distance
+            })
+            .fold(f64::INFINITY, f64::min);
+        assert!(
+            distance < tolerance,
+            "r4 {r4} d {d} corpus {corpus}: {what} {p:?} is {distance} from the nearest edge \
+             (tolerance {tolerance})"
+        );
+    };
+    // along x = -36, from V to W
+    if wholly_past(r4, d) {
+        let v = -65.0 - r4;
+        let w = top_end_on_side();
+        for f in [0.1, 0.5, 0.9] {
+            let y = v + (w - v) * f;
+            let (c, t) = ball_on_foot_round(-36.0 - d, y, d);
+            on_rail(t, "the contact on the foot round");
+            on_rail([-36.0, y, c[2]], "the contact on x = -36");
+        }
+    }
+    // on the corner's round: the top's contact A + (r4 + d) u(th) at z = 5 meets the contact
+    // circle where |A - B + (r4 + d) u|^2 = 23^2, that is m cos(th - phi) = (23^2 - m^2 -
+    // (r4 + d)^2) / (2 (r4 + d)), with m and phi A - B's length and angle
+    let (ax, ay) = (-36.0 + r4, -65.0 - r4);
+    let reach = r4 + d;
+    let (px, py) = (ax + 54.0, ay + 90.0);
+    let m = (px * px + py * py).sqrt();
+    let cosine = (23.0 * 23.0 - m * m - reach * reach) / (2.0 * reach * m);
+    let cross = py.atan2(px) + cosine.acos();
+    assert!(
+        cross > FRAC_PI_2 && (cross < PI) == wholly_past(r4, d),
+        "r4 {r4} d {d}: crossing at {cross}"
+    );
+    let along = |th: f64, r: f64| (ax + r * th.cos(), ay + r * th.sin());
+    let before = (FRAC_PI_2 + cross.min(PI)) / 2.0;
+    let (x, y) = along(before, reach);
+    on_rail([x, y, 5.0], "the contact on the top");
+    let (x, y) = along(before, r4);
+    on_rail([x, y, 5.0 - d], "the contact on the corner's round");
+    if wholly_past(r4, d) {
+        let (x, y) = along(cross, reach);
+        on_rail([x, y, 5.0], "the crossing of the contact circle");
+    }
+    // the corner's round's piece on the foot round, traced in the trace's own rollover
+    // (`ProcessRollOver`): checked with the corpus's fixes only
+    if wholly_past(r4, d) && corpus {
+        for f in [0.25, 0.5, 0.75] {
+            let th = cross + (PI - cross) * f;
+            let (x, y) = along(th, reach);
+            let (c, t) = ball_on_foot_round(x, y, d);
+            on_rail(t, "the contact on the foot round");
+            let (x, y) = along(th, r4);
+            on_rail([x, y, c[2]], "the contact on the corner's round");
+        }
+    }
+}
+
+/// #15767 case 2: where [`wholly_past`], the round's rail on the arm's top along x = -36 lies off
+/// the top the whole length, past the foot round's smooth edge; it is rolled over onto the foot
+/// round before the trace, and the corner's round's rail rolls onto the foot round where it
+/// meets the contact circle, joining it at V. Before, with the corpus's fixes, it was refused
+/// as having no room after the trace ([`Error::NoRoom`], or [`Error::TooLarge`] with its rail
+/// leaving its face; SolidCraft reports the fit 1.476 at r4 = 9), and without them it failed in
+/// the trace's rollover (upstream's unimplemented tangent case, status 1001).
+#[test]
+fn a_rim_round_whose_rail_lies_wholly_on_the_foot_round_rolls_onto_it() {
+    for (r4, d) in [(9.0, 1.6), (9.0, 2.0), (9.0, 2.5), (10.0, 1.4), (10.0, 2.0)] {
+        assert!(wholly_past(r4, d), "r4 {r4} d {d}");
+        for corpus in [true, false] {
+            assert_rim_round_builds(r4, d, corpus);
+        }
+    }
+}
+
+/// Controls: where the top's contact at V lies outside the contact circle, the rail stays on the
+/// top at V and rolls onto the foot round partway along x = -36 (the trace's own rollover), as
+/// before. (8, 2.5) is the limit: 15.5^2 + 17^2 = 529.25, a quarter over 23^2.
+#[test]
+fn a_rim_round_partly_on_the_top_rolls_onto_the_foot_round_partway() {
+    for (r4, d) in [(8.0, 2.0), (8.0, 2.5), (9.0, 1.4)] {
+        assert!(!wholly_past(r4, d), "r4 {r4} d {d}");
+        for corpus in [true, false] {
+            assert_rim_round_builds(r4, d, corpus);
+        }
+    }
+}
+
+/// A real miss between the sections that propose the rollover (#15767 review): the foot round
+/// is cut by a slot 0.04 wide and 2 deep, from the top z = 5 up through the foot round, across
+/// x = -38.6 to -36.3 at y = `ys`, halfway between two of the 17 sections along x = -36 (0.105
+/// apart at r4 = 9), so its floor is the top reaching under the ball's contact x = -38. At every
+/// section the contact lies off the top and the foot round carries the ball, and the rail is
+/// rolled onto the foot round; in the slot the foot round is cut away, and the rail rolled onto
+/// it crosses the slot's edges. It is not proved on the foot round
+/// ([`RoomReason::RailLeavesFace`]'s refusal, which without the corpus's fixes reads as a rail
+/// leaving its face without the cliff overflow fix). Without that proof the blend failed later,
+/// in the trace's rollover, with status 1001; with the corpus's fixes it fails before the trim.
+#[test]
+fn a_rim_round_whose_top_reaches_the_contact_between_sections_is_refused() {
+    let r4 = 9.0;
+    let d = 2.0;
+    let (v, w) = (-65.0 - r4, top_end_on_side());
+    let step = (v - w) / 16.0;
+    let ys = v - 8.5 * step;
+    let width = 0.04;
+    assert!(width < step / 2.0, "the slot lies between two sections");
+    fixes();
+    let b = arm_boss_and_foot_round(r4);
+    let slot = make_box([-38.6, ys - width / 2.0, 5.0], [2.3, width, 2.0]).unwrap();
+    let b = boolean(b, slot, BooleanOp::Subtract).unwrap().unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    let rim = top_rim(&b, r4);
+    session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
+    let result = blend(&b, Blend::Round, &rim, &[d], &[], Corners::Filled);
+    fixes();
+    match result {
+        Err(Error::Unsupported(reason)) if reason.contains("rail leaves its face") => {}
+        other => panic!("the slot between the sections: {other:?}"),
+    }
+}
+
 /// The largest round at C that builds on the arm and boss, in closed form. The ball touches
 /// y = -65 and rolls on the boss: its centre is at (x, -65 - r), 18 + r from B = (-54, -90), so
 /// (x + 54)^2 + (r - 25)^2 = (18 + r)^2, that is (x + 54)^2 = 86 r - 301, and its contact on
@@ -949,5 +1214,367 @@ fn a_round_in_the_sliver_below_the_cutoff_builds_its_end_cap() {
         );
         volume = after;
         assert_b27_rails_on_faces(&input, &made, r, 4e-5);
+    }
+}
+
+/// [`arm_boss_and_foot_round`]'s body before its corner round: the arm and the 20 tall boss,
+/// the boss's foot on the arm's top rounded 5, built with the corpus's fix set. The foot round
+/// runs on past the arm's side x = -36 at the foot edge's end (-36, -90, 5): the side's plane
+/// cuts it off, so the side carries a lobe above the top z = 5, between the tangent edge
+/// x = -36, y = -90 (up to z = 10) and the plane-torus edge from W = (-36, -90 + sqrt 205, 5)
+/// up to (-36, -90, 10). The top's edge on the side runs from C's top (-36, -65, 5) to W, and
+/// W's edge between the top and the foot round (the contact circle, radius 23 about B) leaves W
+/// back towards y = -65.
+fn arm_boss_foot_only() -> Body {
+    fixes();
+    let boss = solidcore_ops::make_cylinder([-54.0, -90.0, 0.0], 18.0, 20.0).unwrap();
+    let b = boolean(arm_and_boss(), boss, BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    let foot = edge_at(&b, [-54.0, -72.0, 5.0]);
+    blend(&b, Blend::Round, &[foot], &[5.0], &[], Corners::Filled).unwrap();
+    b
+}
+
+/// The arm's inner corner C = (-36, -65) rounded `r4` alone on [`arm_boss_foot_only`] (test9's
+/// Fillet4 with its Fillet3 present), with the corpus's fix set (`corpus`) or none: built,
+/// valid at the full check, its rails the lines along z through the ball's contacts
+/// (-36 + r4, -65) on y = -65 and (-36, -65 - r4) on the side x = -36, and its volume the
+/// input's plus the round's section r4^2 (1 - pi / 4) times the arm's height 5 (the notch it
+/// fills is empty up to z = 5 and the round removes nothing). Past r4 = 25 - sqrt 205 (10.68)
+/// the side's rail reaches z = 5 past W, inside the side's lobe under the foot round: its end
+/// cap on z = 5 then has an edge on the side's plane from the rail's end to W, which is
+/// checked too.
+fn assert_corner_round_under_foot_round_builds(r4: f64, corpus: bool) {
+    use solidcore::query::api_queries::edge_closest_point;
+    let b = arm_boss_foot_only();
+    let before = b.volume(1e-9).unwrap();
+    let e = edge_at(&b, [-36.0, -65.0, 2.5]);
+    if !corpus {
+        session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
+    }
+    let result = blend(&b, Blend::Round, &[e], &[r4], &[], Corners::Filled);
+    fixes();
+    result.unwrap_or_else(|err| panic!("r4 {r4} corpus {corpus}: {err:?}"));
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "r4 {r4} corpus {corpus}: {report}");
+    let (k, brep) = common::kernel_copy(&b);
+    let on_edge = |p: [f64; 3]| {
+        let q = solidcore::Vec3::new(p[0], p[1], p[2]);
+        brep.edge_list().iter().any(|&e| {
+            edge_closest_point(&k, &brep, e, q)
+                .unwrap()
+                .closest
+                .distance
+                < 1e-7
+        })
+    };
+    for (x, y) in [(-36.0 + r4, -65.0), (-36.0, -65.0 - r4)] {
+        for z in [0.5, 2.5, 4.5] {
+            assert!(
+                on_edge([x, y, z]),
+                "r4 {r4} corpus {corpus}: no rail through ({x}, {y}, {z})"
+            );
+        }
+    }
+    let w = top_end_on_side();
+    if -65.0 - r4 < w {
+        let y = (-65.0 - r4 + w) / 2.0;
+        assert!(
+            on_edge([-36.0, y, 5.0]),
+            "r4 {r4} corpus {corpus}: no cap edge through (-36, {y}, 5)"
+        );
+    }
+    let after = b.volume(1e-9).unwrap();
+    let expected = before + 5.0 * r4 * r4 * (1.0 - PI / 4.0);
+    assert!(
+        (after - expected).abs() < 1e-6,
+        "r4 {r4} corpus {corpus}: volume {after}, expected {expected}"
+    );
+}
+
+/// #15767's band with the foot round (test9's Fillet4 alone, with Fillet3 present): past
+/// r4 = 25 - sqrt 205 (10.68) the round's rail on the side x = -36 meets the top's plane z = 5
+/// past the top's edge on the side, which ends at W where the foot round's contact circle
+/// turns back from it, so the rail ends inside the side's lobe under the foot round. Before,
+/// with the corpus's fixes the end corner failed (status 1001), and without them it was
+/// refused, naming 10.68. Up to r4 = 25, where the rail reaches the side's tangent edge into
+/// the boss.
+#[test]
+fn a_corner_round_whose_rail_ends_past_the_top_under_the_foot_round_builds() {
+    for r4 in [10.8, 12.0, 15.0, 20.0, 24.0] {
+        assert!(-65.0 - r4 < top_end_on_side());
+        for corpus in [true, false] {
+            assert_corner_round_under_foot_round_builds(r4, corpus);
+        }
+    }
+}
+
+/// Controls: below r4 = 25 - sqrt 205 (10.68) the rail on the side meets z = 5 on the top's
+/// edge, short of W, and the round builds as before, with the same closed forms.
+#[test]
+fn a_corner_round_whose_rail_ends_on_the_top_s_edge_builds() {
+    for r4 in [8.0, 10.0, 10.6, CORNER_ROUND_REACHES_W - 1e-3] {
+        assert!(-65.0 - r4 > top_end_on_side());
+        for corpus in [true, false] {
+            assert_corner_round_under_foot_round_builds(r4, corpus);
+        }
+    }
+}
+
+/// The radius at which the corner round's rail on the side x = -36 meets z = 5 at W:
+/// -65 - r4 = -90 + sqrt 205.
+const CORNER_ROUND_REACHES_W: f64 = 25.0 - 14.317_821_063_276_353;
+
+/// The corner round `r4` on [`arm_boss_foot_only`] (or on `b`), with the corpus's fix set
+/// (`corpus`) or none: its result, the fix set restored after.
+fn corner_round(b: &Body, r4: f64, corpus: bool) -> Result<(), Error> {
+    let e = edge_at(b, [-36.0, -65.0, 2.5]);
+    if !corpus {
+        session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
+    }
+    let result = blend(b, Blend::Round, &[e], &[r4], &[], Corners::Filled);
+    fixes();
+    result.map(|_| ())
+}
+
+/// Next to r4 = 25 - sqrt 205, where the rail meets z = 5 at W, main's outcome stands:
+/// - 1e-3 past it, R lies past W by 1e-3 but within the body's tolerance of the side's edge
+///   on the foot round, which leaves W tangent to the top's edge (the side's lobe is thinner
+///   than the tolerance there): R is not inside the side, the turned-back end is not taken,
+///   and the rounds are refused as crossing at R, as on main;
+/// - 5e-6 past it, within the body's tolerance (1e-5), R is not past W: the rail ends on the
+///   top's edge as on main, and the round builds valid (its volume, MEASURED, 1.4e-5 from the
+///   closed form, which the end at W within the tolerance does not bound).
+#[test]
+fn a_corner_round_whose_rail_meets_the_top_next_to_w_keeps_main_s_outcome() {
+    let w = top_end_on_side();
+    assert!((-65.0 - CORNER_ROUND_REACHES_W - w).abs() < 1e-12);
+    for corpus in [true, false] {
+        let r4 = CORNER_ROUND_REACHES_W + 1e-3;
+        match corner_round(&arm_boss_foot_only(), r4, corpus) {
+            Err(Error::RoundsCross { .. }) => {}
+            other => panic!("r4 {r4} corpus {corpus}: {other:?}"),
+        }
+        let r4 = CORNER_ROUND_REACHES_W + 5e-6;
+        let b = arm_boss_foot_only();
+        corner_round(&b, r4, corpus).unwrap_or_else(|e| panic!("r4 {r4} corpus {corpus}: {e:?}"));
+        let report = b.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "r4 {r4} corpus {corpus}: {report}");
+    }
+}
+
+/// A real miss next to the accepted case: [`arm_boss_foot_only`] with a hole 1 x 1 through the
+/// side round R = (-36, -80, 5), from x = -37 to -30, so the rail of the corner round r4 = 15
+/// meets z = 5 past W but off the side (in the hole), and the hole's edges on the side cross
+/// the cap edge's place from W to R. The turned-back end is not taken, and main's outcome
+/// stands: refused, with the corpus's fixes as its rail leaving its face (fit 14.49), without
+/// them naming 10.68, the closed form less the fit margin (MEASURED 1e-5). MEASURED: with the membership conditions (R inside the side, no edge
+/// crossing W to R) removed, the turned-back end is taken and the round without the corpus's
+/// fixes fails with status 1001 instead.
+#[test]
+fn a_corner_round_whose_rail_ends_past_w_off_the_side_is_refused_as_on_main() {
+    let r4 = 15.0;
+    let b = arm_boss_foot_only();
+    let hole = make_box([-37.0, -80.5, 4.5], [7.0, 1.0, 1.0]).unwrap();
+    let b = boolean(b, hole, BooleanOp::Subtract).unwrap().unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    assert!(-65.0 - r4 < top_end_on_side());
+    match corner_round(&b, r4, true) {
+        Err(Error::TooLarge {
+            why: Some(RoomReason::RailLeavesFace),
+            ..
+        }) => {}
+        other => panic!("corpus: {other:?}"),
+    }
+    match corner_round(&b, r4, false) {
+        Err(Error::TooLarge {
+            size, why: None, ..
+        }) => assert!(
+            size < CORNER_ROUND_REACHES_W && size > CORNER_ROUND_REACHES_W - 1e-4,
+            "no fixes: fit {size}, the closed form {CORNER_ROUND_REACHES_W} less the fit margin"
+        ),
+        other => panic!("no fixes: {other:?}"),
+    }
+}
+
+/// A real miss of the segment certificate alone: [`arm_boss_foot_only`] with a slot 1 x 1
+/// through the side, y -78.5 to -77.5, z 4.5 to 5.5, from x = -37 to -30, between W
+/// (y -75.68) and the rail's end R = (-36, -80, 5) of the corner round r4 = 15. R stays inside
+/// the side, but the slot's edges on the side cross the cap edge's place from W to R, so the
+/// turned-back end is not taken and main's outcome stands: without the corpus's fixes
+/// refused, naming 10.68 (the closed form less the fit margin); with them it fails as on main
+/// (status 1001, not asserted beyond failing). MEASURED: with only the certificate removed,
+/// the turned-back end is taken and the round without the corpus's fixes fails with status
+/// 1001 instead.
+#[test]
+fn a_corner_round_whose_cap_edge_crosses_a_slot_in_the_side_is_refused_as_on_main() {
+    let r4 = 15.0;
+    let b = arm_boss_foot_only();
+    let slot = make_box([-37.0, -78.5, 4.5], [7.0, 1.0, 1.0]).unwrap();
+    let b = boolean(b, slot, BooleanOp::Subtract).unwrap().unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    let w = top_end_on_side();
+    assert!(
+        -65.0 - r4 < -78.5 && -77.5 < w,
+        "the slot lies between W and R"
+    );
+    assert!(corner_round(&b, r4, true).is_err(), "corpus: built");
+    match corner_round(&b, r4, false) {
+        Err(Error::TooLarge {
+            size, why: None, ..
+        }) => assert!(
+            size < CORNER_ROUND_REACHES_W && size > CORNER_ROUND_REACHES_W - 1e-4,
+            "no fixes: fit {size}, the closed form {CORNER_ROUND_REACHES_W} less the fit margin"
+        ),
+        other => panic!("no fixes: {other:?}"),
+    }
+}
+
+/// Edge 28 of `b27` rounded past the R3 round's own radius (3.5 and 4): the ball does not fit
+/// the R3 round, and the irregular-ball refusal used to name 2.99 (the round's radius less the
+/// fit margin), at which every ball on the edge's faces still lies past the End on x = 0 (2.99
+/// is refused there). The refusal now names the smaller of the two, the past-an-end cutoff
+/// less the fit margin, and that size builds: a valid solid, smaller than the input, its rails
+/// on the faces it rolls on.
+#[test]
+fn an_irregular_ball_refusal_names_the_past_an_end_size_when_that_is_smaller() {
+    let want = b27_edge_28_cutoff() - B27_FIT_MARGIN;
+    // the irregular ball's own size: the R3 round's radius less the fit margin
+    let irregular = 3.0 - B27_FIT_MARGIN;
+    let mut named = Vec::new();
+    for r in [3.5, 4.0] {
+        match b27_edge_28(r) {
+            Err(Error::TooLarge { size, why, .. }) => {
+                assert_eq!(why, Some(RoomReason::BallDoesNotFit), "r {r}");
+                assert!((size - want).abs() <= 1e-9, "r {r}: {size} against {want}");
+                assert!(size < irregular, "r {r}: {size} not below {irregular}");
+                named.push(size);
+            }
+            Err(e) => panic!("r {r}: {e:?}"),
+            Ok(_) => panic!("r {r}: built"),
+        }
+    }
+    let (input, _) = b27();
+    let before = input.volume(1e-9).unwrap();
+    let size = named[0];
+    let made = b27_edge_28(size).unwrap_or_else(|e| panic!("r {size}: {e:?}"));
+    assert!(made.check(CheckLevel::All).unwrap().is_valid(), "r {size}");
+    let after = made.volume(1e-9).unwrap();
+    assert!(
+        after > 0.0 && after < before,
+        "r {size}: {after} of {before}"
+    );
+    assert_b27_rails_on_faces(&input, &made, size, 1e-5);
+}
+
+/// The plane of the oblique end cut in [`obliquely_cut_bar`]: `2x + y - 2z = -12`, its unit
+/// normal (2, 1, -2) / 3 pointing out of the bar.
+const CUT: ([f64; 3], f64) = ([2.0 / 3.0, 1.0 / 3.0, -2.0 / 3.0], -4.0);
+
+/// A bar x in [0, 6], z in [0, 7.5] along y from -30, its rim x = 0, z = 7.5 rounded R3 (the
+/// cylinder about x = 3, z = 4.5 along y, between its tangent edges x = 0, z = 4.5 and x = 3,
+/// z = 7.5), its end cut off by the plane [`CUT`] (the half-space beyond removed). The cut
+/// meets the R3 round in an ellipse arc from (0, -3, 4.5) to (3, -3, 7.5) that bends back on
+/// itself: it reaches y = -0.515 at 135 degrees about the axis.
+fn obliquely_cut_bar() -> Body {
+    use solidcore_ops::affine::{rotation, then, translation};
+    fixes();
+    let bar = make_box([0.0, -30.0, 0.0], [6.0, 40.0, 7.5]).unwrap();
+    let rim = edge_at(&bar, [0.0, 0.0, 7.5]);
+    blend(&bar, Blend::Round, &[rim], &[3.0], &[], Corners::Filled).unwrap();
+    // a box whose face y = 0 turns onto the cut's plane: (0, 1, 0) onto the normal n about
+    // (0, 1, 0) x n, then out along n to the plane
+    let (n, d) = CUT;
+    let cutter = make_box([-60.0, 0.0, -60.0], [120.0, 120.0, 120.0]).unwrap();
+    let turn = rotation([0.0; 3], [n[2], 0.0, -n[0]], n[1].acos()).unwrap();
+    let out = translation([n[0] * d, n[1] * d, n[2] * d]).unwrap();
+    cutter.transform(&then(&turn, &out).unwrap()).unwrap();
+    boolean(bar, cutter, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+/// The index of the edge of `b` passing within 1e-6 of `p`.
+fn edge_through(b: &Body, p: [f64; 3]) -> usize {
+    use solidcore::query::api_queries::{edge_closest_point, get_edges};
+    let (k, brep) = common::kernel_copy(b);
+    let q = solidcore::math::Vec3::new(p[0], p[1], p[2]);
+    get_edges(&brep)
+        .unwrap()
+        .iter()
+        .position(|&e| {
+            edge_closest_point(&k, &brep, e, q)
+                .unwrap()
+                .closest
+                .distance
+                <= 1e-6
+        })
+        .unwrap()
+}
+
+/// The ball of radius r touching the R3 round of [`obliquely_cut_bar`] at angle t about its
+/// axis and the cut's plane from inside the bar: its centre lies on the radial line at 3 - r
+/// from the axis, and r inside the plane, `n . c = d - r`.
+fn cut_bar_ball(r: f64, t: f64) -> [f64; 3] {
+    let (n, d) = CUT;
+    let (x, z) = (3.0 + (3.0 - r) * t.cos(), 4.5 + (3.0 - r) * t.sin());
+    [x, (d - r - n[0] * x - n[2] * z) / n[1], z]
+}
+
+/// The crease's End planes, in closed form: at its end V on x = 0 (t = 180 degrees) and its
+/// end W on z = 7.5 (t = 90), each through the end, square to the crease there, signed
+/// positive into the edge's span. The crease is (3 + 3 cos t, y(t), 4.5 + 3 sin t) with
+/// y(t) = -12 - 2 x + 2 z; into the span from V it runs as t falls, from W as t rises.
+fn cut_bar_end_distances(c: [f64; 3]) -> [f64; 2] {
+    let point = |t: f64| {
+        let (x, z) = (3.0 + 3.0 * t.cos(), 4.5 + 3.0 * t.sin());
+        [x, -12.0 - 2.0 * x + 2.0 * z, z]
+    };
+    // d/dt of the crease: (-3 sin t, 6 sin t + 6 cos t, 3 cos t)
+    let into = |t: f64, sense: f64| {
+        let v = [-3.0 * t.sin(), 6.0 * t.sin() + 6.0 * t.cos(), 3.0 * t.cos()];
+        let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        [sense * v[0] / l, sense * v[1] / l, sense * v[2] / l]
+    };
+    let signed = |t: f64, sense: f64| {
+        let (p, u) = (point(t), into(t, sense));
+        (c[0] - p[0]) * u[0] + (c[1] - p[1]) * u[1] + (c[2] - p[2]) * u[2]
+    };
+    [signed(PI, -1.0), signed(PI / 2.0, 1.0)]
+}
+
+/// The round of the oblique cut's crease on the R3 round at r 0.3 and 0.4 (#16156). The balls
+/// touching the R3 round along its two tangent edges both lie past the End plane at V, by
+/// more than 0.1 (closed form), as the past-an-end refusal's first test asks; but the crease
+/// bends back on itself, and the ball touching the round at 135 degrees lies on the span's
+/// side of both End planes, by more than 0.9: the round has sections between the edge's
+/// ends. The refusal used to judge from the two tangent edges' balls alone, assuming the
+/// balls between them lie no nearer the span, and refused it (`EndRollsIntoSmoothEnd`). It
+/// now refuses only where every ball on the R3 round is proven past the plane, which this is
+/// not: the round builds, a valid solid smaller than the bar.
+#[test]
+fn a_round_whose_balls_bend_back_between_the_ends_is_not_refused_past_an_end() {
+    let input = obliquely_cut_bar();
+    assert!(input.check(CheckLevel::All).unwrap().is_valid());
+    let before = input.volume(1e-9).unwrap();
+    let t = 3.0 * PI / 4.0;
+    let (x, z) = (3.0 + 3.0 * t.cos(), 4.5 + 3.0 * t.sin());
+    let crease = [x, -12.0 - 2.0 * x + 2.0 * z, z];
+    for r in [0.3, 0.4] {
+        // the premise, in closed form
+        let [at_v, _] = cut_bar_end_distances(cut_bar_ball(r, PI));
+        let [far_v, _] = cut_bar_end_distances(cut_bar_ball(r, PI / 2.0));
+        assert!(at_v < -0.1 && far_v < -0.1, "r {r}: {at_v}, {far_v}");
+        let [mid_v, mid_w] = cut_bar_end_distances(cut_bar_ball(r, t));
+        assert!(mid_v > 0.9 && mid_w > 0.9, "r {r}: {mid_v}, {mid_w}");
+        let body = input.copy().unwrap();
+        let e = edge_through(&body, crease);
+        match blend(&body, Blend::Round, &[e], &[r], &[], Corners::Filled) {
+            Ok(_) => {
+                assert!(body.check(CheckLevel::All).unwrap().is_valid(), "r {r}");
+                let after = body.volume(1e-9).unwrap();
+                assert!(after > 0.0 && after < before, "r {r}: {after} of {before}");
+            }
+            Err(e) => panic!("r {r}: {e:?}"),
+        }
     }
 }
