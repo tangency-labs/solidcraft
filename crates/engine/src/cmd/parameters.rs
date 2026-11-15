@@ -5,7 +5,7 @@
 use serde_json::{Value, json};
 use solidcraft_doc::FeatureKind;
 use solidcraft_doc::expr::{self, Kind};
-use solidcraft_sketch::{Analysis, ConstraintKind, CurveKind, Hold, Sketch, solve_with};
+use solidcraft_sketch::{Analysis, ConstraintKind, CurveKind, Hold, Sketch, keep_point_order, keep_sides_at_zero, solve_with};
 
 use super::{CommandSpec, sketch_store};
 use crate::params::{bad, bool_, str_};
@@ -353,10 +353,15 @@ fn keep_dimension_start(s: &mut Session, name: &str) {
             continue;
         }
         if stored.points.len() == trial.points.len() {
-            // Only the points move: the stored dimensions keep their own values.
+            // Only the points move: the stored dimensions keep their own values, and the order of
+            // the points of one this edit drives to zero, which keeps their sides (#15766).
+            keep_sides_at_zero(&mut trial, &reference);
             let mut kept = stored.clone();
             for (p, q) in kept.points.iter_mut().zip(&trial.points) {
                 p.pos = q.pos;
+            }
+            for (c, t) in kept.constraints.iter_mut().zip(&trial.constraints) {
+                keep_point_order(&mut c.kind, &t.kind);
             }
             let _ = sketch_store::write(s.doc_mut(), id, kept);
         }

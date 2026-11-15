@@ -535,3 +535,114 @@ fn extrude_from_a_plane_to_a_plane_near_a_face_runs_between_the_planes() {
         assert!((volume - want).abs() < 1e-3 * want, "{operation}: volume {volume}, want {want}");
     }
 }
+
+/// A To point on the edge of a hole in a vertical wall (a vertex there) ends the extrude at that
+/// point's height, whichever faces meet there (#12968).
+#[test]
+fn extrude_to_a_vertex_on_a_hole_in_a_wall_ends_at_its_height() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 400], "length": 100, "width": 60, "height": 250, "body_name": "Base"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [100, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}}));
+    run(&mut s, "sketch.circle.center", json!({"center": [30, 640], "radius": 5}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "20 mm", "direction": "negative", "operation": "cut", "targets": ["Base"]}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 650], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [100, 0], "p1": [120, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"to": [100, 35, 640], "operation": "new", "body_name": "T"}));
+    let b = body(&mut s, "T");
+    let z = |k: &str| b["bbox"][k][2].as_f64().unwrap_or(f64::NAN);
+    assert!((z("min") - 640.0).abs() < 1e-6 && (z("max") - 650.0).abs() < 1e-6, "{b}");
+}
+
+/// A design saved before #12968's fix named the wall on its To point: on a reload the point stays
+/// on the vertex instead of moving into the wall, so the post still ends at 640.
+#[test]
+fn a_to_vertex_saved_with_the_walls_name_still_ends_at_its_height() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 400], "length": 100, "width": 60, "height": 250, "body_name": "Base"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [100, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}}));
+    run(&mut s, "sketch.circle.center", json!({"center": [30, 640], "radius": 5}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "20 mm", "direction": "negative", "operation": "cut", "targets": ["Base"]}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 650], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [100, 0], "p1": [120, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"to": [100, 35, 640], "operation": "new", "body_name": "T"}));
+    // The name a save before the fix gave the point: the wall's, as a point inside it gets.
+    let f = s.doc.features.last().unwrap().clone();
+    let mut kind = f.kind.clone();
+    for p in kind.face_points_mut() {
+        *p = solidcore_record::Vec3::new(100.0, 35.0, 630.0);
+    }
+    let wall = solidcraft_doc::face_point_names(&s.doc, &s.model.state(), &kind, f.component).unwrap();
+    assert_eq!(wall, ["F1:+x"]);
+    let mut doc: solidcraft_doc::Document = (*s.doc).clone();
+    doc.features.last_mut().unwrap().face_names = wall;
+    let mut cold = Session::new(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap());
+    let b = body(&mut cold, "T");
+    let z = |k: &str| b["bbox"][k][2].as_f64().unwrap_or(f64::NAN);
+    assert!((z("min") - 640.0).abs() < 1e-6 && (z("max") - 650.0).abs() < 1e-6, "{b}");
+}
+
+/// #15413: a stored taper of 0 (the Extrude dialog saves one) names the caps and sides as a
+/// straight extrude's are, so the top and bottom of an extrude with a start offset, from the
+/// sketch plane or from a From Object face, take a sketch that follows the offset.
+#[test]
+fn the_faces_of_an_extrude_with_a_taper_of_zero_and_a_start_offset_take_a_sketch() {
+    use solidcraft_doc::config::FaceCertificate;
+    use solidcraft_geom::PlaneGeom;
+    for from in [None, Some(json!([20, 15, 10]))] {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "lift", "expression": "20 mm"}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Base"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "PadSketch"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 5], "p1": [30, 25]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"sketch": "PadSketch", "distance": 10, "start_offset": "lift", "taper": "0 deg", "body_name": "Pad"});
+        if let Some(from) = &from {
+            p["from"] = from.clone();
+        }
+        let pad = run(&mut s, "solid.extrude", p)["feature"].as_u64().unwrap();
+        // The Base's top (z = 10) when the extrude starts from it, else the sketch plane (z = 0).
+        let level = if from.is_some() { 10.0 } else { 0.0 };
+        // Bottom, top and the side along x = 30: which cap (`Some(high)`) or the side (`None`),
+        // a point on the face, and its height above the start level less the lift.
+        let faces = [("OnBottom", Some(false), 20.0, 0.0), ("OnTop", Some(true), 20.0, 10.0), ("OnSide", None, 30.0, 5.0)];
+        let mut sketches = Vec::new();
+        for (name, cap, x, rise) in faces {
+            let p = json!({"plane": {"face": [x, 15.0, level + 20.0 + rise]}, "name": name});
+            let id = s.execute("sketch.create", &p).unwrap_or_else(|e| panic!("from {from:?}, {name}: {e}"))["sketch"].as_u64().unwrap();
+            run(&mut s, "sketch.finish", json!({}));
+            let solidcraft_doc::FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Face { anchor: Some(anchor), .. }, .. } =
+                &s.doc.feature(id).unwrap().kind
+            else {
+                panic!("from {from:?}, {name}: the sketch is not attached to the face");
+            };
+            assert_eq!(anchor.target.origin_feature, pad, "from {from:?}, {name}");
+            let certified = match &anchor.target.certificate {
+                Some(FaceCertificate::ExtrudeCap { high, .. }) => cap == Some(*high),
+                Some(FaceCertificate::ExtrudeSide { .. }) => cap.is_none(),
+                _ => false,
+            };
+            assert!(certified, "from {from:?}, {name}: {:?}", anchor.target.certificate);
+            sketches.push((name, cap, id, rise));
+        }
+        // A bigger lift moves the pad up 5 mm: each sketch goes with its face, also in the reopened design.
+        run(&mut s, "parameters.change", json!({"name": "lift", "expression": "25 mm"}));
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        reopened.refresh();
+        for current in [&s, &reopened] {
+            assert!(current.model.results.iter().all(|r| r.error.is_none()), "from {from:?}: {:?}", current.model.results);
+            let state = current.model.state();
+            for (name, cap, id, rise) in &sketches {
+                let plane = state.sketch(*id).unwrap().plane;
+                if cap.is_none() {
+                    assert!((plane.origin.x - 30.0).abs() < 1e-9 && plane.normal().x.abs() > 1.0 - 1e-12, "from {from:?}, {name}: {plane:?}");
+                } else {
+                    assert!((plane.origin.z - (level + 25.0 + rise)).abs() < 1e-9, "from {from:?}, {name}: {plane:?}");
+                }
+            }
+        }
+    }
+}
