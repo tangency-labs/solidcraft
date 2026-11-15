@@ -3796,19 +3796,17 @@ pub fn examine_n_fix_fillet_geoms_with_solvers(
             let mut edited = (**pb).clone();
             write_end_row(&mut edited.net, &from_row, to_at_start, orient)?;
             let bound = pb.bound();
-            let proved =
-                crate::blend::fillet_section::recertify::rebound(k, &edited, dist_tol.max(bound))
-                    .map_err(|e| {
-                    if e.is_cancelled() {
-                        e
-                    } else {
-                        SolidError::Unsupported {
-                            operation: OP_EXAMINE,
-                            reason: "two rounds that meet at a corner apart by more than the \
-                                 tolerance: joining them moves a round off its definition",
-                        }
-                    }
-                })?;
+            // (a net not proved within the tolerance is the join's refusal; any other
+            // failure of the proof, a cancel among them, is passed on as it is)
+            let Some(proved) =
+                crate::blend::fillet_section::recertify::rebound(k, &edited, dist_tol.max(bound))?
+            else {
+                return Err(SolidError::Unsupported {
+                    operation: OP_EXAMINE,
+                    reason: "two rounds that meet at a corner apart by more than the tolerance: \
+                             joining them moves a round off its definition",
+                });
+            };
             edited.def.bound = bound.max(proved);
             **pb = edited;
         } else {

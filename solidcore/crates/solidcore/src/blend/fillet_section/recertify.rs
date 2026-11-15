@@ -533,7 +533,9 @@ pub fn recertify_with_thumbweight(
     crate::profile::profile_scope!(k, "blend::certificate::recertify");
     let centre = frame_centre(pb.net())?;
     let local = pb.translated(k, centre * -1.0)?;
-    recertify_in_frame(k, &local, pb.bound(), frame_rounding(pb.net())?)
+    recertify_in_frame(k, &local, pb.bound(), frame_rounding(pb.net())?)?.ok_or_else(|| {
+        SolidError::invalid_input(OP, "the net is not within its bound of its definition")
+    })
 }
 
 /// The bound of a blend whose net was edited after it was built (#17015: a fillet's join
@@ -544,18 +546,24 @@ pub fn recertify_with_thumbweight(
 /// [`recertify`] against it takes each span's certificate no further than this one did,
 /// so it proves it again.
 ///
+/// `None` where the edited net is not proved within `ceiling` of its definition.
+///
 /// # Errors
 ///
-/// Those of [`recertify`]: `InvalidInput` where the edited net is not proved within
-/// `ceiling` of its definition, or is not a net of its definition's stations.
-pub(crate) fn rebound(k: &Kernel, pb: &ProceduralBlend, ceiling: f64) -> Result<f64> {
+/// Those of [`recertify`] other than a net not proved within its bound (a net that is not
+/// one of its definition's stations, the station solves, the certificate); `InvalidInput`
+/// for a bound that is not finite.
+pub(crate) fn rebound(k: &Kernel, pb: &ProceduralBlend, ceiling: f64) -> Result<Option<f64>> {
     let centre = frame_centre(pb.net())?;
     let local = pb.translated(k, centre * -1.0)?;
-    let (achieved, _) = recertify_in_frame(k, &local, ceiling, frame_rounding(pb.net())?)?;
+    let Some((achieved, _)) = recertify_in_frame(k, &local, ceiling, frame_rounding(pb.net())?)?
+    else {
+        return Ok(None);
+    };
     let floor = precision_floor(k, local.supports(), local.definition().order, local.net())?;
     let bound = achieved + 2.0 * floor;
     if bound.is_finite() {
-        Ok(bound)
+        Ok(Some(bound))
     } else {
         Err(SolidError::invalid_input(
             OP,
@@ -566,13 +574,14 @@ pub(crate) fn rebound(k: &Kernel, pb: &ProceduralBlend, ceiling: f64) -> Result<
 
 /// [`recertify_with_thumbweight`] of a blend already in its own frame, against `bound`,
 /// its net's distance from its rows taken as at least `shift` more.
+/// `None` where the net is not proved within `bound`.
 #[allow(clippy::too_many_lines)]
 fn recertify_in_frame(
     k: &Kernel,
     pb: &ProceduralBlend,
     bound: f64,
     shift: f64,
-) -> Result<(f64, Option<[f64; 2]>)> {
+) -> Result<Option<(f64, Option<[f64; 2]>)>> {
     let d = pb.definition();
     let n = d.order as usize;
     let equal_area = n >= 2 && d.thumbweight == GN_THUMBWEIGHT_EQUAL_AREA;
@@ -798,10 +807,7 @@ fn recertify_in_frame(
             target = target.min(bound - delta_out.unwrap_or(0.0) - floor);
         }
         if target.partial_cmp(&0.0) != Some(Ordering::Greater) {
-            return Err(SolidError::invalid_input(
-                OP,
-                "the net is not within its bound of its definition",
-            ));
+            return Ok(None);
         }
         // to the target: the bound was proved before, and the levels' halving guess must
         // not stop this run a level short of it where its rounding differs from that run's
@@ -848,15 +854,15 @@ fn recertify_in_frame(
             total.partial_cmp(&bound),
             Some(Ordering::Less | Ordering::Equal)
         ) {
-            return Err(SolidError::invalid_input(
-                OP,
-                "the net is not within its bound of its definition",
-            ));
+            return Ok(None);
         }
         achieved = achieved.max(total);
     }
     let [lo, hi] = vary.w;
-    Ok((achieved, (equal_area && lo <= hi).then_some([lo, hi])))
+    Ok(Some((
+        achieved,
+        (equal_area && lo <= hi).then_some([lo, hi]),
+    )))
 }
 
 /// The growth, past the section's `[0, 1]` over `ext`, of a distance from the continued
