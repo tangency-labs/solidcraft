@@ -279,8 +279,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.offset_resolve_crossing_loops = true;
     k.fixes.offset_stitch_at_body_tolerance = true;
     k.fixes.oscillating_skips_failed_guesses = true;
-    k.fixes.planar_path_profile_placement_statuses = true;
-    k.fixes.planar_path_sweep_statuses = true;
     k.fixes.point_solve_keeps_triangle_guess = true;
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
@@ -289,8 +287,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.revolution_round_offset_collapses = true;
     k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.revolve_holed_profile_void = true;
-    k.fixes.revolve_nested_shells_as_cavities = true;
-    k.fixes.revolve_splits_curves_on_axis = true;
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.shell_empty_cavity_fails = true;
     k.fixes.simple_coincidence_crossing_is_point = true;
@@ -301,7 +297,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.ssi_tangent_contact_points = true;
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
-    k.fixes.taper_tangent_corner_planes = true;
     k.fixes.thicken_planar_side_walls = true;
     k.fixes.torus_check_spindle_apex = true;
     k.fixes.torus_iso_circle_axis_from_midpoint = true;

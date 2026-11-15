@@ -19,8 +19,7 @@
 //! Not upstream (WR-404, tangency-labs/solidcore#411): the curve sweep's caps
 //! come from the side faces at the sweep's ends (`sweep_end_curves`), not the first
 //! and last `count` side faces.
-//! Not upstream (tangency-labs/solidcore#2192, opt-in
-//! `Kernel::fixes.curve_sweep_closed_path_joins_ends`): a sweep along a closed path
+//! Not upstream (tangency-labs/solidcore#2192, WR-675): a sweep along a closed path
 //! whose end sections lie on its start sections (`sweep_ends_coincide`) is not capped,
 //! so the stitch joins its side faces' end edges to their start edges.
 //! Not upstream (the SolidCraft fork's tangency-labs/smlib 5d3939e, WR-523, #1450):
@@ -898,8 +897,8 @@ impl PrimitiveCreation {
             // each composite's side faces (WR-404's caps)
             let mut groups = Vec::new();
             let mut closed_sections = options.cap_ends
-                && a.kernel(brep)?.fixes.curve_sweep_closed_path_joins_ends
-                && !composites.composites.is_empty();
+                && !composites.composites.is_empty()
+                && path_leaves_its_start(&prepared.path, a.brep(brep)?.tolerance())?;
             for (index, mut composite) in composites.composites.into_iter().enumerate() {
                 let profile = composite.make_composite_nurb()?;
                 let want_placements = index == 0 && opt_placements.is_some();
@@ -1111,6 +1110,29 @@ fn sweep_end_curves(
         }
     }
     Ok((starts, ends))
+}
+
+/// Not upstream (WR-675): whether the path certainly leaves the ball of radius `tol`
+/// about its start, so that end sections lying on the start sections mean a path that
+/// closes, not one shorter than the tolerance. A point of the path at a quarter, half or
+/// three quarters of its interval farther from the start than `tol` plus the rounding of
+/// the two evaluations and the distance (`gamma(64)` of their size, generous for a
+/// B-spline evaluation of any degree this kernel builds) proves it. Without such a point
+/// the answer is `false` and the sweep is capped, as upstream caps it.
+fn path_leaves_its_start(path: &BSplineCurve, tol: f64) -> Result<bool> {
+    use crate::nurbs::math::gamma;
+
+    let interval = path.natural_interval();
+    let start = path.evaluate_point(interval.min())?;
+    for fraction in [0.25, 0.5, 0.75] {
+        let point = path.evaluate_point(interval.evaluate(fraction))?;
+        let rounding = gamma(64) * (start.length() + point.length());
+        let distance = start.distance(point);
+        if distance.is_finite() && distance > tol + rounding {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Whether a complete swept surface's terminal sections coincide within the B-rep's
