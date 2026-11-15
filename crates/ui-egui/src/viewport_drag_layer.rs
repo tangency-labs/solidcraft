@@ -78,12 +78,20 @@ fn transform(delta: &Mat) -> [[f32; 4]; 4] {
 /// being captured, and no section, analysis or isocurve is shown (their outlines, colours and
 /// curves follow the bodies' places).
 fn drawable(app: &SolveApp) -> bool {
-    app.viewport.gpu.is_some()
-        && !app.session.pending_moves.is_empty()
-        && app.session.analysis.is_none()
-        && app.session.continuity.is_empty()
-        && app.session.isocurves.is_empty()
-        && super::section_plane(app).is_none()
+    app.viewport.gpu.is_some() && !app.session.pending_moves.is_empty() && plain(app)
+}
+
+/// No section, analysis or isocurve is shown (their outlines, colours and curves follow the
+/// bodies' places, which a layer moves on the GPU alone).
+fn plain(app: &SolveApp) -> bool {
+    app.session.analysis.is_none() && app.session.continuity.is_empty() && app.session.isocurves.is_empty() && super::section_plane(app).is_none()
+}
+
+/// Whether a preview may have the renderer's one moving layer for the bodies it moves: the
+/// model is drawn on the GPU, no component's drag has the layer or can take it (none is moved
+/// without being captured), and the view is one a layer is drawn in ([`plain`]).
+pub(super) fn free_for_preview(app: &SolveApp) -> bool {
+    app.viewport.gpu.is_some() && app.viewport.drag.is_none() && app.session.pending_moves.is_empty() && plain(app)
 }
 
 /// The layer drawing the world shown now: the one under way when its bodies are still dragged
