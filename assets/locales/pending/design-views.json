@@ -1,0 +1,82 @@
+{
+  "en": {
+    "cmd.tab.view.activate": "Show View",
+    "cmd.tab.view.close": "Close View",
+    "cmd.tab.view.duplicate": "Duplicate View",
+    "cmd.tab.view.list": "List Views",
+    "cmd.tab.view.move": "Move View",
+    "cmd.tab.view.open": "Open Another View",
+    "cmd.tab.view.rename": "Rename View",
+    "cmd.tab.view.reopen": "Reopen Closed View"
+  },
+  "de": {
+    "cmd.tab.view.activate": "Ansicht anzeigen",
+    "cmd.tab.view.close": "Ansicht schließen",
+    "cmd.tab.view.duplicate": "Ansicht duplizieren",
+    "cmd.tab.view.list": "Ansichten auflisten",
+    "cmd.tab.view.move": "Ansicht verschieben",
+    "cmd.tab.view.open": "Weitere Ansicht öffnen",
+    "cmd.tab.view.rename": "Ansicht umbenennen",
+    "cmd.tab.view.reopen": "Geschlossene Ansicht wieder öffnen"
+  },
+  "ko": {
+    "cmd.tab.view.activate": "뷰 표시",
+    "cmd.tab.view.close": "뷰 닫기",
+    "cmd.tab.view.duplicate": "뷰 복제",
+    "cmd.tab.view.list": "뷰 목록",
+    "cmd.tab.view.move": "뷰 이동",
+    "cmd.tab.view.open": "다른 뷰 열기",
+    "cmd.tab.view.rename": "뷰 이름 바꾸기",
+    "cmd.tab.view.reopen": "닫은 뷰 다시 열기"
+  },
+  "ar": {
+    "cmd.tab.view.activate": "إظهار العرض",
+    "cmd.tab.view.close": "إغلاق العرض",
+    "cmd.tab.view.duplicate": "تكرار العرض",
+    "cmd.tab.view.list": "سرد المشاهد",
+    "cmd.tab.view.move": "نقل العرض",
+    "cmd.tab.view.open": "فتح عرض آخر",
+    "cmd.tab.view.rename": "إعادة تسمية العرض",
+    "cmd.tab.view.reopen": "إعادة فتح العرض المغلق"
+  },
+  "he": {
+    "cmd.tab.view.activate": "הצגת תצוגה",
+    "cmd.tab.view.close": "סגירת תצוגה",
+    "cmd.tab.view.duplicate": "שכפול תצוגה",
+    "cmd.tab.view.list": "רשימת תצוגות",
+    "cmd.tab.view.move": "הזזת תצוגה",
+    "cmd.tab.view.open": "פתיחת תצוגה נוספת",
+    "cmd.tab.view.rename": "שינוי שם תצוגה",
+    "cmd.tab.view.reopen": "פתיחה מחדש של תצוגה שנסגרה"
+  },
+  "ja": {
+    "cmd.tab.view.activate": "ビューを表示",
+    "cmd.tab.view.close": "ビューを閉じる",
+    "cmd.tab.view.duplicate": "ビューを複製",
+    "cmd.tab.view.list": "ビューを一覧表示",
+    "cmd.tab.view.move": "ビューを移動",
+    "cmd.tab.view.open": "別のビューを開く",
+    "cmd.tab.view.rename": "ビューの名前を変更",
+    "cmd.tab.view.reopen": "閉じたビューを再度開く"
+  },
+  "vi": {
+    "cmd.tab.view.activate": "Hiện góc nhìn",
+    "cmd.tab.view.close": "Đóng góc nhìn",
+    "cmd.tab.view.duplicate": "Nhân bản góc nhìn",
+    "cmd.tab.view.list": "Liệt kê góc nhìn",
+    "cmd.tab.view.move": "Di chuyển góc nhìn",
+    "cmd.tab.view.open": "Mở góc nhìn khác",
+    "cmd.tab.view.rename": "Đổi tên góc nhìn",
+    "cmd.tab.view.reopen": "Mở lại góc nhìn đã đóng"
+  },
+  "zh": {
+    "cmd.tab.view.activate": "显示视图",
+    "cmd.tab.view.close": "关闭视图",
+    "cmd.tab.view.duplicate": "复制视图",
+    "cmd.tab.view.list": "列出视图",
+    "cmd.tab.view.move": "移动视图",
+    "cmd.tab.view.open": "打开其他视图",
+    "cmd.tab.view.rename": "重命名视图",
+    "cmd.tab.view.reopen": "重新打开已关闭的视图"
+  }
+}
