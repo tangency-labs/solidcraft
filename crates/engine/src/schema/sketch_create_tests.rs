@@ -367,7 +367,9 @@ fn strict_keeps_todays_errors_before_the_sketch() {
         ("sketch.ellipse", json!({"center": [0, 0], "major": [10, 0], "minor_radius": 0})),
         ("sketch.ellipse", json!({"center": [0, 0], "major": [10, 0], "minor_radius": -3})),
         ("sketch.ellipse", json!({"center": [0, 0], "major": [10, 0], "minor_radius": 1e8})),
-        ("sketch.ellipse", json!({"center": [0, 0], "major": [10, 0], "minor_radius": "3"})),
+        ("sketch.ellipse", json!({"center": [0, 0], "major": [10, 0], "minor_radius": "  "})),
+        ("sketch.ellipse", json!({"center": [0, 0], "major": [10, 0], "minor_radius": true})),
+        ("sketch.ellipse", json!({"center": ["", 0], "major": [10, 0], "minor_radius": 3})),
         ("sketch.ellipse", json!({"center": [0, 0], "major": [10, 0], "minor_radius": 3, "axes": "yes"})),
         ("sketch.ellipse", json!({"center": [0, 0], "major": [10, 0], "minor": [1, 1], "axes": 0})),
         ("sketch.conic", json!({"rho": 0})),
@@ -594,17 +596,19 @@ fn keys_read_only_in_some_cases_are_checked_only_then() {
     ok("sketch.slot.arc_center", slot(json!({"end": [0, 5]})));
     assert_eq!(issues("sketch.slot.arc_center", slot(json!({"end": "nowhere"}))), ["`end` must be a point [x, y]"]);
     assert_eq!(issues("sketch.slot.arc_center", slot(json!({"sweep": null, "end": [0, 5]}))), ["`sweep` must be finite degrees"]);
-    // minor_radius wins over minor, and a minor_radius that is no number is not read when there is a minor.
+    // minor_radius wins over minor, an expression too, and a minor_radius that is neither a
+    // number nor text is not read when there is a minor.
     let ellipse = |extra: Value| {
         let mut p = json!({"center": [0, 0], "major": [10, 0]});
         p.as_object_mut().into_iter().for_each(|o| o.extend(extra.as_object().cloned().unwrap_or_default()));
         p
     };
     ok("sketch.ellipse", ellipse(json!({"minor_radius": 3, "minor": "nowhere"})));
-    ok("sketch.ellipse", ellipse(json!({"minor_radius": "wide", "minor": [1, 1]})));
+    ok("sketch.ellipse", ellipse(json!({"minor_radius": "w / 4", "minor": "nowhere"})));
+    ok("sketch.ellipse", ellipse(json!({"minor_radius": true, "minor": [1, 1]})));
     ok("sketch.ellipse", ellipse(json!({"minor_radius": null, "minor": [1, 1]})));
     ok("sketch.ellipse", ellipse(json!({"minor": {"x": 1, "y": 1}})));
-    assert_eq!(issues("sketch.ellipse", ellipse(json!({"minor_radius": "wide", "minor": "x"}))), ["needs `minor` [x,y] or `minor_radius`"]);
+    assert_eq!(issues("sketch.ellipse", ellipse(json!({"minor_radius": true, "minor": "x"}))), ["needs `minor` [x,y] or `minor_radius`"]);
     // Outside `edits` a text edit reads its own keys; with `edits` it reads only `edits` (and `live`).
     ok("sketch.edit_text", json!({"edits": [{"link": "t1"}], "link": 5, "text": 7, "at": "no", "bold": "yes"}));
     ok("sketch.edit_text", json!({"edits": null, "link": "t1", "text": "x"}));
@@ -691,7 +695,8 @@ fn creation_replies_match_the_output_schema() {
         json!({"center": [300, 20], "major": [310, 20], "minor": [302, 24], "axes": false}),
         json!({"center": [300, 40], "major": [310, 40], "minor": [302, 44], "axes": null, "construction": true}),
         json!({"center": [300, 60], "major": [310, 60], "minor_radius": 4, "minor": "nowhere"}),
-        json!({"center": [300, 80], "major": [310, 80], "minor_radius": "wide", "minor": {"x": 302, "y": 84}}),
+        json!({"center": [300, 80], "major": [310, 80], "minor_radius": true, "minor": {"x": 302, "y": 84}}),
+        json!({"center": [300, 90], "major": ["310", 90], "minor_radius": "2 + 2"}),
     ] {
         drawn(&mut s, "sketch.ellipse", p);
     }
@@ -864,6 +869,8 @@ fn the_creation_schemas_take_what_the_handlers_read() {
             (json!({"center": [0, 0], "major": [5, 0]}), false),
             (json!({"center": [0, 0], "minor_radius": 2}), false),
             (json!({"center": [0, 0], "major": [5, 0], "minor_radius": 0}), false),
+            (json!({"center": ["w / 2", 0], "major": ["w", 0], "minor_radius": "w / 4"}), true),
+            (json!({"center": [0, 0], "major": [5, 0], "minor_radius": true}), false),
         ],
     );
     takes(

@@ -787,7 +787,7 @@ impl Curve {
     /// A temporary evaluation copy retaining owners, concrete kinds and exact
     /// NURBS data, without copy-constructor knot fix-up. Notification identity is
     /// not copied: the temporary is not another notification target.
-    pub(crate) fn clone_for_evaluation(&self) -> Result<Self> {
+    pub fn clone_for_evaluation(&self) -> Result<Self> {
         self.clone_for_evaluation_depth(0)
     }
 

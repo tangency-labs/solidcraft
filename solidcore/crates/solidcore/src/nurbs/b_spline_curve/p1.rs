@@ -607,7 +607,7 @@ impl BSplineCurve {
 
     /// The NURB for read-only callers (`GetOrCreateGwNurbPointer` through a const
     /// cast), or `SM_ERR` without one (upstream dereferences `NULL`).
-    pub(super) fn nurb_ref(&self) -> Result<&Curve> {
+    pub(crate) fn nurb_ref(&self) -> Result<&Curve> {
         self.nurb
             .as_ref()
             .ok_or_else(|| SolidError::sm_err(OP_NURB))

@@ -7,7 +7,7 @@
 //!   is the ball's arc turned about the axis (a surface of revolution of the exact volume),
 //!   where upstream traces and fits it.
 //! - The point class (two cylinders as wide as the ball, their axes meeting) is the ball's
-//!   piece without `fillet_corner_ball_patch` (WR-420), where upstream fails 1001.
+//!   piece, where upstream fails 1001.
 //! - Rounds the try-chain already made exact (a box edge's cylinder, a plate's rim on a
 //!   boss's torus) come out as before.
 #![allow(
@@ -204,7 +204,7 @@ fn tray_kept(exact: bool, definition: bool) -> (f64, f64, solidcore::Result<()>,
 }
 
 #[test]
-fn the_point_class_makes_the_corner_ball_without_the_ball_patch_flag() {
+fn the_point_class_makes_the_corner_ball() {
     // each vertical edge loses (1 - pi/4) 4 along 8, each corner the octant of the two
     // bottom rounds' crossing (16/3) less the corner ball's (4 pi / 3)
     let removed = 4.0 * (32.0 * (1.0 - PI / 4.0) + 16.0 / 3.0 - 4.0 * PI / 3.0);
@@ -214,10 +214,13 @@ fn the_point_class_makes_the_corner_ball_without_the_ball_patch_flag() {
         (after - (rounded - removed)).abs() < 1e-7 * after,
         "{rounded} {after}"
     );
-    let (_, _, r) = tray(false);
+    // without the exact classes the corner goes through the ball patch (WR-420/541),
+    // where upstream failed 1001: the same body
+    let (rounded, after, r) = tray(false);
+    r.unwrap();
     assert!(
-        r.as_ref().err().and_then(solidcore::error::upstream_status) == Some(1001),
-        "{r:?}"
+        (after - (rounded - removed)).abs() < 1e-7 * after,
+        "{rounded} {after}"
     );
 }
 
