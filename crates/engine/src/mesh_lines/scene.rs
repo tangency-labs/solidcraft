@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use web_time::Instant;
 
 use solidcore_record::Vec3;
-use solidcraft_doc::apply_point;
+use solidcraft_doc::{apply_point, apply_vector};
 use solidcraft_geom::{Aabb3, Mesh};
 
 use super::meshes::{Placement, Scene, WORKERS, claim, transformed_bounds};
@@ -21,6 +21,9 @@ const MAX_SEGMENTS: usize = 4_000_000;
 const MAX_SHARED_TRIANGLES: usize = 2_000_000;
 const MAX_VIEW_NODES: usize = 256 * 1024 * 1024 / std::mem::size_of::<Aabb3>();
 const WORK: usize = 200_000_000;
+/// The cosine under which a surface normal counts as square to the view: well above the
+/// rounding of an exactly side-on view, well below any tilt a drawing shows.
+const EDGE_ON: f64 = 1e-9;
 
 fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> Result<R, &'static str> + Sync) -> Result<Vec<R>, &'static str> {
     solidcraft_kernel::map_on_threads(items, WORKERS, f).into_iter().map(|r| r.ok_or("export worker failed")?).collect()
@@ -149,6 +152,46 @@ fn triangle(view: &View, shared: &Shared, placed: &Placement, id: usize) -> Resu
     ])
 }
 
+/// Which way a placed triangle faces the view.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Facing {
+    Front,
+    Back,
+    /// On a surface seen exactly side on, where the sign of the projected area says nothing
+    /// about which side of the surface faces the eye.
+    EdgeOn,
+}
+impl Facing {
+    /// Triangle `id` of `placed`, `p` being its corners in the view (`View::project`).
+    fn of(view: &View, shared: &Shared, placed: &Placement, id: usize, p: [Vec3; 3]) -> Self {
+        if edge_on(view, shared, placed, id) {
+            Self::EdgeOn
+        } else if cross(xy(p[1] - p[0]), xy(p[2] - p[0])) > 0. {
+            // A positive projective scale preserves the projected winding.
+            Self::Front
+        } else {
+            Self::Back
+        }
+    }
+}
+
+/// Whether the surface under triangle `id` is seen exactly side on: the surface normal at each
+/// of its corners is square to the view. Such a triangle's facet can still tilt either way (a
+/// surface swept along the view, like a bend seen along its axis, is meshed with triangles whose
+/// corners lie at different points of its curve), so its winding is no guide to a silhouette.
+fn edge_on(view: &View, shared: &Shared, placed: &Placement, id: usize) -> bool {
+    let mesh = &shared.mesh;
+    mesh.triangles.get(id).is_some_and(|t| {
+        t.iter().all(|i| {
+            let (Some(p), Some(n)) = (mesh.positions.get(*i as usize), mesh.normals.get(*i as usize)) else { return false };
+            let n = apply_vector(&placed.transform, *n);
+            let toward = view.toward(apply_point(&placed.transform, *p));
+            let scale = n.len() * toward.len();
+            scale > 0. && n.dot(toward).abs() <= EDGE_ON * scale
+        })
+    })
+}
+
 struct Projected {
     nodes: Vec<Aabb3>,
     segments: Vec<(Vec3, Vec3)>,
@@ -158,7 +201,7 @@ impl Projected {
         let mut nodes = vec![Aabb3::EMPTY; shared.tree.nodes.len()];
         // Exact projected leaf bounds avoid false near-eye errors from empty corners of a
         // rotated model-space box. Interior bounds are just unions of the child bounds.
-        let mut front = vec![false; shared.mesh.triangles.len()];
+        let mut facing = vec![Facing::EdgeOn; shared.mesh.triangles.len()];
         for (i, node) in shared.tree.nodes.iter().enumerate().rev() {
             if i.is_multiple_of(1024) {
                 progress.check()?;
@@ -170,9 +213,8 @@ impl Projected {
                 for id in shared.tree.ids.get(node.start..node.end).ok_or("invalid export tree")? {
                     let p = triangle(view, shared, placed, *id)?;
                     b = b.union(&bounds(p));
-                    if let Some(f) = front.get_mut(*id) {
-                        // A positive projective scale preserves the projected winding.
-                        *f = cross(xy(p[1] - p[0]), xy(p[2] - p[0])) > 0.;
+                    if let Some(f) = facing.get_mut(*id) {
+                        *f = Facing::of(view, shared, placed, *id, p);
                     }
                 }
             }
@@ -202,16 +244,19 @@ impl Projected {
             }
         }
         for edge in &shared.edges {
-            let mut positive = false;
-            let mut negative = false;
+            let mut front = false;
+            let mut other = false;
             for id in shared.incident.get(edge.start..edge.end).ok_or("invalid export adjacency")? {
-                if front.get(*id).copied().ok_or("invalid export adjacency")? {
-                    positive = true;
+                if facing.get(*id).copied().ok_or("invalid export adjacency")? == Facing::Front {
+                    front = true;
                 } else {
-                    negative = true;
+                    other = true;
                 }
             }
-            if (positive && negative) || edge.end - edge.start == 1 {
+            // The outline of the front-facing surface: where a front triangle meets a back or an
+            // edge-on one. Edges inside a surface seen edge-on are not silhouettes; each one
+            // projects onto the outline its boundary edges already draw (#16814).
+            if (front && other) || edge.end - edge.start == 1 {
                 let a = shared.mesh.positions.get(edge.vertices[0] as usize).ok_or("invalid silhouette")?;
                 let b = shared.mesh.positions.get(edge.vertices[1] as usize).ok_or("invalid silhouette")?;
                 add(*a, *b)?;
@@ -622,6 +667,58 @@ mod tests {
                 assert_eq!(canonical(actual.lines), canonical(expected), "yaw={yaw}, pitch={pitch}, fov={fov}");
             }
         }
+    }
+
+    #[test]
+    fn a_surface_seen_side_on_draws_no_silhouettes_however_its_triangles_tilt() {
+        // #16814: half a cylinder about Y, seen from the front along its axis. Its middle row
+        // of points sits halfway between the end rows' angles, so every triangle has corners
+        // at three different angles and tilts toward the eye or away from it by turns.
+        use solidcraft_viewport::StandardView;
+        use std::sync::Arc;
+        const N: usize = 8;
+        let mut mesh = Mesh::default();
+        let mut rows = Vec::new();
+        for (y, half) in [(0., false), (5., true), (10., false)] {
+            let mut angles = (0..=N).map(|k| k as f64).collect::<Vec<_>>();
+            if half {
+                angles = std::iter::once(0.).chain((0..N).map(|k| k as f64 + 0.5)).chain([N as f64]).collect();
+            }
+            let mut row = Vec::new();
+            for a in angles {
+                let a = a * std::f64::consts::PI / N as f64;
+                row.push((a, mesh.positions.len() as u32));
+                mesh.positions.push(Vec3::new(5. * a.cos(), y, 5. * a.sin()));
+                mesh.normals.push(Vec3::new(a.cos(), 0., a.sin()));
+            }
+            rows.push(row);
+        }
+        for pair in rows.windows(2) {
+            let (a, b) = (&pair[0], &pair[1]);
+            let (mut i, mut j) = (0, 0);
+            while i + 1 < a.len() || j + 1 < b.len() {
+                if j + 1 >= b.len() || (i + 1 < a.len() && a[i + 1].0 <= b[j + 1].0) {
+                    mesh.triangles.push([a[i].1, a[i + 1].1, b[j].1]);
+                    i += 1;
+                } else {
+                    mesh.triangles.push([a[i].1, b[j + 1].1, b[j].1]);
+                    j += 1;
+                }
+            }
+        }
+        let scene = Scene {
+            meshes: vec![Arc::new(mesh)],
+            placements: vec![Placement { mesh: 0, transform: solidcraft_doc::IDENTITY, visibility: Vec::new() }],
+            triangles: 0,
+            bytes: 0,
+        };
+        let mut cam = Camera { fov: 0., distance: 100., ..Default::default() };
+        cam.set_view(StandardView::Front);
+        let result = drawing(&scene, &[], &View::from_camera(&cam)).unwrap();
+        // Only the open strip's boundary is drawn: N chords at each end, which project onto
+        // each other. Its straight sides project to points.
+        assert_eq!(result.segments, 2 * N);
+        assert_eq!(result.lines.len(), N);
     }
 
     #[test]
