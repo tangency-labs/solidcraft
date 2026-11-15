@@ -78,6 +78,8 @@ pub enum PanelAction {
     PastePicture,
     /// Answer the permission request at this index with an option (none: cancel).
     AnswerPermission(usize, Option<String>),
+    /// Answer the agent's own question at this index.
+    AnswerQuestion(usize, Answer),
     /// Allow (or refuse) a held request once.
     Approve(u64, bool),
     /// Allow a held request and its kind from now on.
@@ -142,6 +144,7 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
             }
         }
         PanelAction::AnswerPermission(n, option) => answer_permission(app, n, option.as_deref()),
+        PanelAction::AnswerQuestion(n, answer) => answer_question(app, n, answer),
         PanelAction::Approve(id, allow) => approve(app, id, allow),
         PanelAction::ApproveAlways(id) => approve_always(app, id),
         PanelAction::SetPermission { agent: Some(id), mode } => {
@@ -2007,6 +2010,8 @@ fn scroll_while_selecting(ui: &egui::Ui) {
 fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let mut answer: Option<(usize, Option<String>)> = None;
+    // The answer to a question of the agent's own: the choice, the consent to a link, or a refusal.
+    let mut question: Option<(usize, Answer)> = None;
     // Allow (true), Deny (false), Always allow (None).
     let mut approval: Option<(u64, Option<bool>)> = None;
     let mut undo: Option<usize> = None;
@@ -2176,6 +2181,53 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                                 }
                             });
                         });
+                    }
+                });
+            }
+            Item::Question { message, options, url, answer: given, .. } => {
+                ui_kit::assistant_approval(ui, &trf("ui.agent_chat_question", &[("message", message)]), |ui| {
+                    // The link the agent asks the user to open, in full: opening it is the user's
+                    // own consent, so it is shown before it can be opened.
+                    if let Some(link) = url {
+                        ui.add(
+                            egui::Label::new(RichText::new(trf("ui.agent_chat_question_link", &[("url", link)])).color(t.text_dim).monospace())
+                                .wrap(),
+                        );
+                    }
+                    match given {
+                        Some(a) => {
+                            ui.label(RichText::new(trf("ui.agent_chat_answered", &[("option", a)])).color(t.text_dim));
+                        }
+                        None => {
+                            ui_kit::assistant_actions(ui, |ui| {
+                                for o in options.iter() {
+                                    let r = ui_kit::button(ui, &o.name, ui_kit::Button::Normal);
+                                    solidcraft_ui_registry::publish_handle(&format!("agent_chat:question:{}", o.value), r.rect.center());
+                                    if r.clicked() {
+                                        question = Some((n, Answer::Choice(o.value.clone())));
+                                    }
+                                }
+                                // A link the user agrees to open: the agent is told "accept".
+                                if let Some(link) = url.as_ref().filter(|u| u.starts_with("http://") || u.starts_with("https://")) {
+                                    let r = ui_kit::button(ui, tr("ui.open"), ui_kit::Button::Normal);
+                                    solidcraft_ui_registry::publish_handle("agent_chat:question:open", r.rect.center());
+                                    if r.clicked() {
+                                        ui.ctx().open_url(egui::OpenUrl::new_tab(link.as_str()));
+                                        question = Some((n, Answer::Accept));
+                                    }
+                                }
+                                let decline = ui_kit::button(ui, tr("ui.agent_chat_decline"), ui_kit::Button::Normal);
+                                solidcraft_ui_registry::publish_handle("agent_chat:question:decline", decline.rect.center());
+                                if decline.clicked() {
+                                    question = Some((n, Answer::Decline));
+                                }
+                                let cancel = ui_kit::button(ui, tr("ui.agent_chat_cancel"), ui_kit::Button::Normal);
+                                solidcraft_ui_registry::publish_handle("agent_chat:question:cancel", cancel.rect.center());
+                                if cancel.clicked() {
+                                    question = Some((n, Answer::Cancel));
+                                }
+                            });
+                        }
                     }
                 });
             }
@@ -2381,6 +2433,9 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
     }
     if let Some((n, o)) = answer {
         chat.actions.push(PanelAction::AnswerPermission(n, o));
+    }
+    if let Some((n, a)) = question {
+        chat.actions.push(PanelAction::AnswerQuestion(n, a));
     }
     match approval {
         Some((id, Some(allow))) => chat.actions.push(PanelAction::Approve(id, allow)),

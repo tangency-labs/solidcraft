@@ -50,7 +50,7 @@ use serde_json::{Value, json};
 use context::Context;
 
 use crate::{ControlRequest, SolveApp};
-use backend::{ChatBackend, Event, PermissionOption, PromptPart, ToolStatus};
+use backend::{Answer, ChatBackend, Event, PermissionOption, PromptPart, QuestionOption, ToolStatus};
 use solidcraft_ui_text::{format as trf, tr};
 
 pub(crate) use panel::{finish_shared, owns_keyboard_input, prepare_shared, request_new_chat, shared_content, tool_space};
@@ -287,6 +287,21 @@ pub enum Item {
         key: u64,
         title: String,
         options: Vec<PermissionOption>,
+        answer: Option<String>,
+    },
+    /// The agent asks the user a question of its own: its message, the choices it offers, and
+    /// what the user answered.
+    Question {
+        key: u64,
+        /// The agent's question, in its words.
+        message: String,
+        /// The choices it offers (a form); empty for a link.
+        options: Vec<QuestionOption>,
+        /// The property the answer belongs to (a form); `None` for a link.
+        field: Option<String>,
+        /// The link it asks the user to open (url mode).
+        url: Option<String>,
+        /// What the user answered, in the label the panel shows.
         answer: Option<String>,
     },
     /// A request of the agent's that SolidCraft holds for the user (files, replacing the design,
@@ -801,7 +816,9 @@ impl AgentChat {
     }
     /// Requests waiting for Allow or Deny.
     pub fn waiting(&self) -> usize {
-        self.held.len() + self.items.iter().filter(|i| matches!(i, Item::Permission { answer: None, .. })).count()
+        self.held.len()
+            + self.items.iter().filter(|i| matches!(i, Item::Permission { answer: None, .. })).count()
+            + self.items.iter().filter(|i| matches!(i, Item::Question { answer: None, .. })).count()
     }
 
     fn stop_backend(&mut self, wait: bool) {
@@ -822,6 +839,9 @@ impl AgentChat {
             if let Item::Permission { answer: a @ None, .. } = i {
                 *a = Some(tr("ui.agent_chat_cancel").to_string());
             }
+            if let Item::Question { answer: a @ None, .. } = i {
+                *a = Some(tr("ui.agent_chat_cancel").to_string());
+            }
         }
     }
 
@@ -837,6 +857,26 @@ impl AgentChat {
         let key = *key;
         if let Some(b) = self.backend.as_mut() {
             b.answer_permission(key, option);
+        }
+    }
+
+    /// Answer the agent's own question at `index`.
+    pub fn answer_question(&mut self, index: usize, answer: Answer) {
+        let Some(Item::Question { key, options, url, answer: given, .. }) = self.items.get_mut(index) else { return };
+        if given.is_some() {
+            return;
+        }
+        let label = match &answer {
+            Answer::Choice(value) => options.iter().find(|o| &o.value == value).map_or_else(|| value.clone(), |o| o.name.clone()),
+            // The link is what the user agreed to open.
+            Answer::Accept => url.clone().unwrap_or_else(|| tr("ui.open").to_string()),
+            Answer::Decline => tr("ui.agent_chat_declined").to_string(),
+            Answer::Cancel => tr("ui.agent_chat_cancel").to_string(),
+        };
+        *given = Some(label);
+        let key = *key;
+        if let Some(b) = self.backend.as_mut() {
+            b.answer_question(key, &answer);
         }
     }
 
@@ -937,6 +977,7 @@ impl AgentChat {
                 }
             }
             Event::Permission { key, title, kind, options } => return Some(Outcome::Permission { key, title, kind, options }),
+            Event::Question { key, message, options, field, url } => return Some(Outcome::Question { key, message, options, field, url }),
             Event::Modes { current, available } => {
                 if self.config_options.is_none() && !available.is_empty() {
                     self.modes = available;
@@ -1065,6 +1106,8 @@ enum Outcome {
     TurnEnd,
     /// The agent asks before running something of its own: answered by the mode, or asked.
     Permission { key: u64, title: String, kind: Option<String>, options: Vec<PermissionOption> },
+    /// The agent asks the user a question of its own: asked in the panel.
+    Question { key: u64, message: String, options: Vec<QuestionOption>, field: Option<String>, url: Option<String> },
 }
 
 /// The AI features are on (the master switch in Settings → AI) and this is the desktop app.
@@ -2047,6 +2090,9 @@ fn interrupt(app: &mut SolveApp) {
         if let Item::Permission { answer: a @ None, .. } = i {
             *a = Some(tr("ui.agent_chat_cancel").to_string());
         }
+        if let Item::Question { answer: a @ None, .. } = i {
+            *a = Some(tr("ui.agent_chat_cancel").to_string());
+        }
     }
 }
 
@@ -2116,6 +2162,17 @@ fn on_permission(app: &mut SolveApp, key: u64, title: String, kind: Option<&str>
         }
         _ => app.agent_chat.push(Item::Permission { key, title, options, answer: None }),
     }
+}
+
+/// The agent asks the user a question of its own: it is asked in the panel, like a permission
+/// request, with the choices it offers.
+fn on_question(app: &mut SolveApp, key: u64, message: String, options: Vec<QuestionOption>, field: Option<String>, url: Option<String>) {
+    app.agent_chat.push(Item::Question { key, message, options, field, url, answer: None });
+}
+
+/// Answer the agent's own question at `index`.
+pub fn answer_question(app: &mut SolveApp, index: usize, answer: Answer) {
+    app.agent_chat.answer_question(index, answer);
 }
 
 fn approve_with(app: &mut SolveApp, id: u64, allow: bool, why: &str) {
@@ -2404,7 +2461,14 @@ pub fn poll(app: &mut SolveApp, ctx: &egui::Context) {
                     b.answer_permission(key, None);
                 }
             }
+            // A question nobody is there to answer is dismissed, as a permission question is.
+            Some(Outcome::Question { key, .. }) if app.agent_chat.turn.is_none() => {
+                if let Some(b) = app.agent_chat.backend.as_mut() {
+                    b.answer_question(key, &Answer::Cancel);
+                }
+            }
             Some(Outcome::Permission { key, title, kind, options }) => on_permission(app, key, title, kind.as_deref(), options),
+            Some(Outcome::Question { key, message, options, field, url }) => on_question(app, key, message, options, field, url),
             None => {}
         }
         if let Some(model) = confirmed_model {
@@ -2952,6 +3016,9 @@ pub fn status(app: &SolveApp) -> Value {
             Item::Plan(p) => json!({"plan": p}),
             Item::Permission { title, options, answer, .. } => {
                 json!({"permission": title, "options": options.iter().map(|o| json!({"id": o.id, "name": o.name, "kind": o.kind})).collect::<Vec<_>>(), "answer": answer})
+            }
+            Item::Question { message, options, url, answer, .. } => {
+                json!({"question": message, "options": options.iter().map(|o| json!({"value": o.value, "name": o.name})).collect::<Vec<_>>(), "url": url, "answer": answer})
             }
             Item::Approval { title, answer, .. } => json!({"approval": title, "answer": answer}),
             Item::Changes { steps, undone, .. } => json!({"changes": steps, "undone": undone}),

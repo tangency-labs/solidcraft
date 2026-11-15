@@ -8,8 +8,8 @@
 
 use serde_json::Value;
 
-pub use super::acp::{AuthMethod, PermissionOption, ToolStatus};
-pub use super::acp::{ConfigChoice, ConfigOption};
+pub use super::acp::{Answer, ConfigChoice, ConfigOption};
+pub use super::acp::{AuthMethod, PermissionOption, QuestionOption, ToolStatus};
 
 /// A connection test keeps authentication failures distinct from transport or protocol errors.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -82,6 +82,18 @@ pub enum Event {
         kind: Option<String>,
         options: Vec<PermissionOption>,
     },
+    /// It asks the user a question of its own; answered with [`ChatBackend::answer_question`].
+    Question {
+        key: u64,
+        /// The agent's question, in its words.
+        message: String,
+        /// The choices it offers (a form); empty for a link.
+        options: Vec<QuestionOption>,
+        /// The property the answer belongs to (a form); `None` for a link.
+        field: Option<String>,
+        /// The link it asks the user to open (url mode).
+        url: Option<String>,
+    },
     /// It needs the user to sign in; `methods` are its own ways to do so.
     AuthRequired {
         methods: Vec<AuthMethod>,
@@ -149,6 +161,8 @@ pub trait ChatBackend {
     fn set_instructions(&mut self, _text: &str) {}
     /// Answer an [`Event::Permission`] with one of its options (`None`: cancelled).
     fn answer_permission(&mut self, key: u64, option: Option<&str>);
+    /// Answer an [`Event::Question`] with a choice, the consent to open a link, or a dismissal.
+    fn answer_question(&mut self, _key: u64, _answer: &Answer) {}
     /// Ask the backend to sign in by itself with one of its methods (it opens the browser).
     fn authenticate(&mut self, method: &str);
     /// Use one of the models it reported in [`Event::Models`].

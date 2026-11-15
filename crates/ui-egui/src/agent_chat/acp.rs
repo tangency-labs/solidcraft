@@ -481,6 +481,28 @@ pub struct PermissionOption {
     pub kind: String,
 }
 
+/// One choice of the agent's own question (an ACP elicitation).
+#[derive(Clone, Debug, PartialEq)]
+pub struct QuestionOption {
+    /// The value the agent's schema names this choice by: what the answer carries back.
+    pub value: String,
+    /// The text the button shows.
+    pub name: String,
+}
+
+/// What the user answers to the agent's own question.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Answer {
+    /// One of the choices the question offers.
+    Choice(String),
+    /// The user agrees to open the link the agent asks for (a url-mode question).
+    Accept,
+    /// The user declines to answer.
+    Decline,
+    /// The user dismisses the question without choosing.
+    Cancel,
+}
+
 /// What a message from the agent means for the panel.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Incoming {
@@ -512,6 +534,21 @@ pub enum Incoming {
         /// The tool call's kind (`execute`, `edit`, `other`, …), as the agent gives it.
         kind: Option<String>,
         options: Vec<PermissionOption>,
+    },
+    /// The agent asks the user a question of its own (`elicitation/create`); answered with
+    /// [`question_reply`].
+    Question {
+        rpc: Value,
+        /// The session the question belongs to (empty when it has none).
+        session: String,
+        /// The agent's question, in its words.
+        message: String,
+        /// The choices it offers (a form); empty for a link or an unusable schema.
+        options: Vec<QuestionOption>,
+        /// The property the answer belongs to (a form); `None` for a link.
+        field: Option<String>,
+        /// The link it asks the user to open (url mode).
+        url: Option<String>,
     },
     /// The agent says whether it is logged in (an extension both adapters send).
     AuthStatus(String),
@@ -603,6 +640,16 @@ pub fn parse(line: &str) -> Option<Incoming> {
                 .unwrap_or_default();
             Some(Incoming::Permission { rpc: id.clone(), title, kind, options })
         }
+        // The agent's own question (`elicitation/create`): it is asked in the panel, not refused.
+        (Some("elicitation/create"), Some(id)) => {
+            let session = params.get("sessionId").and_then(Value::as_str).unwrap_or("").to_string();
+            let message = params.get("message").and_then(Value::as_str).unwrap_or("").chars().take(MAX_QUESTION).collect();
+            let mode = params.get("mode").and_then(Value::as_str).unwrap_or("");
+            // Only a form offers choices; a link and an unknown mode are asked without them.
+            let (field, options) = if mode == "form" { question_choices(params.get("requestedSchema")) } else { (None, Vec::new()) };
+            let url = params.get("url").and_then(Value::as_str).map(|u| u.chars().take(MAX_LINK).collect());
+            Some(Incoming::Question { rpc: id.clone(), session, message, options, field, url })
+        }
         (Some(m), Some(id)) => Some(Incoming::Unsupported { rpc: id.clone(), method: m.to_string() }),
         (Some("session/update"), None) => Some(update(params.get("update")?, params.get("sessionId").and_then(Value::as_str).unwrap_or(""))),
         (Some("_auth/status_update"), None) => {
@@ -668,6 +715,71 @@ pub fn permission_reply(rpc: Value, option: Option<&str>) -> Value {
         None => json!({"outcome": "cancelled"}),
     };
     reply(rpc, json!({"outcome": outcome}))
+}
+
+/// Longest question shown from the agent.
+const MAX_QUESTION: usize = 1024;
+/// Longest link shown from the agent.
+const MAX_LINK: usize = 2048;
+/// Most choices one question may offer.
+const MAX_CHOICES: usize = 64;
+
+/// The choices a form-mode question offers: the first property that is a single select (its
+/// `enum` values, or the `const` of its `oneOf` options), with the property the answer belongs
+/// to. A schema that says nothing usable gives no choices, and the question is asked without them.
+fn question_choices(schema: Option<&Value>) -> (Option<String>, Vec<QuestionOption>) {
+    let Some(properties) = schema.and_then(|s| s.get("properties")).and_then(Value::as_object) else {
+        return (None, Vec::new());
+    };
+    for (name, property) in properties {
+        let choices = choice_values(property);
+        if choices.is_empty() {
+            continue;
+        }
+        let options = choices
+            .into_iter()
+            .take(MAX_CHOICES)
+            .map(|(value, label)| QuestionOption { value: value.chars().take(256).collect(), name: label.chars().take(256).collect() })
+            .collect();
+        return (Some(name.clone()), options);
+    }
+    (None, Vec::new())
+}
+
+/// The values a single-select property offers: its `enum`, or the `const` of its `oneOf` options
+/// (whose `title` names the choice). Anything else offers nothing.
+fn choice_values(property: &Value) -> Vec<(String, String)> {
+    if let Some(values) = property.get("enum").and_then(Value::as_array) {
+        return values.iter().filter_map(|v| v.as_str()).map(|v| (v.to_string(), v.to_string())).collect();
+    }
+    let Some(values) = property.get("oneOf").and_then(Value::as_array) else { return Vec::new() };
+    values
+        .iter()
+        .filter_map(|option| {
+            let value = option.get("const").and_then(Value::as_str)?;
+            let name = option.get("title").and_then(Value::as_str).unwrap_or(value);
+            Some((value.to_string(), name.to_string()))
+        })
+        .collect()
+}
+
+/// The answer to the agent's own question: the choice picked, the consent to open a link, or the
+/// dismissal. `field` is the property the answer belongs to (a form); a link has none.
+pub fn question_reply(rpc: Value, field: Option<&str>, answer: &Answer) -> Value {
+    let result = match answer {
+        Answer::Choice(value) => match field {
+            Some(field) => {
+                let mut content = serde_json::Map::new();
+                content.insert(field.to_string(), Value::String(value.clone()));
+                json!({"action": "accept", "content": Value::Object(content)})
+            }
+            None => json!({"action": "accept"}),
+        },
+        Answer::Accept => json!({"action": "accept"}),
+        Answer::Decline => json!({"action": "decline"}),
+        Answer::Cancel => json!({"action": "cancel"}),
+    };
+    reply(rpc, result)
 }
 
 /// Split a command line into the program and its arguments: whitespace separates, double or
@@ -1012,11 +1124,52 @@ mod tests {
     #[test]
     fn a_question_from_the_agent_is_asked_in_the_panel() {
         // An ACP agent's own question (`elicitation/create`), in form mode.
-        let asked = r#"{"jsonrpc":"2.0","id":43,"method":"elicitation/create","params":{"sessionId":"sess_abc123","mode":"form","message":"How should I approach this refactoring?","requestedSchema":{"type":"object","properties":{"strategy":{"type":"string","enum":["conservative","balanced","aggressive"]}},"required":["strategy"]}}}}"#;
+        let asked = r#"{"jsonrpc":"2.0","id":43,"method":"elicitation/create","params":{"sessionId":"sess_abc123","mode":"form","message":"How should I approach this refactoring?","requestedSchema":{"type":"object","properties":{"strategy":{"type":"string","enum":["conservative","balanced","aggressive"]}},"required":["strategy"]}}}"#;
         let parsed = parse(asked).expect("a question from the agent is read");
         assert!(
             !matches!(parsed, Incoming::Unsupported { .. } | Incoming::Ignored),
             "a question from the agent is asked in the panel, not refused: {parsed:?}"
         );
+        let Incoming::Question { session, message, options, field, url, .. } = parsed else {
+            panic!("the question is asked, with its choices: {parsed:?}")
+        };
+        assert_eq!(session, "sess_abc123");
+        assert_eq!(message, "How should I approach this refactoring?");
+        assert_eq!(field.as_deref(), Some("strategy"));
+        assert_eq!(options.iter().map(|o| o.value.as_str()).collect::<Vec<_>>(), ["conservative", "balanced", "aggressive"]);
+        assert!(url.is_none(), "a form asks no link");
+        // The answer carries the choice back under the property the schema names.
+        let answered = question_reply(json!(43), field.as_deref(), &Answer::Choice("balanced".into()));
+        assert_eq!(answered["id"], json!(43), "the answer keeps the agent's own request id");
+        assert_eq!(answered["result"], json!({"action": "accept", "content": {"strategy": "balanced"}}));
+    }
+
+    #[test]
+    fn a_question_of_the_agent_survives_its_hostile_shapes() {
+        // A link: the message and the link, with no choices.
+        let link = r#"{"jsonrpc":"2.0","id":7,"method":"elicitation/create","params":{"sessionId":"s","mode":"url","url":"https://agent.example.com/connect","message":"Please authorize access."}}"#;
+        let Some(Incoming::Question { message, options, field, url, .. }) = parse(link) else { panic!("a link question is read") };
+        assert_eq!(message, "Please authorize access.");
+        assert!(options.is_empty() && field.is_none(), "a link offers no choice");
+        assert_eq!(url.as_deref(), Some("https://agent.example.com/connect"));
+        // A schema that says nothing usable: the question is asked without choices.
+        let broken = r#"{"jsonrpc":"2.0","id":8,"method":"elicitation/create","params":{"sessionId":"s","mode":"form","message":"?","requestedSchema":{"type":"object","properties":{"note":{"type":"string"}}}}}"#;
+        let Some(Incoming::Question { options, field, .. }) = parse(broken) else { panic!("a question without choices is read") };
+        assert!(options.is_empty() && field.is_none());
+        // A huge list of choices is bounded.
+        let many: Vec<String> = (0..500).map(|n| format!("\"c{n}\"")).collect();
+        let huge = format!(
+            r#"{{"jsonrpc":"2.0","id":9,"method":"elicitation/create","params":{{"sessionId":"s","mode":"form","message":"?","requestedSchema":{{"type":"object","properties":{{"c":{{"type":"string","enum":[{}]}}}}}}}}}}"#,
+            many.join(",")
+        );
+        let Some(Incoming::Question { options, .. }) = parse(&huge) else { panic!("a question with many choices is read") };
+        assert_eq!(options.len(), MAX_CHOICES);
+        // An unknown mode is asked without choices, not as a form.
+        let unknown = r#"{"jsonrpc":"2.0","id":10,"method":"elicitation/create","params":{"sessionId":"s","mode":"chat","message":"?"}}"#;
+        let Some(Incoming::Question { options, field, .. }) = parse(unknown) else { panic!("a question of an unknown mode is read") };
+        assert!(options.is_empty() && field.is_none());
+        // A dismissal and a refusal are told apart, as the protocol asks.
+        assert_eq!(question_reply(json!(1), None, &Answer::Cancel)["result"], json!({"action": "cancel"}));
+        assert_eq!(question_reply(json!(1), None, &Answer::Decline)["result"], json!({"action": "decline"}));
     }
 }
