@@ -1315,6 +1315,7 @@ mod tests {
     }
 
     type NurbSurf = solidcore::nurbs::srf_basic::Surface;
+    use solidcore::surface::implicit::{lies_on, Implicit};
 
     /// Control point `(s, g)` of `net` (Euclidean, weight), `s` along the sweep and `g`
     /// along the tube: the NURB's u is the sweep unless `swap`.
@@ -1341,8 +1342,9 @@ mod tests {
     /// exactly arcs of the circle of centre `c`, unit plane normal `nrm` and radius `rho`:
     /// each end on the circle, every point in its plane, the middle point at
     /// `rho / cos(theta / 2)` on the bisector of the ends, and `w1^2 = w0 w2 cos^2(theta / 2)`
-    /// (the conditions for a rational quadratic Bezier to be that circular arc). Returns the
-    /// arcs' total angle in degrees.
+    /// (the conditions for a rational quadratic Bezier to be that circular arc), every arc
+    /// turning the same way about `nrm` (no arc runs back). Returns the arcs' total angle
+    /// in degrees.
     #[allow(clippy::too_many_arguments)]
     fn assert_arcs(
         res: &mut Residuals,
@@ -1355,6 +1357,7 @@ mod tests {
     ) -> f64 {
         assert!(rho > 0.0, "{name}: arc radius {rho}");
         let mut total = 0.0;
+        let mut sense = 0.0;
         for seg in pts.windows(3).step_by(2) {
             let ((p0, w0), (p1, w1), (p2, w2)) = (seg[0], seg[1], seg[2]);
             let (a, m, b) = (p0 - c, p1 - c, p2 - c);
@@ -1363,7 +1366,12 @@ mod tests {
             for v in [a, m, b] {
                 res.check("net: control point in the arc's plane", name, v.dot(nrm).abs(), tol);
             }
-            let theta = a.cross(b).length().atan2(a.dot(b));
+            let signed = a.cross(b).dot(nrm).atan2(a.dot(b));
+            if sense == 0.0 {
+                sense = signed.signum();
+            }
+            assert!(signed * sense > 0.0, "{name}: an arc turns back ({signed} rad)");
+            let theta = signed.abs();
             let half = (theta / 2.0).cos();
             assert!(half > 0.0, "{name}: arc of {theta} rad");
             res.check("net: middle point at rho / cos(theta / 2)", name, (m.length() - rho / half).abs(), tol / half);
@@ -1375,20 +1383,23 @@ mod tests {
         total
     }
 
-    /// Asserts that `net` is exactly the torus of radii `major` and `minor` about the axis
-    /// through `origin` along `axis`, over STEP lengths `lengths`: degree-2 Bezier knots
-    /// both ways; the tube column at the sweep start is exactly an arc of the minor circle
-    /// (centre `R` out from the axis in its meridian plane, radius `r`) over `lengths.1`;
-    /// every sweep row is exactly the arc about the axis of its tube-column point, over
-    /// `lengths.0`, rotated as the first row, with tensor-product weights. That is the
-    /// NURB surface of revolution of the minor circle (Piegl & Tiller, The NURBS Book,
-    /// section 8.5), so every point of the patch lies on the torus, not only the points
-    /// checked.
+    /// Asserts that `form` lies on the torus of radii `major` and `minor` about the axis
+    /// through `origin` along `axis`, and spans `lengths` of it. That it lies on the torus is
+    /// certified by the kernel's [`lies_on`](solidcore::surface::implicit::lies_on): every
+    /// Bernstein coefficient of the torus's implicit equation on every Bezier patch is within
+    /// its gamma_K rounding, nothing sampled. The extent is pinned by the net (NURB u the
+    /// sweep unless `swap`): degree-2 Bezier knots both ways; the tube column at the sweep
+    /// start is arcs of the minor circle (centre `R` out from the axis in its meridian
+    /// plane, radius `r`) turning one way over `lengths.1`; every sweep row is arcs about
+    /// the axis of its column-0 point turning one way over `lengths.0`, turned as the first
+    /// row, with tensor-product weights. Only column 0 is checked directly; the other
+    /// columns follow from the rows turned alike and the tensor weights. These net checks
+    /// are against chosen allowances.
     #[allow(clippy::too_many_arguments)]
     fn assert_net_is_torus(
         res: &mut Residuals,
         name: &str,
-        net: &NurbSurf,
+        form: &BSplineSurface,
         swap: bool,
         major: f64,
         minor: f64,
@@ -1399,6 +1410,10 @@ mod tests {
         ang: f64,
     ) {
         let a = axis / axis.length();
+        let torus = Implicit::Torus { centre: origin, axis: a, major, minor };
+        let on = lies_on(form, &torus);
+        assert!(matches!(on, Ok(true)), "{name}: not certified on the torus: {on:?}");
+        let net = form.gw_nurb().expect("nurb");
         let ix = net.indices();
         let (nu, nv) = (ix.n + 1, ix.m + 1);
         assert!(bezier_knots(net.u_knots(), nu) && bezier_knots(net.v_knots(), nv), "{name}: knots");
@@ -1447,13 +1462,15 @@ mod tests {
     }
 
     /// The analytic data of `t` against the torus it must be. `exact` (NURB u the sweep
-    /// unless `swap`) is first proven to be exactly that torus ([`assert_net_is_torus`]);
+    /// unless `swap`) is first certified on that torus over `lengths` ([`assert_net_is_torus`]);
     /// `t` must then have radii `major` and `minor`, STEP interval lengths `lengths`
     /// (degrees), the axis through `origin` along `axis` (either sense), and pass through
     /// `test` at the NURB domain's four corners and its centre, each at a STEP parameter
     /// inside its domain; the corners fix the patch's placement on the torus (its u0 and
     /// v0). `slack` is a certified bound on how far `test` lies off `exact` (a perturbed
-    /// control point; 0 otherwise): it certifies the point checks only.
+    /// control point; 0 otherwise). It bounds `test` against `exact`, not against `t`, so a
+    /// perturbed row's checks of `t` (point and parameter) are MEASURED against allowances
+    /// widened by it.
     #[allow(clippy::too_many_arguments)]
     fn assert_is_torus(
         res: &mut Residuals,
@@ -1461,7 +1478,7 @@ mod tests {
         k: &Kernel,
         t: &Torus,
         test: &BSplineSurface,
-        exact: &NurbSurf,
+        exact: &BSplineSurface,
         swap: bool,
         major: f64,
         minor: f64,
@@ -1504,9 +1521,114 @@ mod tests {
             res.check("torus: STEP parameter in the domain", name, outside(step.x, du.min(), du.max()), ang);
             res.check("torus: STEP parameter in the domain", name, outside(step.y, dv.min(), dv.max()), ang);
             let q = t.evaluate_step_point(step).expect("step point");
-            res.check("torus: through the NURB", name, (p - q).length(), tol + slack);
+            let key = if slack > 0.0 { "torus: through the NURB (perturbed rows, MEASURED)" } else { "torus: through the NURB" };
+            res.check(key, name, (p - q).length(), tol + slack);
         }
     }
+
+    /// How far the offset of `t` by `dist` (`CreateOffsetSurface`) is from the source moved
+    /// along its normal: the largest distance (closed form) from the offset torus
+    /// of the source NURB point plus `dist` times its unit normal `Su x Sv / |Su x Sv|`, at
+    /// a 5 x 5 grid inside the NURB domain (off the axis of a horn torus), and the rounding
+    /// allowance for it. A geometric check of the offset's sense, independent of the
+    /// formula that sets its minor radius. Points where the tube has crossed the axis
+    /// (`R + r cos v <= 0`, a spindle torus's folded part, where the sweep runs backwards
+    /// and so does the normal) are left out: there the offset along the normal is not the
+    /// minor-radius change. `None` when no point is left.
+    fn offset_off_normal(name: &str, k: &Kernel, t: &Torus, dist: f64, origin: Vec3, axis: Vec3) -> Option<(f64, f64)> {
+        let off = t
+            .create_offset_surface(k, dist, 1e-6)
+            .expect("offset")
+            .unwrap_or_else(|| panic!("{name}: no offset"));
+        let a_hat = axis / axis.length();
+        let (big, small) = (off.major_radius(), off.minor_radius());
+        // the distance from x to the offset torus, the revolution of its minor circle: in the
+        // meridian plane through x, the nearer of the two circles (the far one matters for a
+        // spindle torus, whose tube crosses the axis)
+        let off_torus = |x: Vec3| {
+            let v = x - origin;
+            let h = v.dot(a_hat);
+            let rho = (v - h * a_hat).length();
+            let near = ((rho - big).powi(2) + h * h).sqrt() - small;
+            let far = ((rho + big).powi(2) + h * h).sqrt() - small;
+            near.abs().min(far.abs())
+        };
+        let src = t.base().base();
+        let nd = src.natural_uv_domain();
+        let tol = 1e-9 * (origin.length() + t.major_radius() + t.minor_radius() + dist.abs());
+        let mut worst = None::<f64>;
+        let grid = [0.1, 0.3, 0.5, 0.7, 0.9];
+        for (a, b) in grid.iter().flat_map(|a| grid.iter().map(move |b| (*a, *b))) {
+            let uv = nd.evaluate(a, b);
+            let v = t.convert_uv_from_nurbs_to_step(k, uv).expect("to step").y;
+            if t.major_radius() + t.minor_radius() * v.to_radians().cos() <= 1e-6 * t.major_radius() {
+                continue;
+            }
+            let d = src.evaluate_simple(uv, 1, 1, false, false, false).expect("derivatives");
+            let n = d[1][0].cross(d[0][1]);
+            let moved = d[0][0] + dist * (n / n.length());
+            let off_by = off_torus(moved);
+            assert!(off_by.is_finite(), "{name}: offset check at ({a}, {b})");
+            worst = Some(worst.map_or(off_by, |w| w.max(off_by)));
+        }
+        worst.map(|w| (w, tol))
+    }
+
+    /// The rows whose torus is inside out (50 of the 92), offset to the wrong side
+    /// (tangency-labs/solidcraft#17091: `CreateOffsetSurface` reverses the offset for a swap
+    /// but not for inside out). The fix must remove this list.
+    const INSIDE_OUT_ROWS: [&str; 50] = [
+        "edge_swap_inside_offset",
+        "edge_swap_inside_rebuild",
+        "gen0358",
+        "gen0393",
+        "gen0482",
+        "gen0489",
+        "issue1433_torus_far_below_s0_i1",
+        "issue1433_torus_far_below_s1_i1",
+        "issue1433_torus_far_full_s0_i1",
+        "issue1433_torus_far_full_s1_i1",
+        "issue1433_torus_far_inner_s0_i1",
+        "issue1433_torus_far_inner_s1_i1",
+        "issue1433_torus_far_offseam_s0_i1",
+        "issue1433_torus_far_offseam_s1_i1",
+        "issue1433_torus_far_past180_s0_i1",
+        "issue1433_torus_far_past180_s1_i1",
+        "issue1433_torus_far_quarter_s0_i1",
+        "issue1433_torus_far_quarter_s1_i1",
+        "issue1433_torus_scaled_0.0001_swap",
+        "issue1433_torus_scaled_0.01_swap",
+        "issue1433_torus_scaled_100000_swap",
+        "issue1433_torus_scaled_100_swap",
+        "issue1433_torus_tilted_below_s0_i1",
+        "issue1433_torus_tilted_below_s1_i1",
+        "issue1433_torus_tilted_inner_s0_i1",
+        "issue1433_torus_tilted_inner_s1_i1",
+        "issue1433_torus_tilted_offseam_s0_i1",
+        "issue1433_torus_tilted_offseam_s1_i1",
+        "issue1433_torus_tilted_past180_s0_i1",
+        "issue1433_torus_tilted_past180_s1_i1",
+        "issue1433_torus_tilted_quarter_s0_i1",
+        "issue1433_torus_tilted_quarter_s1_i1",
+        "issue1433_torus_z_below_s0_i1",
+        "issue1433_torus_z_below_s1_i1",
+        "issue1433_torus_z_inner_s0_i1",
+        "issue1433_torus_z_inner_s1_i1",
+        "issue1433_torus_z_offseam_s0_i1",
+        "issue1433_torus_z_offseam_s1_i1",
+        "issue1433_torus_z_past180_s0_i1",
+        "issue1433_torus_z_past180_s1_i1",
+        "issue1433_torus_z_quarter_s0_i1",
+        "issue1433_torus_z_quarter_s1_i1",
+        "issue1490_r20_4_s1_i1_sw0_is_nurb",
+        "issue1490_r20_4_s1_i1_sw1_is_nurb",
+        "issue1490_r20_4_s1e3_i1_sw0_is_nurb",
+        "issue1490_r20_4_s1e3_i1_sw1_is_nurb",
+        "issue1490_r20_4_s1em3_i1_sw0_is_nurb",
+        "issue1490_r20_4_s1em3_i1_sw1_is_nurb",
+        "v_neg_io_swap_rebuild",
+        "v_zero_io_swap_rebuild",
+    ];
 
     /// Every golden row that moved with the WR-408/501/504 retirement holds the exact torus
     /// (the recogniser and the rebuild) or the exact minor circle (the horn iso curve).
@@ -1520,6 +1642,8 @@ mod tests {
         let k = Kernel::default();
         let mut res = Residuals::default();
         let mut seen = 0;
+        let mut excluded = Vec::new();
+        let mut folded = Vec::new();
         for case in &cases {
             if !WR408_501_504_MOVED.contains(&case.name.as_str()) {
                 continue;
@@ -1532,6 +1656,21 @@ mod tests {
             let origin = v3(i.torus.origin);
             let axis = v3(i.torus.x).cross(v3(i.torus.y));
             let lengths = input_lengths(&i.torus);
+            // every row's torus offset by a quarter of its minor radius lies along its normal,
+            // except the inside-out tori (#17091), which must stay on the wrong side by
+            // exactly 2d until the fix flips this (the torus's own flag: a case given an
+            // explicit generator takes it from that circle, not from the input's flag)
+            let d = 0.25 * minor;
+            if let Some((off_by, off_tol)) = offset_off_normal(name, &k, &t, d, origin, axis) {
+                if t.inside_out() {
+                    excluded.push(name);
+                    res.check("offset: inside-out row off by 2d (#17091)", name, (off_by - 2.0 * d).abs(), off_tol);
+                } else {
+                    res.check("offset: source point moved along its normal is on the offset", name, off_by, off_tol);
+                }
+            } else {
+                folded.push(name);
+            }
             match &i.op {
                 OpIn::IsNurb { scale, net_scale, perturb } => {
                     // the moved is_nurb rows are unscaled or mirrored nets (an isometry
@@ -1569,6 +1708,7 @@ mod tests {
                     let moved: f64 = perturb.iter().map(|p| v3(p.d).length()).sum();
                     let slack = moved * w_max / w_min;
                     let test = BSplineSurface::from_nurb(nurb, false);
+                    let exact = BSplineSurface::from_nurb(exact, false);
                     let found = Torus::is_nurb_surface_torus(&k, &test, *scale)
                         .expect("no error")
                         .unwrap_or_else(|| panic!("{name}: not found"));
@@ -1579,8 +1719,7 @@ mod tests {
                     let mut r = t.clone();
                     r.rebuild_step_from_nurb_parameters(&k).unwrap_or_else(|e| panic!("{name}: {e}"));
                     assert_eq!(r.inside_out(), i.torus.inside_out, "{name}: inside out");
-                    let net = t.base().base().gw_nurb().expect("nurb");
-                    assert_is_torus(&mut res, name, &k, &r, t.base().base(), net, i.torus.swap, major, minor, lengths, origin, axis, 0.0);
+                    assert_is_torus(&mut res, name, &k, &r, t.base().base(), t.base().base(), i.torus.swap, major, minor, lengths, origin, axis, 0.0);
                 }
                 OpIn::Offset { dist, tol, rebuild } => {
                     assert!(*rebuild, "{name}: only rebuilt offsets move");
@@ -1588,13 +1727,13 @@ mod tests {
                         .create_offset_surface(&k, *dist, *tol)
                         .expect("offset")
                         .unwrap_or_else(|| panic!("{name}: no offset"));
-                    // the offset torus in closed form: the minor radius grows by the signed
-                    // distance along the surface normal, which points into the tube when the
-                    // NURB's u and v are swapped (`CreateOffsetSurface`); the major radius,
-                    // frame and STEP domain are the source's
+                    // the offset torus as `CreateOffsetSurface` makes it: minor r + d, d negated
+                    // when u and v are swapped (not when inside out). This row is swapped and
+                    // inside out, so that is the wrong side (#17091, checked above); this
+                    // records what the kernel builds, and the rebuild must give it back
                     let off_minor = minor + if i.torus.swap { -dist } else { *dist };
-                    res.check("offset: minor radius", name, (off.minor_radius() - off_minor).abs(), 1e-9 * off_minor);
-                    res.check("offset: major radius", name, (off.major_radius() - major).abs(), 1e-9 * major);
+                    res.check("offset: minor radius", name, (off.minor_radius() - off_minor).abs(), 1e-12 * off_minor);
+                    res.check("offset: major radius", name, (off.major_radius() - major).abs(), 1e-12 * major);
                     let od = off.base().step_uv_domain();
                     res.check("offset: STEP u length", name, (od.u_interval().length() - lengths.0).abs(), 1e-9);
                     res.check("offset: STEP v length", name, (od.v_interval().length() - lengths.1).abs(), 1e-9);
@@ -1605,8 +1744,7 @@ mod tests {
                     let mut r = off.clone();
                     r.rebuild_step_from_nurb_parameters(&k).unwrap_or_else(|e| panic!("{name}: {e}"));
                     assert_eq!(r.inside_out(), off.inside_out(), "{name}: inside out");
-                    let net = off.base().base().gw_nurb().expect("nurb");
-                    assert_is_torus(&mut res, name, &k, &r, off.base().base(), net, off.base().swap_uv(), major, off_minor, lengths, origin, axis, 0.0);
+                    assert_is_torus(&mut res, name, &k, &r, off.base().base(), off.base().base(), off.base().swap_uv(), major, off_minor, lengths, origin, axis, 0.0);
                 }
                 OpIn::Iso { param, iso, dom } => {
                     assert!(dom.is_none(), "{name}: only whole-domain iso curves move");
@@ -1623,8 +1761,8 @@ mod tests {
                     res.check("iso: unit x axis", name, (x.length() - 1.0).abs(), 1e-12);
                     res.check("iso: x axis in the torus's xy plane", name, x.dot(axis).abs(), 1e-12);
                     let centre = origin + major * x;
-                    res.check("iso: centre", name, (e.position().origin() - centre).length(), ptol);
-                    res.check("iso: radius", name, (e.x_radius() - minor).abs(), 1e-9 * minor);
+                    res.check("iso: centre", name, (e.position().origin() - centre).length(), 1e-12 * (origin.length() + major + minor));
+                    res.check("iso: radius", name, (e.x_radius() - minor).abs(), 1e-12 * minor);
                     let ivl = e.step_interval();
                     res.check("iso: interval length", name, (ivl.length() - lengths.1).abs(), 1e-9);
                     // its analytic ends are the iso curve's NURB ends, and the NURB's middle
@@ -1645,6 +1783,9 @@ mod tests {
             }
         }
         assert_eq!(seen, WR408_501_504_MOVED.len(), "every moved case is checked");
+        excluded.sort_unstable();
+        eprintln!("offset check: {} inside-out rows off by 2d, {} rows wholly folded: {folded:?}", excluded.len(), folded.len());
+        assert_eq!(excluded, INSIDE_OUT_ROWS.to_vec(), "the rows #17091 excludes");
         for (key, used) in &res.0 {
             eprintln!("largest residual / allowance: {used:.3e}  {key}");
         }

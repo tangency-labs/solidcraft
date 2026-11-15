@@ -16,7 +16,11 @@ rig's `fixes.json` and in `issue_2260_gn_pipe_refined_range_end.rs`, the flag li
   over its own interval, not the mirrored one.
 - **Goldens:** the `surface.torus` `rebuild`, rebuilt-`offset` and `is_nurb` rows move (one table in the PR). The
   committed test `wr408_501_504_moved_rows_are_the_exact_torus` (goldens, `units/surface_torus.rs`) checks each
-  result against the torus it was built from. It first proves the NURB's control net is exactly that torus (every row
-  and column a circular arc net, tensor weights), then checks radii, interval lengths, origin, axis, and the analytic
-  surface through the NURB at its corners (which fix the patch's placement) and centre.
+  result against the torus it was built from. It first certifies that the NURB lies on that torus with
+  `surface::implicit::lies_on` (Bernstein coefficients of the implicit equation against their rounding), and pins
+  the patch's extent from the control net with chosen allowances. Only column 0 is checked directly as arcs of the minor
+  circle; the other columns follow from the rows turned alike and the tensor-product weights. It then checks radii,
+  interval lengths, origin, axis, and the analytic surface through the NURB at its corners (which fix the patch's
+  placement) and centre. The `edge_swap_inside_offset` row records an existing wrong offset side (#17091), not a
+  proven value.
 - **Tests:** the unit tests that set the flag run on the default kernel; their expected values are unchanged.
