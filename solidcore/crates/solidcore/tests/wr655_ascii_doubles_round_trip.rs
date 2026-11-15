@@ -55,7 +55,7 @@ fn the_records_example() {
 }
 
 #[test]
-fn ascii_doubles_read_back_unchanged_only_with_the_fix() {
+fn ascii_doubles_read_back_unchanged_only_with_round_trip_doubles() {
     let back = write_read(&VALUES, true);
     for (a, b) in VALUES.iter().zip(&back) {
         assert_eq!(a.to_bits(), b.to_bits(), "{a:e} read back as {b:e}");

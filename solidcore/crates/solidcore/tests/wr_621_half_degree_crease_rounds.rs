@@ -115,3 +115,86 @@ fn wr_621_creases_from_half_a_degree_round() {
         assert!(round(0.3, r).is_err(), "0.3 degrees, r {r}");
     }
 }
+
+/// The upstream `Fillet/nurb_cone.smb`, read as the goldens' file cases read it.
+fn nurb_cone(k: &mut Kernel) -> Brep {
+    use solidcore::geom::object::ObjectRef;
+    use solidcore::topology::brep::p10::TopologyEnv;
+    use solidcore::topology::brep::p7::read_from_file;
+    use solidcore::topology::database_io::FileType;
+    use solidcore::topology::topology::NotifyRecords;
+    use solidcore::EntityRef;
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../upstream/TestFiles/pt_TestFiles/Fillet/nurb_cone.smb"
+    );
+    let bytes = std::fs::read(path).unwrap();
+    let mut b = Brep::new_with_infinite_region().unwrap();
+    let mut records = NotifyRecords::new();
+    let mut attributes = AttributeStore::default();
+    let key = |_: EntityRef| ObjectRef {
+        key: ObjectKey(0),
+        type_code: 0,
+    };
+    let mut env = TopologyEnv {
+        all_attributes: &[],
+        attributes: &mut attributes,
+        key_of: &key,
+        records: &mut records,
+        next_key: 1 << 50,
+    };
+    read_from_file(k, &mut b, bytes, FileType::Ascii, false, &mut env).unwrap();
+    b.use_arena_naming().unwrap();
+    b
+}
+
+/// Edge 8 of `Fillet/nurb_cone.smb` (goldens `blend.fillet_executive_p3`
+/// `stubs4-degenerate-nurb_cone-e8-r0.5`) turns by 0.61 degrees: a crease under the half
+/// degree limit, not a tangent edge. A round of r 0.5 there stands
+/// `r (sec(turn / 2) - 1)` off the edge, under its tolerance, so it is refused as too small
+/// before the solver runs (which leaves the solver's step latch unset), naming the
+/// smallest radius `tolerance / (sec(turn / 2) - 1)` that rounds it.
+#[test]
+fn wr_621_a_shallow_crease_too_small_to_round_is_refused_before_solving() {
+    use solidcore::blend::blend_refusal::{round_too_small, BlendRefusal};
+    let mut k = Kernel::default();
+    // the refusal's query refits the edge's tolerance, so it runs on its own copy
+    let mut probe = nurb_cone(&mut k);
+    let e = probe.edge_list()[8];
+    let refusal = round_too_small(&k, &mut probe, e, 0.5).unwrap();
+    let Some(BlendRefusal::RoundTooSmall {
+        edge,
+        turn,
+        tolerance,
+        smallest_radius,
+    }) = refusal
+    else {
+        panic!("edge 8 at r 0.5: {refusal:?}");
+    };
+    assert_eq!(edge, e);
+    // a crease: above the half degree limit, below upstream's 2 degrees
+    assert!(
+        turn > 0.5 * PI / 180.0 && turn < 2.0 * PI / 180.0,
+        "turn {turn}"
+    );
+    let reach = 1.0 / (0.5 * turn).cos() - 1.0;
+    assert!(0.5 * reach < tolerance, "r 0.5 stands {} off", 0.5 * reach);
+    assert_eq!(smallest_radius, tolerance / reach);
+    assert!((smallest_radius - 0.715).abs() < 1e-3, "{smallest_radius}");
+
+    let mut k = Kernel::default();
+    let mut b = nurb_cone(&mut k);
+    assert_eq!(b.edge_list()[8], e);
+    let err = fillet_edges(&mut k, &mut b, &[e], 0.5, 1, 1, 1.0).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            solidcore::SolidError::BlendRefused {
+                refusal: BlendRefusal::RoundTooSmall { .. },
+                ..
+            }
+        ),
+        "{err:?}"
+    );
+    assert_eq!(k.fillet_point_step.get(), None);
+}

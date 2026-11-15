@@ -1034,11 +1034,18 @@ mod tests {
         file_of(&out).unwrap()
     }
 
-    /// Certificate for the ASCII `write_bytes` rows (WR-655): every double in each ASCII
-    /// file is written as the shortest text that reads back as itself (`round_trip`, no
-    /// `%.16f` text left), and the file carries every double exactly: read back and written
-    /// as a binary file, it gives the same bytes as the case's own binary file read back
-    /// and written the same way.
+    /// The ASCII `write_bytes` cases that write a file: all 114 moved with the WR-655 fix
+    /// (the expectations commit of the flag's retirement), and every one is certified
+    /// below.
+    const ASCII_FILES: usize = 114;
+
+    /// Certificate for the ASCII `write_bytes` rows (WR-655): every finite double in each
+    /// ASCII file is written as the shortest text that reads back as itself (`round_trip`,
+    /// no `%.16f` text left), and the file carries every double exactly: read back and
+    /// written as a binary file, it gives the same bytes as the case's own binary file read
+    /// back and written the same way. The certified cases must be exactly the
+    /// [`ASCII_FILES`] ASCII write cases that write a file, each with a committed golden
+    /// row.
     #[test]
     fn ascii_files_carry_every_double_exactly() {
         let ctx = CaseContext {
@@ -1046,10 +1053,23 @@ mod tests {
             seeds: 16,
         };
         let cases = Runner.cases(&ctx).unwrap();
+        let golden = std::fs::read_to_string(
+            crate::case::repo_root().join("crates/goldens/expected/topology.api_files.jsonl"),
+        )
+        .unwrap();
+        let golden: std::collections::BTreeSet<String> = golden
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter_map(|v| v.get("case")?.as_str().map(str::to_string))
+            .collect();
         let mut covered = Vec::new();
         let mut lossy = Vec::new();
         for case in &cases {
-            let Ok(Op::WriteBytes { brep, ascii: true }) = case.parse::<Op>() else {
+            let op: Op = case
+                .parse()
+                .unwrap_or_else(|e| panic!("{}: {e:?}", case.name));
+            // the ASCII writes only: the other ops and the binary writes do not move
+            let Op::WriteBytes { brep, ascii: true } = op else {
                 continue;
             };
             let ascii = rust(&Op::WriteBytes {
@@ -1090,10 +1110,11 @@ mod tests {
             if loses {
                 lossy.push(name.clone());
             }
+            assert!(golden.contains(name), "{name}: no committed golden row");
             covered.push(name.clone());
         }
         println!("ASCII_EXACT covered {}: {covered:?}", covered.len());
         println!("ASCII_EXACT %.16f loses a double in {}: {lossy:?}", lossy.len());
-        assert!(!covered.is_empty());
+        assert_eq!(covered.len(), ASCII_FILES);
     }
 }
