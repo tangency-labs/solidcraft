@@ -74,8 +74,8 @@ fn one_flag_on_is_exactly_that_entry() {
     assert_eq!(listed(&newest), debug_fields(&newest));
 
     let mut first = UpstreamFixes::default();
-    first.plane_recognition_origin_after_axes = true;
-    assert_eq!(turned_on(&first), ["plane_recognition_origin_after_axes"]);
+    first.fillet_trim_status = true;
+    assert_eq!(turned_on(&first), ["fillet_trim_status"]);
     assert_eq!(listed(&first), debug_fields(&first));
 }
 

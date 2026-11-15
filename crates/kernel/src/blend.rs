@@ -1147,6 +1147,17 @@ pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
     Ok(out)
 }
 
+/// The point halfway along the edge each of `picks` takes, as a blend takes it ([`blend_edges`]),
+/// one per pick and in their order: where a moved copy of the body finds the same edge again. A
+/// pick itself need not: at the vertex two edges share (the halves of a rim a seam splits) it is
+/// as near to each, and on a copy rounding takes either (#16934). The middle is on the edge's own
+/// curve, at the middle of its parameter interval. Picks that find no edge are refused.
+pub fn blend_edge_middles(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
+    let rec = Faces::of(body)?;
+    let (edges, _) = crate::blend_smlib::picked_edges(body, picks)?;
+    edges.into_iter().map(|e| edge_middle(&rec, e).ok_or_else(|| KernelError::Failed("a point on a picked edge".into()))).collect()
+}
+
 /// [`tangent_chain`] as the record's edge indices (the display's edge indices,
 /// [`Body::edges`]): the edges `picks` take, each once, then the edges that continue them.
 /// For a caller that shows the chain: it needs no point looked up on a tessellated edge.

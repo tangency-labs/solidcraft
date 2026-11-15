@@ -95,7 +95,7 @@ const NO_KERNEL: [&str; 14] = [
     "hold_a_kernel",
 ];
 
-const ANSWERING: [&str; 66] = [
+const ANSWERING: [&str; 67] = [
     "set_dump_dir",
     "current_call",
     "crash_test",
@@ -143,6 +143,7 @@ const ANSWERING: [&str; 66] = [
     "history",
     "check",
     "check_owned",
+    "check_stitched",
     "make_cylinder",
     "make_sphere",
     "make_cone",
@@ -260,6 +261,7 @@ fn every_entry_point_answers() {
     says("is_manifold_solid", a.is_manifold_solid());
     says("history", says("tagged", a.tagged(0)).unwrap().history());
     says("check", a.check(CheckLevel::All));
+    says("check_stitched", a.check_stitched(CheckLevel::All));
     says("check_owned", a.try_clone().and_then(|c| c.check_owned(CheckLevel::All)));
     says("make_cylinder", Brep::make_cylinder([0.0; 3], 1.0, 1.0));
     says("make_sphere", Brep::make_sphere([0.0; 3], 1.0));
