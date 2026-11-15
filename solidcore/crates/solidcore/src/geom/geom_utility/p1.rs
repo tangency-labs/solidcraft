@@ -88,14 +88,15 @@
 //!   the symmetric scatter matrix `M` (preserving [`BestFitLine::m`]), the least-squares
 //!   line direction. Pinned v1.0.1 takes the largest eigenvector of `C = del I - M` built
 //!   with un-negated off-diagonals, a perpendicular or skewed direction (`WR-10`).
-//! - [`circle_coplanar_circle_intersect`] takes two circles that overlap by less than
-//!   `tolerance` past touching (from outside or one inside the other) as tangent, as it
-//!   takes two circles that far apart; upstream takes them as tangent only within
-//!   `SM_EFF_ZERO` and returns two crossing points `2√(rδ)` apart for an overlap δ, so
-//!   two holes a hair less than tangent were crossing in one intersection and tangent in
-//!   another (#15429). The tangent point lies on the side where they touch, decided by
-//!   the smaller of the two overlaps (upstream: inside whenever the centres are nearer
-//!   than the radii's sum by more than `SM_EFF_ZERO`).
+//! - [`circle_coplanar_circle_intersect`] takes two circles that overlap past touching
+//!   (from outside each other or with one inside the other) by less than `tolerance`, or
+//!   its `SM_EFF_ZERO · (1 + r1 + r2)` when that is larger, as tangent, as it takes two
+//!   circles that far apart (WR-787, #15429). Upstream's band for an overlap is that zero
+//!   alone, and an overlap δ above it gives two crossings `2√(2δ r1 r2 / (r1 ± r2))`
+//!   apart, far beyond δ, while the circles stay within δ of each other between them.
+//!   The tangent point is on the side the smaller of the two overlaps names (upstream:
+//!   the inside formula whenever the centres are nearer than the radii's sum by more
+//!   than `SM_EFF_ZERO · (1 + |c1|)`, which put a near-outside tangent point off by r2).
 //! - `SM_ASSERT*` and `SM_DEBUG_CODE` blocks are not compiled upstream (release build)
 //!   and are not ported.
 
@@ -1888,6 +1889,61 @@ mod tests {
             circle_coplanar_circle_intersect(Vec3::Z, Vec3::ZERO, 1.0, v(1., 0., 0.), 1.0, 1e-6)
                 .unwrap();
         assert_eq!(r.count(), 2);
+    }
+
+    /// WR-787: two circles overlapping past touching by δ below the tolerance touch midway
+    /// between their nearest points, as circles that far apart do: from outside (radii
+    /// 2.5, and 2 and 3 about centres far from the origin, circle 2 a hair off circle 1's
+    /// plane) and one inside the other (radii 3 and 1, either way round). Past the
+    /// tolerance they cross at two points `2√(2δ r1 r2 / (r1 ± r2))` apart.
+    #[test]
+    fn circles_overlapping_below_the_tolerance_touch() {
+        let far = v(1e3, -2e3, 50.0);
+        let hit = |c1: Vec3, r1: f64, c2: Vec3, r2: f64| {
+            circle_coplanar_circle_intersect(Vec3::Z, c1, r1, c2, r2, 1e-5).unwrap()
+        };
+        let touch = |r: CircleCircle, want: Vec3| match r {
+            CircleCircle::Tangent(p) => assert!(p.distance(want) < 1e-12, "{p:?}, want {want:?}"),
+            other => panic!("{other:?}, want a tangent point at {want:?}"),
+        };
+        let delta = 1e-9;
+        touch(
+            hit(Vec3::ZERO, 2.5, v(5.0 - delta, 0., 0.), 2.5),
+            v(2.5 - delta / 2.0, 0., 0.),
+        );
+        touch(
+            hit(far, 2.0, far + v(0., 5.0 - delta, 0.), 3.0),
+            far + v(0., 2.0 - delta / 2.0, 0.),
+        );
+        touch(
+            hit(Vec3::ZERO, 2.5, v(5.0 - delta, 0., 1e-3), 2.5),
+            v(2.5 - delta / 2.0, 0., 0.5e-3),
+        );
+        touch(
+            hit(Vec3::ZERO, 3.0, v(2.0 + delta, 0., 0.), 1.0),
+            v(3.0 + delta / 2.0, 0., 0.),
+        );
+        touch(
+            hit(v(2.0 + delta, 0., 0.), 1.0, Vec3::ZERO, 3.0),
+            v(3.0 + delta / 2.0, 0., 0.),
+        );
+        // past the tolerance (δ = 1e-4): two crossings, 2√(2δ r1 r2 / (r1 + r2)) apart from
+        // outside and 2√(2δ r1 r2 / (r1 − r2)) inside, to first order in δ
+        let delta = 1e-4;
+        for (r1, c2, r2, denom) in [
+            (2.5, v(5.0 - delta, 0., 0.), 2.5, 5.0),
+            (3.0, v(2.0 + delta, 0., 0.), 1.0, 2.0),
+        ] {
+            let CircleCircle::Crossing(p, q) = hit(Vec3::ZERO, r1, c2, r2) else {
+                panic!("{c2:?}: two crossings expected");
+            };
+            let want = 2.0 * (2.0 * delta * r1 * r2 / denom).sqrt();
+            assert!(
+                (p.distance(q) - want).abs() < 1e-3 * want,
+                "{} vs {want}",
+                p.distance(q)
+            );
+        }
     }
 
     /// A line 1.2e-5 inside a circle of radius 3e-4 crosses it twice, 1.66e-4 apart.

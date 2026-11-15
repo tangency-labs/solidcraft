@@ -236,9 +236,9 @@ fn drill(x: f64, z: f64, depth: f64) -> Body {
 /// and the rims touch within the intersection tolerance, as for holes a hair apart (ε = −1e-9):
 /// each cut is one valid solid of the counts of the holes a hair apart and the volume less the
 /// overlap (the lens of the two circles; the points' overlap is below 1e-12), in either order,
-/// and the two cylinders unite to two solids touching along the line. The drills are checked
-/// to the issue's ε: from 1e-8 their points, which only the marching intersection meets, add
-/// edges (valid solids of the right volume).
+/// and the two cylinders unite to two solids touching along the line. The drills keep the
+/// counts of drills a hair apart to the issue's ε; from 1e-8 their points, which only the
+/// marching intersection meets, add edges, and they are one valid solid of the volume.
 #[test]
 #[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
 fn parallel_holes_a_hair_less_than_tangent_cut_as_touching() {
@@ -280,11 +280,23 @@ fn parallel_holes_a_hair_less_than_tangent_cut_as_touching() {
             volume(&u)
         );
     }
-    for eps in [-1e-9, 1e-9, 2.3e-9] {
+    for eps in [-1e-9, 1e-9, 2.3e-9, 1e-8, 1e-7] {
         let drilled = 4000.0 - 2.0 * PI * r * r * (depth + tip / 3.0) + lens(eps) * depth;
         for (z1, z2) in orders(7.5, 2.5 + eps) {
             let c = cut_twice(drill(5.0, z1, depth), drill(5.0, z2, depth));
-            one_valid_solid(&c, [12, 27, 16], drilled);
+            if eps < 1e-8 {
+                one_valid_solid(&c, [12, 27, 16], drilled);
+            } else {
+                // the points' extra edges are not decided here: one valid solid, its volume
+                let report = c.check(CheckLevel::All).unwrap();
+                assert!(report.is_valid(), "{eps}: {}", report.text);
+                assert_eq!(c.solid_count().unwrap(), 1, "{eps}");
+                assert!(
+                    near(volume(&c), drilled),
+                    "{eps}: {}, closed form {drilled}",
+                    volume(&c)
+                );
+            }
         }
     }
 }

@@ -276,26 +276,18 @@ What the port does today:
   `topology/brep/p3.rs`, `remove_slit_loops_where_solids_touch`).
 - **Solids touching along an edge or at a vertex** are a valid result: ops checks the result with
   `is_outward_touching_solids` (§3).
-- **Circles a hair less than tangent.** Two coplanar circles that overlap past touching by less
-  than the intersection's tolerance touch at one point, as two circles that far apart do
-  (`circle_coplanar_circle_intersect`, `geom/geom_utility/p1.rs`). Their two crossings lie
-  2√(rδ) apart for an overlap δ, far outside the tolerance, while the circles stay within δ of
-  each other between them. Parallel cylinders are cut through the same test (`surface/cone/p3.rs`),
-  so two holes a hair less than tangent touch along one line in the wall intersection and at one
-  point on each rim, consistently. Cones and other surfaces met by the marching intersection
-  are not decided this way.
-- **The sector test near tangency** steps off the edge and compares binormals until they separate
-  (§4.2); where they never do within the face, it returns the coincident or zero-sector class.
-  Tangent faces part as the square of the step over their relative radius, so fixed steps and
-  angle thresholds read the faces of a large enough part as parallel. Two readings therefore step
-  on, three times further each round, until the faces are more than the tolerance apart: a sector
-  whose own two faces look parallel (a zero sector), and a classified face that looks coincident
-  with a face the definitions show to lie on another surface (`query/face/p1.rs`,
-  `faces_on_other_surfaces`: two different analytic kinds, or two quadrics of one kind that
-  `Surface::same_analytic_surface` tells apart). A tangent pair with no definitions to compare (a
-  B-spline on a plane) is still read as coincident once its relative radius passes about 1.7e7
-  times the sum of the two edges' tolerances, 330 mm at 1e-5 each (`query/edge.rs`, the 0.01°
-  rule over eight rounds).
+- **Circles a hair less than tangent.** Two coplanar circles that overlap past touching by δ
+  cross at two points `2√(2δ r1 r2 / (r1 ± r2))` apart (`2√(rδ)` for equal radii from
+  outside), far beyond δ, while the circles stay within δ of each other between them. Below
+  the tolerance its caller passes, `circle_coplanar_circle_intersect` (`geom/geom_utility/p1.rs`)
+  takes them as touching at one point midway between their nearest points, as it takes
+  circles that far apart. The wall intersection of parallel cylinders (`surface/cone/p3.rs`),
+  the circle/circle intersection (`curve/ellipse/p2.rs`) and the curve/surface classifier's
+  osculating circles (`surface/surface/p4.rs`) all decide through it, so two holes a hair less
+  than tangent touch along one line and at one point on each rim wherever their overlap is
+  below every one of those tolerances (the intersection tolerance, about 5e-6 on a part of
+  ordinary size). Parallel cones (drill points) are met by the marching intersection and are
+  not decided this way, nor are coplanar faces bounded by such circles.
 
 **The refusal that names a tangent contact.** The kernel's boolean has none today. The `ssi` crate
 refuses a contact it cannot prove with `Error::Tangent`, code `BOOLEAN_TANGENT`, carrying where it
