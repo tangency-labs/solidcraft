@@ -2921,7 +2921,7 @@ mod tests {
     /// times, more than degree + 1, so the walk has no row to compare there. The knot is
     /// skipped (no pole is reported without a coincidence test), test 1 reports the
     /// multiplicity, and upstream's row index (one past the net) is not read. With no
-    /// pole, test 5 then runs and finds the net doubling back.
+    /// pole, test 5 then runs, as in upstream's order. The test proves only the pole skip.
     #[test]
     fn a_knot_repeated_past_degree_plus_one_is_not_a_pole() {
         let xs = [
@@ -2943,7 +2943,7 @@ mod tests {
                 -0.069_466_878_423_028_26,
                 -0.158_859_253_527_507_32,
                 -0.057_906_515_715_139_88,
-                0.164_432_400_201_120_6,
+                0.164_432_402_001_120_6,
                 -0.185_682_426_738_735_83,
             ],
             [
@@ -2971,7 +2971,7 @@ mod tests {
                 -0.069_466_878_423_028_26,
                 -0.158_859_253_527_507_32,
                 -0.057_906_515_715_139_88,
-                0.164_432_400_201_120_6,
+                0.164_432_402_001_120_6,
                 -0.185_682_426_738_735_83,
             ],
         ];
@@ -3002,8 +3002,10 @@ mod tests {
             .map(|r| (r.reporting_type, r.test_index))
             .collect();
         assert!(!ok);
-        // test 5 runs once no internal pole is found (upstream's order), and it is real: the
-        // net's last U row returns to its first (x 1.083 back to 0.619), so it doubles back
+        // test 5 runs once no internal pole is found (upstream's order). Why it fails is
+        // MEASURED, not asserted here: the net closes in U (its last U row repeats its first),
+        // and test 5's 170-degree turn-back check trips only on the V = 4 column of poles,
+        // at 172.9 degrees between P2->P3 and P3->P4
         assert_eq!(
             failed,
             [
