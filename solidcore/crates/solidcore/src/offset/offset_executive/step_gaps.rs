@@ -288,8 +288,9 @@ impl OffsetExecutive {
     /// end; those of the evaluations, solves, curve edits
     /// and the split; [`SolidError::InvalidInput`] for missing topology.
     ///
-    /// An edge closed to a point (fork ccbf77a) is squeezed out instead, and once every gap is closed the faces
-    /// that closed to nothing with such edges are deleted (see `remove_closed_faces`).
+    /// In a local operation an edge closed to a point (fork ccbf77a, WR-566) is squeezed out
+    /// instead, and once every gap is closed the faces that closed to nothing with such edges
+    /// are deleted (see `remove_closed_faces`).
     pub(super) fn close_loop_gaps(
         &mut self,
         kernel: &mut Kernel,
@@ -530,20 +531,25 @@ impl OffsetExecutive {
                     // the edge's other vertex is: the edge closed to a point. That is sound
                     // only where a face closes to nothing with it, which `close_loop_gaps`
                     // checks once every gap is closed. The edge is squeezed out, its two
-                    // vertices one, and noted with the original face across it.
-                    if self.squeeze_closed_edge(
-                        kernel,
-                        original,
-                        b,
-                        f,
-                        u,
-                        e,
-                        at_start,
-                        vertex_point,
-                        tol,
-                        notifications,
-                        closed_edges,
-                    )? {
+                    // vertices one, and noted with the original face across it. Only a
+                    // local operation moves a wall's top onto another face's plane: in a
+                    // shell or offset an edge closed to a point is where the result meets
+                    // itself along a line (no sound solid), refused below by name.
+                    if self.operation() == OffsetOperation::LocalOperation
+                        && self.squeeze_closed_edge(
+                            kernel,
+                            original,
+                            b,
+                            f,
+                            u,
+                            e,
+                            at_start,
+                            vertex_point,
+                            tol,
+                            notifications,
+                            closed_edges,
+                        )?
+                    {
                         return Ok(());
                     }
                     // (fork 34318f4) elsewhere the vertex moved past the edge's end: the edge
