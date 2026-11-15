@@ -2,6 +2,8 @@
 //! centre (panic fuzz of #2490, case `body_queries:15857720670000042863`; #2756): a
 //! 64-gon of radius 6.29 extruded to 9.19 at 72 degrees, so the offset,
 //! `9.19 * tan 72° = 28.3`, is four times the radius and the trimmed offset is empty.
+//! Its sides as lines now take the tangent corner rule, which builds the pyramid directly
+//! (#17265); as B-spline segments, the cancel cases below, they take the offset method.
 //! The taper then takes its surface intersection method: the untrimmed walls are merged
 //! piecewise, which splits them into a number of faces that grows as the square of the
 //! sides (464 for 16 sides), and the faces that do not reach their generating curve's
@@ -211,8 +213,12 @@ fn apex_z(sides: u64) -> f64 {
 /// The `sides`-gon tapered to `height` at 72 degrees with linear (tangent) corners and the
 /// end caps `caps`.
 fn tangent_taper(sides: u64, height: f64, caps: i32) -> sweeps::TaperExtrude {
+    taper_of(&polygon(sides), height, caps)
+}
+
+/// `polygon` tapered to `height` at 72 degrees with linear corners and the end caps `caps`.
+fn taper_of(polygon: &[Curve], height: f64, caps: i32) -> sweeps::TaperExtrude {
     let mut k = Kernel::default();
-    let polygon = polygon(sides);
     let refs: Vec<Option<&Curve>> = polygon.iter().map(Some).collect();
     sweeps::create_taper_extrude_with_corner(
         &mut k,
@@ -229,7 +235,12 @@ fn tangent_taper(sides: u64, height: f64, caps: i32) -> sweeps::TaperExtrude {
 /// axis at [`apex_z`] and the rest the polygon's corners (as
 /// [`taper_extrude_past_the_centre_still_builds_its_pyramid`] checks the octagon).
 fn assert_open_pyramid(sides: u64) {
-    let sweeps::TaperExtrude::Solid(b) = tangent_taper(sides, HEIGHT, 0) else {
+    assert_open_pyramid_of(sides, &polygon(sides));
+}
+
+/// [`assert_open_pyramid`] of the `sides`-gon given as `curves`.
+fn assert_open_pyramid_of(sides: u64, curves: &[Curve]) {
+    let sweeps::TaperExtrude::Solid(b) = taper_of(curves, HEIGHT, 0) else {
         panic!("the {sides}-gon's pyramid is refused");
     };
     let n = usize::try_from(sides).unwrap();
@@ -331,5 +342,15 @@ fn an_apex_on_the_far_end_is_still_refused() {
             (r - RADIUS).abs() < 1e-9 * RADIUS && refusal.corner.z.abs() < 1e-12,
             "{refusal:?}"
         );
+    });
+}
+
+/// Uncancelled, the 16-gon of B-spline segments (the cancel case's input) still builds its
+/// pyramid through the surface intersection method, as its lines did before the tangent
+/// rule took them.
+#[test]
+fn the_bspline_16_gon_still_builds_its_pyramid() {
+    within_budget(std::time::Duration::from_secs(300), || {
+        assert_open_pyramid_of(16, &bspline_polygon(16));
     });
 }

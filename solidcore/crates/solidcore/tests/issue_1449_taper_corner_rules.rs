@@ -182,6 +182,112 @@ fn a_ridge_on_the_far_end_is_still_refused() {
         panic!("built");
     };
     assert_eq!(refusal.reason, TaperCornerRefusal::WallCloses);
+    // at a corner of a short wall, the walls that close
+    let corners = [p(0.0, 0.0), p(20.0, 0.0), p(20.0, 2.0), p(0.0, 2.0)];
+    assert!(corners.contains(&refusal.corner), "{refusal:?}");
+}
+
+/// A 3-4-5 triangle drafted 45 degrees in: every wall's section shrinks to the incentre
+/// (1, 1) at the height of the inradius, 1 (tan 45 = 1), so the closed taper is the
+/// pyramid of volume 6 * 1 / 3 = 2 with 4 faces and 4 vertices.
+#[test]
+fn a_triangle_closes_at_its_incentre() {
+    let mut k = kernel();
+    let curves = polygon(&[p(0.0, 0.0), p(4.0, 0.0), p(0.0, 3.0)]);
+    let TaperExtrude::Solid(mut b) =
+        taper(&mut k, &curves, 45.0, OffsetCornerType::LinearExtension)
+    else {
+        panic!("refused");
+    };
+    assert!(is_manifold_solid(&b).unwrap());
+    assert_eq!((b.face_list().len(), b.vertex_list().len()), (4, 4));
+    let apex = b
+        .vertex_list()
+        .iter()
+        .map(|&v| b.vertex(v).unwrap().point)
+        .fold(
+            Vec3::new(0.0, 0.0, -1.0),
+            |a, q| if q.z > a.z { q } else { a },
+        );
+    assert!(apex.distance(Vec3::new(1.0, 1.0, 1.0)) <= 1e-9, "{apex:?}");
+    assert_rel(volume(&k, &mut b), 2.0, 1e-9);
+}
+
+/// A rectangle 2 x (2 + d) drafted 45 degrees in closes at height 1: its long walls meet
+/// along a ridge of length d. A ridge well over the tolerance is built as one (6 vertices);
+/// one far below it is the apex of a pyramid (5 vertices). The volume is the hip roof's,
+/// b^2 (3a - b) / 12 with a = 2 + d, b = 2 (tan 45 = 1), either way.
+#[test]
+fn a_ridge_closes_as_a_ridge_and_a_point_as_an_apex() {
+    for (d, vertices) in [(1e-3, 6), (1e-12, 5)] {
+        let mut k = kernel();
+        let a = 2.0 + d;
+        let curves = polygon(&[p(0.0, 0.0), p(a, 0.0), p(a, 2.0), p(0.0, 2.0)]);
+        let TaperExtrude::Solid(mut b) =
+            taper(&mut k, &curves, 45.0, OffsetCornerType::LinearExtension)
+        else {
+            panic!("d {d}: refused");
+        };
+        assert!(is_manifold_solid(&b).unwrap(), "d {d}");
+        assert_eq!(
+            (b.face_list().len(), b.vertex_list().len()),
+            (5, vertices),
+            "d {d}"
+        );
+        assert_rel(volume(&k, &mut b), 4.0 * (3.0 * a - 2.0) / 12.0, 1e-9);
+    }
+}
+
+/// A quarter disc of radius 10 (its two radii and an `SmCircle` arc) drafted 45 degrees in:
+/// it is tangential (its inscribed circle touches both radii and the arc), so the three
+/// walls' sections, the arc's on its cone, shrink to the inscribed circle's centre, on the
+/// bisector at `R / (1 + sin 45)` from the corner, at the height of its radius
+/// `rho = R sin 45 / (1 + sin 45)` (4.14), drafted over 6.
+#[test]
+fn a_quarter_disc_closes_at_its_inscribed_centre() {
+    let mut k = kernel();
+    let r = 10.0;
+    let a = Line::create_line_segment(3, p(0.0, 0.0), p(r, 0.0), None).unwrap();
+    let h = std::f64::consts::FRAC_1_SQRT_2;
+    let arc =
+        Ellipse::circle_from_3_points(&k, p(r, 0.0), p(r * h, r * h), p(0.0, r), 3, false).unwrap();
+    let c = Line::create_line_segment(3, p(0.0, r), p(0.0, 0.0), None).unwrap();
+    let curves = [Curve::from(a), Curve::from(arc), Curve::from(c)];
+    let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+    // over 6, past the apex, before the arc's cone reaches its axis at 10
+    let result = create_taper_extrude_with_corner(
+        &mut k,
+        &refs,
+        6.0,
+        45.0,
+        3,
+        OffsetCornerType::LinearExtension,
+    )
+    .unwrap();
+    let TaperExtrude::Solid(mut b) = result else {
+        panic!("refused: {result:?}");
+    };
+    assert!(is_manifold_solid(&b).unwrap());
+    let lines = solidcore::topology::brep::validation::check_brep(
+        &mut k,
+        &mut b,
+        solidcore::topology::brep::validation::CheckLevel::Level2,
+    )
+    .unwrap()
+    .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    let rho = r * h / (1.0 + h);
+    let along = r / (1.0 + h);
+    let want = Vec3::new(along * h, along * h, rho);
+    let apex = b
+        .vertex_list()
+        .iter()
+        .map(|&v| b.vertex(v).unwrap().point)
+        .fold(
+            Vec3::new(0.0, 0.0, -1.0),
+            |a, q| if q.z > a.z { q } else { a },
+        );
+    assert!(apex.distance(want) <= 1e-9 * r, "{apex:?} vs {want:?}");
 }
 
 /// A rectangle drafted outward: SMLib's tangent rule gave 14 faces (two flat corner

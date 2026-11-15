@@ -1355,19 +1355,46 @@ impl Sections<'_> {
     }
 
     /// Whether the whole section has closed at the point `q` of the profile's plane by
-    /// height `f` (#17265): every live wall's two crossings there lie within `tol` of `q`,
-    /// and an arc's section between them is the short arc. The B-rep's tolerance is the
-    /// kernel's coincidence: points within it of one vertex are that vertex, so the live
-    /// walls' seams all end at one apex `q` at `f`, and above it no section is left (the
-    /// walls meeting at one point is the section shrinking to it: a pyramid's apex, or a
-    /// ridge's far end). A line's section lies between its crossings, so within `tol` of
-    /// `q`. An arc's is followed up from `f_from` in [`SECTION_STEPS`] steps, as the
-    /// closing search follows it, so that its angle stays continuous: the short arc over a
-    /// chord of at most `2 tol` is at most a half circle on it, `PI tol` long, and the long
-    /// one at least `2 PI r - PI tol`, more than `PI tol` while the radius `r` there is
-    /// over `tol` (an arc of radius at most `tol` lies within `2 tol` of `q` either way).
-    /// A crossing that is missing, or a length that is NaN, is not closed.
+    /// height `f` (#17265), so that every live wall's seams may end at one apex `q + f h`
+    /// within the B-rep's tolerance `tol` (the kernel's coincidence: points within it of one
+    /// vertex are that vertex): a pyramid's apex, or a ridge's far end.
+    ///
+    /// Every live wall moves into the material at its own speed per unit of `f`, `s_w`: a
+    /// line's `|offset|`, an arc's `|shrink|`. Let `s` be the least and `H = |h|`. If every
+    /// live wall's two crossings at `f` lie within `reach = tol s / (s + H)` of `q`, the
+    /// section there lies within `reach` of `q` (a line's section runs between its crossings;
+    /// an arc's is the short arc between them, checked below), so each of its points is
+    /// within `reach` of the nearest wall, which reaches it by `f + reach / s`: the section is
+    /// gone by then. Every point of the true walls' meeting above `f` is then within
+    /// `reach + (reach / s) H = tol` of the apex, by the triangle inequality. A wall that does
+    /// not move (`s` not above 0) is not closed.
+    ///
+    /// An arc's section is followed up from `f_from` in [`SECTION_STEPS`] steps, as the
+    /// closing search follows it, so that its angle stays continuous; the short arc over a
+    /// chord of at most `2 reach` is at most a half circle on it, `PI reach` long, and the
+    /// long one at least `2 PI r - PI reach`, more than `PI reach` while the radius `r` there
+    /// is over `reach` (an arc of radius at most `reach` lies within `2 reach` of `q` either
+    /// way, and `read_walls` refuses one whose radius falls to `tol`). A crossing that is
+    /// missing, or a value that is NaN, is not closed.
     fn closed_at(&self, live: &[bool], f_from: f64, f: f64, q: Point3, tol: f64) -> Result<bool> {
+        let mut s = f64::INFINITY;
+        for (w, &alive) in live.iter().enumerate() {
+            if !alive {
+                continue;
+            }
+            let wall = at_ref(self.walls, w)?;
+            let speed = if wall.arc {
+                wall.shrink.abs()
+            } else {
+                wall.offset.length()
+            };
+            s = min2(s, speed);
+        }
+        let height = self.h.length();
+        if !(s > 0.0) || !(height.is_finite()) {
+            return Ok(false);
+        }
+        let reach = tol * s / (s + height);
         for (w, &alive) in live.iter().enumerate() {
             if !alive {
                 continue;
@@ -1376,7 +1403,7 @@ impl Sections<'_> {
                 let Some(x) = self.at(p, f)? else {
                     return Ok(false);
                 };
-                if !(x.distance(q) <= tol) {
+                if !(x.distance(q) <= reach) {
                     return Ok(false);
                 }
             }
@@ -1385,7 +1412,7 @@ impl Sections<'_> {
                 continue;
             }
             let radius = wall.radius - f * wall.shrink;
-            if radius <= tol {
+            if radius <= reach {
                 continue;
             }
             let mut start = wall.start_ang;
@@ -1401,7 +1428,7 @@ impl Sections<'_> {
                 };
                 len = l;
             }
-            if !(radius * len.abs() <= PI * tol) {
+            if !(radius * len.abs() <= PI * reach) {
                 return Ok(false);
             }
         }
@@ -1737,7 +1764,7 @@ fn walls_closing_at_apexes(
                 live_count -= 2;
                 // the walls left close at its far end with them: the section shrinks
                 // along the ridge to that end (#17265)
-                if sections.closed_at(&live, f_cur, f, end, tol)? {
+                if live_count > 0 && sections.closed_at(&live, f_cur, f, end, tol)? {
                     sections.close_all_at(&mut live, f, end)?;
                     collapsed = true;
                     met = true;
