@@ -33,6 +33,10 @@
 //! the offset's put-back of its blends (`OffsetFacesExecutive::reblend`), WR-212.
 //! Not upstream: [`ExecutiveAccess::shrink_face`] shrinks the new fillet faces with
 //! knot snapping of rounding errors (tangency-labs/solidcore#472).
+//! Not upstream (solidcore-native, #15767): `trim_solver_rails` refuses a blend, as a rail
+//! leaving its face ([`NoRoomReason::RailLeavesFace`]), where a rail rolled over a smooth far
+//! edge of its face before the trace is not proved on the face beyond as trimmed
+//! ([`RailTrimAccess::rails_rolled_on_their_faces`]).
 
 use std::collections::BTreeMap;
 
@@ -161,7 +165,7 @@ pub enum NoRoomReason {
     CliffSubtractionLeavesNoSolid,
     /// A round that ends where its edge runs on tangentially is built only alone, with both
     /// its ends such ends, and with its faces' sections at the ends straight (not the fork's,
-    /// WR-674, `fixes.fillet_round_ends_at_tangent_continuation`).
+    /// WR-674).
     TangentContinuationEndUnsupported,
     /// A blend past its faces creases a face that runs on tangentially from a face it rolls
     /// on: the rail would roll over onto it, no cliff (the fork's `TrimAtCreases`,
@@ -819,7 +823,7 @@ pub struct OpenEnd<O> {
     pub vertex: O,
     /// `m_pEndFace`: the face whose surface's continuation cuts the fillet off there.
     pub end_face: O,
-    /// Not the fork's (WR-674, `fixes.fillet_round_ends_at_tangent_continuation`): the
+    /// Not the fork's (WR-674): the
     /// fillet is cut off by its section through the vertex, the plane normal to the
     /// filleted edge there, not by `end_face` (then one of the filleted edge's faces).
     pub section: bool,
@@ -1983,6 +1987,22 @@ pub trait RailTrimAccess<O: ClassObject + SolutionObject + Ord>: SolverGeometryA
         solver: O,
         executive: &mut FilletExecutive<O>,
     ) -> Result<()>;
+
+    /// Not upstream (solidcore-native, #15767): whether every rail of `solver` rolled over a
+    /// smooth far edge of its face before the trace, on the evidence of the ball's sections
+    /// only, is proved to lie on the face beyond as trimmed. `true` where none rolled so (the
+    /// default, for an access without that rollover).
+    ///
+    /// # Errors
+    /// A missing dependency or a cancellation from the proof; actual lookup errors.
+    fn rails_rolled_on_their_faces(
+        &mut self,
+        _k: &mut Kernel,
+        _solver: O,
+        _executive: &mut FilletExecutive<O>,
+    ) -> Result<bool> {
+        Ok(true)
+    }
 }
 
 impl<O, A> RailTrimAccess<O> for A
@@ -3353,6 +3373,15 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     "Fillet Surface Computation Failure: Unable to Trim Rail Curve",
                 );
             }
+            // Not upstream (solidcore-native, #15767): a rail rolled over a smooth far edge of
+            // its face before the trace, which the ball's sections only proposed, is accepted
+            // once proved on the face beyond as trimmed; otherwise the blend is refused
+            if !access.rails_rolled_on_their_faces(k, solver, self)? {
+                return self.record_no_room(
+                    NoRoomReason::RailLeavesFace,
+                    "Fillet Error: a rail rolled over a smooth edge of its face, the whole length, is not proved to lie on the face beyond",
+                );
+            }
             index += 1;
         }
         Ok(())
@@ -3784,6 +3813,43 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 )?;
             }
         }
+        // Not the fork's (#16156): at the radius named, the refused solver's ball may have
+        // every position on its edge's faces past an end of the edge, which
+        // `refuse_balls_past_an_end` refuses at that radius: the refusal names the radius at
+        // which it first has a section between the ends where that is smaller and not refused
+        // too; where it has no such size, none is named, since the irregular ball's own is
+        // refused past the end (`note_past_end_fit`: no size is named that a refusal would
+        // refuse). The refusal stands whatever this finds: an ordinary failure judging it
+        // leaves the irregular ball's size named (port defects and cancellation propagate).
+        if let Some((solver, _)) = worst_solver {
+            if self.fit_radius > 0.0 && self.fit_kind == FitKind::Radius {
+                let named = self.fit_radius;
+                let past = crate::error::native_failure(access.creation_ball_past_an_end(
+                    k,
+                    solver,
+                    Some(named),
+                ))?
+                .flatten();
+                if let Some(past) = past {
+                    let noted = past.radius < named
+                        && crate::error::native_failure(self.note_past_end_fit(
+                            k,
+                            access,
+                            solver,
+                            past.radius,
+                        ))?
+                        .unwrap_or(false);
+                    if noted {
+                        self.error.comment = format!("{}; but at that radius every position of the rolling ball on the edge's faces lies past an end of the edge (at ({}, {}, {})): a radius below {} has a section between the edge's ends", self.error.comment, g(past.at.x), g(past.at.y), g(past.at.z), g(past.radius));
+                    } else {
+                        // the irregular ball's size is refused past the end, and no smaller
+                        // size is known that is not
+                        self.note_fit_radius(-1.0, None, FitKind::Radius);
+                        self.error.comment = format!("{}; but at that radius every position of the rolling ball on the edge's faces lies past an end of the edge (at ({}, {}, {})), and no size is known that has a section between the edge's ends", self.error.comment, g(past.at.x), g(past.at.y), g(past.at.z));
+                    }
+                }
+            }
+        }
         // An End's rail that runs past its side edge's far end is a second cause, which
         // the corner would refuse once built (SmBlendCorner::RefuseEndPastSideEdge): the
         // refusal names the smaller of the two radii (the fork's 41a39ec).
@@ -3909,10 +3975,49 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             };
             self.error.no_room = Some(NoRoomReason::OffsetCollapses);
             self.error.no_room_without_site = true;
-            self.note_open_fit(access, true, radius, FitKind::Radius, solver)?;
+            if let Some(p) = past {
+                self.note_past_end_fit(k, access, solver, p.radius)?;
+            } else {
+                self.note_open_fit(access, true, radius, FitKind::Radius, solver)?;
+            }
             return Err(failure());
         }
         Ok(())
+    }
+
+    /// Not the fork's (#16156): notes the size the past-an-end refusal names for `solver`,
+    /// `radius` less the fit margin (open: at `radius` the far ball's section is the end's),
+    /// where it is the least noted so far and that refusal does not refuse it too
+    /// ([`ball_past_an_end`](crate::blend::fillet_exact::ball_past_an_end) judged at that
+    /// size). Otherwise nothing is noted, so no size is named that the refusal itself would
+    /// refuse. Returns whether it was noted.
+    ///
+    /// # Errors
+    /// Those of the fit lookup and the judging.
+    fn note_past_end_fit(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut impl BrepCreationAccess<O>,
+        solver: O,
+        radius: f64,
+    ) -> Result<bool> {
+        let Some(fit) = access.creation_solver_fit(solver)? else {
+            return Ok(false);
+        };
+        let size = smos_max(0.0, radius - fit.fit_margin);
+        if !crate::geom::certified::above(size, 0.0)
+            || (self.fit_radius >= 0.0 && size >= self.fit_radius)
+        {
+            return Ok(false);
+        }
+        if access
+            .creation_ball_past_an_end(k, solver, Some(size))?
+            .is_some()
+        {
+            return Ok(false);
+        }
+        self.note_fit_radius(size, Some(fit.edge), FitKind::Radius);
+        Ok(true)
     }
 
     /// Not the fork's (#14846): after the collapsed offsets, a constant ball every one of whose
@@ -3944,7 +4049,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             self.error.comment = format!("Fillet Error: every position of the rolling ball on the edge's faces lies past an end of the edge (its rail leaves the face it rolls on before either end, at ({}, {}, {})): a radius below {} has a section between the edge's ends", g(past.at.x), g(past.at.y), g(past.at.z), g(past.radius));
             self.error.no_room = Some(NoRoomReason::EndRollsIntoSmoothEnd);
             self.error.no_room_without_site = true;
-            self.note_open_fit(access, true, past.radius, FitKind::Radius, solver)?;
+            self.note_past_end_fit(k, access, solver, past.radius)?;
             return Err(failure());
         }
         Ok(())

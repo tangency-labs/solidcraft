@@ -2188,7 +2188,7 @@ impl ClassGeometry<IntersectObject> for IntersectObjects<'_> {
 /// classifications' `ExtractGeometry`: its boundary point drops make the faces'
 /// trimmed surface caches on the B-reps and keep them (`smsurf_GetSurfaceCache`, which
 /// creates the faces' UV trim curves), as upstream does through its face pointers.
-struct IntersectObjectsMut<'a> {
+pub(crate) struct IntersectObjectsMut<'a> {
     /// The B-rep of this face.
     b: &'a mut Brep,
     /// The B-rep of the other face when it is a different one.
@@ -2199,6 +2199,22 @@ struct IntersectObjectsMut<'a> {
     uv2: &'a [Option<Curve>],
     /// Set when an edit lent a B-rep ([`ClassGeometryMut::topology_entity_mut`]).
     edited: bool,
+}
+
+impl<'a> IntersectObjectsMut<'a> {
+    /// The objects of free 3D curves (`IntersectObject::Curve(i)` is `curves_3d[i]`)
+    /// classified on a face of `b`, without UV curves.
+    pub(crate) fn of_curves(b: &'a mut Brep, curves_3d: &'a [Curve]) -> Self {
+        Self {
+            b,
+            other: None,
+            side: false,
+            curves_3d,
+            uv1: &[],
+            uv2: &[],
+            edited: false,
+        }
+    }
 }
 
 impl IntersectObjectsMut<'_> {

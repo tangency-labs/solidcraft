@@ -26,11 +26,10 @@
 //! (`SM_ERR_BAD_INTERSECTIONS`). No recursion; every loop is bounded by the face's
 //! edge uses and crossings. The fork's later a759622 ("an offset whose walls would meet
 //! is refused as such": every contact is examined before any crossing, and loops that
-//! touch without crossing fail with `SM_ERR_OFFSET_WALLS_TOUCH`) is a second opt-in,
-//! `Kernel::fixes.offset_walls_touch_refused`, read here; it has no effect without
-//! `offset_resolve_crossing_loops`, which runs this routine at all. With it off the
-//! routine is 6169ea1's (contacts checked as they are found, a touch reported as
-//! whichever crossing check fails first, `SM_ERR_BAD_INTERSECTIONS`).
+//! touch without crossing fail with `SM_ERR_OFFSET_WALLS_TOUCH`) is built in, not
+//! 6169ea1's routine (contacts checked as they are found, a touch reported as whichever
+//! crossing check fails first, `SM_ERR_BAD_INTERSECTIONS`); like the rest of this file it
+//! runs only with `offset_resolve_crossing_loops`.
 //! The fork's 1b016ca (regions the loops wind round the other way under an opening are
 //! kept, reversed, where they are the cavity's floor) is part of the same opt-in (WR-345
 //! addendum): it adds the original body to the routine's inputs for its point tests.
@@ -412,8 +411,7 @@ impl OffsetExecutive {
     /// # Errors
     ///
     /// `SM_ERR_BAD_INTERSECTIONS` for crossings this does not resolve (see
-    /// `resolve_crossing_loops_of_face`); with `Kernel::fixes.offset_walls_touch_refused`,
-    /// `SM_ERR_OFFSET_WALLS_TOUCH` for loops that touch without crossing; those of the
+    /// `resolve_crossing_loops_of_face`); `SM_ERR_OFFSET_WALLS_TOUCH` for loops that touch without crossing; those of the
     /// evaluations, intersections and face construction.
     pub(super) fn resolve_crossing_loops(
         &mut self,
@@ -539,62 +537,23 @@ impl OffsetExecutive {
         // #38 finds them).
         // per edge use: (parameter, crossing)
         let mut cuts: Vec<Vec<(f64, i64)>> = vec![Vec::new(); edgeuses.len()];
-        let mut num_crossings: i64 = 0;
-        if kernel.fixes.offset_walls_touch_refused {
-            // Fork a759622: every contact is looked at before any crossing is resolved
-            // or refused.
-            num_crossings = cut_at_crossings_refusing_touch(
-                kernel,
-                b,
-                f,
-                &CrossingInputs {
-                    loop_edgeuses: &loop_edgeuses,
-                    loop_of: &loop_of,
-                    edgeuses: &edgeuses,
-                    uvs: &uvs,
-                    first_of_loop: &first_of_loop,
-                    tol_3d,
-                    uv_tol,
-                },
-                &mut cuts,
-            )?;
-        } else {
-            for aa in 0..edgeuses.len() {
-                let first_b = *at(&first_of_loop, *at(&loop_of, aa)? + 1)?;
-                for bb in first_b..edgeuses.len() {
-                    let (uv_a, uv_b) = (at(&uvs, aa)?, at(&uvs, bb)?);
-                    let solutions = uv_a.global_curve_intersect(
-                        kernel,
-                        &uv_a.natural_interval(),
-                        uv_b,
-                        &uv_b.natural_interval(),
-                        uv_tol,
-                        &CurveIntersectOptions::<NoObject>::default(),
-                    )?;
-                    for solution in solutions.as_slice() {
-                        if solution.solution_type != SolutionType::SingleValue {
-                            return Err(unresolved(LoopCrossing::RunAlong));
-                        }
-                        let t_a = solution.start.param(0)?;
-                        let t_b = solution.start.param(1)?;
-                        let e_a = edge_of(b, *at(&edgeuses, aa)?)?;
-                        let e_b = edge_of(b, *at(&edgeuses, bb)?)?;
-                        let p_a = edge_curve(b, e_a)?.evaluate_point(kernel, t_a)?;
-                        let p_b = edge_curve(b, e_b)?.evaluate_point(kernel, t_b)?;
-                        if p_a.distance(vertex_point(b, edge::start_vertex(b, e_a)?)?) <= tol_3d
-                            || p_a.distance(vertex_point(b, edge::end_vertex(b, e_a)?)?) <= tol_3d
-                            || p_b.distance(vertex_point(b, edge::start_vertex(b, e_b)?)?) <= tol_3d
-                            || p_b.distance(vertex_point(b, edge::end_vertex(b, e_b)?)?) <= tol_3d
-                        {
-                            return Err(unresolved(LoopCrossing::MeetAtLoopVertex));
-                        }
-                        at_mut(&mut cuts, aa)?.push((t_a, num_crossings));
-                        at_mut(&mut cuts, bb)?.push((t_b, num_crossings));
-                        num_crossings += 1;
-                    }
-                }
-            }
-        }
+        // Fork a759622: every contact is looked at before any crossing is resolved
+        // or refused.
+        let num_crossings = cut_at_crossings_refusing_touch(
+            kernel,
+            b,
+            f,
+            &CrossingInputs {
+                loop_edgeuses: &loop_edgeuses,
+                loop_of: &loop_of,
+                edgeuses: &edgeuses,
+                uvs: &uvs,
+                first_of_loop: &first_of_loop,
+                tol_3d,
+                uv_tol,
+            },
+            &mut cuts,
+        )?;
         if num_crossings == 0 {
             return Ok(());
         }

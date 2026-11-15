@@ -748,7 +748,7 @@ fn vertical_group_row(
         crate::scenario::publish_handle(&format!("timeline-folder-status:{}:{}", status.icon(), group.name), mark.center());
     }
     let response = match tip {
-        Some(tip) => response.backing_on_hover_text(tip),
+        Some(tip) => response.backing_on_hover_status(&tip),
         None => response,
     };
     let renaming = timeline_group_name(app, ui, group, rect, offset, names, suppressed, &t);
@@ -1183,7 +1183,8 @@ fn feature_row_body(
     let elapsed = result.map(|r| r.ms);
     let error = result.and_then(|result| result.error.clone());
     let warning = result.and_then(crate::timeline::warning_text);
-    let status = (error.is_some() || warning.is_some()).then(|| crate::timeline::feature_status_text(name, ty, result));
+    // What the tooltip says of the error and the warning, as every History tooltip does (#8834).
+    let status = (error.is_some() || warning.is_some()).then(|| crate::timeline::feature_status_tip(name, ty, result));
     let rolled = match row_kind {
         RowKind::Reference { parent } => parent >= marker,
         RowKind::Own | RowKind::Nested => index >= marker,
@@ -1236,19 +1237,17 @@ fn feature_row_body(
             .and_then(|f| f.kind.expressions().first().map(ToString::to_string))
             .unwrap_or_else(|| elapsed.map_or_else(String::new, |ms| format!("{ms:.1} ms")));
         let kind = solidcraft_ui_text::tr_label(ty.strip_suffix("Feature").unwrap_or(ty));
-        let mut tip = format!("{name} · {kind} · {summary}");
-        if let Some(status) = &status {
-            tip.push_str(&format!("\n{status}"));
-        }
+        // A value row is one line: the summary has it, and what follows (the error and the
+        // warning as every History tooltip shows them, #8834) wraps under it.
+        crate::ui_kit::text(ui, &format!("{name} · {kind} · {summary}"), crate::ui_kit::Text::Value("history", false));
+        let mut lines = Vec::new();
         // Greyed out says only "not shown": say why (#8100).
         if rolled {
-            tip.push_str(&format!("\n{}", solidcraft_ui_text::tr("timeline.feature_rolled_back")));
+            lines.push(solidcraft_ui_text::tr("timeline.feature_rolled_back").to_string());
         }
-        if let Some(state) = sketch_state {
-            tip.push_str(&format!("\n{}", state.text()));
-        }
-        crate::ui_kit::text(ui, &tip, crate::ui_kit::Text::Value("history", false));
-        // A value row is one line: where the sketch is listed gets a row of its own.
+        lines.extend(sketch_state.map(|state| state.text()));
+        // The summary line already names the feature.
+        crate::ui_kit::StatusTip { head: String::new(), tail: lines.join("\n"), ..status.clone().unwrap_or_default() }.show(ui);
         if let Some(host) = listed_under.filter(|_| reference) {
             let listed = solidcraft_ui_text::format("ui.history_sketch_listed_under", &[("feature", host)]);
             crate::ui_kit::text(ui, &listed, crate::ui_kit::Text::Value("history_listed_under", false));
@@ -1287,6 +1286,13 @@ fn feature_row_body(
         }
         if crate::ui_kit::menu::button(ui, if *suppressed { "Unsuppress Feature" } else { "Suppress Feature" }, "suppress").clicked() {
             let _ = app.run_heavy("timeline.suppress", json!({"feature": id}));
+            ui.close();
+        }
+        // An extra entry for the selection; the one above still acts on this feature alone.
+        if let Some((label, params)) = crate::timeline::suppress_selected(app, id)
+            && crate::ui_kit::menu::button(ui, &label, "suppress").clicked()
+        {
+            let _ = app.run_heavy("timeline.suppress", params);
             ui.close();
         }
         if crate::ui_kit::menu::button(ui, "Roll Back Here", "rollback").clicked() {

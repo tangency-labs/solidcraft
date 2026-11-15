@@ -6,9 +6,11 @@
 //! - `LoopNotPlanar`: a planar cap asked for a cylinder fillet's loop (two lines and two arcs
 //!   on the cylinder), which no plane holds;
 //! - `ExtensionRefused`: the faces along the loop asked to be extended by 0;
-//! - `TangentNeighbours`: `fillet1019`'s fillet that ends on another, tangent, fillet: the
-//!   patch's piece on the wall is cut from that fillet's extension only along an edge the
-//!   kernel proves smooth, so nothing bounds it there;
+//! - `TangentNeighbours`: a patch piece cut from a neighbour's extension only along an edge
+//!   the kernel proves smooth. `fillet1019`'s fillet that ends on the tangent corner round
+//!   was refused so until #15247 corrected the classification that left its patch open; it
+//!   now comes off, and the tests below prove the body it builds (no upstream file here
+//!   reaches this limit now);
 //! - `NotEnclosed`: a box face, whose neighbours, extended, run past it;
 //! - `ExtensionWithinTolerance`: the faces along a fillet's loop extended by less than the
 //!   distance within which the loop's vertices and the patch's are one point.
@@ -27,9 +29,12 @@ use solidcore::error::defeature::DefeatureFailure;
 use solidcore::error::{Reason, SM_ERR};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
+use solidcore::mass::enclosure::enclose_volume;
+use solidcore::surface::implicit::AnalyticSupport;
 use solidcore::topology::brep::p1 as bp1;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
+use solidcore::topology::brep::validation;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::{Brep, EntityRef, Kernel, SolidError};
@@ -138,21 +143,86 @@ fn an_extension_by_nothing_is_refused_as_the_extension_s() {
     assert_eq!(l, DefeatureFailure::ExtensionRefused { distance: 0.0 });
 }
 
+/// `fillet1019` defeatured as the goldens' `blend.feature_executive` rows run it (the base
+/// rebuilt by extending its surfaces, the feature from the other B-rep), one feature per
+/// list of face indices in `faces`, added in turn: `made` says which make a feature. No
+/// feature kept. Returns the base and the feature B-reps.
+fn defeatured(
+    k: &mut Kernel,
+    faces: &[&[usize]],
+    made: &[bool],
+) -> Option<(Brep, Vec<Option<Brep>>)> {
+    let mut b = read(k, "Fillet/fillet1019.smb")?;
+    let all = bp1::faces(&b, None).unwrap();
+    let features = {
+        let mut ex = FeatureExecutive::new(k, &mut b).unwrap();
+        let mut got = Vec::new();
+        for set in faces {
+            let fs: Vec<_> = set.iter().map(|&i| all[i]).collect();
+            let f = ex
+                .add_feature(
+                    k,
+                    &fs,
+                    RebuildBrepType::ExtendSurface,
+                    RebuildBrepType::FromOtherBrep,
+                )
+                .unwrap();
+            got.push(f.is_some());
+        }
+        assert_eq!(got, made, "{faces:?}");
+        let kept = ex.do_defeature(k).unwrap();
+        assert!(kept.is_empty(), "{faces:?}: {kept:?}");
+        ex.into_feature_breps()
+    };
+    Some((b, features))
+}
+
+/// #3218 first asked that `fillet1019`'s bottom fillet (face 3), which ends on the corner
+/// round (face 6), be refused as [`DefeatureFailure::TangentNeighbours`]: the patch's piece
+/// on the x- wall seemed cut from the round's extension only along an edge proved smooth,
+/// so nothing bounded it. That reading came from #15247's misclassification: the boolean
+/// took a point outside the round's extension's hole for outside that face, which left the
+/// patch open. Classified correctly, the patch closes and the fillet comes off, so this
+/// test now proves the bodies it builds are the right ones, with the inputs of the goldens'
+/// `single_face_fillet1019_3` row: the base ([`certify`]: the frustum with the top fillet and
+/// the corner round, the round carried down to the bottom by its own cylinder) and the
+/// feature B-rep ([`certify_feature`]: the fillet's gap).
 #[test]
-fn a_fillet_ending_on_a_tangent_fillet_is_refused_as_tangent_neighbours() {
-    let Some(l) = limit(
-        "Fillet/fillet1019.smb",
-        3,
-        RebuildBrepType::ExtendSurface,
-        None,
-    ) else {
+fn a_fillet_ending_on_a_tangent_fillet_comes_off_to_the_rolling_ball_body() {
+    let mut k = Kernel::default();
+    let Some((mut b, features)) = defeatured(&mut k, &[&[3]], &[true]) else {
         return;
     };
-    let within = Kernel::default().tolerances.ang_tol_deg;
-    assert_eq!(
-        l,
-        DefeatureFailure::TangentNeighbours { within_deg: within }
-    );
+    certify(&mut k, &mut b, Removed::Bottom);
+    certify_feature(&mut k, features, Removed::Bottom);
+}
+
+/// The top fillet (face 8), which ends on the corner round at the top, comes off the same
+/// way (the goldens' `single_face_fillet1019_8`): the frustum with the bottom fillet and the
+/// corner round ([`certify`]), and the fillet's gap as the feature B-rep
+/// ([`certify_feature`]).
+#[test]
+fn a_top_fillet_ending_on_a_tangent_fillet_comes_off_to_the_rolling_ball_body() {
+    let mut k = Kernel::default();
+    let Some((mut b, features)) = defeatured(&mut k, &[&[8]], &[true]) else {
+        return;
+    };
+    certify(&mut k, &mut b, Removed::Top);
+    certify_feature(&mut k, features, Removed::Top);
+}
+
+/// One feature per fillet face (the goldens' `fillet_each_fillet1019`): only the bottom
+/// fillet makes a feature (the round and the top fillet, which touch it, make none), so the
+/// bodies are the bottom fillet's ([`certify`], [`certify_feature`]).
+#[test]
+fn a_feature_per_fillet_of_fillet1019_takes_off_the_bottom_fillet() {
+    let mut k = Kernel::default();
+    let Some((mut b, features)) = defeatured(&mut k, &[&[3], &[6], &[8]], &[true, false, false])
+    else {
+        return;
+    };
+    certify(&mut k, &mut b, Removed::Bottom);
+    certify_feature(&mut k, features, Removed::Bottom);
 }
 
 #[test]
@@ -275,12 +345,7 @@ fn the_identity_radius_brackets_where_the_patch_starts_to_build() {
     let r = ex.do_defeature(&mut k);
     assert!(r.is_ok(), "extended by 1.0001 x {identity_radius}: {r:?}");
     drop(ex);
-    let check = solidcore::topology::brep::validation::check_brep(
-        &mut k,
-        &mut b,
-        solidcore::topology::brep::validation::CheckLevel::Level2,
-    )
-    .unwrap();
+    let check = validation::check_brep(&mut k, &mut b, validation::CheckLevel::Level2).unwrap();
     let lines = check.lines();
     let invalid_edges = lines.iter().filter(|l| l.contains("Test #61")).count();
     assert_eq!(
@@ -314,4 +379,661 @@ fn a_kept_feature_names_its_limit() {
     };
     assert_eq!(kept.len(), 1, "{kept:?}");
     assert!(kept[0].limit.is_some(), "{kept:?}");
+}
+
+// ---- the certificate for fillet1019 (#15247 / #3218) ------------------------------------
+
+/// An interval `[lo, hi]` with outward rounding: each operation's result is widened by one
+/// ulp each way, so it holds the exact result of the operation on any reals in its operands
+/// (the IEEE operations `+ - * / sqrt` are correctly rounded).
+#[derive(Clone, Copy, Debug)]
+struct I {
+    lo: f64,
+    hi: f64,
+}
+
+fn up(x: f64) -> f64 {
+    if x.is_nan() || x == f64::INFINITY {
+        x
+    } else if x == 0.0 {
+        f64::from_bits(1)
+    } else if x > 0.0 {
+        f64::from_bits(x.to_bits() + 1)
+    } else {
+        f64::from_bits(x.to_bits() - 1)
+    }
+}
+
+fn down(x: f64) -> f64 {
+    -up(-x)
+}
+
+impl I {
+    fn p(x: f64) -> Self {
+        Self { lo: x, hi: x }
+    }
+    fn new(lo: f64, hi: f64) -> Self {
+        assert!(lo <= hi, "{lo} > {hi}");
+        Self { lo, hi }
+    }
+    fn width(self) -> f64 {
+        self.hi - self.lo
+    }
+    fn sqr(self) -> Self {
+        let m = self * self;
+        if self.lo <= 0.0 && self.hi >= 0.0 {
+            Self::new(0.0, m.hi)
+        } else {
+            m
+        }
+    }
+    /// The square root of the part of `self` at or above 0: used where the exact value is
+    /// known not to be negative (a discriminant of a line meeting a circle it is tangent to
+    /// at worst), so a negative lower end is rounding.
+    fn sqrt0(self) -> Self {
+        assert!(self.hi >= 0.0, "{self:?}");
+        Self::new(down(self.lo.max(0.0).sqrt()).max(0.0), up(self.hi.sqrt()))
+    }
+    fn max(self, o: Self) -> Self {
+        Self::new(self.lo.max(o.lo), self.hi.max(o.hi))
+    }
+    fn min(self, o: Self) -> Self {
+        Self::new(self.lo.min(o.lo), self.hi.min(o.hi))
+    }
+    fn contains(self, o: Self) -> bool {
+        self.lo <= o.lo && o.hi <= self.hi
+    }
+    /// The measure of `[a, b]` (`0` when empty), for `a`, `b` known to their intervals.
+    fn seg(a: Self, b: Self) -> Self {
+        Self::new(down(b.lo - a.hi).max(0.0), up(b.hi - a.lo).max(0.0))
+    }
+}
+
+impl core::ops::Add for I {
+    type Output = I;
+    fn add(self, o: I) -> I {
+        I::new(down(self.lo + o.lo), up(self.hi + o.hi))
+    }
+}
+impl core::ops::Sub for I {
+    type Output = I;
+    fn sub(self, o: I) -> I {
+        I::new(down(self.lo - o.hi), up(self.hi - o.lo))
+    }
+}
+impl core::ops::Neg for I {
+    type Output = I;
+    fn neg(self) -> I {
+        I::new(-self.hi, -self.lo)
+    }
+}
+impl core::ops::Mul for I {
+    type Output = I;
+    fn mul(self, o: I) -> I {
+        let p = [
+            self.lo * o.lo,
+            self.lo * o.hi,
+            self.hi * o.lo,
+            self.hi * o.hi,
+        ];
+        let lo = p.iter().copied().fold(f64::INFINITY, f64::min);
+        let hi = p.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        I::new(down(lo), up(hi))
+    }
+}
+impl core::ops::Div for I {
+    type Output = I;
+    fn div(self, o: I) -> I {
+        assert!(o.lo > 0.0 || o.hi < 0.0, "division by {o:?}");
+        let p = [
+            self.lo / o.lo,
+            self.lo / o.hi,
+            self.hi / o.lo,
+            self.hi / o.hi,
+        ];
+        let lo = p.iter().copied().fold(f64::INFINITY, f64::min);
+        let hi = p.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        I::new(down(lo), up(hi))
+    }
+}
+
+/// `fillet1019` as a model: the frustum of the four walls drafted in by `t` from the 2W
+/// square at z = 0 to height H, its x- wall's bottom and top edges and its (x-, y-) corner
+/// rounded by rolling balls of radius r. Each round's gap (between its two planes and the
+/// ball's cylinder) is a prism; R3 (bottom), R8 (top) run along y between the y walls, R6
+/// along the corner's line (t, t, 1).
+struct Model {
+    w: I,
+    h: I,
+    t: I,
+    r: I,
+    s: I,  // sqrt(1 + t^2)
+    d2: I, // 1 + 2 t^2
+    cx3: I,
+    cx8: I,
+    cz8: I,
+    ax: I, // the corner axis at z = 0: (ax, ax, 0)
+    g: I,  // n5 . n1 = t^2 / s^2
+}
+
+impl Model {
+    fn new(w: f64, h: f64, top_half: f64, r: f64) -> Self {
+        let (w, h, r) = (I::p(w), I::p(h), I::p(r));
+        let t = (w - I::p(top_half)) / h;
+        let one = I::p(1.0);
+        let s2 = one + t.sqr();
+        let s = s2.sqrt0();
+        let d2 = one + I::p(2.0) * t.sqr();
+        let cx3 = -w + t * r + r * s;
+        let cz8 = h - r;
+        let cx8 = -w + t * cz8 + r * s;
+        let ax = -w + r * s;
+        let g = t.sqr() / s2;
+        Self {
+            w,
+            h,
+            t,
+            r,
+            s,
+            d2,
+            cx3,
+            cx8,
+            cz8,
+            ax,
+            g,
+        }
+    }
+
+    /// The bottom gap's height along the line x = c + t z (parallel to the x- wall, c from
+    /// -W at the wall to cx3 at the bottom tangent line): where the line meets the ball's
+    /// circle, `z = e^2 / (b + sqrt(b^2 - s^2 e^2))`, `e = c - cx3 <= 0`, `b = r - t e`.
+    fn h3(&self, c: I) -> I {
+        let e = c - self.cx3;
+        let e = I::new(e.lo, e.hi.min(0.0));
+        let b = self.r - self.t * e;
+        let disc = b.sqr() - (I::p(1.0) + self.t.sqr()) * e.sqr();
+        e.sqr() / (b + disc.sqrt0())
+    }
+
+    /// The top gap's height along x = c + t z, from the circle up to z = H, and the part of
+    /// the y walls' length 2 (W - t z) integrated over it: `(h, h (2W - t (H + z_up)))`.
+    fn h8(&self, c: I) -> (I, I) {
+        let one = I::p(1.0);
+        let k2 = one + self.t.sqr();
+        let e = c - self.cx8 + self.t * self.cz8;
+        let disc = k2 * self.r.sqr() - e.sqr();
+        let wv = (-(self.t * e) + disc.sqrt0()) / k2;
+        let z_up = self.cz8 + wv;
+        let h = self.h - z_up;
+        let h = I::new(h.lo.max(0.0), h.hi.max(0.0));
+        (h, h * (I::p(2.0) * self.w - self.t * (self.h + z_up)))
+    }
+
+    /// The corner gap's length along y at height 0 and x = c (the same at every height on
+    /// x = c + t z: the gap is a prism along (t, t, 1)): the y with the point inside the
+    /// y- wall (`Y >= -r s`), in the sector between the ball's two tangent rays
+    /// (`Y >= X / g`, `Y <= g X`) and outside the ball's cylinder (`Q(Y) >= 0`), with
+    /// `X = c - ax`, `Y = y - ax`.
+    fn lambda(&self, c: I) -> I {
+        let x = c - self.ax;
+        let a = (-(self.r * self.s)).max(x / self.g);
+        let b = self.g * x;
+        let t2 = self.t.sqr();
+        let q2 = I::p(1.0) - t2 / self.d2;
+        let q1 = -(I::p(2.0) * t2 * x / self.d2);
+        let q0 = x.sqr() * q2 - self.r.sqr();
+        let disc = q1.sqr() - I::p(4.0) * q2 * q0;
+        let root = disc.sqrt0();
+        let y_minus = (-q1 - root) / (I::p(2.0) * q2);
+        let y_plus = (-q1 + root) / (I::p(2.0) * q2);
+        I::seg(a, b.min(y_minus)) + I::seg(a.max(y_plus), b)
+    }
+
+    /// The frustum's volume, `4 (W^3 - (W - t H)^3) / (3 t)`.
+    fn frustum(&self) -> I {
+        let top = self.w - self.t * self.h;
+        I::p(4.0) * (self.w * self.w * self.w - top * top * top) / (I::p(3.0) * self.t)
+    }
+}
+
+/// `int f` over `[a, b]`, enclosed: `n` cells, each `f` of the cell times its width.
+fn integral(a: f64, b: f64, n: usize, f: impl Fn(I) -> I) -> I {
+    let mut sum = I::p(0.0);
+    let at = |i: usize| {
+        if i == n {
+            b
+        } else {
+            a + (b - a) * (i as f64) / (n as f64)
+        }
+    };
+    let mut c0 = a;
+    for i in 1..=n {
+        let c1 = at(i);
+        let cell = I::new(c0, c1);
+        sum = sum + f(cell) * (I::p(c1) - I::p(c0));
+        c0 = c1;
+    }
+    sum
+}
+
+/// The model's volumes: the file's, without the bottom round, without the top round.
+struct Expected {
+    base: I,
+    without_bottom: I,
+    without_top: I,
+    gap_bottom: I,
+    gap_top: I,
+}
+
+fn expected(m: &Model, n: usize) -> Expected {
+    let w = -m.w.lo;
+    let v_f = m.frustum();
+    let v3 = integral(w, m.cx3.hi, n, |c| {
+        let h = m.h3(c);
+        I::p(2.0) * m.w * h - m.t * h.sqr()
+    });
+    let c8 = m.cx8 - m.t * m.h;
+    let v8 = integral(w, c8.hi, n, |c| m.h8(c).1);
+    let v6 = m.h * integral(w, m.ax.hi, n, |c| m.lambda(c));
+    let v36 = integral(w, m.cx3.hi, n, |c| m.lambda(c) * m.h3(c));
+    let v68 = integral(w, c8.hi, n, |c| m.lambda(c) * m.h8(c).0);
+    Expected {
+        base: v_f - v3 - v6 - v8 + v36 + v68,
+        without_bottom: v_f - v6 - v8 + v68,
+        without_top: v_f - v3 - v6 + v36,
+        gap_bottom: v3 - v36,
+        gap_top: v8 - v68,
+    }
+}
+
+type V3 = [I; 3];
+
+fn v3(x: solidcore::math::Vec3) -> V3 {
+    [I::p(x.x), I::p(x.y), I::p(x.z)]
+}
+fn sub3(a: V3, b: V3) -> V3 {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+fn scale3(a: V3, s: I) -> V3 {
+    [a[0] * s, a[1] * s, a[2] * s]
+}
+fn dot3(a: V3, b: V3) -> I {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+fn cross3(a: V3, b: V3) -> V3 {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+fn norm3(a: V3) -> I {
+    (a[0].sqr() + a[1].sqr() + a[2].sqr()).sqrt0()
+}
+fn unit3(a: V3) -> V3 {
+    scale3(a, I::p(1.0) / norm3(a))
+}
+/// `|x|`'s upper end.
+fn abs_hi(x: I) -> f64 {
+    x.hi.max(-x.lo)
+}
+
+/// A plane (unit normal `n`, `n . X = d`) or a cylinder (a point `p` of its axis, unit
+/// axis `u`, radius `r`), known to intervals.
+enum Sup {
+    Plane { n: V3, d: I },
+    Cyl { p: V3, u: V3, r: I },
+}
+
+/// A face support's implicit data: the placement's normal (or axis) `x × y`, unitised. A
+/// cone of semi-angle exactly 0 is its cylinder.
+fn sup_of(a: &AnalyticSupport) -> Sup {
+    match a {
+        AnalyticSupport::Plane { placement, .. } => {
+            let n = unit3(cross3(v3(placement.x_axis()), v3(placement.y_axis())));
+            Sup::Plane {
+                n,
+                d: dot3(n, v3(placement.origin())),
+            }
+        }
+        AnalyticSupport::Cylinder { placement, radius }
+        | AnalyticSupport::Cone {
+            placement,
+            base_radius: radius,
+            semi_angle_deg: 0.0,
+        } => Sup::Cyl {
+            p: v3(placement.origin()),
+            u: unit3(cross3(v3(placement.x_axis()), v3(placement.y_axis()))),
+            r: I::p(*radius),
+        },
+        other => panic!("not a plane or cylinder: {other:?}"),
+    }
+}
+
+/// How far a point of `b` within `R0` of the origin can be from `a` (an upper bound, from
+/// interval arithmetic): planes `|n_a - s n_b| R0 + |s d_b - d_a|`; cylinders
+/// `|r_a - r_b| + |(p_b - p_a)⊥u_a| + (R0 + |p_b|) |u_b - s u_a|`, `s` the sign aligning
+/// the normals (axes). `None` for different kinds.
+fn bound(a: &Sup, b: &Sup) -> Option<f64> {
+    const R0: f64 = 50.0;
+    let sign = |x: I| {
+        if x.lo + x.hi >= 0.0 {
+            I::p(1.0)
+        } else {
+            I::p(-1.0)
+        }
+    };
+    match (a, b) {
+        (Sup::Plane { n: na, d: da }, Sup::Plane { n: nb, d: db }) => {
+            let s = sign(dot3(*na, *nb));
+            let tilt = norm3(sub3(*na, scale3(*nb, s)));
+            Some(up(up(tilt.hi * R0) + abs_hi(s * *db - *da)))
+        }
+        (
+            Sup::Cyl {
+                p: pa,
+                u: ua,
+                r: ra,
+            },
+            Sup::Cyl {
+                p: pb,
+                u: ub,
+                r: rb,
+            },
+        ) => {
+            let s = sign(dot3(*ua, *ub));
+            let w = sub3(*pb, *pa);
+            let perp = norm3(sub3(w, scale3(*ua, dot3(w, *ua))));
+            let tilt = norm3(sub3(*ub, scale3(*ua, s)));
+            let reach = I::p(R0) + norm3(*pb);
+            Some((abs_hi(*ra - *rb) + perp.hi + (tilt * reach).hi) * (1.0 + 4.0 * f64::EPSILON))
+        }
+        _ => None,
+    }
+}
+
+/// The model's surfaces, named: the six planes and the three rounds' cylinders.
+fn model_supports(m: &Model) -> Vec<(&'static str, Sup)> {
+    let (z, one) = (I::p(0.0), I::p(1.0));
+    let inv_s = one / m.s;
+    let wall = |n: V3, d: I| Sup::Plane {
+        n: scale3(n, inv_s),
+        d: d * inv_s,
+    };
+    let along_y = [z, one, z];
+    let corner = scale3([m.t, m.t, one], one / m.d2.sqrt0());
+    vec![
+        (
+            "bottom",
+            Sup::Plane {
+                n: [z, z, one],
+                d: z,
+            },
+        ),
+        (
+            "top",
+            Sup::Plane {
+                n: [z, z, one],
+                d: m.h,
+            },
+        ),
+        ("wall x-", wall([one, z, -m.t], -m.w)),
+        ("wall x+", wall([one, z, m.t], m.w)),
+        ("wall y-", wall([z, one, -m.t], -m.w)),
+        ("wall y+", wall([z, one, m.t], m.w)),
+        (
+            "bottom round",
+            Sup::Cyl {
+                p: [m.cx3, z, m.r],
+                u: along_y,
+                r: m.r,
+            },
+        ),
+        (
+            "top round",
+            Sup::Cyl {
+                p: [m.cx8, z, m.cz8],
+                u: along_y,
+                r: m.r,
+            },
+        ),
+        (
+            "corner round",
+            Sup::Cyl {
+                p: [m.ax, m.ax, z],
+                u: corner,
+                r: m.r,
+            },
+        ),
+    ]
+}
+
+/// Each face's support, its NURBS form proved on it ([`AnalyticSupport::check`]), matched to
+/// the nearest of `named`: the name and the certified distance bound.
+fn match_supports(k: &Kernel, b: &Brep, named: &[(&'static str, Sup)]) -> Vec<(&'static str, f64)> {
+    bp1::faces(b, None)
+        .unwrap()
+        .into_iter()
+        .map(|f| {
+            let s = b.face(f).unwrap().surface.as_ref().unwrap();
+            let sup = sup_of(&AnalyticSupport::check(k, s).unwrap());
+            named
+                .iter()
+                .filter_map(|(name, m)| bound(m, &sup).map(|d| (*name, d)))
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .unwrap()
+        })
+        .collect()
+}
+
+/// Which round the defeature takes off.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Removed {
+    Bottom,
+    Top,
+}
+
+/// The surfaces bound (the faces' bound, [`bound`]) holds for points within `R0` = 50 of the
+/// origin: every face's box lies within 45 of it.
+fn assert_within_r0(k: &Kernel, b: &Brep) {
+    for f in bp1::faces(b, None).unwrap() {
+        let bx = solidcore::query::face::p1::calculate_bounding_box(k, b, f, false).unwrap();
+        for i in 0..3 {
+            assert!(
+                bx.min_at(i).abs() <= 45.0 && bx.max_at(i).abs() <= 45.0,
+                "{bx:?}"
+            );
+        }
+        let corner = (0..3)
+            .map(|i| bx.min_at(i).abs().max(bx.max_at(i).abs()).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        assert!(corner <= 45.0, "{bx:?}");
+    }
+}
+
+/// `b` is sound (manifold, its Level 2 errors no more of each kind than the file's; the rest
+/// are warnings), within `R0`, and its faces lie on the model's surfaces within 1e-9, named
+/// exactly as `names` (name, count; the copied patch faces beside the faces they extend
+/// count apart). Returns the faces' largest bound.
+fn sound_on_model(
+    k: &mut Kernel,
+    b: &mut Brep,
+    named: &[(&'static str, Sup)],
+    names: &[(&str, usize)],
+    what: &str,
+) -> f64 {
+    const ON: f64 = 1e-9;
+    let mut fresh = read(k, "Fillet/fillet1019.smb").unwrap();
+    let file_lines = validation::soundness(k, &mut fresh).unwrap().check.lines();
+    let snd = validation::soundness(k, b).unwrap();
+    assert!(snd.manifold, "{what}");
+    // an error's kind is its text before the measured values
+    let kind = |l: &String| l.split(" (offset").next().unwrap_or(l).to_string();
+    let errors = |lines: &[String]| {
+        let mut v: Vec<String> = lines
+            .iter()
+            .filter(|l| !l.contains("Warning"))
+            .map(kind)
+            .collect();
+        v.sort();
+        v
+    };
+    let (built, file) = (errors(&snd.check.lines()), errors(&file_lines));
+    for e in &built {
+        let n = |v: &[String]| v.iter().filter(|x| *x == e).count();
+        assert!(n(&built) <= n(&file), "{what}: {e}");
+    }
+    assert_within_r0(k, b);
+    let faces = match_supports(k, b, named);
+    let mut got: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for (name, d) in &faces {
+        assert!(*d <= ON, "{what}: {faces:?}");
+        *got.entry(name).or_default() += 1;
+    }
+    let want: std::collections::BTreeMap<&str, usize> = names.iter().copied().collect();
+    assert_eq!(got, want, "{what}: {faces:?}");
+    faces.iter().map(|p| p.1).fold(0.0, f64::max)
+}
+
+/// `x` widened by the volume a surface moved by at most `delta` can sweep over `AREA`, a bound
+/// on these bodies' surface area (the frustum's is about 9700 mm^2).
+fn grow(x: I, delta: f64) -> I {
+    const AREA: f64 = 2e4;
+    I::new(down(x.lo - AREA * delta), up(x.hi + AREA * delta))
+}
+
+/// `b`'s certified volume enclosure, asked to 0.2: it must hold `model` grown by `delta`.
+fn holds_volume(k: &Kernel, b: &mut Brep, model: I, delta: f64, what: &str) -> I {
+    const WIDTH: f64 = 0.2;
+    let v = enclose_volume(k, b, WIDTH).unwrap();
+    let v = I::new(v.lo, v.hi);
+    assert!(v.width() <= WIDTH, "{what}: {v:?}");
+    assert!(
+        v.contains(grow(model, delta)),
+        "{what}: model {model:?}, built {v:?}"
+    );
+    v
+}
+
+/// The proof that `b` is `fillet1019` with the `removed` round taken off.
+///
+/// 1. The model is `fillet1019`: every face of the file lies on one of the model's surfaces
+///    ([`model_supports`]: the frustum's planes, rolling-ball cylinders of radius 5.08 tangent
+///    to their two planes) within `delta` (an interval bound, under 1e-9), each of the nine
+///    surfaces carrying a face, and the file's certified volume enclosure holds the model's
+///    ([`expected`]: the frustum less the three rounds' gaps, their overlaps added back, each
+///    a one-dimensional integral enclosed with outward rounding).
+/// 2. `b` is sound and lies on the model's surfaces ([`sound_on_model`]), its faces named
+///    exactly: the removed round's cylinder carries none, the walls and the bottom (top) are
+///    extended and the corner round is carried on by its own cylinder.
+/// 3. `b`'s certified volume enclosure holds the model's volume without the removed round's
+///    gap (that gap less its overlap with the corner round's), widened by the area bound
+///    times `b`'s own surface bound: the two volumes differ by at most the enclosure's width
+///    (0.2).
+fn certify(k: &mut Kernel, b: &mut Brep, removed: Removed) {
+    let m = Model::new(25.4, 25.4, 23.177787946441534, 5.08);
+    let named = model_supports(&m);
+    let e = expected(&m, 100_000);
+
+    // 1. the model is the file
+    let mut base = read(k, "Fillet/fillet1019.smb").unwrap();
+    let file_names = [
+        ("bottom", 1),
+        ("top", 1),
+        ("wall x-", 1),
+        ("wall x+", 1),
+        ("wall y-", 1),
+        ("wall y+", 1),
+        ("bottom round", 1),
+        ("top round", 1),
+        ("corner round", 1),
+    ];
+    let delta = sound_on_model(
+        k,
+        &mut base.clone_standing_for_self().unwrap(),
+        &named,
+        &file_names,
+        "file",
+    );
+    let kb = holds_volume(k, &mut base, e.base, delta, "file");
+
+    // 2. sound, and on the model's surfaces less the removed round
+    let (names, want): (&[(&str, usize)], I) = match removed {
+        Removed::Bottom => (
+            &[
+                ("bottom", 3),
+                ("top", 1),
+                ("wall x-", 2),
+                ("wall x+", 1),
+                ("wall y-", 2),
+                ("wall y+", 2),
+                ("top round", 1),
+                ("corner round", 2),
+            ],
+            e.without_bottom,
+        ),
+        Removed::Top => (
+            &[
+                ("bottom", 1),
+                ("top", 2),
+                ("wall x-", 2),
+                ("wall x+", 1),
+                ("wall y-", 1),
+                ("wall y+", 2),
+                ("bottom round", 1),
+                ("corner round", 2),
+            ],
+            e.without_top,
+        ),
+    };
+    let what = format!("{removed:?} base");
+    let built_delta = sound_on_model(k, b, &named, names, &what);
+
+    // 3. the volume
+    let kv = holds_volume(k, b, want, built_delta, &what);
+    eprintln!(
+        "{what}: file delta {delta:e}, model {:?} file {kb:?}; delta {built_delta:e}, model {want:?} built {kv:?}",
+        e.base
+    );
+}
+
+/// The feature B-rep of the one feature made (the goldens' `feature0`): the removed round's
+/// gap as a solid, proved as [`certify`] proves the base. Sound and on the model's surfaces
+/// (the round, the planes along it extended, the corner round's extension, the y walls
+/// closing its ends), and its certified volume enclosure holds the gap's model volume (the
+/// gap prism less its overlap with the corner round's).
+fn certify_feature(k: &mut Kernel, features: Vec<Option<Brep>>, removed: Removed) {
+    let m = Model::new(25.4, 25.4, 23.177787946441534, 5.08);
+    let named = model_supports(&m);
+    let e = expected(&m, 100_000);
+    assert_eq!(features.iter().filter(|f| f.is_some()).count(), 1);
+    let mut fb = features.into_iter().flatten().next().unwrap();
+    let (names, gap): (&[(&str, usize)], I) = match removed {
+        Removed::Bottom => (
+            &[
+                ("bottom round", 1),
+                ("bottom", 2),
+                ("wall x-", 1),
+                ("wall y-", 1),
+                ("wall y+", 1),
+                ("corner round", 1),
+            ],
+            e.gap_bottom,
+        ),
+        Removed::Top => (
+            &[
+                ("top round", 1),
+                ("top", 1),
+                ("wall x-", 1),
+                ("wall y+", 1),
+                ("corner round", 1),
+            ],
+            e.gap_top,
+        ),
+    };
+    let what = format!("{removed:?} feature");
+    let delta = sound_on_model(k, &mut fb, &named, names, &what);
+    let kv = holds_volume(k, &mut fb, gap, delta, &what);
+    eprintln!("{what}: delta {delta:e}, model {gap:?} built {kv:?}");
 }

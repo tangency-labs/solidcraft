@@ -406,10 +406,13 @@ pub enum OffsetRefusal {
     /// An offset face has a gap in its loops, and the segment that would bridge it is not
     /// established within tolerance.
     LoopGapUncertified,
+    /// The offset moves a vertex onto or past its edge's other end, so the edge closes to
+    /// nothing: as where a wall is as thick as the part is there.
+    EdgeVanishes,
     /// The body built fails what the input did not: what.
     Unsound {
         /// What the built body fails.
-        what: solidcore::error::offset::Unsoundness,
+        what: Unsoundness,
     },
     /// A failure the kernel states only in words so far: a routine's own failure (its phrase
     /// causes `Failed`, `Missing`, `InvalidValue` and `Inconsistent`), or a reason this version
@@ -472,8 +475,105 @@ impl std::fmt::Display for OffsetRefusal {
                     "a gap in its offset's loops cannot be bridged within tolerance"
                 )
             }
+            OffsetRefusal::EdgeVanishes => write!(
+                f,
+                "an edge of its offset closes to nothing: a vertex moves onto or past the edge's other end"
+            ),
             OffsetRefusal::Unsound { what } => write!(f, "{what}"),
             OffsetRefusal::Phrase { phrase, .. } => f.write_str(phrase),
+        }
+    }
+}
+
+/// What a body built by an offset, a shell or a local operation fails that its input did not
+/// ([`OffsetRefusal::Unsound`]), as the kernel's check names it (`Unsoundness`), an entity by
+/// its record index. More reasons get names of their own, so match it with a wildcard.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum Unsoundness {
+    /// The check reports `failures` failure lines more than the input's; the first is test
+    /// `test_index` of the reporting type `reporting_type` (`None` for a failed status).
+    Check {
+        /// The number of failure lines beyond the input's.
+        failures: usize,
+        /// The first failed report's reporting type and test index.
+        first: Option<(i64, u64)>,
+    },
+    /// The body's pointer check failed, so its geometry was not checked.
+    GeometryUnchecked,
+    /// A loop's certified area leaves its orientation undecided.
+    LoopOrientationUndecided,
+    /// A gap in a loop cannot be closed within the tolerances its certificates allow.
+    LoopGapNotClosable,
+    /// The input was a manifold solid and the body is not.
+    NotManifoldSolid,
+    /// The body is a manifold solid whose volume is proved below 0.
+    VolumeNotPositive,
+    /// The body is a manifold solid whose volume's sign is not proved.
+    VolumeUndecided,
+    /// The tolerance of an edge or vertex grew to `tolerance`, past the `bound` its certificate
+    /// allows.
+    ToleranceBeyondBound {
+        /// The entity of the input it comes from, by its record index: `None` where the kernel
+        /// names none, where the call's order does not hold it, or for an edge or vertex of a
+        /// call without an order.
+        entity: Option<RecordEntity>,
+        /// Its tolerance.
+        tolerance: f64,
+        /// The largest tolerance its certificate allows.
+        bound: f64,
+    },
+}
+
+impl std::fmt::Display for Unsoundness {
+    /// The kernel's statement of the reason, an entity by its record index.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use solidcore::error::offset::Unsoundness as K;
+        let kernel = match *self {
+            Unsoundness::Check { failures, first } => K::Check { failures, first },
+            Unsoundness::GeometryUnchecked => K::GeometryUnchecked,
+            Unsoundness::LoopOrientationUndecided => K::LoopOrientationUndecided,
+            Unsoundness::LoopGapNotClosable => K::LoopGapNotClosable,
+            Unsoundness::NotManifoldSolid => K::NotManifoldSolid,
+            Unsoundness::VolumeNotPositive => K::VolumeNotPositive,
+            Unsoundness::VolumeUndecided => K::VolumeUndecided,
+            Unsoundness::ToleranceBeyondBound {
+                entity,
+                tolerance,
+                bound,
+            } => {
+                match entity {
+                    Some(e) => write!(f, "the tolerance at {e} of the input")?,
+                    None => f.write_str("the tolerance of an edge or vertex")?,
+                }
+                return write!(
+                    f,
+                    " grew to {tolerance:e}, past the {bound:e} its certificate allows"
+                );
+            }
+        };
+        write!(f, "{kernel}")
+    }
+}
+
+/// A face, edge or vertex by its index in the caller's record [`crate::Order`] (a face of a call
+/// without one: by its index among the body's faces).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecordEntity {
+    /// Record face `i`.
+    Face(usize),
+    /// Record edge `i`.
+    Edge(usize),
+    /// Record vertex `i`.
+    Vertex(usize),
+}
+
+impl std::fmt::Display for RecordEntity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RecordEntity::Face(i) => write!(f, "face {i}"),
+            RecordEntity::Edge(i) => write!(f, "edge {i}"),
+            RecordEntity::Vertex(i) => write!(f, "vertex {i}"),
         }
     }
 }

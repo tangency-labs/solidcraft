@@ -5,10 +5,8 @@ use solidcore::surface::twist_volume::TwistVolume;
 use solidcore::surface::volume::{EvalOptions, Volume, VolumeKind};
 
 #[test]
-fn opt_in_duw_matches_central_difference() {
-    let mut kernel = Kernel::default();
-    assert!(!kernel.fixes.twist_simple_duw_sign);
-    kernel.fixes.twist_simple_duw_sign = true;
+fn duw_matches_central_difference() {
+    let kernel = Kernel::default();
     // Simple evaluation is in the identity frame, without orientation or compounding.
     for period in [4.0, -4.0] {
         let twist = Volume::new(VolumeKind::Twist(TwistVolume::from_members(period, 1e-5)));
@@ -44,68 +42,68 @@ fn opt_in_duw_matches_central_difference() {
 }
 
 #[test]
-fn default_preserves_cpp_sign_and_all_other_entries() {
-    let mut kernel = Kernel::default();
-    let twist = Volume::new(VolumeKind::Twist(TwistVolume::from_members(4.0, 1e-5)));
-    for n in 0..=3 {
-        let p = Vec3::new(0.7, -0.4, 0.0);
-        let legacy = twist
-            .evaluate_simple(p, n, &EvalOptions::default())
-            .unwrap();
-        let default = twist
-            .map(
-                p,
-                n,
-                &EvalOptions {
-                    fixes: kernel.fixes,
-                    ..EvalOptions::default()
-                },
-            )
-            .unwrap();
-        assert_eq!(default, legacy);
-        kernel.fixes.twist_simple_duw_sign = true;
-        let fixed = twist
-            .map(
-                p,
-                n,
-                &EvalOptions {
-                    fixes: kernel.fixes,
-                    ..EvalOptions::default()
-                },
-            )
-            .unwrap();
-        for (i, (before, after)) in legacy.iter().zip(&fixed).enumerate() {
-            if n >= 2 && i == (n + 1) * (n + 1) + 1 {
-                assert!(before.y < 0.0);
-                assert_eq!(after.y, -before.y);
-                assert_eq!(after.x, before.x);
-                assert_eq!(after.z, before.z);
-            } else {
-                assert_eq!(before, after);
+fn simple_evaluation_matches_the_twist_closed_form() {
+    // P = (u cos a - v sin a, u sin a + v cos a, w), a = per w; every partial up to
+    // order n, including Duw = (-per sin a, per cos a, 0).
+    for period in [4.0, -4.0] {
+        let twist = Volume::new(VolumeKind::Twist(TwistVolume::from_members(period, 1e-5)));
+        let per = 2.0 * std::f64::consts::PI / period;
+        for w in [0.0, 0.3] {
+            let p = Vec3::new(0.7, -0.4, w);
+            let (c, s) = ((per * w).cos(), (per * w).sin());
+            for n in 0..=3 {
+                let got = twist
+                    .evaluate_simple(p, n, &EvalOptions::default())
+                    .unwrap();
+                let n1 = n + 1;
+                for i in 0..n1 {
+                    for j in 0..n1 {
+                        for k in 0..n1 {
+                            let dc = [c, -s, -c, s][k];
+                            let ds = [s, c, -s, -c][k];
+                            let sc = per.powi(k as i32);
+                            let want = if i + j + k > n {
+                                Vec3::ZERO
+                            } else {
+                                match (i, j) {
+                                    (0, 0) => Vec3::new(
+                                        sc * (p.x * dc - p.y * ds),
+                                        sc * (p.x * ds + p.y * dc),
+                                        [w, 1.0, 0.0, 0.0][k],
+                                    ),
+                                    (1, 0) => Vec3::new(sc * dc, sc * ds, 0.0),
+                                    (0, 1) => Vec3::new(-sc * ds, sc * dc, 0.0),
+                                    _ => Vec3::ZERO,
+                                }
+                            };
+                            let at = got[(i * n1 + j) * n1 + k];
+                            assert!(
+                                (at - want).length() < 1e-12,
+                                "period={period}, w={w}, n={n}, D[{i}][{j}][{k}]: {at:?} vs {want:?}"
+                            );
+                        }
+                    }
+                }
+                if n >= 2 {
+                    let duw = got[n1 * n1 + 1];
+                    assert_eq!(duw.y, per * c, "Duw.y is +per cos a");
+                }
             }
         }
-        kernel.fixes.twist_simple_duw_sign = false;
+        assert!(twist
+            .evaluate_simple(Vec3::ZERO, 4, &EvalOptions::default())
+            .is_err());
     }
-    assert!(twist
-        .map(
-            Vec3::ZERO,
-            4,
-            &EvalOptions {
-                fixes: kernel.fixes,
-                ..EvalOptions::default()
-            }
-        )
-        .is_err());
 }
 
 #[test]
-fn mapped_curve_propagates_kernel_fix_through_compounding() {
+fn mapped_curve_second_derivative_through_compounding() {
     use solidcore::curve::crv_in_volume::CrvInVolume;
     use solidcore::curve::curve::Curve;
     use solidcore::curve::line::Line;
     use solidcore::geom::transform::Transform;
 
-    let mut kernel = Kernel::default();
+    let kernel = Kernel::default();
     let start = Vec3::new(0.7, -0.4, 0.0);
     let end = Vec3::new(1.7, -0.4, 1.0);
     let line = Curve::from(Line::create_line_segment(3, start, end, None).unwrap());
@@ -123,27 +121,22 @@ fn mapped_curve_propagates_kernel_fix_through_compounding() {
         let curve = CrvInVolume::new(line.clone(), in_param_space, volume, 0, 0).unwrap();
         let t = 0.3;
         let h = 1e-6;
-        kernel.fixes.twist_simple_duw_sign = false;
-        let legacy = curve.evaluate(&kernel, t, 2, true, false).unwrap();
         let first = |t| curve.evaluate(&kernel, t, 1, true, false).unwrap()[1];
         let difference = (first(t + h) - first(t - h)) / (2.0 * h);
-        assert!((legacy[2] - difference).length() > 0.1);
-        kernel.fixes.twist_simple_duw_sign = true;
-        let fixed = curve.evaluate(&kernel, t, 2, true, false).unwrap();
-        assert!((fixed[2] - difference).length() < 1e-9);
-        assert_eq!(legacy[..2], fixed[..2]);
+        let second = curve.evaluate(&kernel, t, 2, true, false).unwrap();
+        assert!((second[2] - difference).length() < 1e-9);
     }
 }
 
 #[test]
-fn mapped_surface_propagates_kernel_fix() {
+fn mapped_surface_mixed_derivative() {
     use solidcore::geom::vector2d::Point2;
     use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
     use solidcore::surface::plane::Plane;
     use solidcore::surface::srf_in_volume::SrfInVolume;
     use solidcore::surface::surface::Surface;
 
-    let mut kernel = Kernel::default();
+    let kernel = Kernel::default();
     let base = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0)));
     let twist = TwistVolume::create(
         Vec3::ZERO,
@@ -165,10 +158,6 @@ fn mapped_surface_propagates_kernel_fix() {
             .unwrap()[1][0]
     };
     let difference = (du(uv.y + h) - du(uv.y - h)) / (2.0 * h);
-    let legacy = surface.evaluate(&kernel, uv, 2, 2, flags).unwrap();
-    assert!((legacy[1][1] - difference).length() > 0.1);
-    kernel.fixes.twist_simple_duw_sign = true;
-    let fixed = surface.evaluate(&kernel, uv, 2, 2, flags).unwrap();
-    assert!((fixed[1][1] - difference).length() < 1e-9);
-    assert_eq!(legacy[0][0], fixed[0][0]);
+    let second = surface.evaluate(&kernel, uv, 2, 2, flags).unwrap();
+    assert!((second[1][1] - difference).length() < 1e-9);
 }

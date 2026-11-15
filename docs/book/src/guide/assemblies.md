@@ -70,7 +70,9 @@ does not move, and a part that joints hold to something grounded moves only as f
 allow (below). Dragging any member of a chain joined to nothing grounded moves the whole chain,
 preserving its joint values. Shared nested definitions move in every instance; the selected
 instance follows the pointer even when its parent is rotated differently from the first one. A drag that starts on empty space, on a part that can't move, or
-with Shift, Ctrl (Cmd) or Alt held draws a selection box instead. Other uncaptured moves stay
+with Shift, Ctrl (Cmd) or Alt held draws a selection box instead. A drag over a selected part
+grabs that part, even where another part is in front of it: select a copy's row in the Browser
+to drag it off a grounded copy placed on top of it. Other uncaptured moves stay
 pending. Scripts and agents do the same with `occurrence.drag {occurrence or path, at, point}`,
 which moves the placement by `point - at` in world coordinates and answers the placements it
 `moved`.
@@ -312,6 +314,11 @@ part ("Pedestal:1 is not connected to anything grounded"), the Drive Joints dial
 row, `motion.play` lists such joints under `unmoved`, and `joint.list` names every such chain under
 `floating`. Ground a part of the chain, or join it to a grounded part (a rigid as-built joint keeps
 it where it is), and it moves.
+
+Driving a joint turns the side that is held by no grounded part, with everything joined to it
+rigidly. A rigid joint whose origin is lost (its face was deleted) still holds its two parts as
+they are, so the parts beyond it move with the side that turns. A joint between two grounded
+parts has nothing to turn: the reason says "both sides are held by grounded parts" and names them.
 
 `joint.drive` answers the joint's values as `joint.list` gives them, in degrees and millimetres
 with their units and limits, and `moved` says whether any part moved. A joint's origins are mated

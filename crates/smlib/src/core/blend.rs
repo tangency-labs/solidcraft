@@ -61,8 +61,7 @@ use super::{Body, answer};
 use crate::{Blend, ChamferSecond, Error, Hole, HoleEdge, MAX_POINTS, Result, Turn};
 
 /// Why solidcore refuses the 3x2 mixed-convexity corner whose rails cross
-/// (`fixes.fillet_refuse_mixed_corner_crossing_rails`, [`MIXED_CORNER_RAILS_CROSS`]): it builds no
-/// corner for it yet.
+/// ([`MIXED_CORNER_RAILS_CROSS`]): it builds no corner for it yet.
 pub(crate) const MIXED_CORNER_UNSUPPORTED: &str = "a fillet corner where a convex and a concave round leave the vertex along one \
 tangent, so that their contact lines cross before the corner (https://github.com/tangency-labs/solidcore/issues/2256)";
 use solidcore::topology::brep::p3::brep_copy;
@@ -319,10 +318,21 @@ fn face_set(b: &Brep) -> solidcore::Result<HashSet<FaceId>> {
 /// failure. `replaced`: the session marks the corners' patches for another patch to replace,
 /// so a setback named is only what solidcore's corner needs. A failure that is no refusal of
 /// the blend, including one solidcore itself types as not supported or not ported, passes on
-/// as solidcore's ([`status`]). A sized refusal's point is read once the session lets the body
-/// go ([`solidcore_ops::blend::SessionRefusal::on`]).
+/// as solidcore's ([`session_status`]). A sized refusal's point is read once the session lets
+/// the body go ([`solidcore_ops::blend::SessionRefusal::on`]).
 fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool, replaced: bool, chamfer: bool) -> Result<SessionRefusal> {
-    solidcore_ops::blend::session_refusal(s, e, SessionCall { corner, patches: replaced, chamfer }).map_err(status)
+    solidcore_ops::blend::session_refusal(s, e, SessionCall { corner, patches: replaced, chamfer }).map_err(|e| session_status(s, e))
+}
+
+/// [`status`] for a failure `e` of the session `s`: a blend failure says, after solidcore's
+/// statement of it, what the session noted of the step that failed
+/// ([`solidcore_ops::blend::session_failure`]), since the statement alone ("the fillet body is
+/// not built") is the same for every step. Any other error is as [`status`] gives it.
+fn session_status(s: &FilletSession<'_>, e: SolidError) -> Error {
+    match solidcore_ops::blend::session_failure(s, &e) {
+        Some(failed) => Error::Refused(failed),
+        None => status(e),
+    }
 }
 
 /// An ops refusal of the session ([`blend_failure`]) as SolidCraft's error, its fields as they are.
@@ -1560,5 +1570,23 @@ mod tests {
         // the trim of a blend whose faces leak past its rails, as the message says it
         let leak = blend(BlendFailure::Failed("the faces the rails enclose reach past the rails"));
         assert_eq!(status(leak).to_string(), "the blend failed (status 1001): the faces the rails enclose reach past the rails");
+    }
+
+    /// A session's failure says what the session noted of the step that failed, after
+    /// solidcore's statement of it. The session here is asked to fillet with no edge set up: it
+    /// makes no fillet face, and what it noted says so.
+    #[test]
+    fn a_session_failure_says_what_the_session_noted() {
+        let body = super::super::make_box([0.0; 3], [10.0; 3]).unwrap();
+        let mut b = body.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut k = Kernel::default();
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        let e = s.do_filleting(&mut k, None).unwrap_err();
+        assert_eq!(status(e.clone()).to_string(), "the blend failed (status 1001): the fillet body has no faces");
+        let failed = blend_failure(&s, e, false, false, false).unwrap_err();
+        assert_eq!(
+            failed.to_string(),
+            "the blend failed (status 1001): the fillet body has no faces: Fillet Surface Computation Failure: no fillet faces were made"
+        );
     }
 }

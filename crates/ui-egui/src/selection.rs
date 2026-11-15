@@ -22,6 +22,16 @@ pub(crate) fn same_item(a: &Sel, b: &Sel) -> bool {
     }
 }
 
+/// Whether the selection holds the body `body`: selected on its own, or through a selected
+/// occurrence (the bodies its placement shows, as its Browser row lists them).
+pub(crate) fn holds_body(session: &solidcraft_engine::Session, body: &str) -> bool {
+    session.selection.iter().any(|s| match s {
+        Sel::Body { name } => name == body,
+        Sel::Occurrence { path } => session.occurrence_bodies_shared(path, true).is_ok_and(|b| b.iter().any(|n| n == body)),
+        _ => false,
+    })
+}
+
 /// Two distinct point intents for the alignment command, without creating sketch points.
 pub(crate) fn alignment_points(selection: &[Sel]) -> Option<[serde_json::Value; 2]> {
     let [a, b] = selection else { return None };
@@ -210,7 +220,7 @@ pub(crate) fn curve_pick(id: &str, sketch: u64, active: Option<u64>) -> Sel {
     Sel::SketchCurve { id: id.to_string(), sketch: (active != Some(sketch)).then_some(sketch) }
 }
 
-/// Projections preserve pick order and repetitions; callers own any deduplication or frames.
+/// Projections preserve pick order; profile identities occur once, other picks retain repetitions.
 pub(crate) trait SelectionExt {
     fn body_names(&self) -> Vec<String>;
     fn curve_ids(&self) -> Vec<String>;
@@ -234,7 +244,11 @@ impl SelectionExt for [Sel] {
         named.all(|k| k == Some(first)).then_some(first)
     }
     fn profiles(&self) -> Vec<(u64, usize)> {
-        self.iter().filter_map(|x| if let Sel::Profile { sketch, index } = x { Some((*sketch, *index)) } else { None }).collect()
+        let mut seen = std::collections::BTreeSet::new();
+        self.iter()
+            .filter_map(|x| if let Sel::Profile { sketch, index } = x { Some((*sketch, *index)) } else { None })
+            .filter(|profile| seen.insert(*profile))
+            .collect()
     }
     fn edge_points(&self) -> Vec<Vec3> {
         self.iter().filter_map(|x| if let Sel::Edge { point, .. } = x { Some(*point) } else { None }).collect()
