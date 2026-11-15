@@ -5812,6 +5812,58 @@ fn draft_on_a_cylinder_side_makes_a_frustum() {
     assert!(rel(volume(&mut s), expect) < 1e-3, "{} vs {expect}", volume(&mut s));
 }
 
+/// A split ring (bore r 11, outer r 14, 8 high, a gap 1 wide on +y, two ears out to y = 18) with
+/// both gap walls drafted 2 deg about the ear tip, pulling +y, so each wall closes in on the gap:
+/// |x| = 0.5 - t (18 - y), t = tan 2 deg. Each adds 8 * Int over x from 0.5 to the crossing with
+/// the bore (x_e = 0.255451) of [(18 - (|x| - 0.5) / t) - sqrt(11^2 - x^2)] dx = 6.857605. The walls
+/// move at most 0.25 into a gap 1 wide, so they never meet and the two drafts are independent.
+/// The ring is 8 times its profile's area, 2097.2697 (2,000,000 x-slices). V = 2110.9849.
+const DRAFTED_SPLIT_RING: f64 = 2110.9849;
+
+fn split_ring_walls_drafted(s: &mut Session) {
+    for x in [-0.5, 0.5] {
+        run(s, "solid.draft", json!({"faces": [[x, 14, 4]], "angle": "2 deg",
+            "neutral": {"origin": [4.0 * x, 18, 4], "normal": [0, 1, 0]}, "pull": [0, 1, 0]}));
+    }
+}
+
+/// The split ring built by booleans takes both gap-wall drafts.
+#[test]
+fn both_gap_walls_of_a_boolean_split_ring_draft() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 14, "height": 8, "base": [0, 0, 0], "body_name": "R"}));
+    run(&mut s, "solid.box", json!({"corner": [-4, 10, 0], "length": 8, "width": 8, "height": 8, "operation": "join"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 11, "height": 8, "base": [0, 0, 0], "operation": "cut"}));
+    run(&mut s, "solid.box", json!({"corner": [-0.5, 0, -1], "length": 1, "width": 20, "height": 10, "operation": "cut"}));
+    split_ring_walls_drafted(&mut s);
+    assert!(rel(volume(&mut s), DRAFTED_SPLIT_RING) < 1e-6, "{} vs {DRAFTED_SPLIT_RING}", volume(&mut s));
+}
+
+/// The same split ring extruded from one sketch: the second wall's draft is refused "the body
+/// built is not a manifold solid, as its input was", though either draft alone builds. The
+/// exported operands build in solidcore-ops' `offset::draft`; the refusal is in the app's own
+/// draft path (`crates/smlib/src/core/offset.rs`), which #14737 moves onto solidcore-ops.
+#[test]
+#[ignore = "the second gap-wall draft is refused on the sketch-extruded ring; draft on solidcore-ops (#14737)"]
+fn both_gap_walls_of_an_extruded_split_ring_draft() {
+    let mut s = Session::default();
+    let (g, ri, ro, ear) = (0.5f64, 11.0f64, 14.0f64, 4.0f64);
+    let (yi, yo) = ((ri * ri - g * g).sqrt(), (ro * ro - ear * ear).sqrt());
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "C"}));
+    for (a, b) in [([g, yi], [g, 18.0]), ([g, 18.0], [4.0, 18.0]), ([4.0, 18.0], [4.0, yo])] {
+        run(&mut s, "sketch.line", json!({"points": [a, b]}));
+    }
+    run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [-4.0, yo], "end": [4.0, yo]}));
+    for (a, b) in [([-4.0, yo], [-4.0, 18.0]), ([-4.0, 18.0], [-g, 18.0]), ([-g, 18.0], [-g, yi])] {
+        run(&mut s, "sketch.line", json!({"points": [a, b]}));
+    }
+    run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [-g, yi], "end": [g, yi]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "C", "distance": 8, "operation": "new"}));
+    split_ring_walls_drafted(&mut s);
+    assert!(rel(volume(&mut s), DRAFTED_SPLIT_RING) < 1e-6, "{} vs {DRAFTED_SPLIT_RING}", volume(&mut s));
+}
+
 /// The copies added after a rename keep their numbers through undo/redo, save/reopen and a
 /// further count change; lowering the count drops the last copies (#372).
 #[test]
