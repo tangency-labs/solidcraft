@@ -24,7 +24,11 @@
 //! **When it applies.** Upstream's fix-up is made first. It is kept as it is where every
 //! span it moved is proved within the budget (below), and the largest of those bounds is
 //! reported ([`MoveBound::spent`]) for the drop to add to the deviation it returns: no
-//! move is kept unbounded or uncounted. Otherwise the rule below replaces it; for the
+//! move is kept unbounded or uncounted. Where the trace already accepted a short span over
+//! the tolerance (a negative budget), no move can bring the curve back within it, and the
+//! drop already reports a deviation over the tolerance: upstream's fix-up is then kept
+//! where every span it moved is proved at all, and that bound is counted the same way, so
+//! the reported deviation still bounds the curve. Otherwise the rule below replaces it; for the
 //! `HoodCorner` crease the flattened span moved 4.5e-4 at a 2e-5 tolerance. The kernel's
 //! cancel token is polled between spans and before each enclosure.
 //!
@@ -402,11 +406,17 @@ pub fn fix_boundary_curves_bounded(
     let (lo, hi) = (uv_domain.min(), uv_domain.max());
     let traced = ctrl_poly.to_vec();
 
-    // 0. upstream's fix-up, kept where every span it moved is proved within the budget;
-    // the largest of those bounds is counted (module docs)
+    // 0. upstream's fix-up, kept where every span it moved is proved within the budget, or
+    // proved at all where the trace already left the tolerance (a negative budget); the
+    // largest of those bounds is counted (module docs)
     let mut upstream = traced.clone();
     let upstream_changed = fix_boundary_curves(&mut upstream, uv_domain, uv_tol_x, uv_tol_y)?;
-    if let Some(spent) = polygon_bound(k, bound, &traced, &upstream, uv_domain)? {
+    let limit = if bound.budget < 0.0 {
+        f64::INFINITY
+    } else {
+        bound.budget
+    };
+    if let Some(spent) = polygon_bound(k, bound, &traced, &upstream, uv_domain, limit)? {
         for (p, q) in ctrl_poly.iter_mut().zip(upstream) {
             *p = q;
         }
@@ -484,7 +494,7 @@ pub fn fix_boundary_curves_bounded(
     }
 
     // 6. the total move of every span, against the traced polygon
-    let Some(spent) = polygon_bound(k, bound, &traced, ctrl_poly, uv_domain)? else {
+    let Some(spent) = polygon_bound(k, bound, &traced, ctrl_poly, uv_domain, bound.budget)? else {
         return Err(refuse(
             "a span's move is not proved within the tolerance left",
         ));
@@ -494,15 +504,15 @@ pub fn fix_boundary_curves_bounded(
 }
 
 /// The largest bound of a span's move from `traced` to `moved`, `None` where a span that
-/// moved is not proved within the budget (a span that did not move needs nothing
-/// certified, whatever the budget: it is negative where the trace accepted a short span
-/// over the tolerance). Polls the cancel token before each span's enclosure.
+/// moved is not proved within `limit` (a span that did not move needs nothing
+/// certified, whatever the limit). Polls the cancel token before each span's enclosure.
 fn polygon_bound(
     k: &Kernel,
     bound: &MoveBound,
     traced: &[Point3],
     moved: &[Point3],
     dom: &Extent2d,
+    limit: f64,
 ) -> Result<Option<f64>> {
     let mut spent = 0.0_f64;
     for s in 0..traced.len() / 3 {
@@ -511,7 +521,7 @@ fn polygon_bound(
             return Err(SolidError::invalid_input(OP, "control point index"));
         };
         match bound.span_bound(old, new, dom) {
-            Some(b) if b == 0.0 || b <= bound.budget => spent = spent.max(b),
+            Some(b) if b == 0.0 || (b.is_finite() && b <= limit) => spent = spent.max(b),
             _ => return Ok(None),
         }
     }
@@ -945,6 +955,26 @@ mod tests {
         assert!(b
             .lipschitz(Ivl::new(0.9, 1.1), Ivl::new(0.3, 0.7))
             .is_none());
+    }
+
+    /// With a negative budget (the trace already over the tolerance) upstream's flatten is
+    /// kept where it is proved at all, and its bound is counted: the drop's deviation, over
+    /// the tolerance already, still bounds the curve. A move with no bound (outside an
+    /// offset's net) is still refused.
+    #[test]
+    fn upstreams_proved_flatten_is_kept_and_counted_past_the_tolerance() {
+        for side in 0..4 {
+            let b = plane(10.0, 10.0, -1e-3);
+            let mut p = poly(side, (0.4, 1e-4), (0.5, 0.0), (0.6, 2e-4));
+            let mut up = p.clone();
+            let changed = fix_boundary_curves(&mut up, &DOM, TOL, TOL).expect("fix");
+            assert!(changed && up != p, "side {side}: upstream flattens");
+            assert_eq!(fix(&mut p, &[0.0, 1.0, 2.0], &b), changed);
+            assert_eq!(p, up, "side {side}");
+            assert!(!b.refused());
+            let spent = b.spent();
+            assert!(spent > 0.0 && spent.is_finite(), "side {side}: {spent}");
+        }
     }
 
     /// The trace may accept a short span over the tolerance, leaving a negative budget: a
