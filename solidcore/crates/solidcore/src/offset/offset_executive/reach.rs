@@ -4927,9 +4927,9 @@ mod tests {
     #[test]
     fn a_cylinders_stored_form_lies_within_its_gap_of_its_implicit_surface() {
         use crate::primitive::api_primitives as ap;
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let cylinder =
-            Surface::from(ap::create_cylinder_surface(&mut k, Point3::ZERO, 50.0, 100.0).unwrap());
+            Surface::from(ap::create_cylinder_surface(&k, Point3::ZERO, 50.0, 100.0).unwrap());
         let gap = form_gap(&k, &cylinder).unwrap().unwrap();
         eprintln!("form_gap(cylinder r50 h100) = {gap:e}");
         assert!(gap > 0.0 && gap < 1e-4, "{gap}");
