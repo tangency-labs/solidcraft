@@ -26,8 +26,7 @@
 //!   are put in one body ([`crate::stitch::gather`]) and sewn at the caller's tolerance
 //!   ([`crate::stitch::stitch`]); the seam on each side is the edge of the sewn body through the
 //!   middle of that side's edge, measured by [`Body::continuity_report`] against the caller's
-//!   tolerances. The blend returned is the
-//!   blend alone; the sheets are unchanged.
+//!   tolerances. The blend returned is the blend alone; the sheets are unchanged.
 //!
 //! Ops chooses no tolerance, station count or crown: they are the caller's ([`BlendEdges`]).
 //! What holds: the blend passes through every station of both edges and holds each side's

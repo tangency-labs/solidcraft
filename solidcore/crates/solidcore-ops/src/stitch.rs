@@ -25,9 +25,10 @@
 //! through material (a sheet inside a cavity) comes out void by the same parity: no new
 //! material, so the manifold stitch's result is kept, reported not closed.
 //!
-//! Each takes its body by value and gives the result: an application that keeps its input copies
-//! it first ([`Body::copy`]). While a failure callback is installed, the body is written before
-//! the call, so a failure reports it as it came in.
+//! [`stitch`] and [`merge_faces`] take their body by value and give the result: an application
+//! that keeps its input copies it first ([`Body::copy`]); [`gather`] and [`sew`] copy their
+//! bodies themselves and leave them unchanged. While a failure callback is installed, the body
+//! is written before the call, so a failure reports it as it came in.
 
 use solidcore::kernel::Kernel;
 use solidcore::mass::integrator::properties::region_material;
@@ -47,7 +48,7 @@ use solidcore::topology::{edge, Brep, EdgeId, FaceId, FaceuseId, RegionId};
 use crate::body::{finish, Body, Expect};
 use crate::error::status;
 use crate::order::{self, Order};
-use crate::session::{read_body, run_on, run_taking};
+use crate::session::{run_on, run_taking};
 use crate::{Error, Result};
 
 type Out<T> = std::result::Result<T, Error>;
@@ -65,7 +66,7 @@ type Out<T> = std::result::Result<T, Error>;
 // The body is consumed: its B-rep is taken out under the kernel's lock.
 #[allow(clippy::needless_pass_by_value)]
 pub fn stitch(body: Body, tolerance: f64) -> Result<(Body, bool)> {
-    if !tolerance.is_finite() || tolerance.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+    if !positive(tolerance) {
         return Err(Error::Argument);
     }
     if body.is_poisoned() {
@@ -152,6 +153,9 @@ pub struct Sewn {
 /// # Errors
 /// Those of [`gather`], [`stitch`] and [`open_edges`].
 pub fn sew(bodies: &[&Body], tolerance: f64) -> Result<Sewn> {
+    if !positive(tolerance) {
+        return Err(Error::Argument);
+    }
     let (body, closed) = stitch(gather(bodies)?, tolerance)?;
     let open_edges = open_edges(&body)?;
     Ok(Sewn {
@@ -163,13 +167,14 @@ pub fn sew(bodies: &[&Body], tolerance: f64) -> Result<Sewn> {
 
 /// The record edge indices (in [`Body::to_record`]'s order) of `body`'s edges used by one face
 /// once (`SmEdge::IsLamina`), ascending: the edges a sewing leaves open. An edge a face uses
-/// twice (a seam) and an edge of two or more faces are not open.
+/// twice (a seam) and an edge of two or more faces are not open. The order and the edges are
+/// read in one call; the body is edited as [`Body::to_record`] edits it (each use given its UV
+/// trim), its shape unchanged.
 ///
 /// # Errors
 /// Those of [`Body::to_record`]; the kernel's.
 pub fn open_edges(body: &Body) -> Result<Vec<usize>> {
-    let (_, order) = body.to_record()?;
-    read_body("stitch::open_edges", body, |_, b| {
+    body.with_record("stitch::open_edges", |b, _, order| {
         let mut open = Vec::new();
         for (i, &e) in order.edges.iter().enumerate() {
             if edge_is_lamina(b, e)? {
@@ -178,6 +183,11 @@ pub fn open_edges(body: &Body) -> Result<Vec<usize>> {
         }
         Ok(open)
     })
+}
+
+/// Whether `tolerance` is one a stitch takes: finite and positive.
+fn positive(tolerance: f64) -> bool {
+    tolerance.is_finite() && tolerance.partial_cmp(&0.0) == Some(std::cmp::Ordering::Greater)
 }
 
 /// Whether region `r` (a side's, `None` for a side with no region: void) is material
