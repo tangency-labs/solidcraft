@@ -15,7 +15,8 @@ use super::extrude::extrude_region;
 use super::measure::{equivalent, section};
 use super::profile::rational_curve;
 use super::profile::{
-    check_regions, curve_on_frame, tapered_flange_ends, Loop2, ProfileRefusal, Region2, Seg2,
+    check_regions, curve_on_frame, largest_arc_sweep, smallest_arc_sweep, tapered_flange_ends,
+    Loop2, ProfileRefusal, Region2, Seg2,
 };
 use super::read::{planar_curves, planar_pieces, PlanarPiece, Run};
 use super::sheet::{region_loops, sheet_regions};
@@ -489,107 +490,118 @@ fn a_ccw_arc_starting_past_a_whole_turn_is_the_closed_form() {
     assert_arc_closed_form(&k, p(0.5, 0.25), 2.0, 3.0 * TAU - 0.5, 2.0);
 }
 
-/// An arc of no sweep, or one past a whole turn, is refused as `InvalidInput` (the bounds
-/// `check_regions` holds), never clamped to a full circle.
+/// The sweep limits come from the radius and the kernel's circle builder (`tol` the default zone
+/// tolerance; `floor` the builder's 1e-6 degree smallest angle and `win` its 0.01 degree
+/// full-turn window, each plus the margin): at r = 1 and r = 1e8, on both sides of `tol / r`,
+/// `floor` and `win`. Refused: at most [`smallest_arc_sweep`], past [`largest_arc_sweep`], or
+/// inside the window short of a turn with the end farther than `tol`. Built: the arc's ends in
+/// closed form (to the rounding of coordinates of size r), or the closed circle with its end
+/// within `tol` of `start + sweep`. `check_regions` accepts exactly the arcs `curve_on_frame`
+/// builds.
 #[test]
-fn an_arc_of_no_sweep_or_past_a_whole_turn_is_refused() {
+fn an_arc_builds_exactly_within_the_limits_its_radius_sets() {
     let k = Kernel::default();
-    let arc = |sweep: f64| Seg2::Arc {
-        center: p(0.0, 0.0),
-        radius: 1.0,
-        start: 0.5,
-        sweep,
-    };
-    // just past each bound (`TAU + 2e-9` over the slack of 1e-9; exactly the minimum of 1e-12,
-    // which must be exceeded), and far past them
-    for sweep in [
-        TAU + 2e-9,
-        -(TAU + 2e-9),
-        1e-12,
-        -1e-12,
-        TAU + 1e-6,
-        -(TAU + 1e-6),
-        7.0,
-        -12.0,
-        0.0,
-        1e-13,
-        -1e-13,
-    ] {
-        let r = curve_on_frame(&k, &xy(), 0.0, &arc(sweep));
-        assert!(
-            matches!(
-                r,
-                Err(crate::error::SolidError::InvalidInput {
-                    operation: "prism::profile::curve_on_frame",
-                    ..
-                })
-            ),
-            "{sweep}: {r:?}"
-        );
-    }
-    // just above the minimum still builds, at its start. MEASURED: at 2e-12 the built end sits
-    // on the start (off `start + sweep` by r * |sweep|), so only that weaker bound is asserted
-    // for the end; the minimum keeps out no sweep, not every arc too short to resolve.
-    for sweep in [2e-12, -2e-12] {
-        let c = curve_on_frame(&k, &xy(), 0.0, &arc(sweep)).unwrap();
-        let iv = c.natural_interval();
-        let a = c.evaluate_point(&k, iv.min()).unwrap();
-        let b = c.evaluate_point(&k, iv.max()).unwrap();
-        let want = on_circle(p(0.0, 0.0), 1.0, 0.5);
-        assert!(
-            off(a, want) < ARC_CLOSED_FORM_TOL,
-            "{sweep}: {a:?} vs {want:?}"
-        );
-        let end = on_circle(p(0.0, 0.0), 1.0, 0.5 + sweep);
-        assert!(
-            off(b, end) <= 1.0 * sweep.abs() + ARC_CLOSED_FORM_TOL,
-            "{sweep}: {b:?} vs {end:?}"
-        );
-    }
-    // inside the slack, a sweep past a whole turn builds the full circle: it closes at its
-    // start, so its end is within r * 5e-10 (r = 1) of `start + sweep`
-    for sweep in [TAU + 5e-10, -(TAU + 5e-10)] {
-        let c = curve_on_frame(&k, &xy(), 0.0, &arc(sweep)).unwrap();
-        let iv = c.natural_interval();
-        let a = c.evaluate_point(&k, iv.min()).unwrap();
-        let b = c.evaluate_point(&k, iv.max()).unwrap();
-        let start = on_circle(p(0.0, 0.0), 1.0, 0.5);
-        assert!(off(a, start) < ARC_CLOSED_FORM_TOL, "{sweep}: {a:?}");
-        assert!(
-            off(b, start) < ARC_CLOSED_FORM_TOL,
-            "{sweep}: {b:?} does not close"
-        );
-        let end = on_circle(p(0.0, 0.0), 1.0, 0.5 + sweep);
-        assert!(
-            off(b, end) <= 1.0 * 5e-10 + ARC_CLOSED_FORM_TOL,
-            "{sweep}: {b:?} vs {end:?}"
-        );
-        // a whole turn, not an arc of no length: it reads back as arcs of the input circle, the
-        // first from its start, whose sweeps add up to ±TAU
-        let back = read(&k, &c, iv, true, &xy(), 1e-7).unwrap();
-        let mut total = 0.0;
-        for (i, s) in back.iter().enumerate() {
-            let Seg2::Arc {
-                center,
-                radius,
-                start: s0,
-                sweep: got,
-            } = *s
-            else {
-                panic!("{sweep}: {back:?}")
-            };
-            assert!(
-                center.distance(p(0.0, 0.0)) < ARC_CLOSED_FORM_TOL
-                    && (radius - 1.0).abs() < ARC_CLOSED_FORM_TOL
-                    && (i > 0 || (s0 - 0.5).abs() < ARC_CLOSED_FORM_TOL),
-                "{sweep}: {back:?}"
-            );
-            total += got;
+    let tol = k.tolerances.zone_tol_3d;
+    let floor = (1e-6_f64 + 1e-11).to_radians();
+    let win = (0.01_f64 + 1e-11).to_radians();
+    for r in [1.0, 1e8] {
+        let arc = |sweep: f64| Seg2::Arc {
+            center: p(0.0, 0.0),
+            radius: r,
+            start: 0.5,
+            sweep,
+        };
+        let exact = r * 1e-14 + ARC_CLOSED_FORM_TOL;
+        assert_eq!(largest_arc_sweep(r, tol), TAU + tol / r);
+        assert_eq!(smallest_arc_sweep(r, tol), (tol / r).max(floor));
+        // tol / r is inside the window at both radii (1e-5 and 1e-13 against 1.7e-4)
+        let refused = [
+            0.0,
+            0.5 * tol / r,
+            0.99 * floor,
+            smallest_arc_sweep(r, tol),
+            TAU + 2.0 * tol / r,
+            TAU - 2.0 * tol / r,
+            TAU - 0.99 * win,
+            7.0,
+        ];
+        // the closed circle, its end within tol of the arc's
+        let closed = [TAU, TAU + 0.5 * tol / r, TAU - 0.5 * tol / r];
+        // an arc, its ends the closed form
+        let open = [1.01 * smallest_arc_sweep(r, tol), TAU - 1.01 * win, 2.0];
+        let ends = |sweep: f64| {
+            let c = curve_on_frame(&k, &xy(), 0.0, &arc(sweep)).unwrap();
+            let iv = c.natural_interval();
+            let a = c.evaluate_point(&k, iv.min()).unwrap();
+            let b = c.evaluate_point(&k, iv.max()).unwrap();
+            (a, b)
+        };
+        let start = on_circle(p(0.0, 0.0), r, 0.5);
+        for &s in &refused {
+            for sweep in [s, -s] {
+                let c = curve_on_frame(&k, &xy(), 0.0, &arc(sweep));
+                assert!(
+                    matches!(
+                        c,
+                        Err(crate::error::SolidError::InvalidInput {
+                            operation: "prism::profile::curve_on_frame",
+                            ..
+                        })
+                    ),
+                    "r {r}, sweep {sweep}: {c:?}"
+                );
+            }
         }
-        assert!(
-            (total - sweep.signum() * TAU).abs() < ARC_CLOSED_FORM_TOL,
-            "{sweep}: reads back sweeping {total}: {back:?}"
-        );
+        for &s in &open {
+            for sweep in [s, -s] {
+                let (a, b) = ends(sweep);
+                let end = on_circle(p(0.0, 0.0), r, 0.5 + sweep);
+                assert!(
+                    off(a, start) <= exact && off(b, end) <= exact,
+                    "r {r}, sweep {sweep}: {a:?} {b:?} vs {start:?} {end:?}"
+                );
+            }
+        }
+        for &s in &closed {
+            for sweep in [s, -s] {
+                let (a, b) = ends(sweep);
+                let end = on_circle(p(0.0, 0.0), r, 0.5 + sweep);
+                assert!(
+                    off(a, start) <= exact && off(b, start) <= exact,
+                    "r {r}, sweep {sweep}: {a:?} {b:?} not closed at {start:?}"
+                );
+                assert!(off(b, end) <= tol, "r {r}, sweep {sweep}: {b:?} vs {end:?}");
+            }
+        }
+        // the profile check accepts exactly what builds (a loop of the arc, closed by a line
+        // where its ends are apart; checked at a closure tolerance any of them meets)
+        for &s in refused.iter().chain(&open).chain(&closed) {
+            for sweep in [s, -s] {
+                let seg = arc(sweep);
+                let mut segs = vec![seg];
+                if seg.start().distance(seg.end()) > 1e-6 {
+                    segs.push(Seg2::Line {
+                        a: seg.end(),
+                        b: seg.start(),
+                    });
+                }
+                let region = Region2 {
+                    outer: Loop2 { segs },
+                    holes: vec![],
+                };
+                let builds = curve_on_frame(&k, &xy(), 0.0, &seg).is_ok();
+                let checked = check_regions([&region].into_iter(), 1.0);
+                assert_eq!(
+                    checked,
+                    if builds {
+                        Ok(())
+                    } else {
+                        Err(ProfileRefusal::LineOrArc)
+                    },
+                    "r {r}, sweep {sweep}"
+                );
+            }
+        }
     }
 }
 

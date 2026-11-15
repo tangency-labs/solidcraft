@@ -28,23 +28,86 @@ use crate::eval::Frame;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::vector3d::{Point3, Vec3};
-use crate::kernel::Kernel;
+use crate::kernel::{Kernel, Tolerances};
 use crate::math::{Point2, Vec2};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
+use crate::nurbs::crv_basic::CONIC_ANGLE_TOL_DEG;
+use crate::nurbs::crv_common::DEFAULT_ANGLE_TOL;
 
 const OP_CURVE: &str = "prism::profile::curve_on_frame";
 const OP_AREA: &str = "prism::profile::Loop2::signed_area";
 
-/// An arc's `|sweep|` (radians) must be above this. ARGUED, not derived: the value is the
-/// literal [`check_regions`] already used before it was named. It is not the rounding of any
-/// computation; it only refuses an arc too short to have a usable length.
-const MIN_ARC_SWEEP: f64 = 1e-12;
+/// The margin (degrees) kept from the circle builder's angle windows ([`CONIC_ANGLE_TOL_DEG`],
+/// [`DEFAULT_ANGLE_TOL`]): the kernel's circle builder
+/// re-derives the arc's end angle (`atan2` of its end point, in degrees), which rounds by a few
+/// ulps of 360 (an ulp of 360 is 5.7e-14), so a sweep this close to a window's edge could fall
+/// either side of it. 1e-11 is about 175 ulps of 360.
+const ARC_WINDOW_MARGIN_DEG: f64 = 1e-11;
 
-/// How far (radians) an arc's `|sweep|` may go past a whole turn, `TAU`. ARGUED, not derived:
-/// the value is the literal [`check_regions`] already used before it was named. It is far wider
-/// than rounding: 1e-9 is about 1e6 ulps of `TAU` (ulp ≈ 8.9e-16), so it admits a sweep that
-/// callers sum from segment angles a little past a turn, but nothing proves a bound for those sums.
-const ARC_SWEEP_SLACK: f64 = 1e-9;
+/// How an arc is built: over `[0, deg]` degrees of its own circle, or as the closed circle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ArcBuild {
+    /// An arc of this many degrees.
+    Open(f64),
+    /// The whole circle, `[0, 360]`.
+    Closed,
+}
+
+/// The largest `|sweep|` an arc of `radius` may have and still be built at the zone tolerance
+/// `tol`: `TAU + tol / radius`. Past a whole turn the arc is built as its closed circle, whose end
+/// is the arc's start: it lies from the arc's end by the chord `2 radius sin(o / 2) <= radius o`
+/// of the overshoot `o = |sweep| - TAU`, so within `tol` exactly while `o <= tol / radius`.
+#[must_use]
+pub fn largest_arc_sweep(radius: f64, tol: f64) -> f64 {
+    TAU + tol / radius
+}
+
+/// The `|sweep|` an arc of `radius` must exceed to be built at the zone tolerance `tol`: the
+/// larger of `tol / radius` (at or below it the arc's length `radius |sweep|`, and so the chord
+/// between its ends, is within `tol`, the size below which points are one) and
+/// [`CONIC_ANGLE_TOL_DEG`] plus `ARC_WINDOW_MARGIN_DEG`, in radians (below that the kernel's circle
+/// builder makes the full turn, whatever the radius).
+#[must_use]
+pub fn smallest_arc_sweep(radius: f64, tol: f64) -> f64 {
+    (tol / radius).max((CONIC_ANGLE_TOL_DEG + ARC_WINDOW_MARGIN_DEG).to_radians())
+}
+
+/// How an arc of `radius` turning `sweep` is built at the zone tolerance `tol`, or why it cannot
+/// be (`radius` and `sweep` finite, `radius > 0`):
+/// - `|sweep|` at most [`smallest_arc_sweep`]: refused.
+/// - `|sweep|` within [`DEFAULT_ANGLE_TOL`] (0.01 degrees, plus the margin) of a whole turn, or
+///   past it: the kernel's circle builder (`Ellipse::make_nurb` passes that angle tolerance to
+///   the quadratic arc, which closes any arc within it of a turn by moving its last control point
+///   onto its first; [`CONIC_ANGLE_TOL_DEG`]'s window is inside it) makes such a sweep the full
+///   turn, so it is built as the closed circle outright, whose end lies from the arc's end by the chord of `| |sweep| - TAU |`, at most
+///   `radius | |sweep| - TAU |`: kept while that is within `tol`, else refused. Past a turn this
+///   is [`largest_arc_sweep`]; short of a turn, a sweep must stop more than the window short of it
+///   to build as an arc.
+/// - otherwise the arc over `[0, |sweep|]` degrees: its ends are the closed form.
+fn arc_build(radius: f64, sweep: f64, tol: f64) -> std::result::Result<ArcBuild, &'static str> {
+    let a = sweep.abs();
+    if a <= smallest_arc_sweep(radius, tol) {
+        return Err(
+            "an arc too short to build: its |sweep| must exceed smallest_arc_sweep(radius, \
+             zone_tol_3d), the larger of zone_tol_3d / radius and 1e-6 degrees",
+        );
+    }
+    let deg = a.to_degrees();
+    if deg >= 360.0 - DEFAULT_ANGLE_TOL - ARC_WINDOW_MARGIN_DEG {
+        if radius * (a - TAU).abs() <= tol {
+            Ok(ArcBuild::Closed)
+        } else {
+            Err(
+                "an arc whose end is farther than the zone tolerance from the closed circle it \
+                 builds as: past a whole turn the largest that builds sweeps \
+                 largest_arc_sweep(radius, zone_tol_3d) = TAU + zone_tol_3d / radius; short of a \
+                 turn it must stop more than 0.01 degrees short",
+            )
+        }
+    } else {
+        Ok(ArcBuild::Open(deg))
+    }
+}
 
 /// Highest degree of a [`Seg2::Bezier`].
 pub const MAX_BEZIER_DEGREE: usize = 9;
@@ -667,17 +730,21 @@ pub enum ProfileRefusal {
     /// A loop without segments, not closed within its distance, or more segments than
     /// [`MAX_SEGMENTS`] in all.
     Budget,
-    /// A line or arc not finite or of no length, an arc of no positive radius or turning more
-    /// than once.
+    /// A line or arc not finite or of no length, or an arc of no positive radius or one that
+    /// does not build at the default zone tolerance (its `|sweep|` at most
+    /// [`smallest_arc_sweep`], or built as its closed circle with its end farther than the zone
+    /// tolerance from the arc's: past [`largest_arc_sweep`], or within 0.01 degrees short of a
+    /// turn).
     LineOrArc,
     /// A free-form segment not finite or of no length, or a conic weight not positive.
     FreeForm,
 }
 
 /// The loops of `regions` checked: each closed within ten times `tol`, the segments within
-/// [`MAX_SEGMENTS`], each segment finite and of some length (a line's ends apart, an arc of a
-/// positive radius turning at most once, a conic's weight positive, a Bézier's ends apart), its
-/// coordinates within 1e9.
+/// [`MAX_SEGMENTS`], each segment finite and of some length (a line's ends apart; an arc of a
+/// positive radius that builds at the default zone tolerance by the rule [`curve_on_frame`]
+/// builds by ([`smallest_arc_sweep`], [`largest_arc_sweep`]); a conic's weight positive; a
+/// Bézier's ends apart), its coordinates within 1e9.
 ///
 /// # Errors
 ///
@@ -709,8 +776,7 @@ pub fn check_regions<'a>(
                         && radius < 1e9
                         && start.is_finite()
                         && sweep.is_finite()
-                        && sweep.abs() > MIN_ARC_SWEEP
-                        && sweep.abs() <= TAU + ARC_SWEEP_SLACK
+                        && arc_build(radius, sweep, Tolerances::default().zone_tol_3d).is_ok()
                 }
                 Seg2::Cubic { p0, p1, p2, p3 } => {
                     [p0, p1, p2, p3].into_iter().all(finite) && apart(p0, p3)
@@ -830,8 +896,11 @@ pub fn frame_is_orthonormal(frame: &Frame) -> bool {
 /// # Errors
 ///
 /// `InvalidInput` for a frame whose axes are not orthonormal, a malformed segment, or an arc
-/// whose `|sweep|` is not above `MIN_ARC_SWEEP` and at most `TAU + ARC_SWEEP_SLACK` (the
-/// bounds [`check_regions`] holds); those of the constructors.
+/// that does not build at the kernel's `zone_tol_3d`: its `|sweep|` at most
+/// [`smallest_arc_sweep`], or built as its closed circle (past a whole turn, or within 0.01
+/// degrees short of one) with its end farther than `zone_tol_3d` from the arc's (past a turn,
+/// [`largest_arc_sweep`]). [`check_regions`] holds the same rule at the default zone tolerance.
+/// Those of the constructors.
 pub fn curve_on_frame(k: &Kernel, frame: &Frame, level: f64, seg: &Seg2) -> Result<Curve> {
     if !frame_is_orthonormal(frame) || !level.is_finite() {
         return Err(SolidError::invalid_input(
@@ -853,20 +922,13 @@ pub fn curve_on_frame(k: &Kernel, frame: &Frame, level: f64, seg: &Seg2) -> Resu
             start,
             sweep,
         } => {
-            if !(start.is_finite() && sweep.is_finite()) {
+            if !(start.is_finite() && sweep.is_finite() && radius.is_finite() && radius > 0.0) {
                 return Err(SolidError::invalid_input(OP_CURVE, "a malformed segment"));
             }
-            // The bounds `check_regions` holds an arc to: refused here too, never clamped, so a
-            // sweep past a whole turn is not quietly built as a full circle.
-            if sweep.abs() <= MIN_ARC_SWEEP {
-                return Err(SolidError::invalid_input(OP_CURVE, "an arc of no sweep"));
-            }
-            if sweep.abs() > TAU + ARC_SWEEP_SLACK {
-                return Err(SolidError::invalid_input(
-                    OP_CURVE,
-                    "an arc that sweeps more than a whole turn",
-                ));
-            }
+            // An arc too short to build, or one the kernel would build as its closed circle
+            // farther than the zone tolerance from the arc's end, is refused ([`arc_build`]).
+            let build = arc_build(radius, sweep, k.tolerances.zone_tol_3d)
+                .map_err(|reason| SolidError::invalid_input(OP_CURVE, reason))?;
             let (_, x, y, _) = axes(frame);
             let (y, s0) = if sweep >= 0.0 {
                 (y, start)
@@ -878,8 +940,12 @@ pub fn curve_on_frame(k: &Kernel, frame: &Frame, level: f64, seg: &Seg2) -> Resu
             // crosses the circle's seam nor runs past a whole turn, whatever the start.
             let (c, s) = (s0.cos(), s0.sin());
             let placement = Axis2Placement::new(at(center), x * c + y * s, y * c - x * s);
-            // `.min(360.0)` only shaves the `ARC_SWEEP_SLACK` the check above admits.
-            let deg = Extent1d::from_min_max(0.0, sweep.abs().to_degrees().min(360.0));
+            // The closed circle is asked for outright, so the builder's own full-turn window is
+            // never what decides it.
+            let deg = match build {
+                ArcBuild::Closed => Extent1d::from_min_max(0.0, 360.0),
+                ArcBuild::Open(deg) => Extent1d::from_min_max(0.0, deg),
+            };
             let e = Ellipse::create_canonical_circle(k, &placement, radius, Some(&deg), None)?;
             Ok(Curve::from(e))
         }
