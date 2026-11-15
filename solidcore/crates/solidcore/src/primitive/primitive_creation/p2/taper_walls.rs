@@ -61,7 +61,9 @@
 //! sections that touch within the rounding of computing their crossing touch (the fork's took
 //! rounding's sign, so a tip where a line or an arc touches an arc was refused). No recursion;
 //! every loop is bounded by the profile's curve count or a fixed sample count (the arc span
-//! count is at most the arc's angle over a quarter turn).
+//! count is at most the arc's angle over a quarter turn). Walls whose sections all shrink to
+//! one point close the whole section there, a pyramid's apex or a ridge's far end, where the
+//! fork refused the draft (#17265).
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-safe tests
 
@@ -98,7 +100,8 @@ pub enum TaperCornerRefusal {
     NotExact,
     /// `SM_TCR_WALL_CLOSES`: a wall closes before the far end: its neighbours meet
     /// across it, or its arc shrinks to its centre (WR-571: a wall closes at the far end,
-    /// the whole section closes, or an arc shrinks to its centre).
+    /// the section closes with walls still apart, or an arc shrinks to its centre; a
+    /// section that shrinks to one point closes there, #17265).
     WallCloses,
 }
 
@@ -1351,6 +1354,73 @@ impl Sections<'_> {
         Ok(Some(angle(wall, xb, *start + hint) - *start))
     }
 
+    /// Whether the whole section has closed at the point `q` of the profile's plane by
+    /// height `f` (#17265): every live wall's two crossings there lie within `tol` of `q`,
+    /// and an arc's section between them is the short arc. The B-rep's tolerance is the
+    /// kernel's coincidence: points within it of one vertex are that vertex, so the live
+    /// walls' seams all end at one apex `q` at `f`, and above it no section is left (the
+    /// walls meeting at one point is the section shrinking to it: a pyramid's apex, or a
+    /// ridge's far end). A line's section lies between its crossings, so within `tol` of
+    /// `q`. An arc's is followed up from `f_from` in [`SECTION_STEPS`] steps, as the
+    /// closing search follows it, so that its angle stays continuous: the short arc over a
+    /// chord of at most `2 tol` is at most a half circle on it, `PI tol` long, and the long
+    /// one at least `2 PI r - PI tol`, more than `PI tol` while the radius `r` there is
+    /// over `tol` (an arc of radius at most `tol` lies within `2 tol` of `q` either way).
+    /// A crossing that is missing, or a length that is NaN, is not closed.
+    fn closed_at(&self, live: &[bool], f_from: f64, f: f64, q: Point3, tol: f64) -> Result<bool> {
+        for (w, &alive) in live.iter().enumerate() {
+            if !alive {
+                continue;
+            }
+            for p in [at(&self.ins, w)?, at(&self.outs, w)?] {
+                let Some(x) = self.at(p, f)? else {
+                    return Ok(false);
+                };
+                if !(x.distance(q) <= tol) {
+                    return Ok(false);
+                }
+            }
+            let wall = at_ref(self.walls, w)?;
+            if !wall.arc {
+                continue;
+            }
+            let radius = wall.radius - f * wall.shrink;
+            if radius <= tol {
+                continue;
+            }
+            let mut start = wall.start_ang;
+            let Some(mut len) =
+                self.length(w, f_from, &mut start, wall.end_ang - wall.start_ang)?
+            else {
+                return Ok(false);
+            };
+            for k in 1..=SECTION_STEPS {
+                let fk = f_from + (f - f_from) * f64::from(k) / f64::from(SECTION_STEPS);
+                let Some(l) = self.length(w, fk, &mut start, len)? else {
+                    return Ok(false);
+                };
+                len = l;
+            }
+            if !(radius * len.abs() <= PI * tol) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Every live wall closes at `q` at height `f`: its pieces end there (#17265).
+    fn close_all_at(&mut self, live: &mut [bool], f: f64, q: Point3) -> Result<()> {
+        for (w, alive) in live.iter_mut().enumerate() {
+            if !*alive {
+                continue;
+            }
+            self.end(at(&self.ins, w)?, f, q)?;
+            self.end(at(&self.outs, w)?, f, q)?;
+            *alive = false;
+        }
+        Ok(())
+    }
+
     /// A refusal of `reason` at piece `p`'s low end, in the profile's plane.
     fn refuse(&self, reason: TaperCornerRefusal, p: usize) -> Result<Walls> {
         let seam = at_ref(&self.pieces, p)?.seam;
@@ -1429,8 +1499,11 @@ impl EdgeLoop {
 /// neighbours meet from that point up, a new seam built the same exact way. Two lines
 /// brought face to face so (a slot's sides) close together along their common line, and
 /// the walls beyond them meet from its other end. Each wall's face runs over its seams in
-/// order; a closed wall has no far edge. A wall closing at the far end, the whole section
-/// closing, and an arc shrinking to its centre are still refused.
+/// order; a closed wall has no far edge. Where every live wall's section has shrunk to one
+/// point (a pyramid's apex, or the far end of a ridge two walls close along), the whole
+/// section closes there and the walls end at that point (#17265; the fork refused it once
+/// fewer than three walls were left). A wall closing at the far end, a section that
+/// closes with walls still apart, and an arc shrinking to its centre are still refused.
 #[allow(clippy::too_many_lines)] // one fork routine
 fn walls_closing_at_apexes(
     a: &mut impl PrimitiveCreationAccess,
@@ -1599,6 +1672,11 @@ fn walls_closing_at_apexes(
             return sections.refuse(TaperCornerRefusal::Apart, w_in);
         };
         let mut apex = 0.5 * (xa + xb);
+        // every live wall closes there with it: the section shrinks to the apex (#17265)
+        if sections.closed_at(&live, f_cur, f, apex, tol)? {
+            sections.close_all_at(&mut live, f, apex)?;
+            break;
+        }
         sections.end(w_in, f, apex)?;
         sections.end(at(&sections.outs, w)?, f, apex)?;
         let mut wa = at(&prev, w)?;
@@ -1613,6 +1691,7 @@ fn walls_closing_at_apexes(
         // its neighbours meet from there up (each ridge closes two walls, so the loop ends
         // before every wall has closed)
         let mut met = false;
+        let mut collapsed = false;
         for _ in 0..=count {
             if live_count < 3 || wa == wb {
                 return sections.refuse(TaperCornerRefusal::WallCloses, w_in);
@@ -1656,6 +1735,14 @@ fn walls_closing_at_apexes(
                     SolidError::primitive_failed(OP, "a wall index is out of range")
                 })? = false;
                 live_count -= 2;
+                // the walls left close at its far end with them: the section shrinks
+                // along the ridge to that end (#17265)
+                if sections.closed_at(&live, f_cur, f, end, tol)? {
+                    sections.close_all_at(&mut live, f, end)?;
+                    collapsed = true;
+                    met = true;
+                    break;
+                }
                 if live_count < 3 || c == wb || d == wa {
                     return sections.refuse(TaperCornerRefusal::WallCloses, w_in);
                 }
@@ -1693,6 +1780,9 @@ fn walls_closing_at_apexes(
                 OP,
                 "draft wall closing bound exceeded",
             ));
+        }
+        if collapsed {
+            break;
         }
         f_cur = f;
     }

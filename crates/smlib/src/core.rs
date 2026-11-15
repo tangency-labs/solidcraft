@@ -87,7 +87,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.check_loop_projected_seam_ends = true;
     f.cylinder_rebuild_mean_radius = true;
     f.revolve_analytic_profile_faces = true;
-    f.taper_tangent_corner_planes = true;
     f.revolve_nested_shells_as_cavities = true;
     f.revolve_holed_profile_void = true;
     f.join_touching_loops = true;

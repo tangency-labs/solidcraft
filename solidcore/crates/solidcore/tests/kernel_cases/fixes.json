@@ -38,7 +38,6 @@
   "nurb_cylinder_inside_out_frame",
   "planar_path_profile_placement_statuses",
   "revolve_analytic_profile_faces",
-  "taper_tangent_corner_planes",
   "revolve_nested_shells_as_cavities",
   "revolve_holed_profile_void",
   "revolve_splits_curves_on_axis",
