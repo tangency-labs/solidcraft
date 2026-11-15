@@ -2220,69 +2220,54 @@ mod tests {
     }
 
     #[test]
-    fn create_corners_notes_an_unsupported_vertex_only_when_opted_in() {
+    fn create_corners_notes_an_unsupported_vertex() {
         use crate::blend::fillet_executive::p3::VertexEntry;
 
         let point = Point3::new(4.0, 5.0, 6.0);
-        for (fix, expected) in [(false, (0, None, None)), (true, (9, Some(H(3)), None))] {
-            let mut k = Kernel::default();
-            k.fixes.fillet_vertex_error_diagnostics = fix;
-            let mut executive = corner_creation_executive();
-            executive.filleted_vertices = vec![Some(H(3))];
-            executive
-                .vertex_corner_map
-                .insert(Some(H(3)), VertexEntry::SolverEdgeuses(vec![H(20)]));
-            let mut info = ErrorInfo::new(None);
-            info.code = 99;
-            executive
-                .create_fillet_corners_recording_vertex_errors(
-                    &k,
-                    |_, _, vertex, _| {
-                        assert_eq!(vertex, Some(H(3)));
-                        Ok(CornerCreation::Unsupported {
-                            location: Some(point),
-                        })
-                    },
-                    Some(&mut info),
-                )
-                .unwrap();
-            // The optional out-parameter copy follows upstream `operator=`, which does
-            // not copy the location, comment or entity name.
-            assert_eq!((info.code, info.vertex, info.location), expected);
-            assert_eq!(info.comment, "<no comment>\n");
-            if fix {
-                assert_eq!(info.status, 2);
-                assert_eq!(executive.error.status, 2);
-                assert_eq!(executive.error.location, Some(point));
-                assert_eq!(executive.error.comment, "Corner case not implemented");
-            } else {
-                // The pinned default: no note, so the executive's own info is untouched.
-                assert_eq!(
-                    (
-                        executive.error.code,
-                        executive.error.status,
-                        executive.error.vertex,
-                        executive.error.location
-                    ),
-                    (0, 0, None, None)
-                );
-                assert_eq!(executive.error.comment, "<no comment>\n");
-            }
-            // Diagnostics only: the pending entry and the corner list are unchanged.
-            assert!(executive.corners.is_empty());
-            assert_eq!(
-                executive.vertex_corner_map.get(&Some(H(3))),
-                Some(&VertexEntry::SolverEdgeuses(vec![H(20)]))
-            );
-        }
+        let k = Kernel::default();
+        let mut executive = corner_creation_executive();
+        executive.filleted_vertices = vec![Some(H(3))];
+        executive
+            .vertex_corner_map
+            .insert(Some(H(3)), VertexEntry::SolverEdgeuses(vec![H(20)]));
+        let mut info = ErrorInfo::new(None);
+        info.code = 99;
+        executive
+            .create_fillet_corners_recording_vertex_errors(
+                &k,
+                |_, _, vertex, _| {
+                    assert_eq!(vertex, Some(H(3)));
+                    Ok(CornerCreation::Unsupported {
+                        location: Some(point),
+                    })
+                },
+                Some(&mut info),
+            )
+            .unwrap();
+        // The optional out-parameter copy follows upstream `operator=`, which does
+        // not copy the location, comment or entity name.
+        assert_eq!(
+            (info.code, info.vertex, info.location),
+            (9, Some(H(3)), None)
+        );
+        assert_eq!(info.comment, "<no comment>\n");
+        assert_eq!(info.status, 2);
+        assert_eq!(executive.error.status, 2);
+        assert_eq!(executive.error.location, Some(point));
+        assert_eq!(executive.error.comment, "Corner case not implemented");
+        // Diagnostics only: the pending entry and the corner list are unchanged.
+        assert!(executive.corners.is_empty());
+        assert_eq!(
+            executive.vertex_corner_map.get(&Some(H(3))),
+            Some(&VertexEntry::SolverEdgeuses(vec![H(20)]))
+        );
     }
 
     #[test]
     fn create_corners_original_factory_shape_still_notes_without_a_location() {
         use crate::blend::fillet_executive::p3::VertexEntry;
 
-        let mut k = Kernel::default();
-        k.fixes.fillet_vertex_error_diagnostics = true;
+        let k = Kernel::default();
         let mut executive = corner_creation_executive();
         executive.filleted_vertices = vec![Some(H(3))];
         executive
@@ -2357,7 +2342,12 @@ mod tests {
             executive.vertex_corner_map.get(&Some(H(3))),
             Some(&VertexEntry::Corner(H(30)))
         );
-        assert_eq!(info.code, 17);
+        // H(2), which no corner type handles, is noted as unsupported (WR-513) and the
+        // final assignment copies that note's code and vertex.
+        assert_eq!(
+            (info.code, info.vertex),
+            (FilletErrorType::CornerUnsupported as i32, Some(H(2)))
+        );
     }
 
     #[test]
