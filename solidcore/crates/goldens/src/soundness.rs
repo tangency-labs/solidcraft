@@ -6,7 +6,9 @@
 //! A body is sound as the kernel's local operation gates its result
 //! ([`validation::soundness`]): `check_brep` at level 2 reports nothing, its geometry's owners
 //! taken as the geometry records them (not the runner's naming), and a manifold one has a
-//! positive volume.
+//! positive volume. Where the runner named its input ([`input`]) and that was a manifold solid,
+//! the body must be one too, of positive volume ([`validation::Soundness::sound`], #13685): a
+//! solid's offset that comes back as loose sheets or as nothing is not sound.
 
 use std::cell::RefCell;
 
@@ -17,6 +19,8 @@ use solidcore::topology::Brep;
 
 thread_local! {
     static CAPTURED: RefCell<Option<Vec<Soundness>>> = const { RefCell::new(None) };
+    /// Whether the case's input, as the runner named it ([`input`]), is a manifold solid.
+    static INPUT_SOLID: RefCell<Option<bool>> = const { RefCell::new(None) };
 }
 
 /// What [`measure`] found of one result body.
@@ -30,13 +34,26 @@ pub struct Soundness {
     pub volume: Option<VolumeSign>,
     /// Its face, edge and vertex counts.
     pub counts: [usize; 3],
+    /// Whether the input of the operation it came from was a manifold solid, where the
+    /// runner named that input ([`input`]); `None` where it did not.
+    pub input_solid: Option<bool>,
 }
 
 impl Soundness {
-    /// Whether the check is clean and a manifold body has a positive volume.
+    /// Whether the check is clean and the body is a manifold solid of positive volume, or has
+    /// no face (the solid offset to nothing, #2092), where its input was a manifold solid;
+    /// where the input was not one (or was not named), a body
+    /// that is no manifold solid passes on its check, and a manifold one needs a positive
+    /// volume.
     pub fn sound(&self) -> bool {
+        let positive = matches!(self.volume, Some(VolumeSign::Positive(_)));
         self.check.as_ref().is_ok_and(Vec::is_empty)
-            && (self.manifold != Some(true) || matches!(self.volume, Some(VolumeSign::Positive(_))))
+            && if self.input_solid == Some(true) {
+                // an empty body is the solid offset to nothing (#2092), an answer
+                self.counts[0] == 0 || (self.manifold == Some(true) && positive)
+            } else {
+                self.manifold != Some(true) || positive
+            }
     }
 
     /// One line: `sound`, the check's line count, manifold, volume and counts.
@@ -52,20 +69,35 @@ impl Soundness {
             Err(e) => format!("check_error={e}"),
         };
         format!(
-            "sound={} {check} manifold={:?} volume={:?} faces={} edges={} vertices={}",
+            "sound={} {check} manifold={:?} volume={:?} faces={} edges={} vertices={} \
+             input_solid={:?}",
             self.sound(),
             self.manifold,
             self.volume,
             self.counts[0],
             self.counts[1],
-            self.counts[2]
+            self.counts[2],
+            self.input_solid
         )
     }
 }
 
-/// Starts capturing the bodies [`measure`] is handed on this thread.
+/// Starts capturing the bodies [`measure`] is handed on this thread, no input named yet.
 pub fn start() {
     CAPTURED.with(|c| *c.borrow_mut() = Some(Vec::new()));
+    INPUT_SOLID.with(|i| *i.borrow_mut() = None);
+}
+
+/// Names the input of the operation whose result bodies the runner hands to [`measure`]
+/// next, when capture is on: whether it is a manifold solid (`None` for no input). Off, it
+/// does nothing; the query only reads the body.
+pub fn input(brep: Option<&Brep>) {
+    let on = CAPTURED.with(|c| c.borrow().is_some());
+    if !on {
+        return;
+    }
+    let solid = brep.map(|b| solidcore::topology::brep::p2::is_manifold_solid(b).unwrap_or(false));
+    INPUT_SOLID.with(|i| *i.borrow_mut() = solid);
 }
 
 /// Stops capturing and returns what was measured since [`start`].
@@ -90,6 +122,7 @@ pub fn measure(brep: &mut Brep) {
 
 fn measured(brep: &mut Brep) -> Soundness {
     let mut k = Kernel::default();
+    let input_solid = INPUT_SOLID.with(|i| *i.borrow());
     let counts = [
         solidcore::topology::brep::p1::num_faces(brep),
         solidcore::topology::brep::p1::edges(brep, None).map_or(0, |e| e.len()),
@@ -104,12 +137,14 @@ fn measured(brep: &mut Brep) -> Soundness {
             manifold: Some(found.manifold),
             volume: found.volume,
             counts,
+            input_solid,
         },
         Err(e) => Soundness {
             check: Err(e.to_string()),
             manifold: None,
             volume: None,
             counts,
+            input_solid,
         },
     }
 }
@@ -165,7 +200,7 @@ pub fn probe(runner: &dyn crate::UnitDiff) {
 
 #[cfg(test)]
 mod tests {
-    use super::{measure, start, take, VolumeSign};
+    use super::{input, measure, start, take, VolumeSign};
     use solidcore::kernel::Kernel;
 
     fn cube() -> solidcore::topology::Brep {
@@ -204,5 +239,39 @@ mod tests {
             s.line()
         );
         assert_eq!(s.counts, [6, 12, 8]);
+        assert_eq!(s.input_solid, None);
+    }
+
+    /// A solid's result must be a solid (#13685), or nothing (#2092): from a solid input a
+    /// box is sound and an empty body is sound, a lone plane sheet is not, though it passes
+    /// where the input is no solid.
+    #[test]
+    fn a_solids_result_must_be_a_solid_or_nothing() {
+        let solid = cube();
+        let mut b = cube();
+        let mut empty = solidcore::topology::Brep::new_with_infinite_region().unwrap();
+        let mut sheet = solidcore::primitive::api_primitives::create_plane(
+            &mut Kernel::default(),
+            solidcore::Point3::new(0.0, 0.0, 0.0),
+            10.0,
+            10.0,
+        )
+        .unwrap();
+        start();
+        input(Some(&solid));
+        measure(&mut b);
+        measure(&mut empty);
+        measure(&mut sheet);
+        input(None);
+        measure(&mut sheet);
+        let found = take();
+        assert_eq!(found.len(), 4);
+        assert!(found[0].sound(), "{}", found[0].line());
+        assert_eq!(found[0].input_solid, Some(true));
+        assert!(found[1].sound(), "{}", found[1].line());
+        assert!(!found[2].sound(), "{}", found[2].line());
+        assert_eq!(found[2].manifold, Some(false));
+        assert!(found[3].sound(), "{}", found[3].line());
+        assert_eq!(found[3].input_solid, None);
     }
 }
