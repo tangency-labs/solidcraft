@@ -1485,6 +1485,22 @@ fn eval_point(k: &Kernel, c: &Curve, t: f64) -> Result<Point3> {
     c.evaluate_point(k, t)
 }
 
+/// Whether `c` is collapsed to `p`: the curve has a certified bounding box
+/// ([`Curve::certified_bounding_box`], which contains the curve) and the sphere enclosing
+/// that box lies in the ball of radius `tol` about `p`. A curve without a certified box,
+/// or a closed curve through `p` with any extent beyond `tol`, is not.
+///
+/// # Errors
+///
+/// Those of [`Curve::certified_bounding_box`].
+fn curve_within(k: &Kernel, c: &Curve, p: Point3, tol: f64) -> Result<bool> {
+    let Some(ext) = c.certified_bounding_box(k, &c.natural_interval())? else {
+        return Ok(false);
+    };
+    let sphere = ext.sphere_bound();
+    Ok(sphere.center.distance(p) + sphere.radius <= tol)
+}
+
 /// Not upstream (WR-591, the fork's `sm_NextRoundTheVertex`, tangency-labs/smlib
 /// 9209e76): the curve end a loop goes on from at a vertex where several curve ends
 /// meet. `arrive` is the end the loop arrives by (`2i` the start of curve `i`, `2i + 1`
@@ -1502,27 +1518,6 @@ fn eval_point(k: &Kernel, c: &Curve, t: f64) -> Result<Point3> {
 /// # Errors
 ///
 /// `SM_ERR` for a zero tangent at an end there; those of the curve evaluations.
-/// Whether `c` is collapsed to `p`: the sphere enclosing the curve's bounding box
-/// (`CalculateBoundingBox`, unexpanded) lies in the ball of radius `tol` about `p`. A
-/// closed curve through `p` with any extent beyond `tol` is not.
-fn curve_within(k: &Kernel, c: &Curve, p: Point3, tol: f64) -> Result<bool> {
-    let ext = c
-        .calculate_bounding_box(
-            k,
-            &c.natural_interval(),
-            BoundingBoxRequest {
-                normal: true,
-                pseudo: false,
-                polar: false,
-            },
-            false,
-        )?
-        .normal
-        .unwrap_or_default();
-    let sphere = ext.sphere_bound();
-    Ok(sphere.center.distance(p) + sphere.radius <= tol)
-}
-
 fn next_round_the_vertex(
     k: &Kernel,
     curves: &[Curve],
@@ -3729,11 +3724,6 @@ mod tests {
         }
     }
 
-    /// #17033: the partial cone profile with a top line shorter than the tolerance. Its
-    /// side, top and axis ends all meet at the top vertex; going on round that vertex
-    /// must run the collapsed top line forwards (from its start), not backwards from its
-    /// end. Backwards, the profile face made the sweep report the axis inside the face
-    /// (1025) instead of the degenerate swept face (1007, UB-215).
     /// #16998 review: a closed curve through a touching vertex is not collapsed, so both
     /// its ends stay candidates there and the turn-order rule picks between them. A
     /// 4 x 4 square and, inside it, a closed counterclockwise triangle (one degree-1
@@ -3802,6 +3792,11 @@ mod tests {
         assert_eq!(checked, 96);
     }
 
+    /// #17033: the partial cone profile with a top line shorter than the tolerance. Its
+    /// side, top and axis ends all meet at the top vertex; going on round that vertex
+    /// must run the collapsed top line forwards (from its start), not backwards from its
+    /// end. Backwards, the profile face made the sweep report the axis inside the face
+    /// (1025) instead of the degenerate swept face (1007, UB-215).
     #[test]
     fn issue_17033_collapsed_curve_at_the_vertex_runs_forwards() {
         let k = Kernel::default();
