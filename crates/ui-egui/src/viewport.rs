@@ -8282,7 +8282,7 @@ fn axis_hit(tips: &[crate::view_compass::Tip], p: Pos2) -> Option<usize> {
     crate::view_compass::hit(tips, p)
 }
 
-/// Dragging anywhere on the view navigator orbits about the view centre. A stationary press
+/// Dragging anywhere on the view navigator orbits about the selected origin or the camera target. A stationary press
 /// on a tip chooses its view. Floating windows own their input over the gizmo.
 fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
     let pos = ui.input(|i| i.pointer.interact_pos());
@@ -8301,7 +8301,9 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
     }
     if let Some(crate::view_compass::OrbitStep { dx, dy, snap }) = orbit.step {
         app.cancel_view_animation();
-        orbit_drag(app, rect, dx, dy, None, snap, false);
+        // The widget has no model point under the cursor, but an explicit origin pivot still applies.
+        let around_origin = app.preferences.orbit_around == crate::prefs::OrbitAround::Origin;
+        orbit_drag(app, rect, dx, dy, None, snap, around_origin);
     }
     orbit.orbiting
 }
@@ -14534,6 +14536,63 @@ mod tests {
                 assert!(h.app.viewport.axis_drag.is_none(), "release clears the axis gesture");
                 assert!(h.app.viewport.boxsel.is_none());
             }
+        }
+    }
+
+    /// #17245: the navigator must use the selected world origin even after the view is panned.
+    #[test]
+    fn view_axis_drag_keeps_the_origin_with_free_and_snapped_orbits() {
+        for free in [false, true] {
+            for snap in [false, true] {
+                let mut h = crate::scenario::Harness::new();
+                h.call("ui.prefs", json!({"navigator_style":"axes", "look_at_anim":false}));
+                h.app.preferences.orbit_around = crate::prefs::OrbitAround::Origin;
+                h.app.preferences.free_orbit = free;
+                h.app.cam = Camera { target: Vec3::new(40.0, -25.0, 15.0), yaw: 0.3, pitch: 0.2, distance: 200.0, fov: 0.6, ..Default::default() };
+                h.frames(2);
+                let initial = h.app.cam;
+                let origin = initial.frame_coords(Vec3::ZERO);
+                let undo = h.app.session.undo.len();
+                // Both gestures cross a snap boundary; the second starts from the first's view.
+                for (dx, dy) in [(-90.0, 30.0), (-120.0, -20.0)] {
+                    let before = h.app.cam;
+                    let p = crate::scenario::handle_at("axis_view:-y").unwrap();
+                    h.call("ui.drag", json!({"x0":p.x, "y0":p.y, "x1":p.x + dx, "y1":p.y + dy, "shift":snap, "steps":12}));
+                    assert!(h.app.cam.back().dist(before.back()) > 1e-3, "free={free}, snap={snap}, dx={dx}: the widget must turn the view");
+                    assert!(
+                        h.app.cam.frame_coords(Vec3::ZERO).dist(origin) < 1e-8,
+                        "free={free}, snap={snap}: the origin must stay in the same camera-frame position"
+                    );
+                    assert_eq!(h.app.cam.distance, initial.distance);
+                    assert_eq!(h.app.cam.fov, initial.fov);
+                    assert!(h.app.viewport.axis_drag.is_none(), "release ends each widget gesture");
+                    assert!(h.app.viewport.boxsel.is_none());
+                }
+                assert_eq!(h.app.session.undo.len(), undo, "navigation does not edit the design");
+            }
+        }
+    }
+
+    #[test]
+    fn view_axis_drag_keeps_the_camera_target_for_view_centre_and_cursor() {
+        for around in [crate::prefs::OrbitAround::ViewCentre, crate::prefs::OrbitAround::Cursor] {
+            let mut h = crate::scenario::Harness::new();
+            h.call("ui.prefs", json!({"navigator_style":"axes", "look_at_anim":false}));
+            h.app.run("solid.box", json!({"length":10, "width":10, "height":10})).unwrap();
+            h.settle();
+            h.call("ui.view", json!({"view":"front"}));
+            h.app.preferences.orbit_around = around;
+            // The model and the camera's target differ, so choosing a model pivot would move it.
+            h.app.cam.target = Vec3::new(40.0, -25.0, 15.0);
+            h.frames(2);
+            let before = h.app.cam;
+            let undo = h.app.session.undo.len();
+            let p = crate::scenario::handle_at("axis_view:-y").unwrap();
+            h.call("ui.drag", json!({"x0":p.x, "y0":p.y, "x1":p.x - 48.0, "y1":p.y, "steps":8}));
+            assert!(h.app.cam.back().dist(before.back()) > 1e-3, "{around:?}: the widget must turn the view");
+            assert_eq!(h.app.cam.target, before.target, "{around:?}: the widget keeps its existing camera-target pivot");
+            assert_eq!(h.app.cam.distance, before.distance);
+            assert_eq!(h.app.session.undo.len(), undo);
         }
     }
 
