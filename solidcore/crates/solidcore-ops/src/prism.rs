@@ -24,6 +24,7 @@ use solidcore_convert as convert;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
 
 pub use solidcore::prism::measure::Interval;
+pub use solidcore::prism::placement::LoopPlacement;
 pub use solidcore::prism::profile::{tapered_flange_ends, ProfileRefusal};
 
 use crate::body::{finish, Body, Expect};
@@ -393,4 +394,13 @@ pub fn region_area(region: &Region2) -> Result<kp::Area> {
 #[must_use]
 pub fn loop_holds(lp: &Loop2, p: Vec2) -> Option<bool> {
     convert::loop2(lp).holds(convert::vec2(p))
+}
+
+/// Where `lp` lies against `other` (both in one plane's coordinates), loops within `tol` of each
+/// other counting as meeting ([`kp::Loop2::placement`]): clear inside,
+/// clear outside, along it everywhere, or meeting it in places only. `None` for loops of other
+/// than lines and arcs, or a placement the kernel cannot decide.
+#[must_use]
+pub fn loop_placement(lp: &Loop2, other: &Loop2, tol: f64) -> Option<LoopPlacement> {
+    convert::loop2(lp).placement(&convert::loop2(other), tol)
 }
