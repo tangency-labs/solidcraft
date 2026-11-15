@@ -232,6 +232,52 @@ fn face_update_edges_ok(r: &ProtoRun, which: i32, old_face: H) -> Result<bool, F
     }
 }
 
+/// Which B-rep, the old edge, the new edges and the calling vertex definition of an
+/// `MGR_UPDATE_EDGES` op.
+type UpdateEdgesArgs = (i32, Option<H>, Vec<H>, Option<VertexDefId>);
+
+/// The arguments of an `MGR_UPDATE_EDGES` op, read from `rd` just after its op code: which
+/// B-rep, the old edge, the new edges and the calling vertex definition. `None` when the op
+/// is skipped: a handle that is not an edge, an unknown vertex definition, a B-rep other
+/// than 1 or 2, or a count of new edges outside 0..=4 (at most four are read).
+fn update_edges_args(
+    r: &ProtoRun,
+    rd: &mut Rd<'_>,
+) -> Option<UpdateEdgesArgs> {
+    let mut ok = true;
+    let w = rd.idx();
+    let edge_or_null = |r: &ProtoRun, j: i64, ok: &mut bool| -> Option<H> {
+        if j == -1 {
+            return None;
+        }
+        if !r.pool.is(j, pk::EDGE) {
+            *ok = false;
+            return None;
+        }
+        Some(r.pool.h(j))
+    };
+    let old = edge_or_null(r, rd.idx(), &mut ok);
+    let n = rd.idx();
+    let mut edges = Vec::new();
+    for _ in 0..n.clamp(0, 4) {
+        match edge_or_null(r, rd.idx(), &mut ok) {
+            Some(x) => edges.push(x),
+            None => ok = false,
+        }
+    }
+    let j = rd.idx();
+    let vd = if j == -1 {
+        None
+    } else {
+        let x = r.vd(j);
+        if x.is_none() {
+            ok = false;
+        }
+        x
+    };
+    (ok && (1..=2).contains(&w) && (0..=4).contains(&n)).then_some((w as i32, old, edges, vd))
+}
+
 /// Runs one op of this unit (its code already read) against the port, as the shim's
 /// `run_p2_op` runs it against upstream.
 #[allow(clippy::too_many_lines)]
@@ -547,43 +593,13 @@ pub(super) fn run_op(
             let _ = res(r.mgr.remove_edge_definition(&r.k, d, flag), st, skip)?;
         }
         q::MGR_UPDATE_EDGES => {
-            let w = rd.idx();
-            let edge_or_null = |r: &ProtoRun, j: i64, ok: &mut bool| -> Option<H> {
-                if j == -1 {
-                    return None;
-                }
-                if !r.pool.is(j, pk::EDGE) {
-                    *ok = false;
-                    return None;
-                }
-                Some(r.pool.h(j))
-            };
-            let old = edge_or_null(r, rd.idx(), &mut ok);
-            let n = rd.idx();
-            let mut edges = Vec::new();
-            for _ in 0..n.clamp(0, 4) {
-                match edge_or_null(r, rd.idx(), &mut ok) {
-                    Some(x) => edges.push(x),
-                    None => ok = false,
-                }
-            }
-            let j = rd.idx();
-            let vd = if j == -1 {
-                None
-            } else {
-                let x = r.vd(j);
-                if x.is_none() {
-                    ok = false;
-                }
-                x
-            };
-            if *skip || !ok || !(1..=2).contains(&w) || !(0..=4).contains(&n) {
+            let Some((w, old, edges, vd)) = update_edges_args(r, rd).filter(|_| !*skip) else {
                 *skip = true;
                 return Ok(());
-            }
+            };
             let _ = res(
                 r.mgr
-                    .update_edges(&r.k, &mut r.pool, w as i32, old, &edges, vd),
+                    .update_edges(&r.k, &mut r.pool, w, old, &edges, vd),
                 st,
                 skip,
             )?;
@@ -1725,20 +1741,14 @@ mod tests {
         }
     }
 
-    /// The `MGR_UPDATE_EDGES` op of a proto script decoded as the runner decodes it:
-    /// which B-rep, the old edge, the new edges and the calling vertex definition.
-    fn update_edges_args(r: &ProtoRun, op: &[f64]) -> (i32, Option<H>, Vec<H>, Option<VertexDefId>) {
-        let at = |i: usize| op.get(i).copied().unwrap() as i64;
-        let edge = |j: i64| (j != -1).then(|| r.pool.h(j));
-        let n = at(3) as usize;
-        let edges = (0..n).filter_map(|i| edge(at(4 + i))).collect();
-        let vd = at(4 + n);
-        (
-            at(1) as i32,
-            edge(at(2)),
-            edges,
-            (vd != -1).then(|| r.vd(vd)).flatten(),
-        )
+    /// The arguments of the `MGR_UPDATE_EDGES` op `op`, decoded by the runner's own
+    /// [`update_edges_args`] against the state `r` it starts from.
+    fn op_update_edges_args(r: &ProtoRun, op: &[f64]) -> UpdateEdgesArgs {
+        let mut rd = Rd { v: op, at: 1, bad: false };
+        let Some(args) = update_edges_args(r, &mut rd) else {
+            panic!("the runner skips this UpdateEdges op")
+        };
+        args
     }
 
     /// WR-533's moved rows (batch topology-1, the flag removed). `UpdateEdges` now splits
@@ -1796,7 +1806,36 @@ mod tests {
             let Ok(Some(mut r)) = proto_state_before(&s, index) else {
                 panic!("no state before op {index}")
             };
-            let (w, old, edges, vd) = update_edges_args(&r, &ops[index]);
+            let (w, old, edges, vd) = op_update_edges_args(&r, &ops[index]);
+            if matches!(name, "gen0914" | "gen0976") {
+                // main runs these two on: their two pieces split one curve at a parameter
+                // that lies strictly inside a definition on the old piece and on that curve,
+                // so neither piece holds the whole definition, which is what upstream
+                // re-points to one of them
+                let curve = r.pool.edge_curve(old.unwrap()).flatten();
+                let ivls: Vec<_> = edges
+                    .iter()
+                    .map(|e| {
+                        assert_eq!(r.pool.edge_curve(*e).flatten(), curve, "{name}: one curve");
+                        r.pool.edge_interval(*e).unwrap()
+                    })
+                    .collect();
+                let [a, b] = ivls[..] else {
+                    panic!("{name}: two pieces")
+                };
+                let (lo, hi) = if a.min() < b.min() { (a, b) } else { (b, a) };
+                assert_eq!(lo.max(), hi.min(), "{name}: the pieces meet");
+                let split = lo.max();
+                let crosses = r.mgr.all_edge_definitions().unwrap().into_iter().any(|d| {
+                    let d = r.mgr.edge_def(d).unwrap();
+                    let on = d.xsect_interval();
+                    d.src_topo(w) == old
+                        && d.xsect_curve_3d() == curve
+                        && on.min() < split
+                        && split < on.max()
+                });
+                assert!(crosses, "{name}: a definition on the old piece runs across {split}");
+            }
             let e = r
                 .mgr
                 .update_edges(&r.k, &mut r.pool, w, old, &edges, vd)
@@ -1824,7 +1863,7 @@ mod tests {
             let Ok(Some(r)) = proto_state_before(&s, last_update) else {
                 panic!("gen1321: no state before op {last_update}")
             };
-            update_edges_args(&r, &ops[last_update]).0
+            op_update_edges_args(&r, &ops[last_update]).0
         };
         let Ok(Some(r)) = proto_state_before(&s, ops.len()) else {
             panic!("gen1321: no final state")

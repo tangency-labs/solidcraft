@@ -5,7 +5,9 @@
 //! stretch and crosses it there too: the crossing and the stretch's ends fall in one proto
 //! vertex as three vertex definitions too far apart to combine, and upstream's
 //! `SmProtoEdge::Resolve` keeps the stretch's edge whole past the crossing's vertex. The
-//! union then fails.
+//! union then failed. Since WR-533's split of a coincident definition across a split point
+//! is always on, it joins without `proto_edge_splits_at_captured_vertices` as well, so this
+//! input no longer tells that flag's two settings apart.
 //!
 //! The fork builds each tube with its C API's extrude, the circle starting on the side the
 //! walls touch (the top tube's seam at -y, the seat's at +y). This builds them as
@@ -13,9 +15,9 @@
 //! about Y onto the axis, and moved to the base, as the `boolean.api_brep` fixture
 //! `issue_1517_tube_ends.json` does on both sides.
 //!
-//! Expected with `proto_edge_splits_at_captured_vertices`: one manifold solid, its volume
-//! between the larger tube's and both together, and its check is clean. The fork's still
-//! fails on a separate defect: an ellipse piece 8.6e-5 long (the top tube's wall cut by the
+//! Expected with either setting of `proto_edge_splits_at_captured_vertices`: one manifold
+//! solid, its volume between the larger tube's and both together, and its check is clean.
+//! The fork's still fails on a separate defect: an ellipse piece 8.6e-5 long (the top tube's wall cut by the
 //! seat's end plane) whose STEP inversion set points near the arc's start to the start, so
 //! its NURB read 2.1e-5 off its ellipse (`SmEllipse` test 2). That was
 //! `SmExtent1d::ContainsPeriodicValue`, fixed for #1518 (WR-509).
@@ -129,7 +131,7 @@ fn wr579_near_coincident_tube_ends_join() {
     let (vt, vs) = (volume(&k, &mut t), volume(&k, &mut s));
     for fixed in [false, true] {
         let v = join(fixed).unwrap();
-        println!("fix {fixed}: {v}");
+        println!("fix {fixed}: {v:.17e}");
         assert!(
             v > vt.max(vs) && v < vt + vs,
             "fix {fixed}: union volume {v}, tubes {vt} and {vs}"

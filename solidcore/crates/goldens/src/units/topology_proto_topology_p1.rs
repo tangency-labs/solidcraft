@@ -2854,13 +2854,13 @@ fn run_proto(
 
     let mut stop = stop;
     for (index, opv) in ops.iter().enumerate() {
+        r.pool.sync_topo();
         if let Some((at, state)) = stop.as_mut() {
             if *at == index {
                 **state = Some(r);
                 return Ok(o);
             }
         }
-        r.pool.sync_topo();
         let mut rd = Rd {
             v: opv,
             at: 0,
@@ -4930,6 +4930,7 @@ fn run_proto(
     }
     if let Some((at, state)) = stop {
         if at == ops.len() {
+            r.pool.sync_topo();
             *state = Some(r);
             return Ok(o);
         }
@@ -5359,8 +5360,9 @@ pub(super) fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
 }
 
 /// The proto run of the proto script `s` just before its op `index` (the state that op
-/// starts from), for tests that check a record against that state; `None` when the script
-/// is not a proto script or ends before that op.
+/// starts from, after the runner's per-op `sync_topo`), or after its last op for `index`
+/// equal to the op count, for tests that check a record against that state; `None` when
+/// the script is not a proto script or ends before that op.
 ///
 /// # Errors
 ///

@@ -158,10 +158,10 @@ fn wr_533_lip_swept_flush_round_a_corner_joins() {
     );
 }
 
-/// The fix's observable at the topology level (#1954): with the definition split with its
-/// edge, the union is a body of the block's and the lip's faces, edges and vertices.
-/// Pins the exact counts, so a result that agrees in volume but leaves the rim arc and the lip's edge
-/// joined differently still fails.
+/// The union at the topology level (#1954): a body of the block's and the lip's faces,
+/// edges and vertices. The split no longer arises here (see the module docs), so this pins
+/// the topology, not the fix. The exact counts mean a result that agrees in volume but
+/// joins the rim arc and the lip's edge differently still fails.
 #[test]
 fn wr_533_lip_swept_flush_round_a_corner_has_the_block_and_lip_topology() {
     let mut k = Kernel::default();
