@@ -50,7 +50,9 @@
 //! point (docs/booleans.md, "One point or two"), though they lie farther apart than their
 //! tolerances. [`strip_contacts`] reads the strip from the face pairs' curve intervals
 //! before any of their proto vertices is made and declares each end a contact: the segment
-//! across the strip, widened by the tolerance within which its edges cover the crossing.
+//! across the strip, widened by the tolerance within which its edges cover the crossing
+//! and by how far their ends lie off their offsets. The strip ends at the innermost
+//! bounding edge on each side, each proved on the other face's plane over its hull.
 //! Where an edge bounds the crossing on one side only (the other face goes on out of
 //! tolerance), the half strip between them is such a contact too, and the crossing stays
 //! an edge. A crossing inside a coincident pair never gets that far (it makes no curve);
@@ -102,12 +104,22 @@ struct Def<O, I> {
 /// points.
 pub(super) type FacePairIntersection<O> = (O, O, bool, FaceIntersection<O>, Vec<Point3>);
 
-/// One side of a strip: the offset of its bounding edge from the crossing line, and the
-/// tolerance within which that edge covers the crossing's length.
-#[derive(Clone, Copy)]
+/// One side of a strip: the offset of its bounding edge from the crossing line, the
+/// tolerance within which that edge covers the crossing's length, and how far its ends lie
+/// from the offset across the line and along it beyond `end_tol` ([`band_offset`]): a
+/// contact at a crossing's end reaches the edge's end there within `end_tol + slack`.
+#[derive(Clone, Copy, Debug)]
 struct Side {
     off: Vec3,
     end_tol: f64,
+    slack: f64,
+}
+
+impl Side {
+    /// How far the side's points at a crossing's end reach from its contact segment.
+    fn reach(self) -> f64 {
+        (self.end_tol + self.slack) * (1.0 + gamma(1))
+    }
 }
 
 /// The strip about a crossing: the sides edge-on-face definitions give it, and the two sides
@@ -415,28 +427,65 @@ pub(super) fn strip_contacts<O: ClassObject + SolutionObject + Ord>(
     }
     let mut contacts = Vec::new();
     for crossing in &defs {
+        k.check_cancelled(OP_STRIP_CONTACTS)?;
         let Some(strip) = in_coincident_strip(k, brep, crossing, &defs)? else {
             continue;
         };
         for end in crossing.ends {
-            if let Some([a, b]) = strip.closed {
-                contacts.push(DeclaredContact {
-                    a: end + a.off,
-                    b: end + b.off,
-                    radius: a.end_tol.max(b.end_tol),
-                });
-            } else {
-                for side in &strip.sides {
-                    contacts.push(DeclaredContact {
-                        a: end,
-                        b: end + side.off,
-                        radius: side.end_tol,
-                    });
-                }
-            }
+            contacts.extend(strip.contacts_at(end));
         }
     }
     Ok(contacts)
+}
+
+impl Strip {
+    /// The contacts at the crossing's end `end`: the segment across the strip between its
+    /// two closing sides, or the half strip to each side when it is not closed, each
+    /// reaching its sides' ends there ([`Side::reach`]).
+    fn contacts_at(&self, end: Point3) -> Vec<DeclaredContact> {
+        if let Some([a, b]) = self.closed {
+            return vec![DeclaredContact {
+                a: end + a.off,
+                b: end + b.off,
+                radius: a.reach().max(b.reach()),
+            }];
+        }
+        self.sides
+            .iter()
+            .map(|side| DeclaredContact {
+                a: end,
+                b: end + side.off,
+                radius: side.reach(),
+            })
+            .collect()
+    }
+}
+
+/// Whether no side of `all` lies between `side` and the crossing: none on its side of the
+/// line (offsets at an acute angle) nearer the line. A strip ends at its innermost side;
+/// one farther out bounds nothing beside the crossing.
+fn is_innermost(side: &Side, all: &[Side]) -> bool {
+    let reach = side.off.length();
+    !all.iter()
+        .any(|t| t.off.dot(side.off) > 0.0 && t.off.length() < reach)
+}
+
+/// The two sides that close the strip: an innermost side of `first` and one of `other` on
+/// opposite sides of the crossing, innermost among `first`, `other` and `between` (sides
+/// that cannot close the strip with these but still lie between, or not); `None` where no
+/// such pair is innermost.
+fn closing_pair(first: &[Side], other: &[Side], between: &[Side]) -> Option<[Side; 2]> {
+    let all: Vec<Side> = first.iter().chain(other).chain(between).copied().collect();
+    first
+        .iter()
+        .filter(|a| is_innermost(a, &all))
+        .find_map(|&a| {
+            other
+                .iter()
+                .filter(|b| is_innermost(b, &all))
+                .find(|b| a.off.dot(b.off) < 0.0)
+                .map(|&b| [a, b])
+        })
 }
 
 /// Whether `face`'s interior along `edge` lies toward the crossing line (`off` points from
@@ -478,12 +527,11 @@ fn edge_end_tol<O: ClassObject>(
     Ok(t0.max(t1))
 }
 
-/// The strip sides `face` closes, when it has a boundary edge within intersection tolerance
-/// of `other_plane` that runs parallel to and covers the crossing line `(p0, dir, len)` on
-/// the side opposite to one of `opposite_defs`, with `face`'s interior toward the
-/// crossing: that edge's side and the opposite one.
+/// The strip sides `face`'s boundary edges give: each edge within intersection tolerance of
+/// `other_plane` ([`edge_on_plane`]) that runs parallel to and covers the crossing line
+/// `(p0, dir, len)`, with `face`'s interior toward the crossing.
 #[allow(clippy::too_many_arguments)]
-fn face_edge_bounds_strip<O: ClassObject>(
+fn face_edge_sides<O: ClassObject>(
     k: &Kernel,
     brep: &mut impl IntersectorBrepP2<O>,
     face: O,
@@ -493,9 +541,10 @@ fn face_edge_bounds_strip<O: ClassObject>(
     dir: Vec3,
     len: f64,
     crossing_tol: f64,
-    opposite_defs: &[Side],
-) -> Result<Option<[Side; 2]>> {
+) -> Result<Vec<Side>> {
+    let mut sides = Vec::new();
     for edge in brep.face_edges(face)? {
+        k.check_cancelled(OP_STRIP_CONTACTS)?;
         let Some(ivl) = brep.edge_interval(edge) else {
             continue;
         };
@@ -514,26 +563,51 @@ fn face_edge_bounds_strip<O: ClassObject>(
                 hull,
             )
         };
-        let edge_tol = zone_tol3d(k, brep.topology_tolerance(edge).unwrap_or(0.0));
-        let plane_tol = xsect_tol3d(k, edge_tol + other_face_tol).max(crossing_tol);
-        if !hull
-            .iter()
-            .all(|&(q, e)| other_plane.distance_bound(q, e) <= plane_tol)
-        {
-            continue;
-        }
-        let end_tol = plane_tol + edge_end_tol(k, brep, edge)?;
-        let Some(off) = band_offset(p0, dir, len, ends, &hull, crossing_tol, end_tol) else {
+        let Some(plane_tol) = edge_on_plane(
+            k,
+            brep,
+            edge,
+            &hull,
+            other_plane,
+            other_face_tol,
+            crossing_tol,
+        ) else {
             continue;
         };
-        let Some(&opposite) = opposite_defs.iter().find(|other| off.dot(other.off) < 0.0) else {
+        let end_tol = plane_tol + edge_end_tol(k, brep, edge)?;
+        let Some((off, slack)) = band_offset(p0, dir, len, ends, &hull, crossing_tol, end_tol)
+        else {
             continue;
         };
         if faces_inward(k, brep, edge, face, off)? {
-            return Ok(Some([Side { off, end_tol }, opposite]));
+            sides.push(Side {
+                off,
+                end_tol,
+                slack,
+            });
         }
     }
-    Ok(None)
+    Ok(sides)
+}
+
+/// The tolerance within which `edge`, enclosed by its hull points `hull`, lies on
+/// `other_plane` (that of a face of zone tolerance `other_face_tol`): the intersection
+/// tolerance of the edge's and the face's, at least the crossing's, when every hull point
+/// is proved within it ([`PlanePos::distance_bound`]); else `None`.
+fn edge_on_plane<O: ClassObject>(
+    k: &Kernel,
+    brep: &impl IntersectorBrepP2<O>,
+    edge: O,
+    hull: &[(Point3, f64)],
+    other_plane: PlanePos,
+    other_face_tol: f64,
+    crossing_tol: f64,
+) -> Option<f64> {
+    let edge_tol = zone_tol3d(k, brep.topology_tolerance(edge).unwrap_or(0.0));
+    let plane_tol = xsect_tol3d(k, edge_tol + other_face_tol).max(crossing_tol);
+    hull.iter()
+        .all(|&(q, e)| other_plane.distance_bound(q, e) <= plane_tol)
+        .then_some(plane_tol)
 }
 
 /// The strip about `crossing`, a face/face edge definition of two planes (module docs): the
@@ -570,6 +644,8 @@ fn in_coincident_strip<O: ClassObject, I: PartialEq>(
     {
         return Ok(None);
     }
+    let fa_tol = zone_tol3d(k, brep.topology_tolerance(fa).unwrap_or(0.0));
+    let fb_tol = zone_tol3d(k, brep.topology_tolerance(fb).unwrap_or(0.0));
     let mut def_on_fb: Vec<Side> = Vec::new();
     let mut def_on_fa: Vec<Side> = Vec::new();
     for def in defs.iter().filter(|d| d.id != crossing.id) {
@@ -592,67 +668,85 @@ fn in_coincident_strip<O: ClassObject, I: PartialEq>(
         let Some(hull) = def.hull.as_deref() else {
             continue;
         };
+        // the edge lies on the other face's plane over the whole interval, by its hull, as
+        // a face edge must to bound the strip ([`face_edge_sides`])
+        let (other_plane, other_face_tol) = if is_a_on_fb {
+            (pb, fb_tol)
+        } else {
+            (pa, fa_tol)
+        };
+        if edge_on_plane(
+            k,
+            brep,
+            edge,
+            hull,
+            other_plane,
+            other_face_tol,
+            crossing.tol,
+        )
+        .is_none()
+        {
+            continue;
+        }
         let end_tol = crossing.tol.max(def.tol) + edge_end_tol(k, brep, edge)?;
-        let Some(off) = band_offset(p0, dir, len, def.ends, hull, crossing.tol, end_tol) else {
+        let Some((off, slack)) = band_offset(p0, dir, len, def.ends, hull, crossing.tol, end_tol)
+        else {
             continue;
         };
         if !faces_inward(k, brep, edge, owner_face, off)? {
             continue;
         }
+        let side = Side {
+            off,
+            end_tol,
+            slack,
+        };
         if is_a_on_fb {
-            def_on_fb.push(Side { off, end_tol });
+            def_on_fb.push(side);
         } else {
-            def_on_fa.push(Side { off, end_tol });
+            def_on_fa.push(side);
         }
     }
     if def_on_fb.is_empty() && def_on_fa.is_empty() {
         return Ok(None);
     }
+    // the half strips: only the innermost sides bound anything beside the crossing
+    let all: Vec<Side> = def_on_fa.iter().chain(&def_on_fb).copied().collect();
     let mut strip = Strip {
-        sides: def_on_fa.iter().chain(&def_on_fb).copied().collect(),
-        closed: None,
+        sides: all
+            .iter()
+            .filter(|s| is_innermost(s, &all))
+            .copied()
+            .collect(),
+        closed: closing_pair(&def_on_fb, &def_on_fa, &[]),
     };
-    for &a in &def_on_fb {
-        if let Some(&b) = def_on_fa.iter().find(|b| a.off.dot(b.off) < 0.0) {
-            strip.closed = Some([a, b]);
+    if strip.closed.is_some() {
+        return Ok(Some(strip));
+    }
+    // an edge of fa's own boundary on fb's plane closes it against an fb edge on fa, and
+    // an edge of fb's against an fa edge on fb; every definition still counts as between
+    for (face, other_plane, other_face_tol, opposite, rest) in [
+        (fa, pb, fb_tol, &def_on_fa, &def_on_fb),
+        (fb, pa, fa_tol, &def_on_fb, &def_on_fa),
+    ] {
+        if opposite.is_empty() {
+            continue;
+        }
+        let own = face_edge_sides(
+            k,
+            brep,
+            face,
+            other_plane,
+            other_face_tol,
+            p0,
+            dir,
+            len,
+            crossing.tol,
+        )?;
+        if let Some(pair) = closing_pair(&own, opposite, rest) {
+            strip.closed = Some(pair);
             return Ok(Some(strip));
         }
-    }
-    let fa_tol = zone_tol3d(k, brep.topology_tolerance(fa).unwrap_or(0.0));
-    let fb_tol = zone_tol3d(k, brep.topology_tolerance(fb).unwrap_or(0.0));
-    if def_on_fa.is_empty() {
-        // no side to close
-    } else if let Some(sides) = face_edge_bounds_strip(
-        k,
-        brep,
-        fa,
-        pb,
-        fb_tol,
-        p0,
-        dir,
-        len,
-        crossing.tol,
-        &def_on_fa,
-    )? {
-        strip.closed = Some(sides);
-        return Ok(Some(strip));
-    }
-    if def_on_fb.is_empty() {
-        // no side to close
-    } else if let Some(sides) = face_edge_bounds_strip(
-        k,
-        brep,
-        fb,
-        pa,
-        fa_tol,
-        p0,
-        dir,
-        len,
-        crossing.tol,
-        &def_on_fb,
-    )? {
-        strip.closed = Some(sides);
-        return Ok(Some(strip));
     }
     Ok(Some(strip))
 }
@@ -662,7 +756,12 @@ fn in_coincident_strip<O: ClassObject, I: PartialEq>(
 /// their coordinates), when every point of the curve lies within `tol` of the offset of the
 /// ends' midpoint (an enclosure over `hull`, [`offset_bound`]), the ends' offsets are within
 /// `tol` of each other, the curve covers `[0, len]` within `end_tol` and lies farther from
-/// the line than `tol`; else `None`.
+/// the line than `tol`; else `None`. With it, how far the ends may lie beyond what
+/// `end_tol` accepts: across the line, their distance from the offset ([`offset_bound`] of
+/// each end, its evaluation error a few units in the last place of its coordinates), and
+/// along it, the rounding of their positions along the line (`γ_8` of their distance from
+/// `p0` and `len`). An end the test accepts at the extreme, `end_tol` along and that far
+/// across, lies within `end_tol` plus that slack of the offset at the crossing's end.
 fn band_offset(
     p0: Point3,
     dir: Vec3,
@@ -671,7 +770,7 @@ fn band_offset(
     hull: &[(Point3, f64)],
     tol: f64,
     end_tol: f64,
-) -> Option<Vec3> {
+) -> Option<(Vec3, f64)> {
     let (s0, s1) = ((q0 - p0).dot(dir), (q1 - p0).dot(dir));
     let r0 = (q0 - p0) - dir * s0;
     let r1 = (q1 - p0) - dir * s1;
@@ -681,7 +780,13 @@ fn band_offset(
             .iter()
             .all(|&(q, e)| offset_bound(p0, dir, off, q, e) <= tol);
     let covers = s0.min(s1) <= end_tol && s0.max(s1) >= len - end_tol;
-    (parallel && covers && off.length() > tol).then_some(off)
+    if !(parallel && covers && off.length() > tol) {
+        return None;
+    }
+    let across = |q: Point3| offset_bound(p0, dir, off, q, gamma(8) * q.length());
+    let along = gamma(8) * ((q0 - p0).length().max((q1 - p0).length()) + len);
+    let slack = (across(q0).max(across(q1)) + along) * (1.0 + gamma(2));
+    (!slack.is_nan()).then_some((off, slack))
 }
 
 /// An upper bound of `|r(q) - off|`, with `r(q) = (q - p0) - dir ((q - p0) . dir)` the
@@ -878,7 +983,7 @@ mod tests {
             curve.evaluate_point(k, 1.0).unwrap(),
         ];
         let hull = curve.hull_points_over(&ivl)?;
-        band_offset(Point3::ZERO, Vec3::X, LEN, ends, &hull, TOL, TOL)
+        band_offset(Point3::ZERO, Vec3::X, LEN, ends, &hull, TOL, TOL).map(|(off, _)| off)
     }
 
     /// A strip side whose start, midpoint and end lie on the band `y = SIDE_OFF` but which
@@ -924,5 +1029,84 @@ mod tests {
         );
         let off = offset_of(&k, &line).unwrap();
         assert!((off.y - SIDE_OFF).abs() <= TOL);
+    }
+
+    fn side(y: f64) -> Side {
+        Side {
+            off: Vec3::new(0.0, y, 0.0),
+            end_tol: TOL,
+            slack: 0.0,
+        }
+    }
+
+    /// Two parallel hole edges on one side of the crossing, the farther listed first: the
+    /// strip closes at the nearer one, and a side of either kind between a pair and the
+    /// crossing keeps that pair from closing it.
+    #[test]
+    fn the_strip_closes_at_its_innermost_sides() {
+        let (near, far, below) = (side(1e-3), side(3e-3), side(-2e-3));
+        let [a, b] = closing_pair(&[far, near], &[below], &[]).unwrap();
+        assert_eq!((a.off, b.off), (near.off, below.off));
+        // an edge of the other kind nearer the line on the same side
+        assert!(closing_pair(&[far], &[below], &[near]).is_none());
+        assert!(closing_pair(&[near], &[side(-3e-3)], &[side(-1e-3)]).is_none());
+        // nothing on the other side
+        assert!(closing_pair(&[near, far], &[], &[]).is_none());
+        let only = [near, far, below];
+        let inner: Vec<f64> = only
+            .iter()
+            .filter(|s| is_innermost(s, &only))
+            .map(|s| s.off.y)
+            .collect();
+        assert_eq!(inner, vec![1e-3, -2e-3]);
+    }
+
+    /// A strip side whose end the band test accepts at its extreme, `end_tol` short of the
+    /// crossing's end along it and nearly the tolerance off the band across it (its ends
+    /// 0.9 tolerances apart across): the contact at the crossing's end reaches that edge
+    /// end, the half strip's and the closed strip's alike. Within `end_tol` alone it is
+    /// not (`hypot(0.99, 0.45) > 1`).
+    #[test]
+    fn a_contact_reaches_an_edge_end_the_band_accepts_at_its_extreme() {
+        let end_tol = TOL;
+        let q0 = Point3::new(0.99 * end_tol, SIDE_OFF + 0.45 * TOL, 0.0);
+        let q1 = Point3::new(LEN, SIDE_OFF - 0.45 * TOL, 0.0);
+        let hull = [(q0, 0.0), (q1, 0.0)];
+        let (off, slack) =
+            band_offset(Point3::ZERO, Vec3::X, LEN, [q0, q1], &hull, TOL, end_tol).unwrap();
+        assert!((off.y - SIDE_OFF).abs() <= 1e-15, "{off:?}");
+        let up = Side {
+            off,
+            end_tol,
+            slack,
+        };
+        let old = DeclaredContact {
+            a: Point3::ZERO,
+            b: off,
+            radius: end_tol,
+        };
+        assert!(!old.holds(q0));
+        let half = Strip {
+            sides: vec![up],
+            closed: None,
+        };
+        let closed = Strip {
+            sides: vec![up, side(-SIDE_OFF)],
+            closed: Some([up, side(-SIDE_OFF)]),
+        };
+        for strip in [half, closed] {
+            let contacts = strip.contacts_at(Point3::ZERO);
+            assert_eq!(contacts.len(), 1);
+            assert!(contacts[0].holds(q0), "{:?}", contacts[0]);
+            assert!(contacts[0].holds(Point3::ZERO));
+        }
+        // a point a tolerance farther along stays out
+        let past = Point3::new(q0.x + 2.0 * TOL, q0.y, 0.0);
+        assert!(!Strip {
+            sides: vec![up],
+            closed: None
+        }
+        .contacts_at(Point3::ZERO)[0]
+            .holds(past));
     }
 }

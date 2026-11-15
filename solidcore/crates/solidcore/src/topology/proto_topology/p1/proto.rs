@@ -2229,12 +2229,16 @@ pub struct DeclaredContact {
 impl DeclaredContact {
     /// The uncertainty region of a point `p` known to `tolerance` that a curve fixes on an
     /// edge of unit direction `along` there (docs/booleans.md, "One point or two"): across
-    /// the edge the point is known to `tolerance`, along it only to the enclosed `reach`
-    /// (the tolerance over the sine of the crossing angle, with how far the edge strays
-    /// from its tangent within it: [`crate::curve::curve::Curve::crossing_reach`]), so the
-    /// region is the segment that far either way along the edge, widened by the tolerance
-    /// and the stray. With no reach proved, or one past `limit` (the capture distance: how
-    /// far proto vertices are looked for at all), the region reaches `limit`.
+    /// the edge the point is known to `tolerance`, along it only to the enclosed reach
+    /// (the tolerance over the sine of the crossing angle:
+    /// [`crate::curve::curve::Curve::crossing_reach`]; `limit`, the capture distance, how
+    /// far proto vertices are looked for at all, where none is proved or it is longer).
+    /// `reach` is that reach with how far the edge strays from the line through `p` along
+    /// `along` within it ([`crate::curve::curve::Curve::stray_from_line`]), so the region is
+    /// the segment that far either way along the edge, widened by the tolerance and the
+    /// stray; a stray enclosed over a longer reach bounds it over `limit` too. With no
+    /// enclosure of the edge (`None`) the region is the ball of `limit` and the tolerance:
+    /// every point the lookup considers.
     #[must_use]
     pub fn of_crossing(
         p: Point3,
@@ -2243,14 +2247,20 @@ impl DeclaredContact {
         reach: Option<(f64, f64)>,
         limit: f64,
     ) -> Self {
-        let (reach, stray) = match reach {
-            Some((reach, stray)) if reach <= limit => (reach, stray),
-            _ => (limit, 0.0),
-        };
-        Self {
-            a: p - along * reach,
-            b: p + along * reach,
-            radius: tolerance + stray,
+        match reach {
+            Some((reach, stray)) => {
+                let reach = reach.min(limit);
+                Self {
+                    a: p - along * reach,
+                    b: p + along * reach,
+                    radius: (tolerance + stray) * (1.0 + gamma(1)),
+                }
+            }
+            None => Self {
+                a: p,
+                b: p,
+                radius: (tolerance + limit) * (1.0 + gamma(1)),
+            },
         }
     }
 
@@ -2264,11 +2274,15 @@ impl DeclaredContact {
         }
     }
 
-    /// Whether this region and `other` are not proved apart: the distance between their
-    /// segments, shrunk by its rounding (`gamma_8` of the sizes involved), is within the
-    /// sum of their radii. The distance is that of the closest pair found by clamping each
-    /// segment's foot on the other in turn; the regions are taken for overlapping in
-    /// doubt. A NaN is apart.
+    /// Whether this region and `other` are not proved apart: a lower bound of the distance
+    /// between their segments is within the sum of their radii. The bound is the gap
+    /// between the two segments' projections onto one direction, which no pair of their
+    /// points is closer than whatever the direction, with the projections' rounding
+    /// (`γ_4` of each point's distance from `other.a` times the direction's length)
+    /// taken off. The direction is that of the closest pair found by clamping each
+    /// segment's foot on the other in turn: only where to look, so a pair an ill-conditioned
+    /// solve gets wrong (near-parallel segments) gives a smaller bound, never a larger one.
+    /// The regions are taken for overlapping in doubt. A NaN is apart.
     #[must_use]
     pub fn overlaps(&self, other: &Self) -> bool {
         let (d1, d2, r) = (self.b - self.a, other.b - other.a, self.a - other.a);
@@ -2301,9 +2315,23 @@ impl DeclaredContact {
                 (s, t)
             }
         };
-        let gap = (self.a + d1 * s - (other.a + d2 * t)).length();
-        let size = d1.length() + d2.length() + r.length();
-        let least = gap * (1.0 - gamma(8)) - gamma(8) * size;
+        let w = self.a + d1 * s - (other.a + d2 * t);
+        let width = w.length();
+        // the points relative to `other.a`, each difference rounded once per coordinate
+        let rb = self.b - other.a;
+        let least = if width > 0.0 {
+            let mine = (r.dot(w)).min(rb.dot(w));
+            let theirs = d2.dot(w).max(0.0);
+            let rounding = gamma(4) * width * (r.length() + rb.length() + d2.length());
+            let gap = (mine - theirs) * (1.0 - gamma(1)) - rounding;
+            if gap > 0.0 || gap.is_nan() {
+                gap / width * (1.0 - gamma(4))
+            } else {
+                0.0
+            }
+        } else {
+            width
+        };
         let reach = (self.radius + other.radius) * (1.0 + gamma(1));
         !(least.is_nan() || least > reach)
     }
@@ -3281,7 +3309,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// Merges `other` into `pv` (`CombineProtoVertex`): the larger tolerance, all of
     /// `other`'s vertex definitions (re-owned, still listed at `other`), the position
     /// averaged over the definitions (`other` contributing its own position once per
-    /// definition), and `other`'s proto edges re-pointed and listed at `pv`.
+    /// definition), and `other`'s proto edges re-pointed and listed at `pv`; not upstream:
+    /// and the uncertainty regions of `other`'s points.
     ///
     /// # Errors
     ///
@@ -3315,6 +3344,14 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         self.pv_mut(pv)?
             .proto_edges
             .extend_from_slice(&o.proto_edges);
+
+        // Not upstream: `pv` now holds `other`'s points, so it keeps their uncertainty
+        // regions ([`ProtoTopologyManager::find_proto_vertex_within`]).
+        for (of, _) in &mut self.regions {
+            if *of == other {
+                *of = pv;
+            }
+        }
         Ok(())
     }
 
@@ -4189,6 +4226,86 @@ mod tests {
 
         m.delete_proto_edge_object(gone);
         assert!(m.proto_vertex(start).unwrap().proto_edges().is_empty());
+    }
+
+    /// Two segments crossing at an angle of 1e-9 (their determinant rounds to zero, and the
+    /// closest pair the clamped solve finds is 1e-9 apart) are not proved apart, however
+    /// small the radii; parallel segments 1e-6 apart are, with radii of 1e-7; a NaN is
+    /// apart.
+    #[test]
+    fn near_parallel_crossing_regions_are_not_proved_apart() {
+        let seg = |a: Point3, b: Point3, radius: f64| DeclaredContact { a, b, radius };
+        let one = seg(
+            Point3::new(-1.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            1e-12,
+        );
+        let other = seg(
+            Point3::new(-0.5, -1e-9, 0.0),
+            Point3::new(1.5, 1e-9, 0.0),
+            1e-12,
+        );
+        assert!(one.overlaps(&other));
+        assert!(other.overlaps(&one));
+        let parallel = seg(
+            Point3::new(-0.5, 1e-6, 0.0),
+            Point3::new(1.5, 1e-6, 0.0),
+            1e-7,
+        );
+        assert!(!one.overlaps(&parallel));
+        assert!(!parallel.overlaps(&one));
+        let ball = DeclaredContact::of_point(Point3::new(0.3, 2e-7, 0.0), 1e-7);
+        assert!(!one.overlaps(&ball));
+        assert!(DeclaredContact::of_point(Point3::new(0.3, 0.9e-7, 0.0), 1e-7).overlaps(&one));
+        let nan = DeclaredContact::of_point(Point3::new(f64::NAN, 0.0, 0.0), 1.0);
+        assert!(!one.overlaps(&nan));
+    }
+
+    /// A proto vertex combined into another hands over the uncertainty regions of its
+    /// points: a point that only the combined-away proto vertex's region reached is found
+    /// at the survivor after the combine, as before it.
+    #[test]
+    fn a_combined_proto_vertex_keeps_the_regions_of_its_points() {
+        let k = Kernel::default();
+        let mut m = manager(&k);
+        let tol = 1e-6;
+        let kept = m.new_proto_vertex(Point3::ZERO, tol).unwrap();
+        let gone = m
+            .new_proto_vertex(Point3::new(1e-4, 0.0, 0.0), tol)
+            .unwrap();
+        m.add_proto_vertex(kept);
+        m.add_proto_vertex(gone);
+        // a crossing at `gone` known only to 4e-4 along x
+        m.note_region(
+            gone,
+            DeclaredContact::of_crossing(
+                Point3::new(1e-4, 0.0, 0.0),
+                tol,
+                Vec3::X,
+                Some((4e-4, 0.0)),
+                1e-3,
+            ),
+        );
+        let query = Point3::new(4.5e-4, 0.0, 0.0);
+        assert_eq!(
+            m.find_proto_vertex_within(&k, query, tol, None).unwrap(),
+            Some(gone)
+        );
+        m.combine_proto_vertex(kept, gone).unwrap();
+        m.remove_proto_vertex(gone).unwrap();
+        m.delete_proto_vertex_object(gone);
+        // (no vertex definitions to average: the survivor keeps its own position)
+        m.proto_vertex_mut(kept).unwrap().set_position(Point3::ZERO);
+        assert_eq!(
+            m.find_proto_vertex_within(&k, query, tol, None).unwrap(),
+            Some(kept)
+        );
+        // a point the region does not reach stays apart
+        let off = Point3::new(4.5e-4, 1e-4, 0.0);
+        assert_eq!(
+            m.find_proto_vertex_within(&k, off, tol, None).unwrap(),
+            None
+        );
     }
 
     #[test]

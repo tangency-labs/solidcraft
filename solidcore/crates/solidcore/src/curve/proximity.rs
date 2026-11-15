@@ -310,10 +310,9 @@ impl Curve {
     /// stay in a cone of half angle `alpha` about an axis leaves its window no nearer `p`
     /// than its window's end times `cos alpha`; an end of the curve's own domain covers
     /// everything). `theta` is the angle between the two cones' axes (as lines) less both
-    /// half angles ([`Curve::tangent_cone`]). Returns the reach and how far `edge` strays
-    /// from its tangent line at `p` within it (the reach times the tangent of the edge's
-    /// half angle); `None` where no window proves a reach: the curves may run along each
-    /// other, or have no hull.
+    /// half angles ([`Curve::tangent_cone`]). Returns the reach; `None` where no window
+    /// proves one: the curves may run along each other, or have no hull. How far `edge`
+    /// strays from its tangent line within the reach is [`Curve::stray_from_line`].
     ///
     /// # Errors
     ///
@@ -326,7 +325,7 @@ impl Curve {
         s: f64,
         p: Vec3,
         tolerance: f64,
-    ) -> Result<Option<(f64, f64)>> {
+    ) -> Result<Option<f64>> {
         if !(tolerance > 0.0 && tolerance.is_finite() && t.is_finite() && s.is_finite()) {
             return Ok(None);
         }
@@ -374,15 +373,109 @@ impl Curve {
             if theta > 0.0 {
                 let reach = tolerance / theta.sin() * (1.0 + gamma(8));
                 if reach <= covered_c.min(*covered_e) {
-                    return Ok(Some((
-                        reach,
-                        reach * cone_e.half_angle.tan() * (1.0 + gamma(4)),
-                    )));
+                    return Ok(Some(reach));
                 }
             }
             width *= 4.0;
         }
         Ok(None)
+    }
+
+    /// How far this curve strays from the line through `p` along `along` (a tangent of the
+    /// curve at parameter `s`, `p` a point near the curve there), enclosed over the curve
+    /// from `s` out to `reach` from `p` either way. On each side of `s` a parameter window
+    /// is widened until it is sure to hold the curve out to `reach` from `p` (its far end
+    /// times the cosine of its cone, as [`Curve::crossing_reach`]) or ends at the end of
+    /// the domain. Every tangent over the window lies in its cone of half angle `alpha`
+    /// about the axis ([`Curve::tangent_cone`]), so every point `q` of the window lies in
+    /// that cone from the curve's point `c` at `s` (the window's end there, within the
+    /// cone's rounding), and `q - c` makes at most `phi`, the angle between the axis and
+    /// `along` as lines plus `alpha`, with the line. A point within `reach` of `p` is
+    /// within `reach + |c - p|` of `c`, so within `|c - p| + (reach + |c - p|) sin phi` of
+    /// the line. `None` where a window has no cone, none holds the reach, or `phi` reaches
+    /// a quarter turn: nothing is enclosed.
+    ///
+    /// # Errors
+    ///
+    /// The kernel's cancellation.
+    pub(crate) fn stray_from_line(
+        &self,
+        k: &Kernel,
+        s: f64,
+        along: Vec3,
+        p: Vec3,
+        reach: f64,
+    ) -> Result<Option<f64>> {
+        let finite = [s, reach, along.x, along.y, along.z, p.x, p.y, p.z]
+            .iter()
+            .all(|v| v.is_finite());
+        if !(finite && reach > 0.0 && along.length() > 0.0) {
+            return Ok(None);
+        }
+        let domain = self.natural_interval();
+        let Some(speed) = soft(self.evaluate(k, s, 1, true, false))?
+            .and_then(|d| d.get(1).map(|v| v.length()))
+            .filter(|v| v.is_finite() && *v > 0.0)
+        else {
+            return Ok(None);
+        };
+        let mut stray = 0.0_f64;
+        for upper in [false, true] {
+            let mut width = 1.25 * reach;
+            let mut held = None;
+            for _ in 0..CROSSING_WINDOWS {
+                k.check_cancelled(OP)?;
+                let h = width / speed;
+                let (lo, hi) = if upper {
+                    (s, (s + h).min(domain.max()))
+                } else {
+                    ((s - h).max(domain.min()), s)
+                };
+                if lo >= hi {
+                    if (upper && s >= domain.max()) || (!upper && s <= domain.min()) {
+                        // `s` is the domain's end on this side: no curve beyond it
+                        held = Some(None);
+                        break;
+                    }
+                    width *= 4.0;
+                    continue;
+                }
+                let Some(cone) = self.tangent_cone(lo, hi)? else {
+                    return Ok(None);
+                };
+                let (near, far, far_t, bound) = if upper {
+                    (cone.ends[0], cone.ends[1], hi, domain.max())
+                } else {
+                    (cone.ends[1], cone.ends[0], lo, domain.min())
+                };
+                let covered = if (far_t - bound).abs() > 0.0 {
+                    ((far - p).length() - cone.rounding) * cone.half_angle.cos() * (1.0 - gamma(8))
+                } else {
+                    f64::INFINITY
+                };
+                if covered >= reach {
+                    held = Some(Some((cone, near)));
+                    break;
+                }
+                width *= 4.0;
+            }
+            let Some(window) = held else {
+                return Ok(None);
+            };
+            let Some((cone, near)) = window else {
+                continue;
+            };
+            let between = angle(cone.axis, along);
+            let acute = between.min(std::f64::consts::PI - between);
+            let phi = (acute + cone.half_angle) * (1.0 + gamma(8)) + gamma(8);
+            if phi.is_nan() || phi >= 0.5 * std::f64::consts::PI {
+                return Ok(None);
+            }
+            let off = ((near - p).length() + cone.rounding) * (1.0 + gamma(4));
+            let side = (off + (reach + off) * phi.sin()) * (1.0 + gamma(4)) + gamma(4) * reach;
+            stray = stray.max(side);
+        }
+        Ok((!stray.is_nan()).then_some(stray))
     }
 
     /// Whether every point of this curve over `interval` is proved to lie within `radius`
@@ -640,10 +733,52 @@ mod tests {
             let t = at(&k, &line, p);
             line.crossing_reach(&k, t, &circle, s, p, 1e-5).unwrap()
         };
-        let (steep, stray) = reach(30.0).unwrap();
+        let steep = reach(30.0).unwrap();
         assert!((2e-5..2.001e-5).contains(&steep), "{steep}");
+        let stray = circle
+            .stray_from_line(&k, s, Vec3::new(1.0, 0.0, 0.0), p, steep)
+            .unwrap()
+            .unwrap();
         assert!(stray < 1e-9, "{stray}");
         assert_eq!(reach(0.16), None);
         assert_eq!(reach(0.0), None);
+    }
+
+    /// A unit circle strays from its tangent line at its top by `1 - cos a` at the angle
+    /// `a` from it: over a reach of 1e-3 the stray enclosed is at least the 5e-7 of the
+    /// circle's points there (the point at 5e-4 rad is 1.25e-7 off, which a stray of zero
+    /// left outside a region of radius 1e-8) and within a few times it; a line does not
+    /// stray at all, to its rounding; a reach of zero or NaN encloses nothing.
+    #[test]
+    fn a_curved_edge_s_stray_from_its_tangent_is_enclosed() {
+        let k = Kernel::default();
+        let circle = ellipse(&k, Point3::new(0.0, 0.0, 0.0), 1.0, 1.0);
+        let top = Point3::new(0.0, 1.0, 0.0);
+        let s = at(&k, &circle, top);
+        let reach = 1e-3;
+        let stray = circle
+            .stray_from_line(&k, s, Vec3::new(1.0, 0.0, 0.0), top, reach)
+            .unwrap()
+            .unwrap();
+        for a in [5e-4_f64, -5e-4, 0.999e-3, -0.999e-3] {
+            let off = 1.0 - a.cos();
+            assert!(stray >= off, "stray {stray:e} below {off:e} at {a}");
+        }
+        assert!(stray < 4.0 * (1.0 - 1e-3_f64.cos()), "{stray:e}");
+        let line = Curve::from(Line::from_points(top - Vec3::X, top + Vec3::X, 3));
+        let t = at(&k, &line, top);
+        let flat = line
+            .stray_from_line(&k, t, Vec3::new(1.0, 0.0, 0.0), top, reach)
+            .unwrap()
+            .unwrap();
+        assert!(flat < 1e-13, "{flat:e}");
+        for bad in [0.0, f64::NAN] {
+            assert_eq!(
+                circle
+                    .stray_from_line(&k, s, Vec3::new(1.0, 0.0, 0.0), top, bad)
+                    .unwrap(),
+                None
+            );
+        }
     }
 }

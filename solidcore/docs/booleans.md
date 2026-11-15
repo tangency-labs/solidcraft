@@ -287,9 +287,14 @@ axes less both half angles, and the window is widened until tolerance / sin θ l
 both windows cover. For two edges crossing, the two curves are the edges. Where no window proves a
 reach (a curve grazing or running along its edge: an arc of radius 2 crossing at 0.16° turns by
 more than that within its first-order reach of 3.6e-3) the region reaches as far as the capture
-distance looks. A point with no crossing angle has the ball of its tolerance. Two points
-are one when their regions are not proved apart (`DeclaredContact::overlaps`, the distance shrunk by
-its rounding), and each proto vertex keeps the regions of the points it holds. A wall/round curve
+distance looks. The segment runs along the edge's tangent and is widened by how far the edge
+strays from that line within the reach, enclosed by the tangent cone of a window on each side of
+the point (`Curve::stray_from_line`); an edge with no such enclosure gives the ball of the capture
+distance. A point with no crossing angle has the ball of its tolerance. Two points
+are one when their regions are not proved apart (`DeclaredContact::overlaps`: the gap between the
+two segments' projections onto the direction of their closest pair, less its rounding, which no
+pair of their points is closer than even where the near-parallel solve picks the wrong pair), and
+each proto vertex keeps the regions of the points it holds, also when it is combined into another. A wall/round curve
 along a slab's edge at 5° and a rod/round curve across it at 40° end 9.3e-5 apart at 1e-5: one
 point (1e-5 / sin 5° = 1.1e-4). The two crossings of the sphere's circles by the box edge, 1.5e-4
 apart, are crossed at sines of 0.26 and more: 3.9e-5 each, two points.
@@ -302,7 +307,10 @@ about the crossing line, bounded by an edge of either face lying within toleranc
 (the gap between two planes is linear across it, zero on the crossing): the crossing is fixed only
 to that strip, so at each end of it the crossing's end and the bounding edges' ends are one contact
 point, the segment across the strip widened by the tolerance within which the edges cover the
-crossing (`strip_contacts`, `coincident_strip.rs`; a half strip where only one edge bounds it). A
+crossing and by how far their ends lie off the edges' offsets (`strip_contacts`,
+`coincident_strip.rs`; a half strip where only one edge bounds it). The strip ends at the
+innermost edge on each side, each proved on the other face's plane by its hull; an edge farther
+out bounds nothing beside the crossing. A
 crossing inside a coincident pair (near-coincident strips, above) makes no curve and so declares
 nothing; the contacts are those of the crossings that stay, read from the edge-on-face curve
 intervals beside them with each curve bounded over its certified hull. To declare them before those

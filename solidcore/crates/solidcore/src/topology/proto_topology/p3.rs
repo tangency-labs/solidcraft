@@ -2119,10 +2119,11 @@ fn edge_direction<O: ClassObject>(
 /// over the sine of the angle between the two, the angle enclosed over the whole reach
 /// ([`Curve::crossing_reach`]): the region is that reach either way along the edge's
 /// tangent, widened by the tolerance and by how far the edge strays from its tangent
-/// within the reach. Where no reach is proved (the curves may run along each other within
-/// it, or have no hull) the region reaches `limit`, the capture distance: as far as proto
-/// vertices are looked for at all. Of several crossings the one known worst counts. Any
-/// other point has the ball of its tolerance.
+/// within the reach, enclosed ([`Curve::stray_from_line`]). Where no reach is proved (the
+/// curves may run along each other within it, or have no hull) or it is longer, the region
+/// reaches `limit`, the capture distance: as far as proto vertices are looked for at all;
+/// where the edge's stray is not enclosed either, it is the ball of `limit`. Of several
+/// crossings the one known worst counts. Any other point has the ball of its tolerance.
 #[allow(clippy::too_many_arguments)] // the point, what fixes it and how well
 fn crossing_region<O: ClassObject>(
     k: &Kernel,
@@ -2161,24 +2162,29 @@ fn crossing_region<O: ClassObject>(
             }
         }
     }
-    let mut worst: Option<(Vec3, Option<(f64, f64)>)> = None;
+    // (the edge's direction, the reach along it, the edge and its parameter)
+    let mut worst: Option<(Vec3, f64, &Curve, f64)> = None;
     for (curve, t, edge, s, pc) in crossings {
         let Some(along) = edge_direction(k, geometry, pc)? else {
             continue;
         };
-        let reach = curve.crossing_reach(k, t, edge, s, position, tolerance)?;
-        let farther = match (&worst, reach) {
-            (None, _) | (Some((_, Some(_))), None) => true,
-            (Some((_, Some((old, _)))), Some((new, _))) => new > *old,
-            (Some((_, None)), _) => false,
-        };
-        if farther {
-            worst = Some((along, reach));
+        let reach = curve
+            .crossing_reach(k, t, edge, s, position, tolerance)?
+            .map_or(limit, |reach| reach.min(limit));
+        if worst.is_none_or(|(_, old, _, _)| reach > old) {
+            worst = Some((along, reach, edge, s));
         }
     }
-    Ok(worst.map_or_else(
-        || DeclaredContact::of_point(position, tolerance),
-        |(along, reach)| DeclaredContact::of_crossing(position, tolerance, along, reach, limit),
+    let Some((along, reach, edge, s)) = worst else {
+        return Ok(DeclaredContact::of_point(position, tolerance));
+    };
+    let stray = edge.stray_from_line(k, s, along, position, reach)?;
+    Ok(DeclaredContact::of_crossing(
+        position,
+        tolerance,
+        along,
+        stray.map(|stray| (reach, stray)),
+        limit,
     ))
 }
 

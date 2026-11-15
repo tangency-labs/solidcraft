@@ -864,11 +864,15 @@ fn sphere_box_volume(c: [f64; 3], r: f64, o: [f64; 3], d: [f64; 3]) -> f64 {
 /// crossings 1.7e-4 apart. Taken for one point by the capture distance, the union came
 /// out empty and the intersection and the difference were refused ("no radial sector of
 /// the edge takes the new edge use"). As two vertices the three results integrate to the
-/// exact volumes (measured: within 1.3e-7 relative). The Level2 check is not asserted:
-/// it reports the circles' own STEP-to-NURB test at this size (`SmEllipse` test 1, 5e-10
-/// against 1e-10), on the operands' circles as on the results'.
+/// exact volumes (measured: within 1.3e-7 relative), with the faces, edges and vertices of
+/// the exact result, every vertex on the sphere or the box within its tolerance, and the
+/// box edge's two crossings, each on the sphere and on the edge's two faces, 1.7e-4 apart.
+/// The Level2 check is not asserted: it reports the circles' own STEP-to-NURB test at this
+/// size (`SmEllipse` test 1, 5e-10 against 1e-10), on the operands' circles as on the
+/// results'.
 #[test]
 fn a_tiny_sphere_and_a_box_whose_edge_crosses_it_twice_give_exact_volumes() {
+    use solidcore::topology::vertex;
     let c = [
         0.000_540_068_099_454_042_4,
         -0.000_116_855_468_417_464_12,
@@ -890,10 +894,27 @@ fn a_tiny_sphere_and_a_box_whose_edge_crosses_it_twice_give_exact_volumes() {
     let common = sphere_box_volume(c, r.abs(), o, d);
     assert!((common - 5.424_275_463e-11).abs() < 1e-19, "{common:e}");
     let mut failures = Vec::new();
-    for (op, name, want) in [
-        (Op::Union, "union", sphere + block - common),
-        (Op::Intersection, "intersection", common),
-        (Op::Difference, "difference", sphere - common),
+    // how far `p` is from the sphere, and on how many of the box's six planes it lies within
+    // `tol` (inside the box's slab on the others)
+    let from_sphere = |p: Point3| (p - Point3::new(c[0], c[1], c[2])).length() - r.abs();
+    let box_planes = |p: Point3, tol: f64| {
+        let q = [p.x, p.y, p.z];
+        let mut on = 0;
+        for i in 0..3 {
+            let (lo, hi) = (o[i], o[i] + d[i]);
+            if q[i] < lo - tol || q[i] > hi + tol {
+                return None;
+            }
+            on += usize::from((q[i] - lo).abs() <= tol) + usize::from((q[i] - hi).abs() <= tol);
+        }
+        Some(on)
+    };
+    for (op, name, want, want_counts) in [
+        // the exact result's: union the box's six faces and the sphere; intersection and
+        // difference the sphere's piece and the two box face pieces about the crossed edge
+        (Op::Union, "union", sphere + block - common, [7, 17, 12]),
+        (Op::Intersection, "intersection", common, [3, 5, 4]),
+        (Op::Difference, "difference", sphere - common, [3, 5, 4]),
     ] {
         let mut k = Kernel::default();
         let a = api::create_sphere(&mut k, Point3::new(c[0], c[1], c[2]), r).unwrap();
@@ -921,6 +942,47 @@ fn a_tiny_sphere_and_a_box_whose_edge_crosses_it_twice_give_exact_volumes() {
         // Written to accept: a NaN volume fails.
         if rel.is_nan() || rel > VOLUME_REL_TOL {
             failures.push(format!("{name}: volume {v:e} vs {want:e} (rel {rel:.2e})"));
+        }
+        let counts = [
+            solidcore::topology::brep::p1::faces(&brep, None)
+                .unwrap()
+                .len(),
+            solidcore::topology::brep::p1::edges(&brep, None)
+                .unwrap()
+                .len(),
+            solidcore::topology::brep::p1::vertices(&brep, None)
+                .unwrap()
+                .len(),
+        ];
+        if counts != want_counts {
+            failures.push(format!(
+                "{name}: faces/edges/vertices {counts:?} vs {want_counts:?}"
+            ));
+        }
+        // every vertex on the sphere or the box; the crossings on both, on two box faces
+        let mut crossings = Vec::new();
+        for v in solidcore::topology::brep::p1::vertices(&brep, None).unwrap() {
+            let (p, tol) = (
+                vertex::point(&brep, v).unwrap(),
+                vertex::tolerance(&brep, v).unwrap(),
+            );
+            let on_sphere = from_sphere(p).abs() <= tol;
+            let planes = box_planes(p, tol);
+            if !on_sphere && planes.is_none_or(|n| n == 0) {
+                failures.push(format!(
+                    "{name}: vertex {p:?} (tol {tol:e}) on neither body"
+                ));
+            }
+            if on_sphere && planes == Some(2) {
+                crossings.push(p);
+            }
+        }
+        let apart = match crossings.as_slice() {
+            [p, q] => (*p - *q).length(),
+            _ => f64::NAN,
+        };
+        if !(1.6e-4..1.8e-4).contains(&apart) {
+            failures.push(format!("{name}: crossings {crossings:?}"));
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
