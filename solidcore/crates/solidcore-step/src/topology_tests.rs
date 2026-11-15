@@ -2244,6 +2244,53 @@ fn a_projected_pcurve_past_the_quarter_line_a_face_form_ends_on_stays_in_the_fac
     solidcore_ops::record_check::agreement(b).unwrap();
 }
 
+/// A spline face's pcurve a little past its patch's knot range is put on the range when that
+/// moves the surface within its edge's tolerance, measured along the iso-line it runs on. The
+/// RailCore V6 hotend's face #1310 is a whole bicubic patch whose edge along its first v row, of
+/// tolerance 5.7e-4 mm, gets a closed-form pcurve from u = -4.1e-4 to 1.00097; its pole test
+/// refused the end past the range ("OffRangeBeyondReach"), and the face was left out. Here the
+/// row v = 0 is a straight line 0.3 mm long (the surface moves 0.3 mm per unit of u there), the
+/// row v = 1 three times as long: bounded over the whole patch the move would exceed the
+/// tolerance, along its own row it does not.
+#[test]
+fn a_pcurve_a_little_past_a_spline_patchs_knot_range_is_put_on_it() {
+    let bezier = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+    let points: Vec<Vec<V>> = (0..4)
+        .map(|i| {
+            let x = f64::from(i) / 3.0;
+            (0..4)
+                .map(|j| {
+                    let s = f64::from(j) / 3.0;
+                    // The row's length grows from 0.3 at v = 0 to 0.9 at v = 1; a bulge inside.
+                    let z = if (1..=2).contains(&i) && (1..=2).contains(&j) { 0.5 } else { 0.0 };
+                    [0.3 * (1.0 + 2.0 * s) * x, 10.0 * s, z]
+                })
+                .collect()
+        })
+        .collect();
+    let patch = BSurface::Spline { u_knots: bezier.clone(), v_knots: bezier, points };
+    let row = |a: f64, b: f64| Curve2::Spline { knots: vec![-1.0, -1.0, 0.0, 0.0], points: vec![[a, 0.0], [b, 0.0]] };
+    let (before, after) = (-4.1e-4, 1.0 + 9.7e-4);
+    let tolerance = 5.7e-4;
+    let mut pcs = vec![vec![row(after, before)]];
+    assert_eq!(onto_knots(&patch, &[vec![tolerance]], &mut pcs), 1);
+    assert_eq!(pcs[0][0], row(1.0, 0.0));
+    // The same ends with a tolerance under 0.3 x 9.7e-4 mm stay where they are.
+    let mut pcs = vec![vec![row(after, before)]];
+    assert_eq!(onto_knots(&patch, &[vec![2e-4]], &mut pcs), 0);
+    assert_eq!(pcs[0][0], row(after, before));
+    // Measured along its own row the move is 0.3 x 9.7e-4 mm, within the tolerance (bounded
+    // over the whole patch, where the row v = 1 moves 0.9 mm per unit of u, it would not be).
+    let (_, moved) = SurfaceEval::new(&patch).unwrap().pcurve_onto_knots(&row(after, before), tolerance).unwrap().unwrap();
+    assert!((0.3 * 9.7e-4..0.302 * 9.7e-4).contains(&moved), "{moved}");
+    // A pcurve whose row also leaves the range across, where the surface moves 10 mm per unit of
+    // v, is left as it is.
+    let off = Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[before, -1e-3], [0.5, -1e-3]] };
+    let mut pcs = vec![vec![off.clone()]];
+    assert_eq!(onto_knots(&patch, &[vec![tolerance]], &mut pcs), 0);
+    assert_eq!(pcs[0][0], off);
+}
+
 /// A closed spline edge whose end vertex sits a few µm off the curve's seam (its start and end
 /// point) projects a hair past the start: it is at the seam, and the edge runs to the curve's
 /// end, not refused as crossing the seam.
