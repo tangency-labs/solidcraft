@@ -1437,13 +1437,24 @@ fn plugin_execution_is_off_thread_even_with_agent_off_thread_disabled() {
 #[test]
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 fn a_plugin_result_is_discarded_after_design_or_selection_changes() {
-    for context in ["document", "selection", "plugin_limits"] {
+    for context in ["document", "selection", "plugin_limits", "plugin_grants"] {
         let (mut h, tx) = agent_harness();
         h.app.preferences.language = if context == "selection" { "ja" } else { "en" }.into();
         h.app.run("solid.box", json!({"length":1,"width":1,"height":1,"corner":[200,200,200]})).unwrap();
         h.app.run("edit.undo", json!({})).unwrap();
         assert!(!h.app.session.redo.is_empty());
         let root = plugin_package_for_worker_test(&format!("stale-{context}"));
+        if context == "plugin_grants" {
+            let manifest_path = root.join("sample/plugin.json");
+            let mut manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+            manifest["runtime"]["permissions"] = json!({"command_groups":["file"],"files":[{"name":"work","read":true,"write":false}]});
+            std::fs::write(manifest_path, manifest.to_string()).unwrap();
+            crate::prefs::set(
+                &mut h.app,
+                &json!({"plugin_grants":{"sample":{"command_groups":["file"],"folders":[{"name":"work","folder":root,"read":true,"write":false}]}}}),
+            )
+            .unwrap();
+        }
         let path = root.join("sample").to_string_lossy().into_owned();
         let inspected = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
         let (release, gate) = std::sync::mpsc::channel();
@@ -1456,6 +1467,9 @@ fn a_plugin_result_is_discarded_after_design_or_selection_changes() {
             h.app.run("solid.box", json!({"length":2,"width":2,"height":2,"corner":[100,100,100]})).unwrap();
         } else if context == "plugin_limits" {
             crate::prefs::set(&mut h.app, &json!({"plugin_max_memory_mib":512})).unwrap();
+        } else if context == "plugin_grants" {
+            crate::prefs::set(&mut h.app, &json!({"plugin_grants":{}})).unwrap();
+            assert!(!h.app.session.plugin_state.grants.contains_key("sample"));
         } else {
             let selection = vec![solidcraft_engine::Sel::Feature { id: feature_ids(&h)[0] }];
             if h.app.session.selection == selection {
@@ -1505,20 +1519,40 @@ fn cancelling_a_plugin_worker_answers_stopped_without_adopting_its_result() {
 #[test]
 fn plugin_commands_in_batches_and_scripts_are_refused_before_an_earlier_edit() {
     let mut h = Harness::new();
+    h.app.preferences.agent_off_thread = false;
+    let root = h.dir.join("plugin-management");
+    let package = root.join("sample");
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::write(package.join("plugin.json"), "invalid manifest: review must never read this").unwrap();
+    std::fs::write(package.join("keep.txt"), "removal must never reach this folder").unwrap();
+    h.app.session.plugin_state.plugins_dir = Some(root);
+    h.app.preferences.plugin_grants.insert("sample".into(), solidcraft_engine::plugin::Grants::default());
+    let grants = h.app.preferences.plugin_grants.clone();
     let before = h.app.session.doc.to_json();
-    for command in ["plugin.run", "PLUGIN.RUN"] {
+    for command in ["plugin.run", "PLUGIN.RUN", "plugin.install", "PLUGIN.INSTALL", "plugin.remove", "PLUGIN.REMOVE"] {
         for method in ["engine.batch", "engine.script"] {
+            let params = if command.eq_ignore_ascii_case("plugin.install") {
+                json!({"path":package})
+            } else if command.eq_ignore_ascii_case("plugin.remove") {
+                json!({"id":"sample"})
+            } else {
+                json!({})
+            };
             let reply = h.call(
                 method,
                 json!({"commands":[
                     {"command":"solid.box","params":{"length":2,"width":3,"height":4}},
-                    {"command":command,"params":{}}
+                    {"command":command,"params":params}
                 ]}),
             );
+            let key = if command.eq_ignore_ascii_case("plugin.run") { "ui.plugin_standalone" } else { "ui.plugin_management_standalone" };
             assert_eq!(reply["ok"], false, "{method}: {reply}");
-            assert_eq!(reply["error"], h.app.tr("ui.plugin_standalone"), "{method}: {reply}");
+            assert_eq!(reply["error"], h.app.tr(key), "{method}: {reply}");
             assert_eq!(h.app.session.doc.to_json(), before, "{method}: {command}");
             assert!(h.app.session.undo.is_empty());
+            assert_eq!(std::fs::read_to_string(package.join("keep.txt")).unwrap(), "removal must never reach this folder");
+            assert_eq!(h.app.preferences.plugin_grants, grants, "refused management commands never revoke stored grants");
+            assert!(!crate::plugins::busy(&h.app), "refused batches start no package I/O worker");
         }
     }
 }
