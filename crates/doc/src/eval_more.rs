@@ -1187,15 +1187,15 @@ pub(super) fn sheet_eval(
                 Some("side2") => rule.thickness,
                 Some(_) => return Err(DocError::Invalid("contour flange orientation must be center, side1 or side2".into())),
             };
-            // `reverse` mirrors the sketch (older designs); with an orientation saved it is not used.
-            let legacy_reverse = *reverse && orientation.is_none();
-            let plane = if legacy_reverse { Plane { origin: ss.plane.origin, x: ss.plane.x, y: ss.plane.y * -1.0 } } else { ss.plane };
-            let segs: Vec<Seg2> = if legacy_reverse { segs.iter().map(mirrored_y).collect() } else { segs };
+            // `reverse` (Other side) mirrors the sketch, taking the width to the other side of
+            // its plane, with an orientation saved or not.
+            let plane = if *reverse { Plane { origin: ss.plane.origin, x: ss.plane.x, y: ss.plane.y * -1.0 } } else { ss.plane };
+            let segs: Vec<Seg2> = if *reverse { segs.iter().map(mirrored_y).collect() } else { segs };
             // Mirroring the sketch swaps the material side too. A sheet made from surfaces (#6748):
             // each piece pushed out along the normal is a panel of it.
             let name = new_name(st, f, 0);
             let (sheet, solid) =
-                crate::SurfaceSheet::contour(&name, &r.name, &rule, &plane, &segs, w, depth, *symmetric, *flip != legacy_reverse, f.id, &drawn)?;
+                crate::SurfaceSheet::contour(&name, &r.name, &rule, &plane, &segs, w, depth, *symmetric, *flip != *reverse, f.id, &drawn)?;
             st.bodies.push(new_sheet_body(name, &sheet, solid, f.id));
             st.surface_sheets.push(sheet);
             Ok(())
