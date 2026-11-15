@@ -1053,7 +1053,7 @@ preference_settings! {
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     nav: String = "fusion".into(), PAGE_NAVIGATION;
     /// Touchscreen drags orbit/pan; off preserves the mouse mapping's selection behavior.
-    touchscreen_navigation: bool = true, PAGE_NAVIGATION => check_tr("nav.touchscreen.label");
+    touchscreen_navigation: bool = false, PAGE_NAVIGATION => check_tr("nav.touchscreen.label");
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
     /// Independent of mouse bindings; false also preserves existing saved presets' behavior.
     free_orbit: bool = false, PAGE_NAVIGATION;

@@ -798,7 +798,8 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     // The 3D mouse's motion this frame, with what this page's camera may do.
     device(app, rect, caps);
 
-    let touch_enabled = app.preferences.touchscreen_navigation && app.tool.is_none() && app.dialog.is_none() && app.viewport.context_menu.is_none();
+    // Pencil mode assigns finger gestures to navigation even when the separate preference is off.
+    let touch_enabled = (app.preferences.touchscreen_navigation || app.preferences.pencil_mode) && app.tool.is_none() && app.dialog.is_none() && app.viewport.context_menu.is_none();
     let had_touch = app.viewport.touch.owned;
     let touch = app.viewport.touch.frame(ui, resp.rect, &[axes, readout.unwrap_or(Rect::NOTHING)], inside, touch_enabled, caps.orbit);
 
@@ -4189,20 +4190,21 @@ mod tests {
     }
 
     #[test]
-    fn touchscreen_preference_defaults_on_and_survives_roundtrip() {
+    fn touchscreen_preference_defaults_off_and_survives_roundtrip() {
         use serde_json::json;
         let prefs: crate::prefs::Prefs = serde_json::from_value(json!({})).unwrap();
-        assert!(prefs.touchscreen_navigation);
+        assert!(!prefs.touchscreen_navigation);
+        assert!(!prefs.pencil_mode);
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
-        crate::prefs::control(&mut app, &json!({"open":"Navigation", "touchscreen_navigation":false})).unwrap();
+        crate::prefs::control(&mut app, &json!({"open":"Navigation", "touchscreen_navigation":true})).unwrap();
         crate::prefs::control(&mut app, &json!({"button":"apply"})).unwrap();
         let mut other = crate::SolveApp::new(Default::default(), Default::default());
         other.load_prefs(&app.prefs());
-        assert!(!other.preferences.touchscreen_navigation);
+        assert!(other.preferences.touchscreen_navigation);
         crate::prefs::control(&mut app, &json!({"open":"Navigation", "button":"defaults"})).unwrap();
-        assert!(app.preferences.touchscreen_navigation);
-        crate::prefs::control(&mut app, &json!({"button":"cancel"})).unwrap();
         assert!(!app.preferences.touchscreen_navigation);
+        crate::prefs::control(&mut app, &json!({"button":"cancel"})).unwrap();
+        assert!(app.preferences.touchscreen_navigation);
     }
 
     #[test]
