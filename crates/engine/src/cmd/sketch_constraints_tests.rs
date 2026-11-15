@@ -1957,12 +1957,12 @@ fn negative_distance_dimension_flips_to_the_opposite_side() {
     run(&mut s, "parameters.add", json!({"name": "w", "expression": "10 mm"}));
     run(&mut s, "sketch.point", json!({"point": [15, 0]}));
     let d = run(&mut s, "sketch.dimension", json!({"entities": ["origin", "p1"], "type": "horizontal", "value": "-w"}));
-    assert_eq!(d["expression"], "-(w)");
+    assert_eq!(d["expression"], "-(-w)");
     assert!((sketch(&s).points[1].pos.x + 10.0).abs() < 1e-6);
 
     // Intrinsic sizes (line length, circle radius) still refuse negative values.
     let mut s = sketch_with_len();
     assert!(s.execute("sketch.dimension", &json!({"entities": ["la"], "value": -10})).is_err());
-    run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 5}));
-    assert!(s.execute("sketch.dimension", &json!({"entities": ["c1"], "value": -5})).is_err());
+    let c = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}))["curves"])[0].clone();
+    assert!(s.execute("sketch.dimension", &json!({"entities": [c], "value": -5})).is_err());
 }
