@@ -533,6 +533,23 @@ pub fn not_drawable_apart(view: &ResolvedView) -> Option<&'static str> {
     }
 }
 
+/// Why flat pattern view `view` can't be drawn, if it can't: it draws one body's flat, so it is never
+/// exploded or posed, and a configuration of its own needs that configuration's flat, not read yet.
+/// Nothing for a view of the model.
+pub fn not_drawable_flat(view: &ResolvedView) -> Option<&'static str> {
+    if view.flat.is_none() {
+        None
+    } else if view.exploded.value != Exploded::Assembled {
+        Some("a flat pattern view is never exploded: it draws one body's flat")
+    } else if view.pose.value != Pose::Designed {
+        Some("a flat pattern view has no position: it draws one body's flat")
+    } else if view.configuration.value != ViewConfiguration::Active {
+        Some("not supported yet: a flat pattern view of a configuration of its own")
+    } else {
+        None
+    }
+}
+
 /// What saved view `view` shows of `shown`, with its extents on its plane, or why there's nothing to
 /// measure: the one rule its boundary, its fitted scale and its lines are worked out by.
 pub fn measured<'a>(

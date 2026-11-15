@@ -692,6 +692,9 @@ fn draw_flat(s: &Session, id: u64, view: &ResolvedView, of: &FlatOf) -> Drawn {
     let placing = crate::drawing_view::flat_measured(&flat);
     let boundary = crate::drawing_view::placed(view, placing, Vec2::ZERO, CMD).ok().map(|placed| placed.boundary);
     let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: None };
+    if let Some(why) = crate::drawing_view::not_drawable_flat(view) {
+        return none(Status::Failed(why.into()));
+    }
     let flat = match flat {
         Ok(flat) => flat,
         Err(e) => return none(Status::Failed(reason(e))),

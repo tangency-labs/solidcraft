@@ -3558,6 +3558,47 @@ fn a_round_hole_is_one_circle_on_a_flat_view() {
     assert_eq!(solid.iter().copied().filter(circle).count(), 1, "{solid:?}");
 }
 
+/// A flat pattern view draws one body's flat, so it is never exploded or posed, and it doesn't draw a
+/// configuration of its own yet. Edit refuses each and changes nothing. In a drawing saved so by hand,
+/// the edit rule refuses it too, and the sheet draws no lines for the view and says why.
+#[test]
+fn a_flat_pattern_view_is_never_exploded_posed_or_configured() {
+    let mut s = sheet_plate();
+    with_drawing_closed(&mut s, |s| {
+        run(s, "parameters.add", json!({"name": "W", "expression": "60 mm"}));
+        run(s, "config.configure", json!({"params": ["W"]}));
+        run(s, "config.row", json!({"name": "Wide", "values": {"W": "80 mm"}}));
+    });
+    let (id, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1"}));
+    let configured = "not supported yet: a flat pattern view of a configuration of its own";
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    let e = edit_refused(&mut s, id, json!({"configuration": "Wide"}));
+    assert!(e.contains(configured), "{e}");
+    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record.clone(), steps));
+    let cases: [(fn(&mut solidcraft_doc::drawing_view::ViewOverrides), &str); 3] = [
+        (|o| o.exploded = Some(Exploded::View(1)), "a flat pattern view is never exploded: it draws one body's flat"),
+        (|o| o.pose = Some(Pose::Study(StudyStep { id: 1, step: 0 })), "a flat pattern view has no position: it draws one body's flat"),
+        (|o| o.configuration = Some(ViewConfiguration::Row(1)), configured),
+    ];
+    for (set, why) in cases {
+        s.edit_drawing(EDIT, |d| {
+            let at = d.views.iter().position(|v| v.id == id).unwrap();
+            set(&mut Arc::make_mut(&mut d.views[at]).settings);
+            Ok(())
+        })
+        .unwrap();
+        let e = check_apart(s.drawing(EDIT).unwrap(), std::iter::once(id), EDIT).unwrap_err().to_string();
+        assert!(e.contains(why), "{e}");
+        let (strokes, status) = flat_strokes(&s, id);
+        assert_eq!((strokes.len(), status), (0, crate::drawing_scene::Status::Failed(why.into())));
+        s.edit_drawing(EDIT, |d| {
+            *d = Drawing::clone(&record);
+            Ok(())
+        })
+        .unwrap();
+    }
+}
+
 /// A bend up is ISO 128's long dash and dot (type 04), a bend down its long dash and two dots (type
 /// 05): dashes 20 widths of the narrow line, gaps 3, dots 1, in every line group. In the 0.35 mm group
 /// a bend up is 3.6, 0.54, 0.18, 0.54 mm. Each, narrow, is a stroke the scene takes across an A0 sheet.

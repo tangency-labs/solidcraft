@@ -956,11 +956,14 @@ fn pose_result(s: &Session, sessions: &mut ViewSessions, view: &ResolvedView, ow
     PoseResult { setting, drawn: Some(drawn), skipped: Some(skipped), study }
 }
 
-/// Refuses a drawing in which one of `views` draws its parts apart in a way it can't draw yet
-/// ([`crate::drawing_view::not_drawable_apart`]).
+/// Refuses a drawing in which one of `views` draws its parts apart in a way it can't draw: a flat
+/// pattern view exploded, posed or configured ([`crate::drawing_view::not_drawable_flat`]), or a
+/// shaded view drawn apart ([`crate::drawing_view::not_drawable_apart`]).
 fn check_apart(d: &Drawing, views: impl Iterator<Item = u64>, cmd: &str) -> Result<()> {
     for view in views {
-        if let Some(why) = d.resolve_view(view).ok().as_ref().and_then(crate::drawing_view::not_drawable_apart) {
+        let Ok(resolved) = d.resolve_view(view) else { continue };
+        let why = crate::drawing_view::not_drawable_flat(&resolved).or_else(|| crate::drawing_view::not_drawable_apart(&resolved));
+        if let Some(why) = why {
             return Err(bad(cmd, why));
         }
     }
