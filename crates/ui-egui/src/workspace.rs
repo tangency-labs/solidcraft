@@ -1080,6 +1080,10 @@ mod tests {
         }
     }
 
+    fn drawing_inspector_visible(h: &crate::scenario::Harness) -> bool {
+        h.app.universal_panel_frame().is_some_and(|frame| frame.layout.sections.iter().any(|section| section.instance.0 == "drawing-inspector"))
+    }
+
     #[test]
     fn drawing_uses_the_ribbon_without_changing_the_source_design() {
         let mut h = crate::scenario::Harness::new();
@@ -1095,10 +1099,10 @@ mod tests {
         }
         h.step(&json!({"click":{"handle":"button:drawing.view.base.planned"}})).unwrap();
         h.frames(3);
-        assert!(crate::scenario::rect_of("drawing:settings").is_some(), "known options open from the shared ribbon");
-        assert!(h.widget("Apply (not implemented)").is_some());
+        assert!(drawing_inspector_visible(&h), "known options open from the shared ribbon");
+        assert!(h.widget("Finish").is_some());
         assert!(h.app.run("drawing.view.base.planned", json!({})).is_err(), "the preview never enables engine execution");
-        h.step(&json!({"click":{"handle":"drawing:settings:close"}})).unwrap();
+        h.step(&json!({"key":"Escape"})).unwrap();
         h.step(&json!({"click":{"handle":"tab:DRAWING PARTS"}})).unwrap();
         h.step(&json!({"click":{"handle":"button:assembly.bom"}})).unwrap();
         h.frames(2);
@@ -1115,7 +1119,10 @@ mod tests {
     #[test]
     fn drawing_search_and_panels_work_from_the_keyboard() {
         let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
         h.call("ui.workspace", json!({"workspace":"drawing"}));
+        h.app.run("drawing.create", json!({})).unwrap();
+        h.app.run("drawing.sheet.add", json!({"name":"Second sheet"})).unwrap();
         h.frames(3);
         let before = h.app.session.doc.clone();
         let revision = h.app.session.revision;
@@ -1125,16 +1132,16 @@ mod tests {
         h.step(&json!({"key":"Enter"})).unwrap();
         h.frames(2);
         assert!(!h.app.ui.palette_open);
-        assert!(crate::scenario::rect_of("drawing:settings").is_some(), "search opens known options");
+        assert!(drawing_inspector_visible(&h), "search opens known options");
         h.step(&json!({"key":"Escape"})).unwrap();
         h.frames(2);
-        assert!(crate::scenario::rect_of("drawing:settings").is_none(), "Escape closes options");
+        assert!(!drawing_inspector_visible(&h), "Escape closes options");
         h.step(&json!({"click":{"handle":"drawing:sheets:settings"}})).unwrap();
         h.frames(2);
-        assert!(crate::scenario::rect_of("drawing:settings").is_some());
+        assert!(drawing_inspector_visible(&h));
         h.step(&json!({"key":"Escape"})).unwrap();
         h.frames(2);
-        assert!(crate::scenario::rect_of("drawing:settings").is_none(), "Escape closes Sheet Settings");
+        assert!(!drawing_inspector_visible(&h), "Escape closes Sheet Settings");
         assert_eq!(h.app.session.doc, before);
         assert_eq!(h.app.session.revision, revision);
     }

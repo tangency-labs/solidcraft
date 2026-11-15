@@ -11,11 +11,17 @@ use crate::SolveApp;
 use crate::ui_kit::{self, Container, Edge, Surface};
 use solidcraft_theme::Tokens;
 
+mod panels;
+
+use panels::Tool;
+
 #[derive(Default)]
 pub struct State {
     previous_tab: Option<String>,
+    sheets_override: Option<((u64, u64), bool)>,
     pub settings_open: bool,
-    options: Option<&'static str>,
+    options: Option<Tool>,
+    add_sheet: Option<panels::AddSheet>,
     strip: Option<Rect>,
     strip_sizes: [Option<egui::Vec2>; 2],
     settings: Option<Rect>,
@@ -39,6 +45,7 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
     } else if active(app) {
         app.ui.tab = app.drawing_workspace.previous_tab.take().unwrap_or_else(|| "MODEL".into());
         app.drawing_workspace.options = None;
+        app.drawing_workspace.add_sheet = None;
         app.drawing_workspace.strip = None;
         app.drawing_workspace.settings = None;
     }
@@ -55,36 +62,46 @@ pub fn reset_document(app: &mut SolveApp) {
 }
 
 pub fn can_open_options(id: &str) -> bool {
-    matches!(id, "drawing.view.base.planned" | "drawing.view.projected.planned" | "drawing.dimension" | "drawing.note")
+    Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set")
 }
 
 /// Dismiss the current Drawing inspector without touching source or drawing data.
 pub fn close_panel(app: &mut SolveApp) -> bool {
-    let open = app.drawing_workspace.settings_open || app.drawing_workspace.options.is_some();
+    let open = app.drawing_workspace.settings_open || app.drawing_workspace.options.is_some() || app.drawing_workspace.add_sheet.is_some();
     app.drawing_workspace.settings_open = false;
     app.drawing_workspace.options = None;
+    app.drawing_workspace.add_sheet = None;
     app.drawing_workspace.settings = None;
     open
 }
 
-/// Toolbar clicks may inspect known options. This never executes a missing CAD command.
+/// Toolbar clicks inspect options. Engine execution still uses command parameters directly.
 pub fn start(app: &mut SolveApp, id: &str) -> bool {
     if !active(app) || !can_open_options(id) {
         return false;
     }
-    app.drawing_workspace.options = match id {
-        "drawing.view.base.planned" => Some("Base View"),
-        "drawing.view.projected.planned" => Some("Projected View"),
-        "drawing.dimension" => Some("Dimension"),
-        "drawing.note" => Some("Note"),
-        _ => None,
-    };
-    app.drawing_workspace.settings_open = false;
+    close_panel(app);
+    match id {
+        "drawing.sheet.add" => open_add_sheet(app),
+        "drawing.sheet.set" => app.drawing_workspace.settings_open = true,
+        _ => app.drawing_workspace.options = Tool::for_command(id),
+    }
     true
 }
 
+pub(super) fn edit_object(app: &mut SolveApp, kind: &str, object: u64) {
+    let tool = match kind {
+        "view" => Tool::Edit(Some(object)),
+        "dimension" => Tool::Dimension(Some(object)),
+        "parts_list" => Tool::PartsList(Some(object)),
+        _ => return,
+    };
+    close_panel(app);
+    app.drawing_workspace.options = Some(tool);
+}
+
 pub(crate) fn covered_rects(app: &SolveApp) -> Vec<Rect> {
-    if !active(app) {
+    if !active(app) || app.preferences.drawing_sheets_visibility != "legacy" {
         return Vec::new();
     }
     [app.drawing_workspace.strip, app.drawing_workspace.settings].into_iter().flatten().collect()
@@ -98,21 +115,15 @@ fn panel_width(app: &SolveApp) -> f32 {
     if app.preferences.drawing_panel_width.is_finite() { app.preferences.drawing_panel_width.clamp(240.0, 560.0) } else { 320.0 }
 }
 
-pub(crate) fn left_inset(app: &SolveApp) -> f32 {
-    if active(app)
-        && Container::for_layout(app.ui.layout, Surface::Panel).floating()
-        && (app.drawing_workspace.settings_open || app.drawing_workspace.options.is_some())
-        && app.preferences.drawing_panel_side == "left"
-    {
-        panel_width(app) + crate::ui_kit::SHELL_GAP
-    } else {
-        0.0
-    }
-}
-
 /// Reuse Browser's existing content-hugging host and resize seam, with Drawing contents.
 pub(crate) fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
-    if let Ok(drawing) = app.session.drawing("drawing.inspect") {
+    let top = ui.next_widget_position().y;
+    let body = egui::ScrollArea::vertical().id_salt("drawing_browser").min_scrolled_height(0.0).show(ui, |ui| browser_rows(app, ui));
+    crate::panel_runtime::report_content_extent(ui, top, body.content_size.y, false);
+}
+
+fn browser_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if let Ok(drawing) = app.session.drawing("drawing.inspect").cloned() {
         for sheet in &drawing.sheets {
             let id = ui.make_persistent_id(("drawing_browser_sheet", app.session.uid, drawing.id, sheet.id));
             let mut open = ui.ctx().data(|data| data.get_temp::<bool>(id)).unwrap_or(true);
@@ -136,7 +147,24 @@ pub(crate) fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
                     for (index, object) in ids.into_iter().enumerate() {
                         let key = format!("ui.drawing_browser_{kind}");
                         let label = solidcraft_ui_text::format(&key, &[("number", &(index + 1).to_string())]);
-                        ui_kit::tree_row(ui, id.with((kind, object)), &ui_kit::Row { depth: 1, label: &label, name: true, ..Default::default() });
+                        let row =
+                            ui_kit::tree_row(ui, id.with((kind, object)), &ui_kit::Row { depth: 1, label: &label, name: true, ..Default::default() });
+                        if row.double {
+                            let editor = if kind == "table"
+                                && drawing
+                                    .tables
+                                    .by_id(object)
+                                    .is_some_and(|table| matches!(table.kind, solidcraft_engine::doc::drawing::table::Kind::PartsList(_)))
+                            {
+                                "parts_list"
+                            } else {
+                                kind
+                            };
+                            if matches!(editor, "view" | "dimension" | "parts_list") {
+                                select_sheet(app, sheet.id);
+                                edit_object(app, editor, object);
+                            }
+                        }
                     }
                 }
             }
@@ -194,27 +222,24 @@ pub(crate) fn sheets_visibility_choice(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::scenario::publish_target("prefs:drawing_sheets_visibility", response.rect);
     if selected != current
         && let Some((key, _)) = SHEETS_VISIBILITY.get(selected)
+        && app.preferences.drawing_sheets_visibility != *key
     {
+        app.drawing_workspace.sheets_override = None;
         app.preferences.drawing_sheets_visibility = (*key).into();
     }
 }
 
-fn add_sheet(app: &mut SolveApp) {
-    let result = app.run("drawing.sheet.add", serde_json::json!({}));
-    match result {
-        Ok(result) => {
-            if let Some(sheet) = result.get("sheet").and_then(serde_json::Value::as_str).and_then(solidcraft_engine::doc::ids::decode) {
-                select_sheet(app, sheet);
-            }
-        }
-        Err(error) => app.set_status(error, true),
+fn open_add_sheet(app: &mut SolveApp) {
+    if let Some(form) = panels::AddSheet::open(app) {
+        close_panel(app);
+        app.drawing_workspace.add_sheet = Some(form);
     }
 }
 
 fn sheet_settings_actions(app: &mut SolveApp, ui: &mut egui::Ui) {
     let Some(active) = active_sheet(app) else { return };
     let Ok(drawing) = app.session.drawing("drawing.inspect").cloned() else { return };
-    if drawing.sheets.len() > 1 && app.preferences.drawing_sheets_visibility == "off" {
+    if drawing.sheets.len() > 1 && !sheets_visible(app) && app.preferences.drawing_sheets_visibility != "legacy" {
         let active_name = drawing.sheets.iter().find(|sheet| sheet.id == active).map_or("", |sheet| sheet.name.as_str());
         let label = app.tr("ui.drawing_sheets.active").to_string();
         ui_kit::row(ui, &label, |ui| {
@@ -228,49 +253,69 @@ fn sheet_settings_actions(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
     }
     if ui_kit::button(ui, app.tr("ui.drawing_sheets.add"), ui_kit::Button::Normal).clicked() {
-        add_sheet(app);
+        open_add_sheet(app);
     }
 }
 
 fn toggle_sheet_settings(app: &mut SolveApp) {
-    app.drawing_workspace.settings_open = !app.drawing_workspace.settings_open;
-    app.drawing_workspace.options = None;
+    let open = !app.drawing_workspace.settings_open;
+    close_panel(app);
+    app.drawing_workspace.settings_open = open;
 }
 
-/// Draw the chooser in the shared Browser host, above the Browser title and tree.
-pub(crate) fn sheets_section(app: &mut SolveApp, ui: &mut egui::Ui) {
+pub(crate) fn sheets_visible(app: &SolveApp) -> bool {
     if !active(app) || app.preferences.drawing_sheets_visibility == "legacy" {
-        return;
+        return false;
     }
+    let Ok(drawing) = app.session.drawing("drawing.inspect") else { return false };
+    if app.preferences.drawing_sheets_visibility == "off" {
+        return false;
+    }
+    app.drawing_workspace
+        .sheets_override
+        .filter(|(id, _)| *id == (app.session.uid, drawing.id))
+        .map_or_else(|| app.preferences.drawing_sheets_visibility == "always" || drawing.sheets.len() > 1, |(_, open)| open)
+}
+
+pub(crate) fn set_sheets_visible(app: &mut SolveApp, open: bool) {
+    if active(app)
+        && let Ok(drawing) = app.session.drawing("drawing.inspect")
+        && sheets_visible(app) != open
+    {
+        app.drawing_workspace.sheets_override = Some(((app.session.uid, drawing.id), open));
+    }
+}
+
+pub(crate) fn sheet_settings_entry(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if active(app)
+        && app.session.drawing("drawing.inspect").is_ok()
+        && !sheets_visible(app)
+        && app.preferences.drawing_sheets_visibility != "legacy"
+        && ui_kit::button(ui, solidcraft_ui_text::tr_label("Sheet Settings"), ui_kit::Button::Small).clicked()
+    {
+        toggle_sheet_settings(app);
+    }
+}
+
+pub(crate) fn sheets_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let Ok(drawing) = app.session.drawing("drawing.inspect").cloned() else { return };
-    let show = match app.preferences.drawing_sheets_visibility.as_str() {
-        "always" => true,
-        "off" => false,
-        _ => drawing.sheets.len() > 1,
-    };
     let settings_label = app.tr_label("Sheet Settings").to_string();
-    if !show {
-        if ui_kit::button(ui, &settings_label, ui_kit::Button::Small).clicked() {
-            toggle_sheet_settings(app);
-        }
-        return;
-    }
-    let title = app.tr("ui.drawing_sheets.title").to_string();
     let add_label = app.tr("ui.drawing_sheets.add").to_string();
     let id = ("drawing_sheets", app.session.uid, drawing.id);
     let t = Tokens::get();
     let selected = active_sheet(app);
-    ui_kit::section(ui, id, &title, true, |ui| {
+    ui.scope(|ui| {
         ui.horizontal(|ui| {
             if icon_action(ui, "drawing:sheets:add", "plus", &add_label, true).clicked() {
-                add_sheet(app);
+                open_add_sheet(app);
             }
             if icon_action(ui, "drawing:sheets:settings", "settings", &settings_label, true).clicked() {
                 toggle_sheet_settings(app);
             }
         });
         let width = (ui.available_width() - t.space_8).max(0.0) * 0.5;
-        egui::ScrollArea::vertical().id_salt(id).max_height(t.space_24 * 9.0).show(ui, |ui| {
+        let top = ui.next_widget_position().y;
+        let body = egui::ScrollArea::vertical().id_salt(id).min_scrolled_height(0.0).max_height(t.space_24 * 9.0).show(ui, |ui| {
             for pair in drawing.sheets.chunks(2) {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = t.space_8;
@@ -298,6 +343,7 @@ pub(crate) fn sheets_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             }
         });
+        crate::panel_runtime::report_content_extent(ui, top, body.content_size.y.min(t.space_24 * 9.0), false);
     });
 }
 
@@ -440,17 +486,19 @@ fn icon_action(ui: &mut egui::Ui, id: &str, icon: &str, label: &str, enabled: bo
 }
 
 /// Draw after Browser, so the strip can hug its measured right or bottom edge.
-pub fn chrome(app: &mut SolveApp, ui: &mut egui::Ui) {
+pub fn chrome(app: &mut SolveApp, ui: &mut egui::Ui, domain: Rect) {
     app.drawing_workspace.strip = None;
     if !active(app) || app.preferences.drawing_sheets_visibility != "legacy" {
         return;
     }
-    let mut available = crate::agent_chat::tool_space(app, ui.available_rect_before_wrap());
-    if Container::for_layout(app.ui.layout, Surface::Panel).floating()
-        && app.preferences.drawing_panel_side != "left"
-        && let Some(settings) = settings_rect(app)
-    {
-        available.max.x = available.right().min(settings.left() - Tokens::get().space_8).max(available.left());
+    let mut available = crate::agent_chat::tool_space(app, domain);
+    if let Some(settings) = settings_rect(app) {
+        let gap = Tokens::get().space_8;
+        if app.preferences.drawing_panel_side == "left" {
+            available.min.x = available.left().max(settings.right() + gap).min(available.right());
+        } else {
+            available.max.x = available.right().min(settings.left() - gap).max(available.left());
+        }
     }
     if let Some(bottom) = app.shell.cards.iter().map(Rect::bottom).max_by(f32::total_cmp) {
         available.min.y = available.min.y.max(bottom + Tokens::get().space_8);
@@ -475,8 +523,7 @@ pub fn chrome(app: &mut SolveApp, ui: &mut egui::Ui) {
                     dock_menu(app, ui);
                 });
                 if icon_action(ui, "drawing:sheets:settings", "settings", "Sheet Settings", true).clicked() {
-                    app.drawing_workspace.settings_open = !app.drawing_workspace.settings_open;
-                    app.drawing_workspace.options = None;
+                    toggle_sheet_settings(app);
                 }
             };
             if destination == "under_browser" {
@@ -501,6 +548,14 @@ pub fn chrome(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::scenario::publish_rect("drawing:sheets", card.response.rect);
 }
 
+pub(crate) fn show_add_sheet(app: &mut SolveApp, ctx: &egui::Context) {
+    if active(app)
+        && let Some(form) = app.drawing_workspace.add_sheet.take()
+    {
+        app.drawing_workspace.add_sheet = panels::add_window(app, ctx, form);
+    }
+}
+
 pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.drawing_workspace.settings = None;
     if !active(app) || (!app.drawing_workspace.settings_open && app.drawing_workspace.options.is_none()) {
@@ -521,7 +576,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
         .frame(container.edge_frame(Tokens::get().dialog_body).inner_margin(10))
         .show(ui, |ui| {
             ui_kit::scope(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| panel_body(app, ui));
+                panel_body(app, ui);
             });
         });
     app.drawing_workspace.settings = Some(r.response.rect);
@@ -549,21 +604,13 @@ fn floating_panel(app: &mut SolveApp, ui: &mut egui::Ui, left: bool, width: f32)
     let frame = ui_kit::Panel::feature_frame(&ctx, app.ui.layout, side);
     let inner = (bounds.size() - frame.total_margin().sum()).max(egui::Vec2::ZERO);
     let anchor = if left { bounds.left_top() } else { bounds.right_top() };
-    let panel = ui_kit::Panel::new(
-        solidcraft_ui_text::tr_label("Sheet Settings"),
-        egui::Id::unique("sc_drawing_settings_floating"),
-        anchor,
-        available,
-        side,
-        frame,
-    )
-    .width(width);
+    let panel = ui_kit::Panel::new(panel_title(app), egui::Id::unique("sc_drawing_settings_floating"), anchor, available, side, frame).width(width);
     if let Some(card) = panel.window(&ctx).fixed_size(inner).show(&ctx, |ui| {
         ui.set_min_size(inner);
         ui.set_max_size(inner);
         ui.set_clip_rect(ui.clip_rect().intersect(Rect::from_min_size(ui.max_rect().min, inner)));
         ui_kit::scope(ui, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| panel_body(app, ui));
+            panel_body(app, ui);
         });
         let rect = ui.max_rect();
         let rail = if left {
@@ -586,89 +633,58 @@ fn floating_panel(app: &mut SolveApp, ui: &mut egui::Ui, left: bool, width: f32)
     }
 }
 
-fn unavailable_row(ui: &mut egui::Ui, label: &str, value: &str) {
-    ui_kit::row(ui, solidcraft_ui_text::tr_label(label), |ui| {
-        ui.add_enabled_ui(false, |ui| {
-            if matches!(
-                label,
-                "Source"
-                    | "Orientation"
-                    | "Direction"
-                    | "Parent view"
-                    | "Text style"
-                    | "Profile & units"
-                    | "Size & orientation"
-                    | "Border & template"
-            ) {
-                ui_kit::dropdown_menu(ui, label, solidcraft_ui_text::tr_label(value), |_| {});
-            } else {
-                let mut text = solidcraft_ui_text::tr_label(value).to_string();
-                ui_kit::cell_editor(ui, ui.scope_id().with(label), &mut text, "", false);
-            }
-        });
-    });
+fn panel_title(app: &SolveApp) -> &'static str {
+    app.drawing_workspace.options.map_or_else(|| solidcraft_ui_text::tr("cmd.drawing_sheet_set"), Tool::title)
+}
+
+pub(crate) fn inspector_visible(app: &SolveApp) -> bool {
+    active(app)
+        && app.preferences.drawing_sheets_visibility != "legacy"
+        && (app.drawing_workspace.settings_open || app.drawing_workspace.options.is_some())
+}
+
+pub(crate) fn inspector_title(app: &SolveApp) -> &str {
+    panel_title(app)
+}
+
+pub(crate) fn inspector_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let top = ui.next_widget_position().y;
+    let body = egui::ScrollArea::vertical().id_salt("drawing_inspector").min_scrolled_height(0.0).show(ui, |ui| panel_fields(app, ui));
+    crate::panel_runtime::report_content_extent(ui, top, body.content_size.y, false);
 }
 
 fn panel_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let options = app.drawing_workspace.options;
     ui.horizontal(|ui| {
-        ui.heading(solidcraft_ui_text::tr_label(options.unwrap_or("Sheet Settings")));
+        ui.heading(panel_title(app));
         if icon_action(ui, "drawing:settings:close", "close", "Close drawing panel", true).clicked() {
-            app.drawing_workspace.settings_open = false;
-            app.drawing_workspace.options = None;
+            close_panel(app);
         }
     });
-    ui.horizontal(|ui| {
-        for (side, label) in [("left", "Dock left"), ("right", "Dock right")] {
-            if ui_kit::button(ui, solidcraft_ui_text::tr_label(label), ui_kit::Button::Normal).clicked() {
-                app.preferences.drawing_panel_side = side.into();
+    if options.is_none() {
+        ui.horizontal(|ui| {
+            for (side, label) in [("left", "Dock left"), ("right", "Dock right")] {
+                if ui_kit::button(ui, solidcraft_ui_text::tr_label(label), ui_kit::Button::Normal).clicked() {
+                    app.preferences.drawing_panel_side = side.into();
+                }
             }
-        }
-    });
+        });
+    }
     ui.separator();
-    ui_kit::text(
-        ui,
-        solidcraft_ui_text::tr_label("Not implemented. These options describe the planned interface; no drawing data is changed."),
-        ui_kit::Text::Note("drawing_options_pending"),
-    );
-    if let Some(kind) = options {
-        match kind {
-            "Base View" => {
-                unavailable_row(ui, "Source", "Source design");
-                unavailable_row(ui, "Orientation", "Not configured");
-                unavailable_row(ui, "Scale", "Not configured");
-            }
-            "Projected View" => {
-                unavailable_row(ui, "Parent view", "No drawing view available");
-                unavailable_row(ui, "Direction", "Not configured");
-                unavailable_row(ui, "Scale", "Inherited from parent view");
-            }
-            "Dimension" => {
-                unavailable_row(ui, "References", "No drawing geometry available");
-                unavailable_row(ui, "Units & precision", "Drawing defaults (not available)");
-            }
-            "Note" => {
-                unavailable_row(ui, "Text", "Not configured");
-                unavailable_row(ui, "Text style", "Drawing defaults (not available)");
-            }
-            _ => {}
+    egui::ScrollArea::vertical().show(ui, |ui| panel_fields(app, ui));
+}
+
+fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if let Some(tool) = app.drawing_workspace.options {
+        panels::tool_body(app, ui, tool);
+        if panels::footer(ui, tool) {
+            close_panel(app);
         }
-        ui.separator();
-        ui_kit::button(ui, solidcraft_ui_text::tr_label("Apply (not implemented)"), ui_kit::Button::Enabled(false));
     } else {
-        ui.heading(solidcraft_ui_text::tr_label("Drawing & title block"));
-        unavailable_row(ui, "Title", "No drawing document");
-        unavailable_row(ui, "Title block", "Not available");
-        ui.heading(solidcraft_ui_text::tr_label("Paper & layout"));
         sheet_settings_actions(app, ui);
-        unavailable_row(ui, "Size & orientation", "No sheet available");
-        unavailable_row(ui, "Border & template", "Not available");
-        ui.heading(solidcraft_ui_text::tr_label("Drafting defaults"));
-        unavailable_row(ui, "Profile & units", "No drawing document");
-        ui.separator();
-        ui.heading(solidcraft_ui_text::tr_label("Screen appearance"));
-        let label = app.tr("ui.sheet_page.colour").to_owned();
-        ui_kit::row(ui, &label, |ui| crate::drawing_sheet_page::colour_choice(app, ui));
+        if app.drawing_workspace.settings_open {
+            panels::sheet_settings(app, ui);
+        }
     }
 }
 
@@ -678,7 +694,7 @@ mod tests {
     use crate::scenario::Harness;
 
     #[test]
-    fn browser_lists_sheets_of_the_open_drawing() {
+    fn sheets_panel_lists_sheets_of_the_open_drawing() {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.ui.show_browser = true;
@@ -688,6 +704,10 @@ mod tests {
         h.app.run("drawing.sheet.add", serde_json::json!({"name":"Inspection sheet"})).unwrap();
         h.frames(4);
         assert!(h.widget("Inspection sheet").is_some());
+        let layout = h.app.panel_runtime().unwrap().layout().layout();
+        for panel in ["browser", "drawing-sheets"] {
+            assert!(layout.instances.iter().any(|instance| instance.id.0 == panel && instance.requested_open));
+        }
 
         h.app.run("drawing.close", serde_json::json!({})).unwrap();
         h.frames(2);
@@ -717,6 +737,11 @@ mod tests {
         h.app.run("drawing.sheet.delete", serde_json::json!({"sheet":second})).unwrap();
         h.frames(3);
         assert_eq!(crate::drawing_sheet_page::inspect(&h.app)["sheet"], first);
+        assert!(!sheets_visible(&h.app));
+
+        h.app.run("drawing.sheet.add", serde_json::json!({"name":"Replacement sheet"})).unwrap();
+        h.frames(4);
+        assert!(h.widget("Replacement sheet").is_some());
     }
 
     #[test]
@@ -725,6 +750,10 @@ mod tests {
         h.app.home.open = false;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
         h.app.ui.tab = "SURFACE".into();
+        h.app.ui.show_timeline = true;
+        h.app.preferences.history_in_browser = false;
+        h.frames(4);
+        assert!(crate::scenario::rect_of("history:card").is_some());
         let doc = h.app.session.doc.clone();
         let revision = h.app.session.revision;
         let undo = h.app.session.undo.len();
@@ -732,13 +761,18 @@ mod tests {
         enter(&mut h.app, true).unwrap();
         assert!(start(&mut h.app, "drawing.view.base.planned"));
         h.frames(2);
-        assert!(h.widget("Apply (not implemented)").is_some());
+        assert!(h.widget("Place standard views").is_some());
+        assert!(h.widget("Finish").is_some());
+        assert!(crate::scenario::rect_of("history:card").is_none());
+        assert!(h.app.ui.show_timeline);
         assert_eq!(h.app.session.undo.len(), undo);
         assert_eq!(h.app.session.revision, revision);
         assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
         assert_eq!(h.app.cam, cam);
         enter(&mut h.app, false).unwrap();
         assert_eq!(h.app.ui.tab, "SURFACE");
+        h.frames(4);
+        assert!(crate::scenario::rect_of("history:card").is_some());
     }
 
     #[test]
@@ -747,9 +781,12 @@ mod tests {
             let mut h = Harness::new();
             h.app.preferences.drawing_sheets_visibility = "legacy".into();
             h.app.home.open = false;
+            h.app.ui.show_browser = true;
             h.app.ui.layout = layout;
             h.call("ui.resize", serde_json::json!({"width":1400,"height":1000}));
+            h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
             enter(&mut h.app, true).unwrap();
+            h.app.run("drawing.create", serde_json::json!({})).unwrap();
             let revision = h.app.session.revision;
             let doc = h.app.session.doc.clone();
             let cam = h.app.cam;
@@ -819,10 +856,13 @@ mod tests {
             let mut h = Harness::new();
             h.app.preferences.drawing_sheets_visibility = "legacy".into();
             h.app.home.open = false;
+            h.app.ui.show_browser = true;
             h.app.ui.layout = layout;
             h.call("ui.resize", serde_json::json!({"width":960,"height":600}));
             h.app.preferences.drawing_panel_width = 560.0;
+            h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
             enter(&mut h.app, true).unwrap();
+            h.app.run("drawing.create", serde_json::json!({})).unwrap();
             h.app.drawing_workspace.settings_open = true;
             h.frames(4);
             let browser = crate::scenario::rect_of("browser:card").unwrap();

@@ -76,6 +76,7 @@ pub mod dimension;
 pub mod fields;
 pub mod image;
 pub mod note;
+pub mod symbol;
 pub mod table;
 pub mod template;
 pub mod view;
@@ -87,6 +88,7 @@ use centre_mark::CentreMark;
 use dimension::Dimension;
 use image::{ImageFile, SheetImage};
 use note::{Anchor, Note};
+use symbol::Symbol;
 use table::SheetTable;
 use view::{View, ViewLetters};
 
@@ -188,6 +190,9 @@ pub struct Drawing {
     /// Manual centre lines, by id.
     #[serde(default, skip_serializing_if = "ById::is_empty")]
     pub centre_lines: ById<CentreLine>,
+    /// The symbols of its own it places: each made once, however many places it sits.
+    #[serde(default, skip_serializing_if = "ById::is_empty")]
+    pub symbols: ById<Symbol>,
     /// Behind an `Arc` as the sheets are, so an undo step shares it while it doesn't change.
     #[serde(default, skip_serializing_if = "no_revisions")]
     pub revisions: Arc<RevisionRecord>,
@@ -219,6 +224,9 @@ const RECORD_FIELDS: &[&str] = &[
     "sheet_images",
     "tables",
     "notes",
+    "centre_marks",
+    "centre_lines",
+    "symbols",
     "revisions",
 ];
 
@@ -475,6 +483,7 @@ impl Drawing {
             notes: ById::default(),
             centre_marks: ById::default(),
             centre_lines: ById::default(),
+            symbols: ById::default(),
             revisions: Arc::default(),
             newer_file: None,
         };
@@ -517,6 +526,7 @@ impl Drawing {
         d.notes.put_in_order();
         d.centre_marks.put_in_order();
         d.centre_lines.put_in_order();
+        d.symbols.put_in_order();
         d.validate().map_err(damaged)?;
         d.check_image_files().map_err(damaged)?;
         Ok(d)
@@ -687,6 +697,7 @@ impl Drawing {
             .chain(self.notes.iter().map(|n| n.id))
             .chain(self.centre_marks.iter().map(|m| m.id))
             .chain(self.centre_lines.iter().map(|line| line.id))
+            .chain(self.symbols.iter().map(|s| s.id))
             .chain(self.revisions.ids())
     }
 
@@ -726,7 +737,8 @@ impl Drawing {
         self.check_centre_marks()?;
         self.check_centre_lines()?;
         self.check_images()?;
-        self.check_notes()
+        self.check_notes()?;
+        self.check_symbols()
     }
 
     /// A sheet's own rules, and that the source it documents is one of the drawing's.

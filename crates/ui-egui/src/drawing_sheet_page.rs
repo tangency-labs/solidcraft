@@ -424,6 +424,19 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     crate::scenario::publish_rect("sheet:paper", sheet_rect);
     let hover = response.hover_pos().filter(|p| !crate::shell::covered(app, *p)).map(|p| at.paper(p));
     let hit = hover.and_then(|p| drawing_scene::hit(&view.objects, p, HOVER_BAND / at.scale));
+    if response.double_clicked()
+        && let Some(hit) = hit
+    {
+        let kind = match hit.kind {
+            ObjectKind::View if hit.on_edge => Some("view"),
+            ObjectKind::Dimension => Some("dimension"),
+            ObjectKind::PartsList => Some("parts_list"),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            crate::drawing_workspace::edit_object(app, kind, hit.object);
+        }
+    }
     if let Some(hit) = hit.filter(outlined)
         && let Some(object) = view.objects.iter().find(|o| o.object == hit.object)
     {

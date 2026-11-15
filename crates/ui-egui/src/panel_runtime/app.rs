@@ -1367,10 +1367,6 @@ impl crate::SolveApp {
         self.shell.workspace_panels.clear();
         self.publish_tab_accent(ui.ctx());
         crate::browser::publish_row_prefs(self, ui.ctx());
-        // The drawing's properties panel takes its side of the room before the host lays out.
-        if crate::drawing_workspace::active(self) {
-            crate::drawing_workspace::panel(self, ui);
-        }
         let prepared = self.prepare_workspace_panels(ui, render_domain, true);
         self.shell.content = Some(render_domain);
         if render_domain.is_positive() && render_domain.is_finite() {
@@ -1408,10 +1404,26 @@ impl crate::SolveApp {
                     self.panel_runtime = Some(integration);
                 }
             });
-        // After the Browser, so the sheet strip can hug its measured edge.
-        if crate::drawing_workspace::active(self) {
-            crate::drawing_workspace::chrome(self, ui);
+        // Legacy drawing chrome needs the measured ribbon and Browser bounds.
+        if crate::drawing_workspace::active(self)
+            && self.preferences.drawing_sheets_visibility == "legacy"
+            && render_domain.is_positive()
+            && render_domain.is_finite()
+        {
+            let mut bounds = render_domain;
+            if let Some(bottom) = self.shell.cards.iter().map(egui::Rect::bottom).max_by(f32::total_cmp) {
+                bounds.min.y = bottom.clamp(bounds.top(), bounds.bottom());
+            }
+            if self.preferences.drawing_panel_side == "left"
+                && let Some(browser) = self.shell.browser
+            {
+                bounds.min.x = browser.right().clamp(bounds.left(), bounds.right());
+            }
+            let mut legacy = ui.new_child(egui::UiBuilder::new().id_salt("legacy_drawing_inspector").max_rect(bounds));
+            crate::drawing_workspace::panel(self, &mut legacy);
+            crate::drawing_workspace::chrome(self, ui, render_domain);
         }
+        crate::drawing_workspace::show_add_sheet(self, ui.ctx());
         if self.panel_runtime.as_ref().is_some_and(|integration| integration.production.is_some()) && !self.preferences.agent_chat_popped {
             crate::agent_chat::finish_shared(self, ui.ctx());
         }
