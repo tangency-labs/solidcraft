@@ -1,8 +1,9 @@
 # OpenXR VR view
 
 Status: Phase 0 is `solidcraft-cli xr-info` (PR #7275), which reports the OpenXR
-runtime, headset and Vulkan support. Phase 1 - the stereo view this note describes - is
-not implemented. Vulkan only. The questions that still need an answer are at the end.
+runtime, headset and Vulkan support. It passes on both runtimes tested so far, Oculus
+and SteamVR. Phase 1 - the stereo view this note describes - is not implemented. Vulkan
+only. The questions that still need an answer are at the end.
 
 ## Goal
 
@@ -17,34 +18,44 @@ stay where they are.
 
 ## What the hardware says
 
-The only report from real hardware so far is a Meta Quest 3S on the Oculus runtime,
-captured by `xr-info` and kept as a test fixture
-(`apps/solidcraft-cli/tests/fixtures/quest3s-oculus-1.208.0.json`):
+Four reports from real hardware, collected with `xr-info` through the discussion on
+#2172, cover two runtimes and three headsets:
 
-| | |
-|---|---|
-| Runtime | Oculus 1.208.0, `XR_KHR_vulkan_enable2` present |
-| Recommended per-eye image | 1824 x 1872 |
-| Largest per-eye image | 3648 x 3744 |
-| Largest swapchain image | 4096 x 4096 |
-| Composition layers | up to 16 |
-| `XR_KHR_composition_layer_depth` | present |
-| `XR_KHR_vulkan_swapchain_format_list` | absent |
+| | Quest 3S / Oculus | Quest 3 / Oculus | Quest 3 / SteamVR | Steam Frame / SteamVR |
+|---|---|---|---|---|
+| Runtime version | 1.208.0 | 1.208.0 | 2.18.4 | 2.18.4 |
+| Recommended per-eye image | 1824 x 1872 | 2064 x 2272 | 2528 x 2780 | 2644 x 2644 |
+| Largest per-eye image | 3648 x 3744 | 4128 x 4544 | 8192 x 8192 | 8192 x 8192 |
+| Largest swapchain image | 4096 x 4096 | 4096 x 4096 | 8192 x 8192 | 8192 x 8192 |
+| Composition layers | 16 | 16 | 16 | 16 |
+| Recommended / max sample count | 1 / 4 | 1 / 4 | 1 / 1 | 1 / 1 |
+| `XR_KHR_vulkan_enable2` | present | present | present | present |
+| `XR_KHR_vulkan_swapchain_format_list` | absent | absent | absent | absent |
+| `XR_KHR_composition_layer_depth` | present | present | present | present |
 
-Three things follow from that report:
+The Quest 3S report is kept as a test fixture
+(`apps/solidcraft-cli/tests/fixtures/quest3s-oculus-1.208.0.json`).
 
-- **Instance adoption is possible.** `XR_KHR_vulkan_enable2` is what lets the runtime
-  create the `VkInstance` and hand it over, which is the only way to render into its
-  swapchains from wgpu.
+What follows from the four:
+
+- **Instance adoption is possible everywhere.** `XR_KHR_vulkan_enable2` is present on
+  both runtimes, so the path below is not a Meta or a Valve special case.
 - **The runtime chooses the swapchain image count.** OpenXR does not take one in
   `XrSwapchainCreateInfo`; the app asks afterwards. "Two swapchains" means one per eye,
   not two images.
-- **Format selection is ours.** Without the preference-list extension the runtime does
-  not rank formats. The core `xrEnumerateSwapchainFormats` still lists what is legal;
-  picking is our job.
+- **Format selection is ours on every runtime.** `XR_KHR_vulkan_swapchain_format_list`
+  is absent on Oculus and on SteamVR alike, so no runtime ranks formats. The core
+  `xrEnumerateSwapchainFormats` still lists what is legal; picking is our job.
+- **Sizing is per system, not per headset.** The same Quest 3 asks for 2064 x 2272
+  through Oculus and 2528 x 2780 through SteamVR, and the largest swapchain image is
+  4096 on Oculus against 8192 on SteamVR. Any constant here would be wrong on one of
+  them.
+- **Sample counts are per runtime as well.** Both recommend 1. Oculus supports up to 4;
+  SteamVR reports a maximum of 1, so there is no MSAA through it at all.
 
-A SteamVR or Windows Mixed Reality report would show whether any of this is
-Meta-specific. Until one arrives, the design assumes it is not.
+No Windows Mixed Reality report yet. Nothing in this note depends on one: the two
+runtimes that do report differ in numbers, not in shape, and the probe runs there
+unchanged.
 
 ## Adopting the runtime's Vulkan objects
 
@@ -94,9 +105,12 @@ Per eye, once per session:
   Prefer `B8G8R8A8_SRGB`, then `R8G8B8A8_SRGB`, then the first format offered, and map
   it to the matching `wgpu::TextureFormat`. If the viewport pipeline cannot write the
   chosen format, fail with a clear message instead of rendering wrong colours.
-- **Size**: `recommended_width` x `recommended_height` per view (1824 x 1872 on Quest
-  3S), clamped to the view's maximum (3648 x 3744) and to the system maximum (4096).
-  The recommended size is what the runtime composes at; the maximum is headroom for
+- **Size**: the view's `recommended_width` x `recommended_height`, clamped to the
+  view's maximum and to the system maximum. All three come from the runtime and differ
+  per system: 1824 x 1872 recommended on Quest 3S, 2528 x 2780 through SteamVR, with
+  system maxima of 4096 and 8192. On Oculus the per-view maximum (4128 x 4544) exceeds
+  the largest swapchain image, so the system maximum is the binding limit there. The
+  recommended size is what the runtime composes at; the maximum is headroom for
   supersampling, not a target.
 - **Count**: the runtime decides. `Swapchain::enumerate_images()` returns the images;
   wrap each one once, at session start, and reuse them.
@@ -200,15 +214,16 @@ The parts that decide behaviour are pure and testable:
   fixture.
 
 What cannot be tested here is composition: whether the runtime shows the images,
-whether tracking is smooth, whether the format is accepted. That needs one headset, and
-the discussion thread is how one is being found.
+whether tracking is smooth, whether the chosen format is accepted. `xr-info` reports
+what a runtime exposes; it never composes a frame. That needs a headset running the
+renderer, and no report so far has done it.
 
 ## Open decisions
 
-1. **Depth submission.** `XR_KHR_composition_layer_depth` is available on Quest 3S.
-   Submitting a depth swapchain lets the runtime reproject late frames, at the cost of a
-   second swapchain per eye and a projection that matches the runtime's conventions
-   exactly. Phase 1 can ship without it.
+1. **Depth submission.** `XR_KHR_composition_layer_depth` is available on both
+   runtimes. Submitting a depth swapchain lets the runtime reproject late frames, at the
+   cost of a second swapchain per eye and a projection that matches the runtime's
+   conventions exactly. Phase 1 can ship without it.
 2. **One pass or two.** Rendering both eyes in one pass with `VK_KHR_multiview` halves
    the draw calls but constrains the pipeline and the shaders; two passes reuse the
    existing pipeline unchanged. Phase 1 should start with two passes.
@@ -218,5 +233,6 @@ the discussion thread is how one is being found.
 4. **Loader packaging.** Phase 0's kit ships `openxr_loader.dll` beside the binary by
    hand. A released app needs a decision: vendor it, fetch it in the build, or document
    it as a runtime dependency.
-5. **MSAA.** Quest 3S reports 1x recommended and up to 4x supported. 4x costs fill rate;
-   the recommendation is the safe default until there is a measurement.
+5. **MSAA.** Both runtimes recommend 1x. Oculus supports up to 4x; SteamVR reports a
+   maximum of 1, so 4x is not available there at all. Start at 1x: it is what both
+   runtimes ask for, and 4x would be an Oculus-only path until there is a measurement.
