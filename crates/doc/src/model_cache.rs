@@ -352,7 +352,7 @@ impl Writer {
             "threads": runs(&threads),
             "sketch_key_set": self.sketch_key_set(&st.sketch_keys),
             "blend_edges": serde_json::to_value(&st.blend_edges).ok()?, "fitted": serde_json::to_value(&st.fitted).ok()?,
-            "tapered": serde_json::to_value(&st.tapered).ok()?, "named_faces": serde_json::to_value(&st.named_faces).ok()?,
+            "tapered": serde_json::to_value(&st.tapered).ok()?,
         });
         self.states.push(r);
         self.state_index.insert(id, self.states.len() - 1);
@@ -592,8 +592,9 @@ impl SavedModel {
                 blend_edges: serde_json::from_value(field("blend_edges")?).map_err(invalid)?,
                 fitted: serde_json::from_value(field("fitted")?).map_err(invalid)?,
                 tapered: serde_json::from_value(field("tapered")?).map_err(invalid)?,
-                // A model saved before #15054 has none: copies then find the faces by name.
-                named_faces: s.get("named_faces").cloned().map(serde_json::from_value).transpose().map_err(invalid)?.unwrap_or_default(),
+                // Not kept either: every state would list those of all the features before it.
+                // A pattern's copies then find their sources' faces by name.
+                named_faces: BTreeMap::new(),
                 // A join's notice is for the evaluation that made it, not kept with the cache.
                 kept_separate: BTreeMap::new(),
                 // Not kept either: a saved model's states carry no lineage, so the check of a
