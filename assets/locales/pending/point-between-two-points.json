@@ -1,0 +1,37 @@
+{
+  "ar": {
+    "POINT BETWEEN TWO POINTS": "نقطة بين نقطتين",
+    "cmd.construct_point_midpoint": "نقطة بين نقطتين",
+    "help.construct.point.midpoint": "ينشئ نقطة إنشاء في منتصف المسافة بين نقطتين. تتبع النقطة كلتا النقطتين عندما تتحركان."
+  },
+  "de": {
+    "POINT BETWEEN TWO POINTS": "PUNKT ZWISCHEN ZWEI PUNKTEN",
+    "cmd.construct_point_midpoint": "Punkt zwischen zwei Punkten",
+    "help.construct.point.midpoint": "Erstellt einen Konstruktionspunkt genau in der Mitte zwischen zwei Punkten. Der Punkt folgt beiden Punkten, wenn sie sich bewegen."
+  },
+  "en": {
+    "POINT BETWEEN TWO POINTS": "POINT BETWEEN TWO POINTS",
+    "cmd.construct_point_midpoint": "Point Between Two Points",
+    "help.construct.point.midpoint": "Creates a construction point halfway between two points. The point follows both points when they move."
+  },
+  "he": {
+    "POINT BETWEEN TWO POINTS": "נקודה בין שתי נקודות",
+    "cmd.construct_point_midpoint": "נקודה בין שתי נקודות",
+    "help.construct.point.midpoint": "יוצר נקודת בנייה באמצע הדרך בין שתי נקודות. הנקודה עוקבת אחרי שתי הנקודות כשהן זזות."
+  },
+  "ja": {
+    "POINT BETWEEN TWO POINTS": "2点の中点",
+    "cmd.construct_point_midpoint": "2点の中点",
+    "help.construct.point.midpoint": "2つの点のちょうど中間に構築点を作ります。2つの点が動くと、構築点も追従します。"
+  },
+  "vi": {
+    "POINT BETWEEN TWO POINTS": "ĐIỂM GIỮA HAI ĐIỂM",
+    "cmd.construct_point_midpoint": "Điểm giữa hai điểm",
+    "help.construct.point.midpoint": "Tạo một điểm dựng ở chính giữa hai điểm. Điểm này đi theo cả hai điểm khi chúng di chuyển."
+  },
+  "zh": {
+    "POINT BETWEEN TWO POINTS": "两点之间的点",
+    "cmd.construct_point_midpoint": "两点之间的点",
+    "help.construct.point.midpoint": "在两个点的正中间创建一个构造点。两个点移动时，该点随之移动。"
+  }
+}

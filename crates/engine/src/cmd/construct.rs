@@ -17,7 +17,8 @@ use crate::params::{bad, req_expr, str_, vec3};
 use crate::schema::construct::{
     AxisEdgeParams, AxisNormalToFaceParams, AxisThroughCylinderParams, AxisTwoPlanesParams, AxisTwoPointsParams, MidplaneParams,
     PlaneAlongPathParams, PlaneAxisPointParams, PlanePerpendicularParams, PlaneTangentParams, PlaneThreePointsParams, PlaneTwoEdgesParams,
-    PointAlongPathParams, PointCenterParams, PointEdgePlaneParams, PointThreePlanesParams, PointTwoEdgesParams, PointVertexParams,
+    PointAlongPathParams, PointCenterParams, PointEdgePlaneParams, PointMidpointParams, PointThreePlanesParams, PointTwoEdgesParams,
+    PointVertexParams,
 };
 use crate::schema::features::FeatureResult;
 use crate::schema::{TypedContract, output_schema_for};
@@ -37,6 +38,7 @@ const POINT_THREE_PLANES_CONTRACT: TypedContract<PointThreePlanesParams> = Typed
 const POINT_CENTER_CONTRACT: TypedContract<PointCenterParams> = TypedContract::new();
 const POINT_EDGE_PLANE_CONTRACT: TypedContract<PointEdgePlaneParams> = TypedContract::new();
 const POINT_ALONG_PATH_CONTRACT: TypedContract<PointAlongPathParams> = TypedContract::new();
+const POINT_MIDPOINT_CONTRACT: TypedContract<PointMidpointParams> = TypedContract::new();
 const PLANE_MIDPLANE_CONTRACT: TypedContract<MidplaneParams> = TypedContract::new();
 const PLANE_TWO_EDGES_CONTRACT: TypedContract<PlaneTwoEdgesParams> = TypedContract::new();
 const PLANE_AXIS_POINT_CONTRACT: TypedContract<PlaneAxisPointParams> = TypedContract::new();
@@ -112,6 +114,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&POINT_ALONG_PATH_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("path: edge or sketch curve ref; t: expr, 0…1 along it (default 0.5); name?"),
+    CommandSpec::new("construct.point.midpoint", "Point Between Two Points", crate::checked!("construct.point.midpoint", point_mid))
+        .at("SOLID", "CONSTRUCT")
+        .icon("c_midpoint")
+        .contract(&POINT_MIDPOINT_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("a, b: point refs (vertices, sketch points, points; halfway between them); name?"),
     CommandSpec::new("construct.plane.midplane", "Midplane", crate::checked!("construct.plane.midplane", plane_mid))
         .at("SOLID", "CONSTRUCT")
         .icon("plane_midplane")
@@ -393,6 +401,12 @@ fn point_along(s: &mut Session, p: &Value) -> Result<Value> {
     let path = geo(s, p.get("path"), cmd, "path")?;
     let t = t_param(s, p, cmd)?;
     point(s, p, PointDef::AlongPath { path, t })
+}
+
+fn point_mid(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "construct.point.midpoint";
+    let (a, b) = (geo(s, p.get("a"), cmd, "a")?, geo(s, p.get("b"), cmd, "b")?);
+    point(s, p, PointDef::Midpoint { a, b })
 }
 
 fn plane_mid(s: &mut Session, p: &Value) -> Result<Value> {

@@ -47,6 +47,7 @@ pub const DOCUMENTED: &[&str] = &[
     "construct.point.along_path",
     "construct.point.center",
     "construct.point.edge_plane",
+    "construct.point.midpoint",
     "construct.point.three_planes",
     "construct.point.two_edges",
     "construct.point.vertex",

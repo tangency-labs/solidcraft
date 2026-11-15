@@ -7233,6 +7233,9 @@ fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&
             ("construct.point.edge_plane", "POINT AT EDGE AND PLANE", &[("Edge", CURVE | AXES, "edge"), ("Plane", PLANE, "plane")])
         }
         "construct.point.along_path" => ("construct.point.along_path", "POINT ALONG PATH", &[("Path", CURVE, "path")]),
+        "construct.point.midpoint" => {
+            ("construct.point.midpoint", "POINT BETWEEN TWO POINTS", &[("First point", POINT, "a"), ("Second point", POINT, "b")])
+        }
         "construct.plane.axis_point" => {
             ("construct.plane.axis_point", "cmd.construct.plane.axis_point", &[("Axis", LINE | CURVES, "axis"), ("Point", POINT, "point")])
         }
@@ -9459,6 +9462,7 @@ mod construct_ask_tests {
         "construct.point.center",
         "construct.point.edge_plane",
         "construct.point.along_path",
+        "construct.point.midpoint",
         "construct.plane.axis_point",
         "construct.plane.two_edges",
         "construct.plane.three_points",

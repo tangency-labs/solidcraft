@@ -270,6 +270,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
             PointDef::Center { .. } => "point_center",
             PointDef::EdgeAndPlane { .. } => "point_edge_plane",
             PointDef::AlongPath { .. } => "point_along_path",
+            PointDef::Midpoint { .. } => "c_midpoint",
         },
         FeatureKind::Hole { .. } => "hole",
         FeatureKind::Loft { .. } => "loft",
@@ -1679,6 +1680,7 @@ mod tests {
             ("center", PointDef::Center { of: point() }),
             ("edge_plane", PointDef::EdgeAndPlane { edge: point(), plane: point() }),
             ("along_path", PointDef::AlongPath { path: point(), t: "0.5".into() }),
+            ("midpoint", PointDef::Midpoint { a: point(), b: point() }),
         ] {
             cases.push((format!("construct.point.{id}"), FeatureKind::ConstructionPoint { def }));
         }

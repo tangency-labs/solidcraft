@@ -114,6 +114,8 @@ pub enum PointDef {
     EdgeAndPlane { edge: GeoRef, plane: GeoRef },
     /// At a fraction `t` (0…1) of the way along an edge or sketch curve.
     AlongPath { path: GeoRef, t: crate::Expr },
+    /// Halfway between two points (vertices, sketch points or points).
+    Midpoint { a: GeoRef, b: GeoRef },
 }
 
 /// Resolved construction geometry, kept in the model state by feature.
@@ -1015,6 +1017,7 @@ pub(crate) fn resolve_point(ctx: &Ctx, d: &PointDef) -> Result<Vec3> {
             let t = Document::eval_in(ctx.vals, t, Kind::Unitless)?;
             along(ctx, path, t).map(|(p, _)| p)
         }
+        PointDef::Midpoint { a, b } => Ok((point(ctx, a)? + point(ctx, b)?) * 0.5),
     }
 }
 
@@ -1236,7 +1239,7 @@ impl PointDef {
         match self {
             PointDef::At { point } => vec![point],
             PointDef::Center { of } => vec![of],
-            PointDef::TwoEdges { a, b } => vec![a, b],
+            PointDef::TwoEdges { a, b } | PointDef::Midpoint { a, b } => vec![a, b],
             PointDef::ThreePlanes { a, b, c } => vec![a, b, c],
             PointDef::EdgeAndPlane { edge, plane } => vec![edge, plane],
             PointDef::AlongPath { path, .. } => vec![path],
@@ -1247,7 +1250,7 @@ impl PointDef {
         match self {
             PointDef::At { point } => vec![point],
             PointDef::Center { of } => vec![of],
-            PointDef::TwoEdges { a, b } => vec![a, b],
+            PointDef::TwoEdges { a, b } | PointDef::Midpoint { a, b } => vec![a, b],
             PointDef::ThreePlanes { a, b, c } => vec![a, b, c],
             PointDef::EdgeAndPlane { edge, plane } => vec![edge, plane],
             PointDef::AlongPath { path, .. } => vec![path],

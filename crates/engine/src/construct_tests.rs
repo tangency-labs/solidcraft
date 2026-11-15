@@ -345,6 +345,18 @@ fn point_through_two_edges() {
 }
 
 #[test]
+fn point_between_two_points_sits_halfway_and_follows_them() {
+    let mut s = part();
+    run(&mut s, "construct.point.midpoint", json!({"a": {"vertex": [0.5, 0.5, 0.5]}, "b": {"vertex": [39, 29, 19]}, "name": "M"}));
+    assert!(near(point(&s, "M"), Vec3::new(20.0, 15.0, 10.0)), "{:?}", point(&s, "M"));
+    run(&mut s, "construct.point.vertex", json!({"point": {"point": [0, 0, 0]}, "name": "A"}));
+    run(&mut s, "construct.point.midpoint", json!({"a": {"construct_point": "A"}, "b": {"point": [10, 20, 30]}, "name": "N"}));
+    assert!(near(point(&s, "N"), Vec3::new(5.0, 10.0, 15.0)), "{:?}", point(&s, "N"));
+    run(&mut s, "timeline.redefine", json!({"feature": "A", "command": "construct.point.vertex", "params": {"point": {"point": [-10, 0, 0]}}}));
+    assert!(near(point(&s, "N"), Vec3::new(0.0, 10.0, 15.0)), "{:?}", point(&s, "N"));
+}
+
+#[test]
 fn point_through_three_planes() {
     let mut s = part();
     run(

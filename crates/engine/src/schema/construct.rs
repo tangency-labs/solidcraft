@@ -149,6 +149,19 @@ pub struct PointAlongPathParams {
     pub common: ConstructionCommon,
 }
 
+/// Add a construction point halfway between two points.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PointMidpointParams {
+    /// The first point: a vertex, a construction point, a sketch point, a fixed point, or the
+    /// centre of a circular edge, a sketch circle or arc, or a spherical or toroidal face.
+    pub a: GeoRefParam,
+    /// The second point. The new point stays halfway between the two as they move.
+    pub b: GeoRefParam,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: ConstructionCommon,
+}
+
 /// Add a construction plane halfway between two planes: midway between parallel ones, else
 /// through the line where they meet, halving the angle between them.
 #[derive(Debug, Deserialize, JsonSchema)]
