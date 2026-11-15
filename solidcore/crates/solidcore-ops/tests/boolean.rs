@@ -267,7 +267,11 @@ fn parallel_holes_a_hair_less_than_tangent_cut_as_touching() {
     for eps in [-1e-9, 1e-9, 2.3e-9, 1e-8, 1e-7, 3e-6, 9.9e-6, 2.5e-5] {
         let through = 4000.0 - (2.0 * PI * r * r - lens(eps)) * 10.0;
         // touching along one line, or past the intersection tolerance crossing in two
-        let counts = if eps < 1e-5 { [8, 22, 14] } else { [10, 24, 16] };
+        let counts = if eps < 1e-5 {
+            [8, 22, 14]
+        } else {
+            [10, 24, 16]
+        };
         for (y1, y2) in orders(10.0, 5.0 + eps) {
             let c = cut_twice(cylinder(y1), cylinder(y2));
             one_valid_solid(&c, counts, through);
