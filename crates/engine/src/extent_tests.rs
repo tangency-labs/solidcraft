@@ -253,13 +253,27 @@ fn window(s: &mut Session, y: f64) {
     run(s, "sketch.finish", json!({}));
 }
 
-/// The volume of the window's prism between the cylinders of radii `r0` and `r1` about Z (the
-/// wall of the tube under the window is `wall_between(18, 20)`), by a sum over x.
-fn wall_between(r0: f64, r1: f64) -> f64 {
-    let n = 2000;
-    let wall = |x: f64, r: f64| (r * r - x * x).sqrt();
-    (0..n).map(|i| -3.0 + 6.0 * (i as f64 + 0.5) / n as f64).map(|x| (wall(x, r1) - wall(x, r0)) * 4.0 * 6.0 / n as f64).sum()
+/// The area between the x axis and the circle of radius `r` about Z over the window's x in
+/// [-3, 3]: the integral of sqrt(r^2 - x^2), in closed form.
+fn under_arc(r: f64) -> f64 {
+    3.0 * (r * r - 9.0).sqrt() + r * r * (3.0 / r).asin()
 }
+
+/// The volume of the window's prism (4 tall) between the cylinders of radii `r0` and `r1` about
+/// Z: the wall of the tube under the window is `wall_between(18, 20)`.
+fn wall_between(r0: f64, r1: f64) -> f64 {
+    4.0 * (under_arc(r1) - under_arc(r0))
+}
+
+/// The volume of the window's prism from y = -30 to the cylinder of radius `r` about Z.
+fn post_to(r: f64) -> f64 {
+    4.0 * (6.0 * 30.0 - under_arc(r))
+}
+
+/// How far a measured volume may lie from its closed form, relative: `volume_mm3` is SMLib's
+/// exact measure of the B-rep (planes and cylinders here), not of the display mesh, so only its
+/// numerical integration and the kernel's tolerance part them.
+const EXACT: f64 = 1e-6;
 
 /// #12617: a To offset on a curved face ends the extent that far past the face along the
 /// travel, or that far short of it when negative, on the near face and on the far face alike.
@@ -279,14 +293,46 @@ fn a_to_offset_on_a_curved_face_ends_that_far_past_it() {
     };
     let outer_mm = wall_between(19.0, 20.0);
     let past_outer = cut([0.0, -20.0, 10.0], 1.0);
-    assert!((past_outer - outer_mm).abs() < outer_mm * 2e-2, "1 past the outside face removed {past_outer}, want {outer_mm}");
+    assert!((past_outer - outer_mm).abs() < outer_mm * EXACT, "1 past the outside face removed {past_outer}, want {outer_mm}");
     let short_of_inner = cut([0.0, -18.0, 10.0], -1.0);
-    assert!((short_of_inner - outer_mm).abs() < outer_mm * 2e-2, "1 short of the inside face removed {short_of_inner}, want {outer_mm}");
+    assert!((short_of_inner - outer_mm).abs() < outer_mm * EXACT, "1 short of the inside face removed {short_of_inner}, want {outer_mm}");
     let wall = wall_between(18.0, 20.0);
     let past_inner = cut([0.0, -18.0, 10.0], 1.0);
-    assert!((past_inner - wall).abs() < wall * 2e-2, "1 past the inside face removed {past_inner}, want the wall {wall}");
+    assert!((past_inner - wall).abs() < wall * EXACT, "1 past the inside face removed {past_inner}, want the wall {wall}");
     let short_of_outer = cut([0.0, -20.0, 10.0], -1.0);
     assert!(short_of_outer.abs() < 1e-6, "1 short of the outside face removed {short_of_outer}");
+}
+
+/// #12617: the input main once refused, kept as it was: a window sketched on y = -30, cut To the
+/// tube's inside face at [0, -18, 10] with To offset 2. It builds now: the end lies 2 past the
+/// inside face, in the bore, so the cut takes the wall under the window between r 18 and 20.
+/// (The inside face's offset 2 the wrong way round lies exactly on the outside face.)
+#[test]
+fn a_to_offset_2_past_the_inside_face_of_a_tube_cuts_through_its_wall() {
+    let mut s = tube();
+    let whole = body(&mut s, "Tube")["volume_mm3"].as_f64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -30, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-3, 8], "p1": [3, 12]}));
+    run(&mut s, "sketch.finish", json!({}));
+    s.execute("solid.extrude", &json!({"to": [0, -18, 10], "to_offset": 2.0, "operation": "cut"})).expect("the cut builds");
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let removed = whole - body(&mut s, "Tube")["volume_mm3"].as_f64().unwrap();
+    let want = wall_between(18.0, 20.0);
+    assert!((removed - want).abs() < want * EXACT, "removed {removed}, want the wall {want}");
+}
+
+/// #12617: a profile the offset surface misses is refused, not run out to the far end of the
+/// extent: a window at x 19.2..19.8 crosses the tube's outside face (r 20) but not its offset 1
+/// past it (r 19), so a New Body To that face with To offset 1 has nowhere to end.
+#[test]
+fn a_profile_the_offset_surface_misses_is_refused() {
+    let mut s = tube();
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -30, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Edge"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [19.2, 8], "p1": [19.8, 12]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let made =
+        s.execute("solid.extrude", &json!({"sketch": "Edge", "to": [0, -20, 10], "to_offset": 1.0, "operation": "new_body", "body_name": "Post"}));
+    assert!(made.is_err(), "a New Body the offset surface misses was made: {:?}", body(&mut s, "Post"));
 }
 
 /// #12617: a Join To Object on a curved face with a negative offset stops that far short of
@@ -300,10 +346,8 @@ fn a_join_to_a_curved_face_with_an_offset_stops_that_far_short() {
     run(&mut s, "solid.extrude", json!({"sketch": "Window", "to": [0.0, -20.0, 10.0], "to_offset": -2.0, "operation": "join"}));
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
     let added = volume(&mut s) - whole;
-    let n = 2000;
-    let want: f64 =
-        (0..n).map(|i| -3.0 + 6.0 * (i as f64 + 0.5) / n as f64).map(|x| (30.0 - (22.0f64 * 22.0 - x * x).sqrt()) * 4.0 * 6.0 / n as f64).sum();
-    assert!((added - want).abs() < want * 2e-2, "added {added}, want {want}");
+    let want = post_to(22.0);
+    assert!((added - want).abs() < want * EXACT, "added {added}, want {want}");
 }
 
 /// #12617: a New Body To Object on a curved face keeps its To offset too: a post from y = -30 to
@@ -319,10 +363,8 @@ fn a_new_body_to_a_curved_face_with_an_offset_stops_that_far_short() {
     );
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
     let made = body(&mut s, "Post")["volume_mm3"].as_f64().unwrap_or(0.0);
-    let n = 2000;
-    let want: f64 =
-        (0..n).map(|i| -3.0 + 6.0 * (i as f64 + 0.5) / n as f64).map(|x| (30.0 - (22.0f64 * 22.0 - x * x).sqrt()) * 4.0 * 6.0 / n as f64).sum();
-    assert!((made - want).abs() < want * 2e-2, "made {made}, want {want}");
+    let want = post_to(22.0);
+    assert!((made - want).abs() < want * EXACT, "made {made}, want {want}");
 }
 
 /// A To offset that carries the end back across the start, away from a curved To face, ends at
