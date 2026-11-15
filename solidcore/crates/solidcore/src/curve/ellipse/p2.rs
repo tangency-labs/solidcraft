@@ -78,7 +78,7 @@
 //!   contact tolerance apart from `tol` (WR-787, #15429): coplanar circles overlapping past
 //!   touching by less than it touch at one point; zero keeps upstream's two crossings.
 //!   [`Ellipse::intersect_with_line`] takes the same contact tolerance for a line in the
-//!   circle's plane (#14599).
+//!   circle's plane (#14599); a line tilted out of it keeps upstream's crossings.
 //! - **Two crossings stay two.** `IntersectWithLine` and `IntersectWithEllipse` find
 //!   their candidate points with `smgu_LineCoPlanarCircleIntersect` at ten times the
 //!   intersection tolerance, which upstream also uses to merge the line's two
@@ -1855,8 +1855,9 @@ impl Ellipse {
     /// the circle (a line perpendicular to the plane needs the general intersector,
     /// one that misses gives none). Each candidate point is dropped onto both curves
     /// and, when the line is not exactly in the plane, refined with the local curve
-    /// solver. A line overlapping the circle past touching by less than `contact_tol`
-    /// touches it at one point (WR-787, #14599; zero keeps upstream's two crossings).
+    /// solver. A line in the circle's plane (up to `SM_EFF_ZERO_SQRT`) that overlaps the
+    /// circle past touching by less than `contact_tol` touches it at one point (WR-787,
+    /// #14599; zero keeps upstream's two crossings).
     /// Solutions name `this_obj` and `line_obj`; `start.parameters` holds
     /// `[ellipse param, line param]`.
     ///
@@ -1928,7 +1929,9 @@ impl Ellipse {
                 return Ok(out);
             }
 
-            // Intersect the projected line with the ellipse.
+            // Intersect the projected line with the ellipse. Only a line in the plane can
+            // touch the circle: a tilted one meets it where it pierces the plane, at one of
+            // the crossings, and the chord's midpoint lies off the line (#14599).
             let line_params = line_coplanar_circle_intersect_distinct(
                 line_plane_pnt,
                 line_plane_vec,
@@ -1937,7 +1940,11 @@ impl Ellipse {
                 self.x_radius(),
                 tol * 10.0,
                 tol,
-                contact_tol,
+                if may_need_refinement {
+                    0.0
+                } else {
+                    contact_tol
+                },
             )?;
             if line_params.is_empty() {
                 out.needs_more_intersections = false;
@@ -2786,5 +2793,52 @@ mod tests {
         assert_eq!(c.step_interval(), interval);
         c.set_out_of_bounds_enabled(false);
         assert_eq!(c.base().evaluate_point(-0.1).unwrap(), clamped);
+    }
+
+    /// WR-787 for a line (#14599): a line in the circle's plane 5e-6 inside a circle of
+    /// radius 10 touches it once below a contact tolerance of 1e-5 (through
+    /// `Line::intersect_with_ellipse` too) and crosses it twice, 0.02 apart, without one. A
+    /// line tilted 3° out of the plane through a point of the circle, whose projection is
+    /// 5e-6 inside it, still meets it at that point: its chord's midpoint lies 5e-4 off the
+    /// line.
+    #[test]
+    fn a_line_a_hair_inside_a_circle_touches_it_only_in_its_plane() {
+        let k = kernel();
+        let a = circle(&k, 0.0, 360.0, 10.0, false);
+        let ivl = a.base().natural_interval();
+        let (c, delta) = (Vec3::new(1.0, 2.0, 3.0), 5e-6);
+        let flat = Line::from_points(
+            c + Vec3::new(-20.0, 10.0 - delta, 0.0),
+            c + Vec3::new(20.0, 10.0 - delta, 0.0),
+            3,
+        );
+        let flat_ivl = flat.natural_interval();
+        for (contact, want) in [(1e-5, 1), (0.0, 2)] {
+            let r = flat
+                .intersect_with_ellipse::<i64>(&k, &flat_ivl, &a, &ivl, 1e-5, contact, None, None)
+                .expect("flat");
+            assert_eq!(r.solutions.len(), want, "contact {contact}");
+        }
+        let s = (2.0 * 10.0 * delta - delta * delta).sqrt();
+        let x = c + Vec3::new(s, 10.0 - delta, 0.0);
+        let d = Vec3::new(3_f64.to_radians().cos(), 0.0, 3_f64.to_radians().sin());
+        let tilted = Line::from_points(x - 20.0 * d, x + 20.0 * d, 3);
+        let r = a
+            .intersect_with_line::<i64>(
+                &k,
+                &ivl,
+                &tilted,
+                &tilted.natural_interval(),
+                1e-5,
+                1e-5,
+                None,
+                None,
+            )
+            .expect("tilted");
+        let [sol] = r.solutions.as_slice() else {
+            panic!("one solution expected, {}", r.solutions.len());
+        };
+        let p = a.base().evaluate_point(sol.start.parameters[0]).unwrap();
+        assert!(p.distance(x) < 1e-6, "{p:?} vs {x:?}");
     }
 }

@@ -729,8 +729,10 @@ pub struct AnalyticIntersection<O> {
 /// Intersections of `this` over `interval` with `other` over `other_interval`
 /// within `tol` by the analytic intersectors (`SmCurve::AnalyticCurveIntersect`):
 /// line/line, line/ellipse, ellipse/line and ellipse/ellipse; any other pair finds
-/// nothing and needs the general intersector. Coplanar circles overlapping by less
-/// than `contact_tol` touch ([`Ellipse::intersect_with_ellipse`]; zero is upstream's).
+/// nothing and needs the general intersector. Coplanar circles, or a circle and a line
+/// in its plane, overlapping by less than `contact_tol` touch
+/// ([`Ellipse::intersect_with_ellipse`], [`Ellipse::intersect_with_line`]; zero is
+/// upstream's).
 /// Solutions name `this_obj` and `other_obj`.
 ///
 /// # Errors

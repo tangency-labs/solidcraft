@@ -1672,6 +1672,15 @@ fn a_traced_cut_whose_round_is_tangent_to_a_thin_ribs_side_removes_its_tool() {
         .unwrap()
         .unwrap();
     one_valid_solid_of_volume(&r, [6, 12, 8], want, 1e-9);
+    // the vertices are the rib's bottom corners, its top corners on the far side and the
+    // round's tangent points at z = 2.5, none at the second crossing 1.1e-4 above them
+    let (_, brep) = common::kernel_copy(&r);
+    for &v in brep.vertex_list() {
+        let z = solidcore::query::api_queries::vertex_get_point(&brep, v)
+            .unwrap()
+            .z;
+        assert!([0.0, 2.5, 5.0].iter().any(|h| (z - h).abs() < 1e-6), "a vertex at z = {z}");
+    }
 }
 
 /// #16935's intersect as SolidCraft passed it. Both bodies are a decagon of side 10, 10 tall, with

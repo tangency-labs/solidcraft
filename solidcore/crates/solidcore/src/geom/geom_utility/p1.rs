@@ -789,10 +789,10 @@ pub fn line_coplanar_circle_intersect(
 
 /// [`line_coplanar_circle_intersect`] with the near-miss band and the point identity
 /// tolerance apart: a line passing within `tolerance` of the circle is still found
-/// (none beyond it), but its two crossings are merged into one tangent point only
-/// when that point (the chord's midpoint) lies within `point_tolerance` of the circle.
-/// A line tangent to the circle up to rounding stays one point however long its
-/// numerical chord. A line that overlaps the circle past touching by less than
+/// (none beyond it). Apart from the contact tolerance below, its two crossings are merged
+/// into one tangent point only when that point (the chord's midpoint) lies within
+/// `point_tolerance` of the circle. A line tangent to the circle up to rounding stays one
+/// point however long its numerical chord. A line that overlaps the circle past touching by less than
 /// `contact_tolerance` touches it at the chord's midpoint however long the chord, unless
 /// the whole circle lies within `contact_tolerance` of the line; zero keeps upstream's.
 ///
