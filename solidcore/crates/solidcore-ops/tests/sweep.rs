@@ -25,9 +25,10 @@ mod solidcraft_fixes;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_ops::sweep::{
-    arcs_on_one_circle, curves_meet, extrude, face_section, join_arcs, loft, loft_to_point,
-    planar_faces, project_curves, revolve, screw_sweep, sweep_placed, sweep_stations, Affine,
-    CornerRefusal, Curve, DraftCorner, Ends, Join, PathCheck, SweepFrame, SweepRoute, Verdict,
+    arcs_on_one_circle, curves_meet, extrude, face_section, join_arcs, loft, loft_sheet,
+    loft_to_point, planar_faces, project_curves, revolve, screw_sweep, sweep_placed,
+    sweep_stations, Affine, CornerRefusal, Curve, DraftCorner, Ends, Join, PathCheck, SweepFrame,
+    SweepRoute, Verdict,
 };
 use solidcore_ops::{make_box, Body, CheckLevel, Error};
 
@@ -1089,5 +1090,105 @@ fn a_segment_projects_onto_a_box_s_record_face_at_its_index() {
         at(0, [0.0; 3]),
         Err(Error::Argument),
         "a direction of no length"
+    );
+}
+
+/// The x range of record face `face`'s corners.
+fn corners_x(record: &solidcore_record::brep::Brep, face: usize) -> [f64; 2] {
+    let xs: Vec<f64> = record
+        .edges
+        .iter()
+        .filter(|e| e.uses.iter().any(|u| u.face as usize == face))
+        .flat_map(|e| e.vertices)
+        .map(|v| record.vertices[v as usize].point[0])
+        .collect();
+    [
+        xs.iter().copied().fold(f64::INFINITY, f64::min),
+        xs.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+    ]
+}
+
+/// Two lines from x = 0 to 5 and on to 10 at height `z`, the corners at `y`.
+fn two_lines(y: [f64; 3], z: f64) -> Vec<Curve> {
+    vec![
+        line([0.0, y[0], z], [5.0, y[1], z]),
+        line([5.0, y[1], z], [10.0, y[2], z]),
+    ]
+}
+
+/// A sheet lofted through three sections of two lines each, whose corners move differently from
+/// one section to the next, is one skin: its two faces share the seam between them
+/// (tangency-labs/solidcraft#14048, where each column skinned on its own took parameters of its
+/// own and the seams parted). Each face is traced to its one column, the face between the first
+/// lines lying over x 0…5 and the other over x 5…10.
+#[test]
+fn a_loft_sheet_s_columns_share_their_seams() {
+    let sections = [
+        two_lines([0.0, 0.0, 0.0], 0.0),
+        two_lines([1.0, 6.0, 1.0], 5.0),
+        two_lines([0.0, 2.0, 0.0], 10.0),
+    ];
+    let (b, columns) = loft_sheet(&sections, 2).unwrap();
+    assert_eq!(b.counts().unwrap(), [2, 7, 6], "two faces sharing one seam");
+    let (record, _) = b.to_record().unwrap();
+    assert_eq!(record.edges.iter().filter(|e| e.uses.len() == 1).count(), 6);
+    assert_eq!(columns.len(), 2, "{columns:?}");
+    for (f, ks) in columns.into_iter().enumerate() {
+        let &[k] = &ks[..] else {
+            panic!("face {f}: columns {ks:?}")
+        };
+        let want = [5.0 * k as f64, 5.0 * k as f64 + 5.0];
+        let got = corners_x(&record, f);
+        assert!(
+            (got[0] - want[0]).abs() < 1e-9 && (got[1] - want[1]).abs() < 1e-9,
+            "face {f}, column {k}: x {got:?}"
+        );
+    }
+}
+
+/// Squares of side 10, 8 and 10 at z = 0, 5 and 10 lofted as one sheet: a closed band of four
+/// faces, one for each side and traced to it, joined at the four corner seams; only the two
+/// squares are free.
+#[test]
+fn a_loft_sheet_through_closed_sections_is_a_band() {
+    let sections = [
+        square(0.0, 0.0, 10.0, 0.0),
+        square(1.0, 1.0, 8.0, 5.0),
+        square(0.0, 0.0, 10.0, 10.0),
+    ];
+    let (b, columns) = loft_sheet(&sections, 2).unwrap();
+    assert_eq!(b.counts().unwrap(), [4, 12, 8]);
+    let (record, _) = b.to_record().unwrap();
+    assert_eq!(record.edges.iter().filter(|e| e.uses.len() == 1).count(), 8);
+    let mut seen: Vec<usize> = columns.concat();
+    seen.sort_unstable();
+    assert_eq!(seen, [0, 1, 2, 3], "one side a face: {columns:?}");
+}
+
+/// A loft sheet needs two sections or more, of one count of curves, and a degree of 1 to 3.
+#[test]
+fn a_loft_sheet_refuses_bad_sections() {
+    let one = two_lines([0.0; 3], 0.0);
+    let other = two_lines([1.0; 3], 5.0);
+    assert_eq!(
+        loft_sheet(std::slice::from_ref(&one), 1).err(),
+        Some(Error::Argument)
+    );
+    assert_eq!(
+        loft_sheet(&[one.clone(), other[..1].to_vec()], 1).err(),
+        Some(Error::Argument),
+        "counts differ"
+    );
+    assert_eq!(
+        loft_sheet(&[one.clone(), other.clone()], 0).err(),
+        Some(Error::Argument)
+    );
+    assert_eq!(
+        loft_sheet(&[one.clone(), other.clone()], 4).err(),
+        Some(Error::Argument)
+    );
+    assert_eq!(
+        loft_sheet(&[vec![], vec![]], 1).err(),
+        Some(Error::Argument)
     );
 }

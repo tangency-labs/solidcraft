@@ -1174,8 +1174,8 @@ pub fn loft_sheet(sections: &[(Plane, Vec<Seg2>)]) -> Result<Body> {
 /// through every section's curve; see [`crate::loft_rails`]), `fit` saying how they reshape the
 /// sections between. Without rails, the plain sheet loft.
 ///
-/// The k-th segments of every section make a column: SMLib lofts each column on its own (one wall
-/// from the column's segments), and the columns are stitched along the edges they share.
+/// The k-th segments of every section make a column: one skin runs through every column, so the
+/// walls share their seams (#14048), each wall named by its column's segments.
 pub fn loft_sheet_with_rails(sections: &[(Plane, Vec<Seg2>)], rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Body> {
     if sections.len() < 2 || sections.len() > 50 {
         return Err(invalid("a loft needs 2…50 sections"));
@@ -1199,17 +1199,11 @@ pub fn loft_sheet_with_rails(sections: &[(Plane, Vec<Seg2>)], rails: &[Vec<Vec3>
     }
     let matched = if all_closed { closed_sections(sections)? } else { open_sections(sections)? };
     let lofted = crate::loft_rails::railed(&matched, all_closed, rails, fit)?;
-    let count = matched.first().map_or(0, |s| s.curves.len());
-    let pieces = (0..count)
-        .map(|k| {
-            let column: Vec<&solidcraft_geom::bspline::CurveN<4>> = lofted.iter().filter_map(|s| s.get(k)).collect();
-            let r = imp::lofted(&column)?;
-            let numbers: BTreeSet<usize> = matched.iter().filter_map(|s| s.numbers.get(k)).flatten().copied().collect();
-            let h = vec![record::profile(numbers.iter()); r.faces.len()];
-            Ok((r, h))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    sheet_of(pieces, true, &[])
+    let (r, columns) = imp::lofted(&lofted)?;
+    let numbers =
+        |ks: &[usize]| -> BTreeSet<usize> { ks.iter().flat_map(|k| matched.iter().filter_map(|s| s.numbers.get(*k)).flatten()).copied().collect() };
+    let h = columns.iter().map(|ks| record::profile(numbers(ks).iter())).collect();
+    sheet_of(vec![(r, h)], false, &[])
 }
 
 /// Closed sections matched as the solid loft matches them ([`crate::build::loft_numbered_loops`]),
@@ -1629,18 +1623,32 @@ mod imp {
         }
     }
 
-    /// One column of a loft: its curve in each section (and station) in loft order, skinned by
-    /// SMLib with no caps (`smlib_loft`), ruled between two, cubic through four or more.
-    pub(super) fn lofted(column: &[&solidcraft_geom::bspline::CurveN<4>]) -> Result<Brep> {
-        let sections: Vec<Vec<Curve>> = column
+    /// A loft's sheet: each section's (and station's) curves in loft order, the k-th of each
+    /// making column k, in one skin with no caps (`solidcore_ops::sweep::loft_sheet`), ruled
+    /// between two, cubic through four or more; with each record face's columns. SMLib's own check
+    /// accepts it.
+    pub(super) fn lofted(sections: &[Vec<solidcraft_geom::bspline::CurveN<4>>]) -> Result<(Brep, Vec<Vec<usize>>)> {
+        use solidcore_ops::sweep::Curve as OpsCurve;
+        let curves: Vec<Vec<OpsCurve>> = sections
             .iter()
-            .map(|c| {
-                let points = c.ctrl.iter().map(|h| [h[0] / h[3], h[1] / h[3], h[2] / h[3], h[3]]).collect();
-                vec![Curve::Nurbs { degree: c.degree, points, knots: c.knots.clone() }]
+            .map(|s| {
+                s.iter()
+                    .map(|c| {
+                        let points = c.ctrl.iter().map(|h| [h[0] / h[3], h[1] / h[3], h[2] / h[3], h[3]]).collect();
+                        OpsCurve::Nurbs { degree: c.degree, points, knots: c.knots.clone() }
+                    })
+                    .collect()
             })
             .collect();
-        let degree = u32::try_from(column.len().saturating_sub(1).clamp(1, 3)).unwrap_or(3);
-        checked(&SmBrep::loft(&sections, degree, false).map_err(sm("surface loft"))?, "surface loft")
+        let degree = u32::try_from(sections.len().saturating_sub(1).clamp(1, 3)).unwrap_or(3);
+        let ops = |e: solidcore_ops::Error| failed(format!("surface loft: {e}"));
+        let (body, columns) = solidcore_ops::sweep::loft_sheet(&curves, degree).map_err(ops)?;
+        let (r, _) = body.to_record().map_err(ops)?;
+        let check = SmBrep::from_record(&r, true).and_then(|b| b.check(CheckLevel::All)).map_err(sm("surface loft"))?;
+        if !check.is_valid() {
+            return Err(failed(format!("SMLib surface loft: SMLib's check refuses the result: {check}")));
+        }
+        Ok((r, columns))
     }
 }
 
@@ -1830,8 +1838,9 @@ mod tests {
     }
 
     /// Sheets lofted between open lines and closed loops: a ruled strip (even when the second
-    /// line runs the other way, or is in two pieces), a smooth strip through three, the walls
-    /// between two squares, and a cylinder through three circles.
+    /// line runs the other way, or is in two pieces: one flat face, the first line split in half
+    /// to match and both halves in one skin), a smooth strip through three, the walls between two
+    /// squares, and a cylinder through three circles.
     #[test]
     fn loft_sheet_areas() {
         use std::f64::consts::PI;
@@ -1843,7 +1852,7 @@ mod tests {
         let turned = loft_sheet(&[(at(0.0), vec![line(0.0, 10.0)]), (at(5.0), vec![line(10.0, 0.0)])]).unwrap();
         assert!(rel(area(&turned), 50.0) < 1e-6, "not twisted: {}", area(&turned));
         let pieces = loft_sheet(&[(at(0.0), vec![line(0.0, 10.0)]), (at(5.0), vec![line(0.0, 5.0), line(5.0, 10.0)])]).unwrap();
-        assert!(rel(area(&pieces), 50.0) < 1e-6 && pieces.face_count() == 2, "{}", area(&pieces));
+        assert!(rel(area(&pieces), 50.0) < 1e-6 && pieces.face_count() == 1, "{}", area(&pieces));
         let three = loft_sheet(&[(at(0.0), vec![line(0.0, 10.0)]), (at(5.0), vec![line(0.0, 10.0)]), (at(10.0), vec![line(0.0, 10.0)])]).unwrap();
         assert!(rel(area(&three), 100.0) < 1e-3, "{}", area(&three)); // (measured on meshes)
         let sq = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0)]);
@@ -1874,7 +1883,8 @@ mod tests {
                 Seg2::Cubic { p0: p(5.0, join), p1: p(5.0 + right, join), p2: p(8.0, ends), p3: p(10.0, ends) },
             ]
         };
-        let sheet = loft_sheet(&[(at(0.0), chain(0.0, 0.0, 1.0, 1.0)), (at(5.0), chain(1.0, 6.0, 3.0, 0.5)), (at(10.0), chain(0.0, 2.0, 0.5, 2.5))]).unwrap();
+        let sheet =
+            loft_sheet(&[(at(0.0), chain(0.0, 0.0, 1.0, 1.0)), (at(5.0), chain(1.0, 6.0, 3.0, 0.5)), (at(10.0), chain(0.0, 2.0, 0.5, 2.5))]).unwrap();
         let r = sheet.record();
         assert_eq!((r.faces.len(), r.edges.len(), r.vertices.len()), (2, 7, 6), "the walls share one seam");
         assert_eq!(r.edges.iter().filter(|e| e.uses.len() == 1).count(), 6, "free edges: the sheet's rim only");

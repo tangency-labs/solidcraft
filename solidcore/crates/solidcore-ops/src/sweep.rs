@@ -37,7 +37,9 @@ use solidcore::sweep::api_brep::{
     create_curve_sweep_with_placements, create_linear_sweep, create_rotational_sweep,
     CornerRefusal as KRefusal, OffsetCornerType, TaperExtrude,
 };
-use solidcore::sweep::api_surfaces::create_skin_primitive;
+use solidcore::sweep::api_surfaces::{
+    create_skin_primitive, create_skin_primitive_with_sources, SkinSources,
+};
 use solidcore::sweep::directed;
 use solidcore::sweep::extrude::{self as kextrude, Draft, ExtrudeTolerances};
 use solidcore::sweep::screw;
@@ -1036,6 +1038,134 @@ pub fn loft(sections: &[Vec<Curve>], degree: u32, cap: bool) -> Result<Body> {
             Ok(r) => finish(k, r.brep, if cap { Expect::SOLID } else { Expect::FACES }),
             Err(e) => Ok(Err(status(e))),
         }
+    })
+}
+
+/// A sheet skinned through `sections` as [`loft`] skins them, uncapped, and for each of its
+/// record faces in order the columns it runs along: each `k` (ascending) whose `k`-th curves of
+/// the sections it lies between. Every section has the same number of curves, joined end to end (open or
+/// closed). One skin takes its parameters across the sections from every column at once, so
+/// neighbouring faces share their seam; columns skinned each on its own take parameters of their
+/// own, and their seams part (tangency-labs/solidcraft#14048). The skin joins each section's
+/// curves into one, each over its own parameter span, so a line is first a NURBS line and every
+/// NURBS curve's knots are mapped onto [0, 1] (the same curves): the sections then join at the
+/// same knots. The columns are the kernel's trace of the skin
+/// (`create_skin_primitive_with_sources`): a curve with a kink of its own runs along several
+/// faces, and curves the skin joins smoothly can share one.
+///
+/// # Errors
+/// [`Error::Argument`] for fewer than two sections, sections of different counts of curves, a
+/// degree outside 1 to 3 or a curve refused; [`Error::Unsupported`] for a skin the kernel did
+/// not trace or a face whose columns differ from one section to the next (sections of arcs
+/// whose spans differ); the kernel's status; [`Error::Empty`].
+pub fn loft_sheet(sections: &[Vec<Curve>], degree: u32) -> Result<(Body, Vec<Vec<usize>>)> {
+    let n = sections.first().map_or(0, Vec::len);
+    if sections.len() < 2
+        || sections.len() > MAX_CURVES
+        || !(1..=3).contains(&degree)
+        || n == 0
+        || n > MAX_CURVES
+        || sections.iter().any(|s| s.len() != n)
+    {
+        return Err(Error::Argument);
+    }
+    let all: Vec<Curve> = sections
+        .iter()
+        .flatten()
+        .map(unit_span)
+        .collect::<Result<_>>()?;
+    let made = run(
+        "loft_sheet",
+        |k| -> solidcore::Result<Out<(Brep, Vec<(FaceId, Vec<usize>)>)>> {
+            let made = parsed!(parse(k, &all));
+            let counts = vec![n; sections.len()];
+            let (skin, sources) = match create_skin_primitive_with_sources(
+                k,
+                &counts,
+                &made.refs(),
+                degree as usize,
+                false,
+            ) {
+                Ok(r) => r,
+                Err(e) => return Ok(Err(status(e))),
+            };
+            let traced = match sources {
+                SkinSources::Traced(faces) => faces,
+                SkinSources::NotTraced { why } => {
+                    return Ok(Err(Error::Unsupported(controlled::not_traced(why))))
+                }
+            };
+            // a face's curves in section s are its columns' k + s n, the same columns in each
+            let mut columns = Vec::with_capacity(traced.len());
+            for (f, curves) in traced {
+                let of = |s: usize| -> Vec<usize> {
+                    curves
+                        .iter()
+                        .filter(|&&c| c / n == s)
+                        .map(|&c| c % n)
+                        .collect()
+                };
+                let first = of(0);
+                if first.is_empty() || (1..sections.len()).any(|s| of(s) != first) {
+                    return Ok(Err(Error::Unsupported(
+                        "a loft face whose columns differ from one section to the next",
+                    )));
+                }
+                columns.push((f, first));
+            }
+            Ok(finish(k, skin.brep, Expect::FACES)?.map(|b| (b, columns)))
+        },
+    )?;
+    let (brep, columns) = made?;
+    let body = Body::new(brep);
+    let (_, order) = body.to_record()?;
+    // every face of an uncapped skin is a side face, traced
+    let faces = order
+        .faces
+        .iter()
+        .map(|g| columns.iter().find(|(f, _)| f == g).map(|(_, c)| c.clone()))
+        .collect::<Option<Vec<_>>>()
+        .ok_or(Error::Exception)?;
+    Ok((body, faces))
+}
+
+/// `c` as [`loft_sheet`] skins it: a line as a NURBS line, a NURBS curve over the knot span
+/// [0, 1] (the same curve), an arc as it is.
+fn unit_span(c: &Curve) -> Result<Curve> {
+    Ok(match c {
+        Curve::Line { start, end } => Curve::Nurbs {
+            degree: 1,
+            points: vec![
+                [start[0], start[1], start[2], 1.0],
+                [end[0], end[1], end[2], 1.0],
+            ],
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+        },
+        Curve::Nurbs {
+            degree,
+            points,
+            knots,
+        } => {
+            let (Some(&t0), Some(&t1)) = (
+                knots.get(*degree),
+                knots
+                    .len()
+                    .checked_sub(degree + 1)
+                    .and_then(|i| knots.get(i)),
+            ) else {
+                return Err(Error::Argument);
+            };
+            let span = t1 - t0;
+            if !(span > 0.0) || !span.is_finite() {
+                return Err(Error::Argument);
+            }
+            Curve::Nurbs {
+                degree: *degree,
+                points: points.clone(),
+                knots: knots.iter().map(|t| (t - t0) / span).collect(),
+            }
+        }
+        Curve::Arc { .. } => c.clone(),
     })
 }
 
