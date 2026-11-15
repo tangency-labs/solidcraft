@@ -97,7 +97,11 @@ const OP_CERTIFY: &str = "blend::fillet_section::GnSectionFsg::certify";
 /// the budget refused it (123 halvings at 165 stations, end to end). That was before the
 /// certificate kept the offset's cancellation near a focal distance (#16652): its enclosures
 /// are now tight enough that the round certifies within its budget and builds, and no real
-/// round is known to be refused. A budget predicted from each span's own bound (a halving
+/// round is known to be refused. The boss plate's 0.99 round along a 1 mm arc round (a ball
+/// just under the round's tube, the case the stall stop above was added for; measured
+/// 2026-11-15, release build) is not refused either: its two certificates take 23 halvings
+/// of 209 and 19 of 188, and it builds the same body, to every printed digit, with the budget
+/// lifted. A budget predicted from each span's own bound (a halving
 /// divides a proved span's bound by 16, the Hermite remainder's `h^4`) was tried before #16652
 /// and did not refuse that round: once proved, its spans converge at that rate, so the
 /// prediction allowed its whole cost. Counted, not timed: the kernel has no clock, and a count
