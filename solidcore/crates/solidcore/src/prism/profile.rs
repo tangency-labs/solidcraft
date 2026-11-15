@@ -810,8 +810,11 @@ pub fn frame_is_orthonormal(frame: &Frame) -> bool {
 }
 
 /// `seg` as the kernel's curve on `frame` at `level`, in the direction it runs: a line segment,
-/// a circular arc (the kernel's circle on the frame over the arc's angles; its net is proved on the arc where it is read back, [`super::read::planar_pieces`]; a clockwise arc
-/// on the frame mirrored, so it runs as the segment does), a conic or Bézier as its exact NURBS.
+/// a circular arc (a circle of its own in the frame's plane, its angle 0 at the arc's start and
+/// trimmed to the arc's sweep, so no two arcs share a curve and no trim crosses the circle's
+/// seam; its net is proved on the arc where it is read back, [`super::read::planar_pieces`]; a
+/// clockwise arc turns about the frame's reversed normal, so it runs as the segment does), a
+/// conic or Bézier as its exact NURBS.
 ///
 /// # Errors
 ///
@@ -838,16 +841,22 @@ pub fn curve_on_frame(k: &Kernel, frame: &Frame, level: f64, seg: &Seg2) -> Resu
             start,
             sweep,
         } => {
+            if !(start.is_finite() && sweep.is_finite()) {
+                return Err(SolidError::invalid_input(OP_CURVE, "a malformed segment"));
+            }
             let (_, x, y, _) = axes(frame);
             let (y, s0) = if sweep >= 0.0 {
                 (y, start)
             } else {
                 (-y, -start)
             };
-            let placement = Axis2Placement::new(at(center), x, y);
-            let deg = Extent1d::from_min_max(s0.to_degrees(), (s0 + sweep.abs()).to_degrees());
-            let mut e = Ellipse::create_canonical_circle(k, &placement, radius, Some(&deg), None)?;
-            e.edit_parameterization(k, &deg, true, None)?;
+            // The arc's own circle, its angle 0 at the arc's start: two arcs of one circle are
+            // two curves, so a boolean keeps the points where they meet, and the trim never
+            // crosses the circle's seam nor runs past a whole turn, whatever the start.
+            let (c, s) = (s0.cos(), s0.sin());
+            let placement = Axis2Placement::new(at(center), x * c + y * s, y * c - x * s);
+            let deg = Extent1d::from_min_max(0.0, sweep.abs().to_degrees().min(360.0));
+            let e = Ellipse::create_canonical_circle(k, &placement, radius, Some(&deg), None)?;
             Ok(Curve::from(e))
         }
         _ => {
@@ -916,7 +925,8 @@ pub enum PlacedSeg {
 /// `seg` placed on `frame` at `level` as a [`PlacedSeg`], in the direction it runs: each point
 /// by [`to_world`]; an arc about the frame's normal `x × y`, its angles from `x`, or, swept
 /// clockwise, about the reversed normal with its angles negated so it still runs from its
-/// start (the same arc [`curve_on_frame`] builds); a cubic, conic or Bézier with its control
+/// start (the same points [`curve_on_frame`]'s arc runs through, which measures its angle
+/// from the arc's start instead); a cubic, conic or Bézier with its control
 /// points and weights. `None` for an arc of no sweep, a conic whose weight is not finite and
 /// positive, or a Bézier whose degree is outside `1 ..=` [`MAX_BEZIER_DEGREE`].
 #[must_use]
