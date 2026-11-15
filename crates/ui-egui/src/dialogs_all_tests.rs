@@ -956,6 +956,19 @@ fn face_pattern_attractors_come_from_the_advanced_option() {
     let mut h = h;
     let reply = h.app.run(&command, params).unwrap();
     assert!(reply["created_bodies"].as_array().is_some_and(|b| !b.is_empty()), "{reply}");
+    // Edited again: the face and both attractor sets come back as picks, and the dialog sends
+    // the same pattern back.
+    let feature = reply["feature"].as_u64().unwrap();
+    let edit = super::for_feature(&h.app, feature, None).expect("the pattern opens for editing");
+    let picks = |label: &str| edit.inputs.iter().find(|i| i.label == label).map(|i| i.items.clone()).unwrap_or_default();
+    assert!(matches!(picks("Face").as_slice(), [Sel::Face { .. }]), "{:?}", picks("Face"));
+    let near = picks(ATTRACTORS);
+    assert!(near.iter().any(|p| matches!(p, Sel::Edge { .. })) && near.contains(&Sel::Body { name: "Body2".into() }), "{near:?}");
+    assert!(matches!(picks(FAR_ATTRACTORS).as_slice(), [Sel::Edge { .. }]), "{:?}", picks(FAR_ATTRACTORS));
+    let (_, again) = apply_commands(&h.app, &edit).unwrap().remove(0);
+    let a = &again["attract"];
+    assert_eq!(a["bodies"], json!(["Body2"]));
+    assert!(a["geometry"][0]["edge"].is_array() && a["far_geometry"][0]["edge"].is_array(), "{again}");
 }
 form_case!(pipe, "solid.pipe", ["Diameter", "Wall", "Operation"]);
 form_case!(stock, "solid.bounding_solid", ["Margin"]);

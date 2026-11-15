@@ -3198,7 +3198,10 @@ pub enum PatternKind {
 /// `far` setting at the far distance (or farther); without those distances, the nearest and the
 /// farthest copies set them. With far attractors too, a copy's place between the two sets sets
 /// its value instead: the near setting on the near attractors, the far one on the far
-/// attractors, blended by the share of its distance to the near set in the sum of both.
+/// attractors, blended by the share of its distance to the near set in the sum of both. The near
+/// and far distances are then hold zones: a copy within `near` of the near set takes the near
+/// values, one within `far` of the far set the far values (both default 0), and the blend runs
+/// between the zones' edges.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 pub struct Attract {
     /// Geometry the distances are measured to: fixed points, vertices, sketch points,

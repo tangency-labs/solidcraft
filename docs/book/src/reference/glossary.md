@@ -79,7 +79,9 @@ Each value goes from its near setting at the near distance to its far setting at
 copies nearer or farther than those take the end values. A copy takes the distance to the nearest
 attractor, measured on the exact geometry. With *far attractors* as well, the values blend between
 the two sets instead: the near setting on the near attractors, the far one on the far attractors.
-Two opposite edges of a face, one in each set, make the values run straight across it.
+Two opposite edges of a face, one in each set, make the values run straight across it. The near
+and far distances are then hold zones: within them of their set, a copy takes that set's values
+in full.
 
 - **In SolidCraft:** `solid.pattern.face`'s `attract` (`geometry`, `bodies`, `far_geometry`,
   `far_bodies`, `near`, `far`, `scale_near`, `scale_far`, `offset_near`, `offset_far`,

@@ -110,7 +110,10 @@ pub(crate) fn kind() -> Kind {
 
 /// The fields under the picks. Returns whether Enter was pressed in one.
 pub(crate) fn draw(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
+    // With far attractors, the near and far distances are hold zones round each set.
+    let between = d.inputs.iter().any(|i| i.label == FAR_ATTRACTORS && !i.items.is_empty());
     let Kind::FacePattern(f) = &mut d.kind else { return false };
+    let between = between || !f.saved_far_geometry.is_empty() || !f.saved_far_bodies.is_empty();
     let doc = &app.session.doc;
     let mut enter = false;
     enter |= crate::dialogs::quantity_row(ui, doc, "Across", &mut f.count1);
@@ -130,9 +133,15 @@ pub(crate) fn draw(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
             ui_kit::checkbox(ui, "Attractors", &mut attract);
         });
         if attract {
-            ui_kit::status_line(ui, "Each copy changes with its distance to the nearest attractor", ui_kit::StatusTone::Dim);
-            enter |= hint_row(ui, "Near distance", &mut f.near, "nearest copy");
-            enter |= hint_row(ui, "Far distance", &mut f.far, "farthest copy");
+            if between {
+                ui_kit::status_line(ui, "Copies change from the attractors to the far attractors", ui_kit::StatusTone::Dim);
+                enter |= hint_row(ui, "Near distance", &mut f.near, "hold near values within");
+                enter |= hint_row(ui, "Far distance", &mut f.far, "hold far values within");
+            } else {
+                ui_kit::status_line(ui, "Each copy changes with its distance to the nearest attractor", ui_kit::StatusTone::Dim);
+                enter |= hint_row(ui, "Near distance", &mut f.near, "nearest copy");
+                enter |= hint_row(ui, "Far distance", &mut f.far, "farthest copy");
+            }
             enter |= expr_row(ui, "Scale near", &mut f.scale_near);
             enter |= expr_row(ui, "Scale far", &mut f.scale_far);
             enter |= hint_row(ui, "Offset near", &mut f.offset_near, "none");

@@ -10590,10 +10590,19 @@ fn face_pattern(
                 continue;
             }
             let t = match far_d.as_ref().and_then(|f| f.get(k)) {
-                // Between two sets: 0 on the near attractors, 1 on the far ones.
+                // Between two sets: 0 on the near attractors, 1 on the far ones. The near and far
+                // distances are hold zones: within them of their set, a copy takes that set's
+                // values in full.
                 Some(df) => {
-                    let sum = d + df;
-                    if sum > 1e-12 { (d / sum).clamp(0.0, 1.0) } else { 0.0 }
+                    let x = (d - length(&a.near, 0.0)?).max(0.0);
+                    let y = (df - length(&a.far, 0.0)?).max(0.0);
+                    if x <= 0.0 {
+                        0.0
+                    } else if y <= 0.0 {
+                        1.0
+                    } else {
+                        (x / (x + y)).clamp(0.0, 1.0)
+                    }
                 }
                 None => {
                     let near = length(&a.near, lo)?;
