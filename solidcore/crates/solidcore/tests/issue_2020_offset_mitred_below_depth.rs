@@ -250,8 +250,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.box_face_failures_propagate = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
-    k.fixes.check_loop_projected_seam_ends = true;
-    k.fixes.check_loop_vertex_tolerance = true;
     k.fixes.classify_edge_interval = true;
     k.fixes.cover_refuses_folded_continuation = true;
     k.fixes.curve_contacts_at_curve_ends = true;
@@ -288,7 +286,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.local_operation_box_holds_new_surfaces = true;
     k.fixes.local_operation_refuses_loose_tangent_edges = true;
     k.fixes.local_operation_step_walls = true;
-    k.fixes.loops_go_on_round_the_vertex = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.offset_collapsed_rounds_mated = true;

@@ -31,6 +31,7 @@ pub(crate) fn tools(
         angle,
         anchor,
         clip,
+        keepout_clip,
         margin,
         depth,
         through_all,
@@ -81,6 +82,7 @@ pub(crate) fn tools(
         },
         anchor,
         clip: *clip,
+        keepout_clip: *keepout_clip,
         margin: match margin {
             Some(e) => val(vals, e, Kind::Length)?,
             None => 0.0,
