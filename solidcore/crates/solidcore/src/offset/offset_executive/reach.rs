@@ -2780,7 +2780,9 @@ fn extension_within(
 /// class names ([`exact_class`]), ARGUED as [`implicit::distance_bound`] derives it from
 /// [`implicit::lies_on`]'s acceptance: `0` for a surface with no analytic label (a bare
 /// net is its own form); `None` for a torus, a surface with no NURBS form, or a form the
-/// bound does not take.
+/// bound does not take (a cone's axis short of unit length with the form reaching the band
+/// about its apex where the surface has no point). A cone's `|a|² − 1` is enclosed by
+/// [`quadric::norm_defect`], exactly 0 for a cardinal axis.
 ///
 /// # Errors
 ///
@@ -2792,7 +2794,16 @@ fn form_gap(k: &Kernel, surface: &Surface) -> Result<Option<f64>> {
     let Some(form) = crate::blend::fillet_section::station::as_b_spline(k, surface)? else {
         return Ok(None);
     };
-    implicit::distance_bound(&form, &support.implicit())
+    let equation = support.implicit();
+    let delta = match equation {
+        // `norm_defect` is `−δ`
+        Implicit::Cone { axis, .. } => match quadric::norm_defect(axis) {
+            Some(d) => [-d.hi, -d.lo],
+            None => return Ok(None),
+        },
+        _ => [0.0, 0.0],
+    };
+    implicit::distance_bound(&form, &equation, delta)
 }
 
 /// Whether every two of `quadrics` are parallel ([`parallel_quadrics`], either way round):
@@ -4933,5 +4944,32 @@ mod tests {
         let gap = form_gap(&k, &cylinder).unwrap().unwrap();
         eprintln!("form_gap(cylinder r50 h100) = {gap:e}");
         assert!(gap > 0.0 && gap < 1e-4, "{gap}");
+    }
+
+    /// [`implicit::distance_bound`] near a cone's apex: with `|a|² = 1 + δ`, `δ < 0`, the
+    /// cone has no point at heights where `|R| < √|δ| |s|`, so a form reaching that band about
+    /// the apex (a pointed cone, r 30 at z 0 to its apex at z 100) has no bound (`None`),
+    /// while with `δ` exactly 0 it has one, and a frustum clear of the apex (r 50 to r 30) has
+    /// one with `δ < 0` too.
+    #[test]
+    fn a_cone_short_of_a_unit_axis_has_no_gap_bound_at_its_apex() {
+        use crate::primitive::api_primitives as ap;
+        let k = Kernel::default();
+        let bound = |base: f64, top: f64, delta: [f64; 2]| {
+            let cone =
+                Surface::from(ap::create_cone_surface(&k, Point3::ZERO, base, top, 100.0).unwrap());
+            let form = crate::blend::fillet_section::station::as_b_spline(&k, &cone)
+                .unwrap()
+                .unwrap();
+            let equation = AnalyticSupport::of(&cone).unwrap().implicit();
+            implicit::distance_bound(&form, &equation, delta).unwrap()
+        };
+        let short = -f64::EPSILON;
+        assert!(bound(30.0, 0.0, [0.0, 0.0]).is_some());
+        assert_eq!(bound(30.0, 0.0, [short, short]), None);
+        assert_eq!(bound(30.0, 0.0, [short, 0.0]), None);
+        assert!(bound(50.0, 30.0, [short, short]).is_some());
+        // `δ > 0`: every height has a point
+        assert!(bound(30.0, 0.0, [f64::EPSILON, f64::EPSILON]).is_some());
     }
 }
