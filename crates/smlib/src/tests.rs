@@ -95,7 +95,7 @@ const NO_KERNEL: [&str; 14] = [
     "hold_a_kernel",
 ];
 
-const ANSWERING: [&str; 67] = [
+const ANSWERING: [&str; 68] = [
     "set_dump_dir",
     "current_call",
     "crash_test",
