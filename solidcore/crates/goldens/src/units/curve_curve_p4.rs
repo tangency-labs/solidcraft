@@ -1028,6 +1028,7 @@ fn rust(k: &Kernel, op: &OpIn) -> Result<Output, HarnessError> {
                 obb,
                 &sub_ivl(nb, *fb),
                 *tol,
+                0.0,
                 Some(0),
                 Some(1),
             );

@@ -83,7 +83,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_extended_edges_mated = true;
     f.keep_operand_uv_trims = true;
     f.proto_vertex_miss_is_false = true;
-    f.flat_corners_test_bits = true;
     f.cylinder_rebuild_mean_radius = true;
     f.revolve_analytic_profile_faces = true;
     f.taper_tangent_corner_planes = true;
@@ -148,7 +147,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.boolean_new_face_closure_both_sides = true;
     f.linear_sweep_arc_is_cylinder = true;
     f.revolve_splits_curves_on_axis = true;
-    f.cover_wraps_across_closed_seam = true;
     f.fillet_trace_reaches_rails = true;
     f.delete_vertex_joins_seam_iso_curve = true;
     f.box_face_failures_propagate = true;
@@ -156,7 +154,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_removal_takes_ring_fillets = true;
     // The fork's commits that reached `SMLIB_REV` at eaa998a (tangency-labs/smlib#68, #69, #70).
     f.fillet_trim_inside_by_best_dot = true;
-    f.fillet_half_degree_crease = true;
     f.curve_loop_normal_from_area = true;
     // The fork's commits in `SMLIB_REV` 2fc375f, ported to solidcore since.
     f.fillet_cliff_overflow = true;
@@ -184,7 +181,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ellipse_step_interval_checks = true;
     f.corner_patch_face_side_twist = true;
     f.boolean_union_refuses_solid_leak = true;
-    f.face_points_span_domain = true;
     f.drop_curve_v_domain_degeneracy = true;
     f.dupin_bottom_hyperbola_axis = true;
     f.offset_swap_uv_extended_distance = true;
@@ -193,12 +189,9 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.point_on_start_point_squared_tolerance = true;
     f.bspline_trim_keeps_rational_end_spans = true;
     f.fillet_exact_round_classes = true;
-    f.check_seam_crossing_unclosed = true;
-    f.ascii_doubles_round_trip = true;
     f.offset_edges_keep_source_tolerance = true;
     f.surface_continuity_checks_last_v_knot = true;
     f.volume_lift_third_derivative_terms = true;
-    f.curve_bounded_surface_read_uv_type_and_implicit_outer = true;
     f.volume_representational_end_continuities = true;
     f.offset_open_edge_second_trim_point = true;
     f.close_loop_relates_only_coincident_edges = true;
