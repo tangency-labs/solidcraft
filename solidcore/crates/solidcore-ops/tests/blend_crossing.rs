@@ -4,6 +4,11 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)] // test helpers
 
 mod common;
+/// #16735's leak checks on a result body read into the kernel: test code measuring geometry,
+/// which this crate itself does not (docs/layers.md §4).
+#[path = "../../solidcore/tests/support/volume_leak.rs"]
+#[allow(clippy::disallowed_methods)]
+mod volume_leak;
 
 use solidcore::blend::definition_check::surface_kind_name;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
@@ -250,7 +255,28 @@ fn a_round_ending_at_a_crease_is_not_refused_over_rounds_it_never_reaches() {
         "A B C: {}",
         all.1
     );
-    assert!((all.1 - 4183.769446).abs() < 2e-6, "A B C: {}", all.1);
+    // The issue's figure came from the integrator before #16735, which leaked through the
+    // tolerant edges' gaps; the volume now closes them. So it holds within that body's old
+    // leak bound, sum g L max|z - o_z| over its edge uses (`volume_leak::leak`, gaps g at the
+    // closure's grid: MEASURED), plus the figure's own rounding to six decimals, and the
+    // volume no longer depends on the origin.
+    {
+        let b = creased_wall_arm(2.5);
+        let edges: Vec<usize> = [edge_a, edge_b, edge_c]
+            .iter()
+            .map(|&p| edge_at(&b, p))
+            .collect();
+        blend(&b, Blend::Round, &edges, &[r], &[], Corners::Filled).unwrap();
+        let (k, mut made) = kernel_copy(&b);
+        let l = volume_leak::leak(&k, &mut made, 1e-10, 8);
+        assert!(
+            (all.1 - 4183.769446).abs() <= l.old_bound + 5e-7,
+            "A B C: {} against the issue's 4183.769446, old leak bound {:e}",
+            all.1,
+            l.old_bound
+        );
+        assert!(l.origin_spread <= l.origin_allowance, "A B C: {l:?}");
+    }
     assert_eq!((all.0, &all.2), ([15, 37, 24, solid], &kinds(3, 1, 11)));
 
     let overlapping = creased_wall_arm(0.5);
