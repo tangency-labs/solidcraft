@@ -2908,6 +2908,21 @@ enum ChamferSecond {
     Angle(f64), // Degrees, as entered.
 }
 
+fn chamfer_model_param(doc: &mut solidcraft_doc::Document, base: &str, value: f64, unit: &str, cmd: &str) -> Result<String> {
+    let taken: std::collections::BTreeSet<_> = doc
+        .params
+        .iter()
+        .map(|p| p.name.as_str())
+        .chain(doc.text_params.iter().map(|p| p.name.as_str()))
+        .chain(doc.features.iter().flat_map(|f| f.param_names.iter().map(String::as_str)))
+        .collect();
+    let name = (1..=taken.len() + 1)
+        .map(|index| if index == 1 { base.to_string() } else { format!("{base}_{index}") })
+        .find(|name| !taken.contains(name.as_str()))
+        .ok_or_else(|| bad(cmd, "no free chamfer parameter name"))?;
+    Ok(doc.new_named_model_param(&name, &format!("{value} {unit}"), unit)?)
+}
+
 fn chamfer(s: &mut Session, p: &Value, cmd: &str, distance: f64, second: ChamferSecond) -> Result<Value> {
     let corners = corner_list(p, cmd)?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
@@ -2928,12 +2943,11 @@ fn chamfer(s: &mut Session, p: &Value, cmd: &str, distance: f64, second: Chamfer
             }
         }
         // One set of inputs drives all selected corners. Equal distances share a parameter.
-        let length_param = |doc: &mut solidcraft_doc::Document, value| doc.new_model_param(&format!("{value} mm"), "mm");
-        let first = length_param(doc, distance);
+        let first = chamfer_model_param(doc, "chamfer_distance", distance, "mm", cmd)?;
         let other = match second {
             ChamferSecond::Equal => first.clone(),
-            ChamferSecond::Distance(value) => length_param(doc, value),
-            ChamferSecond::Angle(value) => doc.new_model_param(&format!("{value} deg"), "deg"),
+            ChamferSecond::Distance(value) => chamfer_model_param(doc, "chamfer_second_distance", value, "mm", cmd)?,
+            ChamferSecond::Angle(value) => chamfer_model_param(doc, "chamfer_angle", value, "deg", cmd)?,
         };
         let params = [first, other];
         let (mut lines, mut kept) = (Vec::new(), Vec::new());

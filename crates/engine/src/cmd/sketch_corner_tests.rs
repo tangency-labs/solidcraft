@@ -192,6 +192,12 @@ fn chamfers_keep_input_dimensions() {
             assert!((dims[0].kind.value().unwrap() - 3.0).abs() < 1e-9);
             assert!((dims[1].kind.value().unwrap() - second_value).abs() < 1e-9);
             let params: Vec<_> = dims.iter().map(|c| c.param.clone().unwrap()).collect();
+            let second_name = match cmd {
+                "sketch.chamfer.equal_distance" => "chamfer_distance",
+                "sketch.chamfer.two_distance" => "chamfer_second_distance",
+                _ => "chamfer_angle",
+            };
+            assert_eq!(params, ["chamfer_distance", second_name], "{cmd}");
             assert_eq!(params[0] == params[1], cmd.ends_with("equal_distance"));
             assert_eq!(matches!(dims[1].kind, solidcraft_sketch::ConstraintKind::Angle { .. }), cmd.ends_with("distance_angle"));
             let after = s.doc.to_json();
@@ -211,6 +217,45 @@ fn chamfers_keep_input_dimensions() {
             }
         }
     }
+}
+
+#[test]
+fn chamfer_parameter_names_preserve_existing_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 10}));
+    let plane_param = s.doc.features[0].param_names[0].clone();
+    run(&mut s, "parameters.rename", json!({"name": plane_param, "new_name": "chamfer_angle"}));
+    run(&mut s, "parameters.add", json!({"name": "chamfer_distance", "expression": "7 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "chamfer_second_distance", "expression": "label", "unit": "text"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 20]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": 30}));
+    let width = sk(&s).constraints.iter().find_map(|c| c.param.clone()).unwrap();
+    run(&mut s, "parameters.rename", json!({"name": width, "new_name": "chamfer_distance_2"}));
+    for (cmd, corners, sizes, expected) in [
+        ("sketch.chamfer.two_distance", ["l1", "l2"], json!({"distance": 3, "distance2": 4}), ["chamfer_distance_3", "chamfer_second_distance_2"]),
+        ("sketch.chamfer.distance_angle", ["l2", "l3"], json!({"distance": 3, "angle": 30}), ["chamfer_distance_4", "chamfer_angle_2"]),
+        ("sketch.chamfer.distance_angle", ["l3", "l4"], json!({"distance": 3, "angle": 30}), ["chamfer_distance_5", "chamfer_angle_3"]),
+    ] {
+        let mut p = sizes;
+        p["a"] = json!(corners[0]);
+        p["b"] = json!(corners[1]);
+        let out = run(&mut s, cmd, p);
+        let k = sk(&s);
+        let names: Vec<_> = out["created"]["dimensions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|id| k.constraints.iter().find(|c| c.id == id.as_str().unwrap()).unwrap().param.as_deref().unwrap())
+            .collect();
+        assert_eq!(names, expected, "{cmd}");
+        assert!(solved(&s));
+    }
+    assert_eq!(s.doc.param("chamfer_distance").unwrap().expr, "7 mm");
+    assert_eq!(s.doc.eval("chamfer_distance_2", solidcraft_doc::expr::Kind::Length).unwrap(), 30.0);
+    assert_eq!(s.doc.text_param("chamfer_second_distance").unwrap().text, "label");
+    assert_eq!(s.doc.features[0].param_names, ["chamfer_angle"]);
+    assert_eq!(s.doc.eval("chamfer_angle", solidcraft_doc::expr::Kind::Length).unwrap(), 10.0);
 }
 
 /// The entered angle is measured toward the sharp corner, regardless of line directions.
