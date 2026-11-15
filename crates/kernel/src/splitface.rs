@@ -518,6 +518,13 @@ fn split(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<(Body, Vec<us
     })
 }
 
+/// The record edges of `split` (a body [`split_any`] cut) that no edge of the body was before:
+/// the cut.
+pub(crate) fn cut_edges(split: &Body) -> Vec<usize> {
+    let Some(h) = split.history() else { return Vec::new() };
+    h.edges.iter().enumerate().filter(|(_, prov)| !prov.origins.iter().any(|o| matches!(o, EdgeOrigin::Edge { .. }))).map(|(e, _)| e).collect()
+}
+
 /// The edges of `split` that no edge of the body was before (its split lines), as polylines
 /// through their exact points.
 fn new_lines(split: &Body, h: &History) -> Result<Vec<Vec<Vec3>>> {

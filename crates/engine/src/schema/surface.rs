@@ -561,7 +561,10 @@ fn trim_with_schema(_: &mut SchemaGenerator) -> Schema {
 
 fn trim_tool_schema(generator: &mut SchemaGenerator) -> Schema {
     let mut face = face_on_body(generator);
-    face.insert("description".into(), json!("A face to cut with, its surface extended."));
+    face.insert(
+        "description".into(),
+        json!("A face to cut with: it must cut the surface through on its own (its surface is not extended past its edges)."),
+    );
     face
 }
 

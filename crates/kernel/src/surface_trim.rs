@@ -62,10 +62,46 @@ pub fn trim(body: &Body, tool: &SplitTool, keep: Vec3) -> Result<Body> {
 /// read at a point inside it ([`face_sides`]), and the pieces not kept are taken away ([`crate::remove_faces`]); both carry their history, so the kept
 /// faces are the body's own, cut.
 pub fn trim_keep(body: &Body, tool: &SplitTool, keep: TrimKeep) -> Result<Body> {
+    trim_split(body, tool, keep, None)
+}
+
+/// A surface body trimmed by face `face` of `tool` itself, keeping what `keep` says: the face
+/// must cut the body through on its own. Refused when part of the cut lies off the face (past
+/// its edges, where only its surface extended meets the body): the face's own cut then ends
+/// inside the body and separates nothing, and the face's surface continued past its edges is
+/// not what was picked. The test is exact: every edge the cut made lies on the face's surface
+/// and inside its trim ([`solidcore_ops::cap::edges_lie_on_face`]), within the larger of the
+/// two bodies' tolerances. Each kept face is the face it is a piece of (its history is over
+/// `[body]`).
+pub fn trim_by_face(body: &Body, tool: &Body, face: usize, keep: TrimKeep) -> Result<Body> {
+    trim_split(body, &SplitTool::Face { body: tool, face }, keep, Some((tool, face)))
+}
+
+/// The cut of `split` (the edges the split made) on face `face` of `tool`, or the refusal.
+fn cut_lies_on_face(split: &Body, tool: &Body, face: usize) -> Result<()> {
+    let cut = crate::splitface::cut_edges(split);
+    let (ops_tool, tool_order) = tool.ops_body().ok_or_else(|| KernelError::Failed("trim: the tool body can't be read exactly".into()))?;
+    let (ops_split, split_order) = split.ops_body().ok_or_else(|| KernelError::Failed("trim: the cut surface can't be read exactly".into()))?;
+    let tolerance = split.record().tolerance.max(tool.record().tolerance);
+    let on = solidcore_ops::cap::edges_lie_on_face(ops_tool, tool_order, face, ops_split, split_order, &cut, tolerance)
+        .map_err(|e| KernelError::Failed(format!("trim: where the cut lies: {e}")))?;
+    if on {
+        return Ok(());
+    }
+    Err(KernelError::Invalid(
+        "the tool face does not cut the surface through: its cut would run on past the face's edges, where only the face's surface, extended, meets the surface. Pick a face that crosses the surface from edge to edge, or trim with a plane or sketch curves".into(),
+    ))
+}
+
+/// [`trim_keep`], and with `on_face` ([`trim_by_face`]) the cut held to that face.
+fn trim_split(body: &Body, tool: &SplitTool, keep: TrimKeep, on_face: Option<(&Body, usize)>) -> Result<Body> {
     body.require_brep("trim")?;
     keep.check()?;
     let all: Vec<usize> = (0..body.face_count()).collect();
     let (split, _) = crate::splitface::split_any(body, &all, tool)?;
+    if let Some((tool_body, face)) = on_face {
+        cut_lies_on_face(&split, tool_body, face)?;
+    }
     let kept: Vec<bool> = match keep {
         TrimKeep::Side(p) if crate::splitface::field_count(tool)? == 1 => {
             let side = ToolSide::of(tool, body)?;
@@ -374,6 +410,23 @@ mod tests {
         assert!(rel(area(&ta), 100.0) < 1e-9 && rel(area(&tb), 100.0) < 1e-6, "{} {}", area(&ta), area(&tb));
         let l = stitch(&[&ta, &tb], 0.0).unwrap();
         assert_eq!((l.face_count(), l.edge_count()), (2, 7));
+    }
+
+    /// #17180: a 20 × 20 sheet trimmed by a face of another sheet on the plane x = 5. A face that
+    /// crosses the sheet from edge to edge (y = −5…25) cuts it: the side of x = 0 keeps 5 × 20.
+    /// A face that stops inside it (y = 5…15) cuts nothing through on its own (only its plane,
+    /// extended past its edges, would), so the trim is refused instead of cutting along the
+    /// extension.
+    #[test]
+    fn a_tool_face_must_cut_the_surface_through() {
+        let sq = rect(&Plane::XY, 0.0, 0.0, 20.0, 20.0);
+        let at5 = Plane::new(Vec3::new(5.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap();
+        let across = rect(&at5, -5.0, -5.0, 25.0, 5.0);
+        let t = trim_by_face(&sq, &across, 0, TrimKeep::Side(Vec3::new(1.0, 10.0, 0.0))).unwrap();
+        assert!(rel(area(&t), 100.0) < 1e-9, "{}", area(&t));
+        let short = rect(&at5, 5.0, -5.0, 15.0, 5.0);
+        let e = trim_by_face(&sq, &short, 0, TrimKeep::Side(Vec3::new(1.0, 10.0, 0.0))).unwrap_err().to_string();
+        assert!(e.contains("does not cut the surface through"), "{e}");
     }
 
     #[test]

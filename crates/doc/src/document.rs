@@ -2132,7 +2132,7 @@ pub enum FeatureKind {
         #[walk(length = "Tolerance")]
         tolerance: Expr,
     },
-    /// A surface body trimmed by a plane, by a face of a body (`tool`, its surface extended) or
+    /// A surface body trimmed by a plane, by a face of a body (`tool`, which must cut it through) or
     /// by sketch curves swept onto it (`curves`), keeping the side of `keep`; with `keep_more`,
     /// the regions (pieces that hang together once cut) `keep` and those points pick instead.
     /// With `with`, a mutual trim: `body` and `with` (one face each) cut each other, `with`
