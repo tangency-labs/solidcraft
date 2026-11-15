@@ -6,8 +6,9 @@
 //! # The field
 //! A list of closed loops of lines and arcs in the sketch plane, nested by depth: an outer loop
 //! is a field, a loop inside it is a keep-out (a boss, a screw hole, a label), a loop inside that
-//! is a field again. Curves that are neither lines nor arcs (splines, conics) are followed to
-//! within [`FLATTEN_TOL`] and their loop is never snapped.
+//! is a field again. Curves that are neither lines nor arcs (splines, conics) decide which cells
+//! are kept by their exact distance to a cell ([`exact`]), are followed to within [`FLATTEN_TOL`]
+//! where a cell is trimmed to them, and their loop is never snapped.
 //!
 //! # The lattice
 //! With `s` the cell `size` (its inscribed diameter), `w` the `web` between neighbours and
@@ -40,6 +41,7 @@
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing range tests, kept as written
 
+mod exact;
 mod free;
 pub(crate) mod lattice;
 pub(crate) mod region;
@@ -131,6 +133,9 @@ pub struct CellGridSpec {
     pub anchor: Vec2,
     /// What happens to a cell the field's edge crosses.
     pub clip: Clip,
+    /// The least clearance from a cell's outline to every edge of the field and its keep-outs, with
+    /// [`Clip::Whole`] (0: a cell may touch an edge). Measured exactly, on the edges' own curves.
+    pub margin: f64,
 }
 
 impl Default for CellGridSpec {
@@ -144,6 +149,7 @@ impl Default for CellGridSpec {
             angle: 0.0,
             anchor: Vec2::ZERO,
             clip: Clip::Snap,
+            margin: 0.0,
         }
     }
 }
@@ -170,6 +176,18 @@ impl CellGridSpec {
                 "the web must be from {MIN_SIZE} to {MAX_COORD} mm, not {}",
                 self.web
             )));
+        }
+        if !(self.margin.is_finite() && (0.0..=MAX_COORD).contains(&self.margin)) {
+            return Err(CellGridError::Parameter(format!(
+                "the margin must be from 0 to {MAX_COORD} mm, not {}",
+                self.margin
+            )));
+        }
+        if self.margin > 0.0 && self.clip != Clip::Whole {
+            return Err(CellGridError::Parameter(
+                "a margin needs `clip: whole`: snapped and trimmed cells meet the edge by design"
+                    .into(),
+            ));
         }
         if !self.angle.is_finite() || self.angle.abs() > 1e6 {
             return Err(CellGridError::Parameter(format!(
@@ -330,7 +348,7 @@ pub fn cell_center(spec: &CellGridSpec, i: i64, j: i64) -> Result<Vec2, CellGrid
 pub fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan, CellGridError> {
     let lat = spec.lattice()?;
     let mut warnings = Vec::new();
-    let loops = lattice_loops(field, spec, &mut warnings)?;
+    let (loops, edges, flattened) = lattice_loops(field, spec, &mut warnings)?;
     let mut clip = spec.clip;
     if clip == Clip::Snap && !lat.snappable() {
         clip = Clip::Whole; // no lattice lines to snap to
@@ -341,6 +359,9 @@ pub fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan, CellGr
         region = snapped;
         warnings.extend(notes);
     }
+    // Curves other than lines and arcs, round cells and a margin are decided on the exact edges.
+    let exact =
+        (flattened || lat.round || spec.margin > 0.0).then(|| exact::ExactField::new(edges, lat.p));
     let mut out = CellGridPlan {
         warnings,
         ..CellGridPlan::default()
@@ -355,7 +376,26 @@ pub fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan, CellGr
         let Some(convex) = Convex::new(poly) else {
             continue;
         };
-        let hits = region.hits(&convex);
+        let mut hits = region.hits(&convex);
+        if let Some(exact) = &exact {
+            // The boundary's own curves and the cell's own outline decide, not the chords and the
+            // polygon round a circle; a sentinel index stands for an edge the chords missed.
+            let outline = if lat.round {
+                exact::CellOutline::Circle { c, r: lat.s / 2.0 }
+            } else {
+                exact::CellOutline::Polygon(&convex)
+            };
+            if !exact.meets(&outline, spec.margin) {
+                // The exact edges are the field as drawn. Snapping moves the straight loops off
+                // them (fields shrink, keep-outs grow), so with `Snap` the hits on the moved
+                // loops must stay: only the other modes may clear a hit the chords made.
+                if clip != Clip::Snap {
+                    hits.clear();
+                }
+            } else if hits.is_empty() {
+                hits.push(usize::MAX);
+            }
+        }
         let whole = |lat: &Lattice| -> Vec<Vec<Prim>> {
             if lat.round {
                 vec![vec![Prim::arc(c, lat.s / 2.0, 0.0, std::f64::consts::TAU)]]
@@ -531,7 +571,7 @@ fn lattice_loops(
     field: &[Loop2],
     spec: &CellGridSpec,
     warnings: &mut Vec<String>,
-) -> Result<Vec<Loop>, CellGridError> {
+) -> Result<(Vec<Loop>, Vec<exact::Edge>, bool), CellGridError> {
     if field.len() > MAX_LOOPS {
         return Err(CellGridError::Field(format!(
             "{} loops, more than the {MAX_LOOPS} allowed",
@@ -543,6 +583,7 @@ fn lattice_loops(
     let mut total = 0usize;
     let mut flattened = false;
     let mut loops = Vec::new();
+    let mut edges = Vec::new();
     for (n, lp) in field.iter().enumerate() {
         let wrong = |what: &str| CellGridError::Field(format!("loop {n}: {what}"));
         if lp.segs.is_empty() {
@@ -552,6 +593,11 @@ fn lattice_loops(
         let mut curved = false;
         for seg in &lp.segs {
             check_seg(seg, MAX_COORD).map_err(wrong)?;
+            edges.push(
+                exact::Edge::of(&exact::moved_seg(seg, turn, shift)).ok_or_else(|| {
+                    wrong("has a curve too complex to measure to within 0.001 mm")
+                })?,
+            );
             match *seg {
                 Seg2::Line { a, b } => prims.push(Prim::line(a, b)),
                 Seg2::Arc {
@@ -591,9 +637,9 @@ fn lattice_loops(
         );
     }
     if flattened {
-        warnings.push(format!("curves other than lines and arcs are followed to within {FLATTEN_TOL} mm, and their loop never snaps"));
+        warnings.push(format!("curves other than lines and arcs: cells are kept or dropped by their exact distance to them, a trimmed piece is followed to within {FLATTEN_TOL} mm, and their loop never snaps"));
     }
-    Ok(loops)
+    Ok((loops, edges, flattened))
 }
 
 /// Checks a segment read from outside before anything evaluates it: every stored coordinate
@@ -674,11 +720,15 @@ fn check_seg(seg: &Seg2, max_abs: f64) -> Result<(), &'static str> {
 /// The most pieces a curve is cut into.
 const MAX_FLATTEN_PIECES: usize = 4096;
 
-/// A curve that is neither a line nor an arc as a polyline (both end points included) with at
-/// most about `tol` chord error: the pieces' count from the second differences of the controls
-/// (chord error of `n` pieces is at most the largest second difference over `8 n^2`). `None` when
-/// that takes more than [`MAX_FLATTEN_PIECES`] pieces: the curve is then too complex to follow
-/// within `tol`.
+/// A curve that is neither a line nor an arc as a polyline (both end points included), every
+/// chord within about `tol` of the curve and every point of it within `tol` of a chord (both ways,
+/// the points of the polyline lying on the curve). `None` when that takes more than
+/// [`MAX_FLATTEN_PIECES`] pieces: the curve is then too complex to follow within `tol`.
+///
+/// A cubic's or Bézier's piece count comes from the second differences of its controls (chord
+/// error of `n` pieces is at most the largest second difference over `8 n^2`, proved from the
+/// bound on its second derivative). A conic's comes from [`flatten_conic`], a bound that holds for
+/// every positive weight.
 fn flatten(seg: &Seg2, tol: f64) -> Option<Vec<Vec2>> {
     let tol = tol.max(1e-9);
     let pieces = |bow: f64| {
@@ -696,7 +746,7 @@ fn flatten(seg: &Seg2, tol: f64) -> Option<Vec<Vec2>> {
                 .max((p1 - p2 * 2.0 + p3).length())
                 * 6.0,
         )?,
-        Seg2::Conic { a, apex, b, w } => pieces((a - apex * 2.0 + b).length() * 2.0 * w.max(1.0))?,
+        Seg2::Conic { a, apex, b, w } => return flatten_conic(a, apex, b, w, tol),
         Seg2::Bezier { n, ref p } => {
             let c = p.get(..=usize::from(n)).unwrap_or(&[]);
             let d2 = c.windows(3).map(|w| match w {
@@ -709,4 +759,108 @@ fn flatten(seg: &Seg2, tol: f64) -> Option<Vec<Vec2>> {
         Seg2::Arc { .. } => 8,
     };
     Some((0..=n).map(|i| seg.point_at(i as f64 / n as f64)).collect())
+}
+
+/// A conic (the rational quadratic Bézier from `a` to `b` with control `apex`, end weights 1 and
+/// apex weight `w`) as a polyline whose points lie on it, cut by halving.
+///
+/// A piece is again a conic with positive weights `(w0, w1, w2)`, split at `t = 1/2` by rational
+/// de Casteljau: the new controls are convex combinations of the old (`(w0 P0 + w1 P1) / (w0 +
+/// w1)`, and so on), with weights `(w0 + w1) / 2` and `(w0 + 2 w1 + w2) / 4`, so no weight
+/// from 1e-12 to 1e12 loses precision, and a large weight's shoulder is found within a few
+/// levels.
+///
+/// Exact arithmetic first. With every weight positive a piece lies in its control triangle `a,
+/// apex, b`, so every point of the piece is within `h`, the distance of the apex from the segment
+/// `ab`, of the chord `ab`; and the piece, a curve from `a` to `b` inside the triangle, crosses
+/// the perpendicular to the chord at each of its points within `h` of it, so every chord point is
+/// within `h` of the piece. A piece is taken as a chord when `h <= tol - 2 * slack`.
+///
+/// Rounding (`u = 2^-53`, `gamma_k = k u / (1 - k u)`, `M` the largest coordinate of the three
+/// controls, so every control point of every piece is in the box `[-M, M]^2` and any two are at
+/// most `2 sqrt(2) M` apart); the computed pieces are those of the conic at most
+/// `D = 64 * 16 u M` from the true one, pointwise in the parameter, and `slack` covers that:
+/// - (a) one level's points. `mix` sums at most three weights (two additions, so `s` has relative
+///   error `gamma_2`), divides (`gamma_3` on each coefficient), multiplies (`gamma_4`) and sums
+///   at most three terms (two more additions, `gamma_2` of the sum of their sizes); the
+///   coefficients add to 1 and the points are in the box, so a child's point is off the exact
+///   weighted mean of its computed parent by at most `(gamma_4 + gamma_2) M <= 8 u M`; a
+///   convex combination of points each so far off is that far off.
+/// - (b) one level's weights. `left` and `right` are one addition (relative error `u`), `mid` two
+///   (`gamma_2`); a relative error `theta <= 2.01 u` in each weight changes a point's
+///   coefficients `lambda_i` to at most `lambda_i (1 + theta) / (1 - theta)` times themselves, so
+///   `sum |d lambda_i| <= 2 theta / (1 - theta) <= 4.1 u`, and as they still add to 1 the point
+///   moves at most half of that times `2 sqrt(2) M`: `<= 6 u M`. With (a) a computed child is
+///   within `d1 = 16 u M` (14 u M, and room for the product of the two) of the exact child of
+///   its computed parent, at every parameter.
+/// - Over at most `MAX_LEVELS = 64` levels the exact child of a conic within `e` of another is
+///   within `e` of the same child of it (the same parameter), so the computed piece is within
+///   `D = 64 d1 = 1024 u M` of the true curve, at the same parameter; its ends too.
+/// - (c) the height. `to_segment` takes `f = o - p` and `d = e - o` from the nearer end (each
+///   coordinate one subtraction, `u`), `|d|^2` (`gamma_3`), and, when the foot is inside, the
+///   perpendicular `|f.x d.y - f.y d.x| / |d|`: the two products and their difference are within
+///   `gamma_4 (|f.x d.y| + |f.y d.x|) <= sqrt(2) gamma_4 |f| |d|`, and the division and root add
+///   `gamma_2`'s worth of `h`, so the error is at most `sqrt(2) gamma_4 |f| + 4 u h <= 5.7 u *
+///   2.83 M + 4 u * 2.83 M <= 28 u M`; at an end it is the length of `f` (`gamma_5 |f| <= 15 u
+///   M`). Taken as `E = 32 u M`.
+/// - (d) the decision. Accepted, the computed `h_c <= tol - 2 slack`, so the computed triangle's
+///   true height is at most `tol - 2 slack + E`. The computed piece lies in that triangle, so is
+///   within that of its chord, and the true curve within `D` more of it (and the other way for
+///   a chord point): within `tol - 2 slack + E + D`, which is at most `tol` when `slack >= (E +
+///   D) / 2 = 528 u M = 264 EPSILON M`. `slack` is `288 EPSILON M`, the whole rounded up.
+///
+/// A weight not positive and finite, more than 64 levels, a `slack` over `tol / 4`, or more than
+/// [`MAX_FLATTEN_PIECES`] chords is `None`.
+fn flatten_conic(a: Vec2, apex: Vec2, b: Vec2, w: f64, tol: f64) -> Option<Vec<Vec2>> {
+    const MAX_LEVELS: usize = 64;
+    if !(w.is_finite() && w > 0.0) {
+        return None;
+    }
+    let m = [a, apex, b]
+        .iter()
+        .fold(0.0_f64, |m, p| m.max(p.x.abs()).max(p.y.abs()));
+    let slack = 288.0 * f64::EPSILON * m;
+    let limit = tol - 2.0 * slack;
+    if !(m.is_finite() && limit > 0.5 * tol) {
+        return None;
+    }
+    let mix = |ws: &[f64], ps: &[Vec2]| {
+        let s: f64 = ws.iter().sum();
+        ws.iter()
+            .zip(ps)
+            .fold(Vec2::ZERO, |acc, (&k, &p)| acc + p * (k / s))
+    };
+    let mut out = vec![a];
+    let mut stack = vec![([a, apex, b], [1.0, w, 1.0], 0usize)];
+    let mut visits = 0usize;
+    while let Some((p, k, level)) = stack.pop() {
+        visits += 1;
+        if visits > 4 * MAX_FLATTEN_PIECES {
+            return None;
+        }
+        let [p0, p1, p2] = p;
+        let h = exact::to_segment(p1, p0, p2);
+        if !h.is_finite() {
+            return None;
+        }
+        if h <= limit {
+            out.push(p2);
+            if out.len() > MAX_FLATTEN_PIECES {
+                return None;
+            }
+            continue;
+        }
+        if level >= MAX_LEVELS {
+            return None;
+        }
+        let [w0, w1, w2] = k;
+        let q1 = mix(&[w0, w1], &[p0, p1]);
+        let q2 = mix(&[w0, 2.0 * w1, w2], &[p0, p1, p2]);
+        let r1 = mix(&[w1, w2], &[p1, p2]);
+        let left = (w0 + w1) / 2.0;
+        let mid = (w0 + 2.0 * w1 + w2) / 4.0;
+        stack.push(([q2, r1, p2], [mid, (w1 + w2) / 2.0, w2], level + 1));
+        stack.push(([p0, q1, q2], [w0, left, mid], level + 1));
+    }
+    Some(out)
 }
