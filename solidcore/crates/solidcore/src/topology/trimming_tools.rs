@@ -1490,8 +1490,9 @@ fn eval_point(k: &Kernel, c: &Curve, t: f64) -> Result<Point3> {
 /// meet. `arrive` is the end the loop arrives by (`2i` the start of curve `i`, `2i + 1`
 /// its end), `close` the start of the loop's first curve, `found` the nearest end to
 /// `arrive`. The ends at that vertex (within `tol_3d` of `found`) that the loop can go
-/// on from are those of curves it has not used, and `close`; a curve with both ends there
-/// (shorter than `tol_3d`) offers only its start, so it is run forwards. Of them it takes the one
+/// on from are those of curves it has not used, and `close`; a curve that lies wholly within
+/// `tol_3d` of the vertex (collapsed there) offers only its start, so it is run forwards,
+/// while a closed curve through the vertex offers both ends. Of them it takes the one
 /// whose leaving tangent comes next round the vertex from the arriving curve's,
 /// counterclockwise about `turn_normal` (unit, one for all the vertices of a call, from
 /// `loops_turn_normal`; zero where the curves lie on one line; tangency-labs/smlib
@@ -1501,6 +1502,27 @@ fn eval_point(k: &Kernel, c: &Curve, t: f64) -> Result<Point3> {
 /// # Errors
 ///
 /// `SM_ERR` for a zero tangent at an end there; those of the curve evaluations.
+/// Whether `c` is collapsed to `p`: the sphere enclosing the curve's bounding box
+/// (`CalculateBoundingBox`, unexpanded) lies in the ball of radius `tol` about `p`. A
+/// closed curve through `p` with any extent beyond `tol` is not.
+fn curve_within(k: &Kernel, c: &Curve, p: Point3, tol: f64) -> Result<bool> {
+    let ext = c
+        .calculate_bounding_box(
+            k,
+            &c.natural_interval(),
+            BoundingBoxRequest {
+                normal: true,
+                pseudo: false,
+                polar: false,
+            },
+            false,
+        )?
+        .normal
+        .unwrap_or_default();
+    let sphere = ext.sphere_bound();
+    Ok(sphere.center.distance(p) + sphere.radius <= tol)
+}
+
 fn next_round_the_vertex(
     k: &Kernel,
     curves: &[Curve],
@@ -1522,9 +1544,19 @@ fn next_round_the_vertex(
         if at(seen, ii / 2)? && ii != close {
             continue;
         }
-        // a curve collapsed to this vertex (both ends within `tol_3d` of it) leaves it
-        // only from its start: its end's tangent would run it backwards (#17033)
-        if ii % 2 == 1 && at(ends, ii - 1)?.distance(found_pt) <= tol_3d {
+        // a curve collapsed to this vertex (all of it within `tol_3d` of it) leaves it
+        // only from its start: its end's tangent would run it backwards (#17033). A
+        // closed curve through the vertex has both ends there too but is not collapsed:
+        // both its ends stay candidates.
+        if ii % 2 == 1
+            && at(ends, ii - 1)?.distance(found_pt) <= tol_3d
+            && curve_within(
+                k,
+                curves.get(ii / 2).ok_or_else(|| null("curve index"))?,
+                found_pt,
+                tol_3d,
+            )?
+        {
             continue;
         }
         candidates.push(ii);
@@ -3702,6 +3734,74 @@ mod tests {
     /// must run the collapsed top line forwards (from its start), not backwards from its
     /// end. Backwards, the profile face made the sweep report the axis inside the face
     /// (1025) instead of the degenerate swept face (1007, UB-215).
+    /// #16998 review: a closed curve through a touching vertex is not collapsed, so both
+    /// its ends stay candidates there and the turn-order rule picks between them. A
+    /// 4 x 4 square and, inside it, a closed counterclockwise triangle (one degree-1
+    /// curve `(0,0) -> (2,1) -> (1,2) -> (0,0)`) touching its corner (0, 0). Arriving at
+    /// the corner along the square's left side, the next ray counterclockwise is the
+    /// triangle's end, so the triangle runs backwards (clockwise, a hole touching the
+    /// outline) and the loop goes on to the square's bottom side: one loop of five.
+    /// Excluding the closed curve's end (a guard on its end points alone) ran it
+    /// forwards, `Same`, in all 96 of these orders. Every order whose first curve is not
+    /// the triangle is checked against main's result (the triangle first starts its own
+    /// loop).
+    #[test]
+    fn closed_curve_at_the_vertex_keeps_the_turn_order() {
+        let k = Kernel::default();
+        let tri = [
+            [0.0, 0.0, 0.0],
+            [2.0, 1.0, 0.0],
+            [1.0, 2.0, 0.0],
+            [0.0, 0.0, 0.0],
+        ];
+        let pw = tri
+            .iter()
+            .map(|p| CPoint::new(p[0], p[1], p[2], NOW))
+            .collect();
+        let nl = NlCurve::new(pw, 1, vec![0.0, 0.0, 1.0, 2.0, 3.0, 3.0]).unwrap();
+        let cs = [
+            line3([0.0, 0.0, 0.0], [4.0, 0.0, 0.0]),
+            line3([4.0, 0.0, 0.0], [4.0, 4.0, 0.0]),
+            line3([4.0, 4.0, 0.0], [0.0, 4.0, 0.0]),
+            line3([0.0, 4.0, 0.0], [0.0, 0.0, 0.0]),
+            Curve::from(BSplineCurve::from_nurb(nl, 3, false)),
+        ];
+        let mut orders = vec![vec![]];
+        for _ in 0..5 {
+            let mut next = Vec::new();
+            for o in &orders {
+                for i in 0..5usize {
+                    if !o.contains(&i) {
+                        let mut v: Vec<usize> = o.clone();
+                        v.push(i);
+                        next.push(v);
+                    }
+                }
+            }
+            orders = next;
+        }
+        let mut checked = 0;
+        for o in orders.iter().filter(|o| o[0] != 4) {
+            let input: Vec<Curve> = o.iter().map(|&i| cs[i].clone()).collect();
+            let r = order_curves_into_loops(&k, &input, 1e-6).unwrap();
+            assert!(r.status().is_ok(), "order {o:?}");
+            assert_eq!(r.loop_counts, vec![5], "order {o:?}");
+            let seq: Vec<usize> = r.ordered.iter().map(|&i| o[i]).collect();
+            let want: Vec<usize> = (0..5).map(|n| (o[0] + n) % 5).collect();
+            assert_eq!(seq, want, "order {o:?}");
+            for (&c, &orient) in seq.iter().zip(&r.orients) {
+                let expect = if c == 4 {
+                    OrientType::Opposite
+                } else {
+                    OrientType::Same
+                };
+                assert_eq!(orient, expect, "order {o:?}, curve {c}");
+            }
+            checked += 1;
+        }
+        assert_eq!(checked, 96);
+    }
+
     #[test]
     fn issue_17033_collapsed_curve_at_the_vertex_runs_forwards() {
         let k = Kernel::default();
