@@ -185,12 +185,19 @@ mod tests {
             ("cylinder", vec!["face"]),
             ("linear", vec!["a", "b"]),
             ("angle", vec!["a", "b"]),
+            ("faces", vec!["a", "b"]),
+            ("silhouettes", vec!["a", "b"]),
+            ("length", vec!["edge"]),
+            ("sphere", vec!["face"]),
+            ("cone", vec!["face"]),
         ] {
             let inspection = json!({"record":{"kind":{(kind): {}}}});
             assert_eq!(reference_slots(&inspection), expected);
         }
         assert_eq!(reference_slots(&json!({"record":{"kind":{"chain":{"points":[{},{},{}]}}}})), vec!["0","1","2"]);
         assert!(reference_slots(&json!({"record":{}})).is_empty());
+        assert!(reference_slots(&json!({"record":{"kind":{"unknown":{}}}})).is_empty());
+        assert!(reference_slots(&json!({"record":{"kind":{"linear":{},"radial":{}}}})).is_empty());
     }
     #[test]
     fn only_repairable_states_expose_repair_action() {
