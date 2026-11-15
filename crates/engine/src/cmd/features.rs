@@ -2536,6 +2536,20 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let translate = point_param(s, p, "translate", cmd)?.unwrap_or_else(|| point_expr(Vec3::ZERO));
     let origin = point_param(s, p, "origin", cmd)?;
     let copy = bool_(p, "copy").unwrap_or(false);
+    // The command boundary captures these before instance names become definition names.
+    let copy_frames: Vec<solidcraft_doc::Mat> = if copy {
+        p.get("_copy_frames")
+            .cloned()
+            .or_else(crate::frames::take_copy_frames)
+            .map(|v| serde_json::from_value(v).map_err(|_| bad(cmd, "invalid copy placements")))
+            .transpose()?
+            .unwrap_or_else(|| vec![solidcraft_doc::IDENTITY; bodies.len()])
+    } else {
+        Vec::new()
+    };
+    if !copy_frames.is_empty() && (copy_frames.len() != bodies.len() || copy_frames.iter().any(|m| !solidcraft_doc::valid_transfer_matrix(m))) {
+        return Err(bad(cmd, "invalid copy placements"));
+    }
     let reply = add_feature(
         s,
         p,
@@ -2546,6 +2560,7 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
             rotate_axis: p.get("axis").and_then(vec3).map(Dir),
             angle: expr(p, "angle"),
             copy,
+            copy_frames,
         },
     )?;
     if copy {
