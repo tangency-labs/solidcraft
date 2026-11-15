@@ -732,10 +732,25 @@ pub fn network_surface(u: Vec<NetworkCurve>, v: Vec<NetworkCurve>, tol: Toleranc
         for e in [0.0, 1.0] {
             let ends: Vec<Vec3> = us.iter_mut().map(|t| t.point(e)).collect::<SplineResult<_>>()?;
             let Some(&first) = ends.first() else { continue };
-            if ends.iter().all(|p| p.dist(first) <= tol.cross) {
+            let meet = |a: Vec3, b: Vec3| -> SplineResult<bool> {
+                solidcore_ops::measure::points_meet([a.x, a.y, a.z], [b.x, b.y, b.z], tol.cross)
+                    .or_else(|e| invalid(format!("the ends of the curves can't be compared: {e}")))
+            };
+            let mut all_meet = true;
+            for p in &ends {
+                all_meet &= meet(*p, first)?;
+            }
+            if all_meet {
                 continue;
             }
-            if let Some(i) = ends.windows(2).position(|w| w[0].dist(w[1]) <= tol.cross) {
+            let mut found = None;
+            for (i, w) in ends.windows(2).enumerate() {
+                if meet(w[0], w[1])? {
+                    found = Some(i);
+                    break;
+                }
+            }
+            if let Some(i) = found {
                 let (a, b) = (&us[i].label, &us[i + 1].label);
                 return invalid(format!(
                     "{a} and {b} meet at an end the other curves don't reach, so a surface through the curves in turn would fold back past them there. Curves that meet end to end are the sides of a patch: give the two that share a corner (the surface spans to the side across), or cross them with curves of the other direction"
