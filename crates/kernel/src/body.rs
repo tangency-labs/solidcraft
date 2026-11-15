@@ -767,6 +767,30 @@ impl Body {
         }
     }
 
+    /// Faces of `self` within `reach` of `p`, each with its exact distance and outward normal.
+    pub fn faces_within(&self, p: Vec3, reach: f64) -> Vec<(usize, f64, Vec3)> {
+        let Some((ops, order)) = self.ops_body() else {
+            return Vec::new();
+        };
+        let max_dist = if reach.is_finite() { reach.max(1e-6) } else { 1e12 };
+        let Ok(dists) = ops.face_distances_within(order, &[[p.x, p.y, p.z]], max_dist) else {
+            return Vec::new();
+        };
+        dists
+            .into_iter()
+            .enumerate()
+            .filter_map(|(f, row)| {
+                let d = row.first().copied().flatten()?;
+                if d <= reach {
+                    let n = ops.face_plane_normal(order, f).ok().flatten().map(|n| Vec3::new(n.value[0], n.value[1], n.value[2])).unwrap_or(Vec3::Z);
+                    Some((f, d, n))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
     pub fn with_cylinder_certificate(mut self, producer: u64) -> Result<Self> {
         if producer == 0 {

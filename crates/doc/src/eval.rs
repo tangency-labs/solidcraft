@@ -5224,22 +5224,16 @@ fn hole_on_surface_in(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String], fro
 fn faces_near(st: &ModelState, p: Vec3, reach: f64, scope: &[String]) -> Vec<NearFace> {
     let mut out: Vec<NearFace> = Vec::new();
     for (i, b) in st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh() && in_hole_scope(scope, b)) {
-        let m = b.mesh();
-        // No facet is nearer `p` than the mesh's box: one beyond `reach` has none to give.
-        if !m.bounds().inflated(reach).contains(p) {
+        if let Ok(bounds) = b.body.exact_bounds()
+            && !bounds.inflated(reach.max(1e-6)).contains(p)
+        {
             continue;
         }
-        // The nearest facet of each face of this body.
-        let mut near: BTreeMap<u32, (f64, Vec3)> = BTreeMap::new();
-        for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-            let Some([a, bb, c]) = m.tri(t) else { continue };
-            let d = crate::appearance::closest_on_triangle(p, a, bb, c).dist(p);
-            let Some(n) = (bb - a).cross(c - a).normalized() else { continue };
-            if d <= reach && near.get(f).is_none_or(|(x, _)| d < *x) {
-                near.insert(*f, (d, n));
+        for (f, d, n) in b.body.faces_within(p, reach) {
+            if let Ok(f) = u32::try_from(f) {
+                out.push((d, i, f, n));
             }
         }
-        out.extend(near.into_iter().map(|(f, (d, n))| (d, i, f, n)));
     }
     out.sort_by(|a, b| a.0.total_cmp(&b.0));
     out
