@@ -90,15 +90,28 @@ pub struct ListResult {
 pub struct InstallParams {
     /// The `.zip` to install; subject to the caller's file scope.
     pub path: String,
+    /// Exact manifest-and-component hash from a reviewed dry run; a mismatch refuses installation.
+    #[serde(default)]
+    pub approval: Option<String>,
+    /// Exact `.zip` hash (`archive`) from a reviewed dry run; any changed file in the archive refuses installation.
+    #[serde(default)]
+    pub archive: Option<String>,
     /// Replace an installed plugin with the same id. Without it, that is refused.
     #[serde(default)]
     pub replace: bool,
     /// Check the `.zip` and describe the plugin; write nothing.
     #[serde(default)]
     pub dry_run: bool,
+    /// Permissions approved by the host user. Omission grants nothing, even on replacement.
+    #[serde(default)]
+    pub approve: Option<InstallApproval>,
 }
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct InstallResult {
+    /// SHA-256 of the exact manifest and component. Send it as `approval` after reviewing this reply.
+    pub approval: String,
+    /// SHA-256 of the whole `.zip`. Send it as `archive` after reviewing this reply.
+    pub archive: String,
     pub id: String,
     pub name: String,
     pub version: String,
@@ -107,10 +120,18 @@ pub struct InstallResult {
     pub capabilities: Vec<String>,
     /// What it asks for: command groups, named folders, the clock.
     pub permissions: craft_plugin::Permissions,
+    /// The fuel, memory and time it asks for. Memory above `host_limits` is approved at install
+    /// (`approve.memory_mib`); fuel is not, and must fit `host_limits`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<craft_plugin::Limits>,
+    /// The app's ceilings for plugins, before any approval.
+    pub host_limits: craft_plugin::HostLimits,
     /// App commands it calls.
     pub commands: Vec<String>,
     /// Its entries, as namespaced commands (`id.entry`).
     pub entries: Vec<String>,
+    /// Entry declarations, including where the host will show them.
+    pub entry_points: Vec<craft_plugin::Entry>,
     /// The installed plugin of the same id, `name version`, when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replaces: Option<String>,
@@ -120,4 +141,54 @@ pub struct InstallResult {
     pub folder: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoveParams {
+    pub id: String,
+}
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RemoveResult {
+    pub id: String,
+    pub removed: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// A subset of the manifest's requested permissions; no unrequested access is accepted.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InstallApproval {
+    #[serde(default)]
+    pub command_groups: std::collections::BTreeSet<String>,
+    #[serde(default)]
+    pub folders: Vec<ApprovedFolder>,
+    /// Memory in MiB to allow above the app's ceiling for plugins: exactly the manifest's
+    /// `runtime.limits.memory_mib`. Omitted: the plugin runs under the app's ceiling.
+    #[serde(default)]
+    pub memory_mib: Option<usize>,
+}
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ApprovedFolder {
+    pub name: String,
+    /// An existing absolute folder selected by the host user.
+    pub path: std::path::PathBuf,
+    pub read: bool,
+    pub write: bool,
+}
+impl From<InstallApproval> for crate::plugin::Grants {
+    fn from(approve: InstallApproval) -> Self {
+        Self {
+            package_hash: None,
+            command_groups: approve.command_groups,
+            folders: approve
+                .folders
+                .into_iter()
+                .map(|f| craft_plugin::FileGrant { name: f.name, folder: f.path, read: f.read, write: f.write })
+                .collect(),
+            memory_mib: approve.memory_mib,
+        }
+    }
 }

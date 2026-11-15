@@ -131,8 +131,141 @@ pub fn boundary_surface(u: &[BoundaryCurve], v: &[BoundaryCurve]) -> Result<Body
             SplineError::TooLarge(m) => KernelError::TooLarge(m),
             SplineError::Invalid(m) => KernelError::Invalid(m),
         })?;
-        face_of(&surface, &corners)
+        // The surface is fitted to its curves (a non-rational surface cannot hold an arc
+        // exactly), so each side's edges carry the proved distance of its input curve from the
+        // surface as their tolerance: the B-rep states the construction's real error, and a
+        // body built on the same curve is sewn to it within that tolerance.
+        let (made, tolerance) = face_of(&surface, &corners, &[])?;
+        let mut boundary: Vec<&BoundaryCurve> = Vec::new();
+        for c in [u.first(), u.last(), v.first(), v.last()].into_iter().flatten() {
+            if !boundary.iter().any(|b| std::ptr::eq(*b, c)) {
+                boundary.push(c);
+            }
+        }
+        let mut inputs = Vec::new();
+        for c in boundary {
+            // (a record's tolerance is twice SMLib's: the import halves it into the zone
+            // tolerance the validity check holds a gap to)
+            if let Some((ends, gap)) = input_gap(c, &made, tolerance / 2.0)? {
+                inputs.push((ends, 2.0 * gap));
+            }
+        }
+        if inputs.iter().all(|(_, needed)| *needed <= tolerance) {
+            return Ok(made);
+        }
+        face_of(&surface, &corners, &inputs).map(|(body, _)| body)
     }
+}
+
+/// The record curve `c` as a spline on its own parameter over `interval` (a line as a degree-1
+/// spline whose knots span `interval`, its parameter as the line's: `start + t * (end - start)`,
+/// which an edge's interval need not keep inside `[0, 1]`); `None` for a curve with no spline form
+/// here.
+fn as_spline(c: solidcore_record::brep::Curve, [t0, t1]: [f64; 2]) -> Option<solidcore_record::brep::Curve> {
+    use solidcore_record::brep::Curve as C;
+    match c {
+        C::Line { start, end } => {
+            let at = |t: f64| std::array::from_fn(|i| start[i] + t * (end[i] - start[i]));
+            Some(C::Spline { knots: vec![t0, t0, t1, t1], points: vec![at(t0), at(t1)] })
+        }
+        // a circle or ellipse has the exact rational form the kernel gives it where it is bounded
+        C::Spline { .. } | C::RationalSpline { .. } | C::Circle { .. } | C::Ellipse { .. } => Some(c),
+        _ => None,
+    }
+}
+
+/// The exact curves `c` is made of, each a spline over its interval; `None` only for a point (it has
+/// no edge to bound). A side with a curve that has no spline form (its gap cannot be enclosed),
+/// or with no curve at all, is refused by name.
+fn input_curves(c: &BoundaryCurve) -> Result<Option<Vec<(solidcore_record::brep::Curve, [f64; 2])>>> {
+    let mut out = Vec::new();
+    match &c.source {
+        CurveSource::Sketch { plane, segs } => {
+            for s in segs {
+                let (curve, _) = crate::freeform::segment(plane, s)?;
+                let Some(curve) = as_spline(curve, [0.0, 1.0]) else {
+                    return Err(unproved(&c.label, "a curve has no spline form"));
+                };
+                out.push((curve, [0.0, 1.0]));
+            }
+        }
+        CurveSource::Points(pts) => {
+            for w in pts.windows(2) {
+                if w[0].dist(w[1]) > 0.0 {
+                    let line = solidcore_record::brep::Curve::Line { start: [w[0].x, w[0].y, w[0].z], end: [w[1].x, w[1].y, w[1].z] };
+                    let Some(curve) = as_spline(line, [0.0, 1.0]) else {
+                        return Err(unproved(&c.label, "a curve has no spline form"));
+                    };
+                    out.push((curve, [0.0, 1.0]));
+                }
+            }
+        }
+        CurveSource::Edges { body, at } => {
+            let (chain, _) = crate::surfaces::picked_chain(body, at)?;
+            let r = body.record();
+            for (e, _) in chain {
+                let Some(edge) = r.edges.get(e) else {
+                    return Err(unproved(&c.label, "an edge reference"));
+                };
+                let Some(curve) = as_spline(edge.parameters().clone(), edge.interval) else {
+                    return Err(unproved(&c.label, "a curve has no spline form"));
+                };
+                out.push((curve, edge.interval));
+            }
+        }
+        CurveSource::Point(_) => return Ok(None),
+    }
+    if out.is_empty() {
+        return Err(unproved(&c.label, "no curve"));
+    }
+    Ok(Some(out))
+}
+
+/// The ends of the boundary curve `c` (the ends of its pieces that no other piece shares) and the
+/// proved distance of all of it from the face of `made`; `None` for a point, an error (naming the
+/// side) when the distance is not enclosed. A
+/// hundredth of `zone` (the edges' own zone tolerance) is the scale below which a tighter bound
+/// changes nothing.
+fn input_gap(c: &BoundaryCurve, made: &Body, zone: f64) -> Result<Option<([Vec3; 2], f64)>> {
+    let Some(curves) = input_curves(c)? else {
+        return Ok(None);
+    };
+    let smlib = made.smlib()?;
+    let mut ends: Vec<Vec3> = Vec::new();
+    let mut gap = 0.0_f64;
+    for (curve, interval) in &curves {
+        let bound = smlib.curve_face_gap_bound(curve, *interval, 0, 1e-2 * zone).map_err(|e| KernelError::smlib("SMLib curve/face gap", e))?;
+        gap = gap.max(proved_or_refused(&c.label, bound)?);
+        let eval = CurveEval::new(curve).map_err(|e| KernelError::Failed(format!("boundary surface: {e}")))?;
+        for t in *interval {
+            let p = eval.point(t).ok_or_else(|| unproved(&c.label, "an end is not evaluated"))?;
+            // a piece's end another piece starts or ends at is inside the chain
+            match ends.iter().position(|q| q.dist(p) <= CROSS_TOLERANCE) {
+                Some(i) => {
+                    ends.swap_remove(i);
+                }
+                None => ends.push(p),
+            }
+        }
+    }
+    match ends.as_slice() {
+        [a, z] => Ok(Some(([*a, *z], gap))),
+        // a side with other than two free ends is a closed chain: the network takes none (its
+        // corners are the sides' ends), so a bound that cannot reach the end vertices is refused
+        _ => Err(unproved(&c.label, "its ends")),
+    }
+}
+
+/// The proved distance of a boundary curve's piece from the surface. A side whose distance
+/// cannot be enclosed has no certificate for its edges' tolerance, so the construction is
+/// refused and names the side.
+fn proved_or_refused(label: &str, bound: Option<f64>) -> Result<f64> {
+    bound.ok_or_else(|| unproved(label, "the surface's gap is not enclosed"))
+}
+
+/// The refusal of a non-point side whose distance from the surface is not proved.
+fn unproved(label: &str, why: &str) -> KernelError {
+    KernelError::Failed(format!("boundary surface: {label}: its distance from the surface can't be proved ({why})"))
 }
 
 /// `made` (a boundary surface) sewn into `target` along the edges they share: one body, a solid
@@ -397,8 +530,10 @@ impl CrossFace for EdgeFaces {
 /// at the `corners` that lie on it (inner vertices of edge chains), the pieces edges on the side's
 /// own curve over parts of its interval. A side collapsed to a point (a three-sided patch) is left
 /// out: the two sides beside it meet at one vertex there. Two sides shrunk to a point leave a
-/// lens of two edges; refused when fewer than two sides are left.
-fn face_of(s: &NurbsSurface, corners: &[Vec3]) -> Result<Body> {
+/// lens of two edges; refused when fewer than two sides are left. A side between the ends of
+/// one of `inputs` takes at least its tolerance (record units); the face and the default
+/// tolerance of its edges are returned.
+fn face_of(s: &NurbsSurface, corners: &[Vec3], inputs: &[([Vec3; 2], f64)]) -> Result<(Body, f64)> {
     let fail = |m: &str| KernelError::Failed(format!("boundary surface: {m}"));
     let [nu, nv] = s.count();
     if nu < 2 || nv < 2 {
@@ -435,14 +570,40 @@ fn face_of(s: &NurbsSurface, corners: &[Vec3]) -> Result<Body> {
             }
         }
     }
-    let tolerance = (size * 1e-6).max(1e-5);
-    let mut parts = Parts { tolerance, ..Parts::default() };
-    parts.vertices = c.iter().map(|p| solidcore_record::brep::Vertex { point: [p.x, p.y, p.z], tolerance }).collect();
+    let base = (size * 1e-6).max(1e-5);
+    // Each side's tolerance: at least the one `inputs` gives the input curve that runs between
+    // its corners (within the crossing tolerance, either way round).
+    let side_tolerance: Vec<f64> = sides
+        .iter()
+        .map(|(_, _, [a, z], ..)| {
+            let at = |p: Vec3, q: Vec3| p.dist(q) <= CROSS_TOLERANCE;
+            inputs
+                .iter()
+                .filter(|([p, q], _)| (at(*p, c[*a]) && at(*q, c[*z])) || (at(*p, c[*z]) && at(*q, c[*a])))
+                .fold(base, |t, (_, gap)| t.max(*gap))
+        })
+        .collect();
+    // A corner's tolerance is at least that of every side it ends.
+    let mut corner_tolerance = [base; 4];
+    for (k, (_, _, [a, z], ..)) in sides.iter().enumerate() {
+        if collapsed.get(k).copied().unwrap_or(false) {
+            continue;
+        }
+        let t = side_tolerance.get(k).copied().unwrap_or(base);
+        for i in [*a, *z] {
+            let j = vertex_of[i];
+            corner_tolerance[j] = corner_tolerance[j].max(t);
+        }
+    }
+    let mut parts = Parts { tolerance: base, ..Parts::default() };
+    parts.vertices =
+        c.iter().zip(corner_tolerance).map(|(p, tolerance)| solidcore_record::brep::Vertex { point: [p.x, p.y, p.z], tolerance }).collect();
     let mut uses = Vec::new();
     for (k, (ctrl, knots, [a, z], forward, fixed)) in sides.into_iter().enumerate() {
         if collapsed.get(k).copied().unwrap_or(false) {
             continue;
         }
+        let tolerance = side_tolerance.get(k).copied().unwrap_or(base);
         let (curve, [t0, t1]) = spline_curve(&ctrl, knots)?;
         let eval = CurveEval::new(&curve).map_err(|e| fail(&e.to_string()))?;
         let cuts = cuts_on(&eval, [t0, t1], corners);
@@ -477,7 +638,7 @@ fn face_of(s: &NurbsSurface, corners: &[Vec3]) -> Result<Body> {
     };
     parts.faces.push((face, true));
     let body = surface_body(&parts.canonical()?.brep)?;
-    crate::surfaces::all_new(body, &[])
+    Ok((crate::surfaces::all_new(body, &[])?, base))
 }
 
 /// The points of `corners` on a side's curve (within [`CROSS_TOLERANCE`]) strictly between its
@@ -800,5 +961,14 @@ mod tests {
             continuity: Continuity::G0,
         };
         assert!(boundary_surface(&[nan, line3("b", Vec3::Y, Vec3::new(1.0, 1.0, 0.0))], &[]).is_err());
+    }
+
+    /// A side whose distance from the surface cannot be enclosed is refused by name; a proved
+    /// distance passes through.
+    #[test]
+    fn an_unproved_side_is_refused_by_name() {
+        let e = proved_or_refused("rim", None).unwrap_err();
+        assert!(e.to_string().contains("rim") && e.to_string().contains("can't be proved"), "{e}");
+        assert_eq!(proved_or_refused("rim", Some(0.25)).unwrap(), 0.25);
     }
 }
