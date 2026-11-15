@@ -17,9 +17,19 @@ use std::f64::consts::{PI, TAU};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AngleCrossing {
     /// The piece's angle reaches `θ` at parameter `t`, at `point`.
-    At { point: Vec3, t: f64 },
+    At {
+        /// The point on the curve where its angle is `θ`.
+        point: Vec3,
+        /// The curve's parameter there.
+        t: f64,
+    },
     /// It does not between the piece's ends; the end nearer `θ` in angle.
-    Nearer { point: Vec3, t: f64 },
+    Nearer {
+        /// The end of the piece whose angle is nearer `θ`.
+        point: Vec3,
+        /// The curve's parameter at that end.
+        t: f64,
+    },
 }
 
 /// `x` wrapped into `(−π, π]`.
@@ -37,51 +47,63 @@ pub fn angle_crossing(
     origin: Vec3,
     x: Vec3,
     y: Vec3,
-    [s, t]: [f64; 2],
+    [start, end]: [f64; 2],
     theta: f64,
 ) -> Option<AngleCrossing> {
-    let off = |u: f64| -> Option<(f64, Vec3)> {
-        let p = curve.point(u)?;
-        let d = p - origin;
-        Some((wrap(d.dot(y).atan2(d.dot(x)) - theta), p))
+    let off = |at: f64| -> Option<(f64, Vec3)> {
+        let point = curve.point(at)?;
+        let radial = point - origin;
+        Some((wrap(radial.dot(y).atan2(radial.dot(x)) - theta), point))
     };
-    let ((d0, p0), (d1, p1)) = (off(s)?, off(t)?);
-    if d0 == 0.0 {
-        return Some(AngleCrossing::At { point: p0, t: s });
+    let ((off_start, at_start), (off_end, at_end)) = (off(start)?, off(end)?);
+    if off_start == 0.0 {
+        return Some(AngleCrossing::At {
+            point: at_start,
+            t: start,
+        });
     }
-    if d1 == 0.0 {
-        return Some(AngleCrossing::At { point: p1, t });
+    if off_end == 0.0 {
+        return Some(AngleCrossing::At {
+            point: at_end,
+            t: end,
+        });
     }
     // The wrap is at π: a piece under half a turn whose offsets differ in sign across it does
     // not reach θ (its angle passes θ + π instead).
-    if d0.signum() == d1.signum() || (d1 - d0).abs() >= PI {
-        return Some(if d0.abs() <= d1.abs() {
-            AngleCrossing::Nearer { point: p0, t: s }
+    if off_start.signum() == off_end.signum() || (off_end - off_start).abs() >= PI {
+        return Some(if off_start.abs() <= off_end.abs() {
+            AngleCrossing::Nearer {
+                point: at_start,
+                t: start,
+            }
         } else {
-            AngleCrossing::Nearer { point: p1, t }
+            AngleCrossing::Nearer {
+                point: at_end,
+                t: end,
+            }
         });
     }
-    let (mut a, mut b, mut fa) = (s, t, d0);
+    let (mut lo, mut hi, mut off_lo) = (start, end, off_start);
     for _ in 0..200 {
-        let m = 0.5 * (a + b);
-        if !(a < m && m < b) {
+        let mid = 0.5 * (lo + hi);
+        if !(lo < mid && mid < hi) {
             break;
         }
-        let (fm, _) = off(m)?;
-        if fm == 0.0 {
-            a = m;
-            b = m;
+        let (off_mid, _) = off(mid)?;
+        if off_mid == 0.0 {
+            lo = mid;
+            hi = mid;
             break;
         }
-        if fm.signum() == fa.signum() {
-            a = m;
-            fa = fm;
+        if off_mid.signum() == off_lo.signum() {
+            lo = mid;
+            off_lo = off_mid;
         } else {
-            b = m;
+            hi = mid;
         }
     }
-    let m = 0.5 * (a + b);
-    off(m).map(|(_, point)| AngleCrossing::At { point, t: m })
+    let mid = 0.5 * (lo + hi);
+    off(mid).map(|(_, point)| AngleCrossing::At { point, t: mid })
 }
 
 #[cfg(test)]
