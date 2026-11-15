@@ -1,4 +1,4 @@
-name: SolidCraft T173 borrow-safe app-run regression
+name: SolidCraft T174 reference-slot selection
 on:
   push:
     branches: [integration/issue-15776-upstream-20261115]
