@@ -9,6 +9,8 @@ license.workspace = true
 workspace = true
 
 [features]
+# Tests only: preserve frozen legacy DXF byte/error baselines during migration.
+dxf-legacy-baseline-tests = []
 # Tests only: trust a model cache even when the build has no git commit.
 trust-unknown-source = []
 
