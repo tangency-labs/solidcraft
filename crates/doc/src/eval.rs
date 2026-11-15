@@ -1778,6 +1778,7 @@ fn adopt_solution(stored: &mut solidcraft_sketch::Sketch, solved: &solidcraft_sk
         if let Some(v) = d.kind.value() {
             c.kind.set_value(v);
         }
+        solidcraft_sketch::keep_point_order(&mut c.kind, &d.kind);
     }
     true
 }
