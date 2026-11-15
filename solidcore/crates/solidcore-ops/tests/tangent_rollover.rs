@@ -1595,28 +1595,36 @@ fn two_lobes() -> Body {
     lobes_seamed([LOBE_SEAM.to_degrees(); 2])
 }
 
-/// The cylinders of [`LOBES`], each a circle starting at `seams_deg` (degrees about its axis)
-/// swept 15 along z, joined.
-fn lobes_seamed(seams_deg: [f64; 2]) -> Body {
+/// The cylinder of radius `r` about `(cx, cy)` from `z0` to `z1`, its circle starting at
+/// `seam_deg` (degrees about its axis).
+fn seamed_cylinder(([cx, cy], r): ([f64; 2], f64), seam_deg: f64, z0: f64, z1: f64) -> Body {
     use solidcore::curve::curve::Curve as KCurve;
     use solidcore::math::Point3;
     use solidcore::primitive::api_curves::create_arc;
     use solidcore::sweep::api_brep::create_linear_sweep;
-    let lobe = |([cx, cy], r): ([f64; 2], f64), seam: f64| {
-        common::built(|k| {
-            let circle = KCurve::from(create_arc(Point3::new(cx, cy, 0.0), r, seam - 360.0, seam)?);
-            create_linear_sweep(
-                k,
-                &[Some(&circle)],
-                solidcore::Vec3::new(0.0, 0.0, 1.0),
-                LOBE_HEIGHT,
-                true,
-            )
-        })
-    };
+    common::built(|k| {
+        let circle = KCurve::from(create_arc(
+            Point3::new(cx, cy, z0),
+            r,
+            seam_deg - 360.0,
+            seam_deg,
+        )?);
+        create_linear_sweep(
+            k,
+            &[Some(&circle)],
+            solidcore::Vec3::new(0.0, 0.0, 1.0),
+            z1 - z0,
+            true,
+        )
+    })
+}
+
+/// The cylinders of [`LOBES`], each a circle starting at `seams_deg` (degrees about its axis)
+/// swept 15 along z, joined.
+fn lobes_seamed(seams_deg: [f64; 2]) -> Body {
     boolean(
-        lobe(LOBES[0], seams_deg[0]),
-        lobe(LOBES[1], seams_deg[1]),
+        seamed_cylinder(LOBES[0], seams_deg[0], 0.0, LOBE_HEIGHT),
+        seamed_cylinder(LOBES[1], seams_deg[1], 0.0, LOBE_HEIGHT),
         BooleanOp::Union,
     )
     .unwrap()
@@ -1919,6 +1927,196 @@ fn a_lone_round_between_two_cylinders_does_not_roll_over_a_sharp_edge() {
                 "r {r}: named {size}, the contact reaches the edge at {reach}"
             ),
             other => panic!("r {r}: {other:?}"),
+        }
+    }
+}
+
+/// #17345's lobes as a pocket: the box [-60, 90] x [-50, 55] x [0, 15] less both cylinders
+/// (each run through it, seamed at 35.13 deg about its axis). The edge where the two hole walls
+/// cross at (8.036, 25.677) is convex; its round removes the region between the walls and the
+/// ball, the same region the boss's round adds (the ball outside both circles, touching each),
+/// and past the seam's reach its contact on the ø60 hole wall rolls over that wall's seam. Each
+/// radius builds, checks valid at every level, and has the closed-form volume: the box less the
+/// lobes' section and the round's area, times the height.
+#[test]
+fn a_lone_round_between_two_hole_walls_rolls_over_the_seam_of_one() {
+    let reach = seam_reach();
+    let (px, py) = lobe_crossing();
+    let seam = LOBE_SEAM.to_degrees();
+    for corpus in [true, false] {
+        if corpus {
+            fixes();
+        } else {
+            session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
+        }
+        let mut input = make_box([-60.0, -50.0, 0.0], [150.0, 105.0, LOBE_HEIGHT]).unwrap();
+        for lobe in LOBES {
+            let hole = seamed_cylinder(lobe, seam, -1.0, LOBE_HEIGHT + 1.0);
+            input = boolean(input, hole, BooleanOp::Subtract).unwrap().unwrap();
+        }
+        assert!(input.check(CheckLevel::All).unwrap().is_valid());
+        // The round removes 15 times its area from whatever the input measures: the input's
+        // own measured volume differs from 15 (150 x 105 - lobes) by ~4e-3 (3.5e-8 relative,
+        // the boolean's walls), which is not this round's business, so the round is judged on
+        // the difference alone. A convex round's surface is fitted to the kernel's
+        // approximation tolerance (5e-6), so the removed volume may differ from the exact
+        // ball's by at most that times the round's area (under 15 r pi); it measures 2.6e-6 at
+        // r 5 and 2.2e-4 at r 10, the same at any volume accuracy, the same on either side of
+        // the seam, and the same on main where main builds.
+        let before = input.volume(1e-9).unwrap();
+        for r in [5.0, 5.99, 6.03, 8.0, 10.0] {
+            assert_eq!(r > reach, r > 6.0, "r {r}");
+            let b = input.copy().unwrap();
+            let e = edge_at(&b, [px, py, LOBE_HEIGHT / 2.0]);
+            blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled)
+                .unwrap_or_else(|err| panic!("corpus {corpus} r {r}: {err:?}"));
+            let report = b.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "corpus {corpus} r {r}: {report}");
+            let v = b.volume(1e-9).unwrap();
+            let expected = LOBE_HEIGHT * lobe_round_area(r);
+            assert!(
+                (before - v - expected).abs() < 5e-6 * LOBE_HEIGHT * r * PI,
+                "corpus {corpus} r {r}: removed {}, expected {expected}",
+                before - v
+            );
+        }
+    }
+}
+
+/// The ø60 lobe of #17345 on a slab: the cylinder of radius 30 about (-20, 15), seamed at
+/// 35.13 deg, joined to the box [-60, 60] x [-20, 30] x [0, 15], whose top face y = 30 meets
+/// the wall at 30 deg about the axis, (5.981, 30). The lone round along that edge, between a
+/// plane and a cylinder: its ball, centre (bx, 30 + r) with (bx + 20)^2 + (15 + r)^2 = (30 +
+/// r)^2, touches the top at (bx, 30) and the wall towards its centre; past the radius at which
+/// that contact reaches the seam, it rolls over it.
+fn slab_round(r: f64) -> ((f64, f64), (f64, f64), (f64, f64)) {
+    let bx = -20.0 + ((30.0 + r).powi(2) - (15.0 + r).powi(2)).sqrt();
+    let centre = (bx, 30.0 + r);
+    let (dx, dy) = (bx + 20.0, 15.0 + r);
+    let l = dx.hypot(dy);
+    (
+        (bx, 30.0),
+        (-20.0 + 30.0 * dx / l, 15.0 + 30.0 * dy / l),
+        centre,
+    )
+}
+
+/// The area the slab's round adds: the region bounded by the top from the edge's point to the
+/// ball's contact, the ball to its contact on the wall, and the wall back to the edge's point,
+/// by Green's theorem over its line and its two arcs.
+fn slab_round_area(r: f64) -> f64 {
+    let p = (-20.0 + 30.0 * 30.0_f64.to_radians().cos(), 30.0);
+    let (t1, t2, c) = slab_round(r);
+    let angle = |cx: f64, cy: f64, q: (f64, f64)| (q.1 - cy).atan2(q.0 - cx);
+    let short = |from: f64, to: f64| {
+        let mut d = to - from;
+        while d > PI {
+            d -= 2.0 * PI;
+        }
+        while d < -PI {
+            d += 2.0 * PI;
+        }
+        from + d
+    };
+    let arc = |cx: f64, cy: f64, rad: f64, from: f64, to: f64| {
+        0.5 * (rad * rad * (to - from) + cx * rad * (to.sin() - from.sin())
+            - cy * rad * (to.cos() - from.cos()))
+    };
+    let (s1, s2) = (angle(c.0, c.1, t1), angle(c.0, c.1, t2));
+    let (q2, p2) = (angle(-20.0, 15.0, t2), angle(-20.0, 15.0, p));
+    let total = 0.5 * (p.0 * t1.1 - t1.0 * p.1)
+        + arc(c.0, c.1, r, s1, short(s1, s2))
+        + arc(-20.0, 15.0, 30.0, q2, short(q2, p2));
+    total.abs()
+}
+
+#[test]
+fn a_lone_round_between_a_plane_and_a_cylinder_rolls_over_the_seam() {
+    let seam = LOBE_SEAM.to_degrees();
+    // the radius at which the wall contact reaches the seam, by bisection on the closed form
+    let deg = |r: f64| {
+        let (_, t2, _) = slab_round(r);
+        (t2.1 - 15.0).atan2(t2.0 + 20.0).to_degrees()
+    };
+    let (mut lo, mut hi) = (0.5_f64, 20.0_f64);
+    assert!(deg(lo) < seam && deg(hi) > seam);
+    for _ in 0..200 {
+        let mid = 0.5 * (lo + hi);
+        if deg(mid) < seam {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    let reach = lo;
+    assert!(reach > 3.0 && reach < 8.0, "reach {reach}");
+    // the area oracle against a fine polygon of the same boundary
+    for r in [2.0, 8.0] {
+        let p = (-20.0 + 30.0 * 30.0_f64.to_radians().cos(), 30.0);
+        let (t1, t2, c) = slab_round(r);
+        let n = 20000;
+        let mut pts = vec![p, t1];
+        let (b0, b1) = (
+            (t1.1 - c.1).atan2(t1.0 - c.0),
+            (t2.1 - c.1).atan2(t2.0 - c.0),
+        );
+        for i in 1..=n {
+            let a = b0 + (b1 - b0) * f64::from(i) / f64::from(n);
+            pts.push((c.0 + r * a.cos(), c.1 + r * a.sin()));
+        }
+        let (w0, w1) = ((t2.1 - 15.0).atan2(t2.0 + 20.0), 30.0_f64.to_radians());
+        for i in 1..n {
+            let a = w0 + (w1 - w0) * f64::from(i) / f64::from(n);
+            pts.push((-20.0 + 30.0 * a.cos(), 15.0 + 30.0 * a.sin()));
+        }
+        let mut twice = 0.0;
+        for (i, q) in pts.iter().enumerate() {
+            let w = pts[(i + 1) % pts.len()];
+            twice += q.0 * w.1 - w.0 * q.1;
+        }
+        let polygon = twice.abs() / 2.0;
+        let got = slab_round_area(r);
+        assert!(
+            (got - polygon).abs() < 1e-5 * got,
+            "r {r}: {got} vs {polygon}"
+        );
+    }
+    // the slab and the disc's segment above y = 30, h = 15 above the centre
+    let segment = 900.0 * 0.5_f64.acos() - 15.0 * (900.0_f64 - 225.0).sqrt();
+    let section = 120.0 * 50.0 + segment;
+    let edge = (-20.0 + 30.0 * 30.0_f64.to_radians().cos(), 30.0);
+    for corpus in [true, false] {
+        if corpus {
+            fixes();
+        } else {
+            session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
+        }
+        let input = boolean(
+            make_box([-60.0, -20.0, 0.0], [120.0, 50.0, LOBE_HEIGHT]).unwrap(),
+            seamed_cylinder(([-20.0, 15.0], 30.0), seam, 0.0, LOBE_HEIGHT),
+            BooleanOp::Union,
+        )
+        .unwrap()
+        .unwrap();
+        for r in [2.0, reach - 0.01, reach + 0.02, 8.0, 10.0] {
+            let b = input.copy().unwrap();
+            let e = edge_at(&b, [edge.0, edge.1, LOBE_HEIGHT / 2.0]);
+            let built = blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled);
+            // Without the corpus fixes, a contact within 0.03 past the seam is still refused
+            // (SM_ERR; main refused every r past the reach here, in both modes), a refusal and
+            // never a wrong body. Everything else must build.
+            if !corpus && r > reach && r < reach + 0.03 && built.is_err() {
+                continue;
+            }
+            built.unwrap_or_else(|err| panic!("corpus {corpus} r {r}: {err:?}"));
+            let report = b.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "corpus {corpus} r {r}: {report}");
+            let v = b.volume(1e-9).unwrap();
+            let expected = LOBE_HEIGHT * (section + slab_round_area(r));
+            assert!(
+                (v - expected).abs() < 1e-6,
+                "corpus {corpus} r {r}: volume {v}, expected {expected}"
+            );
         }
     }
 }
