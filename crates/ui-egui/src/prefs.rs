@@ -7368,7 +7368,7 @@ mod tests {
         let on = DesignTabPrefs::from(&h.app.preferences);
         assert_eq!(
             [on.views_as_tabs, on.sub_tab_sheets, on.sub_tab_sketches, on.sub_tab_render, on.reuse_views, on.reopen_views],
-            [true, true, true, true, true, false]
+            [false, true, true, true, true, false]
         );
         let old = lenient(&json!({"theme": "light"}));
         assert_eq!(DesignTabPrefs::from(&old), on, "saved before they existed");
@@ -7394,7 +7394,7 @@ mod tests {
                 flipped.reuse_views,
                 flipped.reopen_views
             ],
-            [false, false, false, false, false, true]
+            [true, false, false, false, false, true]
         );
         defaults(&mut h.app, PAGE_LAYOUT);
         assert_eq!(DesignTabPrefs::from(&h.app.preferences), on, "Layout's Restore Defaults");

@@ -3254,6 +3254,7 @@ mod tests {
     #[test]
     fn the_views_of_a_design_follow_commands_keys_and_the_app() {
         let mut h = crate::scenario::Harness::new();
+        h.app.preferences.design_views_as_tabs = true;
         h.app.home.open = false;
         let call =
             |h: &mut crate::scenario::Harness, command: &str, params: Value| h.call("engine.execute", json!({"command": command, "params": params}));
