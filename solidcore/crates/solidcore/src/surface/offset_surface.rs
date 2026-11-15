@@ -91,8 +91,8 @@
 //! - **Other upstream bugs kept.** `WR-162` (the upper-half, unequal-order second-
 //!   derivative slot write) is still unfixed. `SplitAt` with an extended
 //!   surface splits the base surface a second time for the extended halves;
-//!   `STEPInversion`
-//!   retries on the extended surface with the tolerance not widened by the offset.
+//!   `STEPInversion` retries on the extended surface with the tolerance not widened by
+//!   the offset.
 //! - **Recursion.** The pole step-off of `EvaluatePlainOrSimple` evaluates itself at
 //!   the step-off points; its depth is bounded by [`MAX_STEPOFF_DEPTH`] (upstream
 //!   fixtures reach depth 1). Construction and restoration bound nested surface

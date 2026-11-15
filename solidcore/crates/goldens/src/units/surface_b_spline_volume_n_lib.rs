@@ -701,7 +701,10 @@ mod representational_continuity_tests {
     use super::*;
 
     /// The continuity a knot of multiplicity `mult` gives a direction of degree `deg`:
-    /// `C^(deg - mult)`, and `C^inf` past `C3`, the finest class the type has.
+    /// `C^(deg - mult)`, saturating at `C0` as upstream's representational convention
+    /// does (a knot with `mult > deg` is really discontinuous; not claimed here, and the
+    /// interior values are not what WR-49 moves). Past `C3`, the finest class the
+    /// enum has, it is `CInfinity`: a limit of the type, not the true class.
     fn knot_class(deg: usize, mult: usize) -> ContinuityType {
         match deg.saturating_sub(mult) {
             0 => ContinuityType::C0,
@@ -741,6 +744,7 @@ mod representational_continuity_tests {
             }
         }
         assert_eq!(d.conts, conts, "{name}: continuities (multiplicities {mults:?})");
+        assert!(!d.unaligned, "{name}: aligned");
         assert_eq!(d.min_cont, min, "{name}: lowest");
     }
 

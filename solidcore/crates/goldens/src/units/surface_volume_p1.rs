@@ -492,7 +492,6 @@ fn opts(left: [bool; 3], nz: bool, comp: bool) -> EvalOptions {
         non_zero_tangents: nz,
         do_zero_sampling: true,
         with_compounding: comp,
-        ..EvalOptions::default()
     }
 }
 
@@ -1209,6 +1208,22 @@ mod chain_rule_composition_tests {
     /// multiplies by the output's factorials (1): depth <= 86. `K = 128` bounds both.
     const DEPTH: f64 = 128.0;
 
+    /// Higham's bound needs no underflow or overflow. `assert_no_underflow` checks
+    /// that every nonzero input lies in [1e-50, 1e50]. A product of at most 5 such
+    /// factors and the constants (factorials, `1/beta!`, at most 6 in size) then stays
+    /// within [1e-252, 1e252], normal in `f64`, and sums of at most 128 of them cannot
+    /// overflow.
+    fn assert_no_underflow(name: &str, vs: &[Vec3]) {
+        for v in vs {
+            for x in [v.x, v.y, v.z] {
+                assert!(
+                    x == 0.0 || (1e-50..=1e50).contains(&x.abs()),
+                    "{name}: input {x} outside the range the rounding bound covers"
+                );
+            }
+        }
+    }
+
     /// Both values are expression trees of `+` and `x` (no subtraction) over the same
     /// inputs, whose exact values are the same multivariate polynomial: each is within
     /// `gamma(K) S` of it, where `S` is the tree evaluated on absolute values
@@ -1249,6 +1264,7 @@ mod chain_rule_composition_tests {
                 Inputs::Lift { form, order, vecs } => {
                     let nvars = form.min(2) + 1;
                     let vs: Vec<Vec3> = vecs.iter().map(|&p| v3(p)).collect();
+                    assert_no_underflow(&c.name, &vs);
                     let mut it = vs.into_iter();
                     let inner: Vec<Vec<Vec3>> = (1..=order)
                         .map(|k| it.by_ref().take(multi(nvars, k).len()).collect())
@@ -1270,6 +1286,8 @@ mod chain_rule_composition_tests {
                 Inputs::Concat { n, a, b } => {
                     let first: Vec<Vec3> = a.iter().map(|&p| v3(p)).collect();
                     let second: Vec<Vec3> = b.iter().map(|&p| v3(p)).collect();
+                    assert_no_underflow(&c.name, &first);
+                    assert_no_underflow(&c.name, &second);
                     let got = concat_evals(n, &first, &second).unwrap();
                     let m = n + 1;
                     let at = |v: &[Vec3], e: [usize; 3]| v[(e[0] * m + e[1]) * m + e[2]];

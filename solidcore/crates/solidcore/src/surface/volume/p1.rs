@@ -124,7 +124,7 @@ use crate::geom::matrix::Matrix;
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::transform::{Transform, MAX_DERIV as GW_MAX_DERIV};
 use crate::geom::vector3d::{Point3, Vec3};
-use crate::kernel::{Kernel, UpstreamFixes};
+use crate::kernel::Kernel;
 use crate::math::{max2, EFF_ZERO, EFF_ZERO_SQ};
 use crate::surface::b_spline_volume::{BSplineVolume, VolumeParam};
 use crate::surface::bend_volume::BendVolume;
@@ -197,8 +197,6 @@ pub enum VolumeKind {
 /// Options of the compound evaluations (`Evaluate`, `Map`, `EvaluateSimple`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EvalOptions {
-    /// Opt-in corrections copied from the calling kernel and preserved through next maps.
-    pub fixes: UpstreamFixes,
     /// `bUFromLeft`, `bVFromLeft`, `bWFromLeft`: evaluate a point on an interval
     /// boundary in the upper (`true`) or lower interval, per direction.
     pub from_left: [bool; 3],
@@ -211,10 +209,9 @@ pub struct EvalOptions {
 }
 
 impl Default for EvalOptions {
-    /// Upstream arguments `true`, with all opt-in corrections disabled.
+    /// Upstream arguments `true`.
     fn default() -> Self {
         Self {
-            fixes: UpstreamFixes::default(),
             from_left: [true; 3],
             non_zero_tangents: true,
             do_zero_sampling: true,
@@ -445,6 +442,7 @@ impl Volume {
     pub const fn kind(&self) -> &VolumeKind {
         &self.kind
     }
+
     /// The next map of the compound map (`GetNextMap`).
     #[must_use]
     pub fn next_map(&self) -> Option<&Self> {

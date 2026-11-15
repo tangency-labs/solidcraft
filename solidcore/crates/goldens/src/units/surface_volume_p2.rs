@@ -1956,7 +1956,8 @@ mod representational_continuity_tests {
     use solidcore::surface::b_spline_volume::VolumeParam;
 
     /// The lowest representational class among a B-spline direction's interior knots
-    /// (`C^(deg - mult)`, `C^inf` past `C3`), counted straight from its knot vector; the
+    /// (`C^(deg - mult)` saturating at `C0`, upstream's convention for `mult > deg`;
+    /// `CInfinity` past `C3`, the enum's limit), counted straight from its knot vector; the
     /// ends are not continuities of the volume (WR-49). `CInfinity` when the direction
     /// has no interior knot, or fewer than two distinct knots.
     fn lowest_interior(deg: usize, knots: &[f64]) -> ContinuityType {
