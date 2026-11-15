@@ -162,6 +162,34 @@ impl Form {
         .unwrap();
         BSplineSurface::from_nurb(nurb, true)
     }
+
+    /// The same form with u and v swapped.
+    fn transposed(&self) -> BSplineSurface {
+        let rows: Vec<Vec<CPoint>> = (0..self.v_count)
+            .map(|j| {
+                (0..self.u_count)
+                    .map(|i| {
+                        let n = i * self.v_count + j;
+                        let [x, y, z] = self.points[n];
+                        let w = self
+                            .weights
+                            .as_ref()
+                            .map_or(solidcore::nurbs::math::NOW, |w| w[n]);
+                        CPoint::new(x, y, z, w)
+                    })
+                    .collect()
+            })
+            .collect();
+        let nurb = solidcore::nurbs::srf_basic::Surface::new(
+            rows,
+            self.v_degree,
+            self.u_degree,
+            self.v_knots.clone(),
+            self.u_knots.clone(),
+        )
+        .unwrap();
+        BSplineSurface::from_nurb(nurb, true)
+    }
 }
 
 #[test]
@@ -370,10 +398,12 @@ fn horn_tori_round_trip_from_a_collapsed_boundary_sweep() {
 /// The two short pieces of a chained 2 mm round where a plane meets a 45 degree cone about the
 /// world z axis (tangency-labs/solidcraft#17004), their nets as the body's record holds them
 /// (`data/short_swept_revolution_nets.jsonl`): surfaces of revolution swept 0.4466 degrees at a
-/// radius of about 15.6 mm, mirror images of each other in y = 0. The recogniser's axis is a
-/// circle's through three evaluated points of so short an arc; its centre lay 4e-11 mm off
-/// sideways, which turned the second net's swept points past their rounding, so the body could
-/// not be read back. Both derive, about the z axis through the origin, over their own sweep.
+/// radius of about 15.6 mm, mirror images of each other in y = 0, sweeping along v. The
+/// recogniser's axis is a circle's through three evaluated points of so short an arc; its
+/// centre lay 4e-11 mm off sideways, which turned the second net's swept points past their
+/// rounding, so the body could not be read back. Each net, and the same net with u and v
+/// swapped, derives about the z axis through the origin, over its own sweep, and evaluates as
+/// its form within 64 ulps of the form's size between the control points too.
 #[test]
 fn short_swept_revolution_nets_derive_about_their_own_axis() {
     use solidcore::surface::surface::SurfaceKind;
@@ -385,16 +415,6 @@ fn short_swept_revolution_nets_derive_about_their_own_axis() {
     assert_eq!(forms.len(), 2);
     for form in &forms {
         assert_eq!(form.kind, "Revolution");
-        let surface = form.surface();
-        let derived = AnalyticSupport::derive_revolution(&k, &surface).unwrap();
-        let SurfaceKind::SurfOfRevolution(rev) = derived.kind() else {
-            panic!("not a surface of revolution: {:?}", derived.kind());
-        };
-        let position = rev.position();
-        let axis = position.x_axis().cross(position.y_axis());
-        assert!(axis.x.hypot(axis.y) < 1e-9, "axis {axis:?}");
-        let origin = position.origin();
-        assert!(origin.x.hypot(origin.y) < 1e-9, "origin {origin:?}");
         // the sweep about the z axis from the net's first to its last control point, which
         // are on the surface
         let angle = |n: usize| {
@@ -402,9 +422,41 @@ fn short_swept_revolution_nets_derive_about_their_own_axis() {
             y.atan2(x)
         };
         let sweep = (angle(form.v_count - 1) - angle(0)).abs().to_degrees();
-        let domain = rev.step_uv_domain();
-        let derived_sweep = domain.max().x - domain.min().x;
-        assert!((derived_sweep - sweep).abs() < 1e-9, "{derived_sweep} for {sweep}");
         assert!((sweep - 0.4466).abs() < 1e-4, "{sweep}");
+        let size = form
+            .points
+            .iter()
+            .zip(form.weights.as_ref().unwrap())
+            .map(|(&[x, y, z], &w)| Vec3::new(x, y, z).length() / w)
+            .fold(0.0, f64::max);
+        for surface in [form.surface(), form.transposed()] {
+            let derived = AnalyticSupport::derive_revolution(&k, &surface).unwrap();
+            let SurfaceKind::SurfOfRevolution(rev) = derived.kind() else {
+                panic!("not a surface of revolution: {:?}", derived.kind());
+            };
+            let position = rev.position();
+            let axis = position.x_axis().cross(position.y_axis());
+            assert!(axis.x.hypot(axis.y) < 1e-9, "axis {axis:?}");
+            let origin = position.origin();
+            assert!(origin.x.hypot(origin.y) < 1e-9, "origin {origin:?}");
+            let domain = rev.step_uv_domain();
+            let derived_sweep = domain.max().x - domain.min().x;
+            assert!(
+                (derived_sweep - sweep).abs() < 1e-9,
+                "{derived_sweep} for {sweep}"
+            );
+            let d = surface.natural_uv_domain();
+            for (a, b) in [(0.1, 0.2), (0.5, 0.5), (0.9, 0.8), (0.3, 0.7)] {
+                let uv = Point2::new(
+                    d.min().x + (d.max().x - d.min().x) * a,
+                    d.min().y + (d.max().y - d.min().y) * b,
+                );
+                let step = derived.convert_uv_from_nurbs_to_step(&k, uv).unwrap();
+                let off = (derived.evaluate_step_point(&k, step).unwrap()
+                    - surface.evaluate_point(uv).unwrap())
+                .length();
+                assert!(off <= 64.0 * f64::EPSILON * size, "{off:e} off at {uv:?}");
+            }
+        }
     }
 }

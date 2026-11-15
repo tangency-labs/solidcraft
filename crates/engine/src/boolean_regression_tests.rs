@@ -1962,8 +1962,8 @@ fn a_body_with_round_pieces_swept_under_a_degree_takes_a_later_round() {
     let body = &state.body("Body1").unwrap().body;
     assert_eq!(body.shell_count(), 1);
     assert!(body.validity().is_empty(), "{:?}", body.validity());
-    // The rim, one circle with one vertex, becomes a torus face with its seam between two circles:
-    // one face, two edges (the second circle and the seam) and the second circle's vertex more.
+    // The rim, one circle with one vertex, becomes the round's face between two circles, with its
+    // seam: one face, two edges (the second circle and the seam) and the second circle's vertex more.
     assert_eq!(counts(&s), (18, 41, 25));
     // Pappus: the round takes off the corner between a square and its 1 mm quarter circle,
     // r^2 (1 - pi/4), whose centroid lies r (10 - 3 pi) / (12 - 3 pi) in from each face, swept
