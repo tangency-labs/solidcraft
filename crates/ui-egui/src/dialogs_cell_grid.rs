@@ -15,6 +15,7 @@ use solidcore_record::{
 use solidcraft_engine::{
     Sel,
     doc::{Direction, FeatureKind, expr::Kind as ValueKind},
+    geom::Vec3Geom as _,
 };
 
 /// The command's keywords, in the order of the choice rows.
@@ -220,7 +221,7 @@ pub fn commands(app: &SolveApp, c: &CellGrid, inputs: &[SelInput], extra: &Map<S
         let kept = extra.get("anchor").filter(|kept| stored_point(app, kept).is_some());
         match crate::selection::items(inputs, ANCHOR_INPUT).first() {
             Some(Sel::Vertex { body, point })
-                if body.is_empty() && kept.and_then(|k| stored_point(app, k)).is_some_and(|k| (k - *point).len() < 1e-9) =>
+                if body.is_empty() && kept.and_then(|k| stored_point(app, k)).is_some_and(|k| k.dist(*point) < 1e-9) =>
             {
                 args.insert("anchor".into(), kept.cloned().unwrap_or_default());
             }
