@@ -310,6 +310,7 @@ mod rule_editor;
 mod rule_editor_tests;
 pub mod safe_graphics;
 pub mod save_job;
+mod scale_bar;
 pub mod scenario;
 pub(crate) mod scene_palette;
 pub mod select_other;

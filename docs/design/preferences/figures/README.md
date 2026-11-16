@@ -79,6 +79,7 @@ token each literal maps to.
 | `view-angles` | 120x64 | Prefs2_Graphics | In the view tile "View angles" |
 | `vertex-markers` | 120x64 | Prefs2_Graphics | In the view tile "Vertex markers" |
 | `quick-measure` | 120x64 | Prefs2_Graphics | In the view tile "Quick measurement" |
+| `scale-bar` | 120x64 | Prefs2_Graphics | In the view tile "Scale bar" (#375) |
 | `frame-rate` | 120x64 | Prefs2_Graphics | In the view tile "Frame rate" |
 | `layout-schematic` | 226x148 | Prefs2_Layout | Layout > Panels: schematic of the window (226x148, shown 262 px wide) |
 | `history-bottom` | 226x148 | Prefs2_Layout | History card "Bottom" |
