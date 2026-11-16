@@ -296,11 +296,28 @@ pub(crate) struct DeferredTouching {
     boundary: Curve,
 }
 
+#[cfg(test)]
+impl DeferredTouching {
+    /// A deferred touching point at `point` from `tsp`, on the boundary curve
+    /// `boundary`.
+    pub(crate) fn new(point: Point3, tsp: TsectPnt, boundary: Curve) -> Self {
+        Self {
+            point,
+            tsp,
+            boundary,
+        }
+    }
+}
+
 /// Appends the touching curve of `tsp` to `out`: degenerate 3D and UV curves at
 /// `point` and the UV points of `tsp`, of type touching, deviated by the distance
 /// between `tsp`'s surface points (the degenerate point branch of
 /// `FindBoundaryStartPoints`).
-fn push_touching_curve(out: &mut TsectCurves, point: Point3, tsp: &TsectPnt) -> Result<()> {
+pub(crate) fn push_touching_curve(
+    out: &mut TsectCurves,
+    point: Point3,
+    tsp: &TsectPnt,
+) -> Result<()> {
     // 3D curve, then the UV curves
     let c3 = BSplineCurve::create_degenerate_curve(3, point)?;
     out.curves_3d.push(Curve::from(c3));
@@ -749,7 +766,9 @@ impl SurfaceIntersector<'_> {
     /// Adds the touching points [`SurfaceIntersector::find_boundary_start_points`]
     /// left out for a start point on them (in the order it found them) whose two
     /// surface points are closer than `this_approx_tol_3d` and which are on none of
-    /// the curves found (boundary, traced and interior); the list is emptied.
+    /// the curves `out` holds; the list is emptied. `DoIntersection` calls it last,
+    /// on the curves left once it has removed degenerate curves that lie on others, so
+    /// a removed curve covers nothing.
     ///
     /// Upstream drops a touching point on a start point for good, as the curve traced
     /// from that start point is to cover it ("due to seams"). A start point that traces
