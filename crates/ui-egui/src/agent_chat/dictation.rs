@@ -161,13 +161,7 @@ pub fn request(endpoint: &Endpoint, key: Option<&str>, wav: Vec<u8>) -> Result<H
         }
         headers.push(("Authorization".to_string(), format!("Bearer {key}")));
     }
-    Ok(HttpRequest {
-        method: "POST",
-        url: format!("{}/audio/transcriptions", endpoint.base_url),
-        headers,
-        body: Some(body),
-        timeout_s: TIMEOUT_S,
-    })
+    Ok(HttpRequest { method: "POST", url: format!("{}/audio/transcriptions", endpoint.base_url), headers, body: Some(body), timeout_s: TIMEOUT_S })
 }
 
 /// A `multipart/form-data` body: the text fields, then the file. Answers the Content-Type (with
@@ -209,6 +203,47 @@ pub fn parse(status: u16, body: &[u8]) -> Result<String, String> {
         None => String::from_utf8_lossy(body).into_owned(),
     };
     Ok(text.trim().chars().take(MAX_TEXT_CHARS).collect())
+}
+
+/// The address the setup steps' server answers on.
+pub const LOCAL_URL: &str = "http://127.0.0.1:8178/v1";
+
+/// One step of setting up whisper.cpp's server on this computer: what to do (a message id) and
+/// the command to copy, if the step has one.
+pub struct SetupStep {
+    pub text: &'static str,
+    pub command: Option<&'static str>,
+}
+
+const RUN_UNIX: &str = "./build/bin/whisper-server -m models/ggml-small.bin --port 8178 -l auto --inference-path /v1/audio/transcriptions";
+const BUILD_UNIX: &str = "git clone --depth 1 https://github.com/ggml-org/whisper.cpp && cd whisper.cpp && cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j 4 --target whisper-server";
+
+/// The steps that set up whisper.cpp's server on this system, for Preferences → AI → Dictation:
+/// build it (Linux, macOS) or download its release (Windows), download the multilingual `small`
+/// model, start it on [`LOCAL_URL`].
+pub fn setup_steps() -> Vec<SetupStep> {
+    if cfg!(target_os = "windows") {
+        vec![
+            SetupStep { text: "ui.dictation_setup_download_windows", command: Some("https://github.com/ggml-org/whisper.cpp/releases/latest") },
+            SetupStep {
+                text: "ui.dictation_setup_model",
+                command: Some("Invoke-WebRequest https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin -OutFile ggml-small.bin"),
+            },
+            SetupStep {
+                text: "ui.dictation_setup_run",
+                command: Some(".\\whisper-server.exe -m ggml-small.bin --port 8178 -l auto --inference-path /v1/audio/transcriptions"),
+            },
+        ]
+    } else {
+        vec![
+            SetupStep {
+                text: if cfg!(target_os = "macos") { "ui.dictation_setup_build_macos" } else { "ui.dictation_setup_build_unix" },
+                command: Some(BUILD_UNIX),
+            },
+            SetupStep { text: "ui.dictation_setup_model", command: Some("sh ./models/download-ggml-model.sh small") },
+            SetupStep { text: "ui.dictation_setup_run", command: Some(RUN_UNIX) },
+        ]
+    }
 }
 
 /// The sample rate of the WAV files sent: what speech-to-text models work at.

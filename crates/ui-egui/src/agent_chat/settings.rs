@@ -567,7 +567,12 @@ fn dictation_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::text_field(ui, &mut app.preferences.dictation_model, "whisper-1");
             });
             ui_kit::row(ui, tr("ui.dictation_language"), |ui| {
-                ui_kit::text_field_tip(ui, &mut app.preferences.dictation_language, tr("ui.dictation_language_hint"), tr("ui.dictation_language_tip"));
+                ui_kit::text_field_tip(
+                    ui,
+                    &mut app.preferences.dictation_language,
+                    tr("ui.dictation_language_hint"),
+                    tr("ui.dictation_language_tip"),
+                );
             });
             ui_kit::row(ui, tr("ui.ai_key"), |ui| {
                 ui.add_enabled_ui(has_keychain, |ui| {
@@ -602,6 +607,32 @@ fn dictation_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui_kit::text(ui, e, ui_kit::Text::Error("dictation_key"));
         }
         ui_kit::text(ui, tr("ui.dictation_note"), ui_kit::Text::Hint("dictation_note"));
+        // How to run a service on this computer, for this system: each step with its command to
+        // copy, then a button that puts the server's address in Base URL.
+        ui_kit::section(ui, "sc_dictation_setup", tr("ui.dictation_setup"), app.preferences.dictation_url.trim().is_empty(), |ui| {
+            ui_kit::text(ui, tr("ui.dictation_setup_intro"), ui_kit::Text::Note("dictation_setup"));
+            for (n, step) in super::dictation::setup_steps().iter().enumerate() {
+                ui_kit::text(ui, &format!("{}. {}", n + 1, tr(step.text)), ui_kit::Text::Note(step.text));
+                if let Some(command) = step.command {
+                    let copy = ui_kit::button(ui, tr("ui.agent_chat_copy"), ui_kit::Button::Small).backing_on_hover_text(command);
+                    solidcraft_ui_registry::publish_handle(&format!("prefs:dictation_setup:{n}"), copy.rect.center());
+                    if copy.clicked() {
+                        ui.ctx().copy_text(command.to_string());
+                    }
+                    ui_kit::text(ui, command, ui_kit::Text::Report(step.text, false));
+                }
+            }
+            ui_kit::text(
+                ui,
+                &format!("{}. {}", super::dictation::setup_steps().len() + 1, tr("ui.dictation_setup_address")),
+                ui_kit::Text::Note("dictation_setup_address"),
+            );
+            let use_it = ui_kit::button(ui, trf("ui.dictation_setup_use", &[("url", super::dictation::LOCAL_URL)]), ui_kit::Button::Small);
+            solidcraft_ui_registry::publish_handle("prefs:dictation_setup:use", use_it.rect.center());
+            if use_it.clicked() {
+                app.preferences.dictation_url = super::dictation::LOCAL_URL.to_string();
+            }
+        });
     });
 }
 
@@ -1630,7 +1661,9 @@ mod card_tests {
             assert!(scope_visible, "the full localized permission scope remains visible without hovering, including with AI off");
             assert!(privacy_visible, "the localized privacy note remains visible without hovering, including with AI off");
             let mut previous: Option<f32> = None;
-            for key in ["assistant_availability", "permissions", "agents", "instructions", "panel", "dictation", "assistant_connecting", "agent_pointer"] {
+            for key in
+                ["assistant_availability", "permissions", "agents", "instructions", "panel", "dictation", "assistant_connecting", "agent_pointer"]
+            {
                 let section = solidcraft_ui_registry::rect_of(&format!("prefs:section:{key}")).unwrap();
                 assert!((section.left() - body.left()).abs() <= 1.0 && (section.right() - body.right()).abs() <= 1.0);
                 assert!((section.height() - (solidcraft_theme::Tokens::get().control_height + solidcraft_theme::Tokens::get().space_2)).abs() <= 1.0);

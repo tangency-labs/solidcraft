@@ -145,6 +145,8 @@ The button shows once a service is set under Preferences → AI → **Dictation*
   service detect it.
 - **API key**: kept in the system keychain, and sent only over HTTPS or to this computer.
 
+**Set up a service on this computer**, under the fields, lists the steps for your system: build or download whisper.cpp's server, download a model, start it, each with its command to copy, and a button that puts its address in **Base URL**.
+
 Leave the address empty to hide the button. Dictation records the system's default microphone;
 it is in the desktop app only. A recording is at most ten minutes long.
 

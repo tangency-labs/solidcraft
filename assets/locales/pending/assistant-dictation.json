@@ -19,7 +19,16 @@
     "ui.dictation_stop_tip": "Stop and turn into text",
     "ui.dictation_tip": "Dictate",
     "ui.dictation_too_long": "The recording is too long to send",
-    "ui.dictation_url_hint": "e.g. http://127.0.0.1:8178/v1"
+    "ui.dictation_url_hint": "e.g. http://127.0.0.1:8178/v1",
+    "ui.dictation_setup": "Set up a service on this computer",
+    "ui.dictation_setup_intro": "whisper.cpp's server turns speech into text on this computer, free and offline. These steps set it up once.",
+    "ui.dictation_setup_build_unix": "Build the server. It needs git, CMake and a C++ compiler:",
+    "ui.dictation_setup_build_macos": "Build the server. It needs the Xcode command line tools (xcode-select --install) and CMake (brew install cmake):",
+    "ui.dictation_setup_download_windows": "Download whisper-bin-x64.zip from whisper.cpp's latest release and unzip it:",
+    "ui.dictation_setup_model": "In the server's folder, download a model that understands many languages (about 470 MB):",
+    "ui.dictation_setup_run": "Start the server, and leave it running while you dictate:",
+    "ui.dictation_setup_address": "Use the server's address as the Base URL:",
+    "ui.dictation_setup_use": "Use {url}"
   },
   "ar": {
     "ui.dictation": "الإملاء الصوتي",
@@ -41,7 +50,16 @@
     "ui.dictation_stop_tip": "إيقاف وتحويل إلى نص",
     "ui.dictation_tip": "إملاء",
     "ui.dictation_too_long": "التسجيل أطول من أن يُرسَل",
-    "ui.dictation_url_hint": "مثال: http://127.0.0.1:8178/v1"
+    "ui.dictation_url_hint": "مثال: http://127.0.0.1:8178/v1",
+    "ui.dictation_setup": "إعداد خدمة على هذا الحاسوب",
+    "ui.dictation_setup_intro": "يحوّل خادم whisper.cpp الكلام إلى نص على هذا الحاسوب، مجانًا ودون اتصال بالشبكة. تُعدّه هذه الخطوات مرة واحدة.",
+    "ui.dictation_setup_build_unix": "ابنِ الخادم. يحتاج إلى git و CMake ومترجم C++‎:",
+    "ui.dictation_setup_build_macos": "ابنِ الخادم. يحتاج إلى أدوات سطر الأوامر في Xcode ‏(xcode-select --install) و CMake ‏(brew install cmake):",
+    "ui.dictation_setup_download_windows": "نزّل whisper-bin-x64.zip من أحدث إصدار من whisper.cpp وفك ضغطه:",
+    "ui.dictation_setup_model": "في مجلد الخادم، نزّل نموذجًا يفهم لغات كثيرة (نحو 470 ميغابايت):",
+    "ui.dictation_setup_run": "شغّل الخادم واتركه يعمل أثناء الإملاء:",
+    "ui.dictation_setup_address": "استخدم عنوان الخادم كعنوان URL الأساسي:",
+    "ui.dictation_setup_use": "استخدام {url}"
   },
   "de": {
     "ui.dictation": "Diktieren",
@@ -63,7 +81,16 @@
     "ui.dictation_stop_tip": "Beenden und in Text umwandeln",
     "ui.dictation_tip": "Diktieren",
     "ui.dictation_too_long": "Die Aufnahme ist zu lang zum Senden",
-    "ui.dictation_url_hint": "z. B. http://127.0.0.1:8178/v1"
+    "ui.dictation_url_hint": "z. B. http://127.0.0.1:8178/v1",
+    "ui.dictation_setup": "Einen Dienst auf diesem Computer einrichten",
+    "ui.dictation_setup_intro": "Der Server von whisper.cpp wandelt Sprache auf diesem Computer in Text um, kostenlos und offline. Diese Schritte richten ihn einmal ein.",
+    "ui.dictation_setup_build_unix": "Bauen Sie den Server. Dafür brauchen Sie git, CMake und einen C++-Compiler:",
+    "ui.dictation_setup_build_macos": "Bauen Sie den Server. Dafür brauchen Sie die Xcode-Befehlszeilentools (xcode-select --install) und CMake (brew install cmake):",
+    "ui.dictation_setup_download_windows": "Laden Sie whisper-bin-x64.zip aus der neuesten Version von whisper.cpp herunter und entpacken Sie es:",
+    "ui.dictation_setup_model": "Laden Sie im Ordner des Servers ein Modell herunter, das viele Sprachen versteht (etwa 470 MB):",
+    "ui.dictation_setup_run": "Starten Sie den Server und lassen Sie ihn laufen, während Sie diktieren:",
+    "ui.dictation_setup_address": "Verwenden Sie die Adresse des Servers als Basis-URL:",
+    "ui.dictation_setup_use": "{url} verwenden"
   },
   "he": {
     "ui.dictation": "הכתבה",
@@ -85,7 +112,16 @@
     "ui.dictation_stop_tip": "עצירה והמרה לטקסט",
     "ui.dictation_tip": "הכתבה",
     "ui.dictation_too_long": "ההקלטה ארוכה מכדי לשלוח אותה",
-    "ui.dictation_url_hint": "לדוגמה http://127.0.0.1:8178/v1"
+    "ui.dictation_url_hint": "לדוגמה http://127.0.0.1:8178/v1",
+    "ui.dictation_setup": "הגדרת שירות במחשב הזה",
+    "ui.dictation_setup_intro": "השרת של whisper.cpp ממיר דיבור לטקסט במחשב הזה, בחינם וללא רשת. השלבים האלה מגדירים אותו פעם אחת.",
+    "ui.dictation_setup_build_unix": "בנו את השרת. נדרשים git,‏ CMake ומהדר C++‎:",
+    "ui.dictation_setup_build_macos": "בנו את השרת. נדרשים כלי שורת הפקודה של Xcode ‏(xcode-select --install) ו-CMake ‏(brew install cmake):",
+    "ui.dictation_setup_download_windows": "הורידו את whisper-bin-x64.zip מהגרסה האחרונה של whisper.cpp וחלצו אותו:",
+    "ui.dictation_setup_model": "בתיקיית השרת, הורידו מודל שמבין שפות רבות (כ-470 MB):",
+    "ui.dictation_setup_run": "הפעילו את השרת והשאירו אותו פועל בזמן ההכתבה:",
+    "ui.dictation_setup_address": "השתמשו בכתובת השרת ככתובת הבסיס:",
+    "ui.dictation_setup_use": "שימוש ב-{url}"
   },
   "it": {
     "ui.dictation": "Dettatura",
@@ -107,7 +143,16 @@
     "ui.dictation_stop_tip": "Ferma e trascrivi",
     "ui.dictation_tip": "Detta",
     "ui.dictation_too_long": "La registrazione è troppo lunga per essere inviata",
-    "ui.dictation_url_hint": "es. http://127.0.0.1:8178/v1"
+    "ui.dictation_url_hint": "es. http://127.0.0.1:8178/v1",
+    "ui.dictation_setup": "Imposta un servizio su questo computer",
+    "ui.dictation_setup_intro": "Il server di whisper.cpp trasforma la voce in testo su questo computer, gratis e senza rete. Questi passi lo preparano una volta sola.",
+    "ui.dictation_setup_build_unix": "Compila il server. Servono git, CMake e un compilatore C++:",
+    "ui.dictation_setup_build_macos": "Compila il server. Servono gli strumenti da riga di comando di Xcode (xcode-select --install) e CMake (brew install cmake):",
+    "ui.dictation_setup_download_windows": "Scarica whisper-bin-x64.zip dall'ultima versione di whisper.cpp ed estrailo:",
+    "ui.dictation_setup_model": "Nella cartella del server, scarica un modello che capisce molte lingue (circa 470 MB):",
+    "ui.dictation_setup_run": "Avvia il server e lascialo acceso mentre detti:",
+    "ui.dictation_setup_address": "Usa l'indirizzo del server come URL di base:",
+    "ui.dictation_setup_use": "Usa {url}"
   },
   "ja": {
     "ui.dictation": "音声入力",
@@ -129,7 +174,16 @@
     "ui.dictation_stop_tip": "停止してテキストに変換",
     "ui.dictation_tip": "音声入力",
     "ui.dictation_too_long": "録音が長すぎて送信できません",
-    "ui.dictation_url_hint": "例: http://127.0.0.1:8178/v1"
+    "ui.dictation_url_hint": "例: http://127.0.0.1:8178/v1",
+    "ui.dictation_setup": "このコンピューターでサービスを用意する",
+    "ui.dictation_setup_intro": "whisper.cpp のサーバーは、このコンピューター上で音声をテキストに変換します。無料でオフラインです。次の手順で一度だけ準備します。",
+    "ui.dictation_setup_build_unix": "サーバーをビルドします。git、CMake、C++ コンパイラーが必要です:",
+    "ui.dictation_setup_build_macos": "サーバーをビルドします。Xcode コマンドラインツール (xcode-select --install) と CMake (brew install cmake) が必要です:",
+    "ui.dictation_setup_download_windows": "whisper.cpp の最新リリースから whisper-bin-x64.zip をダウンロードして展開します:",
+    "ui.dictation_setup_model": "サーバーのフォルダーで、多言語に対応したモデル (約 470 MB) をダウンロードします:",
+    "ui.dictation_setup_run": "サーバーを起動し、音声入力の間は動かしたままにします:",
+    "ui.dictation_setup_address": "サーバーのアドレスをベース URL にします:",
+    "ui.dictation_setup_use": "{url} を使う"
   },
   "ko": {
     "ui.dictation": "받아쓰기",
@@ -151,7 +205,16 @@
     "ui.dictation_stop_tip": "중지하고 텍스트로 변환",
     "ui.dictation_tip": "받아쓰기",
     "ui.dictation_too_long": "녹음이 너무 길어 보낼 수 없습니다",
-    "ui.dictation_url_hint": "예: http://127.0.0.1:8178/v1"
+    "ui.dictation_url_hint": "예: http://127.0.0.1:8178/v1",
+    "ui.dictation_setup": "이 컴퓨터에 서비스 설정",
+    "ui.dictation_setup_intro": "whisper.cpp 서버는 이 컴퓨터에서 음성을 텍스트로 바꿉니다. 무료이며 오프라인으로 동작합니다. 다음 단계로 한 번만 설정합니다.",
+    "ui.dictation_setup_build_unix": "서버를 빌드합니다. git, CMake, C++ 컴파일러가 필요합니다:",
+    "ui.dictation_setup_build_macos": "서버를 빌드합니다. Xcode 명령줄 도구(xcode-select --install)와 CMake(brew install cmake)가 필요합니다:",
+    "ui.dictation_setup_download_windows": "whisper.cpp 최신 릴리스에서 whisper-bin-x64.zip을 내려받아 압축을 풉니다:",
+    "ui.dictation_setup_model": "서버 폴더에서 여러 언어를 이해하는 모델(약 470MB)을 내려받습니다:",
+    "ui.dictation_setup_run": "서버를 시작하고, 받아쓰는 동안 계속 실행해 둡니다:",
+    "ui.dictation_setup_address": "서버 주소를 기본 URL로 사용합니다:",
+    "ui.dictation_setup_use": "{url} 사용"
   },
   "vi": {
     "ui.dictation": "Đọc chính tả",
@@ -173,7 +236,16 @@
     "ui.dictation_stop_tip": "Dừng và chuyển thành văn bản",
     "ui.dictation_tip": "Đọc chính tả",
     "ui.dictation_too_long": "Bản ghi quá dài để gửi",
-    "ui.dictation_url_hint": "vd. http://127.0.0.1:8178/v1"
+    "ui.dictation_url_hint": "vd. http://127.0.0.1:8178/v1",
+    "ui.dictation_setup": "Thiết lập dịch vụ trên máy tính này",
+    "ui.dictation_setup_intro": "Máy chủ của whisper.cpp chuyển giọng nói thành văn bản ngay trên máy tính này, miễn phí và không cần mạng. Các bước sau thiết lập nó một lần.",
+    "ui.dictation_setup_build_unix": "Biên dịch máy chủ. Cần git, CMake và một trình biên dịch C++:",
+    "ui.dictation_setup_build_macos": "Biên dịch máy chủ. Cần công cụ dòng lệnh Xcode (xcode-select --install) và CMake (brew install cmake):",
+    "ui.dictation_setup_download_windows": "Tải whisper-bin-x64.zip từ bản phát hành mới nhất của whisper.cpp và giải nén:",
+    "ui.dictation_setup_model": "Trong thư mục của máy chủ, tải một mô hình hiểu nhiều ngôn ngữ (khoảng 470 MB):",
+    "ui.dictation_setup_run": "Khởi động máy chủ và để nó chạy trong khi bạn đọc chính tả:",
+    "ui.dictation_setup_address": "Dùng địa chỉ của máy chủ làm URL gốc:",
+    "ui.dictation_setup_use": "Dùng {url}"
   },
   "zh": {
     "ui.dictation": "语音输入",
@@ -195,6 +267,15 @@
     "ui.dictation_stop_tip": "停止并转为文字",
     "ui.dictation_tip": "语音输入",
     "ui.dictation_too_long": "录音太长，无法发送",
-    "ui.dictation_url_hint": "例如 http://127.0.0.1:8178/v1"
+    "ui.dictation_url_hint": "例如 http://127.0.0.1:8178/v1",
+    "ui.dictation_setup": "在本机设置服务",
+    "ui.dictation_setup_intro": "whisper.cpp 的服务器在本机把语音转成文字，免费且无需联网。以下步骤只需做一次。",
+    "ui.dictation_setup_build_unix": "构建服务器。需要 git、CMake 和 C++ 编译器：",
+    "ui.dictation_setup_build_macos": "构建服务器。需要 Xcode 命令行工具（xcode-select --install）和 CMake（brew install cmake）：",
+    "ui.dictation_setup_download_windows": "从 whisper.cpp 最新版本下载 whisper-bin-x64.zip 并解压：",
+    "ui.dictation_setup_model": "在服务器的文件夹中，下载一个支持多种语言的模型（约 470 MB）：",
+    "ui.dictation_setup_run": "启动服务器，在语音输入期间保持运行：",
+    "ui.dictation_setup_address": "把服务器的地址用作基础 URL：",
+    "ui.dictation_setup_use": "使用 {url}"
   }
 }
