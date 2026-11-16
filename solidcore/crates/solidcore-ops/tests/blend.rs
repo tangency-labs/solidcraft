@@ -2044,6 +2044,11 @@ fn the_ledge_corner_rolls_over_across_the_bores_tangent_seam() {
     assert!(report.is_valid(), "{}", report.text);
     assert!(b.is_manifold_solid().unwrap());
     b.check_solid().unwrap();
+    // the app's record holds it (each pcurve runs over its edge's interval), as built and
+    // after a round trip through a .smb file (the case's render reads it back)
+    b.to_record().unwrap();
+    let back = Body::from_smb(b.to_smb(true).unwrap(), true).unwrap();
+    back.to_record().unwrap();
     let want = v0 + ledge_rolled_change(0.5);
     let v = b.volume(1e-12).unwrap();
     assert!(rel(v, want) < 1e-11, "{v} {want}");
