@@ -6,7 +6,6 @@ face.delete
 solid.draft
 solid.hole
 solid.loft
-solid.mirror
 solid.offset_face
 solid.shell
 solid.thread
