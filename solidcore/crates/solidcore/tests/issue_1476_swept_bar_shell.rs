@@ -137,17 +137,6 @@ fn check(fixes: &UpstreamFixes, want: Option<f64>) -> usize {
     kinds.iter().filter(|&&k| k == "line").count()
 }
 
-/// SolidCraft's preset less `offset_keep_cavity_regions` (WR-667), which the list this file
-/// used to copy did not have. With it on, the shell is refused while building the operand's
-/// point-solve cache ("point-solve geometry owners must identify one edge or face each"): the
-/// operand here names every entity alike, so no geometry owner tells its edge or face apart
-/// (tangency-labs/solidcraft#17393).
-fn solidcraft_fixes_without_cavity_regions() -> UpstreamFixes {
-    let mut fixes = solidcraft_fixes();
-    fixes.offset_keep_cavity_regions = false;
-    fixes
-}
-
 #[test]
 fn issue_1476_swept_bar_shells() {
     assert_eq!(check(&UpstreamFixes::default(), None), 16);
@@ -160,7 +149,7 @@ fn issue_1476_swept_bar_shells() {
 #[test]
 #[ignore = "slow in debug builds (two 38 000-sample curve offsets)"]
 fn issue_1476_swept_bar_shells_with_solidcraft_fixes() {
-    let mut fixes = solidcraft_fixes_without_cavity_regions();
+    let mut fixes = solidcraft_fixes();
     // The preset has it on; this test is SolidCraft's configuration without it (the last
     // test in this file turns it on).
     fixes.shell_edges_on_analytics_exact = false;
@@ -191,7 +180,7 @@ fn issue_1476_swept_bar_shells_with_edges_on_analytics_exact() {
 #[test]
 #[ignore = "slow in debug builds (two 38 000-sample curve offsets)"]
 fn issue_1476_swept_bar_shells_with_solidcraft_fixes_and_edges_on_analytics_exact() {
-    let mut fixes = solidcraft_fixes_without_cavity_regions();
+    let mut fixes = solidcraft_fixes();
     fixes.shell_edges_on_analytics_exact = true;
     assert_eq!(check(&fixes, Some(1299.482314966473)), 18);
 }
