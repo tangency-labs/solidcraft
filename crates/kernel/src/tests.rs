@@ -154,6 +154,33 @@ fn revolve_adjacent_profiles_on_the_axis() {
     assert!(rel(measure(&cut).unwrap().volume, want) < 1e-3, "{} vs {want}", measure(&cut).unwrap().volume);
 }
 
+/// #17516: a plate with a spline dome drawn against the axis (a line up the axis, a short line
+/// to the spline's end, the spline down to the rim), as the sketch solver leaves it: the
+/// spline's end and the short line's top 3.8e-9 mm past the axis. That is on the axis, so the
+/// whole turn builds, with the volume pi times the integral of x^2 dy round the profile. The
+/// same profile with the spline's end 1 mm past the axis crosses it and is refused before the
+/// kernel builds anything.
+#[test]
+fn revolve_a_spline_dome_ending_a_hair_past_the_axis() {
+    let profile = |x: f64| Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(50.0, 0.0) },
+                Seg2::Line { a: Vec2::new(50.0, 0.0), b: Vec2::new(50.0, 2.4) },
+                Seg2::Cubic { p0: Vec2::new(50.0, 2.4), p1: Vec2::new(35.0, 2.4), p2: Vec2::new(16.0, 8.5), p3: Vec2::new(x, 8.5) },
+                Seg2::Line { a: Vec2::new(x, 8.5), b: Vec2::new(0.0, 2.4) },
+                Seg2::Line { a: Vec2::new(0.0, 2.4), b: Vec2::new(0.0, 0.0) },
+            ],
+        },
+        holes: vec![],
+    };
+    let b = revolve(&Plane::XZ, &[profile(-3.8e-9)], Vec2::ZERO, Vec2::Y, 2.0 * PI).unwrap().pop().unwrap();
+    let volume = measure(&b).unwrap().volume;
+    assert!(rel(volume, 33608.582428514645) < 1e-7, "{volume}");
+    let crossing = revolve(&Plane::XZ, &[profile(-1.0)], Vec2::ZERO, Vec2::Y, 2.0 * PI).unwrap_err().to_string();
+    assert!(crossing.contains("the profile crosses the revolve axis"), "{crossing}");
+}
+
 #[test]
 fn chamfer_and_step() {
     let b = box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0)).unwrap();

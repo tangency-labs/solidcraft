@@ -807,6 +807,8 @@ impl Loop {
 pub(crate) struct Region {
     pub parts: Vec<(Loop, Vec<Loop>)>,
     pub prims: Vec<Prim>,
+    /// For each piece of `prims`: whether it belongs to a keep-out loop.
+    pub keepout: Vec<bool>,
     boxes: Vec<Bounds>,
     /// Pieces by horizontal band, so a cell only meets the pieces near it.
     rows: Vec<Vec<u32>>,
@@ -874,6 +876,15 @@ impl Region {
                     .flat_map(|l| l.prims.iter().copied())
             })
             .collect();
+        let keepout: Vec<bool> = parts
+            .iter()
+            .flat_map(|(o, hs)| {
+                std::iter::repeat_n(false, o.prims.len()).chain(
+                    hs.iter()
+                        .flat_map(|h| std::iter::repeat_n(true, h.prims.len())),
+                )
+            })
+            .collect();
         let boxes: Vec<Bounds> = prims.iter().map(Prim::bounds).collect();
         let all = boxes.iter().copied().reduce(Bounds::union);
         let (mut rows, mut row_y0, mut row_h) = (vec![Vec::new()], 0.0, 1.0);
@@ -897,6 +908,7 @@ impl Region {
         Region {
             parts,
             prims,
+            keepout,
             boxes,
             rows,
             row_y0,

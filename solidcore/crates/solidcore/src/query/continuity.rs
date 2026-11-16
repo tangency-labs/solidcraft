@@ -32,7 +32,7 @@ use crate::eval::normal_section::normal_section;
 use crate::eval::{Partials, MAX_PARTIAL_ORDER};
 use crate::geom::extent1d::Extent1d;
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3, Vec3};
+use crate::math::{Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::knots::Side as Span;
 use crate::query::brep as qbrep;
@@ -230,6 +230,10 @@ pub struct Principal {
     pub k1: f64,
     /// The smaller principal curvature.
     pub k2: f64,
+    /// Gaussian curvature, 1/mm²: `k1 * k2`, independent of the face's orientation.
+    pub gaussian: f64,
+    /// Mean curvature, 1/mm: `(k1 + k2) / 2`, convex positive against `normal`.
+    pub mean: f64,
     /// The unit tangent direction of `k1`.
     pub d1: Vec3,
     /// The unit tangent direction of `k2`.
@@ -241,7 +245,9 @@ pub struct Principal {
 /// natural normal `Su x Sv`), read against the face's upward use's normal and signed convex
 /// positive (each negated and the two exchanged where the use runs with the natural normal), so
 /// `k1 >= k2` and a sphere's outside reads `1 / r` twice. `None` where the drop fails, the
-/// normal is zero, or the surface's forms degenerate there (a pole).
+/// normal is zero, the kernel marks the point singular (a pole), or the surface's forms
+/// degenerate there. Gaussian curvature is independent of the face's orientation; mean
+/// curvature has the same convex-positive sign convention as the principal curvatures.
 ///
 /// # Errors
 ///
@@ -264,6 +270,9 @@ pub fn principal_curvatures(
     let Some(one) = side(k, s, sign, p, None)? else {
         return Ok(None);
     };
+    if s.is_singularity(k, one.uv, EFF_ZERO, false)?.singular {
+        return Ok(None);
+    }
     let g = match s.evaluate_geometric(k, one.uv, Span::Left, Span::Left) {
         Ok(g) => g,
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
@@ -285,7 +294,15 @@ pub fn principal_curvatures(
             g.principle_curvature_vector2,
         )
     };
-    if !(k1.is_finite() && k2.is_finite() && finite(d1) && finite(d2)) {
+    let gaussian = g.gaussian_curvature;
+    let mean = -sign * g.normal_curvature;
+    if !(k1.is_finite()
+        && k2.is_finite()
+        && gaussian.is_finite()
+        && mean.is_finite()
+        && finite(d1)
+        && finite(d2))
+    {
         return Ok(None);
     }
     Ok(Some(Principal {
@@ -293,6 +310,8 @@ pub fn principal_curvatures(
         normal: one.normal,
         k1,
         k2,
+        gaussian,
+        mean,
         d1,
         d2,
     }))

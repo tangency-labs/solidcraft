@@ -87,6 +87,11 @@ pub enum ShapeLimit {
     /// A triangle's sharpest corner is a corner of the boundary sharper than the spec's angle,
     /// between two of its sides: no point inside the face widens it.
     Corner,
+    /// A point it would add encroaches on a boundary side, for a triangle of boundary nodes alone
+    /// narrower than the spec's chord: the face is narrower than the chord there (two of its
+    /// curves within the chord of each other), which splitting sides cannot widen. The triangle
+    /// is left as it is.
+    Narrow,
 }
 
 /// An edge a bound of its sampling stopped (see [`PlanStats::edges_capped`]).

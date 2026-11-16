@@ -3087,6 +3087,23 @@ mod tests {
         assert_eq!(out.face_count(), body.face_count() + 4);
         assert!(out.validity().is_empty(), "{:?}", out.validity());
     }
+
+    /// A cylinder r 10, h 50 whose top rim is chamfered 10, the top's radius (#17198): the
+    /// chamfer takes the whole top and is a cone with its apex on the axis, as a round of 10
+    /// is a dome. It was refused as larger than the faces allow. The cone removes the ring
+    /// between the r 10, h 10 cylinder and the cone in it, two thirds of that cylinder; the
+    /// body keeps the side, the bottom and the cone.
+    #[test]
+    fn a_chamfer_as_large_as_a_cylinder_top_makes_a_cone_to_its_centre() {
+        let can = crate::build::cylinder(Vec3::ZERO, Vec3::Z, 10.0, 50.0).unwrap();
+        let out = chamfer(&can, &[Vec3::new(10.0, 0.0, 50.0)], 10.0).unwrap();
+        let pi = std::f64::consts::PI;
+        let want = pi * 100.0 * 50.0 - 2.0 / 3.0 * pi * 100.0 * 10.0;
+        let got = crate::measure(&out).unwrap().volume;
+        assert!((got - want).abs() < 1e-6 * want, "{got} vs {want}");
+        assert_eq!(out.face_count(), 3);
+        assert!(out.validity().is_empty(), "{:?}", out.validity());
+    }
 }
 
 #[cfg(test)]
