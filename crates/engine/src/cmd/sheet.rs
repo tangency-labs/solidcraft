@@ -17,10 +17,9 @@ use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list,
 use crate::schema::features::FeatureResult;
 use crate::schema::sheet::{
     BendTableFormat, BendTableParams, BendTableResult, CROSS_BREAK_DIRECTION, ConvertParams, CrossBreakParams, DxfFile, ExportDxfParams,
-    ExportDxfResult, FlangeParams, FlatCircle,
-    FlatPatternParams, FlatPatternResult, FlatSegment, FlatShape, FoldParams, HemParams, ListedRule, ManageRulesParams, ManageRulesResult,
-    MeasureBodyParams, PathFlangeParams, PerforateParams, RecognizeParams, RuleFeatureError, RuleReply, RulesParams, RulesResult, SheetBodyMeasure,
-    UnfoldParams,
+    ExportDxfResult, FlangeParams, FlatCircle, FlatPatternParams, FlatPatternResult, FlatSegment, FlatShape, FoldParams, HemParams, ListedRule,
+    ManageRulesParams, ManageRulesResult, MeasureBodyParams, PathFlangeParams, PerforateParams, RecognizeParams, RuleFeatureError, RuleReply,
+    RulesParams, RulesResult, SheetBodyMeasure, UnfoldParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -1415,9 +1414,14 @@ impl FlatDrawing {
             }
         }
         loops.sort_by_key(|(pass, ..)| *pass);
-        // Slits (two lines each) and rolls (one line each) are planned like bends: at most two
-        // entities and a bend's few values apiece.
-        let lines = self.bends.len().saturating_add(self.rolls.len()).saturating_add(self.slits.len().saturating_mul(2));
+        // Slits (two lines each), rolls and cross break creases (one line each) are planned like
+        // bends: at most two entities and a bend's few values apiece.
+        let lines = self
+            .bends
+            .len()
+            .saturating_add(self.rolls.len())
+            .saturating_add(self.creases.len())
+            .saturating_add(self.slits.len().saturating_mul(2));
         let mut file = DxfFile::for_flat_pattern_export(loops.len(), lines, self.perforation.len())?;
         if !o.one_layer {
             // These four baseline roles exist even without matching geometry. The

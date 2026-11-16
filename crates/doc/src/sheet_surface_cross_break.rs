@@ -11,6 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::{Loop2, Vec2, Vec3};
+use solidcraft_develop::prelude::*;
 use solidcraft_develop::{Development, Surface};
 use solidcraft_geom::prelude::*;
 
