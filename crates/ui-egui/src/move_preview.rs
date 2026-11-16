@@ -23,8 +23,15 @@ use crate::{
     preview::{Built, Colors, Layer},
 };
 
-/// Most triangles moved this way each frame; beyond them the scratch-design preview runs.
+/// Most triangles built moved here at each change of the move, where the view draws no layer
+/// ([`layered`]) and the scratch-design preview can run beside the window instead; a layer builds
+/// its triangles once, so it has no such limit. In the browser the scratch design is evaluated
+/// on the window thread at every change (`preview::spawn`), which costs more than building the
+/// same triangles moved here, so the browser always builds them here (#17804).
 const MAX_TRIANGLES: usize = 2_000_000;
+
+/// Whether the scratch-design preview runs beside the window rather than on it.
+const SCRATCH_BESIDE_WINDOW: bool = cfg!(not(target_arch = "wasm32"));
 
 /// The most two bodies' motions may differ (per matrix entry, millimetres and rotation alike)
 /// to be drawn as one layer.
@@ -52,6 +59,8 @@ struct Cached {
     revision: u64,
     names: Vec<String>,
     meshes: Vec<Arc<Mesh>>,
+    /// The triangles of `meshes`.
+    triangles: usize,
     frames: Vec<Mat>,
     /// This cache and no other ([`CACHES`]): what a layer's scenes are built from.
     serial: u64,
@@ -157,13 +166,17 @@ impl Cached {
     }
 
     /// A layer's scenes: the ghost of where the bodies are (none for a copy, or with the cut
-    /// tint off), which stays, and the bodies where they stand, which the GPU draws moved.
+    /// tint off), which stays, and the bodies where they stand, which the GPU draws moved. The
+    /// bodies are the Move's picks, so the layer draws them lit in the selection colour, as the
+    /// highlight lights a picked body: the highlight leaves them to the layer
+    /// (`dialogs_move::drawn_as_layer`), and a change of the move lights them anew at no cost
+    /// (#17804).
     fn rest_scenes(&self, colors: Colors, copy: bool) -> (GpuScene, GpuScene) {
         let (mut still, mut moving) = (GpuScene::default(), GpuScene::default());
         let removed = still.color(colors.removed);
         let mut bounds = Aabb3::EMPTY;
         for mesh in &self.meshes {
-            draw(&mut moving, mesh, &IDENTITY, colors, &mut bounds);
+            draw(&mut moving, mesh, &IDENTITY, colors.selected, colors, &mut bounds);
             if !copy && colors.cut_tint {
                 ghost(&mut still, mesh, removed);
             }
@@ -187,7 +200,9 @@ impl MovePreview {
     }
 
     /// The preview of a `solid.move` (or its edit), or `None` to leave it to the scratch design:
-    /// another command, values that don't evaluate, a body not shown, or too many triangles.
+    /// another command, values that don't evaluate, a body not shown, or, built moved here
+    /// rather than drawn as a layer, more than [`MAX_TRIANGLES`] where the scratch design runs
+    /// beside the window.
     pub(crate) fn compute(&mut self, app: &SolveApp, commands: &[(String, Value)], colors: Colors) -> Option<Result<Built, String>> {
         let [(id, params)] = commands else { return None };
         let params = match id.as_str() {
@@ -266,9 +281,7 @@ impl MovePreview {
         {
             let state = crate::open_meshing::session_world(&app.session);
             let meshes: Vec<Arc<Mesh>> = names.iter().map(|n| state.body(n).map(|b| b.mesh())).collect::<Option<_>>()?;
-            if meshes.iter().map(|m| m.triangles.len()).sum::<usize>() > MAX_TRIANGLES {
-                return None;
-            }
+            let triangles = meshes.iter().map(|m| m.triangles.len()).sum();
             // A component's copy moves in the world (`occurrence.move`), so its bodies take the world's.
             let mut frames = placed_frames(app, &bodies);
             frames.resize(names.len(), IDENTITY);
@@ -277,6 +290,7 @@ impl MovePreview {
                 revision: app.session.revision,
                 names: names.clone(),
                 meshes,
+                triangles,
                 frames,
                 serial: CACHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
                 rest: None,
@@ -329,11 +343,14 @@ impl MovePreview {
             let bounds = cache.moved_bounds(&motion);
             return Some(Ok(built(GpuScene::default(), bounds, Some(Layer { key, scenes, motion }))));
         }
+        if cache.triangles > MAX_TRIANGLES && SCRATCH_BESIDE_WINDOW {
+            return None;
+        }
         let mut scene = GpuScene::default();
         let removed = scene.color(colors.removed);
         let mut bounds = Aabb3::EMPTY;
         for (mesh, m) in cache.meshes.iter().zip(&motions) {
-            draw(&mut scene, mesh, m, colors, &mut bounds);
+            draw(&mut scene, mesh, m, if colors.tint_new { colors.added } else { colors.body }, colors, &mut bounds);
             if !copy && colors.cut_tint {
                 ghost(&mut scene, mesh, removed);
             }
@@ -354,11 +371,11 @@ fn ghost(scene: &mut GpuScene, mesh: &Mesh, removed: crate::gpu::PaletteIndex) {
     }
 }
 
-/// `mesh` moved by `m`, in the colour of geometry the feature adds, or the body's own where
-/// the preference leaves new surface untinted (a move makes none either way), with its shaded
-/// edges.
-fn draw(scene: &mut GpuScene, mesh: &Mesh, m: &Mat, colors: Colors, bounds: &mut Aabb3) {
-    let added = scene.color(if colors.tint_new { colors.added } else { colors.body });
+/// `mesh` moved by `m`, filled in `fill` (the colour of geometry the feature adds, or the body's
+/// own where the preference leaves new surface untinted: a move makes none either way; or, in a
+/// layer, the selection colour), with its shaded edges.
+fn draw(scene: &mut GpuScene, mesh: &Mesh, m: &Mat, fill: [u8; 4], colors: Colors, bounds: &mut Aabb3) {
+    let added = scene.color(fill);
     for t in &mesh.triangles {
         for k in t {
             let i = *k as usize;
@@ -479,6 +496,7 @@ mod tests {
             revision: app.session.revision,
             names: Vec::new(),
             meshes: Vec::new(),
+            triangles: 0,
             frames: Vec::new(),
             serial: 0,
             rest: None,
@@ -661,8 +679,9 @@ mod tests {
         assert!(!is_move(&two), "one command only");
     }
 
-    /// The layer looks as the bodies built where they land did: the same picture, but for the
-    /// odd pixel on an outline (the GPU moves single-precision points). Skipped without a GPU
+    /// The layer looks as the bodies built where they land did with the highlight lighting them
+    /// (the layer draws them in the selection colour, #17804): the same picture, but for the odd
+    /// pixel on an outline (the GPU moves single-precision points). Skipped without a GPU
     /// adapter.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
@@ -679,7 +698,9 @@ mod tests {
         let render = |preview: GpuScene, moving: Option<(GpuScene, [[f32; 4]; 4])>| {
             crate::gpu::render_offscreen_preview(GpuScene::default(), preview, moving, proj.vp.to_f32(), proj.cam.back().to_f32(), eye, SIZE)
         };
-        let built = MovePreview::default().compute(&plain, &cmds, c).unwrap().unwrap();
+        // Built where they land, the highlight lights the picked bodies in the selection colour.
+        let lit = Colors { added: c.selected, tint_new: true, ..c };
+        let built = MovePreview::default().compute(&plain, &cmds, lit).unwrap().unwrap();
         let layer = MovePreview::default().compute(&gpu, &cmds, c).unwrap().unwrap().layer.expect("a layer");
         let (still, moving) = layer.scenes.expect("its scenes");
         let transform: [[f32; 4]; 4] = std::array::from_fn(|col| std::array::from_fn(|row| layer.motion[col][row] as f32));

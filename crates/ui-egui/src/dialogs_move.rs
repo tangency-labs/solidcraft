@@ -111,6 +111,16 @@ pub(crate) fn chained(app: &SolveApp) -> Option<(Vec<String>, Mat)> {
     (!is_identity(&m)).then(|| (bodies_of(app, d), m))
 }
 
+/// Whether the preview draws the bodies a Move dialog moves as a layer the GPU moves
+/// (`move_preview`), and shows it: the layer then lights them in the selection colour in place
+/// of the highlight, so a change of the move builds no triangles (#17804).
+pub(crate) fn drawn_as_layer(app: &SolveApp) -> bool {
+    app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::Move { .. }))
+        && app.preview.active
+        && !app.preview.rolled_back
+        && app.preview.layer_shown().is_some()
+}
+
 /// Whether the triad is being dragged in a Move dialog (`drag` keeps the values it began from).
 pub(crate) fn dragging(app: &SolveApp) -> bool {
     app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::Move { .. }) && d.extra.contains_key("drag0"))
