@@ -141,6 +141,59 @@ fn two_faces_splitting_one_side_put_one_node_on_its_edge() {
     assert_eq!(nodes[ei].points.len(), 3, "one node: {:?}", nodes[ei].params);
 }
 
+/// The kernel rig's `surfaces/cov-ruled-cylinder-rim-tangent-to-the-top-is-a-flat-ring`, its
+/// body `Brim` as SolidCraft exports it (frozen in `tests/data`): one plane face in z = 10, the
+/// annulus of radii 10 and 15 round (0, 0, 10), bounded by one loop that runs round the inner
+/// circle, out along a line to the outer one, round it and back along the line (a slit). The
+/// loop passes the inner circle's vertex twice; the triangulation has one node there, the
+/// loop's first, while the shaping kept the boundary's sides by their places in the loop, so it
+/// did not keep the slit's side at that vertex and flipped it away: "triangulation does not
+/// follow the boundary". Meshed at SolidCraft's export spec (a chord of 1/5000 of the size, the
+/// vertices' box diagonal): no triangle side has more than two triangles, every side with one
+/// lies on one of the two circles (none crosses or opens the slit), nothing folds, and the
+/// area is the annulus's within what its chords cut off: the nodes lie on the circles, so the
+/// outer polygon lacks and the hole's polygon gives back at most the chord times each
+/// circumference.
+#[test]
+fn a_ring_bounded_by_a_slit_loop_follows_its_boundary_on_the_mesh_path() {
+    let b = crate::fixtures::fixture("rig_ruled_cylinder_rim_flat_ring");
+    let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    for v in &b.vertices {
+        for k in 0..3 {
+            lo[k] = lo[k].min(v.point[k]);
+            hi[k] = hi[k].max(v.point[k]);
+        }
+    }
+    let size = length(sub(P::new(hi[0], hi[1], hi[2]), P::new(lo[0], lo[1], lo[2])));
+    let chord = crate::MeshTolerance::export_of(size).chord;
+    let (plan, _) = meshed(&b, &MeshSpec::chord(chord), size, None);
+    let (m, refused) = plan.evaluate();
+    assert!(refused.is_empty(), "{refused:?}");
+    assert_nothing_folds(&m, "flat ring");
+    let centre = P::new(0.0, 0.0, 10.0);
+    let mut sides: BTreeMap<(u32, u32), u32> = BTreeMap::new();
+    let mut area = 0.0;
+    for t in &m.triangles {
+        let [a, b, c] = corners(&m, t);
+        area += 0.5 * length(cross(sub(b, a), sub(c, a)));
+        for k in 0..3 {
+            let (i, j) = (t[k], t[(k + 1) % 3]);
+            *sides.entry((i.min(j), i.max(j))).or_default() += 1;
+        }
+    }
+    let radius = |i: u32| length(sub(m.positions[i as usize], centre));
+    let on_circle = |i: u32| [10.0, 15.0].iter().any(|r| (radius(i) - r).abs() <= 1e-9 * 15.0);
+    for (&(i, j), &uses) in &sides {
+        assert!(uses <= 2, "side {i}-{j} has {uses} triangles");
+        if uses == 1 {
+            assert!(on_circle(i) && on_circle(j), "side {i}-{j} is open off the circles: radii {} and {}", radius(i), radius(j));
+        }
+    }
+    let annulus = std::f64::consts::PI * (15.0f64.powi(2) - 10.0f64.powi(2));
+    let cut = chord * 2.0 * std::f64::consts::PI * (15.0 + 10.0);
+    assert!((area - annulus).abs() <= cut, "area {area}, the annulus {annulus}, within {cut}");
+}
+
 /// Every triangle's facet normal on the side of its corners' surface normals (nothing folded
 /// over or reversed).
 fn assert_nothing_folds(m: &Mesh, what: &str) {
