@@ -214,13 +214,14 @@ fn edge_at(b: &Body, p: [f64; 3]) -> usize {
 /// chamfered 4. The round is a quarter tube r 6 about the circle r 4 at z 4 round the post's
 /// axis, three quarters of a turn, ending at the box's two walls through the axis.
 fn posts_with_rounded_tops(chamfered: bool) -> Body {
+    use std::f64::consts::FRAC_1_SQRT_2;
     let (a, c) = (41.0, 23.5);
     let mut b = make_box([-a, -c, 0.0], [2.0 * a, 2.0 * c, 20.0]).unwrap();
     for (sx, sy) in [(-1.0_f64, -1.0_f64), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
         // the cylinder's seam (its +x side) turned to point into the box, so the union leaves
         // each post's side one face, as the reporter's extrusion makes it
         let post = make_cylinder([0.0; 3], 10.0, 10.0).unwrap();
-        let (s, co) = (-sy).atan2(-sx).sin_cos();
+        let (co, s) = (-sx * FRAC_1_SQRT_2, -sy * FRAC_1_SQRT_2);
         post.transform(&[
             [co, s, 0.0, 0.0],
             [-s, co, 0.0, 0.0],
@@ -233,7 +234,7 @@ fn posts_with_rounded_tops(chamfered: bool) -> Body {
             .unwrap();
     }
     // each post's top edge, through its point outward on the diagonal
-    let h = 10.0 / 2f64.sqrt();
+    let h = 10.0 * FRAC_1_SQRT_2;
     let rims: Vec<usize> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
         .iter()
         .map(|&(sx, sy)| edge_at(&b, [sx * (a + h), sy * (c + h), 10.0]))
@@ -275,6 +276,7 @@ fn posts_with_rounded_tops(chamfered: bool) -> Body {
 /// on past the round's ends, three quarters of a turn, to the walls' offsets, at sqrt(16 - t^2)
 /// from the axis along them.
 #[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
 fn a_box_whose_posts_have_rounded_tops_shells() {
     all_fixes();
     let (a, c) = (41.0, 23.5);
