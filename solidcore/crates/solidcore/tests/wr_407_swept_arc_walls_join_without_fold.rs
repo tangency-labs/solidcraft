@@ -8,9 +8,10 @@
 //! off its plane, so it was not planar and its search domain reached past the fold of its
 //! continuation; upstream's `CoverCoincidentSurface` merged wall B's top onto that folded
 //! continuation and the join lost 5573 mm3. WR-407's frame on the path plane's normal is
-//! the default, and so is its fold rule: without it the join was still wrong (with the
-//! drop pieces of the walls' trims joined (WR-543) it was 7744 mm3 too large, and the
-//! level-2 check reported the merged face's B-spline net doubling back). The cover across
+//! the default, and so is its fold rule: without it the join was still wrong (the level-2
+//! check reported the merged face's B-spline net doubling back; its volume missed the
+//! closed form by 7744 mm3 while the queries dropped their statuses, and no longer does
+//! with the statuses passed on (WR-663), but the fold remained). The cover across
 //! the fold is refused and the join has the closed-form volume
 //! `V_A + V_B - overlap = 60 (pi/2)(56^2 - 44^2) + 60 (pi/2)(64^2 - 52^2) - 60 (pi/4)(56^2 - 52^2)`.
 //! The walls' radial faces are the sweep's approximation of the arcs, so the volume is
