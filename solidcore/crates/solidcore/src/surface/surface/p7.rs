@@ -64,14 +64,14 @@
 //!   `SM_ASSERT`s, `EvaluateNormal`'s static list of bad surfaces) is not ported, nor
 //!   is `FindDegenParamForDirection`'s angle bookkeeping (`dBestRad`,
 //!   `dNearBestRad`: computed in release builds but never read).
-//! - **Good drop result (WR-56).** `sm_GoodDropResult` measures the guess and result
-//!   distances each to its own point (upstream swaps them), takes a result as the foot
-//!   only when its gap's components along the unit tangents sum under the local
-//!   solve's tight tolerance (upstream: under 1e-4), and refuses an interior result
-//!   more than that tight tolerance off along either unit tangent (upstream: 1e-3)
-//!   (the fork's tangency-labs/smlib@0b4de8c / eaa998a); a result at the guess itself
-//!   is measured with its own point for the guess (upstream evaluates the guess with
-//!   `EvaluatePoint`, which can round one ulp away from the result's evaluation).
+//! - **Good drop result (WR-56).** `sm_GoodDropResult` takes a result as the foot only
+//!   when its gap's components along the unit tangents sum under the local solve's
+//!   tight tolerance (upstream: under 1e-4), and refuses an interior result more than
+//!   that tight tolerance off along either unit tangent (upstream: 1e-3) (the fork's
+//!   tangency-labs/smlib@eaa998a); its last test takes only a result at the guess
+//!   itself, where upstream compares the guess and result distances with swapped names
+//!   (taking a result farther than its guess, refusing one nearer): a result the local
+//!   solve moved to, nearer or not, goes to the global solve (#17773).
 //! - **Flat corners (WR-384).** `GetFlatCorners` tests each corner bit while filling
 //!   the corner points; upstream masks its return value with `&=` there, so it returns
 //!   at most the first corner's flag and point.
@@ -2788,13 +2788,30 @@ pub fn check_seam_drop<S: SurfaceEvaluate + ?Sized>(
     Ok(out)
 }
 
-/// Whether a local point drop from `guess_uv` (solution value `sol_value` at
-/// `sol_uv`) converged well enough to skip the global solve (`sm_GoodDropResult`).
+/// What [`drop_result_verdict`] makes of a local point drop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DropVerdict {
+    /// A foot the local solve converged to at its guess (or right on the point): the
+    /// drop's answer, without the global solve.
+    Foot,
+    /// A foot the local solve converged to away from its guess, passing every test but
+    /// the last (not upstream, WR-56, #17773): the global solve decides, and the caller
+    /// may keep it as a candidate.
+    MovedFoot,
+    /// Not a converged foot, or a suspicious one: the global solve answers.
+    Refused,
+}
+
+/// How a local point drop from `guess_uv` (solution value `sol_value` at `sol_uv`)
+/// converged (`sm_GoodDropResult`, which returns whether it is [`DropVerdict::Foot`]).
 ///
 /// Not upstream (WR-56; the fork's tangency-labs/smlib@0b4de8c / eaa998a, fork PR #70):
-/// - its last test, which refuses a result farther from the point than the guess,
-///   measures each distance to its own point (upstream swaps them, so it refused a
-///   result nearer than its guess and took one farther);
+/// - its last test takes only a result at the guess itself (upstream compares the
+///   result's and the guess's distances with their names swapped, so it took a result
+///   farther than its guess and refused one nearer; in either order a result the local
+///   solve moved to can be a local minimum that is not the nearest point, #17773): any
+///   other result passing every test is [`DropVerdict::MovedFoot`], for the global
+///   solve to decide;
 /// - a result is taken as the foot only when the gap's components along the unit
 ///   tangents sum under the local solve's tight tolerance `EFF_ZERO * (1 + max|P|)`
 ///   (upstream: under 1e-4), and an interior result with either component over it is
@@ -2803,25 +2820,24 @@ pub fn check_seam_drop<S: SurfaceEvaluate + ?Sized>(
 ///   (the component along the unit short tangent divides the solve's residual by that
 ///   tangent's length); it then goes to the global solve too, which answers the drop
 ///   as it does without a guess;
-/// - not upstream or the fork: a result at the guess itself (equal parameters) uses
-///   the result's point as the guess point, where upstream's `EvaluatePoint` can round
-///   one ulp away, so that with the distances in order the result could measure
-///   farther than its own guess.
+/// - not upstream or the fork: a result at the guess itself is taken without measuring
+///   the guess again (upstream's `EvaluatePoint` can round one ulp away from the result's
+///   evaluation, which then measured the result farther than itself).
 ///
 /// # Errors
 ///
 /// Only [`SolidError::Unported`] (upstream ignores the evaluation statuses).
-pub fn good_drop_result<S: SurfaceEvaluate + ?Sized>(
+pub fn drop_result_verdict<S: SurfaceEvaluate + ?Sized>(
     k: &Kernel,
     surface: &S,
     domain: &Extent2d,
     pt_to_drop: Point3,
     guess_uv: Point2,
     sol: &SolutionEnd,
-) -> Result<bool> {
+) -> Result<DropVerdict> {
     // Check whether it's right on.
     if sol.solution_value < EFF_ZERO {
-        return Ok(true);
+        return Ok(DropVerdict::Foot);
     }
 
     let result_uv = Point2::new(sol.param(0)?, sol.param(1)?);
@@ -2830,10 +2846,10 @@ pub fn good_drop_result<S: SurfaceEvaluate + ?Sized>(
     let max_step = 0.50;
     let uv_step = result_uv - guess_uv;
     if uv_step.x.abs() > max_step * domain.x_length() {
-        return Ok(false);
+        return Ok(DropVerdict::Refused);
     }
     if uv_step.y.abs() > max_step * domain.y_length() {
-        return Ok(false);
+        return Ok(DropVerdict::Refused);
     }
 
     // Evaluate the error functions: how far from the surface normal.
@@ -2841,7 +2857,7 @@ pub fn good_drop_result<S: SurfaceEvaluate + ?Sized>(
     // tangency-labs/smlib 21dcf69; the fork keeps the dropped `Unitize` statuses)
     let mut d = (Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF);
     if !eval_1st_keep(k, surface, result_uv, Side::Left, Side::Left, &mut d)? {
-        return Ok(false);
+        return Ok(DropVerdict::Refused);
     }
     let (srf_point, su, sv) = d;
     let su = su.unitize_or_z();
@@ -2853,55 +2869,64 @@ pub fn good_drop_result<S: SurfaceEvaluate + ?Sized>(
     // `LocalPointSolve_1`'s (WR-56; upstream: |Fu| + |Fv| < 1e-4).
     let tight_tol = EFF_ZERO * (1.0 + pt_to_drop.max_dimension());
     if fu.abs() + fv.abs() < tight_tol {
-        return Ok(true);
+        return Ok(DropVerdict::Foot);
     }
 
     // Check u-param first.
     if result_uv.x < domain.min().x + EFF_ZERO {
         if fu > EFF_ZERO {
-            return Ok(false);
+            return Ok(DropVerdict::Refused);
         }
     } else if result_uv.x > domain.max().x - EFF_ZERO {
         if fu < -EFF_ZERO {
-            return Ok(false);
+            return Ok(DropVerdict::Refused);
         }
     } else if fu.abs() > tight_tol {
-        return Ok(false); // interior, bad fcn value.
+        return Ok(DropVerdict::Refused); // interior, bad fcn value.
     }
 
     // Now check v-param.
     if result_uv.y < domain.min().y + EFF_ZERO {
         if fv > EFF_ZERO {
-            return Ok(false);
+            return Ok(DropVerdict::Refused);
         }
     } else if result_uv.y > domain.max().y - EFF_ZERO {
         if fv < -EFF_ZERO {
-            return Ok(false);
+            return Ok(DropVerdict::Refused);
         }
     } else if fv.abs() > tight_tol {
-        return Ok(false); // interior, bad fcn value.
+        return Ok(DropVerdict::Refused); // interior, bad fcn value.
     }
 
-    // One more: if the solution 3d point is farther than the guess (WR-56: each
-    // distance to its own point; upstream's names are swapped). A result at the guess
-    // itself is its point (not upstream: `EvaluatePoint` there can round one ulp away
-    // from the first-derivative evaluation of the result, which then measured the
-    // result farther than itself).
-    let guess_3d = if guess_uv == result_uv {
-        srf_point
-    } else {
-        let Some(p) = ignored(surface.evaluate_point(k, guess_uv))? else {
-            return Ok(false);
-        };
-        p
-    };
-    let dsq_guess = pt_to_drop.distance_squared(guess_3d);
-    let dsq_result = pt_to_drop.distance_squared(srf_point);
-    if dsq_result > dsq_guess {
-        return Ok(false);
+    // One more: upstream refuses a result whose 3d point is farther than the guess's,
+    // with the two distances' names swapped, so it took a result farther than its
+    // guess and sent one nearer to the global solve. Not upstream (WR-56, #17773):
+    // neither order shows a result the local solve moved to is the nearest point (a
+    // nearer one can be a local minimum the global solve beats), so only a result at
+    // the guess itself is taken here; any other goes to the global solve.
+    if guess_uv != result_uv {
+        return Ok(DropVerdict::MovedFoot);
     }
 
-    Ok(true)
+    Ok(DropVerdict::Foot)
+}
+
+/// Whether a local point drop from `guess_uv` converged well enough to skip the
+/// global solve (`sm_GoodDropResult`): [`drop_result_verdict`] is
+/// [`DropVerdict::Foot`].
+///
+/// # Errors
+///
+/// As [`drop_result_verdict`].
+pub fn good_drop_result<S: SurfaceEvaluate + ?Sized>(
+    k: &Kernel,
+    surface: &S,
+    domain: &Extent2d,
+    pt_to_drop: Point3,
+    guess_uv: Point2,
+    sol: &SolutionEnd,
+) -> Result<bool> {
+    Ok(drop_result_verdict(k, surface, domain, pt_to_drop, guess_uv, sol)? == DropVerdict::Foot)
 }
 
 // ---- the global solvers --------------------------------------------------------------------
@@ -3577,8 +3602,9 @@ mod tests {
 
     /// tangency-labs/solidcore#1852 (WR-56): `sm_GoodDropResult` stores the result
     /// distance in `dDsqGuess` and the guess distance in `dDsqResult`, so its last
-    /// test rejects a drop that improved on the guess; the port compares the actual
-    /// guess and result distances. Every case reaches the final comparison: the
+    /// test rejects a drop that improved on the guess and takes one that got worse;
+    /// the port takes only a result at its guess (a moved one, nearer or not, goes to
+    /// the global solve, #17773). Every case reaches the final comparison: the
     /// result lies on the domain's `u = 0` side and the point on the plane `1/2048`
     /// beyond it along `-S_u`, so `Fu` is `-1/2048` (allowed on that side) and `Fv`
     /// is zero. The foot test (tangency-labs/smlib@eaa998a) does not take it, and on
@@ -3599,19 +3625,29 @@ mod tests {
         *sol.param_mut(1).unwrap() = result_uv.y;
 
         // The result is closer than the guess: upstream rejected it (its swapped
-        // names make the guess look farther); the port accepts it.
+        // names make the guess look farther), and so does the port: a nearer result
+        // is not shown to be the nearest point (#17773).
         let nearer_guess = result_uv + Point2::new(0.1, 0.0);
         // The guess is closer than the result: upstream accepted it; the port
         // rejects it, as the final test intends.
         let farther_guess = result_uv - Point2::new(h, 0.0);
-        // Equidistant: accepted.
+        // Equidistant but moved: upstream accepted it; the port sends it to the
+        // global solve too.
         let equal_guess = result_uv - Point2::new(2.0 * h, 0.0);
 
         let good =
             |guess: Point2| good_drop_result(&k, &s, &domain, pt_to_drop, guess, &sol).unwrap();
-        assert!(good(nearer_guess));
+        assert!(!good(nearer_guess));
         assert!(!good(farther_guess));
-        assert!(good(equal_guess));
+        assert!(!good(equal_guess));
+        // A result at its guess is taken; a moved one passing every other test is a
+        // candidate for the global solve to decide.
+        assert!(good(result_uv));
+        let verdict =
+            |guess: Point2| drop_result_verdict(&k, &s, &domain, pt_to_drop, guess, &sol).unwrap();
+        for g in [nearer_guess, farther_guess, equal_guess] {
+            assert_eq!(verdict(g), DropVerdict::MovedFoot);
+        }
     }
 
     /// The surface of the goldens case `surface.surface_p5` gen0494: a quadratic x

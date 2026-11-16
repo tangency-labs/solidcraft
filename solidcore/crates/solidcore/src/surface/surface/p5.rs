@@ -25,6 +25,10 @@
 //! | [`cs_identical_solutions`], [`cs_identical_solutions_in`], [`csi_identical_solutions`], [`csi_identical_solutions_in`] | `SmCSGlobalSolver::IdenticalSolutions`, `SmCSIGlobalSolver::IdenticalSolutions` |
 //!
 //! Deviations:
+//! - **A moved local foot (WR-56, #17773).** `DropPoint` keeps a converged local result
+//!   that `sm_GoodDropResult` refuses only for having moved from its guess, runs the
+//!   global solve, and returns the local result when the global solve found nothing or
+//!   nothing with a smaller solution value; upstream returns the global answer alone.
 //! - **Solver classes without a Rust struct.** `SmCSGlobalSolver` and
 //!   `SmCSIGlobalSolver` have no struct yet (their constructors belong to unit
 //!   `surface.surface_p1`), so their `IdenticalSolutions` are free functions over the
@@ -94,7 +98,7 @@ use super::p1::{
 use super::p2::{LsiGlobalSolver, SurfaceEval, B_SPLINE_SURFACE_TYPE};
 use super::p4::is_point_on_normal;
 use super::p4::NoObject;
-use super::p7::{good_drop_result, load_guesses, SpGlobalSolver};
+use super::p7::{drop_result_verdict, load_guesses, DropVerdict, SpGlobalSolver};
 use super::{Surface, SurfaceKind};
 
 const OP_SING: &str = "surface::surface::p5::Surface::is_singularity";
@@ -1180,6 +1184,11 @@ impl Surface {
         }
 
         // Try LocalPointSolve if a guess was supplied.
+        // Not upstream (WR-56, #17773): a converged local result the last test of
+        // `good_drop_result` refuses for having moved from its guess is kept as a
+        // candidate, and taken after the global solve when that finds nothing or only
+        // farther answers (see the check after it).
+        let mut moved_foot = false;
         if !success {
             if let Some(g) = guess {
                 match ignored(self.local_point_solve::<O>(k, domain, op, pt_to_drop, g))? {
@@ -1193,7 +1202,9 @@ impl Surface {
                 // Check whether we think that this solution is ok, i.e., was it a good
                 // enough guess?  [080206]
                 if success {
-                    success = good_drop_result(k, self, domain, pt_to_drop, g, &sol.start)?;
+                    let verdict = drop_result_verdict(k, self, domain, pt_to_drop, g, &sol.start)?;
+                    success = verdict == DropVerdict::Foot;
+                    moved_foot = verdict == DropVerdict::MovedFoot;
                 }
                 if success {
                     answer_in_sol = true;
@@ -1232,6 +1243,24 @@ impl Surface {
             if !solutions.is_empty() {
                 success = true;
                 answer_in_array = true;
+            }
+
+            // Not upstream (WR-56, #17773): the moved local foot is the answer when the
+            // global solve found nothing or nothing as near (a local solve can stop at a
+            // local minimum the global solve beats; the global solve can miss a foot on
+            // the domain's boundary). A value that is not a number is not nearer.
+            if moved_foot {
+                let nearest_global = solutions
+                    .as_slice()
+                    .iter()
+                    .map(|s| s.start.solution_value)
+                    .fold(f64::INFINITY, f64::min);
+                if sol.start.solution_value < nearest_global {
+                    solutions = SolutionArray::<O>::new();
+                    success = true;
+                    answer_in_array = false;
+                    answer_in_sol = true;
+                }
             }
         }
 
