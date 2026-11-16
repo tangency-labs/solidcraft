@@ -1158,10 +1158,11 @@ pub struct SketchInspected {
     /// The sketch's feature id.
     pub id: u64,
     pub name: String,
-    /// Where it lies in its component's coordinates, as saved.
+    /// The evaluated plane in its component's coordinates, including resolved face attachments.
     pub plane: SketchPlaneReply,
-    /// Where it lies in the design, matching `points[].world`. Includes pending moves and
-    /// the active authoring path; sketches of other components use their first placement.
+    /// The frame used by `points[].world`, including pending moves and the active authoring path.
+    /// Without an explicit authoring path for the sketch's component, uses its first placement.
+    /// If the placed model has no copy of the sketch, uses the component-local `plane`, as the points do.
     pub world_plane: SketchPlaneReply,
     pub status: SketchStatus,
     /// Its remaining degrees of freedom (0: fully constrained).

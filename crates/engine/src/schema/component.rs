@@ -883,6 +883,9 @@ pub struct ListResult {
     pub active: u64,
     /// The exact occurrence path selected for authoring, from the root to the active component.
     /// Empty for component-only activation, including the design root; no placement is inferred.
+    /// To restore a nonempty path, call `component.activate` with `component: active`,
+    /// `occurrence` set to the path's last id, and `path: active_path`.
+    /// For an empty path, pass only `component: active`; omit `occurrence` and `path`.
     pub active_path: Vec<u64>,
     /// The design and its components.
     pub components: Vec<ComponentNode>,

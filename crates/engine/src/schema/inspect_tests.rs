@@ -596,7 +596,7 @@ fn sketch_inspect_world_plane_follows_occurrence_context() {
         "occurrence.move",
         json!({"occurrence": copy["occurrence"], "to_matrix": [[0, 0, 1, 100], [0, 1, 0, 50], [-1, 0, 0, 30]], "capture": false}),
     );
-    let saved = json!({"origin": [0.0, 0.0, 0.0], "x_dir": [1.0, 0.0, 0.0], "y_dir": [0.0, 1.0, 0.0]});
+    let local = json!({"origin": [0.0, 0.0, 0.0], "x_dir": [1.0, 0.0, 0.0], "y_dir": [0.0, 1.0, 0.0]});
     for (activation, origin, x_dir, normal, center) in [
         (
             json!({"component": leaf["component"], "occurrence": leaf["occurrence"], "path": [copy["occurrence"], leaf["occurrence"]]}),
@@ -606,11 +606,23 @@ fn sketch_inspect_world_plane_follows_occurrence_context() {
             [100.0, 70.0, 15.0],
         ),
         (json!({"component": leaf["component"]}), [5.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [15.0, 20.0, 0.0]),
+        // Inspecting another component's repeated sketch uses its first placement too.
+        (json!({"component": 0}), [5.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [15.0, 20.0, 0.0]),
     ] {
         run(&mut s, "component.activate", activation);
+        let context = (s.active_component, s.active_occurrence_path.clone(), s.active_sketch, s.revision, s.pending_moves.clone());
+        let doc = s.doc.clone();
+        let model = s.model.state();
         let inspected = run(&mut s, "sketch.inspect", json!({"sketch": sketch}));
+        assert_eq!(
+            (s.active_component, s.active_occurrence_path.clone(), s.active_sketch, s.revision, s.pending_moves.clone()),
+            context,
+            "inspection leaves authoring context and pending moves unchanged"
+        );
+        assert!(std::sync::Arc::ptr_eq(&s.doc, &doc), "inspection does not change the document");
+        assert!(std::sync::Arc::ptr_eq(&s.model.state(), &model), "inspection does not rebuild the model");
         matches::<SketchInspected>("sketch.inspect", &inspected, false);
-        assert_eq!(inspected["plane"], saved, "the saved plane keeps its component-local frame");
+        assert_eq!(inspected["plane"], local, "the evaluated plane keeps its component-local frame");
         assert_eq!(inspected["world_plane"], json!({"origin": origin, "x_dir": x_dir, "y_dir": [0.0, 1.0, 0.0]}));
         let plane: solidcore_record::Plane = serde_json::from_value(inspected["world_plane"].clone()).unwrap();
         assert_eq!(<[f64; 3]>::from(plane.normal()), normal);

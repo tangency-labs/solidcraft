@@ -286,8 +286,8 @@ fn the_check_reads_keys_as_the_handlers_do() {
     assert_eq!(issues("component.rename", json!({"component": 0, "name": ""})), ["`name` must be 1…128 characters"]);
 }
 
-fn matches(schema: schemars::Schema, id: &str, reply: &Value) {
-    let schema = schema.as_value();
+fn matches(schema: impl std::borrow::Borrow<schemars::Schema>, id: &str, reply: &Value) {
+    let schema = schema.borrow().as_value();
     assert!(conforms(schema, schema, reply), "{id}: {reply} doesn't match {schema}");
     assert!(reply.get("param_warnings").is_none(), "{id}: {reply}");
 }
@@ -295,14 +295,14 @@ fn matches(schema: schemars::Schema, id: &str, reply: &Value) {
 #[test]
 fn component_list_reports_occurrence_context() {
     let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let schema = output_schema_for::<ListResult>();
     let check = |s: &mut Session, component: u64, path: &[u64]| {
         let before = (s.active_component, s.active_occurrence_path.clone(), s.revision);
         for params in [json!({}), json!({"compact": true}), json!({"compact": true, "bodies": true})] {
             let listed = s.execute("component.list", &params).unwrap();
             assert_eq!(listed["active"], component);
             assert_eq!(listed["active_path"], json!(path));
-            matches(output_schema_for::<ListResult>(), "component.list", &listed);
-            let schema = output_schema_for::<ListResult>();
+            matches(&schema, "component.list", &listed);
             let mut missing = listed.clone();
             missing.as_object_mut().unwrap().remove("active_path");
             assert!(!conforms(schema.as_value(), schema.as_value(), &missing), "active_path must always be present");
