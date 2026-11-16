@@ -1272,8 +1272,9 @@ fn plus_button(ui: &mut egui::Ui, strip: &TabStrip, rect: Rect, icon: f32, pen: 
     }
 }
 
-/// The chevron between the selected design's + and ×, in `rect`: pointing left it folds the
-/// design's sub-tabs into its tab; `collapsed`, pointing right, it shows them again.
+/// The chevron between the selected design's + and ×, in `rect`: the kit's disclosure, open
+/// (pointing down) while the sub-tabs show, which folds them into the design's tab; `collapsed`
+/// (pointing right) it shows them again.
 fn collapse_button(ui: &mut egui::Ui, strip: &TabStrip, rect: Rect, collapsed: bool, pen: &mut Pen) {
     let t = Tokens::get();
     let label = if collapsed { strip.view_text.expand_views } else { strip.view_text.collapse_views };
@@ -1285,13 +1286,7 @@ fn collapse_button(ui: &mut egui::Ui, strip: &TabStrip, rect: Rect, collapsed: b
     if hot {
         ui.painter().rect_filled(rect, VIEW_RADIUS, t.app_bar_hover_button);
     }
-    let ink = t.app_bar_text.gamma_multiply(if hot { 1.0 } else { 0.7 });
-    let icon = Rect::from_center_size(rect.center(), vec2(12.0, 12.0));
-    if collapsed {
-        crate::icons::paint_ink(ui.painter(), icon, "chevron_right", ink);
-    } else {
-        crate::icons::paint_ink_mirrored(ui.painter(), icon, "chevron_right", ink);
-    }
+    crate::disclosure::disclosure(ui.painter(), rect.center(), !collapsed, t.app_bar_text.gamma_multiply(if hot { 1.0 } else { 0.7 }));
     if resp.backing_on_hover_text(label).clicked() {
         pen.actions.push(TabAction::CollapseViews(!collapsed));
     }
