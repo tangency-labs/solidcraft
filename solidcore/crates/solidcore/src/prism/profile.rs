@@ -946,7 +946,16 @@ pub fn regions_overlap(a: &Region2, b: &Region2, eps: f64) -> Option<bool> {
                 ),
                 eps,
             );
-            meet && da.dot(db) > 0.5 * da.length() * db.length()
+            let (la, lb) = (da.length(), db.length());
+            if !(meet && la > 0.0 && lb > 0.0 && da.dot(db) > 0.5 * la * lb) {
+                return false;
+            }
+            // they must lie side by side, not end to end (as at a shared corner)
+            let u = Point2::new(da.x / la, da.y / la);
+            let at = |q: Point2| (q.x - pa.0.x) * u.x + (q.y - pa.0.y) * u.y;
+            let (s, e) = (at(pb.0), at(pb.1));
+            let shared = e.max(s).min(la) - e.min(s).max(0.0);
+            shared > 0.25 * la.min(lb)
         })
     }))
 }
