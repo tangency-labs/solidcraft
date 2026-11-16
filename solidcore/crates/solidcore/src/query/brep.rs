@@ -37,18 +37,9 @@
 //!   the B-rep from its `const` methods). [`calculate_bounding_box`] and
 //!   [`calculate_tight_bounding_box`] take a [`LazyBrep`]: pass `&mut Brep` for the
 //!   upstream behaviour; with `&Brep` the edits are made on a private copy and lost.
-//! - **Ignored statuses.** [`calculate_tight_bounding_box`] ignores the statuses of the
-//!   edge and face boxes, as upstream, and keeps what a failed call leaves: the
-//!   previous face's box after a failed loose face box (upstream writes it only on
-//!   success), the box of the face's vertices and edges after a failure in the
-//!   surface part of the tight face box
-//!   ([`crate::query::face::p3::calculate_tight_bounding_box_into`]), the loose box
-//!   after a failed tight edge box. A failed loose edge box leaves the freshly
-//!   initialised (empty) box: every `CalculateBoundingBox` override (`SmCurve`,
-//!   `SmBSplineCurve`, `SmLine`, `SmHermiteCurve`, `SmCrvOnSurf`, `SmCompositeCurve`)
-//!   fails only before it writes the caller's box. [`SolidError::Unported`] still
-//!   propagates. With `UpstreamFixes::brep_edit_statuses_pass_on` (fork 60a8a51) the
-//!   four statuses are passed on.
+//! - **Passed-on statuses.** Upstream [`calculate_tight_bounding_box`] ignores the
+//!   statuses of the edge and face boxes and keeps what a failed call leaves. As the
+//!   fork does (60a8a51), the four statuses are passed on instead.
 //! - **Point classification.** [`BrepQuery::point_3d_classify`] returns the
 //!   classification instead of filling the caller's (every upstream caller constructs a
 //!   fresh one just before and drops it on failure), with [`EntityRef`] objects. Its
@@ -100,7 +91,7 @@ pub use ray::{
 
 use core::cell::OnceCell;
 
-use crate::error::{ignore_status, ignored, native_failure, EntityRef, Result, SolidError};
+use crate::error::{native_failure, EntityRef, Result, SolidError};
 use crate::geom::attribute::{Attribute, AttributeValue, Behavior};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -274,43 +265,28 @@ pub fn calculate_tight_bounding_box<'a>(
     for e in bp1::edges(b, None)? {
         k.check_cancelled(OP_TIGHT_BOX)?;
         // (CalculateBoundingBox initialises the box first)
-        let mut edge_bbox = ignored(crate::error::passed_on(
-            qe::calculate_bounding_box(k, b, e, NORMAL_BOX, false),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?
-        .and_then(|boxes| boxes.normal)
-        .unwrap_or_default();
+        let mut edge_bbox = qe::calculate_bounding_box(k, b, e, NORMAL_BOX, false)?
+            .normal
+            .unwrap_or_default();
         if edge_bbox.is_contained_by(&brep_bbox, 0.0) {
             continue;
         }
-        // (an edge without curve, or a failure, leaves the loose box)
-        if let Some(Some(tight)) = ignored(crate::error::passed_on(
-            qe::calculate_tight_bounding_box(k, b, e),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)? {
+        // (an edge without curve leaves the loose box)
+        if let Some(tight) = qe::calculate_tight_bounding_box(k, b, e)? {
             edge_bbox = tight;
         }
         brep_bbox = brep_bbox.union(&edge_bbox);
     }
 
-    // Union all of the Tight Face bounding boxes (`rFaceBBox` is kept from face to
-    // face).
-    let mut face_bbox = Extent3d::new();
+    // Union all of the Tight Face bounding boxes (upstream keeps `rFaceBBox` from face
+    // to face, which matters only after a failure; the fork passes failures on).
     for f in bp1::faces(b, None)? {
         k.check_cancelled(OP_TIGHT_BOX)?;
-        if let Some(loose) = ignored(crate::error::passed_on(
-            qf1::calculate_bounding_box(k, lb.get(), f, false),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)? {
-            face_bbox = loose;
-        }
+        let mut face_bbox = qf1::calculate_bounding_box(k, lb.get(), f, false)?;
         if face_bbox.is_contained_by(&brep_bbox, 0.0) {
             continue;
         }
-        ignore_status(crate::error::passed_on(
-            qf3::calculate_tight_bounding_box_into(k, &mut lb, f, &mut face_bbox),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        qf3::calculate_tight_bounding_box_into(k, &mut lb, f, &mut face_bbox)?;
         brep_bbox = brep_bbox.union(&face_bbox);
     }
 
@@ -1499,6 +1475,34 @@ mod tests {
             .unwrap();
         assert_eq!(inside.object(), solid);
         assert!(trim_count(&b) > 0, "the trims are made on the box itself");
+    }
+
+    /// A ray that enters a 100 mm cube 0.001 mm from a vertical edge and leaves 0.001 mm from
+    /// the same edge: the entry point is not on the edge (it is 0.001 mm off it, far outside
+    /// the edge's tolerance), so the hit is a hit on the face it enters, and the ray start is
+    /// outside the cube. (The solve reports the nearest hit only here, so the hit is not moved
+    /// onto the edge whatever tolerance the move is held to; that is covered where a ray meets
+    /// two faces on an edge, `a_long_thin_elliptic_prism_faces_out_and_cuts_a_block`.)
+    #[test]
+    fn a_ray_entering_near_an_edge_hits_the_face() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 100.0, 100.0, 100.0)
+                .unwrap();
+        let query = BrepQuery::of_brep(&b);
+        let outside = b.infinite_region();
+        let start = Point3::new(-30.0, 30.001, 50.0);
+        let direction = Vec3::new(1.0, -1.0, 0.0).unitize().unwrap();
+        let hit = query
+            .ray_fire_live(&k, &mut b, start, direction, 1e-6)
+            .unwrap();
+        assert_eq!(hit.region, outside, "the ray starts outside the cube");
+        assert_eq!(
+            hit.intersection.point_class(),
+            PointClassType::Face,
+            "{:?}",
+            hit.intersection
+        );
     }
 
     /// A query keeps the face caches its ray solves build (upstream keeps them on the

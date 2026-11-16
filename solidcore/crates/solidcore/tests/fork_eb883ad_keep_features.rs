@@ -7,6 +7,9 @@
 //! footprint lies inside the band, at r 1.9 the band stops short of it.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
+
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -175,8 +178,6 @@ fn a_band_short_of_the_feature_leaves_it() {
 fn fork_kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut fixes = UpstreamFixes::default();
-    fixes.fillet_refuse_rails_leaving_faces = true;
-    fixes.fillet_cliff_overflow = true;
     fixes.fillet_overflow_trim_at_creases = true;
     fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes = fixes;
@@ -185,8 +186,8 @@ fn fork_kernel() -> Kernel {
 
 type Feature = fn(&mut Kernel, Brep) -> Result<Brep>;
 
-/// The block with a feature, its top front edge rounded `r`: the volume and the faces.
-fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
+/// The block with a feature, its top front edge rounded `r`, checked valid.
+fn rounded_body(feature: Feature, r: f64) -> Result<(Kernel, Brep)> {
     let mut k = fork_kernel();
     let block = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0)?;
     let mut b = feature(&mut k, block)?;
@@ -197,6 +198,12 @@ fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
         .unwrap()
         .lines();
     assert!(lines.is_empty(), "{lines:?}");
+    Ok((k, b))
+}
+
+/// The block with a feature, its top front edge rounded `r`: the volume and the faces.
+fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
+    let (k, mut b) = rounded_body(feature, r)?;
     Ok((volume_of(&k, &mut b), b.face_list().len()))
 }
 
@@ -211,9 +218,24 @@ fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
 /// read a fifth-order error estimate (#1556, 5.0e-13 at most). Against the closed forms: the
 /// r 1.9 boss and hole are off by +2.0e-7 and -3.6e-7 (the fork's +4.4e-7 and -1.9e-7), and the
 /// r 8 kept cylinder boss and hole, cone boss and 19 degree lean stay 3.4e-5 to 4.8e-5 above
-/// theirs, the crease's fit, as the fork's do; the cone pit has none.
-fn assert_pinned(feature: Feature, r: f64, volume: f64, faces: usize) {
-    let (v, n) = rounded_with(feature, r).unwrap();
+/// theirs, the crease's fit, as the fork's do; the cone pit has none. (Those figures were
+/// before #16735: `brep_volume` now closes the tolerant edges' gaps, and the r 8 cylinder boss
+/// and hole, cone boss and pit and 19 degree lean moved down by 3.4e-5 to 6.1e-5, the old
+/// integrator's leak through their marched creases; the prisms and the r 1.9 hole by a last
+/// bit. Each pin carries its figure from before, and the move is checked to be that leak.
+/// Integrating the faces on their surfaces continued where their trims leave the domain
+/// moved the r 8 cylinder boss and hole, cone boss and pit, 19 degree lean, prism boss and
+/// pocket and r 1.9 hole by one more last bit; the prisms and the r 1.9 hole are back on
+/// their figures from before.)
+///
+/// `was` is the figure before `brep_volume` closed the tolerant edges' gaps (#16735); where it
+/// differs, the move is checked to be that integrator's leak (`support/volume_leak.rs`).
+fn assert_pinned(feature: Feature, r: f64, was: f64, volume: f64, faces: usize) {
+    let (k, mut b) = rounded_body(feature, r).unwrap();
+    let (v, n) = (volume_of(&k, &mut b), b.face_list().len());
+    if was != volume {
+        volume_leak::assert_moved_by_the_old_leak(&k, &mut b, was, volume, 1e-7);
+    }
     // Bit for bit where the figures were taken (Linux). Elsewhere the platform's libm can move
     // the last bit (one on Windows, the kept hole).
     if cfg!(target_os = "linux") {
@@ -266,24 +288,36 @@ fn cone_pit(k: &mut Kernel, block: Brep) -> Result<Brep> {
 
 #[test]
 fn cylinders_keep_their_pinned_volumes() {
-    assert_pinned(cylinder_boss, 8.0, 23528.165527753492, 9);
-    assert_pinned(cylinder_hole, 8.0, 23402.501835298488, 9);
-    assert_pinned(cylinder_boss, 1.9, 24031.84334806833, 9);
-    assert_pinned(cylinder_hole, 1.9, 23906.179641369188, 9);
+    assert_pinned(cylinder_boss, 8.0, 23528.165527753492, 23528.16549376938, 9);
+    assert_pinned(cylinder_hole, 8.0, 23402.501835298488, 23402.50178777836, 9);
+    assert_pinned(cylinder_boss, 1.9, 24031.84334806833, 24031.84334806833, 9);
+    assert_pinned(
+        cylinder_hole,
+        1.9,
+        23906.179641369188,
+        23906.179641369188,
+        9,
+    );
 }
 
 /// Planar walls: each crease is an exact section.
 #[test]
 fn prisms_keep_their_pinned_volumes() {
-    assert_pinned(prism_boss, 8.0, 23549.896259768986, 12);
-    assert_pinned(prism_pocket, 8.0, 23389.896259952173, 12);
+    assert_pinned(prism_boss, 8.0, 23549.896259768986, 23549.896259768986, 12);
+    assert_pinned(
+        prism_pocket,
+        8.0,
+        23389.896259952173,
+        23389.896259952173,
+        12,
+    );
 }
 
 /// Walls that lean: kept as the fork keeps them, the boss's with no refusal.
 #[test]
 fn cones_keep_their_pinned_volumes() {
-    assert_pinned(cone_boss, 8.0, 23501.985588856085, 11);
-    assert_pinned(cone_pit, 8.0, 23427.54088939281, 9);
+    assert_pinned(cone_boss, 8.0, 23501.985588856085, 23501.98555487197, 11);
+    assert_pinned(cone_pit, 8.0, 23427.54088939281, 23427.54082824641, 9);
 }
 
 /// A boss's walls count as upright within the fillet's angular tolerance: at 19 degrees off they
@@ -302,10 +336,90 @@ fn a_boss_leaning_past_the_angular_tolerance_is_refused_as_the_fork() {
         let c = create_cone(k, Point3::new(20.0, 4.0, 20.0), 2.0, 1.0, 1.0)?;
         boolean_union(k, block, c)
     }
-    assert_pinned(lean_19, 8.0, 23486.59179069601, 11);
+    assert_pinned(lean_19, 8.0, 23486.59179069601, 23486.59175105623, 11);
     for steep in [lean_30 as Feature, lean_45] {
         assert!(rounded_with(steep, 8.0).is_err());
     }
+}
+
+/// A round on the rim of a round block (#16636): its one sheet face is a ring whose box covers the
+/// whole top, so every boss on the top lay inside that box. A boss with leaning walls is refused
+/// only where the round really reaches it, not wherever the boxes meet. A 20 x 10 cylinder, its
+/// top rim rounded r 1.5, a boss 4 tall on the top about (8, 0), 12 in from the band: the round is
+/// the closed form's, the boss stays whole.
+fn rounded_rim_with_boss(boss: fn(&mut Kernel) -> Result<Brep>) -> (f64, f64) {
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    k.fixes.fillet_refuse_rounds_breaking_through = false;
+    let block = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 10.0).unwrap();
+    let feature = boss(&mut k).unwrap();
+    let mut b = boolean_union(&mut k, block, feature).unwrap();
+    let e = pick(&k, &b, Point3::new(0.0, 20.0, 10.0));
+    fillet_edges(&mut k, &mut b, &[e], 1.5, 1, 1, 1.0).unwrap();
+    assert!(solidcore::topology::brep::p2::is_manifold_solid(&b).unwrap());
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    assert_eq!(
+        (
+            b.face_list().len(),
+            b.edge_list().len(),
+            b.vertex_list().len()
+        ),
+        (6, 8, 5)
+    );
+    // the spandrel's area, revolved about its centroid (Pappus)
+    let r = 1.5;
+    let area = (1.0 - PI / 4.0) * r * r;
+    let centroid = 20.0 - r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI));
+    (volume_of(&k, &mut b), 2.0 * PI * centroid * area)
+}
+
+#[test]
+fn a_leaning_boss_clear_of_a_rim_round_is_left_alone() {
+    let (v, taken) =
+        rounded_rim_with_boss(|k| create_cone(k, Point3::new(8.0, 0.0, 10.0), 3.0, 1.5, 4.0));
+    let frustum = PI * 4.0 / 3.0 * (9.0 + 4.5 + 2.25);
+    let want = PI * 400.0 * 10.0 + frustum - taken;
+    println!("volume {v:.12}, want {want:.12}");
+    assert!((v - want).abs() <= 1e-6 * want, "volume {v}, want {want}");
+}
+
+/// The same round past an upright boss: the control, the ordinary path.
+#[test]
+fn an_upright_boss_clear_of_a_rim_round_is_left_alone() {
+    let (v, taken) =
+        rounded_rim_with_boss(|k| create_cylinder(k, Point3::new(8.0, 0.0, 10.0), 3.0, 4.0));
+    let want = PI * 400.0 * 10.0 + PI * 9.0 * 4.0 - taken;
+    println!("volume {v:.12}, want {want:.12}");
+    assert!((v - want).abs() <= 1e-6 * want, "volume {v}, want {want}");
+}
+
+/// The same round over a leaning boss standing partly on the band (the rim round takes the ring
+/// r 18.5 to 20 off the top; the boss's base is r 2 about (17, 0), out to 19): refused, never an
+/// open body with the boss's walls left unsewn.
+#[test]
+fn a_leaning_boss_on_a_rim_round_is_refused() {
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    k.fixes.fillet_refuse_rounds_breaking_through = false;
+    let block = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 10.0).unwrap();
+    let boss = create_cone(&mut k, Point3::new(17.0, 0.0, 10.0), 2.0, 1.0, 4.0).unwrap();
+    let mut b = boolean_union(&mut k, block, boss).unwrap();
+    let e = pick(&k, &b, Point3::new(0.0, 20.0, 10.0));
+    let refusal = fillet_edges(&mut k, &mut b, &[e], 1.5, 1, 1, 1.0)
+        .expect_err("a leaning boss over the band is refused");
+    // the round reaches into the boss's footprint: refused as a round into material, not an
+    // open body
+    assert!(
+        format!("{refusal:?}").contains("reason: Some(RoundIntoMaterial)"),
+        "refused for another cause: {refusal:?}"
+    );
 }
 
 /// A boss astride the round's contact line: refused, as the fork.
@@ -327,7 +441,7 @@ fn a_pocket_astride_the_contact_line_matches_the_fork() {
         let c = create_box(k, Point3::new(18.0, 6.0, 15.0), 4.0, 4.0, 6.0)?;
         boolean_difference(k, block, c)
     }
-    assert_pinned(astride, 8.0, 23371.292359915951, 12);
+    assert_pinned(astride, 8.0, 23371.292359915951, 23371.292359915951, 12);
 }
 
 // ---- Work ----

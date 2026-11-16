@@ -454,9 +454,9 @@ pub fn rebuild(
 /// `sheet` with the control rows next to its record edge `edge` moved so the edge meets record
 /// edge `target` of `other` at `order` (the kernel's
 /// [`solidcore::nurbs::srf_match::match_boundary`]: at most `rows.rows` rows from the edge move,
-/// the rows the order does not fix following by `rows.blend`, G2's row along the normal only, the
-/// sheet refined first where its knots cannot carry the target), and the seam after, measured at
-/// the edge's stations. Both sheets are one untrimmed face (as [`control_net`] reads them), each
+/// the rows the order does not fix following by `rows.blend`, G2's correction normal at each
+/// station, the sheet refined first where its knots cannot carry the target), and the seam after,
+/// measured at the edge's stations. Both sheets are one untrimmed face (as [`control_net`] reads them), each
 /// edge a side of its face's box. Refused when the seam would be worse than before in a measure
 /// the order holds: past both what it was and `held`, the caller's floor for that measure (the
 /// gap, the angle, the curvature jump), so rounding at a seam already held is not "worse".

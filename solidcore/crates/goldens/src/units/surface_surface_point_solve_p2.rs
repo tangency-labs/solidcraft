@@ -1024,3 +1024,58 @@ impl UnitDiff for Runner {
     }
 }
 
+
+#[cfg(test)]
+mod review_geometry_tests {
+    use super::*;
+
+    /// A reported maximum must beat every admissible witness, or be a named known failure.
+    #[test]
+    fn review_maximum_outputs_have_geometric_evidence() {
+        let k = Kernel::default();
+        let known =
+            crate::golden::known_failing(&crate::golden::default_dir(), Runner.id()).unwrap();
+        let mut unexplained = Vec::new();
+        for name in ["rev_gen0057", "gen0808"] {
+            let case = crate::case::regression_case(&Runner, name);
+            let input: Inputs = case.parse().unwrap();
+            assert_eq!(input.solver, 4);
+            let surface = any_surface(&k, input.wrap, &input.surf).unwrap();
+            let output = rust(&input).unwrap();
+            let values = &output.values["out"];
+            let reported = values[3];
+            let actual = surface
+                .evaluate_point(&k, p2([values[1], values[2]]))
+                .unwrap()
+                .distance(v3(input.test));
+            assert!((actual - reported).abs() < 1e-11 * actual.max(1.0));
+            let mut witness = (0.0_f64, [0.0; 2]);
+            for iu in 0..=10 {
+                for iv in 0..=10 {
+                    let uv = [
+                        input.dom[0] + (input.dom[2] - input.dom[0]) * f64::from(iu) / 10.0,
+                        input.dom[1] + (input.dom[3] - input.dom[1]) * f64::from(iv) / 10.0,
+                    ];
+                    let distance = surface
+                        .evaluate_point(&k, p2(uv))
+                        .unwrap()
+                        .distance(v3(input.test));
+                    if distance > witness.0 {
+                        witness = (distance, uv);
+                    }
+                }
+            }
+            eprintln!(
+                "{name}: reported={reported:?}; farther witness={witness:?}; tol={:?}",
+                input.tol
+            );
+            if witness.0 > reported + input.tol && !known.contains_key(name) {
+                unexplained.push(name);
+            }
+        }
+        assert!(
+            unexplained.is_empty(),
+            "wrong maxima still blessed: {unexplained:?}"
+        );
+    }
+}

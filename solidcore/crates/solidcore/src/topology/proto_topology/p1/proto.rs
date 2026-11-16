@@ -32,6 +32,8 @@ use crate::topology::{edge, vertex, vertexuse, Brep, EdgeId, VertexId};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 
 const OP: &str = "topology::proto_topology::p1";
+const OP_REMOVE_COINCIDENT: &str =
+    "topology::proto_topology::p1::remove_coincident_no_edge_proto_vertex";
 
 /// The factor of `CanCombineEdgeDefinitions`: the distance allowed between the curves of
 /// two combinable edge definitions, in units of their summed tolerances (upstream's).
@@ -1095,6 +1097,30 @@ impl<O: ClassObject> VertexDefinition<O> {
         self.gap = gap;
         self.crossing_sine = crossing_sine;
         Ok(true)
+    }
+
+    /// Not upstream (#16637): a certified bound on how far this definition's position may
+    /// lie from the point it stands for, where one is known: its gap when either source
+    /// object is a vertex (the definition stands for that vertex, and its position is the
+    /// vertex's point or a point within the gap of it); the misplacement bound of the
+    /// crossing that placed it (`crossing_error`: the gap over the crossing's sine) when a
+    /// crossing at a known angle did; `None` otherwise, and for a gap that is not finite.
+    #[must_use]
+    pub fn placement_error(&self) -> Option<f64> {
+        if !self.gap.is_finite() {
+            return None;
+        }
+        if self.pc1.point_class() == PointClassType::Vertex
+            || self.pc2.point_class() == PointClassType::Vertex
+        {
+            return Some(max2(self.gap, 0.0));
+        }
+        if self.crossing_sine < 0.0 {
+            return None;
+        }
+        let error = crossing_error(self.gap, self.crossing_sine);
+        // (written to accept: an unknown angle's BIG_DOUBLE, or a NaN, gives no bound)
+        (error < BIG_DOUBLE).then_some(error)
     }
 
     /// The tolerance (`GetTolerance`, as an `SmZoneTol3d`).
@@ -2186,11 +2212,6 @@ pub struct ProtoTopologyManager<O> {
     pe_store: Vec<Option<ProtoEdge>>,
     /// Every proto face made.
     pf_store: Vec<Option<ProtoFace<O>>>,
-    /// Not upstream: `SmProtoEdge::Resolve` splits a self-loop proto edge even when
-    /// its vertex definition is on a vertex (`true`, the default and upstream's
-    /// behaviour); `false` drops such a proto edge instead (tangency-labs/solidcore#480,
-    /// see `topology::proto_topology::p2`).
-    split_self_loops_on_vertices: bool,
     /// Not upstream (WR-619): final vertices `(vertex, max_gap, speck_start, speck_end)`
     /// whose collapsed speck definition `SmEdgeDefinition::Imprint` skipped, so
     /// `ImprintIntersections` grows each vertex's tolerance to cover the speck's span.
@@ -2200,6 +2221,11 @@ pub struct ProtoTopologyManager<O> {
     /// coincident interval, so a point where the two cross is no event and gets no vertex
     /// definition ([`ProtoTopologyManager::set_coincident_edges`]).
     coincident_edges: Vec<(O, O)>,
+    /// Not upstream (WR-214): the first refusal of a proto edge from a proto vertex back
+    /// to itself whose curve leaves its ends' reach of a definition on a vertex; the
+    /// Boolean returns it once every proto edge is resolved
+    /// ([`ProtoTopologyManager::take_self_loop_refusal`]).
+    self_loop_refusal: Option<SolidError>,
 }
 
 fn push_store<T>(store: &mut Vec<Option<T>>, item: T) -> Result<u32> {
@@ -2257,26 +2283,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             pv_store: Vec::new(),
             pe_store: Vec::new(),
             pf_store: Vec::new(),
-            split_self_loops_on_vertices: true,
             skipped_speck_vertices: Vec::new(),
             coincident_edges: Vec::new(),
+            self_loop_refusal: None,
         })
-    }
-
-    /// Whether resolving a proto edge from a proto vertex back to itself splits it
-    /// even when its vertex definition is on a vertex in either B-rep (`true`, the
-    /// default, as upstream). Not upstream.
-    #[must_use]
-    pub const fn split_self_loops_on_vertices(&self) -> bool {
-        self.split_self_loops_on_vertices
-    }
-
-    /// Sets [`ProtoTopologyManager::split_self_loops_on_vertices`]; the Boolean's
-    /// topology intersector sets it to `false` when
-    /// `Kernel::fixes.proto_edge_self_loop_on_vertex_degenerate` is on
-    /// (tangency-labs/solidcore#480, WR-214). Not upstream.
-    pub fn set_split_self_loops_on_vertices(&mut self, split: bool) {
-        self.split_self_loops_on_vertices = split;
     }
 
     /// Sets the coincident line edge pairs (B-rep 1's edge, B-rep 2's edge): two straight
@@ -2305,6 +2315,20 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     #[must_use]
     pub fn skipped_speck_vertices(&self) -> &[(O, f64, Point3, Point3)] {
         &self.skipped_speck_vertices
+    }
+
+    /// Takes the refusal a proto edge from a proto vertex back to itself left
+    /// (WR-214): its curve leaves its ends' reach of a definition on a vertex, so it can be
+    /// neither split nor dropped. Not upstream.
+    pub fn take_self_loop_refusal(&mut self) -> Option<SolidError> {
+        self.self_loop_refusal.take()
+    }
+
+    /// Records the first such refusal (WR-214).
+    pub(crate) fn note_self_loop_refusal(&mut self, refusal: SolidError) {
+        if self.self_loop_refusal.is_none() {
+            self.self_loop_refusal = Some(refusal);
+        }
     }
 
     /// Records a final vertex whose collapsed speck definition was skipped at imprint.
@@ -3750,12 +3774,15 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// proto vertex is unlisted, not deleted). As upstream, `true` is also returned,
     /// with nothing removed, when the point solve fails or finds nothing (upstream
     /// returns `SM_SUCCESS` from its `SmBoolean` function there), unless
-    /// `Kernel::fixes.proto_vertex_miss_is_false` is set (WR-73, then `false`).
+    /// `Kernel::fixes.proto_vertex_miss_is_false` is set (WR-73, then `false`). With that
+    /// opt-in a proto vertex that has proto edges is `false` without its point solve (not
+    /// upstream: no outcome of the solve gives another answer).
     ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] for deleted objects or a missing curve;
-    /// [`SolidError::Unported`] from the point solve.
+    /// [`SolidError::Unported`] and [`SolidError::Cancelled`] from the point solve, where it
+    /// runs (it runs for every proto vertex under an already-fired cancel token).
     pub fn remove_coincident_no_edge_proto_vertex(
         &mut self,
         k: &Kernel,
@@ -3784,11 +3811,31 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let crv = curve_of(geometry, crv_handle)?;
         let crv_ivl = e.xsect_interval;
 
+        // (not upstream) a proto vertex with proto edges is never removed, and with
+        // `proto_vertex_miss_is_false` a miss is FALSE as well: the answer is FALSE whatever
+        // the point solve finds, so it is not run. (Without the opt-in a miss is TRUE, which
+        // ends the caller's loop over the proto edges, and the solve decides it.) A boolean
+        // of N tools in one call ran 4 N^2 - 2 N of these solves for nothing.
+        //
+        // Under an already-fired cancel token the solve runs as it did (it is where this
+        // test notices the cancel, when it builds a curve's cache; a line's or a circle's
+        // solve does not), so from the same caches the call returns what it returned. A
+        // skipped solve leaves its curve's cache cold, which a later cancelled call can
+        // show as another label or outcome; the boolean asks the token again after this
+        // step.
+        if k.fixes.proto_vertex_miss_is_false
+            && !p.proto_edges.is_empty()
+            && k.check_cancelled(OP_REMOVE_COINCIDENT).is_ok()
+        {
+            return Ok(false);
+        }
+
         // XSect ProtoEdgeCurve/ProtoVertexPosition
         let opts = GlobalPointSolveOptions {
             handle: Some(CurveHandle(crv.natural_interval())),
             ..GlobalPointSolveOptions::default()
         };
+        k.work_counters.add_proto_vertex_point_solve();
         let sols = ignored(crv.global_point_solve(
             k,
             &crv_ivl,

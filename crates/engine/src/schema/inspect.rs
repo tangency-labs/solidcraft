@@ -73,6 +73,36 @@ pub struct BodyFeaturesParams {
     pub body: Option<String>,
 }
 
+/// Show or hide the temporary component colours (`inspect.colored_components`): the one flag
+/// the command reads, as its handler reads it (`cmd/inspect.rs`'s `colored_components`).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ColoredComponentsParams {
+    /// True shows the colours, false hides them; left out, the command toggles them.
+    #[serde(default, deserialize_with = "enabled_flag", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub enabled: Option<bool>,
+}
+
+/// `true` or `false`; anything else, `null` included, is the handler's own message.
+fn enabled_flag<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Bool(b) => Ok(Some(b)),
+        _ => Err(D::Error::custom(whole("enabled must be a boolean"))),
+    }
+}
+
+/// What `inspect.colored_components` returns: whether the colours are shown now.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ColoredComponentsResult {
+    /// Whether the temporary component colours are shown. They are a view setting: never saved
+    /// with the design, and no appearance is changed.
+    pub enabled: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// What `model.body_features` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ModelBodyFeatures {
@@ -607,8 +637,7 @@ pub struct BodyFigures {
     /// Its centre of mass at uniform density; `null` unless it is closed.
     pub center_of_mass: Option<[f64; 3]>,
     pub bbox: BoundingBox,
-    /// Faces, with split pieces of one analytic surface counted once (a sheet metal body's in
-    /// `inspect.measure`: with its round holes counted as the design shows them).
+    /// Faces, with split pieces of one analytic surface counted once.
     pub faces: i64,
     pub edges: i64,
     pub vertices: i64,
@@ -627,8 +656,7 @@ pub struct BodyFigures {
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct BodyFailure {
     pub error: String,
-    /// `inspect.measure` only, for a sheet metal body: its hole-corrected count, which has
-    /// nothing to correct.
+    /// Topology counts, when available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub faces: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -659,9 +687,11 @@ pub struct DocumentSketch {
     /// Its feature id.
     pub id: u64,
     pub name: String,
-    /// Its remaining degrees of freedom (0: fully constrained).
+    /// Its remaining degrees of freedom (0: fully constrained), its drawn 3D curves' included.
     pub dof: usize,
     pub status: SketchStatus,
+    /// Whether its 3D constraints hold (true when it has none, #10608).
+    pub wires_ok: bool,
     /// How many curves it has.
     pub curves: usize,
     /// How many profiles it closes.
@@ -695,6 +725,26 @@ impl From<solidcraft_sketch::SolveStatus> for SketchStatus {
             solidcraft_sketch::SolveStatus::Failed => SketchStatus::Failed,
         }
     }
+}
+
+/// The design's id and the revision its contents were last seen under (`document.revision`):
+/// the command reads no keys.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DocumentRevisionParams {}
+
+/// What `document.revision` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RevisionResult {
+    /// This open design's id: kept while it stays open, another for each design started or opened.
+    pub document_id: String,
+    /// What the design was last seen under: a new number whenever the design, what is hidden or a
+    /// component's uncaptured position changes, never on a selection or a view; from one counter
+    /// for the whole run, so it never repeats.
+    pub revision: u64,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// How `inspect.measure` selects: bodies, or one or two picked items. With `items`, `bodies` and
@@ -887,6 +937,15 @@ pub struct MeasuredItems {
     /// Two items: the closest distance, as `distance_mm`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min: Option<f64>,
+    /// Two items: `false` when the closest distance between edges, faces or vertices of a solid
+    /// or surface body is approximate, measured on the display mesh because the kernel's exact
+    /// solve gave no answer for them (`closest_note` says why). Absent where it is exact, and for
+    /// mesh bodies, whose triangles are their geometry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closest_exact: Option<bool>,
+    /// Two items: why the closest distance is approximate (`closest_exact` false).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closest_note: Option<String>,
     /// Two items: the farthest distance (mm).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max: Option<f64>,
@@ -1089,8 +1148,17 @@ pub struct SketchInspected {
     /// Its remaining degrees of freedom (0: fully constrained).
     pub dof: usize,
     pub fully_constrained: bool,
+    /// The planar sketch's own degrees of freedom, its drawn 3D curves' left out (#10608).
+    pub planar_dof: usize,
     /// The constraints still violated after a failed solve.
     pub failing: Vec<String>,
+    /// The 3D constraints' solve (#10608): `{ok, dof, failing, ...}`, or null for a sketch with
+    /// no drawn 3D curves. Its freedoms are counted in `dof`.
+    #[schemars(with = "Option<Map<String, Value>>")]
+    pub wires_solve: Value,
+    /// The 3D constraints and dimensions, as saved.
+    #[schemars(with = "Vec<Map<String, Value>>")]
+    pub wire_constraints: Value,
     pub curves: Vec<SketchCurve>,
     pub points: Vec<SketchPoint>,
     pub constraints: Vec<SketchConstraint>,
@@ -1208,7 +1276,23 @@ pub struct SketchPoint {
     pub fixed: bool,
     /// For a linked point: the link that owns it; `null` otherwise.
     pub link: Option<String>,
+    /// For a point placed by parameters: the expressions that place it (a coordinate without one
+    /// is the number in `at`). Such a point is `fixed` and follows them; release it with
+    /// `sketch.constraint.fix` and `fixed: false`. Absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fixed_by: Option<PointFixedBy>,
     pub fully_constrained: bool,
+}
+
+/// The expressions that place a point, over the design's parameters.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PointFixedBy {
+    /// The x coordinate's expression; absent when x is a plain number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub x: Option<String>,
+    /// The y coordinate's expression; absent when y is a plain number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub y: Option<String>,
 }
 
 /// A constraint or dimension: its id, its kind's name and the kind's own fields (`type`, then

@@ -364,9 +364,12 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         return true;
     }
     if id == "canvas.edit" {
-        // The browser's canvas panel (one panel for canvases).
-        if let Some(first) = app.session.doc.canvases.first().map(|c| c.id) {
-            app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(app, first, false));
+        // The browser's canvas panel (one panel for canvases). A canvas picked in the Browser
+        // is the one to edit, not just the first one (#16518).
+        let picked = app.tree.picked_canvases.last().copied();
+        let target = picked.or_else(|| app.session.doc.canvases.first().map(|c| c.id));
+        if let Some(c) = target {
+            app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(app, c, false));
         }
         return false;
     }
@@ -948,6 +951,11 @@ fn mode(id: &str) -> Option<Mode> {
     })
 }
 
+/// Whether an extra sketch tool draws new geometry from clicks rather than picking existing entities.
+pub fn is_drawing_tool(id: &str) -> bool {
+    matches!(mode(id), Some(Mode::Points(_) | Mode::Construction))
+}
+
 /// A tool for one of the extra sketch commands.
 pub fn tool_for(id: &str) -> Option<Tool> {
     mode(id)?;
@@ -1027,6 +1035,47 @@ pub fn hint(id: &str) -> Option<String> {
 
 fn active_sketch(app: &SolveApp) -> Option<u64> {
     app.session.active_sketch
+}
+
+/// A click with Project. An edge, face, vertex or other sketch entity projects as itself.
+/// The centre of a hole is none of those — the opening has no triangles — so the ray is
+/// tested against hole openings and the rim's edges are projected. Anything else is said
+/// out loud: a miss used to return without running the command, so the click did nothing.
+fn project_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, hits: &[Hit]) {
+    let picked = hits.iter().find_map(|h| match h {
+        Hit::Vertex { .. } | Hit::Edge { .. } | Hit::Face { .. } | Hit::SketchCurve { .. } | Hit::SketchPoint { .. } => model_ref(app, h),
+        _ => None,
+    });
+    let refs = if let Some(r) = picked {
+        vec![r]
+    } else if let Some(rim) = hole_under_cursor(app, proj, pos) {
+        rim
+    } else if let Some(r) = hits.iter().find_map(|h| model_ref(app, h)) {
+        vec![r]
+    } else {
+        app.set_status(app.tr("sketch.project.nothing_under_cursor").to_string(), true);
+        return;
+    };
+    if refs.is_empty() {
+        app.set_status(app.tr("sketch.project.nothing_under_cursor").to_string(), true);
+        return;
+    }
+    // A command failure is already reported by `SolveApp::run`. A refusal that returns
+    // before that (a file operation in progress) is not, so surface it here.
+    if let Err(error) = app.run("sketch.project", json!({"refs": refs}))
+        && !app.status.as_ref().is_some_and(|(_, _, is_error)| *is_error)
+    {
+        app.set_status(error, true);
+    }
+}
+
+/// Edge references for the hole opening under the cursor, when the ray passes through one.
+fn hole_under_cursor(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Vec<Value>> {
+    let (origin, dir) = proj.ray(pos);
+    let state = crate::open_meshing::shown_world(app);
+    let rim = solidcraft_engine::doc::project::hole_rim_along_ray(&state, origin, dir, |name| app.session.body_visible(name))?;
+    let refs: Vec<Value> = rim.edges.iter().filter(|p| p.is_finite()).map(|p| json!({"edge": [p.x, p.y, p.z], "body": rim.body})).collect();
+    (!refs.is_empty()).then_some(refs)
 }
 
 /// A model reference for a hit (for Project and friends).
@@ -1170,6 +1219,8 @@ pub fn periodic_start_snap(app: &SolveApp, tool: &Tool, proj: &Proj, pos: Pos2) 
     (screen.distance(pos) <= 8.0).then_some(first)
 }
 
+/// A viewport click while a sketch tool is running: picks under `pos` and dispatches on the
+/// tool's mode. Sketch Project goes through `project_click`.
 pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
     let Some(m) = mode(tool.cmd) else { return };
     let hits = pick(app, proj, pos);
@@ -1264,6 +1315,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 }
             }
         }
+        Mode::ModelRef if cmd == "sketch.project" => project_click(app, proj, pos, &hits),
         Mode::ModelRef => {
             let r = hits.iter().find_map(|h| model_ref(app, h));
             let Some(r) = r else { return };
