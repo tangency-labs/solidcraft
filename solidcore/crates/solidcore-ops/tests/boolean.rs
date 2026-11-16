@@ -206,7 +206,6 @@ fn a_large_cylinder_resting_on_a_box_edge_unions() {
 #[test]
 fn a_cylinder_sunk_a_hair_into_a_flat_face_joins_it() {
     let (r, len) = (9.0, 30.0);
-    let whole = 40.0 * 40.0 * 10.0 + PI * r * r * len;
     for fixes in [false, true] {
         if fixes {
             all_fixes();
@@ -222,6 +221,8 @@ fn a_cylinder_sunk_a_hair_into_a_flat_face_joins_it() {
                 [-15.0, 0.0, r - d, 1.0],
             ])
             .unwrap();
+            // the operands' volumes: the union is their sum, less the sliver at one solid
+            let whole = volume(&b) + volume(&c);
             let u = boolean(b, c, BooleanOp::Union)
                 .unwrap_or_else(|e| panic!("d {d} fixes {fixes}: {e:?}"))
                 .unwrap();
