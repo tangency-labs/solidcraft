@@ -144,7 +144,8 @@ pub struct ExtrudeParams {
     /// How far past `to` to go.
     #[serde(default)]
     pub to_offset: Option<LengthExpr>,
-    /// Start at this face or point (From Object).
+    /// Start at this face or point (From Object). On a flat face at a slant the start follows the
+    /// face, and a distance moves it along the extrusion.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "FromPoint")]
     pub from: Option<FromPoint>,

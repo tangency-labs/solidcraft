@@ -2291,6 +2291,12 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         after.to_body_apart = before.to_body_apart;
     }
+    // An old design's From Object keeps starting at the face's level through an edit.
+    if let (FeatureKind::Extrude { extent: before, .. }, FeatureKind::Extrude { extent: after, .. }) = (&old.kind, &mut new.kind)
+        && after.from.is_some()
+    {
+        after.from_level = before.from_level;
+    }
     // A boundary surface's loop of sketch curves and its curve network are one command's two
     // forms: an edit may turn one into the other.
     let boundary = |k: &FeatureKind| matches!(k, FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. });

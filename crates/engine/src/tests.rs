@@ -4467,6 +4467,75 @@ fn extrude_to_and_from_objects() {
     assert!(s.execute("solid.extrude", &json!({"sketch": "P", "to": "nope"})).is_err());
 }
 
+/// A wedge 40 long and 20 deep whose top slopes from z 30 at x 0 to z 10 at x 40: z = 30 - x / 2.
+fn slanted_wedge(s: &mut Session) {
+    run(s, "sketch.create", json!({"plane": "XZ", "name": "Side"}));
+    run(s, "sketch.line", json!({"closed": true, "points": [[0, 0], [40, 0], [40, -10], [0, -30]]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "solid.extrude", json!({"sketch": "Side", "distance": 20, "direction": "negative", "body_name": "Wedge"}));
+}
+
+/// The least and greatest z of `body`'s bounding box, and its volume.
+fn z_span_and_volume(s: &mut Session, body: &str) -> (f64, f64, f64) {
+    let m = run(s, "inspect.measure", json!({"bodies": [body]}));
+    let b = &m["bodies"][0];
+    let f = |v: &Value| v.as_f64().unwrap_or(f64::NAN);
+    (f(&b["bbox"]["min"][2]), f(&b["bbox"]["max"][2]), f(&b["volume_mm3"]))
+}
+
+/// From Object on a slanted flat face starts on the face, so a disc of radius 4 at x 20,
+/// extruded 5 mm From the slope, runs from z 22 - 4 / 2 = 18 at x 24 up to 22 + 5 = 27 at x 16.
+/// A design saved before keeps its flat start at the slope's level under the disc's centre,
+/// z 20 to 25 (#17639).
+#[test]
+fn extrude_from_a_slanted_face_starts_on_the_face() {
+    let mut s = Session::default();
+    slanted_wedge(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Disc"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [20, -10], "radius": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Disc", "from": [20, -10, 20], "distance": 5, "operation": "new", "body_name": "Post"}));
+    let disc = PI * 16.0 * 5.0;
+    let (lo, hi, v) = z_span_and_volume(&mut s, "Post");
+    assert!((lo - 18.0).abs() < 1e-6 && (hi - 27.0).abs() < 1e-6 && rel(v, disc) < 1e-6, "{lo} {hi} {v}");
+    // Only the side and the two slanted ends: no piece of the prism's flat caps is left.
+    let faces = run(&mut s, "model.faces", json!({"body": "Post"}));
+    assert_eq!(faces["faces"].as_array().map(Vec::len), Some(3), "{faces}");
+
+    let mut legacy: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    legacy["format"] = json!("solidcraft/57");
+    legacy.as_object_mut().unwrap().remove("format_pending");
+    let dir = std::env::temp_dir().join(format!("solidcraft-17639-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let design = dir.join("post.solidcraft");
+    std::fs::write(&design, legacy.to_string()).unwrap();
+    let mut old = Session::default();
+    run(&mut old, "doc.open", json!({"path": design.to_string_lossy()}));
+    let (lo, hi, v) = z_span_and_volume(&mut old, "Post");
+    assert!((lo - 20.0).abs() < 1e-6 && (hi - 25.0).abs() < 1e-6 && rel(v, disc) < 1e-6, "{lo} {hi} {v}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// To Object on a slanted flat face ends a profile that overhangs the face on the face's plane,
+/// as on a face square to the extrusion. An 8 mm deep block from z 40 down to the slope over
+/// x 30 to 45, past the wedge's end at x 40, holds 8 (10 * 15 + (45^2 - 30^2) / 4) = 3450 mm3
+/// (#17639).
+#[test]
+fn extrude_to_a_slanted_face_ends_an_overhanging_profile_on_its_plane() {
+    let mut s = Session::default();
+    slanted_wedge(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 40, "name": "Above"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [30, -14], "p1": [45, -6]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "Above", "to": [35, -10, 12.5], "direction": "negative", "operation": "new", "body_name": "Block"}),
+    );
+    let (lo, hi, v) = z_span_and_volume(&mut s, "Block");
+    assert!((lo - 7.5).abs() < 1e-6 && (hi - 40.0).abs() < 1e-6 && rel(v, 3450.0) < 1e-9, "{lo} {hi} {v}");
+}
+
 /// Revolve Two Sides, Symmetric and To Object.
 #[test]
 fn revolve_two_sides_symmetric_and_to_object() {

@@ -393,6 +393,12 @@ pub struct Extent {
     /// `start_offset`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<FacePick>,
+    /// From Object on a face at a slant to the extrusion starts on a plane parallel to the
+    /// sketch, at the level where the face meets the middle of the profiles, instead of on the
+    /// face. Designs saved before From Object followed a slanted face open with it set, so they
+    /// keep the bodies they were built with.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub from_level: bool,
     /// A Join To Object leaves the body it runs to as its own body, joining only its targets.
     /// Designs saved before a Join also took that body (format 39 and older, #8151) open with
     /// it set, so they keep the bodies they were built with.

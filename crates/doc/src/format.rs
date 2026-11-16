@@ -1822,6 +1822,7 @@ mod tests {
                         to_offset: Some("offset + 1 mm".into()),
                         from: Some(crate::FacePick(solidcore_record::Vec3::new(0.0, 0.0, 5.0))),
                         to_body_apart: false,
+                        from_level: false,
                         picked_placements: Vec::new(),
                     },
                     operation: Operation::NewBody,
@@ -1855,6 +1856,9 @@ mod tests {
         assert_eq!(upgraded.features[1].param_names.len(), 3);
         assert_eq!(upgraded.features[1].param_names[2], "d6");
         let saved: Value = serde_json::from_str(&upgraded.to_json()).unwrap();
+        // The extent is kept, and its From Object keeps starting at the face's level (#17639).
+        let mut old_kind = old_kind;
+        old_kind["extent"]["from_level"] = Value::Bool(true);
         for field in ["extent", "sketch", "operation", "profiles"] {
             assert_eq!(saved["features"][1][field], old_kind[field]);
         }
