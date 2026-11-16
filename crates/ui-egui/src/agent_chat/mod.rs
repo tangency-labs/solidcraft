@@ -2462,7 +2462,8 @@ pub fn poll(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
             // A question nobody is there to answer is dismissed, as a permission question is.
-            Some(Outcome::Question { key, .. }) if app.agent_chat.turn.is_none() => {
+            // A turn the user stopped is nobody to answer it either, until its end arrives.
+            Some(Outcome::Question { key, .. }) if app.agent_chat.turn.is_none() || app.agent_chat.stopped => {
                 if let Some(b) = app.agent_chat.backend.as_mut() {
                     b.answer_question(key, &Answer::Cancel);
                 }

@@ -647,7 +647,9 @@ pub fn parse(line: &str) -> Option<Incoming> {
             let mode = params.get("mode").and_then(Value::as_str).unwrap_or("");
             // Only a form offers choices; a link and an unknown mode are asked without them.
             let (field, options) = if mode == "form" { question_choices(params.get("requestedSchema")) } else { (None, Vec::new()) };
-            let url = params.get("url").and_then(Value::as_str).map(|u| u.chars().take(MAX_LINK).collect());
+            // A link longer than the panel keeps is left out: the address the user opens must
+            // be the one the agent gave, not a shortened one.
+            let url = params.get("url").and_then(Value::as_str).filter(|u| u.chars().count() <= MAX_LINK).map(str::to_string);
             Some(Incoming::Question { rpc: id.clone(), session, message, options, field, url })
         }
         (Some(m), Some(id)) => Some(Incoming::Unsupported { rpc: id.clone(), method: m.to_string() }),
@@ -739,24 +741,36 @@ fn question_choices(schema: Option<&Value>) -> (Option<String>, Vec<QuestionOpti
         let options = choices
             .into_iter()
             .take(MAX_CHOICES)
-            .map(|(value, label)| QuestionOption { value: value.chars().take(256).collect(), name: label.chars().take(256).collect() })
+            // The value is what the answer carries: it is the one the schema offered, whole.
+            // The label is what the button shows: it is shortened for the panel.
+            .map(|(value, label)| QuestionOption { value, name: label.chars().take(256).collect() })
             .collect();
         return (Some(name.clone()), options);
     }
     (None, Vec::new())
 }
 
+/// A choice value the panel can answer with: not empty, and no longer than the panel keeps.
+/// A value that is too long is left out, as the config choices leave one out: the answer must
+/// be a value the schema offered, never one the panel made up.
+fn usable_value(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 256
+}
+
 /// The values a single-select property offers: its `enum`, or the `const` of its `oneOf` options
 /// (whose `title` names the choice). Anything else offers nothing.
 fn choice_values(property: &Value) -> Vec<(String, String)> {
     if let Some(values) = property.get("enum").and_then(Value::as_array) {
-        return values.iter().filter_map(|v| v.as_str()).map(|v| (v.to_string(), v.to_string())).collect();
+        return values.iter().filter_map(|v| v.as_str()).filter(|v| usable_value(v)).map(|v| (v.to_string(), v.to_string())).collect();
     }
     let Some(values) = property.get("oneOf").and_then(Value::as_array) else { return Vec::new() };
     values
         .iter()
         .filter_map(|option| {
             let value = option.get("const").and_then(Value::as_str)?;
+            if !usable_value(value) {
+                return None;
+            }
             let name = option.get("title").and_then(Value::as_str).unwrap_or(value);
             Some((value.to_string(), name.to_string()))
         })
@@ -1171,5 +1185,43 @@ mod tests {
         // A dismissal and a refusal are told apart, as the protocol asks.
         assert_eq!(question_reply(json!(1), None, &Answer::Cancel)["result"], json!({"action": "cancel"}));
         assert_eq!(question_reply(json!(1), None, &Answer::Decline)["result"], json!({"action": "decline"}));
+    }
+
+    #[test]
+    fn a_link_too_long_to_open_is_left_out_rather_than_opened_changed() {
+        // An authorization URL longer than the panel keeps is not offered at all: the address
+        // the user opens must be the one the agent gave, not a shortened one.
+        let long = format!("https://agent.example.com/authorize?token={}", "x".repeat(3000));
+        let asked = format!(
+            r#"{{"jsonrpc":"2.0","id":11,"method":"elicitation/create","params":{{"sessionId":"s","mode":"url","url":"{long}","message":"Please authorize access."}}}}"#
+        );
+        let Some(Incoming::Question { message, url, .. }) = parse(&asked) else { panic!("the question is read") };
+        assert_eq!(message, "Please authorize access.", "the question is still asked");
+        assert!(url.is_none(), "a link that cannot be opened as it is offered is left out: {url:?}");
+        // A link within the limit is offered whole.
+        let short = r#"{"jsonrpc":"2.0","id":12,"method":"elicitation/create","params":{"sessionId":"s","mode":"url","url":"https://agent.example.com/connect","message":"Please authorize access."}}"#;
+        let Some(Incoming::Question { url, .. }) = parse(short) else { panic!("the question is read") };
+        assert_eq!(url.as_deref(), Some("https://agent.example.com/connect"));
+    }
+
+    #[test]
+    fn a_choice_value_the_schema_did_not_offer_is_never_answered_with() {
+        // A value longer than the panel keeps is left out: the answer must be a value the
+        // schema offered, never one of its own.
+        let long = "v".repeat(257);
+        let asked = format!(
+            r#"{{"jsonrpc":"2.0","id":13,"method":"elicitation/create","params":{{"sessionId":"s","mode":"form","message":"?","requestedSchema":{{"type":"object","properties":{{"strategy":{{"type":"string","enum":["{long}","balanced"]}}}}}}}}}}"#
+        );
+        let Some(Incoming::Question { options, .. }) = parse(&asked) else { panic!("the question is read") };
+        assert_eq!(options.iter().map(|o| o.value.as_str()).collect::<Vec<_>>(), ["balanced"], "the answer carries a value the schema offered");
+        // The label the button shows is shortened; the value it stands for is not.
+        let title = "t".repeat(300);
+        let one_of = format!(
+            r#"{{"jsonrpc":"2.0","id":14,"method":"elicitation/create","params":{{"sessionId":"s","mode":"form","message":"?","requestedSchema":{{"type":"object","properties":{{"strategy":{{"oneOf":[{{"const":"keep-me","title":"{title}"}}]}}}}}}}}}}"#
+        );
+        let Some(Incoming::Question { options, .. }) = parse(&one_of) else { panic!("the question is read") };
+        assert_eq!(options.len(), 1);
+        assert_eq!(options[0].value, "keep-me", "the value the answer carries is whole");
+        assert_eq!(options[0].name.chars().count(), 256, "the label the button shows is shortened");
     }
 }

@@ -820,6 +820,28 @@ fn the_agents_own_questions_are_answered_by_the_mode_or_asked() {
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { .. })), "remembered");
 }
 
+/// A question that arrives after the user stopped the turn is dismissed, not asked: the card
+/// must not appear with its buttons once the turn is stopped.
+#[test]
+fn a_question_that_arrives_after_the_turn_was_stopped_is_dismissed() {
+    let (mut app, script, ctx) = app_with_script();
+    send(&mut app, &ctx, "make a bracket".into());
+    assert!(app.agent_chat.turn.is_some(), "the turn runs");
+    cancel(&mut app);
+    assert!(app.agent_chat.stopped, "the turn was stopped");
+    // The agent asks anyway, before the end of the stopped turn reaches the panel.
+    script.report(Event::Question {
+        key: 1,
+        message: "Which approach should I take?".into(),
+        options: vec![QuestionOption { value: "safe".into(), name: "Safe".into() }],
+        field: Some("approach".into()),
+        url: None,
+    });
+    poll(&mut app, &ctx);
+    assert!(script.calls().iter().any(|c| c == "question: 1 Cancel"), "the question is dismissed: {:?}", script.calls());
+    assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::Question { .. })), "a stopped turn shows no question card");
+}
+
 /// A title that only mentions SolidCraft is no tool of SolidCraft's: in every mode but Allow
 /// everything the user is asked, and the mode still answers when it says to.
 #[test]
@@ -896,6 +918,9 @@ impl ChatBackend for Script {
     }
     fn answer_permission(&mut self, key: u64, option: Option<&str>) {
         self.calls.lock().unwrap().push(format!("permission: {key} {option:?}"));
+    }
+    fn answer_question(&mut self, key: u64, answer: &Answer) {
+        self.calls.lock().unwrap().push(format!("question: {key} {answer:?}"));
     }
     fn set_config_option(&mut self, id: &str, value: &str) {
         self.calls.lock().unwrap().push(format!("set_config_option: {id}={value}"));
