@@ -1459,13 +1459,13 @@ mod tests {
             .collect();
         let state = json!({
             "bodies": [[0, bodies.len()]], "sketches": [], "body_counter": 7, "sheets": [], "construct": [], "threads": [],
-            "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {},
+            "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {}, "named_faces": [],
         });
         solidcraft_doc::SavedModel {
             records: json!({
                 "features": [{"id": 1, "fingerprint": "0000000000000000", "ms": 0.0, "skipped": false, "state": 0}],
                 "states": [state], "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [], "sheets": [],
-                "threads": [], "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}],
+                "threads": [], "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}], "named_faces": [],
             }),
             bodies,
         }
@@ -1738,7 +1738,7 @@ mod tests {
                 let bodies = if i == 0 { json!([[0, 16]]) } else { json!([[0, 8], [8 * (i + 1), 8]]) };
                 json!({
                     "bodies": bodies, "sketches": [], "body_counter": 7, "sheets": [], "construct": [], "threads": [],
-                    "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {},
+                    "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {}, "named_faces": [],
                 })
             })
             .collect();
@@ -1751,6 +1751,7 @@ mod tests {
             records: json!({
                 "features": features, "states": states, "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [],
                 "sheets": [], "threads": [], "validation": "each_feature", "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}],
+                "named_faces": [],
             }),
             bodies,
         }
@@ -1802,7 +1803,7 @@ mod tests {
                 one.records["states"],
                 json!([{
                     "bodies": [[0, 16]], "sketches": [], "body_counter": 7, "sheets": [], "construct": [], "threads": [],
-                    "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {},
+                    "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {}, "named_faces": [],
                 }])
             );
         }

@@ -1,4 +1,4 @@
-use crate::{Document, ModelBody, ModelState};
+use crate::{Document, ModelBody, ModelState, PlaneRef};
 use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{LinkGeom, LinkKind, LinkSource, Sketch};
@@ -740,3 +740,78 @@ fn mesh_body_has_no_vertex_names() {
     );
     assert!(crate::naming::vertex_names(&mb).is_empty());
 }
+
+/// #17534: a construction plane of another component, projected onto a sketch, is brought
+/// into the sketch's frame: the projected line is the intersection of the two planes, and
+/// not a line parallel to it, in the plane's own frame.
+#[test]
+fn a_projected_plane_of_another_component_lands_where_the_two_planes_meet() {
+    // A body with two parallel faces: the midplane between them is the XZ plane at y = 10.
+    let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(20., 20., 20.)).unwrap();
+    let mut st = ModelState::default();
+    st.bodies.push(ModelBody::new("Case".into(), body, 1));
+    let faces = st.bodies[0].body.faces(0.01).unwrap();
+    let face_at = |y: f64| {
+        faces
+            .iter()
+            .find(|f| f.plane_normal.is_some_and(|n| n.dot(Vec3::Y).abs() > 0.99) && (f.centroid.y - y).abs() < 1e-6)
+            .map(|f| f.centroid)
+            .unwrap()
+    };
+    // The design: a part placed in the world, turned half about X and lifted 100 mm, and a
+    // construction plane in the root component, halfway between the body's two XZ faces.
+    let mut doc = Document::new("midplane");
+    doc.components.push(crate::Component { id: 7, name: "Part".into(), ..Default::default() });
+    doc.occurrences.push(crate::Occurrence {
+        id: 20,
+        component: 7,
+        parent: 0,
+        name: "Part".into(),
+        transform: PART_FRAME,
+        grounded: false,
+        expressed_moves: Vec::new(),
+    });
+    let mid = doc
+        .add_feature(
+            crate::FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Midplane {
+                    a: Box::new(crate::construct::GeoRef::Face { at: face_at(0.), name: None }),
+                    b: Box::new(crate::construct::GeoRef::Face { at: face_at(20.), name: None }),
+                },
+            },
+            Some("Mid"),
+        )
+        .unwrap();
+    let vals = doc.param_values().0;
+    // The plane as it was built, in the root component's frame.
+    let built = doc.resolve_plane_in(&vals, &PlaneRef::Construction { feature: crate::FeatureId(mid) }, 0, 0, Some(&st)).unwrap();
+    assert!((built.origin.y - 10.).abs() < 1e-9, "the midplane is halfway between the two faces: {built:?}");
+    st.construct.push(crate::construct::Construct {
+        feature: mid,
+        name: "Mid".into(),
+        geom: crate::construct::ConstructGeom::Plane(built),
+        bodies: Vec::new(),
+    });
+    // The sketch stands in the part's frame: its own XY plane.
+    let resolved = crate::project::resolve_at(
+        &doc,
+        &vals,
+        &st,
+        &Plane::XY,
+        LinkKind::Project,
+        &LinkSource::Plane { name: "Mid".into() },
+        Some(&(7, PART_FRAME)),
+    )
+    .unwrap();
+    let LinkGeom::Line(a, b) = &resolved.geom[0] else { panic!("the plane projects to a line: {:?}", resolved.geom) };
+    // The part is turned half about X and lifted 100 mm, so the root's midplane at y = 10
+    // lies at y = 90 in the part's frame: the trace of the two planes is there.
+    assert!(
+        (a.y - 90.).abs() < 1e-9 && (b.y - 90.).abs() < 1e-9,
+        "the projected line is the intersection of the midplane and the sketch plane: {a:?} {b:?}"
+    );
+    assert!((a.x - b.x).abs() > 1e-9, "the projected line runs along the sketch plane: {a:?} {b:?}");
+}
+
+/// Where the part of the test above stands: turned half about X and lifted 100 mm.
+const PART_FRAME: crate::Mat = [[1.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 100.0, 0.0, 1.0]];

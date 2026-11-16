@@ -12,7 +12,7 @@ use solidcore_record::cell_grid::{CellGridPlan, CellGridSpec, GridCell};
 use solidcore_record::{Loop2, Region2, Vec2};
 
 pub use solidcore::cell_grid::{
-    CellGridError, FLATTEN_TOL, MAX_CELLS, MAX_COORD, MAX_SIDES, MIN_SIZE,
+    CellGridError, FLATTEN_TOL, MAX_CELLS, MAX_COORD, MAX_SIDES, MAX_SNAP_INSET, MIN_SIZE,
 };
 
 /// The grid a new cell grid starts from (the kernel's defaults).

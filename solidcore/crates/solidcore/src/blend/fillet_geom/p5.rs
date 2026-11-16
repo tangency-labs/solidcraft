@@ -1599,6 +1599,17 @@ impl FilletBrep {
                     }
                     _ => super::tangent_end_rib::section_contact_order(fs1)?,
                 };
+                // Not upstream (#10876): the rib's piece on the end face of an End across the
+                // cliff's tangent seam runs from the tangent end to S, between the rails; the
+                // other rail's end (the corner's rail end on the wall's rim) orients it
+                let other_fv = if start_tangent { end_fv } else { start_fv };
+                let (other_end, stop) = match the_corner.seam_cap {
+                    Some(cap) if cap.split_vertex == other_fv => (
+                        self.vertex_point(cap.rail_vertex)?,
+                        Some(self.vertex_point(other_fv)?),
+                    ),
+                    _ => (if start_tangent { end_pnt } else { start_pnt }, None),
+                };
                 match &surface {
                     Some(surface) => super::tangent_end_rib::tangent_end_rib(
                         k,
@@ -1606,7 +1617,8 @@ impl FilletBrep {
                         surface,
                         order,
                         if start_tangent { start_pnt } else { end_pnt },
-                        if start_tangent { end_pnt } else { start_pnt },
+                        other_end,
+                        stop,
                         !start_tangent,
                         approx_tol,
                     )
@@ -1826,20 +1838,18 @@ impl FilletBrep {
         // bounds the end face and a face that is not the side face this edge runs in:
         // its extension is where that side face meets the end face's extension
         // (tangency-labs/smlib@d5ebcb3, WR-457).
-        if k.fixes.fillet_nx1_tangent_side_edge {
-            if let Some(side) = self.fillet_edge(e)?.original_face() {
-                if !faces.contains(&side) {
-                    let mut end_face = None;
-                    for &f in &faces {
-                        if extended_surface(the_corner, f)?.is_some() {
-                            end_face = Some(f);
-                            break;
-                        }
+        if let Some(side) = self.fillet_edge(e)?.original_face() {
+            if !faces.contains(&side) {
+                let mut end_face = None;
+                for &f in &faces {
+                    if extended_surface(the_corner, f)?.is_some() {
+                        end_face = Some(f);
+                        break;
                     }
-                    let end_face = end_face
-                        .ok_or_else(|| SolidError::blend_missing(OP_EXT_EDGE, "the end face"))?;
-                    faces = vec![side, end_face];
                 }
+                let end_face = end_face
+                    .ok_or_else(|| SolidError::blend_missing(OP_EXT_EDGE, "the end face"))?;
+                faces = vec![side, end_face];
             }
         }
         let mut tol = edge::tolerance(target, orig_edge)?;

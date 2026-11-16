@@ -192,6 +192,35 @@ fn urdf_forward_kinematics_match_the_assembly() {
     }
 }
 
+/// A saved lateral offset locates the hinge axis in the exported model, in either tree direction.
+#[test]
+fn urdf_lateral_joint_offsets_keep_their_frame_and_motion_axis() {
+    for kind in ["rigid", "revolute"] {
+        for b_grounded in [false, true] {
+            let mut s = two_cubes();
+            if b_grounded {
+                ground(&mut s, "A", false);
+                ground(&mut s, "B", true);
+            }
+            run(
+                &mut s,
+                "joint.create",
+                json!({"type":kind, "name":"Offset joint", "flip":true, "angle":0,
+                    "a":{"occurrence":"A","point":[5,5,10],"z":[1,0,0],"x":[0,0,1]},
+                    "b":{"occurrence":"B","point":[25,5,0],"z":[1,0,0],"x":[0,0,1]},
+                    "offset_x":2,"offset_y":3,"offset":4}),
+            );
+            let p = package(&s);
+            let what = format!("lateral {kind}, B grounded {b_grounded}");
+            assert_fk(&p.model, &s, &what);
+            if kind == "revolute" {
+                run(&mut s, "joint.drive", json!({"joint":"Offset joint","value":90}));
+                assert_fk(&p.model, &s, &what);
+            }
+        }
+    }
+}
+
 #[test]
 fn urdf_limits_convert_units() {
     let mut s = two_cubes();

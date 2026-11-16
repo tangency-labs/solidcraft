@@ -316,13 +316,13 @@ pub(crate) fn shared_presentation(app: &SolveApp) -> Option<crate::panel_runtime
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     let world = crate::open_meshing::session_world(&app.session);
     let sketch = world.sketch(app.session.active_sketch?)?;
-    let solved = sketch.report.ok();
+    let solved = sketch.report.shown_ok();
     let title =
         if sketch.name.trim().is_empty() || sketch.name.len() > 256 { app.tr("ui.palette_sketch_options").to_owned() } else { sketch.name.clone() };
     Some(crate::panel_runtime::PanelPresentation {
         title,
         icon: "sketch".into(),
-        status: Some(constraint_status(sketch.report.dof, solved, has_geometry(&sketch.sketch))),
+        status: Some(constraint_status(sketch.report.shown_dof(), solved, has_geometry(&sketch.sketch))),
         attention: !solved,
         actions: Vec::new(),
     })
@@ -336,8 +336,8 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
         (
             ss.sketch.view.clone(),
-            ss.report.dof,
-            ss.report.ok(),
+            ss.report.shown_dof(),
+            ss.report.shown_ok(),
             unconstrained_total(&ss.sketch),
             has_geometry(&ss.sketch),
             ss.ends.open.len(),
@@ -1145,5 +1145,29 @@ mod tests {
         assert!(h.app.session.active_sketch.is_none());
         assert_eq!(h.app.session.doc.features.len(), 1, "a sketch with a line is kept");
         assert!(crate::scenario::handles("timeline:").iter().any(|(n, _)| n.contains("Sketch")));
+    }
+
+    #[test]
+    fn starting_drawing_tool_clears_selection_so_construction_switches_mode() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let circle = h.app.run("sketch.circle.center", json!({"center":[10,10],"radius":5})).unwrap()["curves"][0].as_str().unwrap().to_string();
+        let sid = h.app.session.active_sketch.unwrap();
+        h.app.session.selection = vec![Sel::SketchCurve { id: circle.clone(), sketch: Some(sid) }];
+        set_mode(&mut h.app, 0);
+        h.settle();
+
+        h.app.start("sketch.line");
+        h.settle();
+        assert!(h.app.session.selection.is_empty(), "starting a drawing tool clears the prior curve selection");
+
+        let construction = crate::scenario::handle_at("dialog:Line Type:construction").unwrap();
+        h.call("ui.click", json!({"x": construction.x, "y": construction.y}));
+        assert_eq!(mode(&h.app), 1, "Construction switches drawing mode instead of converting the circle");
+        let state = crate::open_meshing::session_world(&h.app.session);
+        let sk = &state.sketch(sid).unwrap().sketch;
+        let idx = sk.curve_index(&circle).unwrap();
+        assert!(!sk.curves[idx].construction, "the previously selected circle stays a normal curve");
+        set_mode(&mut h.app, 0);
     }
 }

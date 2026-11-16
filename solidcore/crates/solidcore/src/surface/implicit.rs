@@ -257,14 +257,14 @@ pub fn plane_of_net(form: &BSplineSurface) -> Result<Option<Implicit>> {
     Ok(lies_on(form, &plane)?.then_some(plane))
 }
 
-/// Whether the Bézier patch of degrees `(p, q)` with homogeneous points `points` (row by
-/// row) lies on `a` ([`lies_on`]).
-fn bezier_on<'a>(
+/// The [`Residual`] of `a`'s equation over the Bézier patch of degrees `(p, q)` with
+/// homogeneous points `points` (row by row).
+fn bezier_residual<'a>(
     p: usize,
     q: usize,
     points: impl Iterator<Item = &'a crate::nurbs::math::CPoint>,
     a: &Implicit,
-) -> bool {
+) -> Residual {
     let origin = match *a {
         Implicit::Plane { origin, .. } | Implicit::Cone { origin, .. } => origin,
         Implicit::Sphere { centre, .. } | Implicit::Torus { centre, .. } => centre,
@@ -339,13 +339,228 @@ fn bezier_on<'a>(
         }
     };
     let tol = gamma(4 * degree * (p + 1) * (q + 1) + 16) * scale;
-    let within = |v: &f64| {
-        matches!(
-            v.abs().partial_cmp(&tol),
-            Some(core::cmp::Ordering::Less | core::cmp::Ordering::Equal)
-        )
+    let least_weight = ws.c.iter().copied().fold(f64::INFINITY, f64::min);
+    Residual {
+        coefficients: f.c,
+        tol,
+        degree,
+        absolute,
+        wmax,
+        least_weight,
+    }
+}
+
+/// Whether the Bézier patch of degrees `(p, q)` with homogeneous points `points` (row by
+/// row) lies on `a` ([`lies_on`]): every coefficient of its [`Residual`] within the
+/// rounding of computing it.
+fn bezier_on<'a>(
+    p: usize,
+    q: usize,
+    points: impl Iterator<Item = &'a crate::nurbs::math::CPoint>,
+    a: &Implicit,
+) -> bool {
+    bezier_residual(p, q, points, a).within()
+}
+
+/// [`lies_on`]'s acceptance turned into a distance, ARGUED (not checked by a certificate):
+/// how far a point of the surface `form` describes can lie from `a`'s surface, where
+/// [`lies_on`] accepts `form`; `None` where it does not, for a torus, for a weight that is
+/// not positive, for a patch whose rounding `τ` is below `MIN_POSITIVE / ε` or whose weight
+/// power `W₀^d` is below `MIN_POSITIVE`, or for a bound (any patch's) that is not finite.
+/// The `γ` model of `τ` leaves out underflow: each of a coefficient's `n` operations
+/// (`n = 4d(p+1)(q+1) + 16`) may add up to `2⁻¹⁰⁷⁴` absolutely, `n · 2⁻¹⁰⁷⁴` in all. With
+/// `τ ≥ MIN_POSITIVE / ε = 2⁻⁹⁷⁰` that is at most `n · 2⁻¹⁰⁴ · τ`, far inside the final
+/// growth by `8ε` for any `n` below `2⁴⁹`. Points of tiny weight, whose coefficients
+/// underflow to zeros that pass on nothing, are refused that way.
+///
+/// On a Bézier patch with least weight `W₀ > 0` (a rational patch's weight is a convex
+/// combination of its points' weights, so at least `W₀` everywhere), every coefficient of
+/// `a`'s equation of degree `d` in `(X W, W)` is computed within `τ` ([`lies_on`]'s
+/// rounding) and accepted within `τ`, so the exact coefficient is within `2τ`, and by the
+/// convex hull property of the Bernstein basis `|W^d F(X)| ≤ 2τ` over the whole patch:
+/// `|F(X)| ≤ 2τ / W₀^d`. For a plane `F` is the signed distance (over the normal's
+/// length, a few roundings from 1). For a cone whose stored axis `a` has `|a|² = 1 + δ`
+/// (`δ` enclosed in `delta` by the caller; [`AnalyticSupport::implicit`] need not give a
+/// unit axis), with `s` the height along the unit axis `â`, `ρ` the distance from it and
+/// `R = r + t |a| s`: `|X|² − (a · X)² = ρ² − δ s²`, so `F = ρ² − δ s² − R²`. The surface is
+/// one of revolution about `â`, of radius `ρ_P = √(R² + δ s²)` at height `s` where
+/// `R² + δ s² ≥ 0`; there `ρ² − ρ_P² = F` and `|ρ − ρ_P| ≤ ρ + ρ_P`, so the point is within
+/// `|ρ − ρ_P| ≤ √|F|` of the surface, radially at its height. With `δ < 0` the surface has
+/// no point at a height where `|R| < √|δ| |s|` (a band about the apex), and a point there
+/// has no such bound: a patch whose heights reach that band gives `None` (conservative;
+/// with `δ ≥ 0`, or `δ` exactly 0 for a cardinal axis, every height has a point). A sphere
+/// is the same with `|X|` for `ρ` and `R = r`. The square root is the bound near a cone's
+/// apex, where `ρ_P` is small; elsewhere `|F| / (ρ + ρ_P)` is far smaller, but the bound
+/// does not need it.
+///
+/// [`lies_on`] does not cover the rounding of the Bézier decomposition (knot insertion,
+/// a chain of at most `p + q` convex combinations per point, each a few roundings of the
+/// homogeneous terms' size): a patch point is moved by at most `γ · 2 absolute` in `H`
+/// and `γ · W_max` in `W` (`γ = γ_{4(p+q)+4}`, `absolute` the largest coordinate of
+/// `|H| + |O| W`), so the Euclidean point `X = H / W` by at most
+/// `(|δH| + |X| |δW|) / W₀ ≤ 2 γ absolute (1 + W_max / W₀) / W₀`. That slack is added to
+/// each patch's bound. The whole is the largest over the patches, grown by a few roundings.
+///
+/// # Errors
+///
+/// `SM_ERR` without NURB data; those of the Bézier decomposition.
+pub fn distance_bound(form: &BSplineSurface, a: &Implicit, delta: [f64; 2]) -> Result<Option<f64>> {
+    if matches!(a, Implicit::Torus { .. }) {
+        return Ok(None);
+    }
+    // the most negative `δ` may be (0 when it cannot be below 0)
+    let below = match delta {
+        [lo, hi] if lo <= hi => (-lo).max(0.0),
+        _ => return Ok(None),
     };
-    f.c.iter().all(within)
+    let nurb = form
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let mut bound = 0.0_f64;
+    for row in decompose_to_bez(nurb)? {
+        for patch in row {
+            let (p, q) = patch.degrees();
+            let r = bezier_residual(p, q, patch.rows().flatten(), a);
+            let w0 = r.least_weight;
+            if !(r.within() && w0 > 0.0 && w0.is_finite()) {
+                return Ok(None);
+            }
+            if let Implicit::Cone {
+                origin,
+                axis,
+                radius,
+                tan_angle,
+            } = *a
+            {
+                if below > 0.0
+                    && !clear_of_apex(
+                        patch.rows().flatten(),
+                        origin,
+                        axis,
+                        radius,
+                        tan_angle,
+                        below,
+                    )
+                {
+                    return Ok(None);
+                }
+            }
+            // `τ`'s rounding model leaves out underflow: with `τ ≥ MIN_POSITIVE / ε` the
+            // coefficients' underflow (`n · 2⁻¹⁰⁷⁴`) is a relative `n · 2⁻¹⁰⁴` of `τ`, inside
+            // the final growth; a smaller residual scale, or a weight power that underflows
+            // (homogeneous points of tiny weight), has no bound
+            let power = match r.degree {
+                1 => w0,
+                _ => w0 * w0,
+            };
+            if !(r.tol >= f64::MIN_POSITIVE / f64::EPSILON && power >= f64::MIN_POSITIVE) {
+                return Ok(None);
+            }
+            let exact = 2.0 * r.tol;
+            let residual = exact / power;
+            let off = match *a {
+                // the normal's length, a few roundings from 1
+                Implicit::Plane { normal, .. } => {
+                    residual / (normal.length() * (1.0 - 4.0 * f64::EPSILON))
+                }
+                _ => residual.sqrt(),
+            };
+            let g = gamma(4 * (p + q) + 4);
+            // (`absolute` is a largest coordinate: a Euclidean length is under twice it)
+            let slack = 2.0 * g * r.absolute * (1.0 + r.wmax / w0) / w0;
+            // (`max` would drop a value that is not a number)
+            let patch_bound = off + slack;
+            if !patch_bound.is_finite() {
+                return Ok(None);
+            }
+            bound = bound.max(patch_bound);
+        }
+    }
+    let bound = bound * (1.0 + 8.0 * f64::EPSILON);
+    Ok(bound.is_finite().then_some(bound))
+}
+
+/// Whether every height `s` of the Bézier patch with homogeneous points `points` along
+/// the cone's unit axis keeps `|R(s)| > √below |s|` (`R = r + t |a| s`): the cone with
+/// `|a|² = 1 + δ`, `δ ≥ −below`, has a point at each of them ([`distance_bound`]). The
+/// heights lie between the Euclidean points' (the patch is in their convex hull, `s`
+/// linear), widened by their rounding; `R` keeps one sign over them, so `|R(s)| − √below |s|`
+/// is linear between the ends and 0 and is checked there. Not a number fails.
+fn clear_of_apex<'a>(
+    points: impl Iterator<Item = &'a crate::nurbs::math::CPoint>,
+    origin: Vec3,
+    axis: Vec3,
+    radius: f64,
+    tan_angle: f64,
+    below: f64,
+) -> bool {
+    let length = axis.length();
+    if !(length > 0.0 && length.is_finite()) {
+        return false;
+    }
+    let unit = axis * (1.0 / length);
+    let (mut lo, mut hi, mut size) = (f64::INFINITY, f64::NEG_INFINITY, 0.0_f64);
+    for c in points {
+        let w = if c.w == NOW { 1.0 } else { c.w };
+        // (not a number is not positive)
+        if w.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+            return false;
+        }
+        let x = Vec3::new(c.x, c.y, c.z) * (1.0 / w) - origin;
+        let s = x.dot(unit);
+        lo = lo.min(s);
+        hi = hi.max(s);
+        size = size.max(x.x.abs().max(x.y.abs()).max(x.z.abs()));
+    }
+    // each height's rounding: the division, the move to the origin, the unit axis and the
+    // dot product, a few roundings of the coordinates' size each
+    let spread =
+        32.0 * f64::EPSILON * (size + origin.x.abs().max(origin.y.abs()).max(origin.z.abs()));
+    let (lo, hi) = (lo - spread, hi + spread);
+    if !(lo <= hi && spread.is_finite()) {
+        return false;
+    }
+    let slope = tan_angle * length;
+    let r_of = |s: f64| radius + slope * s;
+    // `R`'s own rounding at a height
+    let r_err = |s: f64| 4.0 * f64::EPSILON * (radius.abs() + (slope * s).abs());
+    let (r_lo, r_hi) = (r_of(lo), r_of(hi));
+    let same_sign = (r_lo - r_err(lo) > 0.0 && r_hi - r_err(hi) > 0.0)
+        || (r_lo + r_err(lo) < 0.0 && r_hi + r_err(hi) < 0.0);
+    if !same_sign {
+        return false;
+    }
+    let root = below.sqrt() * (1.0 + 4.0 * f64::EPSILON);
+    let clear = |s: f64| r_of(s).abs() - r_err(s) > root * s.abs();
+    clear(lo) && clear(hi) && (!(lo < 0.0 && hi > 0.0) || clear(0.0))
+}
+
+/// `a`'s equation over a Bézier patch in its homogeneous coordinates ([`lies_on`]).
+struct Residual {
+    /// Its Bernstein coefficients.
+    coefficients: Vec<f64>,
+    /// The rounding each is computed within.
+    tol: f64,
+    /// The equation's degree.
+    degree: usize,
+    /// The largest absolute homogeneous term, `|H| + |O| W`.
+    absolute: f64,
+    /// The largest weight.
+    wmax: f64,
+    /// The least weight.
+    least_weight: f64,
+}
+
+impl Residual {
+    /// Every coefficient within its rounding (not a number is not).
+    fn within(&self) -> bool {
+        self.coefficients.iter().all(|v| {
+            matches!(
+                v.abs().partial_cmp(&self.tol),
+                Some(core::cmp::Ordering::Less | core::cmp::Ordering::Equal)
+            )
+        })
+    }
 }
 
 pub(crate) const OP_EXACT: &str = "surface::implicit::check_exact_net";

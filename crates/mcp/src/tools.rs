@@ -67,6 +67,15 @@ pub fn tool_definitions() -> Vec<Value> {
 pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
     vec![
         tool(
+            "version",
+            "SolidCraft version",
+            "The SolidCraft build answering this session: {version, commit, mode}. Connected to an app, reports that app's \
+             version and source commit with mode app; otherwise reports this headless build with mode headless. \
+             The commit is unknown when unavailable. Reads metadata without opening Help or returning diagnostics.",
+            object(json!({}), &[]),
+            Effect::ReadOnly,
+        ),
+        tool(
             "list_commands",
             "List commands",
             "The command catalog: id, label, toolbar tab/panel, shortcut, one-line parameter docs and whether the command is \
@@ -821,8 +830,10 @@ fn command_error(command: &str, error: String) -> String {
             let candidate = normalize(spec.id);
             let distance = command_distance(&normalized, &candidate);
             let shared = spec.id.split('.').filter(|word| words.iter().any(|w| w.eq_ignore_ascii_case(word))).count();
-            (distance <= (normalized.len() / 4).max(2) || shared > 0).then_some((
+            let alternative = solidcraft_engine::cmd::command_verb_alternative(id, spec.id);
+            (alternative || distance <= (normalized.len() / 4).max(2) || shared > 0).then_some((
                 normalized != candidate,
+                !alternative,
                 distance,
                 std::cmp::Reverse(shared),
                 spec.id,
@@ -830,7 +841,7 @@ fn command_error(command: &str, error: String) -> String {
         })
         .collect();
     closest.sort_unstable();
-    let hints: Vec<_> = closest.iter().take(3).map(|(_, _, _, id)| format!("`{id}`")).collect();
+    let hints: Vec<_> = closest.iter().take(3).map(|(_, _, _, _, id)| format!("`{id}`")).collect();
     let mut message = format!("unknown command `{command}`");
     if !hints.is_empty() {
         message.push_str(&format!("; closest: {}", hints.join(", ")));
@@ -912,6 +923,17 @@ fn measure_summary_wanted(a: &Map<String, Value>) -> bool {
 
 fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<Value, String> {
     match name {
+        "version" => {
+            let info = b.call("ui.help", json!({}))?;
+            let version = info.get("version").and_then(Value::as_str).filter(|s| !s.is_empty()).ok_or("SolidCraft did not report a version")?;
+            let commit = match info.get("commit") {
+                None | Some(Value::Null) => "unknown",
+                Some(Value::String(s)) if !s.is_empty() => s,
+                _ => return Err("SolidCraft reported an invalid source commit".into()),
+            };
+            // Auto may have discovered the app while making this call.
+            Ok(json!({"version": version, "commit": commit, "mode": if b.has_ui() { "app" } else { "headless" }}))
+        }
         "list_commands" => {
             let query = CommandQuery::parse(a)?;
             let all = b.call("engine.commands", json!({}))?;
@@ -1193,6 +1215,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
         "running" => Err("`running` is a tool, not a command: call it on its own".into()),
         "skill_reference" => Err("`skill_reference` is a tool, not a command: call it on its own".into()),
         "cancel" => Err("`cancel` is a tool, not a command: call it on its own".into()),
+        "version" => Err("`version` is a tool, not a command: call it on its own".into()),
         // An engine command: the step goes as it is.
         _ => Ok((String::new(), Value::Null, None)),
     }
@@ -1222,6 +1245,7 @@ const TOOL_STEPS: &[&str] = &[
     "set_parameter",
     "skill_reference",
     "undo",
+    "version",
 ];
 
 /// Names for an error message: at most 40 of them.
@@ -1624,9 +1648,10 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
             // Older apps and the headless session, or the app wants the steps one by one.
             Err(e) if e.starts_with("unknown method") || e.starts_with("engine.batch unavailable") => {}
             Err(e) if solidcraft_engine::panels::commands::structured_error(&e).is_some() => return (Value::String(e), true),
-            // Never sent: no app to send it to. Or sent and still running (it was not cancelled):
-            // the `pending` tool gets its result.
-            Err(e) if e.starts_with(crate::backend::NOT_RUNNING) || e.starts_with(STILL_RUNNING) => {
+            // Never sent: no app to send it to. Refused unrun: every connection the app serves is
+            // taken (#10967). Or sent and still running (it was not cancelled): the `pending` tool
+            // gets its result.
+            Err(e) if e.starts_with(crate::backend::NOT_RUNNING) || e.starts_with(STILL_RUNNING) || e.contains(crate::backend::REFUSED_UNRUN) => {
                 return (Value::String(e), true);
             }
             // The app may have run it: sending the steps again would apply them twice.
