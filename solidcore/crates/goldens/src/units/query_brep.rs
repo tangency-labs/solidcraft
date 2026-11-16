@@ -460,9 +460,16 @@ fn run_steps(k: &Kernel, b: &mut Brep, steps: &[StepIn]) -> Result<Vec<f64>, Fai
                         expand_by_zone_tol_3d: expand,
                     }
                 };
+                if opts.tight {
+                    crate::dump::body(k, "tight", b);
+                }
                 push_box(&mut o, qb::calculate_bounding_box(k, &mut *b, opts))?;
             }
-            StepIn::Tight => push_box(&mut o, qb::calculate_tight_bounding_box(k, &mut *b))?,
+            StepIn::Tight => {
+                // the body boxed, kept when a test captures it (`dump::capture`)
+                crate::dump::body(k, "tight", b);
+                push_box(&mut o, qb::calculate_tight_bounding_box(k, &mut *b))?;
+            }
             StepIn::Lock { tight, defaults } => {
                 // the default argument is `FALSE`
                 let r = qb::lock_bounding_box(k, b, tight && !defaults);
