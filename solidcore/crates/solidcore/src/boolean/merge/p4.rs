@@ -2215,6 +2215,69 @@ mod tests {
         }
     }
 
+    /// #17118: a tangent patch waiting for its partner is revisited once a later patch
+    /// classifies that partner. `P1` waits for `Q`; the next patch deletes `Q`, because its
+    /// partner `P2` is kept; on the second pass `P1` is kept, as the copy of a deleted face.
+    /// A single pass in list order would leave `P1` to the ray.
+    #[test]
+    fn a_tangent_patch_waiting_for_its_partner_is_resolved_on_a_later_pass() {
+        let mut first = Kernel::default();
+        let mut second = Kernel::default();
+        first.context.set_doing_boolean(true);
+        let mut kernels = BooleanKernels {
+            primary: &mut first,
+            other: Some(&mut second),
+        };
+        let mut lock = kernels
+            .mark_action(|contexts| MarkLock::new_pair(contexts, 0, 1))
+            .unwrap();
+        kernels
+            .mark_action(|contexts| lock.new_mark(contexts))
+            .unwrap();
+        let marks = (lock.mark_type1(), lock.mark_type2());
+        let (p1, p2, q) = (
+            FaceId::from_index(1),
+            FaceId::from_index(2),
+            FaceId::from_index(3),
+        );
+        let mut state = ManifoldState::default();
+        state
+            .primary_marks
+            .mark(kernels.primary, Entity::Face(p2), marks.0);
+        let mut faces = Faces {
+            keep: vec![p2],
+            tangent_patches: vec![
+                TangentPatch {
+                    reverse: false,
+                    pf: p1,
+                    of: q,
+                    keep: Some(true),
+                },
+                TangentPatch {
+                    reverse: true,
+                    pf: p2,
+                    of: q,
+                    keep: Some(true),
+                },
+            ],
+            ..Faces::default()
+        };
+        resolve_tangent_patches(&kernels, &mut state, &mut faces, marks);
+        assert!(state
+            .primary_marks
+            .is_marked(kernels.primary, Entity::Face(p1), marks.0));
+        assert!(state
+            .other_marks
+            .is_marked(kernels.other(), Entity::Face(q), marks.1));
+        assert_eq!(faces.keep, [p2, p1]);
+        assert_eq!(faces.other_delete, [q]);
+        assert!(faces.delete.is_empty() && faces.other_keep.is_empty());
+        assert!(faces.tangent_patches.is_empty());
+        kernels
+            .mark_action(|contexts| lock.release(contexts))
+            .unwrap();
+    }
+
     #[test]
     fn slice_keeps_a_coincident_pair_on_the_sheet_same_side_only() {
         // issue #528: against a sheet (void on both sides) a coincident pair is either
