@@ -627,9 +627,17 @@ impl Builder<'_, '_> {
 
     /// A seam edge from vertex `a` to vertex `b` on the surface: a ruling line, a meridian arc
     /// of a sphere, or a revolution's profile turned to their angle. Returns the edge and
-    /// whether it runs from `a` to `b`.
-    fn seam_edge(&mut self, a: u32, b: u32, ax: &Axis, eval: &SurfaceEval, check: bool) -> R<(u32, bool)> {
-        let (pa, pb) = (self.vpoint(a)?, self.vpoint(b)?);
+    /// whether it runs from `a` to `b`. With `pole`, `b` is the surface's pole there (a vertex
+    /// within its tolerance of it): the seam ends on the pole itself, where every ruling or
+    /// meridian meets, and [`Self::new_edge`] raises `b`'s tolerance to cover its gap. A seam to
+    /// the point as written, a hair off the pole, would leave the surface there and swing round
+    /// the axis as it neared it.
+    fn seam_edge(&mut self, a: u32, b: u32, ax: &Axis, eval: &SurfaceEval, check: bool, pole: Option<Vec3>) -> R<(u32, bool)> {
+        let pa = self.vpoint(a)?;
+        let pb = match pole {
+            Some(p) => p,
+            None => self.vpoint(b)?,
+        };
         if pa.dist(pb) <= self.tol {
             return Err("a seam of no length".into());
         }
@@ -952,13 +960,13 @@ impl Builder<'_, '_> {
         let mut merged = Vec::with_capacity(2 * up.len() + 4);
         if !self.at(a, south)? {
             let s = pole_vertex(self, south)?;
-            let (seam, along) = self.seam_edge(a, s, ax, eval, true)?;
+            let (seam, along) = self.seam_edge(a, s, ax, eval, true, None)?;
             merged.push((seam, !along));
         }
         merged.extend(up);
         if !self.at(b, north)? {
             let n = pole_vertex(self, north)?;
-            merged.push(self.seam_edge(b, n, ax, eval, true)?);
+            merged.push(self.seam_edge(b, n, ax, eval, true, None)?);
         }
         let mut back = merged.clone();
         super::reverse(&mut back);
@@ -1079,7 +1087,7 @@ impl Builder<'_, '_> {
                 v
             }
         };
-        let (seam, along) = self.seam_edge(a, b, ax, eval, false)?;
+        let (seam, along) = self.seam_edge(a, b, ax, eval, false, Some(p))?;
         let mut merged = ring;
         merged.push((seam, along));
         merged.push((seam, !along));
@@ -1452,7 +1460,7 @@ impl Builder<'_, '_> {
         let b_ring = self.rotated(fi, lb, j)?;
         let va = self.start(*a_ring.first().ok_or("empty loop")?)?;
         let vb = self.start(*b_ring.first().ok_or("empty loop")?)?;
-        let (seam, along) = self.seam_edge(va, vb, ax, eval, true)?;
+        let (seam, along) = self.seam_edge(va, vb, ax, eval, true, None)?;
         let mut merged = a_ring;
         merged.push((seam, along));
         merged.extend(b_ring);
