@@ -34,6 +34,36 @@ fn said(s: &Session, feature: &str) -> String {
     format!("{}{}", r.error.clone().unwrap_or_default(), r.warning.clone().unwrap_or_default())
 }
 
+/// A valid counterbore cannot be checked against a made-up through-all depth after its body
+/// disappears. Report the missing body, and recover the hole when the deletion is undone.
+#[test]
+fn a_hole_without_its_body_reports_the_missing_body_and_recovers_on_undo() {
+    for command in ["timeline.delete", "timeline.suppress"] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 6, "name": "Plate"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 6, "name": "HolePts"}));
+        run(&mut s, "sketch.point", json!({"point": [10, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(
+            &mut s,
+            "solid.hole",
+            json!({"sketch": "HolePts", "diameter": 3.4, "type": "counterbore", "cb_diameter": 6.5, "cb_depth": 3.3, "name": "Hole"}),
+        );
+        assert_eq!(said(&s, "Hole"), "");
+        let drilled_volume = volume(&mut s);
+        run(&mut s, command, json!({"feature": "Plate"}));
+        assert!(s.model.state().bodies.is_empty());
+        assert_eq!(said(&s, "Hole"), "there is no body to cut or intersect", "{command}");
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(said(&s, "Hole"), "");
+        assert_eq!(s.model.state().bodies.len(), 1);
+        near(volume(&mut s), drilled_volume);
+        run(&mut s, "edit.redo", json!({}));
+        assert!(s.model.state().bodies.is_empty());
+        assert_eq!(said(&s, "Hole"), "there is no body to cut or intersect", "{command} after redo");
+    }
+}
+
 #[test]
 fn a_hole_the_face_no_longer_reaches_stays_where_it_was_placed_and_says_so() {
     let mut s = Session::default();

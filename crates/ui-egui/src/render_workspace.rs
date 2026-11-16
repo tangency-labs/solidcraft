@@ -3822,6 +3822,7 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
                 fit_result(app);
             }
             if matches!(view, "model") || id == "render.result.close" {
+                live::show_model_preview(app);
                 app.render_workspace.view.compare = None;
                 app.render_workspace.comparison_images.clear();
             }

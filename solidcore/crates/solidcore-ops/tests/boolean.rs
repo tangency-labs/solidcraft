@@ -2194,3 +2194,141 @@ fn a_symmetric_cut_through_a_half_pipe_is_the_same_for_every_length_past_it() {
         );
     }
 }
+
+/// A 6 deep, 11 high slab whose long wall lies in the plane of the wall of #17595's join,
+/// moved `shift` into the slab (at 0 it is that wall), from `from` to `to` along the wall's
+/// 120 long line, standing on z = `z0`.
+fn slab_on_the_join_wall(from: f64, to: f64, shift: f64, z0: f64) -> Body {
+    let start = [-77.110_635_008_193_54, 233.891_523_985_808_33];
+    let end = [-137.110_634_991_806_45, 129.968_476_014_191_62];
+    let inward = [0.866_025_403_784_438_6, -0.5];
+    let at = |along: f64, deep: f64| {
+        [
+            start[0] + along / 120.0 * (end[0] - start[0]) + deep * inward[0],
+            start[1] + along / 120.0 * (end[1] - start[1]) + deep * inward[1],
+            z0,
+        ]
+    };
+    let corners = [
+        at(from, shift),
+        at(to, shift),
+        at(to, shift + 6.0),
+        at(from, shift + 6.0),
+    ];
+    let profile: Vec<Curve> = (0..4)
+        .map(|i| Curve::Line {
+            start: corners[i],
+            end: corners[(i + 1) % 4],
+        })
+        .collect();
+    extrude(
+        &profile,
+        [0.0, 0.0, 1.0],
+        11.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap()
+}
+
+/// The union of `corner` and `slab` (and of `slab` and `corner` with `either_order`) is one
+/// valid solid of `counts`, on the default kernel and with every fix on, whose volume is the
+/// two less what they share (as the default kernel intersects them), within `rel`.
+fn joins_as_both_less_the_shared(
+    corner: &dyn Fn() -> Body,
+    slab: &dyn Fn() -> Body,
+    either_order: bool,
+    counts: [usize; 3],
+    rel: f64,
+) {
+    let no_fixes: &[&str] = &[];
+    session::set_thread_fixes(no_fixes.iter().copied()).unwrap();
+    let shared = boolean(corner(), slab(), BooleanOp::Intersect)
+        .unwrap()
+        .unwrap();
+    let both = corner().volume(1e-11).unwrap() + slab().volume(1e-11).unwrap()
+        - shared.volume(1e-11).unwrap();
+    for fixes in [no_fixes, solidcore::kernel::UpstreamFixes::NAMES] {
+        session::set_thread_fixes(fixes.iter().copied()).unwrap();
+        let joined = boolean(corner(), slab(), BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        one_valid_solid_of_volume(&joined, counts, both, rel);
+        if either_order {
+            let joined = boolean(slab(), corner(), BooleanOp::Union)
+                .unwrap()
+                .unwrap();
+            one_valid_solid_of_volume(&joined, counts, both, rel);
+        }
+    }
+}
+
+/// #17595: a block joined onto an imported part came back as the part alone. In the part two
+/// spline faces meet in an edge of tolerance 4.0e-3, which the join's wall crosses at 1.3° to
+/// 1.8° (measured there). Each face's curve ends where its own surface meets the wall, so the
+/// two ends lie 0.057 apart along the edge; they were two vertices and the intersection loop
+/// stayed open between them. The fixture is a 3 mm cube of the part around that crossing
+/// (`data/issue_17595_imported_corner.smb`: 9 faces, 13.57 mm³; the edge's tolerance there is
+/// 9.1e-3). The wall's face was not cut through, the flood crossed the gap, and every face of
+/// the slab was taken for inside the corner: the union was the corner alone (11 faces,
+/// 13.57 mm³, the slab's 792 missing). The same with the wall 0.05 out. The two ends are one
+/// crossing of the edge with the wall: the union is the corner and the slab less what they
+/// share. (The edge's tolerance over the cube's 3 x 3 section lets two results differ by
+/// 0.08, 1e-4 of the volume; measured 0.0085 at most.)
+///
+/// With the slab first the same two unions are refused on this cube as not a solid (the
+/// part itself joins in either order): open, and not asserted here.
+///
+/// A wall that misses the edge is untouched: 1 mm in, the same sum in either order; 1 mm out
+/// the slab holds the corner and the union is the slab, 12 x 6 x 11.
+#[test]
+fn a_join_whose_wall_crosses_a_loose_spline_edge_at_a_shallow_angle_keeps_the_tool() {
+    let corner = || {
+        Body::from_smb(
+            include_bytes!("data/issue_17595_imported_corner.smb").to_vec(),
+            false,
+        )
+        .unwrap()
+    };
+    assert_eq!(corner().counts().unwrap(), [9, 20, 13]);
+    for (shift, either_order, counts) in [
+        (0.0, false, [10, 21, 14]),
+        (-0.05, false, [10, 21, 14]),
+        (1.0, true, [15, 35, 23]),
+    ] {
+        let slab = || slab_on_the_join_wall(80.35, 92.35, shift, -46.0);
+        joins_as_both_less_the_shared(&corner, &slab, either_order, counts, 1e-4);
+    }
+    let slab = boolean(
+        corner(),
+        slab_on_the_join_wall(80.35, 92.35, -1.0, -46.0),
+        BooleanOp::Union,
+    )
+    .unwrap()
+    .unwrap();
+    one_valid_solid_of_volume(&slab, [6, 12, 8], 12.0 * 6.0 * 11.0, 1e-8);
+}
+
+/// #17595, the same join farther along its wall, where the wall leaves a spline face through
+/// an edge whose curve lies 3.3e-3 outside the face's surface, past the edge's tolerance of
+/// 2.8e-3 (as the STEP import left it; the fixture is a 3 mm cube of the part there, 7 faces,
+/// with that edge's tolerance:
+/// `data/issue_17595_imported_edge_off_its_face.record.json`). The wall's curve on the face
+/// ends on the surface's natural boundary, 3.3e-3 from the edge's curve, where the curve/edge
+/// intersection finds no crossing: the end was taken for a point inside the face, became a
+/// vertex 8.8e-3 short of the one where the next face's curve starts on the edge, and the
+/// intersection loop stayed open between the two. The face's trims put that end on the edge.
+/// The union, in either order, is the corner and the slab less what they share (within 1e-4
+/// of the volume, as above; measured 0.0098 of 799).
+#[test]
+fn a_join_past_an_imported_edge_that_lies_off_its_face_keeps_the_tool() {
+    let record: Record = serde_json::from_str(include_str!(
+        "data/issue_17595_imported_edge_off_its_face.record.json"
+    ))
+    .unwrap();
+    let corner = || Body::from_record(&record, true).unwrap().0;
+    let slab = || slab_on_the_join_wall(49.8, 61.8, 0.0, -50.0);
+    assert_eq!(corner().counts().unwrap(), [7, 15, 10]);
+    joins_as_both_less_the_shared(&corner, &slab, true, [12, 27, 18], 1e-4);
+}
