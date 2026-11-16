@@ -51,11 +51,12 @@
 //!   adds start points (`TraceCurve` adds none), so it ends after at most as many
 //!   passes as `FindBoundaryStartPoints` made points.
 //! - **Touching points left for a start point** (not upstream). After the interior
-//!   curves, a touching point `FindBoundaryStartPoints` dropped because a start point
-//!   lies on it is added when its surface points are within the tolerance and it is
-//!   on no curve found ([`SurfaceIntersector::add_deferred_touching_points`]); such
-//!   points come after the traced curves, where upstream's boundary pass would have
-//!   put them first.
+//!   curves and the removal of degenerate curves that lie on other curves, a touching
+//!   point `FindBoundaryStartPoints` dropped because a start point lies on it is
+//!   added when its surface points are within the tolerance and it is on none of the
+//!   curves left ([`SurfaceIntersector::add_deferred_touching_points`]); such points
+//!   come after the traced curves, where upstream's boundary pass would have put them
+//!   first.
 //! - **Opt-in fix (WR-76, #392).** With
 //!   [`UpstreamFixes::ssi_trace_tangent_curves_once`](crate::kernel::UpstreamFixes::ssi_trace_tangent_curves_once)
 //!   a traced curve removes, before it is flushed, the start points left in a tangent
@@ -834,8 +835,9 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
             mut deviations,
         } = interior;
 
-        // not upstream: a touching point left out because a start point lies on it is
-        // added, last, when no curve found covers it
+        // remove degenerate Curves whose points lie on nonDegenerate intersections, then
+        // (not upstream) add the touching points left for a start point that no curve
+        // left covers
         let mut found = TsectCurves {
             curves_3d: core::mem::take(&mut curves_3d),
             uv_curves: [
@@ -845,7 +847,7 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
             curve_types: core::mem::take(&mut curve_types),
             deviations: core::mem::take(&mut deviations),
         };
-        self.base.add_deferred_touching_points(k, &mut found)?;
+        remove_covered_degenerate_curves_then_add_touching(&mut self.base, k, &mut found)?;
         let TsectCurves {
             curves_3d: found_3d,
             uv_curves: [found_uv1, found_uv2],
@@ -857,42 +859,6 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         surface2_uv_curves = found_uv2;
         curve_types = found_types;
         deviations = found_deviations;
-
-        // remove degenerate Curves whose points lie on nonDegenerate intersections
-        let mut ii = 0;
-        while let Some(curve) = curves_3d.get(ii) {
-            if curve.is_degenerate(k, EFF_ZERO, None)? {
-                // status ignored: an unset point (passed on with
-                // `ssi_proto_topology_statuses_pass_on`, fork bcc6f01)
-                let point = ignored(passed_on(
-                    curve.evaluate_point(k, 0.0),
-                    k.fixes.ssi_proto_topology_statuses_pass_on,
-                )?)?
-                .unwrap_or(Vec3::UNDEF);
-                if self
-                    .base
-                    .is_point_on_curve(k, point, &curves_3d, Some(ii))?
-                {
-                    if ii >= surface1_uv_curves.len()
-                        || ii >= surface2_uv_curves.len()
-                        || ii >= deviations.len()
-                        || ii >= curve_types.len()
-                    {
-                        return Err(SolidError::invalid_input(
-                            OP_DI,
-                            "curve arrays of different lengths (upstream reads past them)",
-                        ));
-                    }
-                    curves_3d.remove(ii);
-                    surface1_uv_curves.remove(ii);
-                    surface2_uv_curves.remove(ii);
-                    deviations.remove(ii);
-                    curve_types.remove(ii);
-                    continue;
-                }
-            }
-            ii += 1;
-        }
 
         // not upstream (WR-75, opt-in; the fork's AddTangentNodes): report the singular
         // points where crossing branches meet
@@ -946,6 +912,61 @@ fn evaluate_1st_derivatives(
     uv: Point2,
 ) -> Result<(Point3, Vec3, Vec3)> {
     crate::surface::surface::p1::evaluate_1st_derivatives(k, surface, uv, Side::Left, Side::Left)
+}
+
+/// The end of `DoIntersection`'s curve list: removes each degenerate curve of `found`
+/// that lies on another of its curves (upstream), then adds the touching points that
+/// `FindBoundaryStartPoints` left for a start point and that no remaining curve covers
+/// (not upstream, [`SurfaceIntersector::add_deferred_touching_points`]). The removal
+/// comes first so that a degenerate curve it drops covers no touching point.
+///
+/// # Errors
+///
+/// Those of [`SurfaceIntersector::is_point_on_curve`] and of the curves; curve arrays
+/// of different lengths are invalid input.
+fn remove_covered_degenerate_curves_then_add_touching(
+    base: &mut SurfaceIntersector<'_>,
+    k: &Kernel,
+    found: &mut TsectCurves,
+) -> Result<()> {
+    let TsectCurves {
+        curves_3d,
+        uv_curves: [surface1_uv_curves, surface2_uv_curves],
+        curve_types,
+        deviations,
+    } = found;
+    let mut ii = 0;
+    while let Some(curve) = curves_3d.get(ii) {
+        if curve.is_degenerate(k, EFF_ZERO, None)? {
+            // status ignored: an unset point (passed on with
+            // `ssi_proto_topology_statuses_pass_on`, fork bcc6f01)
+            let point = ignored(passed_on(
+                curve.evaluate_point(k, 0.0),
+                k.fixes.ssi_proto_topology_statuses_pass_on,
+            )?)?
+            .unwrap_or(Vec3::UNDEF);
+            if base.is_point_on_curve(k, point, curves_3d, Some(ii))? {
+                if ii >= surface1_uv_curves.len()
+                    || ii >= surface2_uv_curves.len()
+                    || ii >= deviations.len()
+                    || ii >= curve_types.len()
+                {
+                    return Err(SolidError::invalid_input(
+                        OP_DI,
+                        "curve arrays of different lengths (upstream reads past them)",
+                    ));
+                }
+                curves_3d.remove(ii);
+                surface1_uv_curves.remove(ii);
+                surface2_uv_curves.remove(ii);
+                deviations.remove(ii);
+                curve_types.remove(ii);
+                continue;
+            }
+        }
+        ii += 1;
+    }
+    base.add_deferred_touching_points(k, found)
 }
 
 #[cfg(test)]
@@ -1037,6 +1058,78 @@ mod tests {
     /// point, leaving no answer; it is now added at the end, since no curve found
     /// covers it (WR-51 made the start point test a real distance of the tolerance,
     /// which reaches this start point).
+    /// A touching point left for a start point is checked against the curves that
+    /// remain once the degenerate curves lying on other curves are removed. Here the
+    /// touching point P is covered only by a degenerate curve D (within 4 tol of it).
+    /// D lies on the line C (0.9 tol past its end) and is removed. P, on the planes'
+    /// meet 3 tol past C's end, is on no curve left (its surface gaps are all zero, so
+    /// the mid-gap test does not join it to C) and is the contact's only report.
+    /// Checked against the curves before the removal, P was dropped together with D.
+    #[test]
+    fn a_touching_point_covered_only_by_a_removed_degenerate_curve_is_kept() {
+        use super::super::p3::{push_touching_curve, DeferredTouching};
+        let k = &Kernel::default();
+        // z = 0 and y = 0.5: they meet along x
+        let a = plane([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let b = plane([0.0, 0.5, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let mut si = SurfaceIntersector::new(k, &a, &d, &b, &d, false).unwrap();
+        let tol = si.this_approx_tol_3d;
+        assert!(tol > 0.0 && tol < 0.01, "{tol}");
+        let touching = |p: Point3, uv: [f64; 2]| {
+            let mut t = TsectPnt::new();
+            *t.srf_pos_mut(SrfIndex::First) = p;
+            *t.srf_pos_mut(SrfIndex::Second) = p;
+            *t.uv_pos_mut(SrfIndex::First) = Point2::new(uv[0], uv[1]);
+            *t.uv_pos_mut(SrfIndex::Second) = Point2::new(uv[0], uv[1]);
+            t
+        };
+        let c_end = Vec3::new(0.5, 0.5, 0.0);
+        let dp = c_end + Vec3::new(0.9 * tol, 0.0, 0.0);
+        let pp = c_end + Vec3::new(3.0 * tol, 0.0, 0.0);
+        let mut found = TsectCurves::default();
+        let line = |dim, p: Point3, q: Point3| {
+            Curve::from(BSplineCurve::create_line_segment(dim, p, q).unwrap())
+        };
+        found
+            .curves_3d
+            .push(line(3, Vec3::new(0.1, 0.5, 0.0), c_end));
+        found.uv_curves[0].push(line(2, Vec3::new(0.1, 0.5, 0.0), Vec3::new(0.5, 0.5, 0.0)));
+        found.uv_curves[1].push(line(2, Vec3::new(0.1, 0.5, 0.0), Vec3::new(0.5, 0.5, 0.0)));
+        found.curve_types.push(TsectCurveType::Crossing);
+        found.deviations.push(0.0);
+        push_touching_curve(&mut found, dp, &touching(dp, [dp.x, dp.y])).unwrap();
+        // P's boundary curve: A's iso line u = P.x across C, which C does not run
+        // along, so only the removal of D decides P (not the #11749 crossing rule)
+        let boundary = line(3, Vec3::new(pp.x, 0.0, 0.0), Vec3::new(pp.x, 1.0, 0.0));
+        si.deferred_touching = vec![DeferredTouching::new(
+            pp,
+            touching(pp, [pp.x, pp.y]),
+            boundary,
+        )];
+        // the premises: D is on C, P is on D and not on C
+        assert!(si
+            .is_point_on_curve(k, dp, &found.curves_3d[..1], None)
+            .unwrap());
+        assert!(pp.distance(dp) < 4.0 * tol);
+        assert!(!si
+            .is_point_on_curve(k, pp, &found.curves_3d[..1], None)
+            .unwrap());
+        assert!(si.is_point_on_curve(k, pp, &found.curves_3d, None).unwrap());
+
+        remove_covered_degenerate_curves_then_add_touching(&mut si, k, &mut found).unwrap();
+        assert!(si.deferred_touching.is_empty());
+        assert_eq!(found.curves_3d.len(), 2);
+        assert_eq!(
+            found.curve_types,
+            [TsectCurveType::Crossing, TsectCurveType::Touching]
+        );
+        assert_eq!(found.curves_3d[1].evaluate_point(k, 0.0).unwrap(), pp);
+        assert_eq!(found.uv_curves[0].len(), 2);
+        assert_eq!(found.uv_curves[1].len(), 2);
+        assert_eq!(found.deviations, [0.0, 0.0]);
+    }
+
     #[test]
     fn a_touching_point_no_curve_covers_is_kept() {
         let k = &Kernel::default();

@@ -3336,7 +3336,6 @@ fn transform_in(
     }) {
         turn_to_nurbs(k, b, notifications.as_deref_mut())?;
     }
-    let mut bbox = Extent3d::new();
     let vertices = brep_vertices(b)?;
     for &vertex in &vertices {
         let mut point = b.vertex(vertex)?.point;
@@ -3353,7 +3352,6 @@ fn transform_in(
         }
         point = placement.transform_point(point);
         set_vertex_point(k, b, vertex, point, notifications.as_deref_mut())?;
-        bbox.add_point(point);
     }
     for edge in crate::topology::brep::p1::curve_owners(b, None, &|e| {
         transform_owner_key(
@@ -3436,62 +3434,41 @@ fn transform_in(
             swap_reflection_shells(b, face)?;
         }
     }
-    let fixes = k.fixes;
-    // WR-507 (#1520): under the opt-in fix a scale of 1 (a rotation or reflection) is no
-    // scale, and a scale s keeps each tolerance at least its own times s; upstream sets
-    // every one to the body tolerance whenever a scale is given.
+    // WR-507 (#1520): a scale of 1 (a rotation or reflection) is no scale, and a scale s
+    // keeps each tolerance at least its own times s; upstream sets every one to the body
+    // tolerance whenever a scale is given.
     let tol_scale = scale.map_or(1.0, |s| max2(s.x.abs(), max2(s.y.abs(), s.z.abs())));
-    let scales_tolerances = if fixes.transform_scales_each_tolerance {
-        scale_tolerances && (tol_scale - 1.0).abs() > crate::math::EFF_ZERO
-    } else {
-        scale.is_some() && scale_tolerances
-    };
-    if scales_tolerances {
-        // WR-508 (#1521): under the opt-in fix the size is the scaled body's bounding box,
-        // so a body without vertices (a lone torus) is not sized from an empty box.
-        let size = if fixes.transform_model_size_from_body_box {
-            let model_box = crate::query::brep::calculate_bounding_box(
-                k,
-                &mut *b,
-                crate::query::brep::BoundingBoxOptions {
-                    approx: false,
-                    tight: false,
-                    expand_by_zone_tol_3d: false,
-                },
-            )?;
-            model_box.size().length()
-        } else {
-            bbox.size().length()
-        };
+    if scale_tolerances && (tol_scale - 1.0).abs() > crate::math::EFF_ZERO {
+        // WR-508 (#1521): the size is the scaled body's bounding box, so a body without
+        // vertices (a lone torus) is not sized from an empty box; upstream sizes it from
+        // its vertices alone.
+        let model_box = crate::query::brep::calculate_bounding_box(
+            k,
+            &mut *b,
+            crate::query::brep::BoundingBoxOptions {
+                approx: false,
+                tight: false,
+                expand_by_zone_tol_3d: false,
+            },
+        )?;
+        let size = model_box.size().length();
         let zone = b.set_this_model_size_estimate(k, size);
         crate::geom::tol::set_context_model_size_estimate(&mut k.context, size);
         for vertex in vertices {
-            let tol = if fixes.transform_scales_each_tolerance {
-                max2(zone, vertex::tolerance(b, vertex)? * tol_scale)
-            } else {
-                zone
-            };
+            let tol = max2(zone, vertex::tolerance(b, vertex)? * tol_scale);
             crate::error::ignore_status(vertex::set_tolerance(b, vertex, tol, false, false))?;
         }
         for edge in brep_edges(b)? {
-            let tol = if fixes.transform_scales_each_tolerance {
-                max2(zone, crate::topology::edge::tolerance(b, edge)? * tol_scale)
-            } else {
-                zone
-            };
+            let tol = max2(zone, crate::topology::edge::tolerance(b, edge)? * tol_scale);
             crate::error::ignore_status(crate::topology::edge::set_tolerance(
                 b, edge, tol, false, false,
             ))?;
         }
         for face in brep_faces(b)? {
-            let tol = if fixes.transform_scales_each_tolerance {
-                max2(
-                    zone,
-                    crate::topology::face::p2::tolerance(b, face)? * tol_scale,
-                )
-            } else {
-                zone
-            };
+            let tol = max2(
+                zone,
+                crate::topology::face::p2::tolerance(b, face)? * tol_scale,
+            );
             set_face_tolerance(b, face, tol, false, false)?;
         }
     }
@@ -4042,81 +4019,61 @@ mod tests {
             ),
         ];
         for (name, placement, scale, wide, narrow) in cases {
-            for fixed in [true, false] {
-                let mut k = Kernel::default();
-                k.fixes.transform_scales_each_tolerance = fixed;
-                let (mut b, [wide_edge, narrow_edge], v, f) = box_with_tolerances(&mut k);
-                transform(&mut k, &mut b, &placement, Some(scale), true).unwrap();
-                let body = b.tolerance();
-                let label = format!("{name} fixed={fixed}");
-                if fixed {
-                    assert_tol(
-                        &format!("{label}: wide edge"),
-                        crate::topology::edge::tolerance(&b, wide_edge).unwrap(),
-                        wide,
-                    );
-                    assert_tol(
-                        &format!("{label}: vertex"),
-                        vertex::tolerance(&b, v).unwrap(),
-                        wide,
-                    );
-                    assert_tol(
-                        &format!("{label}: face"),
-                        crate::topology::face::p2::tolerance(&b, f).unwrap(),
-                        wide,
-                    );
-                    assert_tol(
-                        &format!("{label}: narrow edge"),
-                        crate::topology::edge::tolerance(&b, narrow_edge).unwrap(),
-                        narrow.unwrap_or(body),
-                    );
-                } else {
-                    // upstream: every edge is set to the new body tolerance
-                    assert_tol(
-                        &format!("{label}: wide edge"),
-                        crate::topology::edge::tolerance(&b, wide_edge).unwrap(),
-                        body,
-                    );
-                }
-            }
+            let mut k = Kernel::default();
+            let (mut b, [wide_edge, narrow_edge], v, f) = box_with_tolerances(&mut k);
+            transform(&mut k, &mut b, &placement, Some(scale), true).unwrap();
+            let body = b.tolerance();
+            assert_tol(
+                &format!("{name}: wide edge"),
+                crate::topology::edge::tolerance(&b, wide_edge).unwrap(),
+                wide,
+            );
+            assert_tol(
+                &format!("{name}: vertex"),
+                vertex::tolerance(&b, v).unwrap(),
+                wide,
+            );
+            assert_tol(
+                &format!("{name}: face"),
+                crate::topology::face::p2::tolerance(&b, f).unwrap(),
+                wide,
+            );
+            assert_tol(
+                &format!("{name}: narrow edge"),
+                crate::topology::edge::tolerance(&b, narrow_edge).unwrap(),
+                narrow.unwrap_or(body),
+            );
         }
     }
 
     /// WR-508 (#1521): a lone torus, which this port's `create_torus` gives a single vertex,
     /// so no vertex spans a size: upstream sizes the scaled body from that one-point vertex
-    /// box (size zero), and the model size and body tolerance come out zero. With the fix
-    /// it is sized from its bounding box, as a torus made at the scaled size is.
+    /// box (size zero), and the model size and body tolerance come out zero. The port
+    /// sizes it from its bounding box, as a torus made at the scaled size is.
     #[test]
     fn transform_sizes_a_body_without_vertices_wr508() {
         for scale in [2.0, 0.5] {
-            for fixed in [true, false] {
-                let mut k = Kernel::default();
-                k.fixes.transform_model_size_from_body_box = fixed;
-                let mut torus =
-                    crate::primitive::api_primitives::create_torus(&mut k, Point3::ZERO, 6.0, 2.0)
-                        .unwrap();
-                assert_eq!(torus.vertices().len(), 1);
-                let s = Vec3::new(scale, scale, scale);
-                transform(&mut k, &mut torus, &Axis2Placement::IDENTITY, Some(s), true).unwrap();
-                let mut direct_k = Kernel::default();
-                let direct = crate::primitive::api_primitives::create_torus(
-                    &mut direct_k,
-                    Point3::ZERO,
-                    6.0 * scale,
-                    2.0 * scale,
-                )
-                .unwrap();
-                let got = torus.tolerance();
-                if fixed {
-                    assert!(
-                        got > 0.0 && got >= direct.tolerance() * (1.0 - 1e-12),
-                        "scale {scale}: body tolerance {got:e}, direct {:e}",
-                        direct.tolerance()
-                    );
-                } else {
-                    assert_eq!(got, 0.0, "scale {scale}: upstream's empty vertex box");
-                }
-            }
+            let mut k = Kernel::default();
+            let mut torus =
+                crate::primitive::api_primitives::create_torus(&mut k, Point3::ZERO, 6.0, 2.0)
+                    .unwrap();
+            assert_eq!(torus.vertices().len(), 1);
+            let s = Vec3::new(scale, scale, scale);
+            transform(&mut k, &mut torus, &Axis2Placement::IDENTITY, Some(s), true).unwrap();
+            let mut direct_k = Kernel::default();
+            let direct = crate::primitive::api_primitives::create_torus(
+                &mut direct_k,
+                Point3::ZERO,
+                6.0 * scale,
+                2.0 * scale,
+            )
+            .unwrap();
+            let got = torus.tolerance();
+            assert!(
+                got > 0.0 && got >= direct.tolerance() * (1.0 - 1e-12),
+                "scale {scale}: body tolerance {got:e}, direct {:e}",
+                direct.tolerance()
+            );
         }
     }
 

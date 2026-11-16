@@ -1172,6 +1172,12 @@ fn hostile_params_never_panic() {
         "references",
         "head",
         "head_gap",
+        "outline",
+        "outline_text",
+        "drills",
+        "drills_text",
+        "thickness",
+        "origin",
         "shape",
         "size",
         "web",
@@ -2022,6 +2028,63 @@ fn a_hole_position_of_expressions_follows_the_parameters() {
     assert!((after - want).abs() < 1e-3, "centre y {after}, want {want} (was {before})");
     // A bad expression is refused.
     assert!(s.execute("solid.hole", &json!({"position": ["40", "nope/2", "t"], "diameter": 3})).is_err());
+}
+
+/// #9088: an unreadable hole direction must not silently drill along the face normal.
+#[test]
+fn hole_direction_rejects_malformed_vectors_without_changing_the_design() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
+    let before = (*s.doc).clone();
+    for direction in [json!("sideways"), json!([0, -1]), json!([0, 0, -1, 0]), json!(["1", "0", "0"]), json!({"x": 1}), json!(false), json!(2)] {
+        let err =
+            s.execute("solid.hole", &json!({"position": [10, 10, 10], "diameter": 5, "depth": 5, "direction": direction})).unwrap_err().to_string();
+        assert!(err.contains("`direction`"), "{direction}: {err}");
+        assert_eq!(*s.doc, before, "{direction} changed the design");
+        assert_eq!(s.model.state().body("Plate").unwrap().body.face_count(), 6);
+        assert!((volume(&mut s) - 12_000.0).abs() < 1e-6);
+    }
+}
+
+/// The default normal and the accepted numeric vector forms still make the same blind hole.
+#[test]
+fn hole_direction_accepts_numeric_vectors_and_the_default() {
+    for direction in [None, Some(Value::Null), Some(json!([0, 0, -2])), Some(json!({"x": 0, "y": 0, "z": -2}))] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
+        let mut params = json!({"position": [10, 10, 10], "diameter": 5, "depth": 5, "name": "Hole"});
+        if let Some(direction) = direction {
+            params["direction"] = direction;
+        }
+        run(&mut s, "solid.hole", params);
+        let hole = run(&mut s, "timeline.inspect", json!({"feature": "Hole"}));
+        assert_eq!(hole["definition"]["direction"], json!([0.0, 0.0, -1.0]));
+        assert!((volume(&mut s) - (12_000.0 - PI * 2.5 * 2.5 * 5.0)).abs() < 1e-6);
+    }
+}
+
+/// Sketch-point holes ignore `direction` unless they use the Single hole mode.
+#[test]
+fn hole_direction_is_checked_for_single_sketch_holes() {
+    for single in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "Points"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [10, 10], "radius": 2, "id": "c1"}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = (*s.doc).clone();
+        let result = s.execute(
+            "solid.hole",
+            &json!({"sketch": "Points", "points": ["c1.center"], "single": single, "diameter": 5, "depth": 5, "direction": "sideways"}),
+        );
+        if single {
+            assert!(result.unwrap_err().to_string().contains("`direction`"));
+            assert_eq!(*s.doc, before);
+        } else {
+            result.unwrap();
+            assert!((volume(&mut s) - (12_000.0 - PI * 2.5 * 2.5 * 5.0)).abs() < 1e-6);
+        }
+    }
 }
 
 /// Additive extrusions default to joining even when only a profile side touches material.
@@ -3370,6 +3433,61 @@ fn cached_evaluation_matches_from_scratch() {
         if step == 1 || step == 3 {
             assert!(hits(&s) > before, "step {step} reuses the earlier results");
         }
+    }
+}
+
+/// A sketch on a plane turned about a model edge follows the edge when a parameter moves it: the
+/// cache must not take the turned plane as fixed because its base plane is.
+#[test]
+fn a_sketch_on_a_plane_turned_about_a_model_edge_follows_it_after_a_change() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "cx", "expression": "40 mm"}));
+    run(&mut s, "solid.cylinder", json!({"base": ["cx", 0, 0], "radius": 5, "height": 10, "body_name": "Shaft"}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [46, -2], "p1": [48, -8]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XZ", "axis": {"face": [45, 0, 5]}, "angle": "30 deg", "name": "Turned"}));
+    let turned = s
+        .doc
+        .features
+        .iter()
+        .find_map(|f| match &f.kind {
+            solidcraft_doc::FeatureKind::ConstructionPlane { plane } if f.name == "Turned" => Some(plane.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert!(matches!(turned, solidcraft_doc::PlaneRef::AtAngle { line: Some(_), .. }), "{turned:?}");
+    run(&mut s, "solid.extrude", json!({"sketch": "Profile", "distance": 2, "operation": "new", "name": "Fin"}));
+    let id = s.doc.find_feature("Profile").unwrap().id;
+    if let Some(solidcraft_doc::FeatureKind::Sketch { plane, .. }) = s.doc_mut().feature_mut(id).map(|f| &mut f.kind) {
+        *plane = turned;
+    }
+    s.refresh();
+    let same = |s: &Session, what: &str| {
+        let mut fresh = solidcraft_doc::Model::new();
+        fresh.no_cache = true;
+        fresh.evaluate(&s.doc);
+        assert!(fresh.results.iter().all(|r| r.error.is_none()), "{what}");
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{what}");
+        let shape = |st: &solidcraft_doc::ModelState| {
+            let mut v = st
+                .bodies
+                .iter()
+                .map(|b| {
+                    let m = solidcraft_kernel::measure(&b.body).unwrap();
+                    let c = [m.centroid.x, m.centroid.y, m.centroid.z].map(|v| (v * 1e6).round());
+                    (b.name.clone(), (m.volume * 1e6).round(), c, m.faces)
+                })
+                .collect::<Vec<_>>();
+            v.sort_by(|a, b| a.0.cmp(&b.0));
+            v
+        };
+        assert_eq!(shape(&s.model.state()), shape(&fresh.state()), "{what}");
+    };
+    same(&s, "made");
+    for cx in ["40.5 mm", "41 mm", "40 mm"] {
+        run(&mut s, "parameters.change", json!({"name": "cx", "expression": cx}));
+        same(&s, &format!("cx = {cx}"));
     }
 }
 

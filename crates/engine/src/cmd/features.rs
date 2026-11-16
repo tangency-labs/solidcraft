@@ -3526,7 +3526,12 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             format!("`position` [{}, {}, {}] is not on a face of a body; pick a point on the face to drill", position.x, position.y, position.z),
         ));
     }
-    let direction = match (p.get("direction").and_then(vec3), &points) {
+    let supplied_direction = p.get("direction").and_then(vec3);
+    // Ordinary sketch-point holes use the sketch normal and ignore this input.
+    if supplied_direction.is_none() && p.get("direction").is_some_and(|v| !v.is_null()) && points.as_ref().is_none_or(|(sp, _, _)| sp.single) {
+        return Err(bad(cmd, "`direction` must be a non-zero [x, y, z]"));
+    }
+    let direction = match (supplied_direction, &points) {
         (None, Some((sp, _, d))) if !sp.single => *d,
         (d, _) => match d {
             Some(d) => d.normalized().ok_or_else(|| bad(cmd, "`direction` must be non-zero"))?,
