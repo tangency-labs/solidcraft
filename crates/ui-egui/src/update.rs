@@ -135,7 +135,13 @@ pub fn current_version() -> &'static str {
 /// The release workflow built this binary (`SOLIDCRAFT_VERSION` is set there). Anything else is a
 /// development build, which never checks for updates.
 pub fn release_build() -> bool {
-    option_env!("SOLIDCRAFT_VERSION").is_some_and(|v| !v.is_empty()) && !cfg!(debug_assertions)
+    option_env!("SOLIDCRAFT_VERSION").is_some_and(|v| !v.is_empty() && !is_test_version(v)) && !cfg!(debug_assertions)
+}
+
+/// A one-off test build (`0.43.0-test+abc1234`, from test-build.yml): it is not a release, so it
+/// is treated like a development build and never checks for or offers an update.
+pub fn is_test_version(v: &str) -> bool {
+    parse_version(v).is_some_and(|v| v.pre.as_str() == "test")
 }
 
 // ---- installations ----------------------------------------------------------------------------

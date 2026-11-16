@@ -221,14 +221,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&SLOT_CENTER_TO_CENTER_CONTRACT)
         .output(output_schema_for::<crate::schema::sketch_shapes::SlotResult>)
-        .params(concat!("p0, p1: arc centres, width; returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: arc centres, width: number or expression (an expression naming a parameter is a dimension driven by it); returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.slot.overall", "Overall Slot", crate::checked!("sketch.slot.overall", slot_overall))
         .at("SKETCH", "CREATE")
         .icon("slot_overall")
         .enabled(in_sketch)
         .contract(&SLOT_OVERALL_CONTRACT)
         .output(output_schema_for::<crate::schema::sketch_shapes::SlotResult>)
-        .params(concat!("p0, p1: overall ends, width; returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: overall ends, width: number or expression (an expression naming a parameter is a dimension driven by it); returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.point", "Point", crate::checked!("sketch.point", draw_point)).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).contract(&POINT_CONTRACT).output(output_schema_for::<PointResult>).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), \"x:<a>+<b>:x,y\" (at the crossing of two curves near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", crate::checked!("sketch.dimension", dimension))
         .at("SKETCH", "CREATE")
@@ -1855,6 +1855,41 @@ pub(super) fn length_expr(s: &Session, p: &Value, key: &str, cmd: &str) -> Resul
     Ok((v, driven.then_some(e)))
 }
 
+/// A slot's `width`, read as [`circle_size`] reads a circle's radius (#15857): a number, or an
+/// expression over the design's parameters, which is then a diameter dimension on a round end
+/// (the parameter `dN` holds the expression) so that the slot follows it. A bare number typed as
+/// text reads in the design's unit, and an expression naming no parameter is just the number it
+/// comes to. Returns the width, and the expression when it drives the width.
+pub(super) fn slot_width(s: &Session, p: &Value, cmd: &str) -> Result<(f64, Option<String>)> {
+    let (w, driven) = match p.get("width") {
+        Some(Value::String(_)) => {
+            let e = s.doc.with_design_unit(req_expr(cmd, p, "width")?.as_str(), Kind::Length);
+            let w = s.doc.eval(&e, Kind::Length).map_err(|e| bad(cmd, format!("width: {e}")))?;
+            let driven = !solidcraft_doc::expr::references(&e).is_empty();
+            (w, driven.then_some(e))
+        }
+        // A value that is there but is no number is not a missing one.
+        Some(v) if !v.is_null() && num(p, "width").is_none() => return Err(bad(cmd, "`width` must be a number")),
+        _ => (num(p, "width").unwrap_or(0.0), None),
+    };
+    if w > 1e-9 && w < 1e9 { Ok((w, driven)) } else { Err(bad(cmd, "`width` must be positive")) }
+}
+
+/// The diameter dimension on round end `cap` that a slot whose width was typed as `driven` (an
+/// expression naming parameters) gets: the slot follows the parameters (#15857).
+pub(super) fn slot_width_dimension(
+    sk: &mut Sketch,
+    doc: &mut solidcraft_doc::Document,
+    cap: usize,
+    w: f64,
+    driven: Option<&str>,
+) -> Result<Option<String>> {
+    let Some(e) = driven else { return Ok(None) };
+    let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
+    let pname = doc.new_model_param(e, &unit);
+    Ok(Some(sk.add_constraint(ConstraintKind::Diameter { c: cap, value: w }, Some(pname))?))
+}
+
 fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.circle.center";
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
@@ -2132,18 +2167,27 @@ fn arc_centre(sk: &Sketch, a: usize) -> Option<usize> {
 /// A straight slot: two lines and two equal arc caps, tangent where they meet, plus its middle
 /// (#7908): a point held at the midpoint of a construction line between the arc centres, so it
 /// stays in the middle however the slot is edited or dragged. The middle adds no freedom.
-pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<Value> {
-    let reply = slot_parts(s, p, cmd, c0, c1, w)?;
+/// `driven` is the width's expression when it names parameters ([`slot_width`]).
+pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64, driven: Option<&str>) -> Result<Value> {
+    let reply = slot_parts(s, p, cmd, c0, c1, w, driven)?;
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// What [`slot`] adds: the curve and constraint ids, and the sketch's solve.
-pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<crate::schema::sketch_shapes::SlotResult> {
+pub(super) fn slot_parts(
+    s: &mut Session,
+    p: &Value,
+    cmd: &str,
+    c0: Vec2,
+    c1: Vec2,
+    w: f64,
+    driven: Option<&str>,
+) -> Result<crate::schema::sketch_shapes::SlotResult> {
     let h = w / 2.0;
     let d = (c1 - c0).normalized().ok_or_else(|| bad(cmd, "the slot ends must differ"))?;
     let n = d.perp();
     let mut extra = (None, None);
-    let (out, info) = draw(s, p, cmd, |sk, _| {
+    let (out, info) = draw(s, p, cmd, |sk, doc| {
         let pts: Vec<usize> =
             [c0 - n * h, c1 - n * h, c1 + n * h, c0 + n * h].iter().map(|q| sk.add_point(*q, None)).collect::<std::result::Result<_, _>>()?;
         let (p0, p1, p2, p3) = (pts[0], pts[1], pts[2], pts[3]);
@@ -2163,6 +2207,7 @@ pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Ve
         }
         let mid = sk.add_point((c0 + c1) * 0.5, None)?;
         cons.push(add_c(sk, ConstraintKind::Midpoint { p: mid, l: axis })?);
+        cons.extend(slot_width_dimension(sk, doc, a1, w, driven)?);
         extra = (sk.curves.get(axis).map(|c| c.id.clone()), sk.points.get(mid).map(|q| q.id.clone()));
         Ok((ids_of(sk, &[l1, a1, l2, a0]), cons))
     })?;
@@ -2176,19 +2221,19 @@ pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Ve
 fn slot_c2c(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.slot.center_to_center";
     let (a, b) = (req_vec2(cmd, p, "p0")?, req_vec2(cmd, p, "p1")?);
-    let w = num(p, "width").filter(|w| *w > 1e-9).ok_or_else(|| bad(cmd, "`width` must be positive"))?;
-    slot(s, p, cmd, a, b, w)
+    let (w, driven) = slot_width(s, p, cmd)?;
+    slot(s, p, cmd, a, b, w, driven.as_deref())
 }
 
 fn slot_overall(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.slot.overall";
     let (a, b) = (req_vec2(cmd, p, "p0")?, req_vec2(cmd, p, "p1")?);
-    let w = num(p, "width").filter(|w| *w > 1e-9).ok_or_else(|| bad(cmd, "`width` must be positive"))?;
+    let (w, driven) = slot_width(s, p, cmd)?;
     let d = (b - a).normalized().ok_or_else(|| bad(cmd, "the slot ends must differ"))?;
     if a.dist(b) <= w {
         return Err(bad(cmd, "the slot must be longer than it is wide"));
     }
-    slot(s, p, cmd, a + d * (w / 2.0), b - d * (w / 2.0), w)
+    slot(s, p, cmd, a + d * (w / 2.0), b - d * (w / 2.0), w, driven.as_deref())
 }
 
 fn draw_point(s: &mut Session, p: &Value) -> Result<Value> {

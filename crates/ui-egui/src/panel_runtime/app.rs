@@ -967,7 +967,10 @@ impl AppPanelRuntime {
                 Err(reason)
             }
         };
-        self.last_error = result.as_ref().err().cloned();
+        // A successful service tick does not resolve a failed preference restore.
+        if result.is_err() || !self.preferences.as_ref().is_some_and(|state| state.failed) {
+            self.last_error = result.as_ref().err().cloned();
+        }
         result
     }
     /// Explicit teardown preflights all owners before any controller is destroyed.
@@ -1239,12 +1242,14 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             integration.last_error = result.err();
         }
     }
-    if app
-        .panel_runtime
-        .as_ref()
-        .and_then(|integration| integration.preferences.as_ref())
-        .is_some_and(|state| state.failed || state.rejected.is_some() || !state.reset.is_empty())
-    {
+    if app.panel_runtime.as_ref().is_some_and(|integration| {
+        integration.preferences.as_ref().is_some_and(|state| {
+            // Startup bounds can change. A pending restore that needs more space will retry;
+            // it does not mean that the saved layout is unreadable.
+            let waiting_for_space = state.pending.is_some() && integration.last_error.as_ref().is_some_and(|reason| reason.rule == Rule::NoSpace);
+            (state.failed && !waiting_for_space) || state.rejected.is_some() || !state.reset.is_empty()
+        })
+    }) {
         super::preferences::report_notice(app);
     }
 }

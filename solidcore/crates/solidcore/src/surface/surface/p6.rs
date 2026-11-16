@@ -62,6 +62,8 @@
 //!   builder honor upstream's ignored sampling status without inventing values.
 //!   Counts are checked and capped at [`MAX_BOUNDARY_SAMPLES`] before any allocation;
 //!   outputs otherwise grow as samples are computed. No function here recurses.
+//! - **[`LOCAL_CURVE_INTERSECT_STEPS`]** (not upstream) names the 20 iterations of
+//!   `LocalCurveIntersect`'s solve, for callers that report them.
 
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::Curve;
@@ -106,6 +108,11 @@ const OP_SAMPLE: &str = "surface::surface::p6::DerivSurfDefinition::sample_value
 pub const MAX_BOUNDARY_SAMPLES: u64 = 65_536;
 const OP_SS: &str = "surface::surface::p6::SsGlobalSolver::solutions_identical";
 const OP_CS_INTERSECT: &str = "surface::surface::p6::cs_intersect_local_solve";
+/// The most Newton steps the solve of [`Surface::local_curve_intersect`] takes (upstream's
+/// `SetMaximumIterations(20)` in `LocalCurveIntersect`). From a guess near a crossing, Newton
+/// reaches its desired accuracy in a few; the rest is room for its step cuts and boundary hits.
+/// Named for the callers that report it when the solve finds nothing.
+pub const LOCAL_CURVE_INTERSECT_STEPS: u32 = 20;
 const OP_SC: &str = "surface::surface::p6::sc_local_solve";
 
 /// `SM_CONTINUITY_ANGLE` (`SM_ANG_TOL_DEG`, degrees): the default angle tolerance of
@@ -2380,7 +2387,7 @@ fn cs_intersect_local_solve(
     solver.set_desired_accuracy(EFF_ZERO / 10.0);
     solver.set_step_cutting_enabled(true);
     solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 6);
-    solver.set_maximum_iterations(20);
+    solver.set_maximum_iterations(u64::from(LOCAL_CURVE_INTERSECT_STEPS));
 
     // Solve it
     let solution = solver.solve_it(guess, solve_tol)?;
