@@ -514,6 +514,42 @@ fn finite_point(p: Point3) -> bool {
     p.x.is_finite() && p.y.is_finite() && p.z.is_finite()
 }
 
+/// Not upstream (#16637): whether `x` lies within `tol` of the segment from `a` to `b`,
+/// up to the rounding of placing a point on that segment and of this test.
+///
+/// The test computes the closest point `a + t·(b - a)` (`t` clamped to `[0, 1]`) and
+/// accepts a distance `d` to it of at most `tol + γ_32·S`, with
+/// `S = |x| + |a| + |b|`. The `γ_32·S` term is what makes every point the kernel places
+/// on the segment pass for any `tol >= 0` (`find_position_from_pcs`: `a`, `b`, or
+/// `(1 - f)·a + f·b` with `f` the first gap's share of the two, in `[0, 1]` when
+/// neither gap is negative):
+/// - That point is within `γ_3·(|a| + |b|)` of the segment: per coordinate, the
+///   rounding of `1 - f`, two products and a sum is at most `γ_3·max(|a_i|, |b_i|)`.
+/// - The computed `t` is off the exact projection's by at most `γ_13·|x - a| / |b - a|`
+///   (the subtractions, the two dot products and the division), and clamping only
+///   shrinks that. The computed closest point is within `γ_3·(2|a| + |b|)` of the
+///   segment point at the computed `t`, and the distance has a relative error of
+///   `γ_4`.
+/// - So the computed `d` is at most `(1 + γ_4)·(γ_3 + γ_13 + 2γ_3)·S <= γ_26·S`, and
+///   `γ_32` covers the rounding of `S`, of the product and of the sum with `tol`.
+///
+/// Underflow is not counted: it adds at most about 1.5e-154 (a segment whose squared
+/// length underflows is measured from `a`). Accepting a little more than `tol` never
+/// breaks a bound: the caller covers each accepted point by its own measured distance.
+/// A non-finite distance or bound (an overflow) refuses.
+fn within_tolerance_of_segment(x: Point3, a: Point3, b: Point3, tol: f64) -> bool {
+    let ab = b - a;
+    let len2 = ab.dot(ab);
+    let t = if len2 > 0.0 {
+        ((x - a).dot(ab) / len2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let d = x.distance(a + t * ab);
+    let bound = tol + gamma(32) * (x.length() + a.length() + b.length());
+    bound.is_finite() && d <= bound
+}
+
 /// `SM_CAST_PTR(SmTopology, obj)`.
 fn as_topology<O: ClassObject>(o: Option<O>) -> Option<O> {
     o.filter(|o| {
@@ -1781,15 +1817,23 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// stored gaps (`m_dGap3d`) are not used: several writers set them to something other
     /// than the distance at the stored parameters.
     ///
-    /// Only finite points are returned. An object point is returned only when it lies
-    /// within the definition's tolerance of the definition's position (the distance
-    /// rounded up by `γ_4`, as `attached_curve_ends` attributes ends): one farther off is
-    /// not a point the definition stands for (a definition the kernel builds takes its
-    /// position from its object points), so covering it would only widen the tolerance
-    /// by an inconsistency of the input. An object point that cannot be computed
-    /// (parameters not set, an evaluation error of any kind, a non-finite result) or that
-    /// is not consistent makes the result unbounded instead of an error, so the vertex
-    /// does not move and a resolution that combines definitions never fails here.
+    /// Only finite points are returned. The object points are returned only when they are
+    /// consistent with the definition's position, the way the kernel places a definition
+    /// (`find_position_from_pcs`):
+    /// - With one object point, the position is that point, so the point must lie within
+    ///   the definition's tolerance of it (the distance rounded up by `γ_4`, as
+    ///   `attached_curve_ends` attributes ends).
+    /// - With two, the position is the first, the second or a weighted point between
+    ///   them, however far apart they are (that deviation goes into the gap, not the
+    ///   tolerance). So the position must lie within the definition's tolerance of the
+    ///   segment between them ([`within_tolerance_of_segment`]).
+    ///
+    /// Object points that fail this are not points the definition stands for (only an
+    /// inconsistent input has them), so covering them would only widen the tolerance by
+    /// that inconsistency. They, and an object point that cannot be computed (parameters
+    /// not set, an evaluation error of any kind, a non-finite result), make the result
+    /// unbounded instead of an error, so the vertex does not move and a resolution that
+    /// combines definitions never fails here.
     fn absorbed_points_of(
         &self,
         k: &Kernel,
@@ -1807,6 +1851,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         if bounded {
             points.push(position);
         }
+        let mut objs = Vec::new();
         for which in [1, 2] {
             let pc = d.brep_point_classif(which);
             if matches!(
@@ -1816,11 +1861,20 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 continue;
             }
             match pc.find_obj_point_3d(k, brep) {
-                Ok(p) if finite_point(p) && p.distance(position) * (1.0 + gamma(4)) <= tol => {
-                    points.push(p);
-                }
+                Ok(p) if finite_point(p) => objs.push(p),
                 _ => bounded = false,
             }
+        }
+        let consistent = match objs.as_slice() {
+            [] => true,
+            [p] => p.distance(position) * (1.0 + gamma(4)) <= tol,
+            [a, b] => within_tolerance_of_segment(position, *a, *b, tol),
+            _ => false,
+        };
+        if consistent {
+            points.extend(objs);
+        } else {
+            bounded = false;
         }
         (points, bounded)
     }
@@ -4844,6 +4898,137 @@ mod tests {
         assert_eq!(
             v.raw_tolerance(),
             v.position().distance(R_AT) * (1.0 + gamma(4))
+        );
+    }
+
+    /// #17839 review r3: an absorbed definition at `FAR` whose object points (both `Q`)
+    /// lie 5e-5 off its position, outside its tolerance 1e-5, is inconsistent: no
+    /// placement the kernel makes puts a position that far from the segment between its
+    /// object points. Its object points are not recorded and the vertex does not move
+    /// from where it starts (1e-5 off the survivor). Without the consistency rule the
+    /// vertex moved to the survivor and its tolerance grew to reach `Q`.
+    #[test]
+    fn an_inconsistent_absorbed_definition_does_not_move_the_vertex() {
+        let k = Kernel::default();
+        let geo = absorb_geo();
+        let (mut m, pv, a, b) = vertex_defs_on_one_vertex(&k, &geo, true, 1e-4, 1e-5, 2e-6, 0.0);
+        let start = P + Vec3::new(0.0, 1e-5, 0.0);
+        m.proto_vertex_mut(pv).unwrap().set_position(start);
+        m.resolve_proto_vertex(&k, &geo, pv).unwrap();
+        assert!(m.vertex_def(a).is_none());
+        let v = m.proto_vertex(pv).unwrap();
+        assert_eq!(v.vertex_definitions(), &[b]);
+        assert_eq!(v.position(), start, "not moved");
+        assert!(v.absorbed_unbounded());
+        assert_eq!(v.absorbed_points(), &[FAR], "only the position is recorded");
+        assert_eq!(v.raw_tolerance(), start.distance(FAR) * (1.0 + gamma(4)));
+    }
+
+    /// #17839 review r3: as `the_move_to_the_survivors_covers_their_object_points`, but
+    /// the survivor `s1` has tolerance 1e-5, so its object point `R_AT` (8e-5 off its
+    /// position, both object points at `R_AT`) is inconsistent. The survivors' average is
+    /// 4e-5 from the vertex, a real move, which is declined: `R_AT` is not recorded and the
+    /// vertex stays at `P`. Without the consistency rule it moved and its tolerance grew to
+    /// reach `R_AT` (1.2e-4).
+    #[test]
+    fn an_inconsistent_survivor_declines_a_real_move() {
+        let k = Kernel::default();
+        let geo = absorb_geo();
+        let mut m = manager();
+        let s1 = VertexDefinition::new(
+            &k,
+            &geo,
+            &vertex_pc_at(2, 0.0),
+            &vertex_pc_at(3, 0.0),
+            P,
+            1e-5,
+            1e-6,
+            None,
+        )
+        .unwrap();
+        let s1 = m.insert_vertex_definition(s1).unwrap();
+        let mut region_vd = |at: Point3, gap: f64| {
+            let vd = VertexDefinition::new(
+                &k,
+                &geo,
+                &region_pc(R0),
+                &region_pc(R1),
+                at,
+                1e-5,
+                gap,
+                None,
+            )
+            .unwrap();
+            m.insert_vertex_definition(vd).unwrap()
+        };
+        let s2_at = P + Vec3::new(0.0, 8e-5, 0.0);
+        let s2 = region_vd(s2_at, 1e-6);
+        let a_at = P + Vec3::new(0.0, 6e-5, 0.0);
+        let a = region_vd(a_at, 2e-6);
+        let pv = m.new_proto_vertex(P, 1e-5).unwrap();
+        m.add_proto_vertex(pv);
+        for vd in [s1, s2, a] {
+            m.add_vertex_definition(pv, vd).unwrap();
+        }
+        m.resolve_proto_vertex(&k, &geo, pv).unwrap();
+        assert!(m.vertex_def(a).is_none());
+        let v = m.proto_vertex(pv).unwrap();
+        assert_eq!(v.vertex_definitions(), &[s1, s2]);
+        assert_eq!(v.position(), P, "not moved");
+        assert!(!v.absorbed_points().contains(&R_AT));
+        assert_eq!(v.raw_tolerance(), P.distance(a_at) * (1.0 + gamma(4)));
+    }
+
+    /// #17839 review r3: a definition the kernel places midway between two object points
+    /// 1e-4 apart (`find_position_from_pcs` with equal gaps) holds them 5e-5 off its
+    /// position, beyond its tolerance 1e-5. It is consistent (its position is on the
+    /// segment between them), so the vertex still moves from its start, 1e-5 off, to the
+    /// survivor, and its tolerance covers both object points. A rule that held each object
+    /// point within the tolerance of the position marked it unbounded and kept the vertex
+    /// at its start.
+    #[test]
+    fn a_midpoint_definition_still_moves_the_vertex() {
+        let k = Kernel::default();
+        let half = Vec3::new(0.0, 0.0, 5e-5);
+        let (top, bottom) = (P + half, P - half);
+        let geo = Geo {
+            points: vec![top, bottom],
+            ..Geo::default()
+        };
+        let mut m = manager();
+        let mut mk = |vd_gap: f64| {
+            let vd = VertexDefinition::new(
+                &k,
+                &geo,
+                &vertex_pc_at(0, 0.0),
+                &vertex_pc_at(1, 0.0),
+                P,
+                1e-5,
+                vd_gap,
+                None,
+            )
+            .unwrap();
+            m.insert_vertex_definition(vd).unwrap()
+        };
+        let a = mk(2e-4);
+        let b = mk(1e-4);
+        let start = P + Vec3::new(0.0, 1e-5, 0.0);
+        let pv = m.new_proto_vertex(start, 1e-5).unwrap();
+        m.add_proto_vertex(pv);
+        for vd in [a, b] {
+            m.add_vertex_definition(pv, vd).unwrap();
+        }
+        m.resolve_proto_vertex(&k, &geo, pv).unwrap();
+        assert!(m.vertex_def(a).is_none());
+        let v = m.proto_vertex(pv).unwrap();
+        assert_eq!(v.vertex_definitions(), &[b]);
+        assert!(!v.absorbed_unbounded());
+        assert_eq!(v.position(), P, "moved to the survivor");
+        assert!(v.absorbed_points().contains(&top) && v.absorbed_points().contains(&bottom));
+        assert_covers(&m, pv, &[top, bottom]);
+        assert_eq!(
+            v.raw_tolerance(),
+            max2(P.distance(top), P.distance(bottom)) * (1.0 + gamma(4))
         );
     }
 
