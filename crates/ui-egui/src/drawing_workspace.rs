@@ -11,6 +11,7 @@ use crate::SolveApp;
 use crate::ui_kit::{self, Container, Edge, Surface};
 use solidcraft_theme::Tokens;
 
+mod first_sheet;
 mod panels;
 
 use panels::Tool;
@@ -22,6 +23,7 @@ pub struct State {
     pub settings_open: bool,
     options: Option<Tool>,
     add_sheet: Option<panels::AddSheet>,
+    first_sheet: Option<first_sheet::BlankSheet>,
     strip: Option<Rect>,
     strip_sizes: [Option<egui::Vec2>; 2],
     settings: Option<Rect>,
@@ -46,6 +48,7 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
         app.ui.tab = app.drawing_workspace.previous_tab.take().unwrap_or_else(|| "MODEL".into());
         app.drawing_workspace.options = None;
         app.drawing_workspace.add_sheet = None;
+        app.drawing_workspace.first_sheet = None;
         app.drawing_workspace.strip = None;
         app.drawing_workspace.settings = None;
     }
@@ -67,10 +70,14 @@ pub fn can_open_options(id: &str) -> bool {
 
 /// Dismiss the current Drawing inspector without touching source or drawing data.
 pub fn close_panel(app: &mut SolveApp) -> bool {
-    let open = app.drawing_workspace.settings_open || app.drawing_workspace.options.is_some() || app.drawing_workspace.add_sheet.is_some();
+    let open = app.drawing_workspace.settings_open
+        || app.drawing_workspace.options.is_some()
+        || app.drawing_workspace.add_sheet.is_some()
+        || app.drawing_workspace.first_sheet.is_some();
     app.drawing_workspace.settings_open = false;
     app.drawing_workspace.options = None;
     app.drawing_workspace.add_sheet = None;
+    app.drawing_workspace.first_sheet = None;
     app.drawing_workspace.settings = None;
     open
 }
@@ -191,15 +198,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     ui.painter().rect_filled(rect, 0.0, t.viewport_top);
     let bounds = crate::shell::workspace_content(app, rect);
-    let width = (bounds.width() - t.space_24 * 2.0).clamp(0.0, 420.0);
-    let centre = Rect::from_center_size(bounds.center(), vec2(width, 140.0));
-    ui.scope_builder(egui::UiBuilder::new().max_rect(centre), |ui| {
-        ui.vertical_centered(|ui| {
-            ui.heading(solidcraft_ui_text::tr_label("Drawing workspace"));
-            ui.label(solidcraft_ui_text::tr_label("No drawing sheet is available yet."));
-            ui_kit::text(ui, app.tr("ui.sheet_page.no_drawing"), ui_kit::Text::Note("drawing_waiting"));
-        });
-    });
+    first_sheet::show(app, ui, bounds);
 }
 
 const SHEETS_VISIBILITY: [(&str, &str); 4] = [
@@ -550,6 +549,7 @@ pub fn chrome(app: &mut SolveApp, ui: &mut egui::Ui, domain: Rect) {
 }
 
 pub(crate) fn show_add_sheet(app: &mut SolveApp, ctx: &egui::Context) {
+    first_sheet::show_picker(app, ctx);
     if active(app)
         && let Some(form) = app.drawing_workspace.add_sheet.take()
     {
@@ -693,6 +693,25 @@ fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
 mod tests {
     use super::*;
     use crate::scenario::Harness;
+
+    #[test]
+    fn blank_sheet_starts_a_drawing_from_the_workspace() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.frames(4);
+        assert!(h.app.session.open_drawing.is_none());
+        h.step(&serde_json::json!({"click":{"handle":"drawing:first:blank"}})).unwrap();
+        h.frames(3);
+        assert!(h.app.drawing_workspace.first_sheet.is_some());
+        assert!(h.app.session.open_drawing.is_none());
+        h.step(&serde_json::json!({"widget":"Create Drawing"})).unwrap();
+        h.frames(4);
+        let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+        assert_eq!(drawing.sheets.len(), 1);
+        assert_eq!(active_sheet(&h.app), Some(drawing.sheets[0].id));
+    }
 
     #[test]
     fn sheets_panel_lists_sheets_of_the_open_drawing() {

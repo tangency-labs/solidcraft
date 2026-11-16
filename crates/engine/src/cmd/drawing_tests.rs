@@ -78,6 +78,19 @@ fn a_drawing_starts_from_a_template() {
     assert_eq!(tolerances(&made), json!(template::ASSEMBLY_NOTE));
 }
 
+#[test]
+fn first_sheet_can_omit_the_template_title_block_in_one_undo_step() {
+    let mut s = design();
+    let undo_steps = s.undo.len();
+    let made = run(&mut s, "drawing.create", json!({"template":"iso-a4-part","omit_first_sheet_title_block":true}));
+    assert_eq!(made["sheets"][0]["size_mm"], json!([210.0, 297.0]));
+    let sheet = &open_one(&s).sheets[0];
+    assert!(sheet.border.is_some());
+    assert!(sheet.title_block.is_none());
+    assert!(sheet.title_block_overrides.is_empty());
+    assert_eq!(s.undo.len(), undo_steps + 1);
+}
+
 /// A template applied to the drawing open: a dry run answers what would change and changes nothing;
 /// applying it is one undo step, and applying it again none. The views the new paper leaves
 /// outside are listed and stay where they were.
