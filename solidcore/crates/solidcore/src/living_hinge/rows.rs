@@ -21,6 +21,11 @@ pub struct RowSpan {
     pub lo_open: bool,
     /// Whether the upper end is the plate's edge (air above it).
     pub hi_open: bool,
+    /// The chain of the plate's edge an open lower end lies on (design 2), `None` when closed or
+    /// not known (then rule 2 compares it with the neighbour's nearest open end of any chain).
+    pub lo_chain: Option<usize>,
+    /// The chain an open upper end lies on, as `lo_chain`.
+    pub hi_chain: Option<usize>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -111,13 +116,22 @@ fn delta(lattice: &Lattice, k: i64, x: f64) -> Option<f64> {
         .min_by(f64::total_cmp)
 }
 
-/// The neighbour's `delta` at its open end on the same side nearest `x`, infinite when it has none.
-fn neighbour_delta(lattice: &Lattice, k: i64, side: Side, x: f64, spans: &[RowSpan]) -> f64 {
+/// The neighbour's `delta` at its open end on the same side and the same chain nearest `x`,
+/// infinite when it has none. An end of unknown chain (`None`) matches any chain.
+fn neighbour_delta(
+    lattice: &Lattice,
+    k: i64,
+    side: Side,
+    x: f64,
+    chain: Option<usize>,
+    spans: &[RowSpan],
+) -> f64 {
+    let same = |c: Option<usize>| chain.is_none() || c.is_none() || c == chain;
     let end = spans
         .iter()
         .filter_map(|s| match side {
-            Side::Lo if s.lo_open => Some(s.lo),
-            Side::Hi if s.hi_open => Some(s.hi),
+            Side::Lo if s.lo_open && same(s.lo_chain) => Some(s.lo),
+            Side::Hi if s.hi_open && same(s.hi_chain) => Some(s.hi),
             _ => None,
         })
         .min_by(|a, b| (a - x).abs().total_cmp(&(b - x).abs()));
@@ -132,13 +146,14 @@ fn runs_out<'a>(
     k: i64,
     side: Side,
     x: f64,
+    chain: Option<usize>,
     row_spans: &impl Fn(i64) -> &'a [RowSpan],
 ) -> bool {
     let Some(own) = delta(lattice, k, x) else {
         return false;
     };
     [k - 1, k + 1].into_iter().all(|n| {
-        let other = neighbour_delta(lattice, n, side, x, row_spans(n));
+        let other = neighbour_delta(lattice, n, side, x, chain, row_spans(n));
         own < other || (own == other && k.rem_euclid(2) == 0)
     })
 }
@@ -160,11 +175,11 @@ fn plan_slot<'a>(
     let run_lo = may_run
         && span.lo_open
         && holds(span.lo)
-        && runs_out(lattice, k, Side::Lo, span.lo, row_spans);
+        && runs_out(lattice, k, Side::Lo, span.lo, span.lo_chain, row_spans);
     let run_hi = may_run
         && span.hi_open
         && holds(span.hi)
-        && runs_out(lattice, k, Side::Hi, span.hi, row_spans);
+        && runs_out(lattice, k, Side::Hi, span.hi, span.hi_chain, row_spans);
     // A slot that would run out at both ends of one span would cut the span's material loose
     // (critique B1): it runs out at neither and keeps material at both.
     let (run_lo, run_hi) = if run_lo && run_hi {

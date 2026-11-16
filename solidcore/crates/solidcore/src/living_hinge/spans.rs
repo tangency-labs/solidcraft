@@ -13,7 +13,7 @@
 
 use super::near::NearEdge;
 use super::rows::RowSpan;
-use super::ON_EDGE;
+use super::{G1_TOL, ON_EDGE};
 
 /// Whether `p` lies above the row `v` (a point on it counts as below).
 fn above(p: (f64, f64), v: f64) -> bool {
@@ -90,6 +90,82 @@ pub fn row_crossings(loops: &[Vec<NearEdge>], v: f64) -> Vec<f64> {
     out
 }
 
+/// The unit tangent of `edge` at its first end (`at_end` false) or its last end, in the direction
+/// of travel.
+fn tangent(edge: &NearEdge, at_end: bool) -> (f64, f64) {
+    match *edge {
+        NearEdge::Line(a, b) => {
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let n = dx.hypot(dy);
+            (dx / n, dy / n)
+        }
+        NearEdge::Arc { start, sweep, .. } => {
+            let a = if at_end { start + sweep } else { start };
+            let s = sweep.signum();
+            (-a.sin() * s, a.cos() * s)
+        }
+    }
+}
+
+/// Whether `next` continues `prev` with a turn of at most `G1_TOL` (one chain, design 2).
+fn smooth(prev: &NearEdge, next: &NearEdge) -> bool {
+    let (a, b) = (tangent(prev, true), tangent(next, false));
+    let turn = (a.0 * b.1 - a.1 * b.0).atan2(a.0 * b.0 + a.1 * b.1).abs();
+    turn <= G1_TOL
+}
+
+/// A chain id for every edge of `loops` (design 2: a maximal run of consecutive edges of one loop
+/// meeting with a turn of at most `G1_TOL`), numbered over all loops in order. A loop that is
+/// smooth all round is one chain.
+pub fn chain_ids(loops: &[Vec<NearEdge>]) -> Vec<Vec<usize>> {
+    let mut next = 0;
+    let mut out = Vec::with_capacity(loops.len());
+    for lp in loops {
+        let first = next;
+        let mut ids = Vec::with_capacity(lp.len());
+        let mut prev: Option<&NearEdge> = None;
+        for e in lp {
+            if let Some(p) = prev {
+                if !smooth(p, e) {
+                    next += 1;
+                }
+            }
+            ids.push(next);
+            prev = Some(e);
+        }
+        if !lp.is_empty() {
+            next += 1;
+        }
+        // The loop closes: a smooth join of its last edge to its first merges their chains.
+        if let (Some(last), Some(head), Some(&last_id)) = (lp.last(), lp.first(), ids.last()) {
+            if last_id != first && smooth(last, head) {
+                for id in &mut ids {
+                    if *id == last_id {
+                        *id = first;
+                    }
+                }
+            }
+        }
+        out.push(ids);
+    }
+    out
+}
+
+/// Every crossing of the loops' edges with the row `v` with its edge's chain id, sorted.
+fn chain_crossings(loops: &[Vec<NearEdge>], ids: &[Vec<usize>], v: f64) -> Vec<(f64, usize)> {
+    let mut out = Vec::new();
+    let mut one = Vec::new();
+    for (lp, lp_ids) in loops.iter().zip(ids) {
+        for (edge, &id) in lp.iter().zip(lp_ids) {
+            one.clear();
+            edge_crossings(edge, v, &mut one);
+            out.extend(one.iter().map(|&x| (x, id)));
+        }
+    }
+    out.sort_by(|a, b| a.0.total_cmp(&b.0));
+    out
+}
+
 /// Whether `x` is inside the region whose sorted crossings on the row are `crossings`: an odd
 /// number of them below it.
 fn inside(crossings: &[f64], x: f64) -> bool {
@@ -100,11 +176,19 @@ fn inside(crossings: &[f64], x: f64) -> bool {
 /// each end tagged open where it lies on the plate's boundary.
 pub fn row_spans(field: &[Vec<NearEdge>], plate: &[Vec<NearEdge>], v: f64) -> Vec<RowSpan> {
     let f = row_crossings(field, v);
-    let m = row_crossings(plate, v);
+    let ids = chain_ids(plate);
+    let mc = chain_crossings(plate, &ids, v);
+    let m: Vec<f64> = mc.iter().map(|c| c.0).collect();
     let mut cuts: Vec<f64> = f.iter().chain(&m).copied().collect();
     cuts.sort_by(f64::total_cmp);
     cuts.dedup();
-    let on_plate_edge = |x: f64| m.iter().any(|&c| (c - x).abs() <= ON_EDGE);
+    // The chain of the plate crossing an end lies on (within ON_EDGE), the nearest one.
+    let on_plate_edge = |x: f64| {
+        mc.iter()
+            .filter(|c| (c.0 - x).abs() <= ON_EDGE)
+            .min_by(|a, b| (a.0 - x).abs().total_cmp(&(b.0 - x).abs()))
+            .map(|c| c.1)
+    };
     let mut spans: Vec<RowSpan> = Vec::new();
     for w in cuts.windows(2) {
         let &[lo, hi] = w else { continue };
@@ -119,12 +203,16 @@ pub fn row_spans(field: &[Vec<NearEdge>], plate: &[Vec<NearEdge>], v: f64) -> Ve
                 hi,
                 lo_open: false,
                 hi_open: false,
+                lo_chain: None,
+                hi_chain: None,
             }),
         }
     }
     for s in &mut spans {
-        s.lo_open = on_plate_edge(s.lo);
-        s.hi_open = on_plate_edge(s.hi);
+        s.lo_chain = on_plate_edge(s.lo);
+        s.hi_chain = on_plate_edge(s.hi);
+        s.lo_open = s.lo_chain.is_some();
+        s.hi_open = s.hi_chain.is_some();
     }
     spans
 }
@@ -166,6 +254,8 @@ mod tests {
                 hi: 60.0,
                 lo_open: true,
                 hi_open: true,
+                lo_chain: Some(3),
+                hi_chain: Some(1),
             }]
         );
     }
@@ -182,12 +272,16 @@ mod tests {
                     hi: 25.0,
                     lo_open: false,
                     hi_open: true,
+                    lo_chain: None,
+                    hi_chain: Some(7),
                 },
                 RowSpan {
                     lo: 35.0,
                     hi: 50.0,
                     lo_open: true,
                     hi_open: false,
+                    lo_chain: Some(5),
+                    hi_chain: None,
                 },
             ]
         );
@@ -199,8 +293,38 @@ mod tests {
                 hi: 50.0,
                 lo_open: false,
                 hi_open: false,
+                lo_chain: None,
+                hi_chain: None,
             }]
         );
+    }
+
+    #[test]
+    fn chains_end_at_corners_and_run_through_smooth_joins() {
+        use std::f64::consts::PI;
+        // A rectangle: four corners, four chains; a second loop numbers on.
+        let ids = chain_ids(&[rect(0.0, 0.0, 2.0, 1.0), rect(5.0, 5.0, 6.0, 6.0)]);
+        assert_eq!(ids, vec![vec![0, 1, 2, 3], vec![4, 5, 6, 7]]);
+        // A stadium: line, half circle, line, half circle, all tangent: one chain, and the next
+        // loop is chain 1.
+        let stadium = vec![
+            NearEdge::Line((0.0, 0.0), (4.0, 0.0)),
+            NearEdge::Arc {
+                center: (4.0, 1.0),
+                radius: 1.0,
+                start: -PI / 2.0,
+                sweep: PI,
+            },
+            NearEdge::Line((4.0, 2.0), (0.0, 2.0)),
+            NearEdge::Arc {
+                center: (0.0, 1.0),
+                radius: 1.0,
+                start: PI / 2.0,
+                sweep: PI,
+            },
+        ];
+        let ids = chain_ids(&[stadium, rect(9.0, 0.0, 10.0, 1.0)]);
+        assert_eq!(ids, vec![vec![0, 0, 0, 0], vec![1, 2, 3, 4]]);
     }
 
     #[test]

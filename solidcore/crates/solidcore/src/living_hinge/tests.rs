@@ -35,6 +35,8 @@ fn plan_band(spec: &LivingHingeSpec) -> (Lattice, LivingHingePlan) {
             hi: 60.0,
             lo_open: true,
             hi_open: true,
+            lo_chain: None,
+            hi_chain: None,
         }]
     });
     (lattice, plan)
@@ -164,6 +166,8 @@ fn closed_ends_keep_the_margin() {
             hi: 60.0,
             lo_open: false,
             hi_open: false,
+            lo_chain: None,
+            hi_chain: None,
         }]
     });
     assert_eq!(plan.count(RunOut), 0);
@@ -216,12 +220,16 @@ fn pieces_a_hair_apart_are_pulled_to_the_least_material() {
                 hi: 30.0,
                 lo_open: true,
                 hi_open: false,
+                lo_chain: None,
+                hi_chain: None,
             },
             RowSpan {
                 lo: 30.05,
                 hi: 60.0,
                 lo_open: false,
                 hi_open: true,
+                lo_chain: None,
+                hi_chain: None,
             },
         ]
     });
@@ -254,6 +262,8 @@ fn case_d_closed_keep_out_splits_and_shortens() {
                 hi: 60.0,
                 lo_open: true,
                 hi_open: true,
+                lo_chain: None,
+                hi_chain: None,
             }]
         },
         |_, v| {
@@ -315,12 +325,16 @@ fn case_e_runs_out_into_a_hole() {
                         hi: 20.0,
                         lo_open: true,
                         hi_open: clean,
+                        lo_chain: None,
+                        hi_chain: None,
                     },
                     RowSpan {
                         lo: 40.0,
                         hi: 60.0,
                         lo_open: clean,
                         hi_open: true,
+                        lo_chain: None,
+                        hi_chain: None,
                     },
                 ]
             } else {
@@ -329,6 +343,8 @@ fn case_e_runs_out_into_a_hole() {
                     hi: 60.0,
                     lo_open: true,
                     hi_open: true,
+                    lo_chain: None,
+                    hi_chain: None,
                 }]
             }
         },
@@ -407,6 +423,8 @@ fn case_j_margin() {
                 hi: 60.0,
                 lo_open: clean,
                 hi_open: clean,
+                lo_chain: None,
+                hi_chain: None,
             }]
         },
         |_, v| {
