@@ -74,7 +74,7 @@ use super::p2::{
     original_surface, CrossSectionValues, DerivSurfDefinition, LsiGlobalSolver, Surface,
     SurfaceEval, SurfaceKind, TangencyType,
 };
-use super::p4::{is_point_on_normal, pass_sp_convergence_test, NoObject};
+use super::p4::{is_point_on_normal, NoObject};
 use super::p5::DropPointOptions;
 use super::p6::SampleOptions;
 use crate::curve::curve::p5::CurveMemoKey;
@@ -3162,18 +3162,20 @@ impl Surface {
     /// ([`Surface::find_degen_param_for_direction`]), and the other parameter by
     /// dropping the point to the iso curve there.
     ///
-    /// A success is a local answer: the point at `uv` lies on the surface normal
-    /// through the test point (the residual is perpendicular to the surface there),
-    /// and it is no farther from the test point than the guess or the pole. A local
-    /// inversion has no certificate that this foot point is the global closest one;
-    /// a caller that needs the global closest point compares the candidates of a
-    /// global solve. A drop that is not such a foot point is a failure.
+    /// A success is never farther from the test point than the guess or the pole,
+    /// both surface points the closest point is never farther than; a drop that is
+    /// farther, or whose distance is not finite, is a failure. It is a local answer:
+    /// a local inversion carries no certificate that its point is the global closest
+    /// one. The drop is not required to pass the surface-normal test: its two
+    /// one-dimensional solves are each converged in their own measure, and that test
+    /// refuses answers near true poles that the point solves rely on. A caller that needs the global closest point
+    /// compares the candidates of a global solve.
     ///
     /// # Errors
     ///
     /// The status of a failing degenerate parameter search (`SM_ERR` when it does not
     /// converge) or iso curve creation or curve drop; a surface failure when the
-    /// dropped point is not a foot point no farther than the guess or the pole;
+    /// dropped point is farther than the guess and the pole;
     /// [`SolidError::Unported`] from the evaluations and drops.
     pub fn invert_point_near_singularity(
         &self,
@@ -3304,11 +3306,9 @@ impl Surface {
 
         // The pole assumption may not hold (the edge need not be collapsed), and the
         // drop is not checked by the steps above. The result is accepted only when it
-        // is a foot point of the test point, on the surface normal at `uv` by the
-        // convergence test the point solves use (`sm_PassSPConvergenceTest`, with this
-        // routine's tolerance), and no farther than the guess or the pole, both surface
-        // points the closest point is never farther than. Anything else, a NaN or
-        // infinite distance among them, is a failure (#18052).
+        // is no farther than the guess or the pole, both surface points the closest
+        // point is never farther than. Anything else, a NaN or infinite distance among
+        // them, is a failure (#18052).
         let result_pt = self.evaluate_point(k, uv)?;
         let bound = crate::geom::vector3d::sqrt(
             srf_pt
@@ -3318,12 +3318,12 @@ impl Surface {
         let limit = bound + tol.max(EFF_ZERO) + bound * EFF_ZERO;
         let dist_sq = result_pt.distance_squared(test_pt);
         let no_farther = dist_sq.is_finite() && limit.is_finite() && dist_sq <= limit * limit;
-        if no_farther && pass_sp_convergence_test(k, self, uv, test_pt, tol)? {
+        if no_farther {
             return Ok(SingularityInversion { uv, reason });
         }
         Err(SolidError::surface_failed(
             OP_INVERT,
-            "the point dropped near the singularity is not a foot point no farther than the guess",
+            "the point dropped near the singularity is farther than the guess",
         ))
     }
 }
@@ -3802,19 +3802,20 @@ mod tests {
         )
     }
 
-    /// #18052: a near-singularity inversion succeeds only with a foot point of the test
-    /// point (on the surface normal there) no farther than the guess or the pole. The
-    /// bilinear surface has no collapsed edge, so the pole the routine assumes next to
-    /// the guess is not one and its drops land on points that are not foot points.
+    /// #18052: the bilinear surface has no collapsed edge, so the pole the routine
+    /// assumes next to the guess is not one. A guess whose drop lands farther from the
+    /// point than the guess and the pole is a failure, as is a test point that is not
+    /// finite; every other inversion that is reported must be no farther than the
+    /// guess, and inversions that find a closer point still succeed.
     #[test]
-    fn near_singularity_success_is_a_foot_point_no_farther_than_the_guess() {
+    fn near_singularity_never_reports_a_point_farther_than_the_guess() {
         let k = Kernel::default();
         let s = bilinear();
         let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let tol = 1e-4;
-        let dist = |s: &Surface, uv: Point2, p: Vec3| s.evaluate_point(&k, uv).unwrap().distance(p);
+        let dist = |uv: Point2, p: Vec3| s.evaluate_point(&k, uv).unwrap().distance(p);
 
-        // The drop lands farther than the guess.
+        // The drop lands farther than the guess: reported as a success before the fix.
         for (p, guess) in [
             (Vec3::new(1.0, 1.5, 0.2), Point2::new(0.3, 0.5)),
             (Vec3::new(-0.5, 2.0, 0.1), Point2::new(0.3, 0.5)),
@@ -3826,18 +3827,17 @@ mod tests {
             );
         }
 
-        // The drop is closer than the guess but is not a foot point: (0.4, 0.5) for the
-        // first, 0.2 from the point with the residual along S_u; (0.225, 1) on the edge
-        // v = 1 for the second, with the residual not across that edge.
+        // The drop finds a closer point: still a success, and closer than the guess.
         for (p, guess) in [
             (Vec3::new(1.0, 1.5, 0.2), Point2::new(0.99, 0.4)),
+            (Vec3::new(-0.5, 2.0, 0.1), Point2::new(0.99, 0.4)),
+            (Vec3::new(0.3, -50.0, -4.0), Point2::new(0.01, 0.6)),
             (Vec3::new(1.0, 40.0, 3.0), Point2::new(0.99, 0.4)),
         ] {
-            assert!(
-                s.invert_point_near_singularity(&k, p, &dom, guess, tol)
-                    .is_err(),
-                "a drop that is not a foot point of {p:?} was reported as a success"
-            );
+            let r = s
+                .invert_point_near_singularity(&k, p, &dom, guess, tol)
+                .unwrap();
+            assert!(dist(r.uv, p) <= dist(guess, p) + tol);
         }
 
         // A test point that is not finite is a failure.
@@ -3874,9 +3874,8 @@ mod tests {
             .invert_point_near_singularity(&k, p, &dom, Point2::new(0.3, 0.02), tol)
             .unwrap();
         assert!(r.uv.distance(Point2::new(0.5, 0.5)) < 1e-6, "{:?}", r.uv);
-        assert!(pass_sp_convergence_test(&k, &tri, r.uv, p, tol).unwrap());
 
-        // Whatever else is asked, a success is a foot point no farther than the guess.
+        // Whatever else is asked, a success is never farther than the guess.
         for p in [
             Vec3::new(1.0, 1.5, 0.2),
             Vec3::new(-0.5, 2.0, 0.1),
@@ -3896,13 +3895,8 @@ mod tests {
             ] {
                 if let Ok(r) = s.invert_point_near_singularity(&k, p, &dom, guess, tol) {
                     assert!(
-                        dist(&s, r.uv, p) <= dist(&s, guess, p) + tol,
+                        dist(r.uv, p) <= dist(guess, p) + tol,
                         "result {:?} is farther from {p:?} than the guess",
-                        r.uv
-                    );
-                    assert!(
-                        pass_sp_convergence_test(&k, &s, r.uv, p, tol).unwrap(),
-                        "result {:?} is not a foot point of {p:?}",
                         r.uv
                     );
                 }
