@@ -11,7 +11,7 @@
 //! touches: the parity stays right. Neighbouring edges must share their end points exactly (the
 //! caller snaps an arc's ends to the lines it meets).
 
-use super::near::NearEdge;
+use super::near::{clean_crossing, near_union, NearEdge};
 use super::rows::RowSpan;
 use super::{G1_TOL, ON_EDGE};
 
@@ -217,6 +217,45 @@ pub fn row_spans(field: &[Vec<NearEdge>], plate: &[Vec<NearEdge>], v: f64) -> Ve
     spans
 }
 
+/// Drops the open tag of every end of `spans` (on the row `v`) whose crossing is not clean
+/// (design 6.6 rule 1): the near set of its own chain with reach `rho` must reach at most
+/// `rho / sin(MIN_CROSSING)` into the material, hold no other crossing, and meet no other near set,
+/// the plate's other chains with reach `rho` and the area's closed edges `closed` with reach
+/// `closed_reach` (`r + m`). An end of unknown chain is left as it is.
+pub fn clean_ends(
+    spans: &mut [RowSpan],
+    plate: &[Vec<NearEdge>],
+    closed: &[NearEdge],
+    v: f64,
+    rho: f64,
+    closed_reach: f64,
+) {
+    let ids = chain_ids(plate);
+    let crossings = row_crossings(plate, v);
+    let edges = || plate.iter().flatten().zip(ids.iter().flatten());
+    let closed_near = near_union(closed, v, closed_reach);
+    let clean = |x: f64, chain: usize, air_below: bool| {
+        let own = near_union(edges().filter(|e| *e.1 == chain).map(|e| e.0), v, rho);
+        let mut others = near_union(edges().filter(|e| *e.1 != chain).map(|e| e.0), v, rho);
+        others.extend_from_slice(&closed_near);
+        clean_crossing(x, air_below, rho, &own, &crossings, &others)
+    };
+    for s in spans {
+        if let Some(c) = s.lo_chain.filter(|_| s.lo_open) {
+            if !clean(s.lo, c, true) {
+                s.lo_open = false;
+                s.lo_chain = None;
+            }
+        }
+        if let Some(c) = s.hi_chain.filter(|_| s.hi_open) {
+            if !clean(s.hi, c, false) {
+                s.hi_open = false;
+                s.hi_chain = None;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,6 +336,32 @@ mod tests {
                 hi_chain: None,
             }]
         );
+    }
+
+    #[test]
+    fn ends_near_a_closed_side_are_not_clean() {
+        // Design 17.1 in the frame: plate u 0..60 by v 0..100, band v 30..70 with closed sides.
+        let plate = [rect(0.0, 0.0, 60.0, 100.0)];
+        let field = [rect(0.0, 30.0, 60.0, 70.0)];
+        let sides = [
+            NearEdge::Line((0.0, 30.0), (60.0, 30.0)),
+            NearEdge::Line((60.0, 70.0), (0.0, 70.0)),
+        ];
+        let open = |v: f64, reach: f64| {
+            let mut s = row_spans(&field, &plate, v);
+            clean_ends(&mut s, &plate, &sides, v, 1.4, reach);
+            s.iter().map(|s| (s.lo_open, s.hi_open)).collect::<Vec<_>>()
+        };
+        // Case A: the outer row 0.5 inside a side, reach r = 0.1: clean.
+        assert_eq!(open(30.5, 0.1), vec![(true, true)]);
+        assert_eq!(open(50.0, 0.1), vec![(true, true)]);
+        // Case J: reach r + m = 2.1 (rho 2.1 too), the row 1.25 inside: not clean; 2.75: clean.
+        let mut s = row_spans(&field, &plate, 31.25);
+        clean_ends(&mut s, &plate, &sides, 31.25, 2.1, 2.1);
+        assert!(!s[0].lo_open && !s[0].hi_open && s[0].lo_chain.is_none());
+        let mut s = row_spans(&field, &plate, 32.75);
+        clean_ends(&mut s, &plate, &sides, 32.75, 2.1, 2.1);
+        assert!(s[0].lo_open && s[0].hi_open);
     }
 
     #[test]
