@@ -1983,8 +1983,10 @@ mod tests {
                         other.is_none(),
                         !keep && operation != BooleanOperation::PartialMerge
                     );
-                    assert_eq!(result.is_err(), late == 2);
-                    assert_eq!(kernels.primary.context.doing_boolean(), late == 2);
+                    // DeleteStaleCaches' ordinary failure is passed on too (WR-658,
+                    // tangency-labs/smlib e7ebc8d), before the boolean flag is cleared
+                    assert_eq!(result.is_err(), late != 0);
+                    assert_eq!(kernels.primary.context.doing_boolean(), late != 0);
                 }
             }
         }

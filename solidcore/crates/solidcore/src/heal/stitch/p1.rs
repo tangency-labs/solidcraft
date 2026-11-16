@@ -3403,7 +3403,16 @@ mod tests {
         let shell = b.add_shell_record(Shell::default()).unwrap();
         let edges = edges_between(&mut b, EdgeuseOwner::Shell(Some(shell)), 2);
         let (e0, e1) = (edges[0], edges[1]);
-        glue_edges_general(&mut k, &mut b, e0, OrientType::Same, 0.0, false, e1, None).unwrap();
+        // The wire edge's `DeleteEdge` refuses on this B-rep, whose editing is disabled:
+        // upstream ignores that status and the fork passes it on (WR-658,
+        // tangency-labs/smlib e7ebc8d), so the refusal is returned after the PreEdit.
+        let r = glue_edges_general(&mut k, &mut b, e0, OrientType::Same, 0.0, false, e1, None);
+        assert!(
+            matches!(&r, Err(e) if e.operation() == "topology::brep::p4::delete_edge"
+                && e.sm_status() == Some(1001)
+                && e.to_string().contains("editing is not enabled")),
+            "{r:?}"
+        );
         let seen = events.lock().unwrap().len();
         assert_eq!(
             events.lock().unwrap().first(),

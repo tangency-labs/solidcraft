@@ -3921,10 +3921,14 @@ mod tests {
         let v = b.add_vertex_record(Vertex::default()).unwrap();
         let mut edge = Some(EdgeId::from_index(3));
         // With `SmBrep::DeleteVertex` (topology.brep_p4) and `Notify` ported, the
-        // isolated-vertex branch completes (upstream ignores both statuses); the
-        // deleted-edge output is still reset first.
+        // isolated-vertex branch runs; upstream ignores DeleteVertex's status and the
+        // fork passes it on (WR-658, tangency-labs/smlib 60a8a51), here its refusal on a
+        // B-rep whose editing is disabled. The deleted-edge output is still reset first.
+        let r = combine_coincident_vertices(&mut Kernel::default(), &mut b, v, v, &mut edge);
         assert!(
-            combine_coincident_vertices(&mut Kernel::default(), &mut b, v, v, &mut edge).is_ok()
+            matches!(&r, Err(e) if e.sm_status() == Some(1001)
+                && e.to_string().contains("editing is not enabled")),
+            "{r:?}"
         );
         assert!(edge.is_none());
         let mut out = SqueezedFace {

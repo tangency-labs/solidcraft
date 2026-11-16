@@ -4199,20 +4199,25 @@ mod tests {
             .remove_excess_faces(&mut kernel, &mut original, &mut result)
             .unwrap();
         executive.set_shell_faces(&[]);
+        // RemoveFaces' editing-disabled refusal, which upstream ignores (cpp:2099-2102)
+        // and the fork passes on (WR-658, tangency-labs/smlib 4803d6d)
+        let editing_refused = |r: Result<()>| {
+            assert!(
+                matches!(&r, Err(e) if e.sm_status() == Some(1001)
+                    && e.to_string().contains("editing is not enabled")),
+                "{r:?}"
+            );
+        };
         // No result edge: the original's editing flag is not touched; the empty
-        // deletion list still reaches RemoveFaces, whose editing-disabled refusal is
-        // ignored (cpp:2099-2102).
-        executive
-            .remove_excess_faces(&mut kernel, &mut original, &mut result)
-            .unwrap();
+        // deletion list still reaches RemoveFaces, which refuses on the result whose
+        // editing is disabled.
+        editing_refused(executive.remove_excess_faces(&mut kernel, &mut original, &mut result));
         assert!(!original.editing_enabled());
         add_use(&mut result, 0.0, 1.0, 1.0);
         add_use(&mut result, 0.0, 1.0, 2.0);
         // The edges evaluate and solve against the empty original; no result face is
-        // close to it, so nothing is removed.
-        executive
-            .remove_excess_faces(&mut kernel, &mut original, &mut result)
-            .unwrap();
+        // close to it, so nothing is removed, and RemoveFaces refuses as above.
+        editing_refused(executive.remove_excess_faces(&mut kernel, &mut original, &mut result));
         assert_eq!(result.edges().len(), 2);
         assert_eq!(result.edgeuses().len(), 2);
         assert!(result.faces().is_empty());
@@ -4429,9 +4434,14 @@ mod tests {
         let mut exec = executive();
         exec.set_merge_results(true);
         // Native RemoveExcessFaces ignores the editing-disabled refusal from
-        // RemoveFaces. No traversal mark is acquired by that refused inner call.
-        exec.remove_excess_faces(&mut kernel, &mut original, &mut result)
-            .unwrap();
+        // RemoveFaces; the fork passes it on (WR-658, tangency-labs/smlib 4803d6d). No
+        // traversal mark is acquired by that refused inner call.
+        let r = exec.remove_excess_faces(&mut kernel, &mut original, &mut result);
+        assert!(
+            matches!(&r, Err(e) if e.sm_status() == Some(1001)
+                && e.to_string().contains("editing is not enabled")),
+            "{r:?}"
+        );
         assert!(!result.editing_enabled());
         assert_eq!(kernel.context.current_mark(MarkType::Mark), 1);
         result.set_editing_enabled(true);
@@ -4813,17 +4823,25 @@ mod tests {
     }
 
     #[test]
-    fn uv_boolean_bounds_ignore_ordinary_failures_and_keep_conversion_side_effects() {
+    fn uv_boolean_bounds_return_a_failed_conversion() {
         let kernel = Kernel::default();
         // Rust-only error-path input: upstream ConvertTo3D dereferences the missing NURB.
+        // The conversion's status is passed on (WR-658, tangency-labs/smlib 4803d6d), so no
+        // initialized extent stands in for the box of a curve that was not converted.
         let mut curve = Curve::from(BSplineCurve::new(2));
-        let bbox = uv_curve_bounding_box(&kernel, &mut curve).unwrap();
-        assert_eq!(bbox.min(), Extent3d::new().min());
-        assert_eq!(bbox.max(), Extent3d::new().max());
-        let CurveKind::BSpline(curve) = curve.kind() else {
-            panic!("expected the original B-spline kind");
-        };
-        assert_eq!(curve.dim(), 3);
+        let r = uv_curve_bounding_box(&kernel, &mut curve);
+        assert!(
+            matches!(
+                r,
+                Err(SolidError::Upstream {
+                    operation: "nurbs::b_spline_curve::p1::BSplineCurve::make_nurb",
+                    code: 1001,
+                    ..
+                })
+            ),
+            "{r:?}"
+        );
+        assert!(matches!(curve.kind(), CurveKind::BSpline(_)));
     }
 
     #[test]

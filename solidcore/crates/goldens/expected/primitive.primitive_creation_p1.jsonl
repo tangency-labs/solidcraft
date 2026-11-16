@@ -675,7 +675,7 @@
 {"case":"linear_analytic_circle_cap0_distance0","deferred":null,"error":null,"ints":{"maps":[0,0,1,0,0,0]},"topology":null,"values":{"geometry":[]}}
 {"case":"linear_analytic_circle_cap0_distance2","deferred":null,"error":null,"ints":{"maps":[0,0,1,1,3,2]},"topology":null,"values":{"geometry":{"blocks":[[55.970457797530905,65.3660627594525,2301.9602879845816]],"n":80}}}
 {"case":"linear_analytic_circle_cap1_distance-1","deferred":null,"error":null,"ints":{"maps":[0,0,1,3,3,2]},"topology":null,"values":{"geometry":{"blocks":[[41.849615660060195,82.87538433622665,1772.873650385]],"n":116}}}
-{"case":"linear_analytic_circle_cap1_distance0","deferred":null,"error":null,"ints":{"maps":[0,0,1,2,1,1]},"topology":null,"values":{"geometry":{"blocks":[[15.986987291997378,27.20815718941201,375.1407353800296]],"n":58}}}
+{"case":"linear_analytic_circle_cap1_distance0","deferred":null,"error":null,"ints":{"maps":[0,0,1,2,1,1]},"topology":null,"values":{"geometry":{"blocks":[[16.98259363990804,27.20815718941201,429.4012813411605]],"n":58}}}
 {"case":"linear_analytic_circle_cap1_distance2","deferred":null,"error":null,"ints":{"maps":[0,0,1,3,3,2]},"topology":null,"values":{"geometry":{"blocks":[[76.97047779753092,94.45538433622662,3973.615811784144]],"n":116}}}
 {"case":"linear_analytic_line_cap0_distance-1","deferred":null,"error":null,"ints":{"maps":[0,0,1,1,4,4]},"topology":null,"values":{"geometry":{"blocks":[[19.16009,37.06008999999999,1135.6230499999997]],"n":106}}}
 {"case":"linear_analytic_line_cap0_distance0","deferred":null,"error":null,"ints":{"maps":[0,0,1,0,0,0]},"topology":null,"values":{"geometry":[]}}
@@ -699,7 +699,7 @@
 {"case":"linear_circle_cap0_distance0","deferred":null,"error":null,"ints":{"maps":[0,0,1,0,0,0]},"topology":null,"values":{"geometry":[]}}
 {"case":"linear_circle_cap0_distance2","deferred":null,"error":null,"ints":{"maps":[0,0,1,1,3,2]},"topology":null,"values":{"geometry":{"blocks":[[55.970457797530905,65.3660627594525,2301.9602879845816]],"n":80}}}
 {"case":"linear_circle_cap1_distance-1","deferred":null,"error":null,"ints":{"maps":[0,0,1,3,3,2]},"topology":null,"values":{"geometry":{"blocks":[[41.849615660060195,82.87538433622665,1772.873650385]],"n":116}}}
-{"case":"linear_circle_cap1_distance0","deferred":null,"error":null,"ints":{"maps":[0,0,1,2,1,1]},"topology":null,"values":{"geometry":{"blocks":[[15.986987291997378,27.20815718941201,375.1407353800296]],"n":58}}}
+{"case":"linear_circle_cap1_distance0","deferred":null,"error":null,"ints":{"maps":[0,0,1,2,1,1]},"topology":null,"values":{"geometry":{"blocks":[[16.98259363990804,27.20815718941201,429.4012813411605]],"n":58}}}
 {"case":"linear_circle_cap1_distance2","deferred":null,"error":null,"ints":{"maps":[0,0,1,3,3,2]},"topology":null,"values":{"geometry":{"blocks":[[76.97047779753092,94.45538433622662,3973.615811784144]],"n":116}}}
 {"case":"linear_line_cap0_distance-1","deferred":null,"error":null,"ints":{"maps":[0,0,1,1,4,4]},"topology":null,"values":{"geometry":{"blocks":[[19.16009,37.06008999999999,1135.6230499999997]],"n":106}}}
 {"case":"linear_line_cap0_distance0","deferred":null,"error":null,"ints":{"maps":[0,0,1,0,0,0]},"topology":null,"values":{"geometry":[]}}

@@ -1440,7 +1440,14 @@ mod tests {
                     "{operation:?}: {result:?}"
                 );
             } else {
-                assert!(result.is_ok(), "{operation:?}: {result:?}");
+                // Intersection and Difference delete faces instead, and deleting a bare
+                // face record needs its upward face use: upstream ignores that status and
+                // the fork passes it on (WR-658, tangency-labs/smlib e7ebc8d)
+                assert!(
+                    matches!(&result, Err(e) if e.operation() == "topology::brep::p3"
+                        && e.sm_status() == Some(1006)),
+                    "{operation:?}: {result:?}"
+                );
             }
             assert!(kernel.context.doing_boolean());
         }

@@ -4017,8 +4017,8 @@ mod tests {
                 fail_status: SM_ERR_INVALID_INPUT,
                 ..DropCurveFail::default()
             }));
-            assert!(redistribute_fixture(&mut b, edge)
-                .is_err_and(|e| e.upstream_status() == Some(SM_ERR_INVALID_INPUT)));
+            // a neighbour whose trim curve cannot be created swaps nothing (fork 60a8a51)
+            assert!(!redistribute_fixture(&mut b, edge).unwrap());
             assert_eq!(seam_sides(&b, uses), [0.0, 1.0]);
         }
     }
@@ -4029,12 +4029,19 @@ mod tests {
         for count in [0, 2, 6] {
             let mut bad = b.clone_standing_for_self().unwrap();
             bad.edge_mut(edge).unwrap().edgeuses = uses.into_iter().cycle().take(count).collect();
-            assert!(redistribute_fixture(&mut bad, edge).is_err());
+            // without its four edge uses nothing is swapped (fork 60a8a51)
+            assert!(
+                !redistribute_fixture(&mut bad, edge).unwrap(),
+                "{count} uses"
+            );
         }
         for eu in [uses[0], uses[2], previous[0], previous[1]] {
             let mut bad = b.clone_standing_for_self().unwrap();
             bad.edgeuse_mut(eu).unwrap().uv_trim_curve = Some(Curve::from(BSplineCurve::default()));
-            assert!(redistribute_fixture(&mut bad, edge).is_err());
+            // an end point that cannot be evaluated swaps nothing (fork 60a8a51)
+            let before = format!("{bad:?}");
+            assert!(!redistribute_fixture(&mut bad, edge).unwrap(), "{eu:?}");
+            assert_eq!(format!("{bad:?}"), before);
         }
         for eu in [uses[0], uses[2]] {
             let mut bad = b.clone_standing_for_self().unwrap();
