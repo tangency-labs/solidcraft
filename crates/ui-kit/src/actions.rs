@@ -108,6 +108,13 @@ fn button_appearance(ui: &Ui, response: Option<&Response>, tone: ButtonTone) -> 
     ButtonAppearance { fill, ink, stroke }
 }
 
+/// Fill, ink and border of a normal button in the response's current state, for controls
+/// that paint their own content (icon plus label) but must read as the kit's buttons.
+pub(super) fn normal_button_look(ui: &Ui, response: &Response) -> (egui::Color32, egui::Color32, egui::Stroke) {
+    let look = button_appearance(ui, Some(response), ButtonTone::Normal);
+    (look.fill, look.ink, look.stroke)
+}
+
 fn styled_button(ui: &Ui, label: egui::WidgetText, tone: ButtonTone) -> egui::Button<'static> {
     // Match egui's own Button lookup: its previous rectangle is hit-tested with this frame's
     // input before allocation. No extra UI scope or widget changes the button's identity.

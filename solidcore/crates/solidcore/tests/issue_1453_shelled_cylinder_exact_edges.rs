@@ -121,9 +121,11 @@ fn on_cylinder(p: Point3) -> f64 {
 
 /// The issue's case: a cylinder r5, h10 shelled 1 inward, its top open. By default
 /// (upstream) the new inner edges are marched: 7 edges and 5 vertices (the rim split
-/// at an extra vertex), the volume 3.5e-7 over. With the fix: the floor and rim are
-/// exact circles, 6 edges and 4 vertices, and the volume is pi 25 10 - pi 16 9 to
-/// 1e-9.
+/// at an extra vertex). Its volume read 3.5e-7 over until `brep_volume` closed the
+/// marched edges' gaps (#16735): that was the integrator's leak through them, and the
+/// marched solid's volume is pi 25 10 - pi 16 9 to 1e-9 too (1.1e-12 measured). With
+/// the fix: the floor and rim are exact circles, 6 edges and 4 vertices, and the volume
+/// is that closed form to 1e-9.
 #[test]
 fn issue_1453_shelled_cylinder_edges_are_exact() {
     let want = PI * 25.0 * 10.0 - PI * 16.0 * 9.0;
@@ -143,7 +145,10 @@ fn issue_1453_shelled_cylinder_edges_are_exact() {
     );
     assert!(stock.exact < stock.inner, "a marched inner edge");
     let over = stock.volume.unwrap() - want;
-    assert!(over > 1e-7 * want, "upstream's volume 3.5e-7 over: {over}");
+    assert!(
+        over.abs() <= 1e-9 * want,
+        "the marched solid's volume: {over}"
+    );
     let fixed = shelled(
         "issue_1453 cylinder",
         true,

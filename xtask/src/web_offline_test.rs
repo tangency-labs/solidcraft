@@ -126,7 +126,8 @@ pub fn run_api(site: &str) -> Result<(), String> {
 
 /// The app's mouse buttons follow the browser's: a chord leaves none held (a second button
 /// pressed while one is held fires `pointermove`, not `pointerdown`), and so do a drag let go
-/// outside the window, a release the page never heard of and the window losing focus.
+/// outside the window, a release the page never heard of and the window losing focus. The focus
+/// moving inside the page lets go of none (#16209).
 fn mouse_test(cdp: &mut Cdp) -> Result<String, String> {
     // The model viewport, not the start page, under the pointer.
     let ui = cdp.eval("window.solidcraft.request('ui.home', {open: false}).then(() => window.solidcraft.request('ui.inspect'))")?;
@@ -175,6 +176,26 @@ fn mouse_test(cdp: &mut Cdp) -> Result<String, String> {
     mouse(cdp, "mouseMoved", (x + 10.0, y), "none", 0)?;
     expect(cdp, 0, "a move with no buttons after a lost release")?;
     mouse(cdp, "mouseReleased", (x + 10.0, y), "right", 0)?;
+    // The focus moves inside the page with a button held, as when a value box takes the keyboard
+    // while its manipulator is dragged (#16209): eframe gives it to its hidden text input, the
+    // canvas's next sibling, and back to the canvas, and the window hears each blur too.
+    let focus = |cdp: &mut Cdp, to: &str| -> Result<(), String> {
+        let js = format!(
+            "(() => {{ const c = document.getElementById('solidcraft_canvas'), t = c && c.nextElementSibling; if (!t || t.tagName !== 'INPUT') return 'no hidden text input after the canvas'; const e = {to}; e.focus(); return document.activeElement === e ? 'ok' : 'the focus did not move to ' + e.tagName; }})()"
+        );
+        match cdp.eval(&js)? {
+            Value::String(s) if s == "ok" => Ok(()),
+            v => Err(format!("web-api-test: {v}")),
+        }
+    };
+    focus(cdp, "c")?;
+    mouse(cdp, "mousePressed", c, "middle", 4)?;
+    focus(cdp, "t")?;
+    expect(cdp, 4, "the focus moved to the hidden text input")?;
+    focus(cdp, "c")?;
+    expect(cdp, 4, "the focus came back to the canvas")?;
+    mouse(cdp, "mouseReleased", c, "middle", 0)?;
+    expect(cdp, 0, "let go after the focus moved inside the page")?;
     // The window loses focus with a button held.
     mouse(cdp, "mousePressed", c, "middle", 4)?;
     cdp.eval("window.dispatchEvent(new Event('blur'))")?;
@@ -182,7 +203,7 @@ fn mouse_test(cdp: &mut Cdp) -> Result<String, String> {
     mouse(cdp, "mouseReleased", c, "middle", 0)?;
     cdp.call("Input.dispatchKeyEvent", json!({"type": "keyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}))?;
     cdp.call("Input.dispatchKeyEvent", json!({"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}))?;
-    Ok("chords, a drag let go outside, a lost release and blur leave none held".into())
+    Ok("chords, a drag let go outside, a lost release and blur leave none held; focus moving inside the page lets go of none".into())
 }
 
 /// The browser's own tab switching keys reach it while the app has the keyboard (#5227): their

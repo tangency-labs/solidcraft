@@ -15,6 +15,7 @@
 //! | [`p6`]    | see the module                                                  |
 //! | [`p7`]    | see the module                                                  |
 //! | [`planar_section`] | `CreatePlanarSectionCurves` (unit `topology.brep_planar_section`) |
+//! | [`primitive_outward`] | (not upstream) a primitive's volume sign from its closed form |
 //! | [`p8`]    | making faces from surfaces and from loops of curves              |
 //! | [`vertex_fans`] | `SplitVertexByFans`, `JoinVertexFans` (the fork's, `4ecfbab`) |
 //! | [`p10`]   | `MakeTopologyFromData`, `ProjectAndTrim`, `RemoveAllTopology`, `TestClosureSplitRegion` (edge version) |
@@ -38,7 +39,10 @@ pub mod p7;
 pub mod p8;
 pub mod p9;
 pub mod planar_section;
+pub mod primitive_outward;
 pub mod sheet;
+pub mod side_extend;
+pub mod trim_extend;
 pub mod validation;
 pub mod vertex_fans;
 

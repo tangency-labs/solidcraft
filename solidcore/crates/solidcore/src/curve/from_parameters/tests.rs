@@ -99,6 +99,85 @@ fn an_arc_past_a_turn_moves_back_by_whole_turns() {
     near(at(&k, &e.curve, -90.0), [0.0, -1.0, 0.0], 1e-15 * 8.0);
 }
 
+/// The record's parameter comes back from the kernel's: on a circle or ellipse the angle at
+/// which the record evaluates the kernel's point, in the turn of the interval (the kernel's
+/// rational parameter in degrees is not that angle off the quarter turns); unchanged elsewhere.
+#[test]
+fn the_record_parameter_inverts_the_kernel_parameter() {
+    let k = k();
+    let close = |a: f64, b: f64| assert!((a - b).abs() <= 1e-15 * 8.0, "{a} != {b}");
+    // the record's ellipse at its own parameter
+    let on =
+        |o: [f64; 3], [rx, ry]: [f64; 2], r: f64| [o[0] + rx * r.cos(), o[1] + ry * r.sin(), o[2]];
+    for (record, o, radii) in [
+        (
+            Record::Circle {
+                frame: frame([1.0, 2.0, 3.0]),
+                radius: 10.0,
+            },
+            [1.0, 2.0, 3.0],
+            [10.0, 10.0],
+        ),
+        (
+            Record::Ellipse {
+                frame: frame([0.0; 3]),
+                radii: [3.0, 1.0],
+            },
+            [0.0; 3],
+            [3.0, 1.0],
+        ),
+    ] {
+        for interval in [[0.0, TAU], [TAU, TAU + FRAC_PI_2], [-PI, 0.0]] {
+            let e = from_parameters(&k, &record, interval).unwrap();
+            for i in 0..=16 {
+                let t =
+                    e.interval.min() + (e.interval.max() - e.interval.min()) * f64::from(i) / 16.0;
+                let p = at(&k, &e.curve, t);
+                let r = record_parameter(&record, interval, t, p);
+                assert!(
+                    interval[0] - 1e-12 <= r && r <= interval[1] + 1e-12,
+                    "{r} outside {interval:?}"
+                );
+                near(p, on(o, radii, r), 1e-12);
+            }
+        }
+    }
+    // a quarter turn is exact, as is a whole turn's end
+    let circle = Record::Circle {
+        frame: frame([0.0; 3]),
+        radius: 1.0,
+    };
+    let e = from_parameters(&k, &circle, [0.0, TAU]).unwrap();
+    close(
+        record_parameter(&circle, [0.0, TAU], 90.0, at(&k, &e.curve, 90.0)),
+        FRAC_PI_2,
+    );
+    close(
+        record_parameter(&circle, [0.0, TAU], 360.0, at(&k, &e.curve, 360.0)),
+        TAU,
+    );
+    let line = Record::Line {
+        start: [0.0; 3],
+        end: [1.0, 0.0, 0.0],
+    };
+    assert_eq!(
+        record_parameter(&line, [0.0, 1.0], 0.25, p3([0.25, 0.0, 0.0])),
+        0.25
+    );
+}
+
+/// A parameter a solve rounds just past an end (one ulp past 1, as a cone's silhouette end
+/// came back) is on that end; one past it by more than `EFF_ZERO` is outside.
+#[test]
+fn a_parameter_rounded_past_an_end_is_on_it() {
+    let past = 1.0 + f64::EPSILON;
+    assert_eq!(on_interval([0.0, 1.0], past), Some(1.0));
+    assert_eq!(on_interval([0.0, 1.0], -1e-13), Some(0.0));
+    assert_eq!(on_interval([0.0, 1.0], 0.5), Some(0.5));
+    assert_eq!(on_interval([0.0, 1.0], 1.0 + 1e-9), None);
+    assert_eq!(on_interval([0.0, 1.0], f64::NAN), None);
+}
+
 /// A frame not orthonormal is refused (the kernel would silently rebuild it), as is a radius
 /// of no length.
 #[test]

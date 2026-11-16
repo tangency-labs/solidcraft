@@ -8,9 +8,6 @@
 # The macOS app is signed and notarized when the APPLE_* secrets exist. The Windows binaries and
 # MSI are Authenticode-signed through SignPath Foundation when the SIGNPATH_API_TOKEN secret exists
 # (see the windows job). Nothing else is signed yet.
-# Runners: Blacksmith (blacksmith-<N>vcpu-<os>), as CI uses, except the `version` and `windows`
-# jobs, which stay GitHub-hosted: SignPath Foundation only signs a request when every job leading
-# up to it ran on a GitHub-hosted runner.
 #
 #   Linux x86_64, aarch64   AppImage (+ .zsync), .deb, .rpm, .flatpak, .snap, .tar.gz packaging/linux
 #   Arch Linux x86_64, aarch64  .pkg.tar.zst, repackaged from the .tar.gz         the arch job
@@ -79,7 +76,7 @@ env:
 
 jobs:
   version:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     outputs:
       build: ${{ steps.changed.outputs.build }}
       version: ${{ steps.v.outputs.version }}
@@ -121,14 +118,14 @@ jobs:
     name: Linux ${{ matrix.arch }}
     needs: version
     if: needs.version.outputs.build == 'true'
-    # Ubuntu 22.04, the oldest image, so the binaries only need glibc >= 2.35.
+    # The oldest GitHub-hosted image, so the binaries only need glibc >= 2.35.
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, runner: blacksmith-16vcpu-ubuntu-2204, deb: amd64 }
-          - { arch: aarch64, runner: blacksmith-16vcpu-ubuntu-2204-arm, deb: arm64 }
+          - { arch: x86_64, runner: blacksmith-8vcpu-ubuntu-2204, deb: amd64 }
+          - { arch: aarch64, runner: blacksmith-8vcpu-ubuntu-2204-arm, deb: arm64 }
     env:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
@@ -142,7 +139,7 @@ jobs:
           curl -fsSL -o "$RUNNER_TEMP/nfpm.deb" \
             "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_${{ matrix.deb }}.deb"
           sudo dpkg -i "$RUNNER_TEMP/nfpm.deb"
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-linux-${{ matrix.arch }}
@@ -184,8 +181,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, runner: blacksmith-4vcpu-ubuntu-2404 }
-          - { arch: aarch64, runner: blacksmith-4vcpu-ubuntu-2404-arm }
+          - { arch: x86_64, runner: blacksmith-8vcpu-ubuntu-2404 }
+          - { arch: aarch64, runner: blacksmith-8vcpu-ubuntu-2404-arm }
     env:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
@@ -199,8 +196,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends flatpak flatpak-builder librsvg2-common xvfb xauth weston dbus-x11
-          # Ubuntu 24.04's AppArmor blocks the unprivileged user namespaces bubblewrap needs.
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          # Ubuntu 24.04's AppArmor blocks the unprivileged user namespaces bubblewrap needs. Only
+          # where that switch exists: Blacksmith's VMs run a kernel without it (and don't block them).
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
       - name: Build the Flatpak bundle
         run: packaging/linux/flatpak-bundle.sh "dist/linux/solidcraft-$SOLIDCRAFT_VERSION-linux-${{ matrix.arch }}.tar.gz"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -214,7 +214,7 @@ jobs:
     needs: [version, linux]
     if: needs.version.outputs.build == 'true'
     # makepkg only repackages the tarball's prebuilt binaries, so both architectures build here.
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     # A pre-release or nightly without an Arch package is still worth having; a stable release isn't.
     continue-on-error: ${{ contains(needs.version.outputs.version, '-') }}
     strategy:
@@ -284,8 +284,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, runner: blacksmith-4vcpu-ubuntu-2404 }
-          - { arch: aarch64, runner: blacksmith-4vcpu-ubuntu-2404-arm }
+          - { arch: x86_64, runner: blacksmith-8vcpu-ubuntu-2404 }
+          - { arch: aarch64, runner: blacksmith-8vcpu-ubuntu-2404-arm }
     env:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
@@ -297,7 +297,12 @@ jobs:
           path: dist/linux
       - name: Install snapcraft and the smoke-test tools
         run: |
-          sudo snap install snapcraft --classic
+          # The Snap Store sometimes times out (HTTP 408); try a few times before giving up.
+          for attempt in 1 2 3 4 5; do
+            sudo snap install snapcraft --classic && break
+            if [ "$attempt" = 5 ]; then exit 1; fi
+            sleep $((attempt * 15))
+          done
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends xvfb xauth weston dbus-x11
       - name: Build the snap
@@ -338,29 +343,62 @@ jobs:
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Build and package in a FreeBSD VM (tar.gz)
+        with:
+          # The checkout is copied into the VM; no token goes with it.
+          persist-credentials: false
+      - id: size
+        name: Size the VM to the runner
+        # All but 2 CPUs and 4 GB for the VM; about 3 GB of VM memory per build job (4 jobs in
+        # 12 GB was the most that fit).
+        run: |
+          cpus=$(nproc)
+          mem_mb=$(awk '/MemTotal/ { print int($2 / 1024) }' /proc/meminfo)
+          vm_cpus=$(( cpus > 4 ? cpus - 2 : 2 ))
+          vm_mem=$(( mem_mb > 16384 ? mem_mb - 4096 : 12288 ))
+          jobs=$(( vm_mem / 3072 ))
+          if [ "$jobs" -gt "$vm_cpus" ]; then jobs=$vm_cpus; fi
+          if [ "$jobs" -lt 1 ]; then jobs=1; fi
+          echo "runner: $cpus CPUs, $mem_mb MB; VM: $vm_cpus CPUs, $vm_mem MB, $jobs build jobs"
+          { echo "cpu=$vm_cpus"; echo "mem=$vm_mem"; echo "jobs=$jobs"; } >>"$GITHUB_OUTPUT"
+      - name: Start a FreeBSD VM
         # vmactions/freebsd-vm v1.5.9, pinned by commit (it runs our build).
+        # sync: no, and the source goes in and dist/ comes out with rsync below. The action's own
+        # sync copies $HOME/work and cds into $GITHUB_WORKSPACE, which only works where the
+        # checkout lives under $HOME/work (GitHub's runners). Blacksmith's is under $HOME/_work.
         uses: vmactions/freebsd-vm@c46abacb49f09938ca4e1702d15d836285d694cc
         with:
           release: "14.3"
           usesh: true
-          cpu: 14
-          mem: 40960
-          # Passed into the VM by name; never templated into the script below.
-          envs: "SOLIDCRAFT_VERSION SOLIDCRAFT_BUILD_DATE"
+          sync: "no"
+          cpu: ${{ steps.size.outputs.cpu }}
+          mem: ${{ steps.size.outputs.mem }}
+          # Passed into the VM by name (ssh SendEnv); never templated into the scripts below.
+          envs: "SOLIDCRAFT_VERSION SOLIDCRAFT_BUILD_DATE CARGO_BUILD_JOBS"
           prepare: |
-            pkg install -y bash git curl pkgconf libxkbcommon wayland libX11 libXcursor libXrandr libXi libxcb mesa-libs vulkan-loader
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.98.0
-          run: |
-            set -e
-            . "$HOME/.cargo/env"
-            git config --global --add safe.directory "$PWD"
-            # Build outside the checkout so only dist/ is copied back out of the VM. About 3 GB of
-            # VM memory per job: 4 jobs in 12 GB was the most that fit before.
-            export CARGO_TARGET_DIR=/var/tmp/solidcraft-target CARGO_BUILD_JOBS=12
-            bash packaging/freebsd/package.sh
-            tar -tzf dist/release/solidcraft-*-freebsd-x86_64.tar.gz \
-              | grep -E '/bin/solidcraft$|/bin/solidcraft-cli$|/share/applications/io\.tangencylabs\.solidcraft\.desktop$|/share/doc/solidcraft/THIRD-PARTY-LICENSES\.txt$'
+            pkg install -y bash git curl rsync pkgconf libxkbcommon wayland libX11 libXcursor libXrandr libXi libxcb mesa-libs vulkan-loader
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.99.1
+      - name: Copy the source into the VM
+        run: rsync -a --delete --rsync-path=/usr/local/bin/rsync ./ freebsd:solidcraft/
+      - name: Build and package in the VM (tar.gz)
+        env:
+          CARGO_BUILD_JOBS: ${{ steps.size.outputs.jobs }}
+        run: |
+          ssh freebsd sh <<'VM'
+          set -eu
+          cd "$HOME/solidcraft"
+          . "$HOME/.cargo/env"
+          git config --global --add safe.directory "$PWD"
+          # Build outside the checkout so only dist/ comes back out of the VM.
+          export CARGO_TARGET_DIR=/var/tmp/solidcraft-target
+          bash packaging/freebsd/package.sh
+          tar -tzf dist/release/solidcraft-*-freebsd-x86_64.tar.gz \
+            | grep -E '/bin/solidcraft$|/bin/solidcraft-cli$|/share/applications/io\.tangencylabs\.solidcraft\.desktop$|/share/doc/solidcraft/THIRD-PARTY-LICENSES\.txt$'
+          VM
+      - name: Copy the package out of the VM
+        run: |
+          mkdir -p dist/release
+          rsync -a --rsync-path=/usr/local/bin/rsync freebsd:solidcraft/dist/release/ dist/release/
+          ls -l dist/release
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-freebsd-x86_64
@@ -369,12 +407,11 @@ jobs:
 
   # The two halves of the universal binary build in parallel on their own runners (each alone
   # took about half of the old single job's 45 minutes); `macos` below joins and packages them.
-  # Blacksmith's macOS runners are Apple silicon: the x86_64 half is cross-compiled.
   macos-build:
     name: macOS build ${{ matrix.arch }}
     needs: version
     if: needs.version.outputs.build == 'true'
-    runs-on: blacksmith-12vcpu-macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     strategy:
       fail-fast: false
       matrix:
@@ -386,7 +423,7 @@ jobs:
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -450,10 +487,10 @@ jobs:
     name: Windows ${{ matrix.arch }}
     needs: version
     if: needs.version.outputs.build == 'true'
-    # Must stay a GitHub-hosted runner, like the `version` job before it: SignPath's open-source
-    # policy only signs requests whose jobs leading up to them all ran on GitHub-hosted runners.
+    # Blacksmith, like every other job. SignPath only signs builds from GitHub-hosted runners, so
+    # its steps stay off (WINDOWS_SIGNING=off) until Azure Artifact Signing replaces it.
+    runs-on: blacksmith-8vcpu-windows-2025
     # The installer icon is the committed assets/icons/app/windows/exports/solidcraft.ico.
-    runs-on: windows-latest
     # actions: read lets the SignPath action read this job's details and fetch the uploaded
     # artifact with GITHUB_TOKEN (the workflow default above grants contents: read only).
     permissions:
@@ -472,7 +509,10 @@ jobs:
       # Authenticode signing through SignPath Foundation (docs/releasing.md, "Windows signing").
       # Only when the API token secret exists: forks and repositories without it build unsigned,
       # exactly as before. `if:` can't read secrets, so the check goes through this variable.
-      SIGN_WINDOWS: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+      # The WINDOWS_SIGNING repository variable set to `off` builds unsigned even with the token:
+      # releases ship unsigned rather than with the self-signed test certificate until the real
+      # signing (Azure Artifact Signing) is wired in.
+      SIGN_WINDOWS: ${{ secrets.SIGNPATH_API_TOKEN != '' && vars.WINDOWS_SIGNING != 'off' }}
       # The one switch between the self-signed test certificate (test-signing) and the real one
       # (release-signing): a dispatch input, else the SIGNPATH_SIGNING_POLICY repository variable,
       # else test-signing.
@@ -481,7 +521,7 @@ jobs:
       SIGNPATH_PROJECT_SLUG: solidcraft
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -588,7 +628,7 @@ jobs:
       - name: Note the unsigned build
         if: env.SIGN_WINDOWS != 'true'
         shell: pwsh
-        run: '"Windows ${{ matrix.arch }}: unsigned (no SIGNPATH_API_TOKEN secret)." >> $env:GITHUB_STEP_SUMMARY'
+        run: '"Windows ${{ matrix.arch }}: unsigned (no SIGNPATH_API_TOKEN secret, or WINDOWS_SIGNING is off)." >> $env:GITHUB_STEP_SUMMARY'
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -606,7 +646,7 @@ jobs:
       TRUNK_VERSION: 0.21.14
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -629,7 +669,7 @@ jobs:
     needs: [version, linux, flatpak, arch, snap, freebsd, macos, windows, web]
     # Not for the release gate (packages_only): it builds and checks the packages, nothing more.
     if: needs.version.outputs.build == 'true' && !inputs.packages_only
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     permissions:
       contents: write
     env:
@@ -774,7 +814,11 @@ jobs:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
         working-directory: artifacts
         run: |
-          sudo snap install snapcraft --classic
+          for attempt in 1 2 3 4 5; do
+            sudo snap install snapcraft --classic && break
+            if [ "$attempt" = 5 ]; then exit 1; fi
+            sleep $((attempt * 15))
+          done
           channel=candidate
           if [ "$GITHUB_EVENT_NAME" = schedule ]; then channel=edge; fi
           for arch in x86_64 aarch64; do

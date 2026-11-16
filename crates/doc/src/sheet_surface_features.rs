@@ -12,11 +12,13 @@
 
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 use solidcraft_develop::Cut;
+use solidcraft_develop::prelude::*;
 use solidcraft_develop::{Anchor, Bend, Datum, Joint, JointKind, Lap, Panel, Relief, Rigid3, Rip, Sheet, Surface, Tail, ZoneEnds, develop};
 use solidcraft_geom::prelude::*;
 use solidcraft_kernel::BoolOp;
 
 use crate::sheet::{HeightFrom, WHOLE_EDGE};
+use crate::sheet_surface::entry;
 use crate::{DocError, FoldSide, Result, SurfaceSheet};
 
 fn err<T>(msg: impl Into<String>) -> Result<T> {
@@ -852,7 +854,7 @@ impl SurfaceSheet {
             [] => return err("the fold line must lie on a flat face of the sheet"),
             _ => return err("not supported yet: a fold line drawn across more than one panel"),
         };
-        let region = self.sheet.panels[i].region.clone();
+        let region = entry(&self.sheet.panels, i, "panel")?.region.clone();
         let bend = Bend {
             angle,
             radius,
@@ -2466,11 +2468,14 @@ fn set_back_past(region: &Region2, from: Vec2, m: Vec2, rise: f64, h: f64, into:
     let top = from + m * rise;
     let tol = rise.max(1.0) * 1e-9;
     let same = |p: Vec2, q: Vec2| p.dist(q) <= tol;
-    let k = segs.iter().position(|g| matches!(*g, Seg2::Line { a, b } if (same(a, from) && same(b, top)) || (same(a, top) && same(b, from))))?;
-    let up = matches!(segs[k], Seg2::Line { a, .. } if same(a, from));
-    // The edge past the side, at its top.
+    let (k, side) = segs
+        .iter()
+        .enumerate()
+        .find(|(_, g)| matches!(**g, Seg2::Line { a, b } if (same(a, from) && same(b, top)) || (same(a, top) && same(b, from))))?;
+    let up = matches!(*side, Seg2::Line { a, .. } if same(a, from));
+    // The edge past the side, at its top (`segs` holds the side, so `n` > 0).
     let past_at = if up { (k + 1) % n } else { (k + n - 1) % n };
-    let Seg2::Line { a: pa, b: pb } = segs[past_at] else { return None };
+    let Seg2::Line { a: pa, b: pb } = *segs.get(past_at)? else { return None };
     let (p, q) = (from + m * h, from + m * h + into * by);
     let w = pb - pa;
     let cross = m.cross(w);
@@ -2500,7 +2505,7 @@ fn set_back_past(region: &Region2, from: Vec2, m: Vec2, rise: f64, h: f64, into:
     }
     let side: Vec<Seg2> = pts.windows(2).map(|x| Seg2::Line { a: x[0], b: x[1] }).collect();
     let mut out = segs.clone();
-    out[past_at] = if up { Seg2::Line { a: end, b: pb } } else { Seg2::Line { a: pa, b: end } };
+    *out.get_mut(past_at)? = if up { Seg2::Line { a: end, b: pb } } else { Seg2::Line { a: pa, b: end } };
     out.splice(k..=k, side);
     Some(Region2 { outer: Loop2 { segs: out }, holes: region.holes.clone() })
 }

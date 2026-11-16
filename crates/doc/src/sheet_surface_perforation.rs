@@ -15,6 +15,7 @@
 //! takes it to round-off. Nothing is tessellated.
 
 use solidcore_record::{Loop2, Region2, Vec2, Vec3};
+use solidcraft_develop::prelude::*;
 use solidcraft_develop::{Bent, Rigid2, Rigid3, Surface};
 use solidcraft_geom::bspline::GAUSS_8;
 use solidcraft_geom::inertia::{self, Tensor3};

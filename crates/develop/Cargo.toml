@@ -1,6 +1,6 @@
 [package]
 name = "solidcraft-develop"
-description = "SolidCraft sheet development: a sheet of panels and joints laid out into its flat pattern"
+description = "SolidCraft sheet development: solidcore's, with SolidCraft's wording of its refusals"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,8 +9,6 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-serde = { workspace = true }
 solidcore-ops = { workspace = true }
 solidcore-record = { workspace = true }
-solidcraft-geom = { workspace = true }
 thiserror = { workspace = true }

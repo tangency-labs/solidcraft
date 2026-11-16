@@ -7,11 +7,15 @@
 #![allow(clippy::unwrap_used)] // test helpers
 
 use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection, boolean_union};
+use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, Vec3};
+use solidcore::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::primitive::api_primitives as api;
+use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::Brep;
 use solidcore::Kernel;
@@ -675,4 +679,458 @@ fn sphere_box_edge_cutting_a_shallow_cap() {
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// A closed ellipse of semi-axes `b` (along x) and `a` (along y) about `(0, a)`, as the one
+/// rational B-spline of its four quarters (nine control points, knots 0..4), starting at the
+/// end of the major axis on +y and running counter-clockwise.
+fn ellipse_spline(a: f64, b: f64) -> Curve {
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
+    let control = [
+        p(0.0, 2.0 * a),
+        p(-b, 2.0 * a),
+        p(-b, a),
+        p(-b, 0.0),
+        p(0.0, 0.0),
+        p(b, 0.0),
+        p(b, a),
+        p(b, 2.0 * a),
+        p(0.0, 2.0 * a),
+    ];
+    let weights = [1.0, w, 1.0, w, 1.0, w, 1.0, w, 1.0];
+    Curve::from(
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 2,
+            control_points: &control,
+            form: BSplineCurveForm::default(),
+            knot_multiplicities: &[3, 2, 2, 2, 3],
+            knots: &[0.0, 1.0, 2.0, 3.0, 4.0],
+            knot_type: KnotType::default(),
+            weights: Some(&weights),
+            trim: None,
+        })
+        .unwrap(),
+    )
+}
+
+/// The volume of `brep` at the accuracy the other cases use.
+fn volume_of(k: &Kernel, brep: &mut Brep) -> f64 {
+    let store = AttributeStore::new();
+    let key_of = |_| ObjectKey(0);
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &key_of,
+    };
+    brep_volume(k, brep, 1e-7, &attrs).unwrap()
+}
+
+/// A long thin elliptic prism (semi-axes 67.5 and 5, 4 thick, swept against +z) is a solid
+/// facing out: its volume is the ellipse's area times the thickness, and a block cut by it is
+/// the block less the part of it the block holds. The ray that picks the region outside is
+/// aimed at an edge of the prism, where it meets the wall and the cap at one distance and no
+/// edge; the region it found was taken from the wall alone, which put the outside on the
+/// inside, and the prism came out with a negative volume.
+#[test]
+fn a_long_thin_elliptic_prism_faces_out_and_cuts_a_block() {
+    let (a, b, thick) = (67.5, 5.0, 4.0);
+    let want = PI * a * b * thick;
+    let mut k = Kernel::default();
+    let curve = ellipse_spline(a, b);
+    let mut prism = create_linear_sweep(
+        &mut k,
+        &[Some(&curve)],
+        Vec3::new(0.0, 0.0, -1.0),
+        thick,
+        true,
+    )
+    .unwrap();
+    let got = volume_of(&k, &mut prism);
+    assert!(
+        (got - want).abs() < 1e-4 * want,
+        "prism volume {got} vs {want}"
+    );
+    let check = check_brep(&mut k, &mut prism, CheckLevel::Level2).unwrap();
+    assert!(check.is_valid(), "{:?}", check.lines());
+
+    // A block whose bottom face cuts the prism through its middle: a groove, open below.
+    let block =
+        api::create_box(&mut k, Point3::new(-20.0, -20.0, -2.0), 40.0, 200.0, 22.0).unwrap();
+    let mut cut = boolean_difference(&mut k, block, prism).unwrap();
+    let got = volume_of(&k, &mut cut);
+    let check = check_brep(&mut k, &mut cut, CheckLevel::Level2).unwrap();
+    assert!(check.is_valid(), "{:?}", check.lines());
+    // The block's six faces (the bottom one with a hole), the groove's wall and its ceiling: eight
+    // faces; the block's twelve edges, the hole's rim, the ceiling's rim and the wall's seam:
+    // fifteen; the block's eight corners and the two ends of the rims' loops: ten.
+    let counts = [
+        solidcore::topology::brep::p1::faces(&cut, None)
+            .unwrap()
+            .len(),
+        solidcore::topology::brep::p1::edges(&cut, None)
+            .unwrap()
+            .len(),
+        solidcore::topology::brep::p1::vertices(&cut, None)
+            .unwrap()
+            .len(),
+    ];
+    assert_eq!(counts, [8, 15, 10], "faces, edges, vertices");
+    let want = 40.0 * 200.0 * 22.0 - PI * a * b * 2.0;
+    assert!(
+        (got - want).abs() < 1e-4 * want,
+        "block less prism {got} vs {want}"
+    );
+}
+
+// ---- an arc grazing a coplanar box face -----------------------------------------------
+
+/// The profile of #16640 extruded 10 along z, then joined with the 5 x 25 x 10 box at
+/// (5, -5, 0): `(0, 0)`, `(10, 0)`, `(10, 10)`, an arc about `(cx, cy)` of radius `r` from
+/// `(10, 10)` counter-clockwise to `(px, py)`, `(0, py)`. The arc's end `(10, 10)` lies on the
+/// box face `x = 10`, which also holds the profile's side from `(10, 0)` to `(10, 10)`.
+/// The union is the box plus the part of the profile left of `x = 5`, so its volume is
+/// `10 (5 py + 125)`: only a sliver of the arc past `x = 10` (in the grazing
+/// case, 0.26 micron wide over 1.6 mm, 0.003 mm3 in all) is added.
+fn arc_graze_union(
+    k: &mut Kernel,
+    centre: (f64, f64),
+    r: f64,
+    start_deg: f64,
+    end_deg: f64,
+    top: (f64, f64),
+) -> solidcore::Result<Brep> {
+    use solidcore::curve::curve::Curve;
+    use solidcore::primitive::api_curves as curves;
+    use solidcore::sweep::api_brep::create_linear_sweep;
+    let p = Point3::new;
+    let line = |a: Point3, b: Point3| Curve::from(curves::create_line_segment(a, b).unwrap());
+    let profile = [
+        line(p(0.0, 0.0, 0.0), p(10.0, 0.0, 0.0)),
+        line(p(10.0, 0.0, 0.0), p(10.0, 10.0, 0.0)),
+        Curve::from(curves::create_arc(p(centre.0, centre.1, 0.0), r, start_deg, end_deg).unwrap()),
+        line(p(top.0, top.1, 0.0), p(0.0, top.1, 0.0)),
+        line(p(0.0, top.1, 0.0), p(0.0, 0.0, 0.0)),
+    ];
+    let refs: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
+    let body = create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), 10.0, true)?;
+    let boxed = api::create_box(k, Point3::new(5.0, -5.0, 0.0), 5.0, 25.0, 10.0)?;
+    boolean_union(k, body, boxed)
+}
+
+fn assert_closed_with_volume(k: &mut Kernel, mut brep: Brep, want: f64, slack: f64) {
+    let store = AttributeStore::new();
+    let key_of = |_| ObjectKey(0);
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &key_of,
+    };
+    let v = brep_volume(k, &mut brep, 1e-9, &attrs).unwrap();
+    assert!(
+        (v - want).abs() <= slack,
+        "volume {v} vs {want} (slack {slack})"
+    );
+    let check = check_brep(k, &mut brep, CheckLevel::Level2).unwrap();
+    assert!(check.is_valid(), "Level2 {:?}", check.lines());
+}
+
+/// #16640: an arc, three-point as drawn, that crosses the plane of a coplanar box face
+/// 0.26 micron past a shared vertex, 1.6 mm along, and stays within the tolerance of the
+/// face's edge for as long again beyond the crossing. The definition of that second
+/// stretch ended on no vertex, so its two edges were related whole to each other and to the
+/// edges the crossing had already related: "another entity is already related". It makes
+/// no relation of its own now; the union is closed and has the volume of the box and the
+/// profile left of it.
+#[test]
+fn an_arc_grazing_a_coplanar_box_face_joins() {
+    let mut k = Kernel::default();
+    let (py, centre) = (12.941, (5.003_150_514_408_299, 10.001_605_029_505_038));
+    let brep = arc_graze_union(
+        &mut k,
+        centre,
+        4.996_849_743_366_094,
+        -0.018_403_879_031_201_775,
+        36.032_894_179_707_97,
+        (9.044, py),
+    )
+    .unwrap();
+    // the added sliver is about 0.003 mm3
+    assert_closed_with_volume(&mut k, brep, 10.0 * (5.0 * py + 125.0), 0.01);
+}
+
+/// The control of #16640: the same profile with the arc exactly tangent to the face's plane
+/// (centre `(5, 10)`, radius 5), which joined before.
+#[test]
+fn an_arc_tangent_to_a_coplanar_box_face_joins() {
+    let mut k = Kernel::default();
+    let theta = 36.0_f64;
+    let (px, py) = (
+        5.0 + 5.0 * theta.to_radians().cos(),
+        10.0 + 5.0 * theta.to_radians().sin(),
+    );
+    let brep = arc_graze_union(&mut k, (5.0, 10.0), 5.0, 0.0, theta, (px, py)).unwrap();
+    assert_closed_with_volume(&mut k, brep, 10.0 * (5.0 * py + 125.0), 1e-6 * 2000.0);
+}
+
+/// tangency-labs/solidcraft#16532: a 10 mm box with its edge at (0, 0) rounded with r 2, joined
+/// by a slab whose x-face stands a hair past the round's tangent line x = 2 (where the round
+/// meets the flat face), is one closed manifold solid that checks clean at Level2. The
+/// offsets 2e-5 and 2.5e-5 are where the vertex the join leaves at the tangent line used to
+/// stand off the slab's face by more than the intersection tolerance; 1e-5 and 1e-4 are
+/// either side of them and joined before.
+#[test]
+fn a_slab_a_hair_past_a_fillets_tangent_line_joins_valid() {
+    use solidcore::blend::fillet_executive::api::fillet_edges;
+    use solidcore::topology::{edge, vertex};
+
+    let mut failures = Vec::new();
+    // (offset, vertices): the kernel's counts; one more where the slab clears the tangent line
+    for (dx, want_vertices) in [(1e-5, 17), (2e-5, 17), (2.5e-5, 17), (1e-4, 18)] {
+        let mut k = Kernel::default();
+        let mut block =
+            api::create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let corner_edge = block
+            .edges()
+            .ids()
+            .find(|&e| {
+                let Ok((Some(s), Some(t))) = edge::start_end_vertices(&block, e) else {
+                    return false;
+                };
+                let (p, q) = (
+                    vertex::point(&block, s).unwrap(),
+                    vertex::point(&block, t).unwrap(),
+                );
+                p.x.abs() < 1e-9 && p.y.abs() < 1e-9 && q.x.abs() < 1e-9 && q.y.abs() < 1e-9
+            })
+            .unwrap();
+        fillet_edges(&mut k, &mut block, &[corner_edge], 2.0, 1, 1, 1.0).unwrap();
+        let slab =
+            api::create_box(&mut k, Point3::new(2.0 + dx, -5.0, 0.0), 6.0, 10.0, 5.0).unwrap();
+        let mut brep = match boolean_union(&mut k, block, slab) {
+            Ok(b) => b,
+            Err(e) => {
+                failures.push(format!("dx {dx:e}: join refused: {e}"));
+                continue;
+            }
+        };
+        let check = check_brep(&mut k, &mut brep, CheckLevel::Level2).unwrap();
+        if !check.is_valid() {
+            failures.push(format!("dx {dx:e}: Level2 {:?}", check.lines()));
+        }
+        if !solidcore::topology::brep::p2::is_manifold_solid(&brep).unwrap() {
+            failures.push(format!("dx {dx:e}: not a closed manifold solid"));
+        }
+        // the box less the round's 10 (4 - pi) plus the slab's 150 outside the box
+        let want_volume = 1110.0 + 10.0 * PI;
+        let store = AttributeStore::new();
+        let key_of = |_| ObjectKey(0);
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &key_of,
+        };
+        let volume = brep_volume(&k, &mut brep, 1e-7, &attrs).unwrap();
+        if (volume - want_volume).abs() > VOLUME_REL_TOL * want_volume {
+            failures.push(format!("dx {dx:e}: volume {volume} vs {want_volume}"));
+        }
+        // eleven faces; a closed genus 0 body has V - E + F = 2
+        let faces = solidcore::topology::brep::p1::faces(&brep, None)
+            .unwrap()
+            .len();
+        let vertices = brep.vertices().ids().count();
+        let edges = brep.edges().ids().count();
+        if (faces, vertices, edges) != (11, want_vertices, want_vertices + 9) {
+            failures.push(format!(
+                "dx {dx:e}: {faces} faces, {vertices} vertices, {edges} edges"
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// A through bore whose cap is almost coincident with a cylinder's cap. The two
+/// cylinder seams differ, and the bore axis tilts by 1e-5 radians. Both bore caps
+/// lie outside the stock, so every slice normal to the stock axis loses the same
+/// ellipse: area pi * r^2 / cos(theta).
+#[test]
+fn a_nearly_axial_bore_through_a_cylinder_with_step_tolerances() {
+    use solidcore::curve::ellipse::Ellipse;
+    use solidcore::topology::brep::{p1, p2, p5};
+
+    let mut k = rig_kernel();
+    let stock_frame = Axis2Placement::new(
+        Point3::new(-22.0005005683, 27.3286637536, -43.3425576331),
+        Vec3::new(
+            0.33541020646821096,
+            -0.4447535182170257,
+            -0.8304783569910354,
+        ),
+        Vec3::new(
+            0.7984072189295407,
+            0.6021178562052287,
+            -1.2617029737649332e-7,
+        ),
+    );
+    let bore_frame = Axis2Placement::new(
+        Point3::new(-22.000499999972, 27.328699999997, -43.342599999983),
+        Vec3::new(0.459987304432186, 0.748373023696032, 0.4778592859464696),
+        Vec3::new(-0.7337328686846232, 0.01728700041769954, 0.6792181071116936),
+    );
+    let mut stock = api::create_cylinder(&mut k, Point3::ZERO, 3.75, 11.0).unwrap();
+    p5::transform(&mut k, &mut stock, &stock_frame, None, false).unwrap();
+    // STEP's 0.005 mm intersection tolerance is a 0.0025 mm kernel zone.
+    p2::set_tolerance(&k, &mut stock, 0.0025, true, true).unwrap();
+    let circle =
+        Curve::from(Ellipse::create_canonical_circle(&k, &bore_frame, 2.4, None, None).unwrap());
+    let mut bore = create_linear_sweep(
+        &mut k,
+        &[Some(&circle)],
+        Vec3::new(0.5000477548925153, -0.6630527709169285, 0.5570576862465307),
+        12.9998,
+        true,
+    )
+    .unwrap();
+    p2::set_tolerance(&k, &mut bore, 1e-5, true, true).unwrap();
+    for operand in [&mut stock, &mut bore] {
+        solidcore::topology::integrity::check(operand).unwrap();
+        let check = check_brep(&mut k, operand, CheckLevel::Level2).unwrap();
+        assert!(check.is_valid(), "input: {:?}", check.lines());
+    }
+
+    let mut result = boolean_difference(&mut k, stock, bore).unwrap();
+    solidcore::topology::integrity::check(&result).unwrap();
+    let check = check_brep(&mut k, &mut result, CheckLevel::Level2).unwrap();
+    assert!(check.is_valid(), "{:?}", check.lines());
+    assert_eq!(p1::faces(&result, None).unwrap().len(), 4);
+    // Edges: the stock seam and its two cap circles (each closed at the seam), the bore
+    // seam, and each bore circle as two arcs: the circle is a closed curve that starts
+    // 0.82 mm from where the bore seam meets the cap, so it is cut there and at the
+    // seam crossing. Vertices: two on the stock seam, two per bore circle.
+    assert_eq!(p1::edges(&result, None).unwrap().len(), 8);
+    assert_eq!(p1::vertices(&result, None).unwrap().len(), 6);
+
+    let store = AttributeStore::new();
+    let key_of = |_| ObjectKey(0);
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &key_of,
+    };
+    let volume = brep_volume(&k, &mut result, 1e-9, &attrs).unwrap();
+    let expected = PI * 11.0 * (3.75_f64.powi(2) - 2.4_f64.powi(2) / 1e-5_f64.cos());
+    assert!(
+        (volume - expected).abs() / expected < VOLUME_REL_TOL,
+        "volume {volume} vs {expected}"
+    );
+}
+
+// ---- a pocket whose sides are tangent to a bore, a hair past the bore's axis --------------
+
+/// #17098, with the report's numbers: a block with a bore of radius 4.5 along z through it,
+/// cut by a pocket 2 deep at the block's end face `z = 26` (its end 1.5 micron short of the
+/// face), from the block's bottom face to 0.005 above the bore's axis, whose two sides are
+/// tangent to the bore. At the end face, the bore's circle and each of the pocket's edges
+/// along a side run 0.005 side by side from the tangent point to where the pocket's top
+/// meets the circle, 2.8 micron apart there, within the edges' tolerance. The boolean finds
+/// each such stretch twice: as the circle's arc against the pocket's end face, and as the
+/// pocket's edge against the block's end face. The second made a second edge in the block's
+/// end face beside the arc, and the pocket's edge, related to the arc, was asked for it too:
+/// "another entity is already related to the other one". On the side where the bore's seam
+/// is the two are definitions of one proto edge; on the other, of two proto edges between
+/// the same proto vertices.
+#[test]
+fn a_pocket_tangent_to_a_bore_just_past_its_axis_cuts() {
+    let (cx, cy, r) = (-26.724_830_725_384_454, 4.363_269_403_785_069, 4.5);
+    let bottom = -2.311_730_596_423_852;
+    let (x0, x1) = (-31.224_830_725_366_328, -22.224_830_725_456_723);
+    let (top, z1) = (bottom + 6.68, 25.999_998_476);
+    let (height, length) = (14.55, 26.0);
+
+    let mut k = rig_kernel();
+    let block = api::create_box(
+        &mut k,
+        Point3::new(cx - 18.0, bottom, 0.0),
+        36.0,
+        height,
+        length,
+    )
+    .unwrap();
+    let bore = api::create_cylinder(&mut k, Point3::new(cx, cy, -1.0), r, length + 2.0).unwrap();
+    let block = boolean_difference(&mut k, block, bore).unwrap();
+    let pocket = api::create_box(
+        &mut k,
+        Point3::new(x0, bottom, z1 - 2.0),
+        x1 - x0,
+        top - bottom,
+        2.0,
+    )
+    .unwrap();
+    let mut result = boolean_difference(&mut k, block, pocket).unwrap();
+    let check = check_brep(&mut k, &mut result, CheckLevel::Level2).unwrap();
+    assert!(check.is_valid(), "Level2 {:?}", check.lines());
+    // the pocket takes its box less the bore's part of it, the circle below the chord `h`
+    // above its centre
+    let h = top - cy;
+    let below = PI * r * r / 2.0 + h * (r * r - h * h).sqrt() + r * r * (h / r).asin();
+    let pocket_material = ((x1 - x0) * (top - bottom) - below) * 2.0;
+    let want = 36.0 * height * length - PI * r * r * length - pocket_material;
+    let got = volume_of(&k, &mut result);
+    assert!(
+        (got - want).abs() <= VOLUME_REL_TOL * want,
+        "volume {got} vs {want}"
+    );
+}
+
+// ---- a slot cut across a hole tangent to the face it starts on -------------------------
+
+/// The block of #16937: the 40 x 20 rectangle `x` in `[-40, 0]`, `y` in `[-10, 10]` less
+/// the circle of radius 8 about `(-20, -2)`, which touches the side `y = -10` at
+/// `(-20, -10)`, swept 60 along z. Its profile is one loop that runs along that side to the
+/// tangent point, round the circle and on along the side, as a sketch's region is, so the
+/// block pinches to no thickness along the line `x = -20`, `y = -10`, where it has two
+/// edges between the same two vertices: the edge between the side's two parts and the seam
+/// of the hole's wall. The block checks clean at Level2.
+fn block_with_a_tangent_hole(k: &mut Kernel) -> solidcore::Result<Brep> {
+    use solidcore::primitive::api_curves as curves;
+    let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
+    let line = |a: Point3, b: Point3| Curve::from(curves::create_line_segment(a, b).unwrap());
+    let profile = [
+        line(p(-40.0, -10.0), p(-20.0, -10.0)),
+        Curve::from(curves::create_arc(p(-20.0, -2.0), 8.0, -90.0, 270.0)?),
+        line(p(-20.0, -10.0), p(0.0, -10.0)),
+        line(p(0.0, -10.0), p(0.0, 10.0)),
+        line(p(0.0, 10.0), p(-40.0, 10.0)),
+        line(p(-40.0, 10.0), p(-40.0, -10.0)),
+    ];
+    let refs: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
+    create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), 60.0, true)
+}
+
+/// #16937: a slot cut from the block's side `y = -10`, 18 deep, 8 high (`z` in `[24, 32]`)
+/// and past both of its ends. The cutter's face on that side is coplanar with the side on
+/// both sides of the pinch line and tangent to the wall along it, so its one edge along the
+/// line was defined against both of the block's edges there and related to both: "another entity is already
+/// related to the other one". The hole lies within the slot's depth, so the cut takes the
+/// slot's whole box out of the block, hole and all; the block keeps the pinch above and
+/// below the slot.
+#[test]
+fn a_slot_across_a_hole_tangent_to_its_face_cuts() {
+    let mut k = rig_kernel();
+    let mut block = block_with_a_tangent_hole(&mut k).unwrap();
+    let block_volume = volume_of(&k, &mut block);
+    let want_block = 40.0 * 20.0 * 60.0 - PI * 64.0 * 60.0;
+    assert!(
+        (block_volume - want_block).abs() <= VOLUME_REL_TOL * want_block,
+        "block volume {block_volume} vs {want_block}"
+    );
+
+    let slot = api::create_box(&mut k, Point3::new(-50.0, -10.0, 24.0), 60.0, 18.0, 8.0).unwrap();
+    let mut result = boolean_difference(&mut k, block, slot).unwrap();
+    // the slot's box within the block, less the hole's part of it, is gone
+    let want = want_block - 8.0 * (40.0 * 18.0 - PI * 64.0);
+    let check = check_brep(&mut k, &mut result, CheckLevel::Level2).unwrap();
+    assert!(check.is_valid(), "Level2 {:?}", check.lines());
+    let got = volume_of(&k, &mut result);
+    assert!(
+        (got - want).abs() <= VOLUME_REL_TOL * want,
+        "volume {got} vs {want}"
+    );
 }

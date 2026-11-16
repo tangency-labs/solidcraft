@@ -51,7 +51,7 @@ pub const TABLE: &[(&str, Class)] = &[
     // the profiler: timed spans for every layer, the kernel's calls to commands (no workspace dependencies)
     ("profile", Class::Standalone),
     ("sketch", Class::Layer(1)),
-    // sheet development: a sheet of panels and joints laid out into its flat pattern and folded back
+    // sheet development: solidcore's (solidcore-ops' develop and query) with SolidCraft's wording of its refusals
     ("develop", Class::Layer(1)),
     // the B-rep kernel, solidcore (the Rust port of NVIDIA's SMLib, ADR 0002); only the kernel uses it
     ("smlib", Class::Layer(1)),
@@ -73,6 +73,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("craft-plugin-wasm", Class::Shared),
     // the sRGB transfer rule and the surface-analysis palette, read by the renderer and the theme (#13291)
     ("color", Class::Shared),
+    // length display: a millimetre value in a design unit with its decimal places (no dependencies)
+    ("display-units", Class::Shared),
     // the widget handle and rect registry UI components publish into and scenarios/the control channel read (#12936)
     ("ui-registry", Class::Shared),
     // message catalogs' machinery and bidirectional text: lookup, formatting, language choice (#13290)

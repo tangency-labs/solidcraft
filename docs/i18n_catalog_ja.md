@@ -217,7 +217,6 @@
 | Create Sketch | スケッチを作成 | `ui.create_sketch` |
 | CREATE SKETCH | スケッチを作成 | `ui.heading_create_sketch` |
 | CSV or JSON: updates existing parameters, adds new ones | CSVまたはJSON：既存のパラメータを更新し、新しいパラメータを追加します | `CSV or JSON: updates existing parameters, adds new ones` |
-| Cube | キューブ | `Cube` |
 | current | 現在 | `ui.current` |
 | Curvature | 曲率 | `ui.curvature` |
 | Curvature Comb Analysis | 曲率コーム解析 | `cmd.inspect_curvature_comb` |
