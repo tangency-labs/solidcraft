@@ -79,7 +79,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.keep_operand_uv_trims = true;
     f.proto_vertex_miss_is_false = true;
     f.revolve_analytic_profile_faces = true;
-    f.revolve_holed_profile_void = true;
     f.join_touching_loops = true;
     f.offset_analytic_mate_edges = true;
     f.local_operation_refuses_loose_tangent_edges = true;
