@@ -1082,6 +1082,9 @@ preference_settings! {
     trusted_signing_keys: String = String::new(), PAGE_SECURITY;
     /// Verify a design's signature when it opens. Off: opening reads no payload twice.
     verify_opened_designs: bool = false, PAGE_SECURITY => check_id_help("prefs.security.verify_opened", "prefs.security.verify_opened_help");
+    /// Report a bug (the title bar's button, Help › Report an Issue, Create Issue) opens the
+    /// public GitHub draft it opened before tickets, instead of the report that files a ticket.
+    report_on_github: bool = false, PAGE_SECURITY => check_id_help("prefs.reports.github", "prefs.reports.github_help");
     /// With a dialog open, typing the first letter of a button's label presses it: O for OK,
     /// C for Cancel (#9841). Off by default: typing does nothing to the buttons, as before.
     /// A letter that fits two buttons does nothing, and a focused text field keeps the keystroke.
@@ -1203,12 +1206,17 @@ preference_settings! {
     /// A small dot at every vertex wherever edges are drawn (#7834). Off by default: the viewport
     /// draws edges only, as it always has.
     vertex_markers: bool = false;
+    /// A selected whole body draws its hidden edges dimmed through the model, as hovering one did
+    /// before. Off by default: a selected body is tinted, and neither hover nor selection shows
+    /// the edges the model hides.
+    show_selected_hidden_edges: bool = false, PAGE_GRAPHICS => check_id("prefs.show_selected_hidden_edges");
     /// A preview of a feature that changes a body draws the surface it adds in the preview
     /// colour, working out face by face which surface that is. Off: the body is drawn as itself
     /// and nothing is worked out (`preview::Colors::tint_new`).
     preview_tint_new_faces: bool = true, PAGE_GRAPHICS => check_id("prefs.preview_tint_new_faces");
     /// A preview that removes material shows the removed shape as a red see-through ghost. Off:
     /// the ghost is fully transparent and only its outline is drawn (`preview::Colors::cut_tint`).
+    /// A Combine's preview always shows its ghosts.
     cut_preview_tint: bool = true, PAGE_GRAPHICS => check_id("prefs.cut_preview_tint");
     /// Restore the previous platform-specific fixed Render preview geometry budget.
     render_previous_geometry_budget: bool = false, PAGE_GRAPHICS => check_id("prefs.render_previous_geometry_budget");
@@ -1363,6 +1371,9 @@ preference_settings! {
     /// Show engine-derived persistent selection in the ribbon; off retains neutral buttons.
     persistent_ribbon_pressed: bool = true, PAGE_LAYOUT;
     viewport_analysis_status: bool = true, PAGE_GRAPHICS;
+    /// An idle Escape (nothing else owns it) turns off the newest analysis or the section view,
+    /// as before. Off by default: they close only from their status item, toggle or command.
+    escape_closes_analyses: bool = false, PAGE_GRAPHICS;
     viewport_section_status: bool = true, PAGE_GRAPHICS;
     viewport_status_details: bool = true, PAGE_GRAPHICS;
     viewport_status_summary: bool = true, PAGE_GRAPHICS;
@@ -1373,6 +1384,9 @@ preference_settings! {
     /// shown, and has them back when it is shown again (#9360). Off by default: a switch cancels
     /// them and shows the MODEL tab.
     keep_work_on_tab_switch: bool = false, PAGE_LAYOUT;
+    /// Each design tab keeps its toolbar tab (MODEL, SURFACE, ...) while another design is shown,
+    /// with or without `keep_work_on_tab_switch`. Off: a switch shows the MODEL tab, as before.
+    remember_toolbar_tab: bool = false, PAGE_LAYOUT;
     /// Hovering a result in Search commands shows the command's place in the ribbon: its tab,
     /// its button or its row in a section's drop-down (#7287). A command started from the search
     /// blinks there, and a running command that sits in a drop-down marks its section label. Off
@@ -1390,7 +1404,7 @@ preference_settings! {
     tab_double_click_renames: bool = true, PAGE_LAYOUT;
     /// A design's views (Model, Sketch, Sheet, Render, Animation) are tabs inside its tab; off, the
     /// design keeps one tab and a view switcher lists them.
-    design_views_as_tabs: bool = true, PAGE_LAYOUT;
+    design_views_as_tabs: bool = false, PAGE_LAYOUT;
     /// A drawing sheet opens as a view (a sub-tab) of its design.
     design_sub_tab_sheets: bool = true, PAGE_LAYOUT;
     /// Editing a sketch opens it as a view of its design; Finish Sketch returns to the previous view.
@@ -1401,6 +1415,12 @@ preference_settings! {
     design_reuse_views: bool = true, PAGE_LAYOUT;
     /// A design opens with the views it had when it was last closed.
     design_reopen_views: bool = false, PAGE_LAYOUT;
+    /// Windows only: while the window is dragged by its title bar, nothing is drawn, so the window
+    /// follows the pointer smoothly; animations and progress pause and the picture catches up when
+    /// the drag ends (#13991). Off (the default): the window keeps drawing during the drag and
+    /// every move step renders a frame, as before. Passed to winit at once, no restart
+    /// ([`WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE`]).
+    windows_smooth_window_drag: bool = false, PAGE_LAYOUT;
     /// Where a dialog's OK and Cancel sit: under its inputs (the default) or in its title row (#6708).
     dialog_buttons: crate::ui_kit::DialogButtons = Default::default(), PAGE_LAYOUT;
     /// Where notices and offers stack: the view's bottom-right corner (the default) or the bottom
@@ -1699,6 +1719,9 @@ preference_settings! {
     /// negative or past the main screen when the window sits on another one).
     agent_chat_popped: bool = false, PAGE_ASSISTANT;
     agent_chat_window: Option<[f32; 4]> = None, PAGE_ASSISTANT;
+    /// Each reply's thinking (the dimmed text a model streams while it works) starts folded, with
+    /// a control to open it (#17072). Off: it is shown open, as before.
+    agent_thinking_folded: bool = true, PAGE_ASSISTANT;
     /// Changes the agent may make for one message; 0 is no limit.
     agent_chat_turn_limit: u32 = crate::agent_chat::gate::DEFAULT_TURN_LIMIT, PAGE_ASSISTANT;
     /// Custom instructions (#8220): text the agent chat adds to its system note when a session
@@ -2891,6 +2914,36 @@ pub fn request_graphics_restart(app: &mut SolveApp) -> Result<(), String> {
     Ok(())
 }
 
+/// Pausing drawing while the window is dragged (`windows_smooth_window_drag`) is a choice on
+/// Windows only: the row is drawn and `ui.prefs` lists and sets it there and nowhere else.
+pub const WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE: bool = cfg!(target_os = "windows");
+
+const WINDOWS_SMOOTH_WINDOW_DRAG_UNAVAILABLE: &str =
+    "`windows_smooth_window_drag` is available on Windows only: elsewhere the system decides how a dragged window moves";
+
+/// `ui.prefs` refuses `windows_smooth_window_drag` where it doesn't exist (`available`:
+/// [`WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE`]).
+fn refuse_unavailable_preferences(p: &serde_json::Value, available: bool) -> Result<(), String> {
+    if !available && p.get("windows_smooth_window_drag").is_some() {
+        return Err(WINDOWS_SMOOTH_WINDOW_DRAG_UNAVAILABLE.into());
+    }
+    Ok(())
+}
+
+/// A reply listing the preferences, without the ones this system doesn't have.
+fn preferences_reply(p: &Prefs) -> Result<serde_json::Value, String> {
+    preferences_reply_where(p, WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE)
+}
+
+/// [`preferences_reply`], with `windows_smooth_window_drag` listed only where it is `available`.
+fn preferences_reply_where(p: &Prefs, available: bool) -> Result<serde_json::Value, String> {
+    let mut out = serde_json::to_value(p).map_err(|e| e.to_string())?;
+    if !available && let Some(o) = out.as_object_mut() {
+        o.remove("windows_smooth_window_drag");
+    }
+    Ok(out)
+}
+
 /// Write ordinary startup settings without changing a backend choice or its recovery record.
 fn save_graphics(app: &SolveApp) {
     if let Some(path) = &app.services.graphics_path {
@@ -3562,7 +3615,7 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
     if button.is_some() {
         // Cancel and Restore Defaults can change the angle too.
         follow_view_fov(app);
-        out = serde_json::to_value(&app.preferences).map_err(|e| e.to_string())?;
+        out = preferences_reply(&app.preferences)?;
     }
     if let Some(o) = out.as_object_mut() {
         if let serde_json::Value::Object(options) = serde_json::to_value(theme_options_reply(app)).map_err(|e| e.to_string())? {
@@ -4377,6 +4430,7 @@ fn prepare_preferences(
             return Err(format!("`{key}` must be 0.001…180 degrees"));
         }
     }
+    refuse_unavailable_preferences(p, WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE)?;
     let mut cur = serde_json::to_value(base).map_err(|e| e.to_string())?;
     if let (Some(o), Some(src)) = (cur.as_object_mut(), p.as_object()) {
         for (k, v) in src {
@@ -4624,7 +4678,7 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
         up_axis_changed(app);
     }
     follow_view_fov(app);
-    serde_json::to_value(&app.preferences).map_err(|e| e.to_string())
+    preferences_reply(&app.preferences)
 }
 
 #[cfg(test)]
@@ -6846,11 +6900,13 @@ mod tests {
             ("ribbon_labels", json!(false), PAGE_LAYOUT),
             ("persistent_ribbon_pressed", json!(false), PAGE_LAYOUT),
             ("viewport_analysis_status", json!(false), PAGE_GRAPHICS),
+            ("escape_closes_analyses", json!(true), PAGE_GRAPHICS),
             ("viewport_section_status", json!(false), PAGE_GRAPHICS),
             ("viewport_status_details", json!(false), PAGE_GRAPHICS),
             ("viewport_status_summary", json!(false), PAGE_GRAPHICS),
             ("sketch_tab_always", json!(true), PAGE_LAYOUT),
             ("keep_work_on_tab_switch", json!(true), PAGE_LAYOUT),
+            ("remember_toolbar_tab", json!(false), PAGE_LAYOUT),
             ("ribbon_reveal", json!(true), PAGE_LAYOUT),
             ("pinned_constraints_in_grid", json!(false), PAGE_LAYOUT),
             ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
@@ -7361,7 +7417,7 @@ mod tests {
         let on = DesignTabPrefs::from(&h.app.preferences);
         assert_eq!(
             [on.views_as_tabs, on.sub_tab_sheets, on.sub_tab_sketches, on.sub_tab_render, on.reuse_views, on.reopen_views],
-            [true, true, true, true, true, false]
+            [false, true, true, true, true, false]
         );
         let old = lenient(&json!({"theme": "light"}));
         assert_eq!(DesignTabPrefs::from(&old), on, "saved before they existed");
@@ -7387,7 +7443,7 @@ mod tests {
                 flipped.reuse_views,
                 flipped.reopen_views
             ],
-            [false, false, false, false, false, true]
+            [true, false, false, false, false, true]
         );
         defaults(&mut h.app, PAGE_LAYOUT);
         assert_eq!(DesignTabPrefs::from(&h.app.preferences), on, "Layout's Restore Defaults");
@@ -11076,6 +11132,95 @@ mod tests {
         assert!(!h.app.preferences.construct_menu_groups);
     }
 
+    /// Pausing drawing while the window is dragged: off by default (also for settings saved before
+    /// it existed), set by `ui.prefs` and saved, put back by Layout's reset and that reset taken back by
+    /// Cancel. On other systems the preference doesn't exist for scripts.
+    #[test]
+    fn windows_smooth_window_drag_is_set_saved_and_reset_with_layout_on_windows_only() {
+        assert!(!Prefs::default().windows_smooth_window_drag);
+        assert!(!lenient(&json!({"theme":"light"})).windows_smooth_window_drag, "settings without it read as off");
+        let mut h = crate::scenario::Harness::new();
+        let listed = h.call("ui.prefs", json!({}));
+        assert_eq!(listed["result"].get("windows_smooth_window_drag").is_some(), WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE, "{listed}");
+        let out = h.call("ui.prefs", json!({"windows_smooth_window_drag": true}));
+        if WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE {
+            assert_eq!(out["result"]["windows_smooth_window_drag"], true, "{out}");
+            assert!(h.app.preferences.windows_smooth_window_drag);
+            let mut restored = SolveApp::new(Default::default(), Default::default());
+            restored.load_prefs(&h.app.prefs());
+            assert!(restored.preferences.windows_smooth_window_drag, "saved");
+            let reset = h.call("ui.prefs", json!({"open": "Layout", "button": "defaults"}));
+            assert!(!h.app.preferences.windows_smooth_window_drag, "Layout's reset turns it off");
+            assert_eq!(reset["result"]["windows_smooth_window_drag"], false, "{reset}");
+            h.call("ui.prefs", json!({"button": "cancel"}));
+            assert!(h.app.preferences.windows_smooth_window_drag, "Cancel takes the reset back");
+            assert!(h.call("ui.prefs", json!({"windows_smooth_window_drag": "on"}))["error"].as_str().is_some(), "a refused value");
+            assert!(h.app.preferences.windows_smooth_window_drag, "changes nothing");
+        } else {
+            let error = out["error"].as_str().unwrap_or_default();
+            assert!(error.contains("windows_smooth_window_drag") && error.contains("Windows only"), "{out}");
+            assert!(!h.app.preferences.windows_smooth_window_drag, "a refused value changes nothing");
+            let reset = h.call("ui.prefs", json!({"open": "Layout", "button": "defaults"}));
+            assert!(reset["result"].get("windows_smooth_window_drag").is_none(), "{reset}");
+            h.call("ui.prefs", json!({"button": "cancel"}));
+        }
+    }
+
+    /// Where `windows_smooth_window_drag` exists and where it doesn't, decided from an explicit input
+    /// so both sides run on every system: the refusal, the reply and the row; and Layout's reset.
+    #[test]
+    fn windows_smooth_window_drag_exists_where_available_for_scripts_and_the_row() {
+        let set = json!({"windows_smooth_window_drag": true});
+        // `ui.prefs` sets it where it exists and refuses it elsewhere, with a message that says so.
+        assert_eq!(refuse_unavailable_preferences(&set, true), Ok(()));
+        let refused = refuse_unavailable_preferences(&set, false).unwrap_err();
+        assert!(refused.contains("windows_smooth_window_drag") && refused.contains("Windows only"), "{refused}");
+        assert_eq!(refuse_unavailable_preferences(&json!({"msaa": 4}), false), Ok(()), "other keys are not refused");
+        // Replies list it where it exists only, and nothing else changes.
+        let p = Prefs { windows_smooth_window_drag: true, ..Prefs::default() };
+        let (listed, stripped) = (preferences_reply_where(&p, true).unwrap(), preferences_reply_where(&p, false).unwrap());
+        assert_eq!(listed["windows_smooth_window_drag"], true);
+        assert!(stripped.get("windows_smooth_window_drag").is_none(), "{stripped}");
+        let mut without = listed.clone();
+        if let Some(o) = without.as_object_mut() {
+            o.remove("windows_smooth_window_drag");
+        }
+        assert_eq!(stripped, without, "only that key goes");
+        // Layout's reset turns it off; the other pages' resets leave it alone.
+        for page in 0..PAGES.len() {
+            let mut reset = p.clone();
+            reset_preferences(&mut reset, page);
+            assert_eq!(reset.windows_smooth_window_drag, page != PAGE_LAYOUT, "page {page}");
+        }
+        // The row is drawn where the preference exists only.
+        let mut h = crate::scenario::Harness::new();
+        for available in [false, true] {
+            let _ = h.ctx.run_ui(egui::RawInput::default(), |ui| {
+                crate::scenario::clear_handles();
+                super::interface::windows_smooth_window_drag_row(&mut h.app, ui, available);
+            });
+            assert_eq!(crate::scenario::handle_at("prefs:windows_smooth_window_drag").is_some(), available, "available: {available}");
+        }
+    }
+
+    /// The row is on Layout on Windows only, and it changes the preference.
+    #[test]
+    fn the_windows_smooth_window_drag_row_is_drawn_on_windows_only() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open": "Layout"}));
+        h.frames(4);
+        if !WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE {
+            assert!(crate::scenario::handle_at("prefs:windows_smooth_window_drag").is_none(), "the row is on Windows only");
+            return;
+        }
+        super::reveal_preference(&mut h, "prefs:windows_smooth_window_drag");
+        let checkbox = crate::scenario::handle_at("prefs:windows_smooth_window_drag").unwrap();
+        h.call("ui.click", json!({"x": checkbox.x, "y": checkbox.y}));
+        assert!(h.app.preferences.windows_smooth_window_drag, "the row turns it on");
+        h.call("ui.click", json!({"x": checkbox.x, "y": checkbox.y}));
+        assert!(!h.app.preferences.windows_smooth_window_drag, "and off");
+    }
+
     #[test]
     fn persistent_ribbon_pressed_preference_checkbox_control_persists_cancels_and_resets() {
         assert!(Prefs::default().persistent_ribbon_pressed);
@@ -11255,6 +11400,30 @@ mod tests {
         }
         assert_eq!(h.app.session.revision, revision);
         assert_eq!(h.app.session.doc.to_json(), design);
+    }
+
+    #[test]
+    fn escape_closes_analyses_preference_is_off_by_default_and_its_chip_persists_cancels_and_resets() {
+        assert!(!Prefs::default().escape_closes_analyses);
+        assert!(!lenient(&json!({"theme":"light"})).escape_closes_analyses);
+        assert!(!lenient(&json!({"escape_closes_analyses":"yes"})).escape_closes_analyses);
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open":"Graphics"}));
+        super::reveal_preference(&mut h, "prefs:escape_closes_analyses");
+        let chip = crate::scenario::handle_at("prefs:escape_closes_analyses").unwrap();
+        h.call("ui.click", json!({"x":chip.x,"y":chip.y}));
+        assert!(h.app.preferences.escape_closes_analyses);
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["escape_closes_analyses"], true);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.preferences.escape_closes_analyses);
+        h.call("ui.prefs", json!({"open":"Graphics","escape_closes_analyses":true,"button":"apply"}));
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(restored.preferences.escape_closes_analyses);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(!h.app.preferences.escape_closes_analyses);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.preferences.escape_closes_analyses);
     }
 
     #[test]

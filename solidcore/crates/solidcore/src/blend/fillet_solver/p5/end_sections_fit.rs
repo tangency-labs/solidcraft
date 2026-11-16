@@ -2,7 +2,7 @@
 //! Nx1 end lies on its end face.
 //!
 //! Not upstream (SMLib 1.0.1 has none): the SolidCraft fork's tangency-labs/smlib
-//! `a307480`, used only with the opt-in `Kernel::fixes.fillet_cliff_overflow` (WR-631),
+//! `a307480` (WR-631), used
 //! in the executive's cliff-overflow choice: an end section that runs off its end face
 //! under material overflows it, and the blend is built as a cliff overflow is.
 //!
@@ -27,7 +27,7 @@ use crate::kernel::Kernel;
 use crate::math::{Point3, BIG_DOUBLE};
 use crate::topology::{edge, edgeuse::p1 as eu, vertex, Brep, FaceId};
 
-use super::rails_fit::is_concave_edge;
+use super::rails_fit::{edge_bounds_material, is_concave_edge};
 
 /// `smos_Min(a, b)`: `a < b ? a : b`.
 fn smos_min(a: f64, b: f64) -> f64 {
@@ -73,30 +73,63 @@ fn rail_end_past_side_edge_end(
     Ok((end - v_point).dot(axis) / len > len + tol)
 }
 
-/// The far end (away from `v`) of edge `side`.
-fn far_end(
+/// The side edge `side` from `v` with the edges it runs on into between the same two faces,
+/// each with its end away from `v`, in order: at each end, the run goes on along the one other
+/// edge of those two faces there (a side split by a seam, such as a tube's joint on an end face
+/// split by the tube's cylinder seam, #16654), and stops where there is none or more than one,
+/// or back at `v` (a closed run). An unsplit side is itself alone. Each end of the run is still
+/// judged for what stands on the end face there. The walk ends: an edge joins the run once.
+fn side_run(
     target: &Brep,
     side: crate::topology::EdgeId,
     v: crate::topology::VertexId,
-) -> Result<Option<Point3>> {
-    let (a, b) = edge::start_end_vertices(target, side)?;
-    let far = if a == Some(v) { b } else { a };
-    far.map(|f| vertex::point(target, f)).transpose()
+) -> Result<Vec<(crate::topology::EdgeId, crate::topology::VertexId)>> {
+    let faces = edge::faces(target, side, None)?;
+    let same_faces = |other: &[FaceId]| {
+        other.len() == faces.len()
+            && other.iter().all(|f| faces.contains(f))
+            && faces.iter().all(|f| other.contains(f))
+    };
+    let mut run = Vec::new();
+    let (mut e, mut from) = (side, v);
+    loop {
+        let (a, b) = edge::start_end_vertices(target, e)?;
+        let Some(far) = (if a == Some(from) { b } else { a }) else {
+            break;
+        };
+        run.push((e, far));
+        if far == v {
+            break;
+        }
+        let mut next = None;
+        let mut ambiguous = false;
+        for n in vertex::edges(target, far, None)? {
+            if n == e || run.iter().any(|(r, _)| *r == n) {
+                continue;
+            }
+            if same_faces(&edge::faces(target, n, None)?) {
+                ambiguous |= next.is_some();
+                next = Some(n);
+            }
+        }
+        match next.filter(|_| !ambiguous) {
+            Some(n) => (e, from) = (n, far),
+            None => break,
+        }
+    }
+    Ok(run)
 }
 
-/// Whether face `g` has a concave edge, other than `side`, at `side`'s end away from `v`.
-fn concave_edge_of_face_at_far_end(
+/// Whether face `g` has a concave edge, other than one of the side's `run`, at vertex `at`.
+fn concave_edge_of_face_at(
     k: &Kernel,
     target: &mut Brep,
-    side: crate::topology::EdgeId,
-    v: crate::topology::VertexId,
+    run: &[(crate::topology::EdgeId, crate::topology::VertexId)],
+    at: crate::topology::VertexId,
     g: FaceId,
 ) -> Result<bool> {
-    let (a, b) = edge::start_end_vertices(target, side)?;
-    let far = if a == Some(v) { b } else { a };
-    let Some(far) = far else { return Ok(false) };
-    for e in vertex::edges(target, far, None)? {
-        if e == side || !edge::faces(target, e, None)?.contains(&g) {
+    for e in vertex::edges(target, at, None)? {
+        if run.iter().any(|(r, _)| *r == e) || !edge::faces(target, e, None)?.contains(&g) {
             continue;
         }
         if is_concave_edge(k, target, e)? {
@@ -143,6 +176,13 @@ impl FilletSolver {
             .ok_or_else(|| SolidError::blend_missing(OP, "the solver's first edge use"))?;
         let fil_edge = eu::edge(target, fil_eu)?
             .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge use's edge"))?;
+        // A sheet's edge bounds no material: no end section can run off its end face under
+        // material, and there is no body to subtract an overflow from, so the corner trims
+        // the fillet as it does any other (not the fork's, whose `IsConcaveEdge` fails there,
+        // and the fillet with it).
+        if !edge_bounds_material(target, fil_edge)? {
+            return Ok(true);
+        }
         let concave = is_concave_edge(k, target, fil_edge)?;
         let approx_tol = solver.solver().this_approx_tol_3d();
         let ang_tol = solver.solver().this_ang_tol_rad();
@@ -228,7 +268,9 @@ impl FilletSolver {
                         both = false;
                         continue;
                     }
-                    // the rail's crossing of the side edge nearest the vertex
+                    // the rail's crossing of the side nearest the vertex: of the side edge
+                    // or of an edge it runs on into (a side split by a seam is one side)
+                    let run = side_run(target, side, v)?;
                     let mut cc = CurveClassification::new(k);
                     cc.reset(
                         k,
@@ -262,7 +304,7 @@ impl FilletSolver {
                             let on_side = pc.point_class() == PointClassType::Edge
                                 && match pc.object() {
                                     Some(o) => {
-                                        matches!(o.target_entity(), Ok(EntityRef::Edge(e)) if e == side)
+                                        matches!(o.target_entity(), Ok(EntityRef::Edge(e)) if run.iter().any(|(r, _)| *r == e))
                                     }
                                     None => false,
                                 };
@@ -284,15 +326,20 @@ impl FilletSolver {
                         // has a concave edge at P (something stands on it there): the end
                         // section starts past P, under material, and the fillet overflows its
                         // end face. Else, as the fork: not judged.
-                        if match far_end(target, side, v)? {
-                            Some(far) => {
-                                rail_end_past_side_edge_end(k, &curve, v_point, far, approx_tol)?
+                        // P is each end along the side's run: a side split only by a seam
+                        // (the joint of a tube, split by the tube's seam) has no end at the
+                        // split, and the run's next edge there is the side, not something
+                        // standing on the end face (#16654).
+                        if let Some(g) = end_face {
+                            for &(_, far) in &run {
+                                let p = vertex::point(target, far)?;
+                                if rail_end_past_side_edge_end(k, &curve, v_point, p, approx_tol)?
+                                    && concave_edge_of_face_at(k, target, &run, far, g)?
+                                {
+                                    fit = false;
+                                    break;
+                                }
                             }
-                            None => false,
-                        } && end_face.is_some_and(|g| {
-                            concave_edge_of_face_at_far_end(k, target, side, v, g).unwrap_or(false)
-                        }) {
-                            fit = false;
                         }
                         both = false;
                     }

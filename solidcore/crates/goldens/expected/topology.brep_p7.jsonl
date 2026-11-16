@@ -73,7 +73,7 @@
 {"case":"gen0011","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1001.0,0.0,1.0,1.0,1.0,2.0,4.0,5.0]}}
 {"case":"gen0012","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1007.0]}}
 {"case":"gen0013","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.0,1.0,2.0,2.0,1.0,1.0,1.0,2.0]}}
-{"case":"gen0014","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[11.000059999999998,11.000059999999998,74.00086999999999]],"n":17}}}
+{"case":"gen0014","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[1012.0000599999998,1012.0000599999998,2076.00087]],"n":17}}}
 {"case":"gen0015","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"glue_Endcap.smb_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,1.0,1.0,1.0,1.0,1.0,1.0,0.0040511335586128185,0.0040511335586128185]}}
 {"case":"glue_Endcap.smb_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,1.0,1.0,1.0,1.0,1.0,1.0,0.0040511335586128185,0.0040511335586128185]}}
@@ -405,7 +405,7 @@
 {"case":"read_sphere.smb_index0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1001.0]}}
 {"case":"read_sphere.smb_index1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,2.0,2.0,1.0,1.0,1.0,2.0]}}
 {"case":"read_sphere.smb_index2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1007.0]}}
-{"case":"read_sphere.smb_index3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,2.0,2.0,1.0,1.0,1.0,2.0]}}
+{"case":"read_sphere.smb_index3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1006.0]}}
 {"case":"read_sphere.smb_modified0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,2.0,2.0,1.0,1.0,1.0,2.0]}}
 {"case":"read_sphere.smb_modified1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,2.0,2.0,1.0,1.0,1.0,2.0]}}
 {"case":"read_sphere.smb_modified2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,2.0,2.0,1.0,1.0,1.0,2.0]}}

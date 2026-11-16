@@ -42,6 +42,12 @@
 //! - **Open setbacks and each round's side (the fork's ef57570, ce748fa; smlib#125).** An
 //!   open G1 setback corner's spring curves are imprinted with the sheet's boundary and its
 //!   hole's `3 n` edges stay free; a concave round's sheet lies in the void it fills.
+//! - **The Roll-over's certified creases (not the fork's, #10876).** In the blend corner's
+//!   Roll-over second pass (`FilletSession::set_roll_over_pass`), a crease of an exact torus
+//!   with a cliff face parallel to its axis (a plane, or a cylinder touching the convex
+//!   round) is the certified graph over the face's profile
+//!   ([`crate::blend::blend_corner::rollover::geometry::torus_creases`]), within the body's
+//!   tolerance of the torus, not the general intersection.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -57,13 +63,14 @@ use crate::blend::fillet_overflow::{
     pieces_along_edges, pieces_in_face, ExtendOutcome, Extension, Rail,
 };
 use crate::blend::fillet_solver::p5::is_concave_edge;
-use crate::curve::curve::Curve;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::ids;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::object::ObjectRef;
 use crate::kernel::Kernel;
-use crate::math::{Point3, BIG_DOUBLE};
+use crate::math::{Point3, Vec3, BIG_DOUBLE};
+use crate::nurbs::b_spline_curve::ControlPointForm;
 use crate::nurbs::knots::Side;
 use crate::query::brep::BrepIdentity;
 use crate::surface::plane::Plane;
@@ -187,6 +194,451 @@ fn drop_on(
         SolverOperation::Minimize,
     )?;
     Ok(d.success.then_some((d.parameter, d.distance)))
+}
+
+/// The point where `crease` meets `other`, solved from `start` by Gauss-Newton on the
+/// pair (the parameters `(t, u)` minimising `|crease(t) - other(u)|`, each kept within its
+/// curve's natural interval: the crease's piece and the edge's trimmed curve, neither run
+/// on past its ends), which converges quadratically wherever the curves cross, however
+/// shallow the crossing. Accepted only on the solved residual: the point on the crease
+/// when the two points lie within `tol * 1e-6` of each other (iterated on while that
+/// still halves the residual). `None` when a drop or an evaluation fails, the curves are
+/// parallel there to rounding (the system is singular), or no step within 32 reaches the
+/// residual (curves that pass apart, or a meet past either curve's end).
+fn crease_meets(
+    k: &Kernel,
+    crease: &Curve,
+    other: &Curve,
+    start: Point3,
+    tol: f64,
+) -> Result<Option<Point3>> {
+    let (ci, oi) = (crease.natural_interval(), other.natural_interval());
+    let (Some((mut t, _)), Some((mut u, _))) = (
+        drop_on(k, crease, &ci, start)?,
+        drop_on(k, other, &oi, start)?,
+    ) else {
+        return Ok(None);
+    };
+    let accept = tol * 1e-6;
+    let mut found: Option<(f64, Point3)> = None;
+    for _ in 0..32 {
+        let dc = crease.evaluate(k, t, 1, false, false)?;
+        let d_o = other.evaluate(k, u, 1, false, false)?;
+        let (Some(&p), Some(&a), Some(&q), Some(&b)) =
+            (dc.first(), dc.get(1), d_o.first(), d_o.get(1))
+        else {
+            return Ok(None);
+        };
+        let r = p - q;
+        let gap = r.length();
+        // NaN fails every comparison and so is never accepted
+        if gap <= accept {
+            match found {
+                Some((best, _)) if gap > 0.5 * best => break,
+                _ => found = Some((gap, p)),
+            }
+            if gap == 0.0 {
+                break;
+            }
+        }
+        // the least-squares step of r + a dt - b du = 0
+        let (aa, ab, bb) = (a.dot(a), a.dot(b), b.dot(b));
+        let (ar, br) = (a.dot(r), b.dot(r));
+        let det = ab * ab - aa * bb;
+        let solvable = det.abs() > 64.0 * f64::EPSILON * aa * bb;
+        if !solvable {
+            break;
+        }
+        let dt = (ar * bb - ab * br) / det;
+        let du = (ab * ar - aa * br) / det;
+        t = smos_min(smos_max(t + dt, ci.min()), ci.max());
+        u = smos_min(smos_max(u + du, oi.min()), oi.max());
+    }
+    Ok(found.map(|(_, p)| p))
+}
+
+/// The piece of `curve` that runs from `from` to `to` (each dropped onto it), reversed
+/// when they run against its parameter. `None` when either does not drop onto it, or
+/// both drop to one parameter (no piece between them).
+fn piece_between(k: &Kernel, curve: &Curve, from: Point3, to: Point3) -> Result<Option<Curve>> {
+    let natural = curve.natural_interval();
+    let (Some((t0, _)), Some((t1, _))) = (
+        drop_on(k, curve, &natural, from)?,
+        drop_on(k, curve, &natural, to)?,
+    ) else {
+        return Ok(None);
+    };
+    let distinct = t0 < t1 || t1 < t0;
+    if !distinct {
+        return Ok(None);
+    }
+    let mut piece = curve.copy(k)?;
+    let (lo, hi) = if t0 < t1 { (t0, t1) } else { (t1, t0) };
+    let mut ivl = crate::geom::extent1d::Extent1d::from_min_max(lo, hi);
+    if ivl != piece.natural_interval() {
+        piece.trim(
+            k,
+            &mut ivl,
+            crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+        )?;
+    }
+    if t0 > t1 {
+        let old = piece.natural_interval();
+        piece.reverse_parameterization(k, &old)?;
+    }
+    Ok(Some(piece))
+}
+
+/// `piece` as the edge's new 3D curve with its UV trims cleared (`SmBrep::ReplaceCurve`'s
+/// edit on the notification environment).
+fn replace_edge_curve(
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    e: EdgeId,
+    piece: Curve,
+) -> Result<()> {
+    edge::replace_3d_curve(b, e, Some(piece), env)?;
+    for eu in edge::edgeuses(b, e, None, None)? {
+        let _ = eu1::set_uv_trim_curve(b, eu, eu1::UvTrimCurveArg::Null, 0.0, true, None)?;
+    }
+    Ok(())
+}
+
+/// The Euclidean control points of a B-spline kind (a line's or a conic's own
+/// `SmBSplineCurve` included) whose weights are all positive, with the largest coordinate
+/// among them: `None` for another kind, a base without its NURB, or a weight that is not
+/// positive (NaN included). Such a curve lies in their convex hull.
+fn hull_points(curve: &Curve) -> Option<(Vec<Point3>, f64)> {
+    let spline = match curve.kind() {
+        CurveKind::BSpline(c) => c,
+        CurveKind::Line(c) => c.base(),
+        CurveKind::Ellipse(c) => c.base(),
+        CurveKind::Parabola(c) => c.base(),
+        CurveKind::Hyperbola(c) => c.base(),
+        _ => return None,
+    };
+    let n = spline.number_control_points().ok()?;
+    let mut points = Vec::new();
+    let mut scale = 0.0_f64;
+    for i in 0..n {
+        let (p, w) = spline
+            .control_point(ControlPointForm::EuclideanRational, i)
+            .ok()?;
+        let positive = w > 0.0;
+        if !positive && w != crate::nurbs::math::NOW {
+            return None;
+        }
+        scale = smos_max(scale, smos_max(p.x.abs(), smos_max(p.y.abs(), p.z.abs())));
+        points.push(p);
+    }
+    Some((points, scale))
+}
+
+/// The largest coordinate of `p`.
+fn coordinate_scale(p: Point3) -> f64 {
+    smos_max(p.x.abs(), smos_max(p.y.abs(), p.z.abs()))
+}
+
+/// An enclosed bound on the distance from every point of `crease` to the line through
+/// `a` and `b` (`None` when it cannot be bounded: see [`hull_points`], or `a` and `b` one
+/// point). A B-spline with positive weights lies in its control points' convex hull, and
+/// the distance to a line is convex, so its greatest value over the curve is at most the
+/// greatest over the control points. Each distance is computed in the line's own frame
+/// and counted up for its rounding by `64 eps s (1 + D / L)`, with `s` the largest
+/// coordinate, `L = |b - a|` and `D` the largest `|p - a|`: `b - a` and `p - a` take one
+/// rounding per coordinate on `s`, so the unit direction is off by about `eps s / L`,
+/// which moves the perpendicular of a point `D` away by `eps s D / L`; `along` and
+/// `d - dir along` take about eight roundings on `D` (at most `2 sqrt 3 s`), and a
+/// rational point one more for its weight. 64 of each covers them with room to spare.
+fn distance_to_line_bound(crease: &Curve, a: Point3, b: Point3) -> Option<f64> {
+    let (points, hull_scale) = hull_points(crease)?;
+    let axis = b - a;
+    let len = axis.length();
+    let has_length = len > 0.0;
+    if !has_length {
+        return None;
+    }
+    let dir = axis / len;
+    let scale = smos_max(
+        hull_scale,
+        smos_max(coordinate_scale(a), coordinate_scale(b)),
+    );
+    let (mut bound, mut reach) = (0.0_f64, 0.0_f64);
+    for p in points {
+        let d = p - a;
+        let along = d.dot(dir);
+        let off = (d - dir * along).length();
+        if !off.is_finite() {
+            return None;
+        }
+        bound = smos_max(bound, off);
+        reach = smos_max(reach, d.length());
+    }
+    Some(bound + 64.0 * f64::EPSILON * scale * (1.0 + reach / len))
+}
+
+/// An enclosed bound on the distance from every point of `crease` to the plane through
+/// `at` with unit normal `normal` (`None` when it cannot be bounded, see [`hull_points`]):
+/// the distance to a plane is convex, so the control points' greatest bounds the curve's;
+/// each is counted up by `64 eps` of the largest coordinate for its rounding (one per
+/// coordinate of `p - at` and three for the dot product, on that size).
+fn distance_to_plane_bound(crease: &Curve, at: Point3, normal: Vec3) -> Option<f64> {
+    let (points, hull_scale) = hull_points(crease)?;
+    let scale = smos_max(hull_scale, coordinate_scale(at));
+    let mut bound = 0.0_f64;
+    for p in points {
+        let off = (p - at).dot(normal).abs();
+        if !off.is_finite() {
+            return None;
+        }
+        bound = smos_max(bound, off);
+    }
+    Some(bound + 64.0 * f64::EPSILON * scale)
+}
+
+/// Whether `curve` is straight: a line, or a B-spline whose control points all lie on the
+/// line through its ends to rounding. Its ends are returned, with the enclosed bound on
+/// its distance from the line through them (0 for a line).
+fn straight_ends(k: &Kernel, curve: &Curve) -> Result<Option<(Point3, Point3, f64)>> {
+    let ivl = curve.natural_interval();
+    let (a, b) = (
+        curve.evaluate_point(k, ivl.min())?,
+        curve.evaluate_point(k, ivl.max())?,
+    );
+    let deviation = match curve.kind() {
+        CurveKind::Line(_) => Some(0.0),
+        CurveKind::BSpline(_) => {
+            let scale = smos_max(
+                smos_max(a.x.abs(), smos_max(a.y.abs(), a.z.abs())),
+                smos_max(b.x.abs(), smos_max(b.y.abs(), b.z.abs())),
+            );
+            distance_to_line_bound(curve, a, b).filter(|&d| d <= 128.0 * f64::EPSILON * scale)
+        }
+        _ => None,
+    };
+    Ok(deviation.map(|d| (a, b, d)))
+}
+
+/// What a move of an edge onto its crease leaves to the trim: geometry that no longer
+/// meets where it did, which the faces the trim deletes must take away (else the trim
+/// is refused, never accommodated by a larger tolerance).
+#[derive(Debug, Default)]
+struct MovedEdges {
+    /// The edges moved onto their creases.
+    moved: BTreeSet<EdgeId>,
+    /// The moved vertices: an edge through one whose curve misses its new point is off it.
+    vertices: Vec<crate::topology::VertexId>,
+    /// The crease pieces the edges took.
+    pieces: Vec<Curve>,
+}
+
+/// WR-717 (#17633): moves the body edge `e` of face `f`, which `crease` runs along, onto
+/// the crease, so that the sheet's boundary is imprinted and sewn where it is instead of
+/// being drawn to the edge. Each end vertex goes to where the crease meets one of the
+/// vertex's other edges on `f`, within that edge's curve (so the edge keeps its geometry
+/// and is only trimmed to it); the edge takes the crease's piece between them. Edges at a
+/// moved vertex whose curve passes through its new point are trimmed to it; the others,
+/// and the moved edge against its other faces, are recorded in `record` for the trim to
+/// take away. Nothing moves (the imprint then draws the section to the edge, as before)
+/// when: the edge is not straight, or the crease's piece is not enclosed within `tol` of
+/// its line (a bound over the whole piece, [`distance_to_line_bound`]); either end has no
+/// meet within `on_tol`; or a move would leave an edge already moved off its new vertex.
+#[allow(clippy::too_many_arguments)]
+fn move_edge_onto_crease(
+    k: &Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    f: FaceId,
+    e: EdgeId,
+    crease: &Curve,
+    tol: f64,
+    on_tol: f64,
+    record: &mut MovedEdges,
+) -> Result<bool> {
+    let (Some(sv), Some(ev)) = edge::start_end_vertices(b, e)? else {
+        return Ok(false);
+    };
+    if sv == ev {
+        return Ok(false);
+    }
+    let Some((ea, eb, straightness)) = straight_ends(k, &edge_curve(k, b, e)?)? else {
+        return Ok(false);
+    };
+    // the trim checks the moved edge's faces against their planes (below, after the
+    // faces past the creases are deleted): a crease on a curved face is not moved
+    let planar = match face::p2::surface(b, f)? {
+        Some(surface) => crate::blend::fillet_overflow::plane_of(k, surface)?.is_some(),
+        None => false,
+    };
+    if !planar {
+        return Ok(false);
+    }
+    let mut ends = Vec::with_capacity(2);
+    for v in [sv, ev] {
+        let p = vertex::point(b, v)?;
+        let mut q = None;
+        for e2 in vertex::edges(b, v, Some(f))? {
+            if e2 == e {
+                continue;
+            }
+            let other = edge_curve(k, b, e2)?;
+            q = crease_meets(k, crease, &other, p, tol)?;
+            if q.is_some() {
+                break;
+            }
+        }
+        let Some(q) = q else {
+            return Ok(false);
+        };
+        let near = q.distance(p) <= on_tol;
+        if !near {
+            return Ok(false);
+        }
+        ends.push((v, p, q));
+    }
+    if ends.iter().all(|&(_, p, q)| p.distance(q) <= tol * 1e-6) {
+        return Ok(false);
+    }
+    let (Some(&(_, _, qs)), Some(&(_, _, qe))) = (ends.first(), ends.get(1)) else {
+        return Ok(false);
+    };
+    let Some(piece) = piece_between(k, crease, qs, qe)? else {
+        return Ok(false);
+    };
+    // the crease's piece within `tol` of the edge over its whole length (its distance to the
+    // edge's line, and the edge's own from that line)
+    if !matches!(distance_to_line_bound(&piece, ea, eb), Some(d) if d + straightness <= tol) {
+        return Ok(false);
+    }
+    // what each moved vertex does to the edges through it, decided before anything moves
+    let mut trims: Vec<(EdgeId, Curve, Point3, Point3)> = Vec::new();
+    for &(v, _, q) in &ends {
+        for e2 in vertex::edges(b, v, None)? {
+            if e2 == e {
+                continue;
+            }
+            let curve = edge_curve(k, b, e2)?;
+            let through = matches!(
+                drop_on(k, &curve, &curve.natural_interval(), q)?,
+                Some((_, dist)) if dist <= tol * 1e-6
+            );
+            if !through {
+                if record.moved.contains(&e2) {
+                    // an edge already on its crease would be left off its own vertex
+                    return Ok(false);
+                }
+                // left for the trim to take off (checked once it has)
+                continue;
+            }
+            let (Some(a), Some(z)) = edge::start_end_vertices(b, e2)? else {
+                continue;
+            };
+            if a == z || trims.iter().any(|(t, _, _, _)| *t == e2) {
+                // a closed edge through the vertex: its curve already runs through it; an
+                // edge between both moved vertices is trimmed once
+                continue;
+            }
+            let at = |x: crate::topology::VertexId| -> Result<Point3> {
+                Ok(ends
+                    .iter()
+                    .find(|&&(w, _, _)| w == x)
+                    .map_or(vertex::point(b, x)?, |&(_, _, q)| q))
+            };
+            trims.push((e2, curve, at(a)?, at(z)?));
+        }
+    }
+    let mut pieces = Vec::new();
+    for (e2, curve, pa, pz) in trims {
+        let Some(p) = piece_between(k, &curve, pa, pz)? else {
+            return Ok(false);
+        };
+        pieces.push((e2, p));
+    }
+    // the move
+    record.pieces.push(piece.copy(k)?);
+    replace_edge_curve(b, env, e, piece)?;
+    for &(v, _, q) in &ends {
+        let this = (env.key_of)(EntityRef::Vertex(v));
+        let key_of = env.key_of;
+        let vu_ref = |vu: crate::topology::VertexuseId| key_of(EntityRef::Vertexuse(vu));
+        vertex::set_point(
+            b,
+            v,
+            q,
+            &mut *env.records,
+            &mut *env.attributes,
+            env.context.as_deref_mut(),
+            this,
+            &vu_ref,
+        )?;
+    }
+    for (e2, p) in pieces {
+        replace_edge_curve(b, env, e2, p)?;
+    }
+    record.vertices.extend(ends.iter().map(|&(v, _, _)| v));
+    record.moved.insert(e);
+    Ok(true)
+}
+
+/// #17633: whether the trim kept geometry that an edge's move onto its crease left off
+/// (checked once the faces past the creases are deleted; a `true` is refused). Checked on
+/// the geometry, not on ids, so an edge or face the imprint split is still found: an edge
+/// still at a moved vertex that does not run through it (within `tol * 1e-6`), or an edge
+/// along a crease piece (picked by its midpoint) that does not lie, by the enclosed bound
+/// of its control points, on the plane of every face it bounds (a face that is not planar
+/// fails).
+fn move_leftovers_kept(k: &Kernel, target: &Brep, moves: &MovedEdges, tol: f64) -> Result<bool> {
+    let on = tol * 1e-6;
+    for &v in &moves.vertices {
+        if target.vertex(v).is_err() {
+            continue;
+        }
+        let p = vertex::point(target, v)?;
+        for e in vertex::edges(target, v, None)? {
+            let curve = edge_curve(k, target, e)?;
+            let through = matches!(
+                drop_on(k, &curve, &curve.natural_interval(), p)?,
+                Some((_, dist)) if dist <= on
+            );
+            if !through {
+                return Ok(true);
+            }
+        }
+    }
+    if moves.pieces.is_empty() {
+        return Ok(false);
+    }
+    for e in crate::topology::brep::p1::edges(target, None)? {
+        let curve = edge_curve(k, target, e)?;
+        let mid = curve.evaluate_point(k, curve.natural_interval().evaluate(0.5))?;
+        // picks the edges along a piece (the acceptance below is a bound)
+        let mut along = false;
+        for piece in &moves.pieces {
+            along = matches!(
+                drop_on(k, piece, &piece.natural_interval(), mid)?,
+                Some((_, dist)) if dist <= on
+            );
+            if along {
+                break;
+            }
+        }
+        if !along {
+            continue;
+        }
+        for g in edge::faces(target, e, None)? {
+            let plane = match face::p2::surface(target, g)? {
+                Some(surface) => crate::blend::fillet_overflow::plane_of(k, surface)?,
+                None => None,
+            };
+            let on_plane = plane.is_some_and(|(at, normal)| {
+                matches!(distance_to_plane_bound(&curve, at, normal), Some(d) if d <= on)
+            });
+            if !on_plane {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 /// A refusal with its fillet error and typed reason.
@@ -850,6 +1302,8 @@ impl FilletSession<'_> {
         let body_tol = self.objects.target.tolerance();
         // WR-717: the creases that run along an edge of the face they cross
         let mut edge_creases: Vec<Curve> = Vec::new();
+        // #17633: each such crease with the face it crosses
+        let mut face_creases: Vec<(FaceId, Curve)> = Vec::new();
         // WR-717: the body's edges those creases stand for
         let mut crease_edges: Vec<EdgeId> = Vec::new();
         for s in crate::topology::brep::p1::faces(&sheet, None)? {
@@ -904,7 +1358,27 @@ impl FilletSession<'_> {
                 // fitted to the body's own accuracy, so that creases meeting at a corner of
                 // the sheet (on two faces past a cliff) meet there within it; exact
                 // sections stay exact
-                let found = creases(k, &mut sheet, s, self.objects.target, f, body_tol)?;
+                // Not upstream (#10876): the Roll-over's torus against a cliff face parallel
+                // to its axis, its creases as certified graphs over the face's profile
+                let certified = if self.executive.roll_over_pass {
+                    match (
+                        face::p2::surface(&sheet, s)?,
+                        face::p2::surface(self.objects.target, f)?,
+                    ) {
+                        (Some(torus), Some(cliff)) => {
+                            crate::blend::blend_corner::rollover::geometry::torus_creases(
+                                k, torus, cliff, tol, body_tol,
+                            )?
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                let found = match certified {
+                    Some(found) => found,
+                    None => creases(k, &mut sheet, s, self.objects.target, f, body_tol)?,
+                };
                 // each crease where it lies inside both faces
                 let mut in_face = Vec::new();
                 for c in &found {
@@ -920,6 +1394,7 @@ impl FilletSession<'_> {
                     }
                     for c in in_face.get(first..).unwrap_or_default() {
                         edge_creases.push(c.copy(k)?);
+                        face_creases.push((f, c.copy(k)?));
                     }
                 }
                 let before = pieces.len();
@@ -1113,6 +1588,42 @@ impl FilletSession<'_> {
                     }
                     extensions.extend(made);
                 }
+            }
+        }
+
+        // #17633 (WR-717): each body edge a crease runs along moves onto the crease
+        // first, so that the sheet's boundary is imprinted on its faces and sewn where it
+        // lies, not drawn the crease's gap to the edge (a section's end on an end face
+        // drawn to the old vertex skews the end face's outline by that gap)
+        // (each edge once: a second crease along it, on its other face, is left to the
+        // imprint)
+        let mut moves = MovedEdges::default();
+        for (f, c) in &face_creases {
+            for e in face::p4::edges(self.objects.target, *f, None, false, None)? {
+                if moves.moved.contains(&e) {
+                    continue;
+                }
+                // a candidate: the edge's ends and midpoint within the trim's tolerance of
+                // the crease (the move itself is decided on a bound over the whole edge)
+                let curve = edge_curve(k, self.objects.target, e)?;
+                let ivl = edge::interval(self.objects.target, e)?;
+                let mut along = true;
+                for at in [0.0, 0.5, 1.0] {
+                    let p = curve.evaluate_point(k, ivl.evaluate(at))?;
+                    along = matches!(
+                        drop_on(k, c, &c.natural_interval(), p)?,
+                        Some((_, dist)) if dist <= tol
+                    );
+                    if !along {
+                        break;
+                    }
+                }
+                if !along {
+                    continue;
+                }
+                self.with_target_env(k, |k, b, env, _| {
+                    move_edge_onto_crease(k, b, env, *f, e, c, tol, on_tol, &mut moves)
+                })?;
             }
         }
 
@@ -1331,6 +1842,22 @@ impl FilletSession<'_> {
             }
             Ok(())
         })?;
+        // #17633: what an edge's move onto its crease left off its old geometry is taken off
+        // with the faces past the creases; anything left of it is refused, not kept
+        // within a larger tolerance ([`move_leftovers_kept`])
+        {
+            let kept_off = move_leftovers_kept(k, self.objects.target, &moves, tol)?;
+            if kept_off {
+                return refuse(
+                    note,
+                    refusal(
+                        FilletErrorType::BadMerge,
+                        None,
+                        "Fillet Error: a body edge moved onto a blend's crease leaves geometry the trim does not take off",
+                    ),
+                );
+            }
+        }
 
         // the fillet edges' attribute stays with the executive's own B-reps
         if let (Some(serial), Some(FilletObject::Attribute(handle))) =
@@ -1556,4 +2083,119 @@ pub(super) fn with_target_env_of<R>(
         };
         edit(k, target, &mut env, identity)
     })?
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+
+    use super::*;
+    use crate::nurbs::b_spline_curve::BSplineCurve;
+    use crate::nurbs::crv_basic::Curve as NlCurve;
+    use crate::nurbs::math::{CPoint, NOW};
+
+    /// A cubic S through (0, 0, 0) and (3, 0, 0) that crosses its chord at its middle:
+    /// its ends and midpoint lie on the line, its quarter points `0.2887 h` off it.
+    fn s_curve(h: f64) -> Curve {
+        Curve::from(BSplineCurve::from_nurb(
+            NlCurve::new(
+                vec![
+                    CPoint::new(0.0, 0.0, 0.0, NOW),
+                    CPoint::new(1.0, h, 0.0, NOW),
+                    CPoint::new(2.0, -h, 0.0, NOW),
+                    CPoint::new(3.0, 0.0, 0.0, NOW),
+                ],
+                3,
+                vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            3,
+            false,
+        ))
+    }
+
+    /// The bound the move's gate compares with `tol` (`distance_to_line_bound`, plus
+    /// `straight_ends` for the edge) is over the whole curve, not samples: a crease that
+    /// meets the edge's line at its ends and middle but bows off it between is not within
+    /// `tol`, and is not taken as a straight edge.
+    #[test]
+    fn a_crease_on_the_line_at_three_points_but_bowed_between_is_not_moved_onto_it() {
+        let k = Kernel::default();
+        let (h, tol) = (2e-4, 4e-5);
+        let c = s_curve(h);
+        let (a, b) = (Point3::new(0.0, 0.0, 0.0), Point3::new(3.0, 0.0, 0.0));
+        for t in [0.0, 0.5, 1.0] {
+            let p = c.evaluate_point(&k, t).unwrap();
+            assert!(p.y.abs() <= 1e-15, "t {t}: {p:?} on the line");
+        }
+        // the true deviation, at t = 1/2 -+ sqrt(3)/6: h / (2 sqrt 3) = 0.2887 h
+        let worst = (0..=1000)
+            .map(|i| c.evaluate_point(&k, f64::from(i) / 1000.0).unwrap().y.abs())
+            .fold(0.0_f64, f64::max);
+        assert!(worst > tol, "the S bows {worst} off the line, past tol");
+        let bound = distance_to_line_bound(&c, a, b).unwrap();
+        assert!(
+            bound >= worst,
+            "bound {bound} encloses the deviation {worst}"
+        );
+        assert!(bound > tol, "the gate refuses: bound {bound} > tol {tol}");
+        // and the S is not taken as a straight edge
+        assert!(straight_ends(&k, &c).unwrap().is_none());
+    }
+
+    /// The leftover check refuses what a move left off and passes a body that holds
+    /// together: the trim's `BadMerge` refusal (#17704) is this `true`.
+    #[test]
+    fn a_move_s_leftovers_are_found_on_the_geometry() {
+        use crate::primitive::api_primitives::{create_box, create_cylinder};
+        let mut k = Kernel::default();
+        let tol = 4e-5;
+
+        // a box's vertex: every edge at it runs through it
+        let mut b = create_box(&mut k, Point3::ZERO, 40.0, 20.0, 10.0).unwrap();
+        let v = b.vertices().ids().next().unwrap();
+        let mut moves = MovedEdges {
+            vertices: vec![v],
+            ..MovedEdges::default()
+        };
+        assert!(!move_leftovers_kept(&k, &b, &moves, tol).unwrap());
+        // the vertex moved 1e-6 off its edges (far past `tol * 1e-6`): refused
+        b.vertex_mut(v).unwrap().point.x += 1e-6;
+        assert!(move_leftovers_kept(&k, &b, &moves, tol).unwrap());
+
+        // a box's edge taken as a crease piece: it lies on both its planes
+        let b = create_box(&mut k, Point3::ZERO, 40.0, 20.0, 10.0).unwrap();
+        let e = b.edges().ids().next().unwrap();
+        moves = MovedEdges {
+            pieces: vec![edge_curve(&k, &b, e).unwrap()],
+            ..MovedEdges::default()
+        };
+        assert!(!move_leftovers_kept(&k, &b, &moves, tol).unwrap());
+
+        // a cylinder's rim taken as a crease piece: the rim bounds the curved side, whose
+        // distance no plane bound encloses: refused
+        let c = create_cylinder(&mut k, Point3::ZERO, 5.0, 10.0).unwrap();
+        let rim = c
+            .edges()
+            .ids()
+            .find(|&e| {
+                edge::faces(&c, e, None).unwrap().iter().any(|&g| {
+                    let surface = face::p2::surface(&c, g).unwrap().unwrap();
+                    crate::blend::fillet_overflow::plane_of(&k, surface)
+                        .unwrap()
+                        .is_none()
+                }) && edge::faces(&c, e, None).unwrap().iter().any(|&g| {
+                    let surface = face::p2::surface(&c, g).unwrap().unwrap();
+                    crate::blend::fillet_overflow::plane_of(&k, surface)
+                        .unwrap()
+                        .is_some()
+                })
+            })
+            .expect("a rim between a cap and the side");
+        let moves = MovedEdges {
+            pieces: vec![edge_curve(&k, &c, rim).unwrap()],
+            ..MovedEdges::default()
+        };
+        assert!(move_leftovers_kept(&k, &c, &moves, tol).unwrap());
+    }
 }

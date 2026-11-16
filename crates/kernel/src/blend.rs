@@ -308,17 +308,21 @@ fn fillet_turning(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) ->
 /// [`fillet`], its rounds turning at side edges as `turn` says, with the picks whose edges are
 /// gone: where some of the rounds overflow their faces, those are built first, and a picked edge
 /// one of them removes whole is not rounded (the others round what is left of their edges).
+/// Where SMLib refuses the round of a single edge as too large or fails it as an operation, the
+/// concave round whose contact line runs off the flat face it rolls on is built by carrying that
+/// face on ([`concave_overflow_round`]); where that does not apply, SMLib's error.
 pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<(Body, Vec<Vec3>)> {
     let _span = solidcraft_profile::span("kernel", "fillet");
     body.require_brep("fillet")?;
     match crate::blend_smlib::fillet_removing(body, edges, radius, turn) {
         Ok((b, gone)) => Ok((closed(body, b)?, gone)),
-        Err(KernelError::TooLarge(why)) => match edges {
-            [pick] => match concave_overflow_round(body, *pick, radius, |carried| crate::blend_smlib::fillet(carried, &[*pick], radius, turn))? {
-                Some(b) => Ok((b, Vec::new())),
-                None => Err(KernelError::TooLarge(why)),
-            },
-            _ => Err(KernelError::TooLarge(why)),
+        // Just past the largest round that fits, SMLib fails it as an operation (its status 1001)
+        // rather than sizing it as too large, as it does the chamfer ([`chamfer_carrying_face`]).
+        Err(e @ (KernelError::TooLarge(_) | KernelError::Failed(_))) => match edges {
+            [pick] => concave_overflow_round(body, *pick, radius, |carried| crate::blend_smlib::fillet(carried, &[*pick], radius, turn))?
+                .map(|b| (b, Vec::new()))
+                .ok_or(e),
+            _ => Err(e),
         },
         Err(e) => Err(e),
     }
@@ -326,7 +330,8 @@ pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTur
 
 /// A concave blend (a round or a chamfer) on one straight edge whose contact line runs off the
 /// flat face it rolls on (the face's outline turns away there, into a rounded corner or an
-/// opening), which SMLib refuses (solidcore#3252): `blend` of the edge on the body with that face
+/// opening), which SMLib refuses (solidcore#3252), or just past the largest blend that fits fails
+/// as an operation: `blend` of the edge on the body with that face
 /// carried on as a slab behind its plane, over the edge's length, and of the material that blend
 /// adds, what stands over the face's outline (its sheet thickened along its normal) and what
 /// stands past the edge's line, on the other face's side of it (a box on that side of the line,
@@ -353,6 +358,19 @@ fn concave_overflow_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&B
     // Each step checked as it is built: one whose result the check refuses fails that step, so
     // the caller never gets a body the feature's check refuses later.
     crate::validation::validating(crate::Validation::EachStep, || carried_on_round(body, pick, reach, blend)).0
+}
+
+/// `rounded` (the blend of `body` with `slab` joined to it) less what lies outside `body`, `slab`
+/// and `keep` within a box `room` larger each way than `bounds` (the added material's box):
+/// `body` joined to the added material within `keep`, without taking that material on its own.
+/// `None` where a step fails.
+fn blended_within(body: &Body, slab: &Body, rounded: &Body, keep: &Body, bounds: solidcraft_geom::Aabb3, room: f64) -> Option<Body> {
+    let pad = Vec3::new(room, room, room);
+    let block = crate::box_solid(bounds.min - pad, bounds.max + pad).ok()?;
+    let outside = crate::boolean(&block, keep, crate::BoolOp::Cut).ok()??;
+    let waste = crate::boolean(&outside, slab, crate::BoolOp::Union).ok()??;
+    let waste = crate::boolean(&waste, body, crate::BoolOp::Cut).ok()??;
+    crate::boolean(rounded, &waste, crate::BoolOp::Cut).ok()?
 }
 
 /// A step of [`carried_on_round`] that failed, and why.
@@ -416,13 +434,24 @@ fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -
         let what = "joining the face's prism and the box past the edge's line";
         let keep = crate::boolean(&prism, &beyond, crate::BoolOp::Union).map_err(failed(what))?.ok_or_else(|| nothing(what))?;
         let what = "keeping the added material within the face's outline";
-        let kept = crate::boolean(&fill, &keep, crate::BoolOp::Intersect).map_err(failed(what))?.ok_or_else(|| nothing(what))?;
-        let what = "joining the added material to the body";
-        let joined = crate::boolean(body, &kept, crate::BoolOp::Union).map_err(failed(what))?.ok_or_else(|| nothing(what))?;
+        let kept = crate::boolean(&fill, &keep, crate::BoolOp::Intersect).map_err(failed(what)).and_then(|k| k.ok_or_else(|| nothing(what)));
+        let (joined, history) = match kept {
+            Ok(kept) => {
+                let what = "joining the added material to the body";
+                (crate::boolean(body, &kept, crate::BoolOp::Union).map_err(failed(what))?.ok_or_else(|| nothing(what))?, true)
+            }
+            // Where the contact line runs only just past the face's outline, the added material
+            // is thinner there than the boolean's tolerance and cutting it at the outline fails.
+            // The blended body less what lies outside the body, the slab and the kept region is
+            // the same body and does not cut that sliver on its own. Deliberate: where that fails
+            // too, the first route's failure is the one reported. Its history would run through
+            // four more booleans and is not composed: the result has none.
+            Err(first) => (blended_within(body, &slab, &rounded, &keep, bounds, room).ok_or(first)?, false),
+        };
         let joined = closed(body, joined).map_err(failed("checking that the result is closed"))?;
         let what = "measuring the result";
         if volume(&joined).map_err(failed(what))? > volume(body).map_err(failed(what))? {
-            Ok(over_body_alone(joined, body, e))
+            Ok(if history { over_body_alone(joined, body, e) } else { joined.without_history() })
         } else {
             Err(Some(("checking that the result adds material", "it adds none".to_owned())))
         }
@@ -1777,6 +1806,35 @@ mod tests {
         }
     }
 
+    /// A round likewise: rounded 5.29 its contact on the plate's front face stays short of x 32.5
+    /// (at 32.4970) and the body is SMLib's; just past there SMLib fails the round as an
+    /// operation instead of sizing it, and carried on it builds and grows with its radius. Its
+    /// contact reaches under 0.05 past x 32.5, where the round stands under 2e-4 off the plate
+    /// and the corner's arc drops under 1e-4: what it leaves out past the arc is far under the
+    /// tolerance, and its material is its section over the boss's 24 mm.
+    #[test]
+    fn a_concave_round_just_past_its_face_builds() {
+        let body = boss_on_rounded_plate();
+        assert!(matches!(fillet(&body, &[BOSS_EDGE], 5.32), Err(KernelError::Failed(_))));
+        let (fits, _) = fillet_removing(&body, &[BOSS_EDGE], 5.29, FilletTurn::Mitre).unwrap();
+        let plain = fillet(&body, &[BOSS_EDGE], 5.29).unwrap();
+        assert_eq!(crate::encode_native_body(&fits).unwrap(), crate::encode_native_body(&plain).unwrap());
+        let before = crate::measure(&body).unwrap();
+        let mut last = before.volume;
+        for r in [5.29, 5.32, 5.33, 5.34] {
+            let (out, gone) = fillet_removing(&body, &[BOSS_EDGE], r, FilletTurn::Mitre).unwrap_or_else(|e| panic!("r {r}: {e}"));
+            assert!(gone.is_empty());
+            let (p, _, area) = boss_round_section(r);
+            assert!(p.0 < 32.55, "r {r}: contact at x {}", p.0);
+            let m = crate::measure(&out).unwrap();
+            let added = m.volume - before.volume;
+            assert!(m.shells == 1 && m.volume > last && (24.0 * area - added).abs() < 1e-3, "r {r}: added {added}");
+            assert!(m.bbox.min.dist(before.bbox.min) < 1e-9 && m.bbox.max.dist(before.bbox.max) < 1e-9, "r {r}: {:?}", m.bbox);
+            assert_eq!(faces_from_edge(&out, &body, BOSS_EDGE), 1, "r {r}");
+            last = m.volume;
+        }
+    }
+
     /// What carrying the face on leaves out of a chamfer with contacts `p` on the plate and `q`
     /// on the boss: the part of its section past the r16 corner's arc, none where `p` is short of
     /// x 32.5. At x = 32.5 + u the section is as thick as the chamfer's line stands off the plate
@@ -1890,10 +1948,13 @@ mod tests {
     /// x 30. A chamfer `d` is the triangle of its two sides, `d^2 sin(wedge) / 2`, and past the
     /// end it loses its tip there, `d - 10` long and as high as its line stands off the top at
     /// x 30. Up to 10 it is SMLib's; past it SMLib refuses it and carrying the top on builds it.
-    /// A round whose contacts are 12 from the edge (radius `12 tan(wedge / 2)`) is the kite of
+    /// A round whose contacts are `c` from the edge (radius `c tan(wedge / 2)`) is the kite of
     /// the edge, its contacts and its centre less its sector, and loses what stands past x 30:
-    /// `r - sqrt(r^2 - w^2)` off the top, `w` from 0 to 2 short of its contact. Each blend is one
-    /// face, in one shell.
+    /// `r - sqrt(r^2 - w^2)` off the top, `w` from 0 to `c - 10` short of its contact. With its
+    /// contacts 10.01 and 10.02 from the edge that is under 5e-5 thick at x 30, thinner than the
+    /// boolean that cuts it there takes, and the round is built without cutting it on its own
+    /// (with no history). Each blend is in one shell and none stands past x 30; the chamfers and
+    /// the round 12 from the edge are one face each.
     fn wall_blends_run_on_past_the_tops_end(wedge: f64) {
         let body = walled_plate(wedge);
         let before = crate::measure(&body).unwrap().volume;
@@ -1921,16 +1982,30 @@ mod tests {
             last = m.volume;
         }
         let half = wedge.to_radians() / 2.0;
-        let r = 12.0 * half.tan();
-        assert!(matches!(fillet(&body, &[WALL_EDGE], r), Err(KernelError::TooLarge(_))), "{wedge}°: SMLib refuses r {r}");
-        let (out, gone) = fillet_removing(&body, &[WALL_EDGE], r, FilletTurn::Mitre).unwrap_or_else(|e| panic!("{wedge}°, r {r}: {e}"));
-        assert!(gone.is_empty());
-        let section = 12.0 * r - r * r * (std::f64::consts::FRAC_PI_2 - half);
-        let past = 2.0 * r - (r * r - 4.0).sqrt() - 0.5 * r * r * (2.0 / r).asin();
-        let m = crate::measure(&out).unwrap();
-        let full = 20.0 * (section - past);
-        assert!(m.shells == 1 && (full - (m.volume - before)).abs() < 1e-6, "{wedge}°, r {r}: added {} of {full}", m.volume - before);
-        assert_eq!(faces_from_edge(&out, &body, WALL_EDGE), 1, "{wedge}°, r {r}");
+        let bbox = crate::measure(&body).unwrap().bbox;
+        let mut last = before;
+        for c in [10.01, 10.02, 12.0] {
+            let r = c * half.tan();
+            assert!(matches!(fillet(&body, &[WALL_EDGE], r), Err(KernelError::TooLarge(_))), "{wedge}°: SMLib refuses r {r}");
+            let (out, gone) = fillet_removing(&body, &[WALL_EDGE], r, FilletTurn::Mitre).unwrap_or_else(|e| panic!("{wedge}°, r {r}: {e}"));
+            assert!(gone.is_empty());
+            let section = c * r - r * r * (std::f64::consts::FRAC_PI_2 - half);
+            let w = c - 10.0;
+            let past = w * r - 0.5 * w * (r * r - w * w).sqrt() - 0.5 * r * r * (w / r).asin();
+            let m = crate::measure(&out).unwrap();
+            let full = 20.0 * (section - past);
+            assert!(
+                m.shells == 1 && m.volume > last && (full - (m.volume - before)).abs() < 1e-6,
+                "{wedge}°, r {r}: added {} of {full}",
+                m.volume - before
+            );
+            // nothing of it stands past the top's end
+            assert!(m.bbox.min.dist(bbox.min) < 1e-9 && m.bbox.max.dist(bbox.max) < 1e-9, "{wedge}°, r {r}: {:?}", m.bbox);
+            if c == 12.0 {
+                assert_eq!(faces_from_edge(&out, &body, WALL_EDGE), 1, "{wedge}°, r {r}");
+            }
+            last = m.volume;
+        }
     }
 
     /// With the wall's side leaning back 30° (a wedge of 120°) a blend stands over the wall's
@@ -3010,6 +3085,23 @@ mod tests {
         let actual = crate::measure(&body).unwrap().volume - crate::measure(&out).unwrap().volume;
         assert!((actual - removed).abs() < 1e-3, "{actual} vs {removed}");
         assert_eq!(out.face_count(), body.face_count() + 4);
+        assert!(out.validity().is_empty(), "{:?}", out.validity());
+    }
+
+    /// A cylinder r 10, h 50 whose top rim is chamfered 10, the top's radius (#17198): the
+    /// chamfer takes the whole top and is a cone with its apex on the axis, as a round of 10
+    /// is a dome. It was refused as larger than the faces allow. The cone removes the ring
+    /// between the r 10, h 10 cylinder and the cone in it, two thirds of that cylinder; the
+    /// body keeps the side, the bottom and the cone.
+    #[test]
+    fn a_chamfer_as_large_as_a_cylinder_top_makes_a_cone_to_its_centre() {
+        let can = crate::build::cylinder(Vec3::ZERO, Vec3::Z, 10.0, 50.0).unwrap();
+        let out = chamfer(&can, &[Vec3::new(10.0, 0.0, 50.0)], 10.0).unwrap();
+        let pi = std::f64::consts::PI;
+        let want = pi * 100.0 * 50.0 - 2.0 / 3.0 * pi * 100.0 * 10.0;
+        let got = crate::measure(&out).unwrap().volume;
+        assert!((got - want).abs() < 1e-6 * want, "{got} vs {want}");
+        assert_eq!(out.face_count(), 3);
         assert!(out.validity().is_empty(), "{:?}", out.validity());
     }
 }
