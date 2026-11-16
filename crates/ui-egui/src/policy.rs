@@ -24,6 +24,12 @@ pub const RECOMMENDED: &str = "Recommended";
 /// 0: no update checks. 1: checks at start and once a day. Locks `check_updates`.
 pub const CHECK_FOR_UPDATES: &str = "CheckForUpdates";
 
+/// The organization's name, shown as "Managed by {name}". Mandatory only; it locks nothing.
+pub const ORGANIZATION_NAME: &str = "OrganizationName";
+
+/// The longest organization name shown, in characters; a longer one is cut.
+pub const MAX_NAME: usize = 64;
+
 /// A policy file for tests and screenshots: a JSON object of the same value names, with the
 /// recommended ones in a `Recommended` object. A value the registry sets wins, so the variable
 /// cannot loosen an administrator's policy.
@@ -45,6 +51,9 @@ pub enum Value {
 pub struct Layer {
     /// [`CHECK_FOR_UPDATES`].
     pub check_for_updates: Option<bool>,
+    /// [`ORGANIZATION_NAME`], cleaned: one line, no control or direction characters, at most
+    /// [`MAX_NAME`] characters, never empty.
+    pub organization: Option<String>,
 }
 
 impl Layer {
@@ -58,12 +67,24 @@ impl Layer {
                 None
             }
         };
-        Layer { check_for_updates: switch(CHECK_FOR_UPDATES) }
+        let text = |name: &str| match get(name)? {
+            Value::Text(text) => clean_name(&text),
+            other => {
+                log::warn!("policy: {name} is {other:?}, expected text; ignored");
+                None
+            }
+        };
+        Layer { check_for_updates: switch(CHECK_FOR_UPDATES), organization: text(ORGANIZATION_NAME) }
+    }
+
+    /// Whether any value is set.
+    fn any(&self) -> bool {
+        self.check_for_updates.is_some() || self.organization.is_some()
     }
 
     /// `self`, with `under` for the values `self` leaves unset.
     fn or(self, under: Layer) -> Layer {
-        Layer { check_for_updates: self.check_for_updates.or(under.check_for_updates) }
+        Layer { check_for_updates: self.check_for_updates.or(under.check_for_updates), organization: self.organization.or(under.organization) }
     }
 }
 
@@ -80,6 +101,24 @@ impl Policy {
     /// The preferences (by their `ui.prefs` names) a mandatory value replaces.
     pub fn locked(&self) -> Vec<&'static str> {
         self.mandatory.check_for_updates.map(|_| "check_updates").into_iter().collect()
+    }
+
+    /// The administrator set a mandatory value: SolidCraft says it is managed.
+    pub fn managed(&self) -> bool {
+        self.mandatory.any()
+    }
+
+    /// The organization's name, when the administrator gave one.
+    pub fn organization(&self) -> Option<&str> {
+        self.mandatory.organization.as_deref()
+    }
+
+    /// "Managed by {name}", or "Managed by your organization" without a name; None when unmanaged.
+    pub fn managed_by(&self) -> Option<String> {
+        self.managed().then(|| match self.organization() {
+            Some(name) => solidcraft_ui_text::format("policy.managed_by", &[("name", name)]),
+            None => solidcraft_ui_text::tr("policy.managed").to_string(),
+        })
     }
 
     /// A mandatory value replaces the preference `name`.
@@ -106,9 +145,51 @@ impl Policy {
     }
 }
 
+/// `text` as one short line for the app bar: control and direction characters become spaces,
+/// spaces collapse, and it is cut to [`MAX_NAME`] characters. None when nothing is left.
+fn clean_name(text: &str) -> Option<String> {
+    let invisible = |c: char| c.is_control() || matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FEFF}');
+    let spaced: String = text.chars().take(4 * MAX_NAME).map(|c| if invisible(c) { ' ' } else { c }).collect();
+    let name: String = spaced.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_NAME).collect();
+    let name = name.trim_end().to_string();
+    (!name.is_empty()).then_some(name)
+}
+
 /// Update checks run at start and once a day: the administrator's answer, else the person's.
 pub fn check_updates(app: &SolveApp) -> bool {
     app.policy.mandatory.check_for_updates.unwrap_or(app.preferences.check_updates)
+}
+
+// ---- user interface ---------------------------------------------------------------------------
+
+/// Room the badge's full label leaves for the document tabs; past it the badge says just "Managed".
+const TAB_ROOM: f32 = 300.0;
+
+/// The application bar's "Managed by {name}" badge at the right of `span`, while a policy is set:
+/// it opens Preferences › General. Its rect (None: not shown).
+pub fn badge(app: &mut SolveApp, ui: &mut egui::Ui, span: egui::Rect, labeled: bool) -> Option<egui::Rect> {
+    use crate::ui_kit::BackingTooltipExt as _;
+    let full = app.policy.managed_by()?;
+    let labels = [full.as_str(), solidcraft_ui_text::tr("policy.managed_short")];
+    let (rect, response) = crate::toolbar::offer_pill(ui, span, labeled, &labels, TAB_ROOM, "briefcase", "titlebar:managed", true)?;
+    let tip = format!("{full}\n{}", solidcraft_ui_text::tr("policy.managed_tip"));
+    if response.backing_on_hover_text(tip).clicked() {
+        crate::prefs::open_at(app, 0);
+    }
+    Some(rect)
+}
+
+/// A briefcase and "Managed by {name}" on one line, in the note colour, while a policy is set
+/// (Preferences and About). `handle` names it for scenarios.
+pub fn note(app: &SolveApp, ui: &mut egui::Ui, handle: &str) {
+    let Some(text) = app.policy.managed_by() else { return };
+    let t = solidcraft_theme::Tokens::get();
+    let line = ui.horizontal(|ui| {
+        let (icon, _) = ui.allocate_exact_size(egui::vec2(t.space_16, t.space_16), egui::Sense::hover());
+        crate::icons::paint_ink(ui.painter(), icon, "briefcase", t.text_dim);
+        ui.label(egui::RichText::new(text).size(t.font_label).color(t.text_dim));
+    });
+    crate::scenario::publish_target(handle, line.response.rect);
 }
 
 /// This computer's policy. The host reads it once at start; tests and the web app keep the default.
@@ -200,6 +281,35 @@ mod tests {
     }
 
     #[test]
+    fn the_organization_name_is_one_clean_short_line_and_anything_else_is_not_set() {
+        let name = |v: Value| layer(&[(ORGANIZATION_NAME, v)]).organization;
+        assert_eq!(name(Value::Text("  ACME   Corp ".into())).as_deref(), Some("ACME Corp"));
+        assert_eq!(name(Value::Text("Acme\r\nCorp\t\u{202E}Ltd\u{200B}".into())).as_deref(), Some("Acme Corp Ltd"));
+        assert_eq!(name(Value::Text("x".repeat(100_000))).map(|n| n.chars().count()), Some(MAX_NAME));
+        assert_eq!(name(Value::Text("é".repeat(70))).map(|n| n.chars().count()), Some(MAX_NAME), "cut by characters, not bytes");
+        for nothing in [Value::Text(String::new()), Value::Text(" \n\u{200B} ".into()), Value::Number(1)] {
+            assert_eq!(name(nothing), None);
+        }
+    }
+
+    #[test]
+    fn any_mandatory_value_makes_the_computer_managed_and_a_recommended_one_does_not() {
+        let _language = solidcraft_ui_text::scope("en");
+        assert!(!Policy::default().managed());
+        assert_eq!(Policy::default().managed_by(), None);
+        let named = Policy::from_json(r#"{"OrganizationName": "ACME"}"#);
+        assert!(named.managed());
+        assert_eq!(named.organization(), Some("ACME"));
+        assert_eq!(named.managed_by().as_deref(), Some("Managed by ACME"));
+        assert!(named.locked().is_empty(), "a name locks no setting");
+        let unnamed = Policy::from_json(r#"{"CheckForUpdates": 0}"#);
+        assert_eq!(unnamed.managed_by().as_deref(), Some("Managed by your organization"));
+        let recommended = Policy::from_json(r#"{"Recommended": {"OrganizationName": "ACME", "CheckForUpdates": 0}}"#);
+        assert!(!recommended.managed());
+        assert_eq!(recommended.organization(), None);
+    }
+
+    #[test]
     fn an_invalid_machine_value_leaves_the_users_valid_one() {
         let machine = layer(&[(CHECK_FOR_UPDATES, Value::Number(2))]);
         let user = layer(&[(CHECK_FOR_UPDATES, Value::Number(0))]);
@@ -210,7 +320,7 @@ mod tests {
 
     #[test]
     fn the_registry_wins_over_the_policy_file_value_by_value() {
-        let registry = Policy { mandatory: Layer { check_for_updates: Some(false) }, recommended: Layer::default() };
+        let registry = Policy { mandatory: Layer { check_for_updates: Some(false), organization: None }, recommended: Layer::default() };
         let file = Policy::from_json(r#"{"CheckForUpdates": 1, "Recommended": {"CheckForUpdates": 1}}"#);
         let both = registry.or(file);
         assert_eq!(both.mandatory.check_for_updates, Some(false));
