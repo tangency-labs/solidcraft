@@ -438,6 +438,58 @@ pub fn footprint_on(
     Ok(read.regions)
 }
 
+/// A face bounding the strip Σ across it (along `w`), as [`eased_edge`] reads it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum StripBound {
+    /// A planar face: its unit normal and its extent along `n` (how tall it stands over P).
+    Plane {
+        /// The face's unit normal.
+        normal: Vec3,
+        /// Its extent along `n`, mm.
+        height: f64,
+    },
+    /// A cylindrical face: its unit axis.
+    Cylinder {
+        /// The cylinder's unit axis.
+        axis: Vec3,
+    },
+    /// A face on any other surface.
+    Other,
+}
+
+/// Whether T's edge at S is eased (design v2 5.4, [m11]): a face bounding Σ across the strip is a
+/// planar face at an angle to `n` (neither square to it nor parallel, by [`bearing`]) narrower
+/// along `n` than `t` by more than `tol` (a chamfer), or a cylindrical face whose axis runs along
+/// the strip `along` (a round). The pair is then skipped `eased_edge`, not `not_square`.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a non-unit `n`, `along`, normal or axis, a non-finite
+/// height, or `t` or `tol` not positive and finite.
+pub fn eased_edge(bounds: &[StripBound], n: Vec3, along: Vec3, t: f64, tol: f64) -> Result<bool> {
+    if !(t.is_finite() && t > 0.0 && tol.is_finite() && tol > 0.0) {
+        return Err(invalid("thickness and tol must be positive and finite"));
+    }
+    check_unit(n)?;
+    check_unit(along)?;
+    let mut eased = false;
+    for b in bounds {
+        eased |= match *b {
+            StripBound::Plane { normal, height } => {
+                if !height.is_finite() {
+                    return Err(invalid("a bound's height must be finite"));
+                }
+                matches!(bearing(n, normal)?, Bearing::Oblique(_)) && height < t - tol
+            }
+            StripBound::Cylinder { axis } => {
+                matches!(bearing(along, axis)?, Bearing::Same | Bearing::Opposite)
+            }
+            StripBound::Other => false,
+        };
+    }
+    Ok(eased)
+}
+
 /// Of two opposite unit normals, whether `v` is the one taken as `m`: the first of its components
 /// larger in size than [`SQUARE_SLACK`] is positive. A unit vector has a component of at least
 /// `1/√3`, so one always qualifies.

@@ -424,3 +424,34 @@ fn the_footprint_on_p_is_the_faces_lying_in_it_facing_down() {
     assert!(on([0.0, 0.0, 6.0 + 0.5 * TOL], up, side).len() == 1);
     assert!(footprint_on(&k, &wall, &frame_at([0.0; 3], up, side), 0.0).is_err());
 }
+
+/// Wall on F (n = +z, strip along +x, t = 6). A 1 mm chamfer at Wall's foot: a 45° face
+/// (normal (0, −1, −1)/√2) 1 mm tall, under 6: eased. The plate face itself (normal −y, square
+/// to n): not eased. A 45° face 6 mm tall (no chamfer: the plate is tilted): not eased here
+/// (`not_square` decides it). A 1 mm round: a cylinder along ±x: eased; along y: not.
+#[test]
+fn a_chamfer_or_a_round_at_the_foot_is_an_eased_edge() {
+    let h = std::f64::consts::FRAC_1_SQRT_2;
+    let chamfer = StripBound::Plane {
+        normal: Vec3::new(0.0, -h, -h),
+        height: 1.0,
+    };
+    let face = StripBound::Plane {
+        normal: Vec3::new(0.0, -1.0, 0.0),
+        height: 60.0,
+    };
+    let tilted = StripBound::Plane {
+        normal: Vec3::new(0.0, -h, -h),
+        height: 6.0,
+    };
+    let eased = |b: &[StripBound]| eased_edge(b, Vec3::Z, Vec3::X, 6.0, TOL).expect("eased");
+    assert!(eased(&[face, chamfer]));
+    assert!(!eased(&[face, face]));
+    assert!(!eased(&[tilted]));
+    assert!(eased(&[StripBound::Cylinder {
+        axis: Vec3::new(-1.0, 0.0, 0.0)
+    }]));
+    assert!(!eased(&[StripBound::Cylinder { axis: Vec3::Y }]));
+    assert!(!eased(&[StripBound::Other]));
+    assert!(eased_edge(&[face], Vec3::Z, Vec3::X, 0.0, TOL).is_err());
+}
