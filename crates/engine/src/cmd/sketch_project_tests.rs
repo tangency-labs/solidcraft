@@ -1509,6 +1509,26 @@ fn intersect_through_a_torus_axis_at_an_angle_gives_the_profile_circle() {
     }
 }
 
+/// A plane 1e-7 off a cylinder's axis, the cylinder standing a million from the axis's origin
+/// (z 1000000 to 1000001), misses the cylinder's walls by 0.005 there: the exact section leaves
+/// it (`None`) and Intersect cuts the face as it did, which finds the wall (#17496).
+#[test]
+fn intersect_leaves_a_plane_near_the_axis_far_from_its_origin_to_the_section() {
+    use solidcore_record::{Plane, Vec3};
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 1000000], "radius": 1, "height": 1, "body_name": "Far"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [0, 1, 0], "y_dir": [-1e-7, 0, 1]}}));
+    let plane = Plane { origin: Vec3::new(0.0, 0.0, 0.0), x: Vec3::new(0.0, 1.0, 0.0), y: Vec3::new(-1e-7, 0.0, 1.0) };
+    let st = s.model.state();
+    let far = &st.body("Far").unwrap().body;
+    for face in 0..far.face_count() {
+        assert!(solidcraft_kernel::axial_face_section(far, face, &plane).unwrap().is_none(), "face {face}");
+    }
+    drop(st);
+    s.execute("sketch.intersect", &json!({"refs": [{"face": [1, 0, 1000000.5], "body": "Far"}]})).unwrap();
+    assert!(!linked_curves(&inspect(&mut s)).is_empty());
+}
+
 /// Where Intersect's cut is already exact it stays as it is: a box's outline (through it and on
 /// its bottom face), a cylinder's and a sphere's circle, a tilted cylinder's 21 segments.
 #[test]
