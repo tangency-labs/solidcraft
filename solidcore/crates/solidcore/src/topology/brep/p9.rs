@@ -187,11 +187,7 @@ pub fn find_infinite_region(
         };
         let bounds = match supplied_box {
             Some(bounds) => bounds,
-            None => crate::error::ignored(crate::error::passed_on(
-                qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default()),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?
-            .unwrap_or_else(crate::geom::extent3d::Extent3d::new),
+            None => qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?,
         };
         let ray_start = bounds.max() + (bounds.max() - bounds.min()) * 0.5;
         let mut direction = Vec3::new(1.0, 1.0, 1.0);
@@ -540,10 +536,7 @@ pub fn orient_sheet_surfaces(
     if is_oriented_sheet(k, b)? {
         if !same {
             // Status ignored upstream (SmBrep.cpp:11644).
-            ignore_status(crate::error::passed_on(
-                swap_brep_uv(k, b, env),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            swap_brep_uv(k, b, env)?;
         }
         return Ok(None);
     }
@@ -965,6 +958,16 @@ struct SplitUvInput {
     for_tessellation: bool,
 }
 
+/// `sm_MakeVertexSplitUVTrimCurve` for one original edge use and its new piece.
+///
+/// (not upstream, which ignores the status and keeps whatever the failed split left) A
+/// split of the UV trim curve that fails drops the trim curves of both uses, as the split
+/// itself does where the split point is off the trim curve: a UV trim curve is the edge
+/// use's lazy cache of its 3D curve on the face, rebuilt when next asked for. The edge's
+/// split has already rewired the edge uses here, so returning the error would leave them
+/// on an edge the B-rep never takes in (review of #16956), and keeping the failed
+/// split's curve would leave the original use's trim spanning the whole edge it had.
+/// Unported dependencies, cancellations and preparation requests still propagate.
 fn split_uv_trim(k: &Kernel, b: &mut Brep, input: SplitUvInput) -> Result<()> {
     let SplitUvInput {
         original,
@@ -975,7 +978,7 @@ fn split_uv_trim(k: &Kernel, b: &mut Brep, input: SplitUvInput) -> Result<()> {
         orientation,
         for_tessellation,
     } = input;
-    crate::topology::brep::p1::make_vertex_split_uv_trim_curve(
+    let split = crate::topology::brep::p1::make_vertex_split_uv_trim_curve(
         k,
         b,
         original,
@@ -985,7 +988,22 @@ fn split_uv_trim(k: &Kernel, b: &mut Brep, input: SplitUvInput) -> Result<()> {
         scaled_zero,
         orientation,
         for_tessellation,
-    )
+    );
+    // `error::ignored`, not `native_failure`, on purpose: the edge split must
+    // complete even when a trim split fails.
+    if crate::error::ignored(split)?.is_none() {
+        for eu in [original, new] {
+            crate::error::ignored(crate::topology::edgeuse::p1::set_uv_trim_curve(
+                b,
+                eu,
+                crate::topology::edgeuse::p1::UvTrimCurveArg::Null,
+                0.0,
+                true,
+                None,
+            ))?;
+        }
+    }
+    Ok(())
 }
 
 /// `MakeVertexSplitEdge`: preserve the scaled parameter boundary, the two-stage
@@ -1213,10 +1231,8 @@ pub(crate) fn make_vertex_split_edge_with_curve_identity_state(
         );
         // `SER(sIvl1.SetMinMax(..))`, `SER(sIvl2.SetMinMax(..))` (fork 60a8a51): a split
         // parameter outside the edge's interval fails here instead of being swapped in
-        if k.fixes.brep_edit_statuses_pass_on {
-            interval.clone().set_min_max(interval.min(), parameter)?;
-            interval.clone().set_min_max(parameter, interval.max())?;
-        }
+        interval.clone().set_min_max(interval.min(), parameter)?;
+        interval.clone().set_min_max(parameter, interval.max())?;
         let mut ivl1 = Extent1d::from_min_max(interval.min(), parameter);
         let mut ivl2 = Extent1d::from_min_max(parameter, interval.max());
         let primary = required(
@@ -1264,59 +1280,47 @@ pub(crate) fn make_vertex_split_edge_with_curve_identity_state(
         })?;
         let split_parameter;
         if same {
-            ignore_status(crate::error::passed_on(
-                required(
-                    b.edge_mut(edge_id)?.curve.as_mut(),
-                    "split edge without curve",
-                )?
-                .trim(
-                    k,
-                    &mut ivl1,
-                    crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
-                ),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            required(
+                b.edge_mut(edge_id)?.curve.as_mut(),
+                "split edge without curve",
+            )?
+            .trim(
+                k,
+                &mut ivl1,
+                crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+            )?;
             split_parameter = ivl1.max();
-            ignore_status(crate::error::passed_on(
-                required(
-                    b.edge_mut(new_edge)?.curve.as_mut(),
-                    "new split edge without curve",
-                )?
-                .trim(
-                    k,
-                    &mut ivl2,
-                    crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
-                ),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            required(
+                b.edge_mut(new_edge)?.curve.as_mut(),
+                "new split edge without curve",
+            )?
+            .trim(
+                k,
+                &mut ivl2,
+                crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+            )?;
             b.edge_mut(edge_id)?.interval = ivl1;
             b.edge_mut(new_edge)?.interval = ivl2;
         } else {
-            ignore_status(crate::error::passed_on(
-                required(
-                    b.edge_mut(edge_id)?.curve.as_mut(),
-                    "split edge without curve",
-                )?
-                .trim(
-                    k,
-                    &mut ivl2,
-                    crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
-                ),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            required(
+                b.edge_mut(edge_id)?.curve.as_mut(),
+                "split edge without curve",
+            )?
+            .trim(
+                k,
+                &mut ivl2,
+                crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+            )?;
             split_parameter = ivl2.min();
-            ignore_status(crate::error::passed_on(
-                required(
-                    b.edge_mut(new_edge)?.curve.as_mut(),
-                    "new split edge without curve",
-                )?
-                .trim(
-                    k,
-                    &mut ivl1,
-                    crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
-                ),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            required(
+                b.edge_mut(new_edge)?.curve.as_mut(),
+                "new split edge without curve",
+            )?
+            .trim(
+                k,
+                &mut ivl1,
+                crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+            )?;
             b.edge_mut(edge_id)?.interval = ivl2;
             b.edge_mut(new_edge)?.interval = ivl1;
         }
@@ -1408,22 +1412,19 @@ pub(crate) fn make_vertex_split_edge_with_curve_identity_state(
             let old1 = *required(old_pair.first(), "missing original pair")?;
             let orientation = b.edgeuse(old1)?.orientation;
             for (&old, &new) in old_pair.iter().zip(new_pair) {
-                ignore_status(crate::error::passed_on(
-                    split_uv_trim(
-                        k,
-                        b,
-                        SplitUvInput {
-                            original: old,
-                            new,
-                            point,
-                            parameter: split_parameter,
-                            scaled_zero,
-                            orientation,
-                            for_tessellation,
-                        },
-                    ),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                split_uv_trim(
+                    k,
+                    b,
+                    SplitUvInput {
+                        original: old,
+                        new,
+                        point,
+                        parameter: split_parameter,
+                        scaled_zero,
+                        orientation,
+                        for_tessellation,
+                    },
+                )?;
             }
         }
         let tolerance = b.edge(edge_id)?.tolerance;
@@ -1743,10 +1744,7 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
             };
             let mut transform = Axis2Placement::default();
             transform.translate(translation);
-            ignore_status(crate::error::passed_on(
-                copy.transform(k, &transform, None),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            copy.transform(k, &transform, None)?;
         }
         let bottom = if b.edgeuse(eu4)?.orientation == OrientType::Same {
             eu4
@@ -1982,10 +1980,7 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
         remove_old_loop_vertices(b, start)?;
         remove_old_loop_vertices(b, end)?;
         redistribute_seam_trims(k, b, edge_id, original_trim_owner, seam, &domain)?;
-        ignore_status(crate::error::passed_on(
-            fp1::remove_loop(b, face, delete),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        fp1::remove_loop(b, face, delete)?;
         delete_loop_records(b, delete, env)?;
     }
     brep_notify(
@@ -2371,20 +2366,19 @@ fn redistribute_inner_loops(
         let other = if classify_to_original { new_face } else { face };
         let mut pc = PointClassification::<EntityRef>::new(tolerance);
         let need_move = if missing_new && missing_original {
-            // Both statuses and the drop's success flag are ignored natively.
-            let _old_domain = computed_uv_domain(k, b, face)?;
+            // Both statuses and the drop's success flag are ignored natively; the
+            // statuses are passed on here (WR-658).
+            computed_uv_domain(k, b, face)?;
             let new_domain = computed_uv_domain(k, b, new_face)?;
             let surface = required(b.face(face)?.surface.as_ref(), "split face without surface")?;
-            let uv = crate::error::ignored(crate::error::passed_on(
-                surface.drop_point::<crate::topology::ObjectHandle>(
+            let uv = surface
+                .drop_point::<crate::topology::ObjectHandle>(
                     k,
                     point,
                     &surface.natural_uv_domain_with_nurb(k)?,
                     &crate::surface::surface::p5::DropPointOptions::default(),
-                ),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?
-            .map_or(crate::geom::vector2d::Vec2::UNDEF, |drop| drop.result_uv);
+                )?
+                .result_uv;
             new_domain.contains_point(uv, 0.0)
         } else {
             classify_with_retries(
@@ -2458,14 +2452,8 @@ fn redistribute_inner_loops(
         if need_move {
             face_notify(b, face, env, NotifyOperation::PreEdit)?;
             face_notify(b, new_face, env, NotifyOperation::PreEdit)?;
-            ignore_status(crate::error::passed_on(
-                fp1::remove_loop(b, face, loop_),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
-            ignore_status(crate::error::passed_on(
-                fp1::insert_loop(b, new_face, loop_),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            fp1::remove_loop(b, face, loop_)?;
+            fp1::insert_loop(b, new_face, loop_)?;
             let refreshed = fp2::loops(b, face, false, None)?;
             if refreshed.len() >= loops.len() {
                 return Err(SolidError::invalid_input(
@@ -2557,14 +2545,12 @@ fn computed_uv_domain(
     b: &mut Brep,
     face: FaceId,
 ) -> Result<crate::geom::extent2d::Extent2d> {
-    let initial = b.face(face)?.uv_domain;
-    Ok(crate::error::ignored(crate::error::passed_on(
+    Ok(
         crate::topology::face::p1::calculate_uv_domain_from_uv_trim_curves(
             k, b, face, true, false, false,
-        ),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?
-    .map_or(initial, |out| out.domain))
+        )?
+        .domain,
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -2867,6 +2853,80 @@ mod tests {
         assert_eq!(e.entity(), None);
         assert!(e.topology_failure().is_some());
         assert_eq!(OrientSheetNote::stop_on_note(Ok(None)), Ok(()));
+    }
+
+    /// A UV trim curve that cannot be split does not leave the edge split half done
+    /// (review of #16956): the split of a box edge whose uses carry trim curves on a
+    /// face without surface (the trim split's `NER` on the surface) completes, with the new
+    /// edge and vertex in the B-rep, the uses rewired to it, and the trim curves of the
+    /// uses dropped. A box edge has four uses (each of its two faces is used from both
+    /// sides), split in mate pairs; every face they reach loses its surface, so every
+    /// trim split fails. Before, the trim split's error was returned after the uses had been
+    /// rewired to an edge the B-rep never took in.
+    #[test]
+    fn a_failed_uv_trim_split_still_completes_the_edge_split() {
+        use crate::topology::edgeuse::p1 as eu1;
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0)
+                .unwrap();
+        b.set_editing_enabled(true);
+        let edge = b.edge_list()[0];
+        let interval = b.edge(edge).unwrap().interval;
+        let parameter = (interval.min() + interval.max()) * 0.5;
+        let uses = b.edge(edge).unwrap().edgeuses.clone();
+        assert_eq!(uses.len(), 4);
+        for &eu in &uses {
+            // the edge's own curve stands in as the trim curve: the split only needs its
+            // interval to hold the split parameter well inside
+            let trim = b.edge(edge).unwrap().curve.clone().unwrap();
+            eu1::set_uv_trim_curve(
+                &mut b,
+                eu,
+                eu1::UvTrimCurveArg::New(Box::new(trim)),
+                0.0,
+                false,
+                None,
+            )
+            .unwrap();
+            // `SetUVTrimCurve` keeps the curve on the same-oriented use of the mate pair
+            assert!(eu1::uv_trim_curve(&b, eu).unwrap().0.is_some());
+        }
+        for &eu in &uses {
+            let face = eu1::face(&b, eu).unwrap().unwrap();
+            b.face_mut(face).unwrap().surface = None;
+        }
+        let (edges, vertices) = (b.edge_list().len(), b.vertex_list().len());
+
+        let mut records = crate::topology::topology::NotifyRecords::new();
+        let mut attributes = crate::geom::attribute::AttributeStore::default();
+        let mut env = edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &crate::topology::loopuse::notify_ref,
+        };
+        let curve_ref =
+            |e: EdgeId, _type_code: i64| crate::topology::loopuse::notify_ref(EntityRef::Edge(e));
+        let out =
+            make_vertex_split_edge(&mut k, &mut b, edge, parameter, &mut env, &curve_ref).unwrap();
+
+        assert!(out.split);
+        let [first, second] = out.edges.unwrap();
+        let new_edge = if first == edge { second } else { first };
+        assert_ne!(new_edge, edge);
+        assert_eq!(b.edge_list().len(), edges + 1);
+        assert_eq!(b.vertex_list().len(), vertices + 1);
+        assert!(b.edge_list().contains(&new_edge));
+        assert!(b.vertex_list().contains(&out.vertex.unwrap()));
+        let new_uses = b.edge(new_edge).unwrap().edgeuses.clone();
+        assert_eq!(new_uses.len(), uses.len());
+        for &eu in uses.iter().chain(&new_uses) {
+            assert!(eu1::uv_trim_curve(&b, eu).unwrap().0.is_none(), "{eu:?}");
+        }
+        for &eu in &new_uses {
+            assert_eq!(b.edgeuse(eu).unwrap().edge, Some(new_edge));
+        }
     }
 
     mod notifications {

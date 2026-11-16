@@ -2198,11 +2198,11 @@
 {"case":"touching_cylinder_plane_line_10_tol1e-4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[8.000000000349246,8.000000000349246,87.00000000360887]],"n":18}}}
 {"case":"touching_cylinder_plane_line_10_tol1e-6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[8.000000000349246,8.000000000349246,87.00000000360887]],"n":18}}}
 {"case":"touching_cylinder_plane_line_10_tol1e-6_nopts","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[8.000000000349246,8.000000000349246,87.00000000360887]],"n":18}}}
-{"case":"touching_cylinder_sphere_01_tol1e-4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,0.0]}}
-{"case":"touching_cylinder_sphere_01_tol1e-6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,0.0]}}
+{"case":"touching_cylinder_sphere_01_tol1e-4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,1.0,-2.373526899143732e-16,1.0,1.0]}}
+{"case":"touching_cylinder_sphere_01_tol1e-6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,1.0,-2.373526899143732e-16,1.0,1.0]}}
 {"case":"touching_cylinder_sphere_01_tol1e-6_nopts","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,0.0]}}
-{"case":"touching_cylinder_sphere_10_tol1e-4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,0.0]}}
-{"case":"touching_cylinder_sphere_10_tol1e-6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,0.0]}}
+{"case":"touching_cylinder_sphere_10_tol1e-4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,1.0,-2.373526899143732e-16,1.0,1.0]}}
+{"case":"touching_cylinder_sphere_10_tol1e-6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,1.0,-2.373526899143732e-16,1.0,1.0]}}
 {"case":"touching_cylinder_sphere_10_tol1e-6_nopts","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,0.0]}}
 {"case":"touching_sphere_axis_x_plane_01_tol1e-4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,1.0,2.0,0.0,3.0]}}
 {"case":"touching_sphere_axis_x_plane_01_tol1e-6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,1.0,2.0,0.0,3.0]}}

@@ -60,11 +60,14 @@ const RIM: [f64; 3] = [0.0, -25.0, 2.0];
 /// A point on the R2 corner arc at x > 0.
 const CORNER: [f64; 3] = [3.414_213_56, 32.525_324_7, 2.0];
 /// What the rim's round removes alone (#2176's `the_neighbours_keep_their_rounds`, which
-/// pins the fork's 7.958672926831696: 18e96f1 and 63c7962, `SmApiFilletEdges` r 0.5).
+/// pinned the fork's 7.958672926831696 until #16735: 18e96f1 and 63c7962,
+/// `SmApiFilletEdges` r 0.5).
 const RIM_REMOVED: f64 = 7.958_672_926_831_696;
-/// What the rim's round removes alone here: 4.5e-11 more than the fork's
-/// [`RIM_REMOVED`], the solidcore-native exact spine.
-const RIM_MEASURED: f64 = 7.958_672_926_877_170_5;
+/// What the rim's round removes alone here, as #2176's test pins it: 1.5e-8 less than the
+/// fork's [`RIM_REMOVED`], which (as this before #16735, 7.9586729268771705) includes the
+/// volume integrator's leak through the round's tolerant edges. #2176's test checks the move
+/// is within that leak's bound and independent of the origin.
+const RIM_MEASURED: f64 = 7.958_672_912_139_264;
 
 /// Every opt-in fix on (as in the issue).
 fn kernel() -> Kernel {
@@ -192,9 +195,8 @@ fn corner_arc_and_rim_round_together() {
 #[test]
 fn each_edge_alone_is_unchanged() {
     let (rim, faces) = removed(&[RIM]).unwrap();
-    assert!((rim - RIM_REMOVED).abs() <= 1e-9, "rim {rim}");
-    // pinned at the value measured here, 4.5e-11 more than the fork's `RIM_REMOVED`
-    // (the solidcore-native exact spine)
+    // pinned at the value measured here (`RIM_MEASURED`); it was within 1e-9 of the fork's
+    // `RIM_REMOVED` until the integrator stopped leaking through tolerant edges (#16735)
     assert!((rim - RIM_MEASURED).abs() <= 1e-12, "rim {rim}");
     assert_eq!(faces, 9);
     let (corner, faces) = removed(&[CORNER]).unwrap();

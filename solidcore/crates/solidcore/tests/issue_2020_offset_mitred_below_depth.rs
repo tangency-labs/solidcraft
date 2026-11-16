@@ -268,7 +268,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
     k.fixes.good_drop_result_distances_in_order = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
-    k.fixes.imprint_reuses_coincident_face_edge = true;
     k.fixes.join_touching_loops = true;
     k.fixes.keep_operand_uv_trims = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
@@ -280,7 +279,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.offset_extension_as_itself = true;
     k.fixes.offset_extension_from_base = true;
     k.fixes.point_solve_keeps_triangle_guess = true;
-    k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.proto_vertex_miss_is_false = true;
     k.fixes.revolution_round_offset_collapses = true;
@@ -289,11 +287,7 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.simple_coincidence_crossing_is_point = true;
     k.fixes.ssi_low_angle_start_on_probation = true;
-    k.fixes.ssi_pole_point_keeps_its_tangent = true;
-    k.fixes.ssi_tangent_contact_points = true;
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
-    k.fixes.transform_model_size_from_body_box = true;
-    k.fixes.transform_scales_each_tolerance = true;
     k.fixes.uv_trim_corner_end_points_only = true;
 }
