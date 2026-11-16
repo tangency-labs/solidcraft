@@ -643,7 +643,7 @@ fn the_update_pill_keeps_the_link_pills_clear() {
     h.frame();
     wait_for_check(&mut h);
     h.frame();
-    let clear = |h: &crate::scenario::Harness| {
+    let clear = || {
         let update = crate::scenario::rect_of("titlebar:update").expect("the Update pill");
         for pill in ["titlebar:kofi", "titlebar:discord"] {
             if let Some(r) = crate::scenario::rect_of(pill) {
@@ -652,12 +652,12 @@ fn the_update_pill_keeps_the_link_pills_clear() {
         }
         update
     };
-    let wide = clear(&h);
+    let wide = clear();
     assert!(h.widget(&format!("Update to {version}")).is_some(), "the full label fits a 21:9 bar");
     // The frame its width changes (the short label on a narrower bar) keeps them clear too.
     h.call("ui.resize", json!({ "width": 1000.0, "height": 700.0 }));
     h.frame();
-    let narrow = clear(&h);
+    let narrow = clear();
     assert!(narrow.width() < wide.width(), "the label gives way on the narrower bar");
 }
 
