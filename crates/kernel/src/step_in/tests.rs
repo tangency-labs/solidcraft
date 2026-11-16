@@ -784,13 +784,14 @@ fn a_part_smlibs_check_fails_is_reported_at_import_by_name() {
     assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
     let body = &imp.bodies[0].body;
     assert!(body.smlib_refusal().is_none(), "SMLib takes the part");
+    assert_eq!((body.face_count(), body.edge_count(), body.vertex_count()), (6, 13, 9), "the block's topology as the file writes it");
     let check = body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
     assert!(!check.is_valid(), "the check fails it");
     let summary = crate::validation::check_summary(&check);
     let issue = imp.report.issues.iter().find(|i| i.kind == IssueKind::NeedsRepair).unwrap_or_else(|| panic!("{:?}", imp.warnings));
     assert_eq!(issue.detail, format!("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: {summary}"));
     assert!(imp.warnings.contains(&issue.detail), "{:?}", imp.warnings);
-    assert!(summary.starts_with(&format!("{} failed tests: ", check.failures)), "{summary}");
+    assert!(summary.starts_with(&format!("{} failed test", check.failures)), "{summary}");
     // Each test the check failed is named once, with how many times it failed.
     for line in check.text.lines().filter(|l| l.contains("Test #")) {
         let name = &line[..line.find(" (").unwrap()];
@@ -798,6 +799,9 @@ fn a_part_smlibs_check_fails_is_reported_at_import_by_name() {
     }
     // The block as written (its edge on the plane) passes the check, and no warning says otherwise.
     let clean = step_import(&lifted_bezier_block(0.0)).unwrap();
+    assert_eq!(clean.bodies.len(), 1, "{:?}", clean.warnings);
+    let b = &clean.bodies[0].body;
+    assert_eq!((b.face_count(), b.edge_count(), b.vertex_count()), (6, 13, 9), "the same topology with the edge on its face");
     assert!(clean.bodies[0].body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap().is_valid());
     assert!(clean.report.issues.iter().all(|i| i.kind != IssueKind::NeedsRepair), "{:?}", clean.warnings);
 }
@@ -1522,10 +1526,18 @@ fn torus_capped_cylinder(torus: &str, major: f64, minor: f64, tip: Tip) -> Strin
 }
 
 /// The one closed body of `text`, its volume and area against the closed forms; `warnings`
-/// the import's warnings.
-fn assert_closed_measures(text: &str, volume: f64, area: f64, warnings: &[&str]) {
+/// the import's warnings. `fails_check`: SMLib's full check fails the body, and the import's
+/// last warning is the one that says so, built from that check; otherwise the check passes.
+fn assert_closed_measures(text: &str, volume: f64, area: f64, warnings: &[&str], fails_check: bool) {
     let imp = step_import(text).unwrap();
     assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let check = crate::validation::failing_check(&imp.bodies[0].body).unwrap();
+    assert_eq!(check.is_some(), fails_check, "{check:?}");
+    let mut warnings: Vec<String> = warnings.iter().map(|w| (*w).to_string()).collect();
+    if let Some(check) = check {
+        let name = &imp.bodies[0].name;
+        warnings.push(format!("solid '{name}': needs repair before it can be modelled: SMLib's check fails it: {check}"));
+    }
     assert_eq!(imp.warnings, warnings, "{:?}", imp.warnings);
     assert!(imp.bodies[0].closed);
     let m = measure(&imp.bodies[0].body).unwrap();
@@ -1542,7 +1554,7 @@ fn assert_closed_measures(text: &str, volume: f64, area: f64, warnings: &[&str])
 fn horn_torus_round_on_a_pin_imports_whole() {
     use std::f64::consts::PI;
     let t = torus_capped_cylinder("#5=TOROIDAL_SURFACE('',#4,1.,1.);", 1.0, 1.0, Tip::Disc { z: 1.0, r: 1.0 });
-    assert_closed_measures(&t, 8.0 * PI + PI * (5.0 / 3.0 + PI / 2.0), 15.0 * PI + PI * PI, &[]);
+    assert_closed_measures(&t, 8.0 * PI + PI * (5.0 / 3.0 + PI / 2.0), 15.0 * PI + PI * PI, &[], false);
 }
 
 /// The volume and area of a spindle torus's pin end ([`Tip::Pole`]): in the meridian plane the
@@ -1574,7 +1586,7 @@ fn spindle_torus_pin_tip_imports_whole() {
     for torus in ["#5=TOROIDAL_SURFACE('',#4,1.,2.);", "#5=DEGENERATE_TOROIDAL_SURFACE('',#4,1.,2.,.T.);"] {
         for (seam, warnings) in [(true, &[][..]), (false, &["solid 'Pin': 1 seam edges added to faces that wind around their surface"][..])] {
             let t = torus_capped_cylinder(torus, 1.0, 2.0, Tip::Pole { apex: s3, seam });
-            assert_closed_measures(&t, volume, area, warnings);
+            assert_closed_measures(&t, volume, area, warnings, false);
         }
     }
 }
@@ -1633,7 +1645,8 @@ fn nearly_round_spindle_torus_pin_end_in_halves_imports_whole() {
     t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))").replace("LENGTH_MEASURE(1.E-6)", "LENGTH_MEASURE(1.E-5)");
     t += TAIL;
     let (volume, area) = pin_with_cylinder(major, minor);
-    assert_closed_measures(&t, volume, area, &[]);
+    // SMLib's check fails the part as the reader makes it (#17706): the import says so.
+    assert_closed_measures(&t, volume, area, &[], true);
 }
 
 /// The lemon of a spindle torus (the tube's part across the axis: a closed surface with a pole
@@ -1664,7 +1677,7 @@ fn spindle_torus_lemon_with_a_negative_major_radius_imports_whole() {
         t += "#20=CLOSED_SHELL('',(#19));\n#21=MANIFOLD_SOLID_BREP('Lemon',#20);\n#22=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#21),#70);\n";
         t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
         t += TAIL;
-        assert_closed_measures(&t, PI * (6.0 * s3 - 8.0 * PI / 3.0), 4.0 * PI * (2.0 * s3 - 2.0 * PI / 3.0), &[]);
+        assert_closed_measures(&t, PI * (6.0 * s3 - 8.0 * PI / 3.0), 4.0 * PI * (2.0 * s3 - 2.0 * PI / 3.0), &[], false);
     }
 }
 
@@ -1709,7 +1722,7 @@ fn torus_written_as_a_revolution_of_a_spline_circle_imports_whole() {
     let ring = PI * 3.0;
     let wall = 2.0 * PI * 2.0;
     let tube = 2.0 * PI * (PI - 1.0);
-    assert_closed_measures(&t, volume, ring + wall + tube, &[]);
+    assert_closed_measures(&t, volume, ring + wall + tube, &[], false);
 }
 
 /// A wire of rectangular section (radius 2 to 3, 0.5 high) wound two turns round the Z axis, rising
@@ -1857,7 +1870,8 @@ fn a_face_winding_two_turns_round_its_cylinder_imports_whole() {
     let ruled_area = |r: f64| 0.5 * (r * (r * r + c * c).sqrt() + c * c * (r + (r * r + c * c).sqrt()).ln());
     let volume = height * (outer * outer - inner * inner) / 2.0 * angle;
     let area = (outer + inner) * height * angle + 2.0 * (outer - inner) * height + 2.0 * angle * (ruled_area(outer) - ruled_area(inner));
-    assert_closed_measures(&t, volume, area, &[]);
+    // SMLib's check fails the part as the reader makes it (#17706): the import says so.
+    assert_closed_measures(&t, volume, area, &[], true);
 }
 
 /// No warning that a face was left out or that the solid came in as surfaces.

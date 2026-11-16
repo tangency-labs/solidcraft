@@ -645,6 +645,7 @@ mod tests {
         let bad = Body::from_record(record).unwrap();
         assert!(bad.smlib_refusal().is_none(), "SMLib takes the part");
         assert!(bad.record().edges.iter().all(|e| e.uses.len() == 2), "it is closed");
+        assert_eq!((bad.face_count(), bad.edge_count(), bad.vertex_count()), (6, 12, 8), "a box's topology");
         let check = bad.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
         assert!(!check.is_valid());
         let err = repair(&bad, &RepairOptions { gap: 0.2, patch_holes: true }).unwrap_err().to_string();

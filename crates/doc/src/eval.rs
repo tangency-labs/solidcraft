@@ -603,16 +603,61 @@ fn removed_note(gone: &[Vec3]) -> String {
 thread_local! {
     /// Current feature evaluation validation mode (`EachStep`, `EachFeature`, or `Off`).
     static EVAL_VALIDATION: std::cell::Cell<kernel::Validation> = const { std::cell::Cell::new(kernel::Validation::EachFeature) };
+    /// Latest successful thread output per body, confined to the current feature evaluation.
+    static CHECKED_THREAD_OUTPUTS: std::cell::Cell<Option<BTreeMap<String, Body>>> = const { std::cell::Cell::new(None) };
 }
 
-/// Restores `EVAL_VALIDATION` to its previous value when dropped.
-struct EvalValidationGuard(kernel::Validation);
+/// Restores the validation mode and the enclosing feature's checks on scope exit.
+struct EvalValidationGuard {
+    mode: kernel::Validation,
+    checked: Option<BTreeMap<String, Body>>,
+}
+
+impl EvalValidationGuard {
+    fn new(mode: kernel::Validation) -> Self {
+        Self { mode: EVAL_VALIDATION.replace(mode), checked: CHECKED_THREAD_OUTPUTS.replace(Some(BTreeMap::new())) }
+    }
+}
 
 impl Drop for EvalValidationGuard {
-    /// Restores the saved validation mode on scope exit.
     fn drop(&mut self) {
-        EVAL_VALIDATION.set(self.0);
+        CHECKED_THREAD_OUTPUTS.set(self.checked.take());
+        EVAL_VALIDATION.set(self.mode);
     }
+}
+
+/// Record only an unchanged final thread output after its native check succeeded.
+fn remember_checked_thread_output(name: &str, body: &Body) {
+    if EVAL_VALIDATION.get() != kernel::Validation::EachFeature {
+        return;
+    }
+    CHECKED_THREAD_OUTPUTS.with(|cell| {
+        let mut checked = cell.take();
+        if let Some(bodies) = checked.as_mut() {
+            bodies.insert(name.to_owned(), body.clone());
+        }
+        cell.set(checked);
+    });
+}
+
+/// A successful thread check can replace only the same feature's check of that exact shape.
+fn checked_thread_output(body: &Body) -> bool {
+    if EVAL_VALIDATION.get() != kernel::Validation::EachFeature {
+        return false;
+    }
+    CHECKED_THREAD_OUTPUTS.with(|cell| {
+        let checked = cell.take();
+        let found = checked.as_ref().is_some_and(|bodies| bodies.values().any(|old| old.same_shape(body)));
+        cell.set(checked);
+        found
+    })
+}
+
+/// Run a full check, counting the calls separately from reused successful thread checks.
+fn check_feature_body(body: &Body) -> kernel::Result<()> {
+    #[cfg(test)]
+    cost_tests::count(|c| c.kept_checks += 1);
+    kernel::check_kept(body)
 }
 
 /// A blend's refusal as too large (`why`) with the largest `size` (radius, distance) that fits,
@@ -2018,7 +2063,13 @@ fn check_kept(before: &ModelState, after: &ModelState) -> kernel::Result<()> {
         if before.bodies.iter().any(|old| old.body.same_shape(&b.body)) {
             continue;
         }
-        kernel::check_kept(&b.body).map_err(|e| kept_refused(&b.name, &e, &replaced(before, after)))?;
+        // A thread output already checked (only successful checks are recorded) passed.
+        if checked_thread_output(&b.body) {
+            #[cfg(test)]
+            cost_tests::count(|c| c.reused_checks += 1);
+            continue;
+        }
+        check_feature_body(&b.body).map_err(|e| kept_refused(&b.name, &e, &replaced(before, after)))?;
     }
     Ok(())
 }
@@ -2026,29 +2077,38 @@ fn check_kept(before: &ModelState, after: &ModelState) -> kernel::Result<()> {
 /// [`check_kept`] of bodies whose checks were detached from them ([`kernel::detach_kept`]), by
 /// body name, in order: the first that fails is the feature's error, as there. `inputs` are the
 /// bodies the feature replaced ([`replaced`]), for that error.
-fn run_kept(checks: Vec<(String, kernel::KeptCheck)>, inputs: Vec<(String, Body)>) -> kernel::Result<()> {
+fn run_kept(checks: Vec<(String, kernel::KeptCheck)>, inputs: Vec<(String, Body, bool)>) -> kernel::Result<()> {
     for (name, check) in checks {
         check.run().map_err(|e| kept_refused(&name, &e, &inputs))?;
     }
     Ok(())
 }
 
-/// The bodies of `before` a feature that made `after` replaced or used up (by name): its inputs,
-/// whose own check says whether a refusal of its result is the feature's doing.
-fn replaced(before: &ModelState, after: &ModelState) -> Vec<(String, Body)> {
+/// The bodies of `before` a feature that made `after` replaced or used up: its inputs, whose own
+/// check says whether a refusal of its result is the feature's doing. Each with whether the
+/// feature used it up (no body of `after` has its name, as a join's tools), so that a refusal of
+/// one result is blamed on its own former self or on bodies it consumed, never on another body
+/// the same feature changed beside it.
+fn replaced(before: &ModelState, after: &ModelState) -> Vec<(String, Body, bool)> {
     before
         .bodies
         .iter()
         .filter(|old| !after.bodies.iter().any(|b| b.body.same_shape(&old.body)))
-        .map(|old| (old.name.clone(), old.body.clone()))
+        .map(|old| (old.name.clone(), old.body.clone(), !after.bodies.iter().any(|b| b.name == old.name)))
         .collect()
 }
 
 /// The feature's error when the check of body `name`, which it keeps, refused it (`e`): naming
-/// the bodies among `inputs` that already failed SMLib's check before the feature ran, since the
-/// result's check reports their defects too. Checked only here, once the result is refused.
-fn kept_refused(name: &str, e: &kernel::KernelError, inputs: &[(String, Body)]) -> kernel::KernelError {
-    let failing: Vec<&str> = inputs.iter().filter(|(_, b)| kernel::failing_check(b).is_ok_and(|c| c.is_some())).map(|(n, _)| n.as_str()).collect();
+/// the bodies among `inputs` that went into it (its own former self, by name, and the bodies the
+/// feature used up) and already failed SMLib's check before the feature ran, since the result's
+/// check reports their defects too. Checked only here, once the result is refused.
+fn kept_refused(name: &str, e: &kernel::KernelError, inputs: &[(String, Body, bool)]) -> kernel::KernelError {
+    let failing: Vec<&str> = inputs
+        .iter()
+        .filter(|(n, _, used_up)| *used_up || n == name)
+        .filter(|(_, b, _)| kernel::failing_check(b).is_ok_and(|c| c.is_some()))
+        .map(|(n, _, _)| n.as_str())
+        .collect();
     let before = match failing.as_slice() {
         [] => String::new(),
         [only] if *only == name => " (it already failed SMLib's check before this feature)".to_string(),
@@ -3609,7 +3669,7 @@ impl Model {
                 // A parameter with an error fails the features using it, with that error.
                 let bad_param = param_names(f).into_iter().find_map(|n| self.param_errors.get(&n).map(|e| format!("parameter `{n}`: {e}")));
                 // The bodies whose check runs beside the features after this one.
-                let mut apart: Option<(Vec<(String, kernel::KeptCheck)>, Vec<(String, Body)>)> = None;
+                let mut apart: Option<(Vec<(String, kernel::KeptCheck)>, Vec<(String, Body, bool)>)> = None;
                 let refused = checks.refused(i);
                 let mut r = match frame_error.or(bad_param) {
                     _ if cached.is_some() => Ok(()),
@@ -3625,7 +3685,7 @@ impl Model {
                         }
                     }
                     None => kernel::guard(&f.name, || {
-                        let _val_guard = EvalValidationGuard(EVAL_VALIDATION.replace(validation));
+                        let _val_guard = EvalValidationGuard::new(validation);
                         let (r, deferred) =
                             kernel::validating(validation, || eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair));
                         r.map_err(|e| match e {
@@ -10798,8 +10858,10 @@ fn eval_feature(
         }
         FeatureKind::FrameEndCap { .. } => crate::end_cap::evaluate(doc, vals, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
-        FeatureKind::BoundingSolid { bodies, margin } => {
+        FeatureKind::BoundingSolid { bodies, margin, margins } => {
             let m = val(vals, margin, Kind::Length)?;
+            let side = |i: usize| margins.as_ref().and_then(|ms| ms.get(i)).map_or(Ok(m), |e| val(vals, e, Kind::Length));
+            let (lo, hi) = (Vec3::new(side(0)?, side(2)?, side(4)?), Vec3::new(side(1)?, side(3)?, side(5)?));
             let mut bb = solidcraft_geom::Aabb3::EMPTY;
             for b in st.bodies.iter().filter(|b| bodies.is_empty() || bodies.iter().any(|t| *t == b.name)) {
                 bb = bb.union(&b.mesh().bounds());
@@ -10807,8 +10869,11 @@ fn eval_feature(
             if bb.is_empty() {
                 return Err(DocError::Invalid("no bodies to bound".into()));
             }
-            let pad = Vec3::new(m, m, m);
-            let b = crate::lineage::numbered_tool(kernel::box_solid(bb.min - pad, bb.max + pad)?);
+            let (min, max) = (bb.min - lo, bb.max + hi);
+            if !(min.x < max.x && min.y < max.y && min.z < max.z) {
+                return Err(DocError::Invalid("a side's margin reaches past the opposite side of the bodies".into()));
+            }
+            let b = crate::lineage::numbered_tool(kernel::box_solid(min, max)?);
             let name = unique_body_name(st, f.body_names.first().map(String::as_str).unwrap_or("Bounding"));
             st.bodies.push(ModelBody::traced_new(name, b, f.id));
             Ok(())
@@ -12469,5 +12534,35 @@ mod named_face_lookup_tests {
         let st = parts(3);
         let hit = body_at(&st, &None, &[Vec3::new(22.0, 5.0, 5.0)]).unwrap();
         assert_eq!(st.bodies[hit].name, "Part1");
+    }
+}
+
+#[cfg(test)]
+mod kept_refused_tests {
+    use super::*;
+
+    /// #17689: a refused result names the inputs that already failed SMLib's check: its own
+    /// former self and the bodies the feature used up, never another body the same feature
+    /// changed beside it.
+    #[test]
+    fn a_refusal_names_only_the_results_own_inputs_that_failed_the_check() {
+        let text = include_str!("../../../tests/step-regressions/block_edge_off_its_face.step");
+        let bad = kernel::step_import(text).unwrap().bodies.remove(0).body;
+        assert!(kernel::failing_check(&bad).unwrap().is_some(), "the block fails the check");
+        let good = kernel::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        assert!(kernel::failing_check(&good).unwrap().is_none(), "the box passes it");
+        let e = kernel::KernelError::Failed("refused".into());
+        let msg = |name: &str, inputs: &[(String, Body, bool)]| kept_refused(name, &e, inputs).to_string();
+        // Both moved by one feature: the box's result is not blamed on the block.
+        let both = [("Bloco".to_string(), bad.clone(), false), ("Box1".to_string(), good.clone(), false)];
+        assert!(!msg("Box1", &both).contains("already failed"), "{}", msg("Box1", &both));
+        assert!(msg("Bloco", &both).contains("body `Bloco` (it already failed SMLib's check before this feature)"), "{}", msg("Bloco", &both));
+        // The block used up by a join into the box: named.
+        let joined = [("Bloco".to_string(), bad, true), ("Box1".to_string(), good, false)];
+        assert!(
+            msg("Box1", &joined).contains("body `Box1` (body `Bloco` already failed SMLib's check before this feature)"),
+            "{}",
+            msg("Box1", &joined)
+        );
     }
 }

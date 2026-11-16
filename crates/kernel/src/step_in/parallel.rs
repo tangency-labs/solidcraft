@@ -29,10 +29,10 @@ pub(super) struct Part {
     /// No B-rep could be made of the whole solid, and this is why: the body is a surface body of
     /// the faces that read ([`surface_part`]).
     pub refused: Option<String>,
-    /// SMLib's check of the body, as an operation on it takes it, fails, and this is its summary
-    /// ([`crate::validation::failing_check`]): operations that check their results refuse them
-    /// until the body is repaired. Checked once, when the part is read; not for a part made of
-    /// surfaces.
+    /// SMLib's check of the body as the file defines it fails or cannot run, and this says so
+    /// (`SMLib's check fails it: <summary>`, [`crate::validation::failing_check`]): operations
+    /// that check their results refuse them until the body is repaired. Checked once, when the
+    /// part is read; not for a part made of surfaces.
     pub check: Option<String>,
 }
 
@@ -81,11 +81,11 @@ pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
         Source::Item { item, units } => {
             let (mut part, mut read) = smlib_part(ex, *item, *units).or_else(|refused| surface_part(ex, *item, *units, refused))?;
             if part.refused.is_none() {
-                part.check = solidcraft_profile::scope("import", "step.check", || crate::validation::failing_check(&part.body)).unwrap_or_else(|e| {
-                    log::debug!(target: "step", "the check of item #{item} could not run: {e}");
-                    None
-                });
-                if part.check.is_some() {
+                let check = solidcraft_profile::scope("import", "step.check", || crate::validation::failing_check(&part.body));
+                let fails = matches!(check, Ok(Some(_)));
+                part.check = check_note(check);
+                // Only a check that ran and failed is healed: one that cannot run stays reported.
+                if fails {
                     solidcraft_profile::scope("import", "step.heal", || heal(&mut part, &mut read, *item));
                 }
             }
@@ -97,6 +97,15 @@ pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
     // Counted on the part (a placement meshes the same faces).
     let missing = if job.check_mesh { solidcraft_profile::scope("import", "step.mesh_check", || part.body.unmeshed_faces()) } else { 0 };
     Ok(Made { body, missing, part, read })
+}
+
+/// A part's check as [`Part::check`] states it. A check that cannot run refuses an operation's
+/// result too (check_kept), so it is reported the same way.
+fn check_note(check: std::result::Result<Option<String>, String>) -> Option<String> {
+    match check {
+        Ok(check) => check.map(|summary| format!("SMLib's check fails it: {summary}")),
+        Err(e) => Some(format!("SMLib's check could not run: {e}")),
+    }
 }
 
 /// A part whose check fails, healed of its tolerance-scale defects
@@ -116,10 +125,7 @@ pub(super) fn heal(part: &mut Part, read: &mut Vec<Note>, item: u64) {
         log::debug!(target: "step", "the heal of item #{item} named a face the part does not have");
         return;
     };
-    part.check = crate::validation::failing_check(&body).unwrap_or_else(|e| {
-        log::debug!(target: "step", "the check of item #{item}'s healed body could not run: {e}");
-        None
-    });
+    part.check = check_note(crate::validation::failing_check(&body));
     part.body = body;
     part.face_origin = face_origin;
     read.push(Note::Repaired(format!("healed SMLib's check failures: {}", heal.summary())));
