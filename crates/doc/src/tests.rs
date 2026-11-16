@@ -1421,6 +1421,10 @@ fn a_second_sketch_cannot_take_an_existing_sketch_name() {
     // Automatic names skip the taken one.
     let auto = doc.add_feature(sketch(), None).unwrap();
     assert_ne!(doc.feature(auto).unwrap().name, "Sketch2");
+    // Lookup ignores case, so a name that differs only in case is the same name.
+    let error = doc.add_feature(sketch(), Some("sketch2")).unwrap_err().to_string();
+    assert!(error.contains("another feature is called `sketch2`"), "{error}");
+    assert_eq!(doc.find_feature("SKETCH2").unwrap().name, "Sketch2");
 }
 
 #[test]

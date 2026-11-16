@@ -4393,7 +4393,22 @@ impl Document {
         {
             return Some(f);
         }
-        self.features.iter().find(|f| f.name.eq_ignore_ascii_case(r))
+        self.features.iter().find(|f| same_feature_name(&f.name, r))
+    }
+
+    /// Whether a new feature of `kind` called `name` would be ambiguous. Plane references share
+    /// the feature namespace, and sketches are also referenced by name (`extrude` by sketch name
+    /// takes the first match), so a duplicate would silently select the first feature. Other
+    /// shared names (a sketch and its extrude) remain supported. Names compare as lookup does.
+    pub fn name_clash(&self, kind: &FeatureKind, name: &str) -> bool {
+        let is_plane = matches!(kind, FeatureKind::ConstructionPlane { .. });
+        let is_sketch = matches!(kind, FeatureKind::Sketch { .. });
+        self.features.iter().any(|f| {
+            same_feature_name(&f.name, name)
+                && (is_plane
+                    || matches!(f.kind, FeatureKind::ConstructionPlane { .. })
+                    || (is_sketch && matches!(f.kind, FeatureKind::Sketch { .. })))
+        })
     }
 
     /// Resolve a textual timeline reference. An exact name wins even when it looks like an id.
@@ -4407,7 +4422,7 @@ impl Document {
         {
             return Ok(feature);
         }
-        let mut matches = self.features.iter().filter(|f| f.name.eq_ignore_ascii_case(name));
+        let mut matches = self.features.iter().filter(|f| same_feature_name(&f.name, name));
         let feature = matches.next().ok_or_else(|| DocError::Invalid(format!("no feature `{name}`")))?;
         if matches.next().is_some() {
             return Err(DocError::Invalid(format!("ambiguous feature `{name}`. Use its exact name or numeric id")));
@@ -4484,18 +4499,7 @@ impl Document {
             Some(n) if !n.trim().is_empty() => n.trim().to_string(),
             _ => self.unique_name(kind.base_name()),
         };
-        // Plane references share the feature namespace. A duplicate would silently select
-        // the first feature. Other shared names (a sketch and its extrude) remain supported.
-        let is_plane = matches!(kind, FeatureKind::ConstructionPlane { .. });
-        // Sketches are also referenced by name (`extrude` by sketch name takes the first match),
-        // so two sketches may not share one (#17963).
-        let is_sketch = matches!(kind, FeatureKind::Sketch { .. });
-        if self.features.iter().any(|f| {
-            f.name == name
-                && (is_plane
-                    || matches!(f.kind, FeatureKind::ConstructionPlane { .. })
-                    || (is_sketch && matches!(f.kind, FeatureKind::Sketch { .. })))
-        }) {
+        if self.name_clash(&kind, &name) {
             return Err(DocError::Invalid(format!("another feature is called `{name}`")));
         }
         let id = self.next_id.max(1);
@@ -5279,4 +5283,9 @@ pub fn valid_density(d: f64) -> bool {
 /// Density of a built-in physical material (g/cm³).
 pub fn material_density(name: &str) -> Option<f64> {
     MATERIALS.iter().find(|(n, _)| n.eq_ignore_ascii_case(name.trim())).map(|(_, d)| *d)
+}
+
+/// How a textual reference matches a feature name: ASCII case does not matter.
+pub fn same_feature_name(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
 }
