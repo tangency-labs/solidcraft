@@ -1981,7 +1981,8 @@ fn a_traced_cut_by_each_of_ten_wedges_in_turn_is_the_target_less_the_wedges() {
 /// point it is taken about. Moved 40 above the centre of the bounding box, where `Body::volume`
 /// takes it, that point changes the target's own volume by 1.3e-4 and what the sixth join adds by
 /// 1.8e-4. So nine joins add 7.3e-5 each, the sixth 1.0e-4 alone and 2.0e-4 after the other five,
-/// and the bound allows 3e-5 a wedge.
+/// and the bound allows 3e-5 a wedge. The test after this one checks each join's vertices
+/// against the first join's, which the volume cannot do to better than that.
 #[test]
 fn a_traced_join_of_each_of_ten_wedges_in_turn_adds_what_lies_outside_the_target() {
     all_fixes();
@@ -2012,6 +2013,73 @@ fn a_traced_join_of_each_of_ten_wedges_in_turn_adds_what_lies_outside_the_target
         (added - 10.0 * outside).abs() <= 10.0 * 3e-5,
         "added {added}, ten times the part of a wedge outside the target {outside}"
     );
+}
+
+/// The ten wedges of the test above, each joined alone to the target. The wedges and the target
+/// are ten turns of one part about the z axis, so each join, turned back by its wedge's multiple
+/// of 36 degrees, must have the first join's counts and its vertices, each within 1e-6 (a tenth of
+/// the tolerance) of one of the first join's and the other way round. This checks the geometry of
+/// every join directly, where the volume bound above only measures it as precisely as the traced
+/// bodies' open loops allow.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's comparison, not ops computing geometry
+fn a_traced_join_of_each_wedge_alone_is_the_first_join_turned_into_place() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    let angle = |b: &Body| {
+        let [x, y, _] = b.mass_properties(1e-11).unwrap().centroid;
+        y.atan2(x)
+    };
+    let joined = |i: usize| {
+        let wedge = body(&format!("wedge{i}"));
+        let turn = angle(&wedge);
+        let r = boolean(body("target"), wedge, BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let report = r.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "wedge {i}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 1, "wedge {i}");
+        (r, turn)
+    };
+    // each vertex of the join, turned about z by `turn`
+    let vertices = |r: &Body, turn: f64| -> Vec<[f64; 3]> {
+        let (_, brep) = common::kernel_copy(r);
+        let (s, c) = turn.sin_cos();
+        brep.vertices()
+            .ids()
+            .map(|v| {
+                let p = brep.vertex(v).unwrap().point;
+                [c * p.x - s * p.y, s * p.x + c * p.y, p.z]
+            })
+            .collect()
+    };
+    let nearest = |p: &[f64; 3], set: &[[f64; 3]]| {
+        set.iter()
+            .map(|q| ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt())
+            .fold(f64::INFINITY, f64::min)
+    };
+    let (first, first_turn) = joined(0);
+    let counts = first.counts().unwrap();
+    let want = vertices(&first, 0.0);
+    for i in 1..10 {
+        let (r, turn) = joined(i);
+        assert_eq!(r.counts().unwrap(), counts, "wedge {i}");
+        // the wedge's whole number of tenths of a turn from the first
+        let steps = ((turn - first_turn) / (TAU / 10.0)).round();
+        let got = vertices(&r, -steps * TAU / 10.0);
+        for (a, b, which) in [
+            (&got, &want, "of this join"),
+            (&want, &got, "of the first join"),
+        ] {
+            for p in a {
+                let d = nearest(p, b);
+                assert!(
+                    d <= 1e-6,
+                    "wedge {i}: a vertex {which} at {p:?} is {d} from the other"
+                );
+            }
+        }
+    }
 }
 
 /// A 10 mm cube with the vertical edge at x = 0, y = 0 rounded to radius 2.
