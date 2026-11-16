@@ -18,7 +18,9 @@ use crate::tools::Tool;
 use crate::viewport::Proj;
 use solidcraft_theme::Tokens;
 
-/// What an untyped construction line Length box shows: the line stays infinite.
+/// The placeholder an untyped construction line Length box shows: the line stays infinite.
+/// It is not a value in the box: the box holds the user's own expression, empty until they
+/// type one (#17052).
 const INFINITE: &str = "\u{221e}";
 
 /// One value box.
@@ -552,6 +554,8 @@ pub fn dimensions(t: &Tool) -> Value {
         .iter()
         .chain(&t.dims)
         .filter(|dimension| dimension.locked && is_dimension(t, dimension.label))
+        // A cleared construction Length is the infinite line again: it is no dimension (#17052).
+        .filter(|dimension| !(construction_length(t, dimension) && dimension.value.trim().is_empty()))
         .map(|dimension| (dimension.label.to_ascii_lowercase().replace(' ', "_"), json!(dimension.value)))
         .collect::<serde_json::Map<_, _>>();
     Value::Object(values)
@@ -702,8 +706,14 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     let construction = solidcraft_engine::cmd::construction_line_mode(t.cmd).is_some();
     for (b, (v, _)) in t.dims.iter_mut().zip(&lv) {
         if !b.locked {
-            // A construction line's untyped length is infinite, whatever the pointer does.
-            b.value = if construction && b.label == "Length" { INFINITE.to_owned() } else { fmt(app, b.label, b.kind, *v) };
+            // A construction line's Length box holds no value until the user types one: an
+            // unset length keeps the line infinite, and the box shows the ∞ as its placeholder
+            // (#17052), so a typed size is the whole value.
+            if construction && b.label == "Length" {
+                b.value.clear();
+            } else {
+                b.value = fmt(app, b.label, b.kind, *v);
+            }
         }
     }
     // Polygon values used to sit inside the radius, so both boxes covered a small polygon
@@ -723,6 +733,16 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     } else {
         None
     };
+    // Where each box would sit, then moved apart in screen space: a tilted view pulls boxes that
+    // are apart in the sketch together on the screen (#10543).
+    let anchored: Vec<Option<Pos2>> = (0..t.dims.len())
+        .map(|i| {
+            let (_, at) = lv.get(i).copied()?;
+            let sp = proj.to_screen(plane.to_world(at))?;
+            Some(in_view(sp + vec2(-34.0, -11.0), view, ui.ctx().pointer_latest_pos()))
+        })
+        .collect();
+    let apart = apart(&anchored, view);
     // Line inputs need screen-space clearance: a fixed sketch-space offset can leave a
     // wide field over a vertical line, especially when the whole preview is short.
     let line_positions = if matches!(t.cmd, "sketch.line" | "sketch.line.midpoint") {
@@ -750,10 +770,16 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
         let Some(sp) = proj.to_screen(plane.to_world(at)) else { continue };
         let id = egui::Id::unique(("sc_dim", i));
         let has_focus = ui.ctx().memory(|m| m.has_focus(id));
+        // What the box shows: the expression the user typed, or the ∞ of an untouched
+        // construction line's Length. The ∞ is a placeholder, not a value in the box (#17052).
+        let mut text = b.value.clone();
+        if construction && b.label == "Length" && text.is_empty() {
+            text = INFINITE.to_owned();
+        }
         // While a box follows the cursor its whole text is selected, so typing replaces it.
         if (has_focus || (focus && i == 0)) && !b.locked {
             let mut s = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
-            let n = b.value.chars().count();
+            let n = text.chars().count();
             s.cursor.set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
             s.store(ui.ctx(), id);
         }
@@ -761,6 +787,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             .as_ref()
             .or(polygon_positions.as_ref())
             .and_then(|positions| positions.get(i).copied())
+            .or(apart.get(i).copied().flatten())
             .unwrap_or_else(|| in_view(sp + vec2(-34.0, -11.0), view, ui.ctx().pointer_latest_pos()));
         // Background: under Preferences and Report a bug (#9016), like canvas value boxes.
         Container::new(ui.ctx(), Surface::Canvas).area(egui::Id::unique(("sc_dim_area", i))).fixed_pos(pos).order(egui::Order::Background).show(
@@ -768,13 +795,15 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             |ui| {
                 let fill = if b.locked { tk.accent_soft } else { tk.panel };
                 Container::show_backing(ui, field_frame.fill(fill), |ui| {
-                    let r = crate::ui_kit::placement_field(ui, id, &mut b.value, b.label);
+                    let r = crate::ui_kit::placement_field(ui, id, &mut text, b.label);
                     // A completion gets first use of forward Tab. Shift+Tab always moves back;
                     // the box reached by egui's generic traversal must not complete its text.
-                    let changed =
-                        (source.is_none() || (source == Some(i) && tab != Some(true))) && crate::params_dialog::complete(ui, &r, &mut b.value);
+                    let changed = (source.is_none() || (source == Some(i) && tab != Some(true))) && crate::params_dialog::complete(ui, &r, &mut text);
                     completed |= changed && source == Some(i);
                     if r.changed() || changed {
+                        // The ∞ is a placeholder: what the user typed is the whole value, and a
+                        // cleared box is the infinite length again (#17052).
+                        b.value = text.replace(INFINITE, "");
                         b.locked = true;
                     }
                     if focus && i == 0 {
@@ -968,6 +997,28 @@ pub(crate) fn over_tool_boxes(app: &SolveApp, ctx: &egui::Context, p: egui::Pos2
     let Some(t) = app.tool.as_ref() else { return false };
     (0..t.dims.len()).any(|i| ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).is_some_and(|r| r.contains(p)))
         || ctx.memory(|m| m.area_rect(egui::Id::unique("sc_construction_switch"))).is_some_and(|r| r.contains(p))
+}
+
+/// The boxes at `positions` (top left, `None` for one not shown) with none covering another: a
+/// box that overlaps an earlier one moves below it, or above it when that leaves `view`. The
+/// first box of an overlap keeps its place, so the one that follows the cursor does not jump.
+fn apart(positions: &[Option<Pos2>], view: Option<egui::Rect>) -> Vec<Option<Pos2>> {
+    const GAP: f32 = 2.0;
+    let mut out = positions.to_vec();
+    let rect = |p: Pos2| egui::Rect::from_min_size(p, BOX);
+    for j in 1..out.len() {
+        for i in 0..j {
+            let (Some(a), Some(b)) = (out[i], out[j]) else { continue };
+            if !rect(a).intersects(rect(b)) {
+                continue;
+            }
+            let below = Pos2::new(b.x, a.y + BOX.y + GAP);
+            let above = Pos2::new(b.x, a.y - BOX.y - GAP);
+            let fits = |p: Pos2| view.is_none_or(|v| v.contains_rect(rect(p)));
+            out[j] = Some(if fits(below) || !fits(above) { below } else { above });
+        }
+    }
+    out
 }
 
 /// Where a value box whose top left would be `pos` goes so it stays in the drawing area `view`:

@@ -88,7 +88,7 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
         let h = f("height").unwrap_or(DEFAULT_MODEL_H).clamp(16.0, 8192.0);
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(w as f32, h as f32));
         let cam = app.cam;
-        (crate::viewport::Proj { cam, vp: cam.view_proj(w / h, crate::viewport::scene_radius(app)), rect }, 1.0)
+        (crate::viewport::Proj { cam, vp: cam.view_proj(w / h, crate::viewport::scene_radius(app)), rect, bounds: None }, 1.0)
     };
 
     let mut inputs: Vec<Input> = Vec::new();
@@ -348,6 +348,11 @@ pub(crate) fn body_cut_at(
             continue;
         }
         if !include_ghosted && crate::viewport::body_faded(app, b, active_bodies) {
+            continue;
+        }
+        // A sheet or an open shell has no inside to cut: a ray crossing it once is not within
+        // material, so it must not raise a cap that hides what lies behind (#17177).
+        if !b.is_closed() {
             continue;
         }
         if let Some((_, bb)) = bounds.get(i) {

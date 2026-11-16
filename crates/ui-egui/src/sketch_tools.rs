@@ -364,9 +364,12 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         return true;
     }
     if id == "canvas.edit" {
-        // The browser's canvas panel (one panel for canvases).
-        if let Some(first) = app.session.doc.canvases.first().map(|c| c.id) {
-            app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(app, first, false));
+        // The browser's canvas panel (one panel for canvases). A canvas picked in the Browser
+        // is the one to edit, not just the first one (#16518).
+        let picked = app.tree.picked_canvases.last().copied();
+        let target = picked.or_else(|| app.session.doc.canvases.first().map(|c| c.id));
+        if let Some(c) = target {
+            app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(app, c, false));
         }
         return false;
     }
@@ -619,10 +622,22 @@ pub fn refine_snap(
     let px = 1.0 / (a.distance(b) as f64).max(1e-9);
     let tol = 7.0 * px;
     // A model vertex under the cursor: drawing on it projects it into the sketch.
+    // A snap point of a model edge or another sketch's curve (#11229) is one too: an end of a
+    // body's edge is a vertex, projected and linked like one; a centre or a middle (and a point
+    // of another sketch) is no vertex to link, so the point goes where it projects to.
     for h in pick(app, proj, a) {
-        if let Hit::Vertex { point, .. } = h {
-            SNAP.with(|s| *s.borrow_mut() = Some(("Pt", plane.to_local(point))));
-            return Some((plane.to_local(point), Some(format!("vertex:{},{},{}", point.x, point.y, point.z))));
+        if let Hit::Vertex { point, body } = h {
+            use solidcraft_engine::snap::SnapKind;
+            let vertex = Some(format!("vertex:{},{},{}", point.x, point.y, point.z));
+            let (label, arg) = match crate::snap_wake::woken_at(app, point).map(|p| p.kind) {
+                Some(SnapKind::Centre | SnapKind::FaceCentre) => ("Ctr", None),
+                Some(SnapKind::Middle) => ("Mid", None),
+                Some(SnapKind::End) if body.is_empty() => ("End", None),
+                Some(SnapKind::End) => ("End", vertex),
+                Some(SnapKind::Vertex) | None => ("Pt", vertex),
+            };
+            SNAP.with(|s| *s.borrow_mut() = Some((label, plane.to_local(point))));
+            return Some((plane.to_local(point), arg));
         }
     }
     let mid_only = crate::tool_modifiers::target_midpoint();
@@ -901,6 +916,15 @@ pub fn takes(id: &str, hit: &Hit) -> bool {
     }
 }
 
+/// Whether a tool places points on the sketch plane (and so takes snap points, #11229).
+pub fn places_points(t: &Tool) -> bool {
+    match t.kind {
+        Kind::Draw(_) => true,
+        Kind::Ext => matches!(mode(t.cmd), Some(Mode::Points(_))),
+        _ => false,
+    }
+}
+
 fn mode(id: &str) -> Option<Mode> {
     if solidcraft_engine::cmd::construction_line_mode(id).is_some() {
         return Some(Mode::Construction);
@@ -982,7 +1006,9 @@ pub fn hint(id: &str) -> Option<String> {
             "sketch.slot.center_point" => "Slot: click the centre, an arc centre, then the width",
             "sketch.slot.arc_three_point" => "Arc slot: click start, a point on the arc, the end, then the width",
             "sketch.slot.arc_center" => "Arc slot: click the centre, the start, the end, then the width",
-            "sketch.spline.fit_point" => "Spline: click fit points; click the start to close smoothly, or right-click to finish",
+            "sketch.spline.fit_point" => {
+                "Spline: click fit points; click the start to close smoothly, or right-click to finish; then select the spline to drag its tangent handles"
+            }
             "sketch.spline.control_point" | "sketch.spline.control_point_5" => "Control point spline: click control points; right-click to finish",
             "sketch.text" => "Text: click where the text starts",
             "sketch.edit_text" => "Edit Text: click a letter interior or outline",
@@ -1004,6 +1030,47 @@ pub fn hint(id: &str) -> Option<String> {
 
 fn active_sketch(app: &SolveApp) -> Option<u64> {
     app.session.active_sketch
+}
+
+/// A click with Project. An edge, face, vertex or other sketch entity projects as itself.
+/// The centre of a hole is none of those — the opening has no triangles — so the ray is
+/// tested against hole openings and the rim's edges are projected. Anything else is said
+/// out loud: a miss used to return without running the command, so the click did nothing.
+fn project_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, hits: &[Hit]) {
+    let picked = hits.iter().find_map(|h| match h {
+        Hit::Vertex { .. } | Hit::Edge { .. } | Hit::Face { .. } | Hit::SketchCurve { .. } | Hit::SketchPoint { .. } => model_ref(app, h),
+        _ => None,
+    });
+    let refs = if let Some(r) = picked {
+        vec![r]
+    } else if let Some(rim) = hole_under_cursor(app, proj, pos) {
+        rim
+    } else if let Some(r) = hits.iter().find_map(|h| model_ref(app, h)) {
+        vec![r]
+    } else {
+        app.set_status(app.tr("sketch.project.nothing_under_cursor").to_string(), true);
+        return;
+    };
+    if refs.is_empty() {
+        app.set_status(app.tr("sketch.project.nothing_under_cursor").to_string(), true);
+        return;
+    }
+    // A command failure is already reported by `SolveApp::run`. A refusal that returns
+    // before that (a file operation in progress) is not, so surface it here.
+    if let Err(error) = app.run("sketch.project", json!({"refs": refs}))
+        && !app.status.as_ref().is_some_and(|(_, _, is_error)| *is_error)
+    {
+        app.set_status(error, true);
+    }
+}
+
+/// Edge references for the hole opening under the cursor, when the ray passes through one.
+fn hole_under_cursor(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Vec<Value>> {
+    let (origin, dir) = proj.ray(pos);
+    let state = crate::open_meshing::shown_world(app);
+    let rim = solidcraft_engine::doc::project::hole_rim_along_ray(&state, origin, dir, |name| app.session.body_visible(name))?;
+    let refs: Vec<Value> = rim.edges.iter().filter(|p| p.is_finite()).map(|p| json!({"edge": [p.x, p.y, p.z], "body": rim.body})).collect();
+    (!refs.is_empty()).then_some(refs)
 }
 
 /// A model reference for a hit (for Project and friends).
@@ -1147,6 +1214,8 @@ pub fn periodic_start_snap(app: &SolveApp, tool: &Tool, proj: &Proj, pos: Pos2) 
     (screen.distance(pos) <= 8.0).then_some(first)
 }
 
+/// A viewport click while a sketch tool is running: picks under `pos` and dispatches on the
+/// tool's mode. Sketch Project goes through `project_click`.
 pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
     let Some(m) = mode(tool.cmd) else { return };
     let hits = pick(app, proj, pos);
@@ -1241,6 +1310,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 }
             }
         }
+        Mode::ModelRef if cmd == "sketch.project" => project_click(app, proj, pos, &hits),
         Mode::ModelRef => {
             let r = hits.iter().find_map(|h| model_ref(app, h));
             let Some(r) = r else { return };
@@ -2150,6 +2220,9 @@ fn snap_hint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     }
     crate::scenario::publish_count("sketch_align_guides", guides.len() as f64);
     let r = egui::Rect::from_min_size(sp + egui::vec2(12.0, -24.0), egui::vec2(24.0, 14.0));
+    // The tool at the cursor sits in the same corner of the pointer (#15391).
+    let r = crate::tool_cursor::clear_of_badge(app, painter, proj.rect, r);
+    crate::scenario::publish_rect("viewport:snap_hint", r);
     painter.rect_filled(r, tk.radius_sm.saturating_sub(1), tk.accent_soft);
     painter.text(r.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(solidcraft_theme::Tokens::get().font_micro), tk.text);
 }

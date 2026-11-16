@@ -303,7 +303,9 @@ fn ext(d: &[[f64; 3]; 2]) -> Extent3d {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -457,7 +459,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
         Inputs::Preds { p, a, b, .. } => {
             let v = need()?;
             let in_point = tri!(o, v.is_point_in_param_domain_simple(v3(*p)));
-            let in_line = tri!(o, v.is_line_in_param_domain_simple(k, v3(*a), v3(*b)));
+            let in_line = tri!(o, v.is_line_in_param_domain_simple(v3(*a), v3(*b)));
             let bounded = tri!(o, v.is_bounded_simple());
             o.push(0.0);
             o.extend([fl(in_point), fl(in_line), fl(bounded)]);

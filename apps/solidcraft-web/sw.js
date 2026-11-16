@@ -149,9 +149,12 @@ self.addEventListener("activate", (event) => {
         return self.registration.unregister();
       }
       const older = (await caches.keys()).filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE);
+      // Claim first: from the moment this worker is the active one, a page the old worker controlled has
+      // no controller until it is claimed, and a request it makes then goes straight to the network, which
+      // serves the newest build, not the page's. Nothing slow goes before this.
+      await self.clients.claim();
       for (const name of older) await (await caches.open(name)).put(url(RETIRED), new Response(""));
       await sweep();
-      await self.clients.claim();
       // With no earlier build kept, the pages open when the first worker takes over came from the
       // network, and get their files from it. After an update a page with no record is not
       // assumed to be anything: its record may only be late, and the network now serves a newer

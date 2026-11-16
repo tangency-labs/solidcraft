@@ -1,7 +1,29 @@
 //! Modal confirmations share the Panel/Window frame and the single kit footer.
-use super::{Action, Footer, Window, actions::footer_with_left, text::paint_text};
+use super::{
+    Action, Footer, Window,
+    actions::{first_letter_action, footer_with_left},
+    text::paint_text,
+};
 use egui::{Ui, vec2};
 use solidcraft_theme::Tokens;
+
+thread_local! {
+    /// Does the host let dialog buttons answer the first letter of their labels (#9841)?
+    /// Off unless the host turns it on, so the old behaviour — typing does nothing to the
+    /// buttons — is the default. See [`set_dialog_mnemonics`].
+    static DIALOG_MNEMONICS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Do dialog buttons answer the first letter of their labels? See [`set_dialog_mnemonics`].
+pub fn dialog_mnemonics() -> bool {
+    DIALOG_MNEMONICS.with(std::cell::Cell::get)
+}
+
+/// The host turns the first-letter button accelerators of [`Confirm`] on or off (#9841).
+/// Off is the old behaviour: a typed letter does nothing to a dialog's buttons.
+pub fn set_dialog_mnemonics(on: bool) {
+    DIALOG_MNEMONICS.with(|cell| cell.set(on));
+}
 
 #[derive(Clone, Copy)]
 pub enum Tone {
@@ -65,6 +87,22 @@ impl<'a> Confirm<'a> {
         self
     }
 
+    /// The footer's visible buttons with their live states, for the first-letter accelerator:
+    /// OK needs valid inputs, Cancel always answers, and a confirmation's left action is live.
+    fn accelerators(&self, valid: bool) -> Vec<(Action, &'a str, bool)> {
+        let mut out = Vec::new();
+        if !self.ok.is_empty() {
+            out.push((Action::Ok, self.ok, valid));
+        }
+        if let Some(left) = self.left {
+            out.push((Action::Apply, left, true));
+        }
+        if !self.cancel.is_empty() {
+            out.push((Action::Cancel, self.cancel, true));
+        }
+        out
+    }
+
     pub fn show(self, ctx: &egui::Context, valid: bool, message: impl FnOnce(&mut Ui)) -> (bool, Action) {
         // Reviewed reports and native pickers temporarily own input. Keep the pending
         // answer untouched and resume the modal when that boundary closes.
@@ -80,6 +118,10 @@ impl<'a> Confirm<'a> {
             ui.spacing_mut().item_spacing.y = 0.0;
             // Consume before native button focus can interpret Enter as a different answer.
             let enter = ui.is_enabled() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+            // #9841: a typed letter answers the button whose translated label starts with it.
+            // Read here so the keystroke is consumed even when Escape or a click wins the frame.
+            // The host's preference gates the accelerator; off, the keystroke is left alone.
+            let accel = if ui.is_enabled() && dialog_mnemonics() { first_letter_action(ui.ctx(), &self.accelerators(valid)) } else { Action::None };
             let mut closed = false;
             egui::Frame::NONE
                 .inner_margin(egui::Margin {
@@ -148,6 +190,8 @@ impl<'a> Confirm<'a> {
                 action
             } else if enter && valid {
                 self.selected.unwrap_or(Action::Ok)
+            } else if action == Action::None && accel != Action::None {
+                accel
             } else {
                 action
             };
@@ -155,3 +199,7 @@ impl<'a> Confirm<'a> {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "confirm_tests.rs"]
+mod tests;

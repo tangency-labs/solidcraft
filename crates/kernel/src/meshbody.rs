@@ -49,6 +49,22 @@ impl TriMesh {
         out
     }
 
+    /// Measured properties of a mesh body.
+    pub(crate) fn measure(&self) -> (solidcraft_geom::MeshMeasure, solidcraft_geom::Aabb3) {
+        let m = self.to_mesh();
+        (m.measure(), m.bounds())
+    }
+
+    /// Triangle count.
+    pub(crate) fn face_count(&self) -> usize {
+        self.triangles.len()
+    }
+
+    /// Vertex count.
+    pub(crate) fn vertex_count(&self) -> usize {
+        self.positions.len()
+    }
+
     /// Distinct undirected triangle sides.
     pub(crate) fn edge_count(&self) -> usize {
         let mut set = std::collections::HashSet::new();

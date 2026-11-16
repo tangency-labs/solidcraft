@@ -2011,3 +2011,105 @@ fn a_left_panel_in_an_inside_out_view_keeps_an_anchor() {
     let anchor = panel.bounded_anchor(&ctx);
     assert!(anchor.x.is_finite() && anchor.y.is_finite(), "{anchor:?}");
 }
+
+/// Cards for a column, in the shape a host measures them: content height and minimum height.
+fn stack_cards(spec: &[(f32, f32)]) -> Vec<StackCard> {
+    spec.iter().map(|&(content, minimum)| StackCard { content, minimum }).collect()
+}
+
+/// Places a stack and checks what must hold for every host: inside the column, never overlapping,
+/// a floor kept unless the card is folded, and an honest `scrolls`.
+fn checked_stack(column: egui::Rect, cards: &[StackCard]) -> Vec<StackSlot> {
+    let slots = Panel::stack_bounds(column, cards);
+    assert_eq!(slots.len(), cards.len(), "one rect per card");
+    let mut previous: Option<egui::Rect> = None;
+    for (i, (slot, card)) in slots.iter().zip(cards).enumerate() {
+        assert_eq!(slot.rect.width(), column.width(), "card {i} spans the column");
+        assert!(slot.rect.top().is_finite() && slot.rect.bottom().is_finite(), "card {i} is drawn at a finite height");
+        assert!(slot.rect.top() >= column.top() - 0.01, "card {i} starts {} above the column", column.top() - slot.rect.top());
+        assert!(slot.rect.bottom() <= column.bottom() + 0.01, "card {i} ends {} below the column", slot.rect.bottom() - column.bottom());
+        if let Some(above) = previous {
+            assert!(slot.rect.top() >= above.bottom() - 0.01, "card {i} overlaps the card above it");
+        }
+        if !slot.folded {
+            assert!(slot.rect.height() >= card.minimum - 0.01, "card {i} is {} high, below its minimum {}", slot.rect.height(), card.minimum);
+        }
+        assert_eq!(slot.scrolls, card.content > slot.rect.height() + 0.5, "card {i} must report whether it scrolls");
+        previous = Some(slot.rect);
+    }
+    slots
+}
+
+/// With room for every card, each one gets exactly its content height: nothing scrolls and nothing
+/// folds, for two, three and five cards.
+#[test]
+fn stacked_cards_share_a_tall_column_by_their_content() {
+    let column = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 1400.0));
+    for spec in [
+        &[(120.0, 60.0), (200.0, 60.0)][..],
+        &[(120.0, 60.0), (200.0, 60.0), (80.0, 60.0)][..],
+        &[(120.0, 60.0), (200.0, 60.0), (80.0, 60.0), (90.0, 60.0), (150.0, 60.0)][..],
+    ] {
+        let cards = stack_cards(spec);
+        let slots = checked_stack(column, &cards);
+        for (i, (slot, card)) in slots.iter().zip(&cards).enumerate() {
+            assert_eq!(slot.rect.height(), card.content, "card {i} is given exactly what its content needs");
+            assert!(!slot.scrolls && !slot.folded, "card {i} fits, so it neither scrolls nor folds");
+        }
+    }
+}
+
+/// With room for the minimums but not for every content, every card keeps its minimum and says it
+/// scrolls, and the space left over goes to the card that lacks the most.
+#[test]
+fn stacked_cards_share_a_short_column_down_to_their_minimums() {
+    let t = Tokens::get();
+    let cards = stack_cards(&[(400.0, 80.0), (300.0, 60.0), (200.0, 40.0)]);
+    let height = 80.0 + 60.0 + 40.0 + t.space_8 * 2.0 + 60.0;
+    let column = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, height));
+    let slots = checked_stack(column, &cards);
+    for (i, slot) in slots.iter().enumerate() {
+        assert!(slot.scrolls && !slot.folded, "card {i} scrolls, it is not folded");
+    }
+    assert!(slots[0].rect.height() > slots[1].rect.height(), "the card that lacks most gets most");
+    assert!(slots[0].rect.height() > 80.0 && slots[2].rect.height() > 40.0, "the spare goes to the cards that lack room");
+}
+
+/// A column too short for every minimum folds the lowest cards to their header, and keeps the ones
+/// above at their minimum, without ever overlapping.
+#[test]
+fn stacked_cards_fold_to_their_header_when_the_column_cannot_hold_every_minimum() {
+    let t = Tokens::get();
+    let cards = stack_cards(&[(300.0, 120.0), (300.0, 120.0), (300.0, 120.0), (300.0, 120.0)]);
+    let column = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 2.0 * 120.0 + t.form_header_height + t.space_8 * 3.0));
+    let slots = checked_stack(column, &cards);
+    assert_eq!(slots.iter().filter(|slot| slot.folded).count(), 3, "three of the four cards have to fold");
+    assert!(!slots[0].folded, "the top card keeps its minimum");
+    assert!(slots[1].folded && slots[2].folded && slots[3].folded, "the lowest cards fold first");
+    for slot in slots.iter().filter(|slot| slot.folded) {
+        assert!(slot.rect.height() <= t.form_header_height + 0.01, "a folded card is its header high");
+    }
+}
+
+/// A column too short even for the headers still gives finite, ordered rects that stay inside it,
+/// and nothing panics on nonsense measurements.
+#[test]
+fn stacked_cards_degrade_to_finite_rects_and_never_overlap() {
+    let cards = stack_cards(&[(300.0, 120.0), (300.0, 120.0), (300.0, 120.0)]);
+    for height in [120.0, 40.0, 0.0] {
+        let column = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, height));
+        let slots = checked_stack(column, &cards);
+        assert!(slots.iter().all(|slot| slot.folded), "nothing fits at {height}: every card folds");
+    }
+    // Un rect invertido no es un sitio donde dibujar: se trata como vacio, sin panic ni rects sueltos.
+    let inverted = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, -50.0));
+    for slot in Panel::stack_bounds(inverted, &cards) {
+        assert!(slot.rect.height() == 0.0 && slot.rect.top() == inverted.top(), "an inverted column holds nothing");
+    }
+    assert!(Panel::stack_bounds(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 400.0)), &[]).is_empty());
+    let nonsense = stack_cards(&[(f32::NAN, -10.0), (f32::INFINITY, f32::NAN)]);
+    let column = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, f32::NAN));
+    for slot in Panel::stack_bounds(column, &nonsense) {
+        assert!(slot.rect.top().is_finite() && slot.rect.height().is_finite(), "a nonsense measurement still draws somewhere finite");
+    }
+}

@@ -73,6 +73,36 @@ pub struct BodyFeaturesParams {
     pub body: Option<String>,
 }
 
+/// Show or hide the temporary component colours (`inspect.colored_components`): the one flag
+/// the command reads, as its handler reads it (`cmd/inspect.rs`'s `colored_components`).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ColoredComponentsParams {
+    /// True shows the colours, false hides them; left out, the command toggles them.
+    #[serde(default, deserialize_with = "enabled_flag", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub enabled: Option<bool>,
+}
+
+/// `true` or `false`; anything else, `null` included, is the handler's own message.
+fn enabled_flag<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Bool(b) => Ok(Some(b)),
+        _ => Err(D::Error::custom(whole("enabled must be a boolean"))),
+    }
+}
+
+/// What `inspect.colored_components` returns: whether the colours are shown now.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ColoredComponentsResult {
+    /// Whether the temporary component colours are shown. They are a view setting: never saved
+    /// with the design, and no appearance is changed.
+    pub enabled: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// What `model.body_features` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ModelBodyFeatures {
@@ -342,6 +372,98 @@ pub struct DocumentInspectParams {
     /// Give each sketch also its plane and its number of points and constraints. Default: false.
     #[serde(default)]
     pub sketch_counts: Option<bool>,
+    /// How much of the timeline to give: true (the default) each feature with its state and
+    /// timing; `"summary"` each as its id, name and type, with `error`, `warning`, `suppressed`
+    /// and `rolled_back` only when it has them (a reply a large design keeps small); false leaves
+    /// `timeline` out.
+    #[serde(default)]
+    pub timeline: Option<TimelineDetail>,
+    /// How much of each body to give: true (the default) as `measure` says; `"names"` only their
+    /// names, nothing measured; false leaves `bodies` out.
+    #[serde(default)]
+    pub bodies: Option<BodiesDetail>,
+}
+
+/// `document.inspect`'s `timeline`: the whole timeline, a summary of it, or none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TimelineDetail {
+    Full,
+    Summary,
+    Left,
+}
+
+const TIMELINE_FORMS: &str = "`timeline` must be true, false or \"summary\"";
+
+impl TimelineDetail {
+    /// `timeline` as the handler reads it: absent or `null` is the whole timeline.
+    pub fn read(v: Option<&Value>) -> Result<Self, &'static str> {
+        match v {
+            None | Some(Value::Null) | Some(Value::Bool(true)) => Ok(TimelineDetail::Full),
+            Some(Value::Bool(false)) => Ok(TimelineDetail::Left),
+            Some(Value::String(s)) if s == "summary" => Ok(TimelineDetail::Summary),
+            Some(_) => Err(TIMELINE_FORMS),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for TimelineDetail {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        TimelineDetail::read(Some(&v)).map_err(|e| D::Error::custom(whole(e)))
+    }
+}
+
+impl JsonSchema for TimelineDetail {
+    fn schema_name() -> Cow<'static, str> {
+        "TimelineDetail".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "true: every feature with its state and timing; \"summary\": id, name and type, with error, warning, suppressed and rolled_back only when set; false: no timeline.",
+            "anyOf": [{"type": "boolean"}, {"type": "string", "enum": ["summary"]}]
+        })
+    }
+}
+
+/// `document.inspect`'s `bodies`: each body in full, only the names, or none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BodiesDetail {
+    Full,
+    Names,
+    Left,
+}
+
+const BODIES_FORMS: &str = "`bodies` must be true, false or \"names\"";
+
+impl BodiesDetail {
+    /// `bodies` as the handler reads it: absent or `null` is every body in full.
+    pub fn read(v: Option<&Value>) -> Result<Self, &'static str> {
+        match v {
+            None | Some(Value::Null) | Some(Value::Bool(true)) => Ok(BodiesDetail::Full),
+            Some(Value::Bool(false)) => Ok(BodiesDetail::Left),
+            Some(Value::String(s)) if s == "names" => Ok(BodiesDetail::Names),
+            Some(_) => Err(BODIES_FORMS),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for BodiesDetail {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        BodiesDetail::read(Some(&v)).map_err(|e| D::Error::custom(whole(e)))
+    }
+}
+
+impl JsonSchema for BodiesDetail {
+    fn schema_name() -> Cow<'static, str> {
+        "BodiesDetail".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "true: each body as `measure` says; \"names\": only the body names, nothing measured; false: no bodies.",
+            "anyOf": [{"type": "boolean"}, {"type": "string", "enum": ["names"]}]
+        })
+    }
 }
 
 /// What `document.inspect` returns.
@@ -365,10 +487,13 @@ pub struct DocumentInspectResult {
     pub marker: usize,
     /// The design's parameters.
     pub params: Vec<DocumentParam>,
-    /// Its features, in timeline order.
-    pub timeline: Vec<TimelineEntry>,
-    /// Its bodies.
-    pub bodies: Vec<DocumentBody>,
+    /// Its features, in timeline order (in short with `timeline: "summary"`); left out with
+    /// `timeline: false`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeline: Option<Vec<TimelineRow>>,
+    /// Its bodies (only their names with `bodies: "names"`); left out with `bodies: false`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bodies: Option<DocumentBodies>,
     /// Its sketches.
     pub sketches: Vec<DocumentSketch>,
     /// What is selected, each as the selection commands take it.
@@ -418,6 +543,44 @@ pub struct TimelineEntry {
     pub warning: Option<String>,
     /// How long it took to evaluate (ms); `null` when it has no result.
     pub ms: Option<f64>,
+}
+
+/// A feature of `document.inspect`'s timeline: in full, or in short with `timeline: "summary"`.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum TimelineRow {
+    Full(TimelineEntry),
+    Summary(TimelineSummary),
+}
+
+/// A feature in short: what it is, and only the states it has.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct TimelineSummary {
+    pub id: u64,
+    pub name: String,
+    /// The feature's kind, such as `Extrude`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Why it failed; present only when it did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Present only when it has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+    /// Present, and true, only when it is suppressed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suppressed: Option<bool>,
+    /// Present, and true, only when the timeline marker has rolled it back.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rolled_back: Option<bool>,
+}
+
+/// `document.inspect`'s bodies: each in full, or only their names with `bodies: "names"`.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum DocumentBodies {
+    Full(Vec<DocumentBody>),
+    Names(Vec<String>),
 }
 
 /// A body of the design: measured with `measure`, else with the feature that made it.
@@ -562,6 +725,26 @@ impl From<solidcraft_sketch::SolveStatus> for SketchStatus {
             solidcraft_sketch::SolveStatus::Failed => SketchStatus::Failed,
         }
     }
+}
+
+/// The design's id and the revision its contents were last seen under (`document.revision`):
+/// the command reads no keys.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DocumentRevisionParams {}
+
+/// What `document.revision` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RevisionResult {
+    /// This open design's id: kept while it stays open, another for each design started or opened.
+    pub document_id: String,
+    /// What the design was last seen under: a new number whenever the design, what is hidden or a
+    /// component's uncaptured position changes, never on a selection or a view; from one counter
+    /// for the whole run, so it never repeats.
+    pub revision: u64,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// How `inspect.measure` selects: bodies, or one or two picked items. With `items`, `bodies` and
@@ -962,6 +1145,10 @@ pub struct SketchInspected {
     pub points: Vec<SketchPoint>,
     pub constraints: Vec<SketchConstraint>,
     pub profiles: Vec<SketchProfile>,
+    /// Planar closed loops the 3D sketch curves take part in, in planes of their own (#741):
+    /// each has `index`, `area_mm2`, `plane` (origin and unit normal), `centroid`, `curves`, `holes`.
+    #[schemars(with = "Vec<Map<String, Value>>")]
+    pub profiles_3d: Vec<Value>,
     /// Links to geometry outside the sketch (projections, intersections, includes), as saved.
     #[schemars(with = "Vec<Map<String, Value>>")]
     pub links: Value,
@@ -988,6 +1175,16 @@ pub struct SketchCurve {
     /// For a linked curve: the link that owns it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub link: Option<String>,
+}
+
+/// A fit spline's tangent handle (#6502).
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SplineTangentHandle {
+    /// The handle's end point.
+    pub point: String,
+    pub at: Option<[f64; 2]>,
+    /// The construction line from its fit point to the handle's end.
+    pub curve: Option<String>,
 }
 
 /// A curve's kind and its points, by id and (`_at`) by position `[x, y]` in the sketch's plane.
@@ -1029,6 +1226,8 @@ pub enum CurveShape {
         control: bool,
         degree: u8,
         periodic: bool,
+        /// A fit spline's tangent handles: the end of each handle and the construction line to it.
+        tangent_handles: Vec<SplineTangentHandle>,
         /// A control spline with its own knots (a projected free-form edge).
         #[serde(skip_serializing_if = "Option::is_none")]
         knots: Option<Vec<f64>>,
@@ -1059,7 +1258,23 @@ pub struct SketchPoint {
     pub fixed: bool,
     /// For a linked point: the link that owns it; `null` otherwise.
     pub link: Option<String>,
+    /// For a point placed by parameters: the expressions that place it (a coordinate without one
+    /// is the number in `at`). Such a point is `fixed` and follows them; release it with
+    /// `sketch.constraint.fix` and `fixed: false`. Absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fixed_by: Option<PointFixedBy>,
     pub fully_constrained: bool,
+}
+
+/// The expressions that place a point, over the design's parameters.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PointFixedBy {
+    /// The x coordinate's expression; absent when x is a plain number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub x: Option<String>,
+    /// The y coordinate's expression; absent when y is a plain number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub y: Option<String>,
 }
 
 /// A constraint or dimension: its id, its kind's name and the kind's own fields (`type`, then

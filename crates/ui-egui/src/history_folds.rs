@@ -261,7 +261,11 @@ mod tests {
         app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).expect("a box");
         super::set_open(&mut app, "timeline_group:4", true);
         let first = dir.join("first.solidcraft").to_string_lossy().into_owned();
-        crate::save_job::start(&mut app, "file.save_as", json!({"path": first}));
+        {
+            let mut params = crate::toolbar::provenance_params(&app);
+            params["path"] = json!(first);
+            crate::save_job::start(&mut app, "file.save_as", params);
+        }
         crate::save_job::tick(&mut app, true);
         assert_eq!(app.session.path.as_deref(), Some(first.as_str()));
         super::set_open(&mut app, "timeline_group:5", true);

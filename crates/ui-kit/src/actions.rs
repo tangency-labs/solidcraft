@@ -108,6 +108,13 @@ fn button_appearance(ui: &Ui, response: Option<&Response>, tone: ButtonTone) -> 
     ButtonAppearance { fill, ink, stroke }
 }
 
+/// Fill, ink and border of a normal button in the response's current state, for controls
+/// that paint their own content (icon plus label) but must read as the kit's buttons.
+pub(super) fn normal_button_look(ui: &Ui, response: &Response) -> (egui::Color32, egui::Color32, egui::Stroke) {
+    let look = button_appearance(ui, Some(response), ButtonTone::Normal);
+    (look.fill, look.ink, look.stroke)
+}
+
 fn styled_button(ui: &Ui, label: egui::WidgetText, tone: ButtonTone) -> egui::Button<'static> {
     // Match egui's own Button lookup: its previous rectangle is hit-tested with this frame's
     // input before allocation. No extra UI scope or widget changes the button's identity.
@@ -196,6 +203,43 @@ pub fn keyboard(ctx: &egui::Context, ok_enabled: bool) -> Action {
     } else {
         Action::None
     }
+}
+
+/// First-letter accelerators (#9841): a typed character answers the visible button whose
+/// translated label starts with it. The match is on the typed glyph (`Event::Text`), not the
+/// physical key, so it works on any keyboard layout, and on the label after translation, so a
+/// German dialog answers N, A and S. Ambiguous letters do nothing; a matched but disabled
+/// button still swallows the key so it cannot reach the app behind the dialog. A focused text
+/// editor keeps the keystroke, as with Enter in [`keyboard`]. The host's preference gates the
+/// whole accelerator ([`super::set_dialog_mnemonics`]); this runs only when it is on.
+pub(super) fn first_letter_action(ctx: &egui::Context, candidates: &[(Action, &str, bool)]) -> Action {
+    if ctx.memory(|m| m.focused().is_some()) {
+        return Action::None;
+    }
+    ctx.input_mut(|i| {
+        let hit = i.events.iter().enumerate().find_map(|(index, event)| match event {
+            egui::Event::Text(text) => {
+                let mut letters = text.chars();
+                let (Some(ch), None) = (letters.next(), letters.next()) else {
+                    return None;
+                };
+                let mut matches = candidates.iter().filter(|(_, label, _)| {
+                    solidcraft_ui_text::tr_label(label).trim().chars().next().is_some_and(|first| first.to_lowercase().eq(ch.to_lowercase()))
+                });
+                let (action, live) = match (matches.next(), matches.next()) {
+                    (Some((action, _, live)), None) => (*action, *live),
+                    _ => return None,
+                };
+                Some((index, action, live))
+            }
+            _ => None,
+        });
+        if let Some((index, action, live)) = hit {
+            i.events.remove(index);
+            return if live { action } else { Action::None };
+        }
+        Action::None
+    })
 }
 
 /// Pinned actions with optional Apply, compute status and keyboard selection mark.

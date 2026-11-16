@@ -1,0 +1,11 @@
+{
+  "bit_exact_equal_polynomial_cells": 130,
+  "changed_polynomial_cells": 17,
+  "changed_parameter_ranges": [
+    [
+      3.8756126132562025,
+      3.9073851893762397
+    ]
+  ],
+  "caches_are_exactly_the_same_polynomial_through_query_interval": true
+}

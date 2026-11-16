@@ -19,7 +19,9 @@ use solidcore_record::Vec3;
 use solidcraft_geom::Vec3Geom as _;
 
 use super::check::{located, whole};
+use super::config::RowRef;
 use super::types::{not_blank_pattern, present};
+use crate::cmd::LinkState;
 use crate::params;
 
 /// The most components `component.update_links` and `component.replace_with_link` read from a
@@ -126,6 +128,18 @@ fn path_only_required(schema: &mut Schema) {
     require(schema, "path");
 }
 
+/// Select a source configuration row, or follow the saved source state with `null`.
+fn configuration<'de, D: Deserializer<'de>>(d: D) -> Result<Option<RowRef>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::String(name) => Ok(Some(RowRef::Name(name))),
+        Value::Number(n) => {
+            n.as_u64().map(|id| Some(RowRef::Id(id))).ok_or_else(|| D::Error::custom(whole("`configuration` must be a row name, id, or null")))
+        }
+        _ => Err(D::Error::custom(whole("`configuration` must be a row name, id, or null"))),
+    }
+}
+
 /// A component's `translate` as `component.insert_design` reads it: `[x, y, z]` or `{x, y, z}`
 /// in mm, finite and under 1e9 in length.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -168,6 +182,10 @@ pub struct InsertDesignParams {
     #[serde(default, deserialize_with = "path_required", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "path_schema")]
     pub path: Option<String>,
+    /// Source configuration row, by name or stable id. Omitted or null follows the source's
+    /// saved state. The link stores the resolved id, so renaming the row keeps the selection.
+    #[serde(default, deserialize_with = "configuration")]
+    pub configuration: Option<RowRef>,
     /// The component's name. Default: the design's name.
     #[serde(default)]
     pub name: Option<String>,
@@ -178,8 +196,8 @@ pub struct InsertDesignParams {
     /// Where to place it, in mm from the parent's origin. Default: [0, 0, 0], also with `reuse`.
     #[serde(default)]
     pub translate: Option<Translation>,
-    /// Reuse an existing link to the same file when there is one, placing another occurrence of
-    /// it. Default: false.
+    /// Reuse an existing link to the same file and configuration when there is one, placing
+    /// another occurrence of it. Default: false.
     #[serde(default)]
     pub reuse: Option<bool>,
 }
@@ -348,6 +366,10 @@ pub struct RelinkParams {
     #[serde(default, deserialize_with = "path_required", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "path_schema")]
     pub path: Option<String>,
+    /// Source configuration row, by name or stable id. Omitted preserves the selection for
+    /// the same source file; a different file follows its saved state. Null clears the selection.
+    #[serde(default, deserialize_with = "configuration")]
+    pub configuration: Option<RowRef>,
     /// One of its placements, by id. When the component has other placements, only this one
     /// comes to show the design, as a placement of the component already linked to it or of a
     /// new one under the same parent, keeping its position, grounding and joints.
@@ -432,8 +454,9 @@ pub struct LinksResult {
     pub param_warnings: Vec<String>,
 }
 
-/// One linked component. A file that is looked for has `found` and `changed`; a refused one is
-/// not looked for and has `found` null and a `reason`.
+/// One linked component. A file that is looked for has `found` and `changed`, and a `state` and
+/// a `reason` when it can't be reached; a refused one is not looked for and has `found` null, a
+/// `state` and a `reason`.
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum LinkInfo {
@@ -444,6 +467,9 @@ pub enum LinkInfo {
         name: Option<String>,
         /// The link as stored.
         path: String,
+        /// Selected source configuration row id; absent when following the saved source state.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        configuration: Option<u64>,
         /// The file it resolves to.
         file: String,
         /// Whether the file is there; null when that can't be told.
@@ -451,17 +477,29 @@ pub enum LinkInfo {
         /// Whether the file is no longer what this design last read (`component.update_links`
         /// reads it again); null when it is not found or the link is older than this record.
         changed: Option<bool>,
+        /// Why the file can't be reached: `missing`, `unreadable` or `not_allowed`. Left out
+        /// when it can be read.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        state: Option<LinkState>,
+        /// What to show about it. Left out with `state`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
     },
     /// The file is on a network location that is not allowed.
     Network {
         component: u64,
         name: Option<String>,
         path: String,
+        /// Selected source configuration row id; absent when following the saved source state.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        configuration: Option<u64>,
         file: String,
         /// Always null: it is not looked for.
         found: Option<bool>,
         /// The network location.
         host: String,
+        /// Always `not_allowed`.
+        state: LinkState,
         reason: String,
     },
     /// The path names a device.
@@ -469,9 +507,14 @@ pub enum LinkInfo {
         component: u64,
         name: Option<String>,
         path: String,
+        /// Selected source configuration row id; absent when following the saved source state.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        configuration: Option<u64>,
         file: String,
         /// Always null: it is not looked for.
         found: Option<bool>,
+        /// Always `unreadable`.
+        state: LinkState,
         reason: String,
     },
 }

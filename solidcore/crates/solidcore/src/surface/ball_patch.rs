@@ -153,20 +153,20 @@ impl BallPatch {
         {
             return Err(SolidError::invalid_input(
                 OP_CREATE,
-                "SmBallPatch: a sphere's centre is finite and its radius finite and positive",
+                "a ball patch's sphere has a finite centre and a finite, positive radius",
             ));
         }
         let cpn = net.control_point_net()?;
         if !net.is_rational() || cpn.weights.len() != cpn.points.len() {
             return Err(SolidError::invalid_input(
                 OP_CREATE,
-                "SmBallPatch: a patch on a sphere is rational",
+                "a ball patch's net is rational",
             ));
         }
         if cpn.weights.iter().any(|&w| !positive(w)) {
             return Err(SolidError::invalid_input(
                 OP_CREATE,
-                "SmBallPatch: a patch on a sphere has positive weights",
+                "a ball patch's net has positive weights",
             ));
         }
         Ok(Self {
@@ -191,15 +191,11 @@ impl BallPatch {
         let refused = |reason: &'static str| SolidError::invalid_input(OP_CERTIFIED, reason);
         match Self::is_on_sphere(net, centre, radius, ON_SPHERE_REL_TOL) {
             Ok(true) => {}
-            Ok(false) => {
-                return Err(refused(
-                    "SmBallPatch: the net is not on its definition's sphere",
-                ))
-            }
-            Err(_) => return Err(refused("SmBallPatch: the net's sphere certificate failed")),
+            Ok(false) => return Err(refused("the net is not on its definition's sphere")),
+            Err(_) => return Err(refused("the net's sphere certificate failed")),
         }
         Self::create(net, centre, radius)
-            .map_err(|_| refused("SmBallPatch: the definition is not a ball patch's"))
+            .map_err(|_| refused("the definition is not a ball patch's"))
     }
 
     /// `IsOnSphere` (the fork's efb8007): whether every point of `net` is on the sphere of
@@ -221,7 +217,9 @@ impl BallPatch {
         if !net.is_rational() {
             return Ok(false);
         }
-        let form = surface_form(net).ok_or_else(|| SolidError::sm_err(OP_ON_SPHERE))?;
+        let form = surface_form(net).ok_or_else(|| {
+            SolidError::surface_failed(OP_ON_SPHERE, "the net has no rational surface form")
+        })?;
         Ok(eval::sphere::surface_on_sphere(&form, xyz(centre), radius, rel_tol).is_ok())
     }
 
@@ -238,7 +236,9 @@ impl BallPatch {
         radius: f64,
         rel_tol: f64,
     ) -> Result<bool> {
-        let form = curve_form(curve).ok_or_else(|| SolidError::sm_err(OP_CURVE_ON_SPHERE))?;
+        let form = curve_form(curve).ok_or_else(|| {
+            SolidError::surface_failed(OP_CURVE_ON_SPHERE, "the curve has no rational curve form")
+        })?;
         Ok(eval::sphere::curve_on_sphere(&form, xyz(centre), radius, rel_tol).is_ok())
     }
 
@@ -367,7 +367,7 @@ impl BallPatch {
         if !positive(new_radius) {
             return Err(SolidError::invalid_input(
                 OP_OFFSET,
-                "SmBallPatch: the offset passes the sphere's centre (SmSurface::OffsetCollapses)",
+                "the offset passes the sphere's centre",
             ));
         }
         let scale = new_radius / self.radius;
@@ -375,17 +375,23 @@ impl BallPatch {
         let mut net = self.net.copy();
         let cpn = self.net.control_point_net()?;
         let (u_count, v_count) = (cpn.u_count, cpn.v_count);
-        let count = u_count
-            .checked_mul(v_count)
-            .ok_or_else(|| SolidError::sm_err(OP_OFFSET))?;
+        let count = u_count.checked_mul(v_count).ok_or_else(|| {
+            SolidError::surface_failed(OP_OFFSET, "the control point count overflows")
+        })?;
         if cpn.points.len() != count || cpn.weights.len() != cpn.points.len() {
-            return Err(SolidError::sm_err(OP_OFFSET));
+            return Err(SolidError::surface_failed(
+                OP_OFFSET,
+                "the control point net does not match its counts",
+            ));
         }
         for ii in 0..u_count {
             for jj in 0..v_count {
                 let at = ii * v_count + jj;
                 let (Some(&p), Some(&w)) = (cpn.points.get(at), cpn.weights.get(at)) else {
-                    return Err(SolidError::sm_err(OP_OFFSET));
+                    return Err(SolidError::surface_failed(
+                        OP_OFFSET,
+                        "a control point is missing from the net",
+                    ));
                 };
                 let scaled = self.centre + (p - self.centre) * scale;
                 net.set_control_point(ControlPointForm::EuclideanRational, ii, jj, scaled, w)?;
@@ -421,7 +427,10 @@ impl BallPatch {
         if let Some(sc) = scale {
             #[allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-refusing test
             if !are_same(sc.x, sc.y) || !are_same(sc.x, sc.z) || !(sc.x > EFF_ZERO) {
-                return Err(SolidError::sm_err(OP_TRANSFORM));
+                return Err(SolidError::surface_failed(
+                    OP_TRANSFORM,
+                    "the scale is not uniform and positive",
+                ));
             }
             factor = sc.x;
         }
@@ -459,7 +468,7 @@ impl BallPatch {
         if db.file_type() == FileType::Ascii {
             let st = db
                 .in_stream_mut()
-                .ok_or_else(|| SolidError::null_pointer(OP_READ))?;
+                .ok_or_else(|| SolidError::surface_missing(OP_READ, "the input stream"))?;
             let mut read = true;
             for v in &mut values {
                 match st.extract_double() {
@@ -470,7 +479,10 @@ impl BallPatch {
             db.go_to_next_line();
             if !read || db.in_stream().is_none_or(InputStream::fail) {
                 // "its definition could not be read"
-                return Err(SolidError::sm_err(OP_READ));
+                return Err(SolidError::surface_failed(
+                    OP_READ,
+                    "the definition could not be read",
+                ));
             }
         } else {
             let v = db.read_doubles(4)?;

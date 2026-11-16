@@ -3,7 +3,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use std::f64::consts::PI;
+use std::f64::consts::{FRAC_1_SQRT_2, PI};
 
 use serde_json::{Value, json};
 
@@ -193,6 +193,66 @@ fn a_sweep_round_a_closed_path_starts_where_the_profile_is() {
     }
 }
 
+/// #2216: a sweep whose path is a closed loop of a body's edges is followed from the profile,
+/// like a closed sketch path: the tube stays on the loop, within the profile's half width of
+/// it, instead of standing off it by the distance between the profile and the vertex the
+/// first picked edge happened to be on. A body's top face is a closed loop of eight edges; a
+/// 4 x 3 profile at the middle of one of them, square to it, swept round the whole loop.
+#[test]
+fn a_sweep_round_a_closed_body_edge_path_starts_where_the_profile_is() {
+    let mut s = Session::default();
+    // A rounded rectangle 60 x 40, corners r8, extruded 10: its top face is a closed loop of
+    // eight edges, smooth all round.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Loop"}));
+    run(&mut s, "sketch.line", json!({"points": [[-22, -20], [22, -20]], "infer": false, "ids": ["l1"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [22, -12], "start": [22, -20], "end": [30, -12], "id": "a1"}));
+    run(&mut s, "sketch.line", json!({"points": [[30, -12], [30, 12]], "infer": false, "ids": ["l2"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [22, 12], "start": [30, 12], "end": [22, 20], "id": "a2"}));
+    run(&mut s, "sketch.line", json!({"points": [[22, 20], [-22, 20]], "infer": false, "ids": ["l3"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-22, 12], "start": [-22, 20], "end": [-30, 12], "id": "a3"}));
+    run(&mut s, "sketch.line", json!({"points": [[-30, 12], [-30, -12]], "infer": false, "ids": ["l4"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-22, -12], "start": [-30, -12], "end": [-22, -20], "id": "a4"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Loop", "distance": 10, "operation": "new", "body_name": "Slab"}));
+    // A 4 x 3 profile at the middle of the loop's bottom edge, square to it.
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -20, 10], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Prof"}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [2, 1.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    // The path: the loop's eight edges, one point on each, in order round it.
+    let c = 8.0 * FRAC_1_SQRT_2;
+    run(
+        &mut s,
+        "solid.sweep",
+        json!({
+            "sketch": "Prof",
+            "path_body": "Slab",
+            "path_edges": [
+                [-11.0, -20.0, 10.0],
+                [22.0 + c, -12.0 - c, 10.0],
+                [30.0, 0.0, 10.0],
+                [22.0 + c, 12.0 + c, 10.0],
+                [-11.0, 20.0, 10.0],
+                [-22.0 - c, 12.0 + c, 10.0],
+                [-30.0, 0.0, 10.0],
+                [-22.0 - c, -12.0 - c, 10.0]
+            ],
+            "operation": "new",
+            "body_name": "Tube"
+        }),
+    );
+    let m = measure(&s, "Tube");
+    // Pappus: the profile's area (4 x 3) times the loop's length.
+    let want = 12.0 * (2.0 * 44.0 + 2.0 * 24.0 + 4.0 * (PI / 2.0) * 8.0);
+    assert!((m.volume - want).abs() < want * 1e-3, "{} vs {want}", m.volume);
+    // The tube stays on the loop: within the profile's half width (2) of it, the loop's own
+    // bounds (-30..30 by -20..20) grown by it.
+    for (got, want) in
+        [(m.bbox.min.x, -32.0), (m.bbox.max.x, 32.0), (m.bbox.min.y, -22.0), (m.bbox.max.y, 22.0), (m.bbox.min.z, 8.5), (m.bbox.max.z, 11.5)]
+    {
+        assert!((got - want).abs() < 0.08, "{:?}", m.bbox);
+    }
+}
+
 /// #3604: a path whose first curve is a spline of several exact pieces, the next curve meeting
 /// it at its start, follows the spline back from its end: a curve is turned round whole, not
 /// piece by piece. A 2 x 2 profile at the spline's end (20, 0), swept along the spline through
@@ -213,4 +273,30 @@ fn a_path_turns_a_spline_of_several_pieces_round_whole() {
     for (got, want) in [(m.bbox.min.x, -15.0), (m.bbox.max.x, 20.0), (m.bbox.min.y, -1.0), (m.bbox.max.y, 1.0)] {
         assert!((got - want).abs() < 0.04, "{:?}", m.bbox);
     }
+}
+
+/// #17386: renaming the body a sweep's path runs along renames it in the sweep too, so the
+/// sweep and what follows it keep working.
+#[test]
+fn renaming_the_path_body_keeps_a_sweep_along_its_edges() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [30, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "distance": 10, "operation": "new", "body_name": "Slab"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [-30, -20, 10], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Prof"}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [2, 1.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let swept = run(
+        &mut s,
+        "solid.sweep",
+        json!({"sketch": "Prof", "path_body": "Slab", "path_edges": [[0, -20, 10]], "operation": "new", "body_name": "Rib"}),
+    );
+    let id = swept["feature"].as_u64().unwrap();
+    let before = measure(&s, "Rib").volume;
+    run(&mut s, "body.rename", json!({"body": "Slab", "name": "Plate"}));
+    let feature = run(&mut s, "timeline.inspect", json!({"feature": id}));
+    assert_eq!(feature["definition"]["path_body"], "Plate");
+    assert!(feature["error"].is_null(), "{}", feature["error"]);
+    assert!((measure(&s, "Rib").volume - before).abs() < 1e-6 * before);
 }

@@ -41,7 +41,9 @@ pub fn selection_params(app: &SolveApp) -> Value {
         }
     }
     let occurrences: Vec<u64> = app.tree.picked_components.iter().filter_map(|c| app.session.doc.occurrence_of(*c).map(|o| o.id)).collect();
-    json!({ "items": items, "occurrences": occurrences, "canvases": app.tree.picked_canvases, "joints": app.tree.picked_joints })
+    // Undo can remove a canvas while its Browser selection survives.
+    let canvases: Vec<u64> = app.tree.picked_canvases.iter().copied().filter(|id| app.session.doc.canvases.iter().any(|c| c.id == *id)).collect();
+    json!({ "items": items, "occurrences": occurrences, "canvases": canvases, "joints": app.tree.picked_joints })
 }
 
 fn is_empty(p: &Value) -> bool {
@@ -97,7 +99,7 @@ fn joint_delete_blocked(app: &SolveApp) -> Option<&'static str> {
         Some("Finish the active tool before deleting a joint")
     } else if app.computing_since().is_some() {
         Some("Wait for the design to finish computing before deleting a joint")
-    } else if app.file_load.busy() {
+    } else if app.file_load_holds() {
         Some("Wait for the file to finish loading before deleting a joint")
     } else {
         None
@@ -115,7 +117,7 @@ pub fn request(app: &mut SolveApp, params: Value) {
             && ["items", "occurrences", "components", "canvases"]
                 .iter()
                 .all(|k| params.get(*k).and_then(Value::as_array).is_none_or(|a| a.is_empty()));
-        if only_edited && app.applying.is_none() && app.tool.is_none() && app.computing_since().is_none() && !app.file_load.busy() {
+        if only_edited && app.applying.is_none() && app.tool.is_none() && app.computing_since().is_none() && !app.file_load_holds() {
             crate::dialogs::cancel(app);
         }
         if let Some(why) = joint_delete_blocked(app) {

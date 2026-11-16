@@ -16,9 +16,10 @@
 //!   samples that many.
 //!
 //! Expected: one solid, V = 40 L - 28 (L - 0.5) = 1299.48668 with L = 60 + 15 pi. The
-//! port gives 1299.48768 (defaults, 7.7e-7 relative above) and 1299.48231 (SolidCraft's
-//! fixes, 3.4e-6 below; SolidCraft measured 1299.48275 on an older main); the
-//! operand's own volume is 1.2e-2 below its closed form. Both are pinned to 1e-9.
+//! port gives 1299.48231 with SolidCraft's fixes (3.4e-6 below; SolidCraft measured
+//! 1299.48275 on an older main), pinned to 1e-9; the operand's own volume is 1.2e-2 below
+//! its closed form. With the kernel's own defaults the volume is checked against the
+//! closed form only.
 //!
 //! With `shell_edges_on_analytics_exact` (WR-545) on as well, as the SolidCraft rig runs
 //! it, `make_edges_on_analytics_exact` intersected the walls' face-owned surfaces without
@@ -34,11 +35,12 @@
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
+#[path = "support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
 
 use offset_fixture::{planar_faces_at, volume, Notifications};
 use solidcore::curve::curve::p2::{Curve, CurveKind};
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::object::ObjectRef;
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
@@ -47,7 +49,8 @@ use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::{Brep, EntityRef, Kernel};
+use solidcore::{Brep, Kernel};
+use solidcraft_fixes::solidcraft_fixes;
 
 /// `SmBrep::ReadFromFile` of the rig's operand.
 fn operand(k: &mut Kernel) -> Brep {
@@ -55,10 +58,7 @@ fn operand(k: &mut Kernel) -> Brep {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,
@@ -69,84 +69,6 @@ fn operand(k: &mut Kernel) -> Brep {
     read_from_file(k, &mut b, bytes, FileType::Ascii, false, &mut env).unwrap();
     b.refresh_cached_topology();
     b
-}
-
-/// SolidCraft's `core::fixes()`: every opt-in `UpstreamFixes` flag it runs with (the
-/// issue's configuration).
-fn solidcraft_fixes() -> UpstreamFixes {
-    let mut f = UpstreamFixes::default();
-    f.fillet_retry_radius_as_first = true;
-    f.fillet_rail_rim_on_face = true;
-    f.fillet_refuse_rails_leaving_faces = true;
-    f.fillet_refuse_face_consuming_blends = true;
-    f.fillet_refuse_non_manifold_result = true;
-    f.fillet_corner_ball_patch = true;
-    f.fillet_chamfer_cone_on_arc = true;
-    f.fillet_torus_center_on_axis = true;
-    f.offset_excess_faces_after_merge = true;
-    f.offset_clip_right_side_out = true;
-    f.revolution_offset_axis_both_sides = true;
-    f.offset_extended_edges_mated = true;
-    f.remove_slit_loops_where_solids_touch = true;
-    f.keep_operand_uv_trims = true;
-    f.geometric_g2_continuity = true;
-    f.proto_vertex_miss_is_false = true;
-    f.check_loop_vertex_tolerance = true;
-    f.check_loop_projected_seam_ends = true;
-    f.bspline_check_min_radius = true;
-    f.oscillating_skips_failed_guesses = true;
-    f.refine_cc_range_ends = true;
-    f.flat_corners_test_bits = true;
-    f.cylinder_rebuild_mean_radius = true;
-    f.revolve_analytic_profile_faces = true;
-    f.revolve_nested_shells_as_cavities = true;
-    f.join_touching_loops = true;
-    f.uv_trim_reversal_on_surface = true;
-    f.offset_resolve_crossing_loops = true;
-    f.offset_walls_touch_refused = true;
-    f.offset_analytic_mate_edges = true;
-    f.nurb_cylinder_inside_out_frame = true;
-    f.offset_collapsed_rounds_mated = true;
-    f.offset_missing_surface_fails = true;
-    f.fillet_nx1_end_rib_global_merge = true;
-    f.uv_trim_corner_end_points_only = true;
-    f.bspline_trim_preserves_uv_spans = true;
-    f.cone_parallel_line_midpoint = true;
-    f.cone_parallel_line_domains = true;
-    f.proto_edge_self_loop_on_vertex_degenerate = true;
-    f.slice_coincident_faces_sheet_side = true;
-    f.boolean_outer_shell_first = true;
-    f.edge_reversal_keeps_failed_edge = true;
-    f.topology_failed_evaluations_propagate = true;
-    f.heal_stage3_failures_propagate = true;
-    f.sweep_frame_on_planar_path_normal = true;
-    f.cover_refuses_folded_continuation = true;
-    f.boolean_vertex_by_best_crossing = true;
-    f.boolean_cleanup_removes_slits = true;
-    f.classify_edge_interval = true;
-    f.ellipse_trim_seam_lines_span_cone_height = true;
-    f.degenerate_proto_edge_in_one_vertex = true;
-    f.new_edge_vertex_tolerance_covers_gap = true;
-    f.torus_signed_gen_curve_interval = true;
-    f.sheet_sweep_joins_profile_wires = true;
-    f.point_solve_keeps_triangle_guess = true;
-    f.imprint_trims_edge_to_proto_vertex = true;
-    f.imprint_extends_edge_to_proto_vertex = true;
-    f.fillet_point_step_per_point = true;
-    f.analytic_copy_keeps_parameterization = true;
-    f.precise_properties_body_length_scale = true;
-    f.offset_extension_from_base = true;
-    f.corner_blend_stays_inside_neighbours = true;
-    f.fillet_cleanup_keeps_target_faces = true;
-    f.fillet_nx1_tangent_side_edge = true;
-    f.offset_stitch_at_body_tolerance = true;
-    f.curve_contacts_at_curve_ends = true;
-    f.shell_empty_cavity_fails = true;
-    f.boolean_lists_virtual_surface_copies = true;
-    f.ssi_tangent_contact_points = true;
-    f.ssi_trace_tangent_curves_once = true;
-    f.found_torus_sphere_keep_tested_nurb = true;
-    f
 }
 
 /// The shell of the operand (`SmApiShellBrepFull(b, -0.5, TRUE, TRUE, TRUE, [start
@@ -181,7 +103,7 @@ fn shell(fixes: &UpstreamFixes) -> (Kernel, solidcore::Result<Brep>) {
 }
 
 /// Checks the shell and returns its number of line edges.
-fn check(fixes: &UpstreamFixes, want: f64) -> usize {
+fn check(fixes: &UpstreamFixes, want: Option<f64>) -> usize {
     let (k, result) = shell(fixes);
     let mut b = result.unwrap();
     b.refresh_cached_topology();
@@ -209,13 +131,15 @@ fn check(fixes: &UpstreamFixes, want: f64) -> usize {
     let analytic =
         40.0 * (60.0 + 15.0 * std::f64::consts::PI) - 28.0 * (59.5 + 15.0 * std::f64::consts::PI);
     assert!((v - analytic).abs() <= 1e-5 * analytic, "{v} vs {analytic}");
-    assert!((v - want).abs() <= 1e-9 * want, "{v} vs {want}");
+    if let Some(want) = want {
+        assert!((v - want).abs() <= 1e-9 * want, "{v} vs {want}");
+    }
     kinds.iter().filter(|&&k| k == "line").count()
 }
 
 #[test]
 fn issue_1476_swept_bar_shells() {
-    assert_eq!(check(&UpstreamFixes::default(), 1299.4876808844865), 16);
+    assert_eq!(check(&UpstreamFixes::default(), None), 16);
 }
 
 /// About 6 s at opt-level 3 but over 4 min in a debug build (the two 38 000-sample
@@ -225,7 +149,11 @@ fn issue_1476_swept_bar_shells() {
 #[test]
 #[ignore = "slow in debug builds (two 38 000-sample curve offsets)"]
 fn issue_1476_swept_bar_shells_with_solidcraft_fixes() {
-    assert_eq!(check(&solidcraft_fixes(), 1299.482314966473), 16);
+    let mut fixes = solidcraft_fixes();
+    // The preset has it on; this test is SolidCraft's configuration without it (the last
+    // test in this file turns it on).
+    fixes.shell_edges_on_analytics_exact = false;
+    assert_eq!(check(&fixes, Some(1299.482314966473)), 16);
 }
 
 /// `shell_edges_on_analytics_exact` (WR-545) alone: `make_edges_on_analytics_exact`
@@ -242,7 +170,7 @@ fn issue_1476_swept_bar_shells_with_solidcraft_fixes() {
 fn issue_1476_swept_bar_shells_with_edges_on_analytics_exact() {
     let mut fixes = UpstreamFixes::default();
     fixes.shell_edges_on_analytics_exact = true;
-    assert_eq!(check(&fixes, 1299.4876808844865), 18);
+    assert_eq!(check(&fixes, None), 18);
 }
 
 /// SolidCraft's configuration with `shell_edges_on_analytics_exact` on as well (the
@@ -254,5 +182,5 @@ fn issue_1476_swept_bar_shells_with_edges_on_analytics_exact() {
 fn issue_1476_swept_bar_shells_with_solidcraft_fixes_and_edges_on_analytics_exact() {
     let mut fixes = solidcraft_fixes();
     fixes.shell_edges_on_analytics_exact = true;
-    assert_eq!(check(&fixes, 1299.482314966473), 18);
+    assert_eq!(check(&fixes, Some(1299.482314966473)), 18);
 }

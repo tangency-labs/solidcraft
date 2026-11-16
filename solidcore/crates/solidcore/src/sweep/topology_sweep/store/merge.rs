@@ -89,8 +89,10 @@ impl Session {
 
     pub(super) fn operands(&self) -> Result<(BrepId, BrepId)> {
         Ok((
-            self.primary.ok_or_else(|| SolidError::null_pointer(OP))?,
-            self.other.ok_or_else(|| SolidError::null_pointer(OP))?,
+            self.primary
+                .ok_or_else(|| SolidError::sweep_missing(OP, "the merge's primary body"))?,
+            self.other
+                .ok_or_else(|| SolidError::sweep_missing(OP, "the merge's other body"))?,
         ))
     }
 }
@@ -301,7 +303,7 @@ impl Driver<'_, '_> {
             None,
         );
         self.set_operands(primary, other);
-        result?.ok_or_else(|| SolidError::null_pointer(OP))
+        result?.ok_or_else(|| SolidError::sweep_missing(OP, "the union's result"))
     }
 
     fn surface_face(&self, surface: ObjectRef) -> Result<(BrepId, FaceId)> {
@@ -504,7 +506,8 @@ impl BooleanDriver for Driver<'_, '_> {
         angle: f64,
         options: Option<&MergeOptions>,
     ) -> Result<()> {
-        let id = primary.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let id =
+            primary.ok_or_else(|| SolidError::sweep_missing(OP, "the merge's primary body"))?;
         let source = other
             .map(|id| self.body(id).map(|body| (body, MergeOperand::Other)))
             .transpose()?;
@@ -533,8 +536,8 @@ impl BooleanDriver for Driver<'_, '_> {
         operation: BooleanOperation,
         lock: Option<&mut MarkLock>,
     ) -> Result<Option<BrepId>> {
-        let a = primary.ok_or_else(|| SolidError::null_pointer(OP))?;
-        let b = other.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let a = primary.ok_or_else(|| SolidError::sweep_missing(OP, "the merge's primary body"))?;
+        let b = other.ok_or_else(|| SolidError::sweep_missing(OP, "the merge's other body"))?;
         let (source, destination) = body_pair_mut(self.bodies, b, a)?;
         // `SmMerge::ManifoldBoolean` edits its operands in place: an owned body or a
         // caller-borrowed one (`DoSweep`'s merge into `pBrepToSweepInto`), never a
