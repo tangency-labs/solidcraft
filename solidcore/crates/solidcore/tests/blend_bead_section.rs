@@ -2026,3 +2026,72 @@ fn a_toe_in_a_notch_of_its_face_is_refused_with_the_leg_that_fits() {
     assert!(weld_bead_body(&mut k, &mut b, &[edge], &[fits], 0.0, &[], &[], SQUARE).is_ok());
     assert!(smb(&k, &b) == before, "the part changed");
 }
+
+// ---- the feet proved between the stations (the certificate, step 1) ----
+
+/// Between planes at 60, 90 and 120 degrees (equal and unequal legs) and round the tube
+/// T-joint, every span between the section face's stations is proved: for each support, one
+/// foot in a box about the stations' feet for every point of the span (Krawczyk), the
+/// stations' own feet in it. The pieces cover every span; the T-joint's count is printed.
+#[test]
+fn the_feet_are_proved_between_the_stations() {
+    use solidcore::blend::foot_blend::{FootBlend, WELD_FIT_TOLERANCE};
+    for adeg in [60.0_f64, 90.0, 120.0] {
+        for legs in [[5.0, 5.0], [4.0, 8.0]] {
+            let mut k = kernel();
+            let (mut b, at) = corner(&mut k, adeg.to_radians());
+            let edge = pick(&k, &b, at);
+            let blend = FootBlend::of_edge(&k, &mut b, edge, None).unwrap();
+            for h in [0.0, 1.0] {
+                let proof = blend
+                    .prove_section(&k, legs, h, WELD_FIT_TOLERANCE)
+                    .unwrap();
+                assert!(proof.pieces >= 3, "{adeg} {legs:?} {h}: {proof:?}");
+            }
+        }
+    }
+    let mut k = kernel();
+    let (mut part, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
+    let blend = FootBlend::of_edge(&k, &mut part, joints[0], None).unwrap();
+    let started = std::time::Instant::now();
+    let proof = blend
+        .prove_section(&k, [4.0, 4.0], 1.0, WELD_FIT_TOLERANCE)
+        .unwrap();
+    println!(
+        "T-joint, legs 4, h 1: {} pieces, {} halvings, section face and proof {:?}",
+        proof.pieces,
+        proof.halvings,
+        started.elapsed()
+    );
+    assert!(proof.pieces >= 94, "{proof:?}");
+}
+
+/// The proof is not empty: stations whose last foot was moved onto the other branch (across
+/// the edge, on the plane's continuation) are not proved, a typed failure, not a pass.
+#[test]
+fn a_foot_on_the_other_branch_is_not_proved() {
+    use solidcore::blend::foot_blend::FootBlend;
+    use solidcore::error::blend::BlendFailure;
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &b, at);
+    let blend = FootBlend::of_edge(&k, &mut b, edge, None).unwrap();
+    let (lo, hi) = (blend.interval.min(), blend.interval.max());
+    let legs = [5.0, 5.0];
+    let mut stations = Vec::new();
+    for f in [0.0, 0.25, 0.5] {
+        let near = stations.last();
+        stations.push(blend.station(&k, lo + f * (hi - lo), legs, near).unwrap());
+    }
+    assert!(blend.prove_feet(&k, legs, &stations).is_ok());
+    let last = stations.last_mut().unwrap();
+    last.feet[0] = last.root - (last.feet[0] - last.root);
+    let err = blend.prove_feet(&k, legs, &stations).err().unwrap();
+    assert!(
+        matches!(
+            err.blend_failure(),
+            Some(BlendFailure::NotCertified { .. } | BlendFailure::NoRoom(_))
+        ),
+        "{err:?}"
+    );
+}

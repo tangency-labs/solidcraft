@@ -257,8 +257,21 @@ rolling-ball blend, which it leaves unchanged.
 - **Net.** Stations on every knot of the leader (at least four), doubled between them (at most
   2⁹ times) until the net holds the feet, the section's middle and the root within the weld's fit
   tolerance, 0.01 mm, at the midpoint between each two stations. That is a **sampled** check, not
-  a certificate (§2.4): until the foot solve is certified (Krawczyk, one root per box, on the
-  branch along the face) the foot blend's stated bound is the sampled tolerance.
+  a certificate (§2.4): until the net is certified the foot blend's stated bound is the sampled
+  tolerance.
+- **Feet proved.** Between each two stations, and for each support, the foot is proved: over a
+  piece T of the leader (at most an eighth of the smaller leg long, halved up to four times
+  where needed) Krawczyk's test (`geom::krawczyk`) holds in a box on the support's NURBS form
+  for every t in T at once, so the box holds one foot for each t and no other, and it holds the
+  stations' own feet, found on the face's side: the foot between them is theirs, on its branch.
+  The foot is taken as the straight path between the piece's end feet plus a correction δ (the
+  unknowns), and the equations are enclosed in their centred form along that path,
+  G(t̃) + G′(T)(t − t̃), with G′ = (w′·e′ + w·e″, 2 w·w′) and w′ = S_u u′ + S_v v′ − e′. That
+  rate nearly vanishes where the path follows the foot. Enclosed apart, the toe's travel along
+  the joint, and the leg times the joint's turn, would enter the Jacobian at their full size and
+  no piece would be proved. A periodic support's box across its seam is cut there; past a
+  non-periodic support's knots its end piece is continued. On the T-joint (4 mm legs) a section
+  face's 94 stations take 177 pieces, none halved.
 - **Body.** The bead is a body of its own: per span the section face, a strip on each support
   between the root and its foot, and square end caps in the stations' planes, stitched and
   oriented. A closed joint is built in four segments, so no face runs a full turn. A strip on a
@@ -306,6 +319,7 @@ that predates it can take a bead for a chamfer (as one that predates `ChamferRec
 | no point of the face at the leg on its side (the face turns away or ends within the leg) | `NoRoomReason::NoToeAtLeg` | `FilletTooLarge` | the largest leg on that side that finds its toes, halved down |
 | the arc would cut into a face at a station | `NoRoomReason::BeadCutsFace` | `FilletTooLarge` | the least of the stations' bounds, (c/2) tan(min βᵢ/2) concave, a hair below it |
 | Newton does not converge from either start | `StationDidNotConverge` | a defect | none |
+| the feet between two stations not proved after the halvings | `NotCertified` (`NoToeAtLeg` with its leg fit where the equations are near singular at an end: the toes on the leg's circle meet there) | `NotWithinTolerance` | none (the fit where `NoToeAtLeg`) |
 | the net does not hold the tolerance after its refinements | `SkinPastStationCap` | `NotWithinTolerance` | none |
 | beads meeting at a vertex | `WeldNotBuilt(BeadsMeetAtVertex)`, naming the vertex | `Unsupported` | none (#17916) |
 

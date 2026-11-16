@@ -354,9 +354,10 @@ Every face is in one of three classes:
 | **refused** | no B is proved within the bound | none | the construction returns a typed error naming the cause and, where one exists, the size that builds |
 
 One kind is not in a class yet: a foot blend's section face (a weld bead's on curved faces,
-`blend::foot_blend`, #15129) is checked at samples, 0.01 mm at the midpoints between its stations,
-and states that tolerance as its bound; it moves into the certified class with its certificate
-(Krawczyk on the foot solve, `generic-blend.md` §2.5).
+`blend::foot_blend`, #15129). Its feet are proved between its stations (Krawczyk on the foot
+equations over each piece, `generic-blend.md` §2.5), but its net's distance from the section is
+checked at samples, 0.01 mm at the midpoints between its stations, and it states that tolerance
+as its bound; it moves into the certified class with the net's bound.
 
 There is no fourth class. A face that is none of these (a bare NURBS a blend made) is a defect, and
 `blend::definition_check::bare_blend_faces` lists it. The kinds still bare are named in the ledger
