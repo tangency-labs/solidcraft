@@ -758,10 +758,15 @@ impl Body {
     /// the answer, so a ray through an edge names the edge, not one of its faces. The kernel's
     /// solve may add UV trim curves to the body, as a point classification does.
     ///
+    /// [`Body::face_hit_by_ray`] answers the first face alone, with the point and its (u, v);
+    /// this names the edge or vertex a ray passes through, as a pick needs. Both take the ray
+    /// as [`Ray::new`] makes it.
+    ///
     /// # Errors
-    /// [`Error::Argument`] for a coordinate that is not finite or a hit the conversion's
-    /// [`Order`] does not hold; the kernel's refusal of a direction of no length and of a ray
-    /// that starts on the body (its nearest hit at the start); any other kernel error.
+    /// [`Error::Argument`] for a coordinate that is not finite, a direction of no length (both
+    /// as [`Ray::new`] refuses them) or a hit the conversion's [`Order`] does not hold; the
+    /// kernel's refusal of a ray that starts on the body (its nearest hit at the start); any
+    /// other kernel error.
     pub fn fire_ray(
         &self,
         order: &Order,
@@ -772,8 +777,7 @@ impl Body {
         fn at<T: PartialEq>(list: &[T], id: &T) -> Result<usize> {
             list.iter().position(|x| x == id).ok_or(Error::Argument)
         }
-        let (o, d) = (point(origin)?, point(direction)?);
-        let d = Vec3::new(d.x, d.y, d.z);
+        let ray = Ray::new(point(origin)?, point(direction)?).map_err(|_| Error::Argument)?;
         let hit = with_body("fire_ray", self, |k, b| {
             let tol = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
             let query = BrepQuery::of_brep(b);
@@ -786,8 +790,8 @@ impl Body {
                 cache,
                 identity.keys,
                 identity.owner_of,
-                o,
-                d,
+                ray.origin(),
+                ray.direction(),
                 tol,
                 None,
             )?;

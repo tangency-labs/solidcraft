@@ -538,7 +538,7 @@ fn a_box_face_holds_the_points_on_it_and_no_others() {
 /// A ray fired at a body meets its exact faces: straight down onto a 10 mm box, the top face at
 /// distance 10; down beside a sphere of radius 2 about (1, 2, 3) at 1 from its axis, the sphere
 /// at z = 3 + √3, a point of the surface, not of a facet; through an edge of the box, that edge;
-/// past the box, nothing.
+/// past the box, nothing; a coordinate that is not finite or a direction of no length is refused.
 #[test]
 fn a_fired_ray_meets_the_exact_face_edge_or_nothing() {
     use solidcore_ops::RayEntity;
@@ -575,6 +575,10 @@ fn a_fired_ray_meets_the_exact_face_edge_or_nothing() {
     );
     assert_eq!(
         b.fire_ray(&order, [f64::NAN, 4.0, 20.0], [0.0, 0.0, -1.0]),
+        Err(solidcore_ops::Error::Argument)
+    );
+    assert_eq!(
+        b.fire_ray(&order, [3.0, 4.0, 20.0], [0.0; 3]),
         Err(solidcore_ops::Error::Argument)
     );
 
