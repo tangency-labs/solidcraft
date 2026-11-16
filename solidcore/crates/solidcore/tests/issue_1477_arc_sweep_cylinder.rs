@@ -1,9 +1,8 @@
 //! tangency-labs/solidcore#1477 (WR-565): `SmPrimitiveCreation::CreateLinearSweep` makes
 //! an `SmCylinder` only of a whole circle swept along its axis. A circular arc short of a
 //! whole turn becomes an `SmSurfOfExtrusion`, which exports as a NURBS, so a sheet-metal
-//! convert finds no cylinder at a modelled bend. The opt-in
-//! `Kernel::fixes.linear_sweep_arc_is_cylinder` (SolidCraft change, tangency-labs/smlib
-//! 12918e9) makes that arc's wall a cylinder: its frame turned to the arc's start (for a
+//! convert finds no cylinder at a modelled bend. The port (SolidCraft change,
+//! tangency-labs/smlib 12918e9) makes that arc's wall a cylinder: its frame turned to the arc's start (for a
 //! sweep against the arc's normal, to its end and then flipped), bounded 0..sweep angle by
 //! 0..distance. A sweep that is not square to the arc's plane stays a surface of
 //! extrusion, and a whole circle keeps upstream's cylinder.
@@ -187,17 +186,11 @@ fn issue_1477_an_arc_extruded_square_to_its_plane_is_a_cylinder() {
     let mut k = Kernel::default();
     let arc = circle(&k, &issue_frame(), 4.0, 0.0, 90.0);
 
-    // the fix off: upstream's surface of extrusion, unchanged
-    let mut b = quarter_disc(&mut k, &arc, Vec3::Z, 50.0);
-    assert_eq!(kinds(&b), ["extrusion", "plane", "plane", "plane", "plane"]);
-    assert_solid(&mut k, &mut b, QUARTER_DISC_VOLUME, "fix off");
-
-    // the fix on: a cylinder of radius 4 about x = 4, y = 4, domain 0..90 by 0..50, its
-    // u from the arc's start at (0, 4) to its end at (4, 0)
-    k.fixes.linear_sweep_arc_is_cylinder = true;
+    // a cylinder of radius 4 about x = 4, y = 4, domain 0..90 by 0..50, its u from the
+    // arc's start at (0, 4) to its end at (4, 0)
     let mut b = quarter_disc(&mut k, &arc, Vec3::Z, 50.0);
     assert_eq!(kinds(&b), ["cylinder", "plane", "plane", "plane", "plane"]);
-    assert_solid(&mut k, &mut b, QUARTER_DISC_VOLUME, "fix on");
+    assert_solid(&mut k, &mut b, QUARTER_DISC_VOLUME, "arc");
     let cylinders = cylinders(&b);
     assert_eq!(cylinders.len(), 1);
     assert_cylinder(
@@ -211,7 +204,7 @@ fn issue_1477_an_arc_extruded_square_to_its_plane_is_a_cylinder() {
             Vec3::new(4.0, 0.0, 0.0),
             Vec3::new(0.0, 4.0, 50.0),
         ],
-        "fix on",
+        "arc",
     );
     // the bend point of the issue's convert lies on it, at 45 degrees and half height
     let mid = cylinders[0]
@@ -231,7 +224,6 @@ fn issue_1477_a_sweep_against_the_arc_normal_turns_the_frame_to_the_arc_end() {
     for (dir, dist) in [(-Vec3::Z, 50.0), (Vec3::Z, -50.0)] {
         let case = format!("{dir:?} {dist}");
         let mut k = Kernel::default();
-        k.fixes.linear_sweep_arc_is_cylinder = true;
         let arc = circle(&k, &issue_frame(), 4.0, 0.0, 90.0);
         let mut b = quarter_disc(&mut k, &arc, dir, dist);
         assert_eq!(
@@ -287,13 +279,6 @@ fn issue_1477_the_frame_is_turned_to_the_arc_start() {
     ];
     for (case, arc) in &arcs {
         let mut k = Kernel::default();
-        let off = kinds(&quarter_disc(&mut k, arc, Vec3::Z, 50.0));
-        assert_eq!(
-            off,
-            ["extrusion", "plane", "plane", "plane", "plane"],
-            "{case}"
-        );
-        k.fixes.linear_sweep_arc_is_cylinder = true;
         let mut b = quarter_disc(&mut k, arc, Vec3::Z, 50.0);
         assert_eq!(
             kinds(&b),
@@ -323,86 +308,74 @@ fn issue_1477_an_extruded_l_with_a_modelled_bend_has_two_cylinders() {
     // the bend, swept 50 along +z: the extruded L of the issue (10 faces, 24 edges, 16
     // vertices on both kernels)
     let p = |x: f64, y: f64| Vec3::new(x, y, 0.0);
-    for fix in [false, true] {
-        let mut k = Kernel::default();
-        k.fixes.linear_sweep_arc_is_cylinder = fix;
-        let curves = [
-            circle(&k, &issue_frame(), 4.0, 0.0, 90.0),
-            seg(p(4.0, 0.0), p(14.0, 0.0)),
-            seg(p(14.0, 0.0), p(14.0, 2.0)),
-            seg(p(14.0, 2.0), p(4.0, 2.0)),
-            circle(&k, &issue_frame(), 2.0, 0.0, 90.0),
-            seg(p(2.0, 4.0), p(2.0, 14.0)),
-            seg(p(2.0, 14.0), p(0.0, 14.0)),
-            seg(p(0.0, 14.0), p(0.0, 4.0)),
-        ];
-        let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
-        let mut b = create_linear_sweep(&mut k, &refs, Vec3::Z, 50.0, true).unwrap();
-        let bend = if fix { "cylinder" } else { "extrusion" };
-        assert_eq!(
-            kinds(&b),
-            [bend, "plane", "plane", "plane", bend, "plane", "plane", "plane", "plane", "plane"],
-            "fix {fix}"
+    let mut k = Kernel::default();
+    let curves = [
+        circle(&k, &issue_frame(), 4.0, 0.0, 90.0),
+        seg(p(4.0, 0.0), p(14.0, 0.0)),
+        seg(p(14.0, 0.0), p(14.0, 2.0)),
+        seg(p(14.0, 2.0), p(4.0, 2.0)),
+        circle(&k, &issue_frame(), 2.0, 0.0, 90.0),
+        seg(p(2.0, 4.0), p(2.0, 14.0)),
+        seg(p(2.0, 14.0), p(0.0, 14.0)),
+        seg(p(0.0, 14.0), p(0.0, 4.0)),
+    ];
+    let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+    let mut b = create_linear_sweep(&mut k, &refs, Vec3::Z, 50.0, true).unwrap();
+    assert_eq!(
+        kinds(&b),
+        [
+            "cylinder", "plane", "plane", "plane", "cylinder", "plane", "plane", "plane", "plane",
+            "plane"
+        ]
+    );
+    assert_eq!(p1::faces(&b, None).unwrap().len(), 10);
+    assert_eq!(p1::edges(&b, None).unwrap().len(), 24);
+    assert_eq!(p1::vertices(&b, None).unwrap().len(), 16);
+    // 50 (2 legs of 2 x 10 and a quarter annulus of radii 2 and 4)
+    let want = 50.0 * (40.0 + 3.0 * std::f64::consts::PI);
+    assert_solid(&mut k, &mut b, want, "L");
+    let cylinders = cylinders(&b);
+    assert_eq!(cylinders.len(), 2);
+    for (c, r) in cylinders.iter().zip([4.0, 2.0]) {
+        assert_cylinder(
+            &k,
+            c,
+            r,
+            Vec3::Z,
+            (90.0, 50.0),
+            [
+                Vec3::new(4.0 - r, 4.0, 0.0),
+                Vec3::new(4.0, 4.0 - r, 0.0),
+                Vec3::new(4.0 - r, 4.0, 50.0),
+            ],
+            &format!("radius {r}"),
         );
-        assert_eq!(p1::faces(&b, None).unwrap().len(), 10, "fix {fix}");
-        assert_eq!(p1::edges(&b, None).unwrap().len(), 24, "fix {fix}");
-        assert_eq!(p1::vertices(&b, None).unwrap().len(), 16, "fix {fix}");
-        // 50 (2 legs of 2 x 10 and a quarter annulus of radii 2 and 4)
-        let want = 50.0 * (40.0 + 3.0 * std::f64::consts::PI);
-        assert_solid(&mut k, &mut b, want, &format!("fix {fix}"));
-        if fix {
-            let cylinders = cylinders(&b);
-            assert_eq!(cylinders.len(), 2);
-            for (c, r) in cylinders.iter().zip([4.0, 2.0]) {
-                assert_cylinder(
-                    &k,
-                    c,
-                    r,
-                    Vec3::Z,
-                    (90.0, 50.0),
-                    [
-                        Vec3::new(4.0 - r, 4.0, 0.0),
-                        Vec3::new(4.0, 4.0 - r, 0.0),
-                        Vec3::new(4.0 - r, 4.0, 50.0),
-                    ],
-                    &format!("radius {r}"),
-                );
-            }
-        }
     }
 }
 
 #[test]
 fn issue_1477_a_sweep_not_square_to_the_arc_stays_a_surface_of_extrusion() {
     let dir = Vec3::new(1.0, 0.0, 1.0);
-    let mut off = Kernel::default();
-    let arc = circle(&off, &issue_frame(), 4.0, 0.0, 90.0);
-    let upstream = kinds(&quarter_disc(&mut off, &arc, dir, 50.0));
-    let mut on = Kernel::default();
-    on.fixes.linear_sweep_arc_is_cylinder = true;
-    let fixed = kinds(&quarter_disc(&mut on, &arc, dir, 50.0));
-    assert_eq!(fixed, upstream);
+    let mut k = Kernel::default();
+    let arc = circle(&k, &issue_frame(), 4.0, 0.0, 90.0);
+    let fixed = kinds(&quarter_disc(&mut k, &arc, dir, 50.0));
     assert_eq!(fixed[0], "extrusion");
     assert!(!fixed.contains(&"cylinder"), "{fixed:?}");
 }
 
 #[test]
 fn issue_1477_a_whole_circle_keeps_upstream_cylinder() {
-    for fix in [false, true] {
-        let mut k = Kernel::default();
-        k.fixes.linear_sweep_arc_is_cylinder = fix;
-        let disc = circle(&k, &issue_frame(), 4.0, 0.0, 360.0);
-        let mut b = create_linear_sweep(&mut k, &[Some(&disc)], Vec3::Z, 50.0, true).unwrap();
-        assert_eq!(kinds(&b), ["cylinder", "plane", "plane"], "fix {fix}");
-        let want = 50.0 * 16.0 * std::f64::consts::PI;
-        assert_solid(&mut k, &mut b, want, &format!("fix {fix}"));
-        let step = cylinders(&b)[0].rev().step_uv_domain();
-        assert!(
-            step.u_interval().min().abs() < 1e-12
-                && (step.u_interval().max() - 360.0).abs() < 1e-12,
-            "fix {fix}: u {} .. {}",
-            step.u_interval().min(),
-            step.u_interval().max()
-        );
-    }
+    let mut k = Kernel::default();
+    let disc = circle(&k, &issue_frame(), 4.0, 0.0, 360.0);
+    let mut b = create_linear_sweep(&mut k, &[Some(&disc)], Vec3::Z, 50.0, true).unwrap();
+    assert_eq!(kinds(&b), ["cylinder", "plane", "plane"]);
+    let want = 50.0 * 16.0 * std::f64::consts::PI;
+    assert_solid(&mut k, &mut b, want, "circle");
+    let step = cylinders(&b)[0].rev().step_uv_domain();
+    assert!(
+        step.u_interval().min().abs() < 1e-12 && (step.u_interval().max() - 360.0).abs() < 1e-12,
+        "u {} .. {}",
+        step.u_interval().min(),
+        step.u_interval().max()
+    );
 }

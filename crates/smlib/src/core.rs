@@ -119,7 +119,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.revolution_round_offset_collapses = true;
     f.proto_edge_splits_at_captured_vertices = true;
     f.imprint_reuses_coincident_face_edge = true;
-    f.linear_sweep_arc_is_cylinder = true;
     f.fillet_trace_reaches_rails = true;
     f.box_face_failures_propagate = true;
     f.fillet_removal_takes_ring_fillets = true;
@@ -129,7 +128,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_extension_as_itself = true;
     f.fillet_mitre_concave_face_corners = true;
     f.good_drop_result_distances_in_order = true;
-    f.face_tight_box_searches_trim = true;
     f.ssi_low_angle_start_on_probation = true;
     f.fillet_variable_span_follows_fillet = true;
     f.simple_coincidence_crossing_is_point = true;

@@ -164,7 +164,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.curve_loop_normal_from_area = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
-    k.fixes.face_tight_box_searches_trim = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.fillet_knife_edge_rounds = true;
@@ -183,7 +182,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.imprint_reuses_coincident_face_edge = true;
     k.fixes.join_touching_loops = true;
     k.fixes.keep_operand_uv_trims = true;
-    k.fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes.local_operation_box_holds_new_surfaces = true;
     k.fixes.local_operation_refuses_loose_tangent_edges = true;
     k.fixes.local_operation_step_walls = true;

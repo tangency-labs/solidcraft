@@ -11,7 +11,7 @@
 //! | Rust                                          | Upstream                                    |
 //! |-----------------------------------------------|---------------------------------------------|
 //! | [`calculate_tight_bounding_box`], [`calculate_tight_bounding_box_into`] | `SmFace::CalculateTightBoundingBox` |
-//! | `face_directed_max` (opt-in, WR-588), `cell_directed_max`, `cell_monotone`, `cell_division` (WR-651) | `sm_FaceDirectedMax`, `sm_CellDirectedMax`, `sm_CellMonotone` (the fork tangency-labs/smlib@9d44c1b), `sm_CellDivision` (tangency-labs/smlib@326de73) |
+//! | `face_directed_max` (WR-588), `cell_directed_max`, `cell_monotone`, `cell_division` (WR-651) | `sm_FaceDirectedMax`, `sm_CellDirectedMax`, `sm_CellMonotone` (the fork tangency-labs/smlib@9d44c1b), `sm_CellDivision` (tangency-labs/smlib@326de73) |
 //! | [`face_classify_uv_line`]                     | `sm_FaceClassifyUVLine` (file static)       |
 //! | [`face_classify_uv_line_mut`]                 | `sm_FaceClassifyUVLine` (in place)          |
 //! | [`find_and_classify_loop_bisector`], [`LoopBisector`] | `sms_FindAndClassifyLoopBisector`   |
@@ -65,8 +65,8 @@
 //!   outputs as upstream initialises them); a failed surface evaluation in the tight
 //!   box adds the partially evaluated point, as `SmSurfaceEval::Pos` returns it. The
 //!   fork's `sm_CellDirectedMax` (WR-588) propagates the solve's and the classification's
-//!   errors where the tight box above ignores them; the port's search ignores them as the
-//!   tight box does, so the two differ only where those calls fail outright. A failed solve
+//!   errors where upstream's tight box ignores them; the port's search ignores them as
+//!   upstream's tight box does, so the two differ only where those calls fail outright. A failed solve
 //!   in the trimmed-face search gives a cell with no solution, which counts with its loose
 //!   box, so the box only grows (safer than the fork's SER, which would fail the box).
 //! - **A hole's outside is the face.** `SectorClassifyCurveOn`'s loop-containment retry
@@ -92,7 +92,7 @@
 //!   `ApproxDerivativeLengths` call is kept for its [`SolidError::Unported`]).
 //! - **Unported callees.** Only through callees (`SmEdgeuse::EvaluateBinormal` is wired
 //!   to `topology.edgeuse_p3`, whose own stubs propagate).
-//! - **Loops.** The trimmed-face search (WR-588, opt-in) takes its cells from an explicit
+//! - **Loops.** The trimmed-face search (WR-588) takes its cells from an explicit
 //!   stack, not recursion, bounded at `FACE_EXTREME_MAX_DEPTH` (16 halvings) and
 //!   `FACE_EXTREME_MAX_CELLS` (4096 cells); a cell past either counts with its greatest value.
 //!   Not the fork's (#14452): each cell of a B-spline face open both ways is solved on its
@@ -442,10 +442,10 @@ pub fn check_face_coordinates(
 /// `SmFace::CalculateTightBoundingBox`: the box of the face's vertices, grown by the
 /// tight box of every face edge; unless the surface is planar (`SM_EFF_ZERO`) or its
 /// loose box over the face's UV domain already lies inside, grown by the surface points
-/// that maximise the signed distance along `±x`, `±y`, `±z` over the face's domain and
-/// classify on the face (not `SM_PC_UNKNOWN`). With `Kernel::fixes.face_tight_box_searches_trim`
-/// (WR-588, #1799) those extremes are searched inside the trim (`face_directed_max`)
-/// instead of taken from the surface's global solve.
+/// that maximise the signed distance along `±x`, `±y`, `±z` inside the face's trim
+/// (`face_directed_max`; not upstream, WR-588, #1799: upstream takes the surface's global
+/// solve over the face's domain and keeps the solutions that classify on the face, not
+/// `SM_PC_UNKNOWN`, so a face whose surface peaks outside the trim was boxed too small).
 ///
 /// # Errors
 ///
@@ -453,7 +453,7 @@ pub fn check_face_coordinates(
 /// [`SolidError::InvalidInput`] for a face with a coordinate above `1e150` (HANG-29,
 /// [`check_face_coordinates`]); those of [`face_vertices`], the edge boxes ([`qe::calculate_tight_bounding_box`]),
 /// the planarity test and the surface's loose box; [`SolidError::Unported`] from the
-/// global solves and point classifications.
+/// cells' solves and point classifications.
 pub fn calculate_tight_bounding_box<'a>(
     k: &Kernel,
     b: impl Into<LazyBrep<'a>>,
@@ -522,142 +522,72 @@ pub fn calculate_tight_bounding_box_into(
         return Ok(());
     }
 
-    // WR-588 (#1799; tangency-labs/smlib@9d44c1b), opt-in: the face's own extremes inside
+    // WR-588 (#1799; tangency-labs/smlib@9d44c1b): the face's own extremes inside
     // its trim (`sm_FaceDirectedMax`), not the surface's global ones alone. The starting
     // values are the box of the vertices and edges, as the fork's.
-    if k.fixes.face_tight_box_searches_trim {
-        let (lo, hi) = (face_bbox.min(), face_bbox.max());
-        let x_max = face_directed_max(
-            k,
-            lb,
-            f,
-            surface,
-            &uv_domain,
-            face_zone_tol_3d,
-            Vec3::new(1.0, 0.0, 0.0),
-            hi.x,
-        )?;
-        let x_min = -face_directed_max(
-            k,
-            lb,
-            f,
-            surface,
-            &uv_domain,
-            face_zone_tol_3d,
-            Vec3::new(-1.0, 0.0, 0.0),
-            -lo.x,
-        )?;
-        let y_max = face_directed_max(
-            k,
-            lb,
-            f,
-            surface,
-            &uv_domain,
-            face_zone_tol_3d,
-            Vec3::new(0.0, 1.0, 0.0),
-            hi.y,
-        )?;
-        let y_min = -face_directed_max(
-            k,
-            lb,
-            f,
-            surface,
-            &uv_domain,
-            face_zone_tol_3d,
-            Vec3::new(0.0, -1.0, 0.0),
-            -lo.y,
-        )?;
-        let z_max = face_directed_max(
-            k,
-            lb,
-            f,
-            surface,
-            &uv_domain,
-            face_zone_tol_3d,
-            Vec3::new(0.0, 0.0, 1.0),
-            hi.z,
-        )?;
-        let z_min = -face_directed_max(
-            k,
-            lb,
-            f,
-            surface,
-            &uv_domain,
-            face_zone_tol_3d,
-            Vec3::new(0.0, 0.0, -1.0),
-            -lo.z,
-        )?;
-        face_bbox.add_point(Point3::new(x_min, y_min, z_min));
-        face_bbox.add_point(Point3::new(x_max, y_max, z_max));
-        *out = face_bbox;
-        return Ok(());
-    }
-
-    // Unfortunately, we can't just call the surface method with our domain,
-    // that box could well be larger than that of the Face.
-    // So we have to reproduce the Surface method here,
-    // and check each solution for being inside the Face.
-
-    // Begin copy of Surface::CalculateTightBoundingBox():
-    let mut pt_class = PointClassification::new(face_zone_tol_3d);
-    let mut srf_bbox = Extent3d::new();
-
-    let mut dir_vec = Vec3::new(1.0, 0.0, 0.0); // +/- x
-    for idx in 0..3 {
-        if idx == 1 {
-            dir_vec = Vec3::new(0.0, 1.0, 0.0); // +/- y
-        }
-        if idx == 2 {
-            dir_vec = Vec3::new(0.0, 0.0, 1.0); // +/- z
-        }
-
-        // Positive direction, then negative direction:
-        for pass in 0..2 {
-            if pass == 1 {
-                dir_vec = -dir_vec;
-            }
-            let solutions = ignored(global_point_solve_starts(
-                k,
-                surface,
-                &uv_domain,
-                SolverOperation::Signed3dDirectedMaximize,
-                dir_vec,
-                EFF_ZERO_SQRT,
-                SolutionRequested::All,
-            ))?
-            .unwrap_or_default();
-
-            for sol in &solutions {
-                let uv = Point2::new(
-                    sol.parameters.first().copied().unwrap_or(0.0),
-                    sol.parameters.get(1).copied().unwrap_or(0.0),
-                );
-                let mut eval = SurfaceEval::with_uv(k, Some(surface), uv.x, uv.y);
-                // (status ignored upstream)
-                // (it may attach missing UV trim curves to the B-rep)
-                ignored(point_classify(
-                    k,
-                    lb.get_mut()?,
-                    f,
-                    uv,
-                    &mut pt_class,
-                    PointClassifyOptions {
-                        src_zone_tol_3d: face_zone_tol_3d,
-                        do_boundary_intersections: false,
-                        use_uv_classification: true,
-                        ..PointClassifyOptions::default()
-                    },
-                ))?;
-                if pt_class.point_class() != PointClassType::Unknown {
-                    srf_bbox.add_point(eval_pos(&mut eval)?);
-                }
-            }
-        }
-    } // end for on x, y, z directions
-
-    face_bbox = face_bbox.union(&srf_bbox);
-
-    // End copy of Surface::CalculateTightBoundingBox():
+    let (lo, hi) = (face_bbox.min(), face_bbox.max());
+    let x_max = face_directed_max(
+        k,
+        lb,
+        f,
+        surface,
+        &uv_domain,
+        face_zone_tol_3d,
+        Vec3::new(1.0, 0.0, 0.0),
+        hi.x,
+    )?;
+    let x_min = -face_directed_max(
+        k,
+        lb,
+        f,
+        surface,
+        &uv_domain,
+        face_zone_tol_3d,
+        Vec3::new(-1.0, 0.0, 0.0),
+        -lo.x,
+    )?;
+    let y_max = face_directed_max(
+        k,
+        lb,
+        f,
+        surface,
+        &uv_domain,
+        face_zone_tol_3d,
+        Vec3::new(0.0, 1.0, 0.0),
+        hi.y,
+    )?;
+    let y_min = -face_directed_max(
+        k,
+        lb,
+        f,
+        surface,
+        &uv_domain,
+        face_zone_tol_3d,
+        Vec3::new(0.0, -1.0, 0.0),
+        -lo.y,
+    )?;
+    let z_max = face_directed_max(
+        k,
+        lb,
+        f,
+        surface,
+        &uv_domain,
+        face_zone_tol_3d,
+        Vec3::new(0.0, 0.0, 1.0),
+        hi.z,
+    )?;
+    let z_min = -face_directed_max(
+        k,
+        lb,
+        f,
+        surface,
+        &uv_domain,
+        face_zone_tol_3d,
+        Vec3::new(0.0, 0.0, -1.0),
+        -lo.z,
+    )?;
+    face_bbox.add_point(Point3::new(x_min, y_min, z_min));
+    face_bbox.add_point(Point3::new(x_max, y_max, z_max));
     *out = face_bbox;
     Ok(())
 }
@@ -758,7 +688,7 @@ struct CellDirectedMax {
 
 /// `sm_CellDirectedMax`: `GlobalPointSolve(SM_SO_3D_SIGNED_DIRECTED_MAXIMIZE)` over `cell`
 /// (the solver's solutions within its tolerance of the greatest, each classified; only
-/// points inside the face, `SM_PC_FACE`, count, as the fork's tangency-labs/smlib@95bf434). Status handling as the tight box above: a failed solve gives no solutions and a
+/// points inside the face, `SM_PC_FACE`, count, as the fork's tangency-labs/smlib@95bf434). Status handling as upstream's tight box: a failed solve gives no solutions and a
 /// failed classification keeps the point as classified.
 fn cell_directed_max(
     k: &Kernel,
@@ -3357,16 +3287,15 @@ mod tests {
     }
 
     /// The tight box of the crowned height field trimmed to the square `[-10, 10]^2` (its
-    /// loop is four lines on `z = 0`), with the fix `searches_trim` on or off.
-    fn crowned_trimmed_face_box(corner: f64, searches_trim: bool) -> Extent3d {
-        let (k, b, f) = crowned_trimmed_face(corner, searches_trim);
+    /// loop is four lines on `z = 0`).
+    fn crowned_trimmed_face_box(corner: f64) -> Extent3d {
+        let (k, b, f) = crowned_trimmed_face(corner);
         calculate_tight_bounding_box(&k, &b, f).unwrap()
     }
 
     /// The kernel, B-rep and face of [`crowned_trimmed_face_box`].
-    fn crowned_trimmed_face(corner: f64, searches_trim: bool) -> (Kernel, Brep, FaceId) {
+    fn crowned_trimmed_face(corner: f64) -> (Kernel, Brep, FaceId) {
         let mut k = Kernel::default();
-        k.fixes.face_tight_box_searches_trim = searches_trim;
         let interval = Extent1d::from_min_max(0.0, 1.0);
         let corners = [(-10.0, -10.0), (10.0, -10.0), (10.0, 10.0), (-10.0, 10.0)];
         let curves = (0..4)
@@ -3395,19 +3324,11 @@ mod tests {
     /// global maximum (50 at the corner outside the trim) is not inside the face.
     #[test]
     fn tight_box_finds_a_trimmed_faces_peak_when_the_surface_peaks_outside() {
-        let bx = crowned_trimmed_face_box(50.0, true);
+        let bx = crowned_trimmed_face_box(50.0);
         assert!((bx.max().z - 4.0).abs() <= 1e-9, "z max {}", bx.max().z);
         assert!((bx.min().z - 0.0).abs() <= 1e-9, "z min {}", bx.min().z);
         assert!((bx.min().x + 10.0).abs() <= 1e-9 && (bx.max().x - 10.0).abs() <= 1e-9);
         assert!((bx.min().y + 10.0).abs() <= 1e-9 && (bx.max().y - 10.0).abs() <= 1e-9);
-    }
-
-    /// Upstream (fix off): the surface's global solve gives only the peak outside the
-    /// trim, so the box comes from the edges alone (z max 0).
-    #[test]
-    fn tight_box_of_a_trimmed_face_without_the_fix_is_upstreams() {
-        let bx = crowned_trimmed_face_box(50.0, false);
-        assert!((bx.max().z - 0.0).abs() <= 1e-9, "z max {}", bx.max().z);
     }
 
     /// A rational single-span patch (degree 2 in u, 1 in v) of the quarter cylinder of
@@ -3453,51 +3374,45 @@ mod tests {
 
     /// An analytic face (the quarter-cylinder side of a partial cylinder of radius 5 and
     /// height 10, a cone-kind surface whose base is a B-spline) boxes at `[0,5] x [0,5] x
-    /// [0,10]` with the search on and off, both in the same time.
+    /// [0,10]`.
     #[test]
     fn tight_box_of_an_analytic_cylinder_face_is_the_same_with_the_search() {
-        for searches_trim in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.face_tight_box_searches_trim = searches_trim;
-            let brep = crate::primitive::api_primitives::create_partial_cylinder(
-                &mut k,
-                Point3::new(0.0, 0.0, 0.0),
-                5.0,
-                10.0,
-                0.0,
-                90.0,
-            )
+        let mut k = Kernel::default();
+        let brep = crate::primitive::api_primitives::create_partial_cylinder(
+            &mut k,
+            Point3::new(0.0, 0.0, 0.0),
+            5.0,
+            10.0,
+            0.0,
+            90.0,
+        )
+        .unwrap();
+        let faces = crate::topology::brep::p1::faces(&brep, None).unwrap();
+        let side = faces
+            .into_iter()
+            .find(|&f| {
+                matches!(
+                    brep.face(f).unwrap().surface.as_ref().map(Surface::kind),
+                    Some(SurfaceKind::Cone(_))
+                )
+            })
             .unwrap();
-            let faces = crate::topology::brep::p1::faces(&brep, None).unwrap();
-            let side = faces
-                .into_iter()
-                .find(|&f| {
-                    matches!(
-                        brep.face(f).unwrap().surface.as_ref().map(Surface::kind),
-                        Some(SurfaceKind::Cone(_))
-                    )
-                })
-                .unwrap();
-            // Its height is linear in v, so the whole face is monotone along z through the
-            // B-spline base of the cone-kind surface (rule 4 of the search).
-            let face = brep.face(side).unwrap();
-            let surface = face.surface.as_ref().unwrap();
-            assert!(cell_monotone(&k, surface, &face.uv_domain, Vec3::new(0.0, 0.0, 1.0)).unwrap());
-            let bx = calculate_tight_bounding_box(&k, &brep, side).unwrap();
-            let (lo, hi) = (bx.min(), bx.max());
-            for (got, want) in [
-                (lo.x, 0.0),
-                (lo.y, 0.0),
-                (lo.z, 0.0),
-                (hi.x, 5.0),
-                (hi.y, 5.0),
-                (hi.z, 10.0),
-            ] {
-                assert!(
-                    (got - want).abs() <= 1e-6,
-                    "fix {searches_trim}: {got} vs {want}"
-                );
-            }
+        // Its height is linear in v, so the whole face is monotone along z through the
+        // B-spline base of the cone-kind surface (rule 4 of the search).
+        let face = brep.face(side).unwrap();
+        let surface = face.surface.as_ref().unwrap();
+        assert!(cell_monotone(&k, surface, &face.uv_domain, Vec3::new(0.0, 0.0, 1.0)).unwrap());
+        let bx = calculate_tight_bounding_box(&k, &brep, side).unwrap();
+        let (lo, hi) = (bx.min(), bx.max());
+        for (got, want) in [
+            (lo.x, 0.0),
+            (lo.y, 0.0),
+            (lo.z, 0.0),
+            (hi.x, 5.0),
+            (hi.y, 5.0),
+            (hi.z, 10.0),
+        ] {
+            assert!((got - want).abs() <= 1e-6, "{got} vs {want}");
         }
     }
 
@@ -3510,7 +3425,7 @@ mod tests {
     /// whole net's hull is 9.
     #[test]
     fn unsolved_cell_at_the_search_limits_keeps_a_bound_on_the_face() {
-        let (k, b, f) = crowned_trimmed_face(0.0, true);
+        let (k, b, f) = crowned_trimmed_face(0.0);
         let face = b.face(f).unwrap();
         let surface = face.surface.clone().unwrap();
         let domain = face.uv_domain;
@@ -3558,7 +3473,7 @@ mod tests {
     /// every cell aside at once.
     #[test]
     fn a_solve_that_misses_the_peak_does_not_set_its_cell_aside() {
-        let (k, b, f) = crowned_trimmed_face(0.0, true);
+        let (k, b, f) = crowned_trimmed_face(0.0);
         let face = b.face(f).unwrap();
         let surface = face.surface.clone().unwrap();
         let domain = face.uv_domain;
@@ -3603,7 +3518,7 @@ mod tests {
     /// search of one direction: the search stops there with the cancellation.
     #[test]
     fn a_cancelled_search_stops_at_its_next_cell() {
-        let (mut k, b, f) = crowned_trimmed_face(0.0, true);
+        let (mut k, b, f) = crowned_trimmed_face(0.0);
         let token = crate::kernel::CancelToken::new();
         k.set_cancel_token(token.clone());
         let face = b.face(f).unwrap();
@@ -3673,7 +3588,7 @@ mod tests {
             panic!("a B-spline");
         };
         assert!(sub_patch_rounding(wild_bs).is_none());
-        let (k, b, f) = crowned_trimmed_face(0.0, true);
+        let (k, b, f) = crowned_trimmed_face(0.0);
         let lb: LazyBrep<'_> = (&b).into();
         let cell = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         // the cell then counts with the surface's loose box over it, which holds the
@@ -3682,18 +3597,12 @@ mod tests {
         assert!(top >= 1e100, "loose top {top}");
     }
 
-    /// The surface's global maximum lies inside the trim (no peak outside): both paths
-    /// give the face's extreme 4.
+    /// The surface's global maximum lies inside the trim (no peak outside): the face's
+    /// extreme 4, as upstream's global solve gives it.
     #[test]
     fn tight_box_with_the_peak_inside_the_trim_agrees_with_upstream() {
-        for searches_trim in [false, true] {
-            let bx = crowned_trimmed_face_box(0.0, searches_trim);
-            assert!(
-                (bx.max().z - 4.0).abs() <= 1e-9,
-                "fix {searches_trim}: z max {}",
-                bx.max().z
-            );
-        }
+        let bx = crowned_trimmed_face_box(0.0);
+        assert!((bx.max().z - 4.0).abs() <= 1e-9, "z max {}", bx.max().z);
     }
 
     #[test]

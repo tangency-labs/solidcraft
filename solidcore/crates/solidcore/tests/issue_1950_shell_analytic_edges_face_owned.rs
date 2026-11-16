@@ -123,11 +123,6 @@ fn check(v: f64, want: f64, without_flag: f64) {
 #[test]
 fn shelled_plate_with_solidcraft_fixes() {
     let mut fixes = solidcraft_fixes();
-    // Off, as in the list this test copied before: with it the extruded half circle is a
-    // cylinder rather than a surface of extrusion, so the operand is not the one pinned below
-    // (its shell measures 10400.213233570486, +8.6e-4 against the closed form, 8.3e-8
-    // relative, within the volume's 1e-6).
-    fixes.linear_sweep_arc_is_cylinder = false;
     // The preset has the flag on; this first volume is the one without it.
     fixes.shell_edges_on_analytics_exact = false;
     let without_flag = shelled_volume(&fixes);

@@ -1,13 +1,13 @@
 //! The two arc tests of `CreateLinearSweep` together: WR-576 (#1507,
 //! tangency-labs/smlib@fd59111) tests a generating curve's arc to the cylinder check's
-//! zero, `1000 SM_EFF_ZERO * (1 + size)`, not to the B-rep tolerance; WR-565 (`Kernel::fixes.linear_sweep_arc_is_cylinder`,
-//! #1477, tangency-labs/smlib 12918e9) makes an arc short of a whole turn swept square to
+//! zero, `1000 SM_EFF_ZERO * (1 + size)`, not to the B-rep tolerance; WR-565 (#1477,
+//! tangency-labs/smlib 12918e9) makes an arc short of a whole turn swept square to
 //! its plane a cylinder too. The arc test gates both, as `ArcZero` gates `ArcSweepCylinder`
 //! in the fork: only an exact arc becomes a cylinder, whole or partial.
 //!
 //! Each profile (an ellipse of radii 10 and 10 + 1e-7, an arc to the B-rep tolerance and
 //! not to the cylinder check's zero, or an exact circle, each over a whole turn or half a
-//! turn closed by its chord) is swept 2 along +z, capped, with WR-565 off and on.
+//! turn closed by its chord) is swept 2 along +z, capped.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -84,10 +84,9 @@ fn profile(k: &Kernel, curve: &dyn Fn(&Kernel) -> Curve) -> Vec<Curve> {
     vec![c, Curve::from(chord)]
 }
 
-/// The profile of `curve` extruded 2 along +z and capped, with WR-565's `partial_arcs`.
-fn sweep(curve: &dyn Fn(&Kernel) -> Curve, partial_arcs: bool) -> &'static str {
+/// The side face of the profile of `curve` extruded 2 along +z and capped.
+fn sweep(curve: &dyn Fn(&Kernel) -> Curve) -> &'static str {
     let mut k = Kernel::default();
-    k.fixes.linear_sweep_arc_is_cylinder = partial_arcs;
     let curves = profile(&k, curve);
     let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
     let b = create_linear_sweep(&mut k, &refs, Vec3::new(0.0, 0.0, 1.0), 2.0, true).unwrap();
@@ -96,11 +95,6 @@ fn sweep(curve: &dyn Fn(&Kernel) -> Curve, partial_arcs: bool) -> &'static str {
         panic!("one side face: {kinds:?}");
     };
     kind
-}
-
-/// The side face of `curve` for WR-565 off and on.
-fn matrix(curve: &dyn Fn(&Kernel) -> Curve) -> [&'static str; 2] {
-    [sweep(curve, false), sweep(curve, true)]
 }
 
 #[test]
@@ -120,16 +114,16 @@ fn arc_flags_near_circle_is_an_arc_only_to_the_brep_tolerance() {
 
 #[test]
 fn arc_flags_near_circle_is_an_extrusion() {
-    assert_eq!(matrix(&|k| near_arc(k, 360.0)), ["extrusion", "extrusion"]);
+    assert_eq!(sweep(&|k| near_arc(k, 360.0)), "extrusion");
 }
 
 #[test]
 fn arc_flags_near_half_circle_is_an_extrusion() {
-    assert_eq!(matrix(&|k| near_arc(k, 180.0)), ["extrusion", "extrusion"]);
+    assert_eq!(sweep(&|k| near_arc(k, 180.0)), "extrusion");
 }
 
 #[test]
 fn arc_flags_exact_arcs_keep_their_cylinders() {
-    assert_eq!(matrix(&|k| arc(k, 360.0)), ["cylinder", "cylinder"]);
-    assert_eq!(matrix(&|k| arc(k, 180.0)), ["extrusion", "cylinder"]);
+    assert_eq!(sweep(&|k| arc(k, 360.0)), "cylinder");
+    assert_eq!(sweep(&|k| arc(k, 180.0)), "cylinder");
 }

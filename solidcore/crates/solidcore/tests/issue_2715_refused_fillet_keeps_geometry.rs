@@ -219,7 +219,6 @@ fn keep_kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut fixes = UpstreamFixes::default();
     fixes.fillet_overflow_trim_at_creases = true;
-    fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes = fixes;
     k
 }
