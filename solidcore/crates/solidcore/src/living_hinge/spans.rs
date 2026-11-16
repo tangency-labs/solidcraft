@@ -11,7 +11,7 @@
 //! touches: the parity stays right. Neighbouring edges must share their end points exactly (the
 //! caller snaps an arc's ends to the lines it meets).
 
-use super::near::{clean_crossing, near_union, NearEdge};
+use super::near::{clean_crossing, merge, near_set, near_union, NearEdge};
 use super::rows::RowSpan;
 use super::{G1_TOL, ON_EDGE};
 
@@ -256,6 +256,26 @@ pub fn clean_ends(
     }
 }
 
+/// The keep-out zone `Z_c ∪ Z_o` on the row `v` (design 6.5) as sorted, disjoint open intervals:
+/// the near sets of the area's closed edges `closed` with reach `closed_reach` (`r + m`) and of
+/// every edge of the plate's loops `plate` with reach `rho`, all of them, not only those inside the
+/// area.
+pub fn row_zone(
+    plate: &[Vec<NearEdge>],
+    closed: &[NearEdge],
+    v: f64,
+    rho: f64,
+    closed_reach: f64,
+) -> Vec<(f64, f64)> {
+    merge(
+        closed
+            .iter()
+            .flat_map(|e| near_set(e, v, closed_reach))
+            .chain(plate.iter().flatten().flat_map(|e| near_set(e, v, rho)))
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,6 +298,31 @@ mod tests {
                 .iter()
                 .zip(want)
                 .all(|(g, w)| (g.lo - w.0).abs() < 1e-12 && (g.hi - w.1).abs() < 1e-12)
+    }
+
+    #[test]
+    fn the_zone_joins_closed_sides_and_every_plate_edge() {
+        // Plate u 0..60 by v 0..100 with a hole u 20..23 (v 40..60), 3 mm wide so its sides' near
+        // sets stay 0.2 apart; a closed side at u = 40.
+        let plate = [rect(0.0, 0.0, 60.0, 100.0), rect(20.0, 40.0, 23.0, 60.0)];
+        let closed = [NearEdge::Line((40.0, 30.0), (40.0, 70.0))];
+        let zone = row_zone(&plate, &closed, 50.0, 1.4, 2.1);
+        let want = [
+            (-1.4, 1.4),
+            (18.6, 21.4),
+            (21.6, 24.4),
+            (37.9, 42.1),
+            (58.6, 61.4),
+        ];
+        assert_eq!(zone.len(), want.len());
+        for (g, w) in zone.iter().zip(&want) {
+            assert!(
+                (g.0 - w.0).abs() < 1e-12 && (g.1 - w.1).abs() < 1e-12,
+                "{g:?} != {w:?}"
+            );
+        }
+        // Far from the hole the row keeps only the plate's sides.
+        assert_eq!(row_zone(&plate, &[], 20.0, 1.4, 2.1).len(), 2);
     }
 
     #[test]

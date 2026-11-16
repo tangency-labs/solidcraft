@@ -145,7 +145,7 @@ fn near_arc(
 }
 
 /// Sorts open intervals and joins those that overlap or touch.
-fn merge(mut ivs: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
+pub(crate) fn merge(mut ivs: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
     ivs.retain(|iv| iv.0 < iv.1);
     ivs.sort_by(|a, b| a.0.total_cmp(&b.0));
     let mut out: Vec<(f64, f64)> = Vec::with_capacity(ivs.len());
