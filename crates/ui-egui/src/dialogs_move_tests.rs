@@ -1151,6 +1151,30 @@ fn picking_the_component_that_holds_a_picked_body_picks_the_whole_component() {
 }
 
 #[test]
+fn picking_a_nested_component_that_holds_a_picked_body_picks_it() {
+    // A body two components deep: the click on its own component, not only the outer one, takes
+    // the whole component.
+    let mut h = crate::scenario::Harness::new();
+    let outer = h.app.run("component.create", json!({"name": "Frame", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+    let inner = h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Peg"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.start("solid.move");
+    h.frames(2);
+    pick(&mut h, body("Peg"));
+    pick(&mut h, occurrence(&[outer, inner]));
+    assert_eq!(picks(&h), vec![occurrence(&[outer, inner])]);
+    assert_eq!(object_of(&h), OBJECT_COMPONENTS);
+}
+
+#[test]
+fn a_shared_child_picked_through_two_copies_of_its_parent_moves_once() {
+    // One occurrence (9) placed by two copies (1 and 2) of its parent: one placement move.
+    let picked = [occurrence(&[1, 9]), occurrence(&[2, 9]), occurrence(&[3])];
+    assert_eq!(placement_paths(&picked, false, false), vec![vec![1, 9], vec![3]]);
+}
+
+#[test]
 fn with_components_picked_a_body_stands_for_its_component_and_a_root_body_is_refused() {
     let (mut h, part, other) = two_parts_and_a_root_body();
     h.app.start("solid.move");

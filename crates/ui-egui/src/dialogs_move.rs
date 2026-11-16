@@ -163,12 +163,19 @@ pub(crate) fn admit(s: &solidcraft_engine::Session, d: &mut Dialog, sel: Sel) ->
     let components = picks.iter().any(|p| matches!(p, Sel::Occurrence { .. }));
     match sel {
         Sel::Occurrence { path } if !components => {
+            // The body's whole placement path: a pick of a nested component keeps only part of it.
             let holds_a_pick = picks.iter().any(|p| match p {
-                Sel::Body { name } => crate::dialogs::occurrence_path_of_body(s, name).is_some_and(|owner| owner.starts_with(&path)),
+                Sel::Body { name } => crate::dialogs::body_placement_path(s, name).is_some_and(|owner| owner.starts_with(&path)),
                 _ => false,
             });
             if !holds_a_pick {
                 return None;
+            }
+            // The bodies it holds give way to it; the others become the components they are in.
+            if let Some(input) = d.inputs.first_mut() {
+                input.items.retain(|p| {
+                    !matches!(p, Sel::Body { name } if crate::dialogs::body_placement_path(s, name).is_some_and(|owner| owner.starts_with(&path)))
+                });
             }
             to_components(s, d);
             set_object(d, OBJECT_COMPONENTS);
@@ -416,7 +423,8 @@ pub(crate) fn placements(d: &Dialog) -> Vec<Vec<u64>> {
 }
 
 /// [`placements`] from the Bodies picks, whether Create Copy is ticked, and whether a Move feature
-/// is being edited.
+/// is being edited. A shared child reached through two copies of its parent is one occurrence,
+/// moved once: each `occurrence.move` would move it again.
 pub(crate) fn placement_paths(picks: &[Sel], copy: bool, editing: bool) -> Vec<Vec<u64>> {
     if copy || editing {
         return Vec::new();
@@ -431,7 +439,8 @@ pub(crate) fn placement_paths(picks: &[Sel], copy: bool, editing: bool) -> Vec<V
     let mut out: Vec<Vec<u64>> = Vec::new();
     for p in &paths {
         let inside_another = paths.iter().any(|q| q.len() < p.len() && p.starts_with(q));
-        if !inside_another && !out.contains(*p) {
+        let same_occurrence = out.iter().any(|q| q.last() == p.last());
+        if !inside_another && !same_occurrence {
             out.push((*p).clone());
         }
     }

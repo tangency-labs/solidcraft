@@ -3207,6 +3207,16 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
 /// active a part inside a subassembly picks the subassembly; with the subassembly (or the part)
 /// active it picks the part. A body outside the active component picks its top-level placement.
 pub(crate) fn occurrence_path_of_body(s: &Session, body: &str) -> Option<Vec<u64>> {
+    let path = body_placement_path(s, body)?;
+    let depth = pick_depth(s, &path);
+    let path: Vec<u64> = path.into_iter().take(depth).collect();
+    (!path.is_empty()).then_some(path)
+}
+
+/// The full placement path of the component a body is in, to its innermost component: `None`
+/// for a body at the design's root. A component pick keeps only part of it
+/// ([`occurrence_path_of_body`]).
+pub(crate) fn body_placement_path(s: &Session, body: &str) -> Option<Vec<u64>> {
     let st = crate::open_meshing::session_world(s);
     let b = st.body(body)?;
     if s.doc.model_body_component(b) == 0 {
@@ -3214,8 +3224,6 @@ pub(crate) fn occurrence_path_of_body(s: &Session, body: &str) -> Option<Vec<u64
     }
     let model = s.model.state();
     let (_, _, _, path, _) = s.placed_document().body_frames_with_source(&model).into_iter().find(|(world, ..)| world == body)?;
-    let depth = pick_depth(s, &path);
-    let path: Vec<u64> = path.into_iter().take(depth).collect();
     (!path.is_empty()).then_some(path)
 }
 

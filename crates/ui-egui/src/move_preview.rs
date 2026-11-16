@@ -64,6 +64,8 @@ struct Cached {
     /// Each body's own colour and its faces' (`viewport::body_face_rgba`): a moved body keeps
     /// its look.
     looks: Vec<Look>,
+    /// Whether the outline shows hidden edges dimmed (`viewport::moved_body_outline`).
+    hidden_edges: bool,
     frames: Vec<Mat>,
     /// This cache and no other ([`CACHES`]): what a layer's scenes are built from.
     serial: u64,
@@ -178,7 +180,7 @@ impl Cached {
         let removed = still.color(colors.removed);
         let mut bounds = Aabb3::EMPTY;
         for (mesh, look) in self.meshes.iter().zip(&self.looks) {
-            draw(&mut moving, mesh, look, &IDENTITY, colors, &mut bounds);
+            draw(&mut moving, mesh, look, &IDENTITY, colors, self.hidden_edges, &mut bounds);
             if !copy && colors.cut_tint {
                 ghost(&mut still, mesh, removed);
             }
@@ -279,8 +281,10 @@ impl MovePreview {
         for path in &components {
             names.extend(app.session.occurrence_bodies(path, true).ok()?);
         }
-        if self.cached.as_ref().is_none_or(|c| c.revision != app.session.revision || !Arc::ptr_eq(&c.document, &app.session.doc) || c.names != names)
-        {
+        let hidden_edges = app.preferences.show_selected_hidden_edges;
+        if self.cached.as_ref().is_none_or(|c| {
+            c.revision != app.session.revision || !Arc::ptr_eq(&c.document, &app.session.doc) || c.names != names || c.hidden_edges != hidden_edges
+        }) {
             let state = crate::open_meshing::session_world(&app.session);
             let drawn: Vec<&solidcraft_engine::doc::ModelBody> = names.iter().map(|n| state.body(n)).collect::<Option<_>>()?;
             let meshes: Vec<Arc<Mesh>> = drawn.iter().map(|b| b.mesh()).collect();
@@ -296,6 +300,7 @@ impl MovePreview {
                 meshes,
                 triangles,
                 looks,
+                hidden_edges,
                 frames,
                 serial: CACHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
                 rest: None,
@@ -355,7 +360,7 @@ impl MovePreview {
         let removed = scene.color(colors.removed);
         let mut bounds = Aabb3::EMPTY;
         for ((mesh, look), m) in cache.meshes.iter().zip(&cache.looks).zip(&motions) {
-            draw(&mut scene, mesh, look, m, colors, &mut bounds);
+            draw(&mut scene, mesh, look, m, colors, cache.hidden_edges, &mut bounds);
             if !copy && colors.cut_tint {
                 ghost(&mut scene, mesh, removed);
             }
@@ -383,7 +388,7 @@ type Look = ([u8; 4], Vec<[u8; 4]>);
 /// keeps its appearance), with its edges, and outlined as picked as the view outlines it before
 /// it moves (`viewport::moved_body_outline`): the same all through the move, dragged or not,
 /// whatever the move type.
-fn draw(scene: &mut GpuScene, mesh: &Mesh, look: &Look, m: &Mat, colors: Colors, bounds: &mut Aabb3) {
+fn draw(scene: &mut GpuScene, mesh: &Mesh, look: &Look, m: &Mat, colors: Colors, hidden_edges: bool, bounds: &mut Aabb3) {
     let body = scene.color(look.0);
     let faces: Vec<_> = look.1.iter().map(|c| scene.color(*c)).collect();
     for (ti, t) in mesh.triangles.iter().enumerate() {
@@ -406,7 +411,7 @@ fn draw(scene: &mut GpuScene, mesh: &Mesh, look: &Look, m: &Mat, colors: Colors,
             scene.line(apply_point(m, w[0]).to_f32(), apply_point(m, w[1]).to_f32(), edge, 1.3, false);
         }
     }
-    crate::viewport::moved_body_outline(scene, mesh, m);
+    crate::viewport::moved_body_outline(scene, mesh, m, hidden_edges);
 }
 
 #[cfg(test)]
@@ -510,6 +515,7 @@ mod tests {
             meshes: Vec::new(),
             triangles: 0,
             looks: Vec::new(),
+            hidden_edges: false,
             frames: Vec::new(),
             serial: 0,
             rest: None,
@@ -776,6 +782,20 @@ mod tests {
         let layer = MovePreview::default().compute(&gpu, &cmds, plain).expect("taken here").expect("built").layer.expect("a layer");
         let (_, moving) = layer.scenes.expect("its scenes");
         check(moving.palette.entries(), "a layer");
+    }
+
+    /// The outline of what moves shows its hidden edges dimmed only with Preferences' Show
+    /// hidden edges of selected bodies on, as a selected body's do.
+    #[test]
+    fn a_moved_bodys_hidden_edges_follow_the_preference() {
+        let mut app = app();
+        let cmds = [("solid.move".to_string(), json!({"bodies": ["Plate"], "translate": ["30 mm", "0 mm", "0 mm"]}))];
+        let mut pv = MovePreview::default();
+        for on in [false, true] {
+            app.preferences.show_selected_hidden_edges = on;
+            let built = pv.compute(&app, &cmds, colors(&app)).expect("taken here").expect("built");
+            assert_eq!(!built.scene.merged().hidden.is_empty(), on, "hidden edges drawn: {on}");
+        }
     }
 
     /// A turn about a given origin is drawn about that point: the Move dialog names its pivot as

@@ -4583,16 +4583,21 @@ impl EdgeColours {
     }
 }
 
-/// A body that Move/Copy moves, outlined as picked: its edges in the selection colours, dimmed
-/// where the model hides them, over its own look, moved by `m`. The view draws it so where the
-/// body stands, and the move's preview draws it so where the body goes, the same way all through
-/// the move.
-pub(crate) fn moved_body_outline(sc: &mut GpuScene, mesh: &solidcraft_engine::geom::Mesh, m: &solidcraft_engine::doc::Mat) {
+/// A body that Move/Copy moves, outlined as picked: its edges in the selection colours over its
+/// own look, moved by `m`, and dimmed where the model hides them when `hidden` (Preferences' Show
+/// hidden edges of selected bodies, as a selected body's). The view draws it so where the body
+/// stands, and the move's preview draws it so where the body goes, the same way all through the
+/// move.
+pub(crate) fn moved_body_outline(sc: &mut GpuScene, mesh: &solidcraft_engine::geom::Mesh, m: &solidcraft_engine::doc::Mat, hidden: bool) {
     let t = Tokens::get();
     let cols = EdgeColours::new(sc, t.sel_edge, t.sel_edge_rim);
     for (_, e) in mesh.edges.iter().enumerate().filter(|(ei, _)| mesh.edge_pickable(*ei)) {
         let moved: Vec<Vec3> = e.iter().map(|p| solidcraft_engine::doc::apply_point(m, *p)).collect();
-        edge_lines(sc, &moved, cols, 2.0, &[]);
+        if hidden {
+            edge_lines(sc, &moved, cols, 2.0, &[]);
+        } else {
+            whole_body_edge_lines(sc, &moved, cols, 2.0);
+        }
     }
 }
 
@@ -5187,7 +5192,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     let live = crate::dialogs_move::chained(app);
     let dragging = crate::dialogs_move::dragging(app);
     // ...and outlined rather than filled, so they keep their look, as the preview draws them.
-    let move_outlined = crate::dialogs_move::moved_bodies(app);
+    let move_outlined: std::collections::HashSet<String> = crate::dialogs_move::moved_bodies(app).into_iter().collect();
     let moving = |name: &str| dragging && chain_of(live.as_ref(), name).is_some();
     let chained = live.as_ref().filter(|_| !dragging);
     let carry = |b: &solidcraft_engine::doc::ModelBody| chain_of(chained, &b.name);
@@ -5476,7 +5481,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                     && !(moved && app.preview.effective_replaced().iter().any(|n| n == name))
                 {
                     if moved && has_pickable_outline(&shown(b)) {
-                        moved_body_outline(&mut feedback, &shown(b), &solidcraft_engine::doc::IDENTITY);
+                        moved_body_outline(&mut feedback, &shown(b), &solidcraft_engine::doc::IDENTITY, app.preferences.show_selected_hidden_edges);
                     } else if let Some(m) = outlines.then(|| shown(b)).filter(|mesh| has_pickable_outline(mesh)) {
                         for (_, e) in m.edges.iter().enumerate().filter(|(ei, _)| m.edge_pickable(*ei)) {
                             edge_lines(&mut feedback, e, selected_edge, 2.0, &[]);
