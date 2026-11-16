@@ -47,7 +47,6 @@
   "found_torus_sphere_keep_tested_nurb",
   "point_solve_keeps_triangle_guess",
   "imprint_extends_edge_to_proto_vertex",
-  "imprint_reuses_coincident_face_edge",
   "fillet_point_step_per_point",
   "analytic_copy_keeps_parameterization",
   "offset_extension_from_base",

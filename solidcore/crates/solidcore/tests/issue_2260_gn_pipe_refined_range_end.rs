@@ -79,7 +79,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "geometric_g2_continuity",
     "good_drop_result_distances_in_order",
     "imprint_extends_edge_to_proto_vertex",
-    "imprint_reuses_coincident_face_edge",
     "join_touching_loops",
     "keep_operand_uv_trims",
     "linear_sweep_arc_is_cylinder",
