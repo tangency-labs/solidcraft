@@ -37,7 +37,6 @@
 use super::{curve_of, dangling, ignore_soft, EdgeDefId, ProtoBrep, ProtoTopologyManager};
 use super::{ProtoVertexId, Result};
 use crate::curve::curve::p2::{Curve, CurveKind};
-use crate::error::SolidError;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::{SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
 use crate::geom::global_solver::SolverOperation;
@@ -56,9 +55,6 @@ const MAX_EXTENSION_FRACTION: f64 = 0.05;
 
 /// `ANALYTIC_TOL_SCALE` (`SmConfig.h`).
 const ANALYTIC_TOL_SCALE: f64 = 100.0;
-
-/// The operation path of the end continuation's refusal.
-const OP_EXTEND: &str = "topology::proto_topology::p2::imprint_ends::extend_end_to_proto_vertex";
 
 impl<O: ClassObject> ProtoTopologyManager<O> {
     /// The block at the top of the fork's `SmEdgeDefinition::Imprint`: for each end of the
@@ -157,8 +153,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// that absorbed definitions is their certified distance from it (`resolve_proto_vertex`):
     /// the end is then a point the vertex stands for. Each curve is clamped, so its end is
     /// its end control point, and moving that point by `Δ` moves every point of the curve by
-    /// at most `|Δ|` (the basis functions are a partition of unity, at most 1): the 3d curve
-    /// stays within the gap of where it was, PROVEN. A continuation past the end instead
+    /// at most `|Δ|` (the basis functions, rational ones with positive weights included, are
+    /// a partition of unity, each at most 1): the 3d curve stays within the gap of where it
+    /// was, ARGUED (not asserted in code). A continuation past the end instead
     /// (`extend_end_to_proto_vertex`) follows the end span's polynomial, which near a pole
     /// runs out of the face's UV domain. Returns whether the curves were replaced.
     #[allow(clippy::too_many_arguments)]
@@ -199,6 +196,19 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 continue;
             };
             let uv_curve = curve_of(&*brep, Some(h))?;
+            // The UV curve's end control point is its point at `end_param` only where its
+            // natural interval ends there too.
+            let uv_natural = uv_curve.natural_interval();
+            if !are_same(
+                end_param,
+                if at_end {
+                    uv_natural.max()
+                } else {
+                    uv_natural.min()
+                },
+            ) {
+                return Ok(false);
+            }
             let face = d
                 .src_topo(which)
                 .filter(|_| d.src_topo_type(which) == PointClassType::Face)
@@ -506,7 +516,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             // Not upstream (#16637): a continued UV curve whose end leaves its surface's
             // domain across a side the surface collapses on (a pole) is no trim of the face:
             // the end span's polynomial runs past the pole, where no parameter of the face
-            // continues it. Refused, never installed. A continuation past any other side
+            // continues it. Not installed: the end is left as it was, as for every other
+            // continuation this function declines. A continuation past any other side
             // (across a periodic seam, or a hair past an open side) is left to the checks
             // that follow, as before.
             let Some(dom) = ignore_soft(surface.natural_uv_domain_with_nurb(k))? else {
@@ -522,10 +533,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 (SS_VMAX, p.y > dom.max().y + uv_zero),
             ];
             if past.iter().any(|&(bit, out)| out && sides & bit != 0) {
-                return Err(SolidError::topology_failed(
-                    OP_EXTEND,
-                    "the continued UV curve runs past a pole of its face's surface",
-                ));
+                return Ok(false);
             }
         }
 

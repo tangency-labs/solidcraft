@@ -1188,15 +1188,28 @@ fn a_ball_with_its_poles_within_tolerance_of_a_rolls_face_is_cut() {
 /// solid. The merged vertex is now the pole, its tolerance the certified distance to the
 /// crossing it absorbed, and that curve's end is moved onto the pole inside the domain. Each
 /// frame is one valid solid of V = 3920π less the ball between radii 48 and 50 at that
-/// distance ([`ball_inside`]).
+/// distance ([`ball_inside`]), with the face, edge and vertex counts of the same frame with
+/// the seam turned 0.1 (the crossing within the summed tolerances of the pole, one vertex
+/// there before and after #16637): no vertex or sliver edge is left at the crossing.
 #[test]
 fn a_ball_with_its_poles_within_tolerance_and_its_seam_turned_off_the_line_is_cut() {
     all_fixes();
     let d = 50.0 - 1e-6;
     let want = 3920.0 * PI - (ball_inside(|_| 50.0, d) - ball_inside(|_| 48.0, d));
+    let counts = |frame, turn: f64| {
+        boolean(
+            half_roll(frame),
+            ball([0.0, d, 20.0], turn),
+            BooleanOp::Subtract,
+        )
+        .ok()
+        .flatten()
+        .and_then(|r| r.counts().ok())
+    };
     let mut failed = Vec::new();
-    for turn in [0.01, 0.02, 0.03] {
-        for frame in [2, 5, 8, 14] {
+    for frame in [2, 5, 8, 14] {
+        let control = counts(frame, 0.1);
+        for turn in [0.01, 0.02, 0.03] {
             let what = format!("turned {turn}, frame {frame}");
             failed.extend(cut_is_valid_solid(
                 half_roll(frame),
@@ -1204,6 +1217,10 @@ fn a_ball_with_its_poles_within_tolerance_and_its_seam_turned_off_the_line_is_cu
                 want,
                 &what,
             ));
+            let got = counts(frame, turn);
+            if got.is_none() || got != control {
+                failed.push(format!("{what}: counts {got:?}, turned 0.1 {control:?}"));
+            }
         }
     }
     assert!(failed.is_empty(), "{failed:#?}");
