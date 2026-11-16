@@ -567,10 +567,17 @@ fn an_assembly_with_a_joint_and_a_motion_link_replays() {
     assert!(steps.contains(&"occurrence.ground"));
     assert!(steps.contains(&"joint.create"));
     assert!(steps.contains(&"joint.motion_link"));
-    // Numeric values are recaptured by creating the joint where the parts
-    // are; limits travel as their own steps in degrees.
+    // Values travel explicitly in degrees (a joint's values are anchored at
+    // its snap mate, so re-creating it where the parts are keeps them);
+    // limits travel as their own steps in degrees.
     let pivot = script["commands"].as_array().unwrap().iter().find(|c| c["command"] == "joint.create" && c["params"]["name"] == "Pivot").unwrap();
-    assert!(pivot["params"].get("values").is_none(), "values must be recaptured, not re-applied");
+    let values = pivot["params"]["values"].as_array().unwrap();
+    assert_eq!(values.len(), 1, "{pivot}");
+    assert!((values[0].as_f64().unwrap() - 30.0).abs() < 1e-9, "values travel explicitly in degrees: {pivot}");
+    // The rest angle and the offset travel too, zero included: a value left
+    // out would be re-inferred at creation from wherever the parts sit.
+    assert_eq!(pivot["params"]["angle"], json!(0.0), "{pivot}");
+    assert_eq!(pivot["params"]["offset"], json!(0.0), "{pivot}");
     let limits = script["commands"].as_array().unwrap().iter().find(|c| c["command"] == "joint.limits" && c["params"]["joint"] == "Pivot").unwrap();
     assert!((limits["params"]["min"].as_f64().unwrap() + 10.0).abs() < 1e-9);
     assert!((limits["params"]["max"].as_f64().unwrap() - 45.0).abs() < 1e-9);
@@ -605,4 +612,87 @@ fn occurrence_copies_replay() {
     let mut t = replay(&script);
     same(&mut s, &mut t);
     assert_eq!(s.doc.occurrences.len(), 2);
+}
+
+/// A revolute joint whose value and offset follow parameters, a rigid joint
+/// and a suppressed joint: the script replays into the same design,
+/// expressions verbatim, and the replayed expressions still drive the
+/// assembly as the parameters change.
+#[test]
+fn expressions_a_rigid_joint_and_a_suppressed_joint_replay() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "turn", "expression": "30 deg"}));
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "2 mm"}));
+    run(&mut s, "component.create", json!({"name": "Base", "grounded": true, "activate": false}));
+    run(&mut s, "component.create", json!({"name": "Arm", "activate": false}));
+    run(&mut s, "component.create", json!({"name": "Block", "activate": false}));
+    run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence": "Arm:1", "space": "local",
+        "to_matrix": [1, 0, 0, 10, 0, 1, 0, 0, 0, 0, 1, 0]}),
+    );
+    run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence": "Block:1", "space": "local",
+        "to_matrix": [1, 0, 0, 0, 0, 1, 0, 20, 0, 0, 1, 0]}),
+    );
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "revolute", "name": "Pivot",
+        "a": {"occurrence": "Base:1", "frame": {"origin": [10, 0, 0], "z": [0, 0, 1], "x": [1, 0, 0]}},
+        "b": {"occurrence": "Arm:1", "frame": {"origin": [10, 0, 0], "z": [0, 0, 1], "x": [1, 0, 0]}},
+        "values": ["turn"], "offset": "gap", "limits": [[-10, 45]]}),
+    );
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "name": "Weld",
+        "a": {"occurrence": "Base:1", "frame": {"origin": [0, 20, 0], "z": [0, 0, 1]}},
+        "b": {"occurrence": "Block:1", "frame": {"origin": [0, 0, 0], "z": [0, 0, 1]}}}),
+    );
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "slider", "name": "Slide",
+        "a": {"occurrence": "Base:1", "frame": {"origin": [0, 0, 0], "z": [1, 0, 0]}},
+        "b": {"occurrence": "Arm:1", "frame": {"origin": [0, 0, 0], "z": [1, 0, 0]}}}),
+    );
+    run(&mut s, "joint.edit", json!({"joint": "Slide", "suppressed": true}));
+
+    let script = script(&mut s);
+    let pivot = script["commands"].as_array().unwrap().iter().find(|c| c["command"] == "joint.create" && c["params"]["name"] == "Pivot").unwrap();
+    assert_eq!(pivot["params"]["values"], json!(["turn"]), "{pivot}");
+    assert_eq!(pivot["params"]["offset"], json!("gap"), "{pivot}");
+    let mut t = replay(&script);
+    same(&mut s, &mut t);
+    // The replayed expressions still drive the assembly.
+    for (name, value) in [("turn", "45 deg"), ("gap", "3 mm")] {
+        run(&mut s, "parameters.change", json!({"name": name, "expression": value}));
+        run(&mut t, "parameters.change", json!({"name": name, "expression": value}));
+    }
+    same(&mut s, &mut t);
+}
+
+/// A joint made as an assembly constraint carries the rule it was made as,
+/// and no script step restores that tag: the export refuses it with its own
+/// message rather than replaying it as a plain joint.
+#[test]
+fn a_joint_made_as_an_assembly_constraint_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Base", "activate": true}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Stand"}));
+    run(&mut s, "component.create", json!({"name": "Lid", "parent": "root", "activate": true}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "body_name": "Top"}));
+    run(
+        &mut s,
+        "assembly.constraint.create",
+        json!({"type": "mate", "name": "Seat",
+        "a": {"occurrence": "Base:1", "face": [5, 5, 10]},
+        "b": {"occurrence": "Lid:1", "face": [25, 5, 0]}}),
+    );
+    let e = s.execute("timeline.export_script", &json!({})).unwrap_err().to_string();
+    assert!(e.contains("assembly constraint"), "{e}");
 }
