@@ -2100,8 +2100,16 @@ fn replaced(before: &ModelState, after: &ModelState) -> Vec<(String, Body, bool)
 
 /// The feature's error when the check of body `name`, which it keeps, refused it (`e`): naming
 /// the bodies among `inputs` that went into it (its own former self, by name, and the bodies the
-/// feature used up) and already failed SMLib's check before the feature ran, since the result's
-/// check reports their defects too. Checked only here, once the result is refused.
+/// feature used up) whose SMLib form, as the feature took them, fails SMLib's check
+/// ([`kernel::failing_check`]), since the result's check reports their defects too. Checked only
+/// here, once the result is refused.
+///
+/// That is a check of each input as it is now, not a replay of the check that kept it at the end
+/// of its own feature, which ran on that step's own result ([`kernel::check_kept`]; for a
+/// boolean, as the separate solids a non-manifold result exports to). The body decoded from a
+/// result is a different SMLib form, which can fail where the result passed, so the message says
+/// what was checked: the body as it was before this feature, not that its own feature let a
+/// failure through.
 fn kept_refused(name: &str, e: &kernel::KernelError, inputs: &[(String, Body, bool)]) -> kernel::KernelError {
     let failing: Vec<&str> = inputs
         .iter()
@@ -2111,10 +2119,10 @@ fn kept_refused(name: &str, e: &kernel::KernelError, inputs: &[(String, Body, bo
         .collect();
     let before = match failing.as_slice() {
         [] => String::new(),
-        [only] if *only == name => " (it already failed SMLib's check before this feature)".to_string(),
-        [only] => format!(" (body `{only}` already failed SMLib's check before this feature)"),
+        [only] if *only == name => " (SMLib's check fails it as it was before this feature)".to_string(),
+        [only] => format!(" (SMLib's check fails body `{only}` as it was before this feature)"),
         many => format!(
-            " (bodies {} already failed SMLib's check before this feature)",
+            " (SMLib's check fails bodies {} as they were before this feature)",
             many.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ")
         ),
     };
@@ -12555,12 +12563,12 @@ mod kept_refused_tests {
         let msg = |name: &str, inputs: &[(String, Body, bool)]| kept_refused(name, &e, inputs).to_string();
         // Both moved by one feature: the box's result is not blamed on the block.
         let both = [("Bloco".to_string(), bad.clone(), false), ("Box1".to_string(), good.clone(), false)];
-        assert!(!msg("Box1", &both).contains("already failed"), "{}", msg("Box1", &both));
-        assert!(msg("Bloco", &both).contains("body `Bloco` (it already failed SMLib's check before this feature)"), "{}", msg("Bloco", &both));
+        assert!(!msg("Box1", &both).contains("before this feature"), "{}", msg("Box1", &both));
+        assert!(msg("Bloco", &both).contains("body `Bloco` (SMLib's check fails it as it was before this feature)"), "{}", msg("Bloco", &both));
         // The block used up by a join into the box: named.
         let joined = [("Bloco".to_string(), bad, true), ("Box1".to_string(), good, false)];
         assert!(
-            msg("Box1", &joined).contains("body `Box1` (body `Bloco` already failed SMLib's check before this feature)"),
+            msg("Box1", &joined).contains("body `Box1` (SMLib's check fails body `Bloco` as it was before this feature)"),
             "{}",
             msg("Box1", &joined)
         );

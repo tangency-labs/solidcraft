@@ -8,6 +8,9 @@ pub(super) struct Job {
     /// Where the body goes (its instance's placement in the assembly).
     pub placement: M4,
     pub check_mesh: bool,
+    /// Check the body placed, in SMLib ([`PlacedCheck`]): the first instance of its part under
+    /// its placement's class ([`super::check_class`]).
+    pub check: bool,
 }
 
 /// What a job places: a solid item to read from the file (and orient), or a part an earlier
@@ -29,11 +32,6 @@ pub(super) struct Part {
     /// No B-rep could be made of the whole solid, and this is why: the body is a surface body of
     /// the faces that read ([`surface_part`]).
     pub refused: Option<String>,
-    /// SMLib's check of the body as the file defines it fails or cannot run, and this says so
-    /// (`SMLib's check fails it: <summary>`, [`crate::validation::failing_check`]): operations
-    /// that check their results refuse them until the body is repaired. Checked once, when the
-    /// part is read; not for a part made of surfaces.
-    pub check: Option<String>,
 }
 
 /// A prepared instance.
@@ -45,6 +43,22 @@ pub(super) struct Made {
     pub part: Arc<Part>,
     /// This job read the item: what the read repaired and the faces it left out.
     pub read: Option<Vec<Note>>,
+    /// SMLib's check of the body placed, when the job asked for it.
+    pub check: Option<PlacedCheck>,
+}
+
+/// SMLib's check of a placed body, as an operation on it takes it
+/// ([`crate::validation::failing_check`]): operations that check their results refuse them
+/// while it fails or cannot run.
+pub(super) enum PlacedCheck {
+    /// Not run: the part is made of surfaces (no B-rep could be made of the whole solid).
+    Skipped,
+    /// It passes (or SMLib refuses the body outright, which [`Body::smlib_refusal`] says).
+    Passes,
+    Fails(crate::CheckFailure),
+    CouldNotRun(String),
+    /// The token over the import's work stopped it: the import is stopped.
+    Stopped,
 }
 
 /// What reading an item noted.
@@ -61,7 +75,7 @@ pub(super) struct Failure {
     pub msg: String,
 }
 
-type Prepared = std::result::Result<Made, Failure>;
+pub(super) type Prepared = std::result::Result<Made, Failure>;
 
 pub(super) fn workers() -> usize {
     #[cfg(not(target_arch = "wasm32"))]
@@ -79,15 +93,7 @@ pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
     let (part, read) = match &job.source {
         Source::Oriented(part) => (part.clone(), None),
         Source::Item { item, units } => {
-            let (mut part, read) = smlib_part(ex, *item, *units).or_else(|refused| surface_part(ex, *item, *units, refused))?;
-            if part.refused.is_none() {
-                // A check that cannot run refuses an operation's result too (check_kept), so it
-                // is reported the same way.
-                part.check = match solidcraft_profile::scope("import", "step.check", || crate::validation::failing_check(&part.body)) {
-                    Ok(check) => check.map(|summary| format!("SMLib's check fails it: {summary}")),
-                    Err(e) => Some(format!("SMLib's check could not run: {e}")),
-                };
-            }
+            let (part, read) = smlib_part(ex, *item, *units).or_else(|refused| surface_part(ex, *item, *units, refused))?;
             (Arc::new(part), Some(read))
         }
     };
@@ -95,7 +101,21 @@ pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
         .map_err(|e| Failure { read: false, msg: e.to_string() })?;
     // Counted on the part (a placement meshes the same faces).
     let missing = if job.check_mesh { solidcraft_profile::scope("import", "step.mesh_check", || part.body.unmeshed_faces()) } else { 0 };
-    Ok(Made { body, missing, part, read })
+    // The body as placed, which is what operations take: a placement that scales, shears or
+    // mirrors the part maps its geometry without its tolerances, so its check can differ from
+    // the part's. A check that cannot run refuses an operation's result too (check_kept).
+    let check = job.check.then(|| {
+        if part.refused.is_some() {
+            return PlacedCheck::Skipped;
+        }
+        match solidcraft_profile::scope("import", "step.check", || crate::validation::failing_check(&body)) {
+            Ok(None) => PlacedCheck::Passes,
+            Ok(Some(failure)) => PlacedCheck::Fails(failure),
+            Err(_) if solidcraft_smlib::stop::current().is_some_and(|s| s.is_stopped()) => PlacedCheck::Stopped,
+            Err(e) => PlacedCheck::CouldNotRun(e.to_string()),
+        }
+    });
+    Ok(Made { body, missing, part, read, check })
 }
 
 /// The part's body where its instance goes: the very same body at the identity (it keeps the
@@ -162,7 +182,7 @@ fn solid_part(solid: &solidcore_step::topology::Solid) -> std::result::Result<Pa
         smlib_body(r).map_err(|f| Failure { msg: name_record_face(&f.msg, &solid.face_origin), ..f })?
     };
     let face_origin = of_record.iter().map(|f| solid.face_origin.get(*f).copied()).collect::<Option<Vec<u64>>>().ok_or_else(renumbered)?;
-    Ok(Part { body, closed: !solid.sheet, file_faces: solid.face_origin.len(), face_origin, refused: None, check: None })
+    Ok(Part { body, closed: !solid.sheet, file_faces: solid.face_origin.len(), face_origin, refused: None })
 }
 
 fn renumbered() -> Failure {
@@ -382,7 +402,7 @@ fn stitched_part(pieces: &[(u64, Body)], file_faces: usize, refused: &str) -> cr
     }
     // One face read alone is the sheet: nothing to stitch it to.
     if let [(face, body)] = pieces {
-        return Ok(Part { body: body.clone(), closed: false, file_faces, face_origin: vec![*face], refused: Some(refused.to_string()), check: None });
+        return Ok(Part { body: body.clone(), closed: false, file_faces, face_origin: vec![*face], refused: Some(refused.to_string()) });
     }
     let tol = 10.0 * pieces.iter().map(|(_, b)| b.record().tolerance).fold(0.0, f64::max);
     let bodies: Vec<&Body> = pieces.iter().map(|(_, b)| b).collect();
@@ -400,7 +420,7 @@ fn stitched_part(pieces: &[(u64, Body)], file_faces: usize, refused: &str) -> cr
         .filter(|o| o.len() == body.face_count())
         .ok_or_else(|| KernelError::Failed("a stitched face from no one face".into()))?;
     let closed = !body.is_surface();
-    Ok(Part { body, closed, file_faces, face_origin, refused: Some(refused.to_string()), check: None })
+    Ok(Part { body, closed, file_faces, face_origin, refused: Some(refused.to_string()) })
 }
 
 /// Prepare `jobs`, the results in the jobs' order. Solids still to read and orient (the slow

@@ -1798,12 +1798,12 @@ mod tests {
             "{warnings:?}"
         );
         // A box joined to it at its far corner: the default each_feature check refuses the result,
-        // and the message says the part failed the check before the join.
+        // and the message says the check fails the part as it was before the join.
         let err = s
             .execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [18, 28, 8], "operation": "join", "targets": ["Bloco"]}))
             .unwrap_err()
             .to_string();
-        assert!(err.contains("body `Bloco` (it already failed SMLib's check before this feature): "), "{err}");
+        assert!(err.contains("body `Bloco` (SMLib's check fails it as it was before this feature): "), "{err}");
         assert!(err.contains("SMLib's check refuses the result"), "{err}");
         // Repair: refused with the check's failures, nothing added.
         let n = s.doc.features.len();

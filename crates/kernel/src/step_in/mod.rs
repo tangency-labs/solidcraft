@@ -263,6 +263,27 @@ fn translation(t: [f64; 3]) -> M4 {
 }
 
 /// The matrix of an AXIS2_PLACEMENT: its frame's axes and origin.
+/// The class of placements under which a part is sent into SMLib, and checked there, once
+/// (`Reader::modelling_checked`): every rigid motion is one class (`None`), any other placement
+/// (a transformation operator's scale, shear or mirror) its own, by the matrix's exact bits.
+///
+/// A rigid placement is applied by [`solidcraft_geom::brep::placement::moved`], which moves
+/// every point and direction of the part by the same rotation and translation and keeps every
+/// tolerance; SMLib's check compares distances, lengths and orientations with those tolerances,
+/// which the motion keeps but for the rounding of the coordinates it moves. Any other placement
+/// is mapped without its tolerances, so the check can differ: such a placement is checked as it
+/// is.
+fn check_class(m: &M4) -> Option<[u64; 16]> {
+    if solidcraft_geom::brep::placement::Rigid::of_matrix(m).is_some() {
+        return None;
+    }
+    let mut bits = [0u64; 16];
+    for (b, x) in bits.iter_mut().zip(m.iter().flatten()) {
+        *b = x.to_bits();
+    }
+    Some(bits)
+}
+
 fn frame_matrix(p: &solidcore_step::geom::Placement) -> M4 {
     let (x, y, z, o) = (p.ref_direction, p.y(), p.axis, p.origin);
     [[x[0], x[1], x[2], 0.0], [y[0], y[1], y[2], 0.0], [z[0], z[1], z[2], 0.0], [o[0], o[1], o[2], 1.0]]
@@ -316,8 +337,9 @@ struct Reader {
     visits: usize,
     /// Items whose meshing was checked.
     unmeshed_checked: HashSet<u64>,
-    /// Items sent into SMLib as an operation would send them, to say which need repair.
-    modelling_checked: HashSet<u64>,
+    /// Items sent into SMLib as an operation would send them, to say which need repair: each
+    /// once per class of the placements of its instances ([`check_class`]).
+    modelling_checked: HashSet<(u64, Option<[u64; 16]>)>,
     bodies: Vec<ImportedBody>,
     /// Solids the walk found, in file order, to be converted into bodies afterwards (so the
     /// conversion, the long part, can be done a piece at a time: [`StepReading`]).
@@ -891,7 +913,8 @@ impl Reader {
                 }
             };
             sources.push((i, item, placement, Some(jobs.len())));
-            jobs.push(parallel::Job { source, placement, check_mesh: !self.unmeshed_checked.contains(&item) });
+            let check = self.modelling_checked.insert((item, check_class(&placement)));
+            jobs.push(parallel::Job { source, placement, check_mesh: !self.unmeshed_checked.contains(&item), check });
         }
         // Reading and orienting new parts is shared out between the workers.
         let mut prepared: Vec<Option<_>> = parallel::bodies(&ex, &jobs, self.workers).into_iter().map(Some).collect();
@@ -917,14 +940,15 @@ impl Reader {
                             None => continue,
                         },
                     };
-                    parallel::prepare(&ex, &parallel::Job { source, placement, check_mesh: !self.unmeshed_checked.contains(&item) })
+                    let check = self.modelling_checked.insert((item, check_class(&placement)));
+                    parallel::prepare(&ex, &parallel::Job { source, placement, check_mesh: !self.unmeshed_checked.contains(&item), check })
                 }
             };
             let Some(e) = ex.get(item) else { continue };
             let Some(batch) = self.plan.get(i).and_then(|p| self.batches.get(p.batch)) else { continue };
             let (m, path, product, instance) = (batch.m, batch.path.clone(), batch.product.clone(), batch.instance.clone());
             match made {
-                Ok(parallel::Made { body, missing, part, read }) => {
+                Ok(parallel::Made { body, missing, part, read, check }) => {
                     // What the read of the item found, reported once.
                     if let Some(failed) = read {
                         let label = self.label(item);
@@ -998,20 +1022,37 @@ impl Reader {
                         }
                         None => body,
                     };
-                    // A part SMLib refuses cannot be modelled on: found now (its first instance,
-                    // sent as an operation would send it), not at the first operation.
-                    // A part SMLib takes but whose check fails (or cannot run) is found now too:
+                    // A part SMLib refuses cannot be modelled on: found now, not at the first
+                    // operation. So is a part SMLib takes but whose check fails (or cannot run):
                     // every operation that checks its result (booleans, sweeps, blends) refuses it
-                    // until then. The check is of the part as the file defines it, before its
-                    // placement, once per part: a placement moves it rigidly.
-                    if self.modelling_checked.insert(item) {
+                    // until then. Both are of the body placed, as an operation sends it, at the
+                    // first instance of each class of its placements ([`check_class`]: one for
+                    // every rigid motion, one for each other placement, whose mapping can change
+                    // the check's verdict).
+                    if let Some(check) = check {
+                        let what = if check_class(&m).is_some() {
+                            format!("solid '{name}' as its placement scales, shears or mirrors it")
+                        } else {
+                            format!("solid '{name}'")
+                        };
                         if let Some(refused) = body.smlib_refusal() {
                             let at = refused.face.map(|f| format!(" (face {})", f + 1)).unwrap_or_default();
-                            let msg = format!("solid '{name}': needs repair before it can be modelled: {}{at}", refused.why);
+                            let msg = format!("{what}: needs repair before it can be modelled: {}{at}", refused.why);
                             self.note(IssueKind::NeedsRepair, Some(item), usize::from(refused.face.is_some()), msg);
-                        } else if let Some(check) = &part.check {
-                            let msg = format!("solid '{name}': needs repair before it can be modelled: {check}");
-                            self.note(IssueKind::NeedsRepair, Some(item), 0, msg);
+                        } else {
+                            let why = match check {
+                                parallel::PlacedCheck::Skipped | parallel::PlacedCheck::Passes => None,
+                                parallel::PlacedCheck::Fails(failure) => Some(format!("SMLib's check fails it: {failure}")),
+                                parallel::PlacedCheck::CouldNotRun(e) => Some(format!("SMLib's check could not run: {e}")),
+                                // Stopped by the import's token: the import stops, as when its watch cancels it.
+                                parallel::PlacedCheck::Stopped => {
+                                    self.cancelled = true;
+                                    None
+                                }
+                            };
+                            if let Some(why) = why {
+                                self.note(IssueKind::NeedsRepair, Some(item), 0, format!("{what}: needs repair before it can be modelled: {why}"));
+                            }
                         }
                     }
                     self.bodies.push(ImportedBody {

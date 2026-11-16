@@ -219,7 +219,7 @@ pub use polyhedron::{HalfSpace, convex_polyhedron, draft, offset_faces, shell};
 pub use prism::{PLANAR_FIT_TOL, extrude_planar_regions, planar_regions_boolean};
 pub use prism_curve::{PlanarPiece, PlanarSpline};
 pub use prism_measure::{PrismSection, certified_prism_equivalent, certified_prism_section};
-pub use repair::{Hole, RebuiltFace, RefusedFace, RepairOptions, RepairReport, SewnGap, repair};
+pub use repair::{Hole, RebuiltFace, RefusedFace, RepairOptions, RepairRefusal, RepairReport, SewnGap, repair};
 pub use sew::{EdgeSpec, FaceSpec, SurfSpec, sew, sew_touching};
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::stop::Stop;
@@ -247,7 +247,7 @@ pub use sweep_path::{RailFit, SweepControl, SweepOrientation, sweep_path, sweep_
 pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at, material_in_ring};
 pub use topo::{TopoCounts, merged_topology, seam_flags, whole_edge};
 pub use tspline::tspline_sheet;
-pub use validation::{KeptCheck, Validation, check_kept, check_summary, detach_kept, failing_check, validating};
+pub use validation::{CheckFailure, FailedTest, KeptCheck, Validation, check_kept, detach_kept, failing_check, validating};
 pub use validity::{SmlibCheck, Validity, smlib_dump_dir, validity};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -266,6 +266,10 @@ pub enum KernelError {
     /// A lip's band that leaves no sound face beside it.
     #[error("the operation failed: raising a band: {0}")]
     Lip(#[from] LipRefusal),
+    /// A repair that has nothing it can do: the part needs none, or SMLib's check fails it for
+    /// what the repair does not fix.
+    #[error("the operation failed: {0}")]
+    Repair(#[from] RepairRefusal),
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;
