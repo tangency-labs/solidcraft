@@ -2753,6 +2753,23 @@ fn mirror_placements_digest(doc: &Document, f: &Feature, plane: &PlaneRef, place
     h.finish()
 }
 
+/// What a body pattern's picked placements read: each placement's frame and the component its
+/// copies join, both in the feature's component, and each body's offset.
+fn pattern_placements_digest(doc: &Document, f: &Feature, placements: &[Vec<u64>], bodies: &[crate::BodyName]) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for placed in placements.iter().map(|path| mirror_copy_frame(doc, f.component, path)) {
+        placed.is_some().hash(&mut h);
+        if let Some((component, frame, picked)) = placed {
+            component.hash(&mut h);
+            frame.iter().chain(&picked).flatten().for_each(|x| x.to_bits().hash(&mut h));
+        }
+    }
+    for b in bodies {
+        serde_json::to_string(&doc.body_offsets.get(&b.0)).unwrap_or_default().hash(&mut h);
+    }
+    h.finish()
+}
+
 /// Whether only the bodies `f` makes follow where parts are placed: a mirror of placed bodies
 /// into new bodies. A feature after it reads its copies only by naming them, so a pose change
 /// need not evaluate features that don't (#12139).
@@ -3010,7 +3027,11 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         // A pattern of bodies copies them along its directions or about its axis in its own
         // component's frame, so it follows where each body it copies is placed relative to that
         // frame: copies of a root block, patterned in a component, move with the component.
-        FeatureKind::Pattern { bodies, .. } if !bodies.is_empty() => {
+        FeatureKind::Pattern { bodies, placements, .. } if !bodies.is_empty() => {
+            // Bodies picked where a placement shows them follow those placements, as a mirror's.
+            if !placements.is_empty() {
+                pattern_placements_digest(doc, f, placements, bodies).hash(&mut h);
+            }
             for b in bodies {
                 reads.placed_body(st, &b.0);
             }
@@ -8668,6 +8689,68 @@ fn mirror_matrix(pl: &Plane) -> Mat {
 
 const MAX_INSTANCES: usize = 1000;
 
+/// The copies of body `n` (source `s` of `count`) a body pattern makes, one per matrix of
+/// `mats` past the first. Picked where a placement (`path`) shows it, the body is copied where
+/// that placement shows it, and its copies go into the component that placement shows, as a
+/// mirror's do. A body of another component, picked by its own name, is copied as the pattern
+/// moves it in the world and kept beside its source, in its component (#4763).
+#[allow(clippy::too_many_arguments)]
+fn pattern_body(doc: &Document, f: &Feature, st: &mut ModelState, mats: &[Mat], count: usize, s: usize, n: &str, path: Option<&[u64]>) -> Result<()> {
+    let mb = st.body(n).cloned().ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
+    let here = doc.component_transform(f.component);
+    let singular = || DocError::Invalid(format!("the component holding `{n}` has a singular placement"));
+    // How a pattern matrix (in this feature's component) moves the body's own geometry, and
+    // the component its copies go into when it is not this feature's.
+    let (component, frames) = match mirrored_placement(doc, f.component, &mb, path)? {
+        Some((component, frame, source)) => {
+            let inverse = |m: &Mat| crate::mat_inverse(m).ok_or_else(singular);
+            (Some(component), Some((inverse(&frame)?, source)))
+        }
+        None if mb.component != f.component => {
+            let frame = doc.component_transform(mb.component);
+            let inverse = |m: &Mat| crate::mat_inverse(m).ok_or_else(singular);
+            (Some(mb.component), Some((crate::mat_mul(&inverse(&frame)?, &here), crate::mat_mul(&inverse(&here)?, &frame))))
+        }
+        None => (None, None),
+    };
+    // Named against an index of the names in use: searching every body for every name tried
+    // took time cubic in the copies.
+    let mut names = BodyNames::new(st);
+    let mut made = Vec::with_capacity(mats.len());
+    for (k, m) in mats.iter().enumerate() {
+        let local = match &frames {
+            Some((into, from)) => crate::mat_mul(into, &crate::mat_mul(m, from)),
+            None => *m,
+        };
+        let copy = moved_copy(&mb, kernel::transform_matrix(&mb.body, local)?, k + 1);
+        let slot = pattern_name_slot(f.body_names.len(), count, mats.len(), s, k, f.pattern_names_in_order);
+        let name = pattern_copy_name(&mut names, f, slot, &mb.name);
+        made.push((name, copy, local));
+    }
+    // Only once every copy of this body is made: a body that fails leaves none behind.
+    for (name, copy, local) in made {
+        copy_sheet(st, &mb.name, &name, &local);
+        let mut body = ModelBody::traced_new(name, copy, f.id);
+        // A copy is its source moved: it is drawn from the source's triangles and display plans,
+        // moved, rather than meshed and planned again for every copy.
+        body.mesh_placement = placed_mesh::PlacedMesh::new(&mb, &local).map(Arc::new);
+        if let Some(c) = component.filter(|c| *c != f.component) {
+            // Kept in that component as a moved body is (and through later features).
+            body.component = c;
+            body.transferred = true;
+        }
+        st.bodies.push(body);
+    }
+    Ok(())
+}
+
+/// The warning of a body pattern that left out the bodies `skipped`, the first for `why`.
+fn pattern_skipped_note(skipped: &[String], why: &DocError) -> String {
+    let shown: Vec<&str> = skipped.iter().take(3).map(String::as_str).collect();
+    let more = if skipped.len() > 3 { format!(" (+{} more)", skipped.len() - 3) } else { String::new() };
+    format!("{} of the bodies could not be copied and were left out: {}{more} ({why})", skipped.len(), shown.join(", "))
+}
+
 /// Where a mirrored body was picked and where its copy goes, for a mirror in component `own`: the
 /// component the copy joins and that component's frame, and the frame the body's own geometry is
 /// in where it was picked (its placement `path`, with its offset), both in `own`'s frame. `None` in
@@ -9106,7 +9189,7 @@ fn source_label(doc: &Document, id: FeatureId) -> String {
 /// or mirror of bodies (its copies are bodies, which a pattern or mirror of features can't take).
 fn copied_features(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, src: &Feature) -> Result<Option<(Vec<FeatureId>, Vec<Mat>)>> {
     match &src.kind {
-        FeatureKind::Pattern { features, pattern, bodies } if bodies.is_empty() => {
+        FeatureKind::Pattern { features, pattern, bodies, .. } if bodies.is_empty() => {
             Ok(Some((features.clone(), pattern_transforms(doc, vals, st, src.component, pattern)?)))
         }
         FeatureKind::Mirror { features, plane, bodies, .. } if bodies.is_empty() => {
@@ -10985,52 +11068,31 @@ fn eval_feature_kind(
             }
             Ok(())
         }
-        FeatureKind::Pattern { features, pattern, bodies } => {
+        FeatureKind::Pattern { features, pattern, bodies, placements } => {
             let mats = pattern_transforms(doc, vals, st, f.component, pattern)?;
             if bodies.is_empty() {
                 return replay(doc, vals, f, st, features, &mats, warning);
             }
-            // Bodies: each copy is a new body named after its source.
-            let here = doc.component_transform(f.component);
+            // Bodies: each copy is a new body named after its source. A body that cannot be
+            // copied (gone, its placement gone, or its geometry refused by the move) is left out
+            // with a warning: the others are still copied, and only a pattern that copies none
+            // fails.
+            let mut skipped = Vec::new();
+            let mut first_error = None;
             for (s, n) in bodies.iter().enumerate() {
-                let mb = st.body(n).cloned().ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
-                // A body of another component is held in that component's frame, the pattern's
-                // transforms in this feature's: each copy is moved as the pattern moves it in the
-                // world and kept beside its source, in its component (#4763). Taken as they were,
-                // the copies landed where the source sits before its component is placed.
-                let owner = (mb.component != f.component).then(|| {
-                    let frame = doc.component_transform(mb.component);
-                    let singular = || DocError::Invalid(format!("the component holding `{n}` has a singular placement"));
-                    Ok::<_, DocError>((frame, crate::mat_inverse(&frame).ok_or_else(singular)?, crate::mat_inverse(&here).ok_or_else(singular)?))
-                });
-                let owner = owner.transpose()?;
-                // Named against an index of the names in use: searching every body for every
-                // name tried took time cubic in the copies.
-                let mut names = BodyNames::new(st);
-                for (k, m) in mats.iter().enumerate() {
-                    let local = match &owner {
-                        Some((frame, frame_inv, here_inv)) => {
-                            crate::mat_mul(&crate::mat_mul(frame_inv, &here), &crate::mat_mul(&crate::mat_mul(m, here_inv), frame))
-                        }
-                        None => *m,
-                    };
-                    let copy = moved_copy(&mb, kernel::transform_matrix(&mb.body, local)?, k + 1);
-                    let slot = pattern_name_slot(f.body_names.len(), bodies.len(), mats.len(), s, k, f.pattern_names_in_order);
-                    let name = pattern_copy_name(&mut names, f, slot, &mb.name);
-                    copy_sheet(st, &mb.name, &name, &local);
-                    let mut body = ModelBody::traced_new(name, copy, f.id);
-                    // A copy is its source moved: it is drawn from the source's triangles and
-                    // display plans, moved, rather than meshed and planned again for every copy.
-                    body.mesh_placement = placed_mesh::PlacedMesh::new(&mb, &local).map(Arc::new);
-                    if owner.is_some() {
-                        // Kept in that component as a moved body is (and through later features).
-                        body.component = mb.component;
-                        body.transferred = true;
-                    }
-                    st.bodies.push(body);
+                if let Err(e) = pattern_body(doc, f, st, &mats, bodies.len(), s, n, placements.get(s).map(Vec::as_slice)) {
+                    skipped.push(n.to_string());
+                    first_error.get_or_insert(e);
                 }
             }
-            Ok(())
+            match first_error {
+                Some(e) if skipped.len() == bodies.len() => Err(e),
+                Some(e) => {
+                    append_warning(warning, pattern_skipped_note(&skipped, &e));
+                    Ok(())
+                }
+                None => Ok(()),
+            }
         }
         FeatureKind::Mirror { features, plane, bodies, combine, placements } => {
             let pl = doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?;

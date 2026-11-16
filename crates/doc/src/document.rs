@@ -1011,6 +1011,12 @@ pub enum FeatureKind {
         /// Copy these bodies (as new bodies) instead of replaying features.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         bodies: Vec<BodyName>,
+        /// Where each of `bodies` is copied from: the occurrence path of the placement it was
+        /// picked at, as a mirror's `placements` (the same body may be picked at several). The
+        /// body is copied where that placement shows it, and its copies join the component that
+        /// placement shows. Empty in older designs, and for bodies picked by their own name.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        placements: Vec<Vec<u64>>,
     },
     /// Mirror copies of other features' results in a plane. The copied features are named by
     /// id (#1134).
