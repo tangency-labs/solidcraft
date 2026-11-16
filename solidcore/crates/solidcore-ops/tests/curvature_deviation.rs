@@ -14,7 +14,7 @@ use solidcore_ops::continuity::principal_curvatures;
 use solidcore_ops::curve::{curve_deviation, curve_surface_deviation};
 use solidcore_ops::surface::{reverse_sheet, ruled};
 use solidcore_ops::trim::{remove_faces, split_face_by_curves};
-use solidcore_ops::{make_cylinder, make_sphere, Body, Error};
+use solidcore_ops::{make_cylinder, make_sphere, Error};
 use solidcore_record::brep::Curve;
 
 fn line(a: [f64; 3], b: [f64; 3]) -> Curve {
@@ -66,12 +66,25 @@ fn a_cylinder_reads_its_inverse_radius_round_and_nothing_along() {
         .unwrap()
         .to_record()
         .unwrap();
+    let got = principal_curvatures(&can, &[[5.0, 0.0, 5.0]]).unwrap();
+    let p = got[0].unwrap();
+    assert!((p.k1 - 1.0 / 3.0).abs() < 1e-9, "{p:?}");
+    assert!(p.k2.abs() < 1e-9, "{p:?}");
+    assert!(p.gaussian.abs() < 1e-9, "{p:?}");
+    assert!((p.mean - 1.0 / 6.0).abs() < 1e-9, "{p:?}");
+}
+
+#[test]
+fn a_cylinder_reads_wall_curvature_near_its_cap_boundaries() {
+    let (can, _) = make_cylinder([0.0; 3], 3.0, 10.0)
+        .unwrap()
+        .to_record()
+        .unwrap();
     // Each probe is 2 from the wall. Near either end, the cap's infinite plane is closer,
     // but the circular cap itself is farther away than the wall.
     let points = [
         [5.0, 0.0, 0.5],
         [5.0, 0.0, 1.5],
-        [5.0, 0.0, 5.0],
         [5.0, 0.0, 8.5],
         [5.0, 0.0, 9.5],
     ];
@@ -114,7 +127,7 @@ fn a_trimmed_saddle_reads_curvature_at_its_nearest_boundary_point() {
         false,
     )
     .unwrap();
-    let (body, order) = Body::from_record(&saddle, true).unwrap();
+    let (body, order) = solidcore_ops::Body::from_record(&saddle, true).unwrap();
     let cut = [solidcore_ops::sweep::Curve::Line {
         start: [0.0, -1.0, 0.0],
         end: [0.0, 1.0, 0.0],
