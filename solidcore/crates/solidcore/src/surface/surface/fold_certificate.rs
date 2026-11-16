@@ -9,20 +9,29 @@
 //! |-----------------------|----------|
 //! | [`certify_no_fold`]   | none     |
 //! | [`FoldCertificate`]   | none     |
+//! | [`NotProvedReason`]   | none     |
 //!
 //! **What is proved.** A fold of the continuation is where its normal `N = Du x Dv`
 //! vanishes (the map stops being an immersion there), or where `N` reverses across the
 //! natural domain's side (the continuation turns back over the face at its edge, with
-//! `N` zero along that edge). The certificate excludes both:
-//! - every piece of the merge domain outside the closed natural domain has `N . d > E`
-//!   on all of it for one direction `d` (so `N` never vanishes there), `E` the bound of
-//!   the arithmetic below;
-//! - a piece that touches the natural domain, once split down to the last level, has
-//!   `N . d >= -E` on it instead (a zero of `N` on the natural domain's side, a
+//! `N` zero along that edge) or across a knot line where the net is only `C0` (`N`
+//! jumps there without vanishing). The certificate excludes these. Below, "the computed
+//! `N . d > E`" means every Bernstein coefficient of `N . d`, as computed, is above its
+//! arithmetic bound `E` (so the exact `N . d > 0` on the piece), and "the computed
+//! `N . d >= -E`" means none is below `-E` (so the exact `N . d >= -2 E`); a coefficient
+//! or bound that is not finite proves nothing:
+//! - every piece of the merge domain outside the closed natural domain has the computed
+//!   `N . d > E` for one direction `d` (so `N` never vanishes there);
+//! - a piece that touches the natural domain, once split down to the last level, has the
+//!   computed `N . d >= -E` on it instead (a zero of `N` on the natural domain's side, a
 //!   degenerate edge or corner of the surface's own domain, is allowed);
-//! - for every piece that touches the natural domain, `N . d >= -E` also holds on its
-//!   mirror across the sides it touches, inside the natural domain, with the same `d`:
-//!   `N` does not reverse across the side.
+//! - for every piece that touches the natural domain, the computed `N . d >= -E` also
+//!   holds on its mirror across the sides it touches, inside the natural domain, with
+//!   the same `d`: `N` does not reverse across the side;
+//! - for every piece with a side on a `C0` knot line (a knot of multiplicity at least
+//!   the degree) inside the merge domain, the computed `N . d >= -E` holds on the strip
+//!   of the same width across that line, with the same `d`: `N` does not reverse across
+//!   the knot line.
 //!
 //! The pieces start as the cells of the fold rule's `20 x 20` sample grid over the merge
 //! domain, cut at knot lines and at the natural domain's sides; `d` is the normal at a
@@ -31,8 +40,13 @@
 //! with its own `d`; past that the certificate refuses
 //! ([`FoldCertificate::NotProved`]), as it does for a surface kind with no certificate
 //! here. On the last split's pieces along the natural domain's sides (`1 / 16` of a
-//! cell wide) only `N . d >= -E` is shown: a zero of `N` there, or a reversal smaller
-//! than the arithmetic's bound `E`, is not excluded.
+//! cell wide) only the computed `N . d >= -E` is shown: a zero of `N` there (an
+//! even-order zero of `N . d` up to `1 / 16` of a cell off the face, for one), or a
+//! reversal within `2 E`, is not excluded.
+//!
+//! **What is not proved.** That the continuation does not come back over the face
+//! without folding (a revolution swept past a full turn, a sheet curling round onto
+//! itself): the certificate is local, it excludes folds, not overlaps at a distance.
 //!
 //! **How (B-spline nets).** The evaluated surface is its NURBS form, continued past its
 //! knot range by its end spans' polynomials (NLib's span search clamps to the end span).
@@ -58,7 +72,12 @@
 //! `gamma_K T` of the exact coefficient of the extracted net (Higham, *Accuracy and
 //! Stability of Numerical Algorithms*, 2nd ed., §3.1), and the extraction's error moves
 //! it by at most `Te - T` (the twin is a polynomial with nonnegative coefficients in the
-//! magnitudes). With the twins' own rounding, `E = (Te - T) + 3 gamma_(2K) Te`.
+//! magnitudes). With the twins' own rounding, `E = (Te - T) + 3 gamma_(2K) Te`. A twin
+//! that overflows gives a bound that is not finite, which proves nothing. Far past a
+//! short end span the restriction's magnitude weights `|1 - t|`, `|t|` grow the twins
+//! like `(2 |t| + 1)^degree`; a piece whose coefficients all have the right sign but not
+//! by more than `E` is refused for precision ([`NotProvedReason::Precision`]), not as a
+//! zero of the normal.
 //!
 //! **Other kinds.** A plane's STEP evaluation is affine, so its normal is constant:
 //! proved. Spheres, cones and tori: the normal is a scalar closed form times a unit
@@ -70,8 +89,15 @@
 //! (a revolution's B-spline generator; an ellipse, parabola or hyperbola, whose
 //! evaluation clamps to its own interval rather than continuing), is not proved.
 //!
-//! Deviations: none (no upstream counterpart). No recursion: pieces wait on a stack, at
-//! most [`MAX_PIECES`] of them per call.
+//! **Failures.** A construction the certificate cannot make (a Bezier extraction, a
+//! net or a Bernstein product refused as invalid input) refuses the continuation
+//! ([`NotProvedReason::Construction`]) rather than failing the caller: the certificate
+//! is the acceptance half of a rule whose other answer is "not covered". Cancellation,
+//! an unported call and the port's invariants still propagate.
+//!
+//! Deviations: none (no upstream counterpart). No recursion: pieces wait on a stack.
+//! [`MAX_PIECES`] bounds the normals computed per call (each piece's own, and those of
+//! its mirrors and its knot strips), and the cancel flag is polled before each.
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::Result;
@@ -115,8 +141,93 @@ pub enum FoldCertificate {
         /// Where.
         uv: Point2,
         /// Why.
-        reason: &'static str,
+        reason: NotProvedReason,
     },
+}
+
+/// Why [`certify_no_fold`] proved nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotProvedReason {
+    /// The merge domain is not a finite rectangle of positive width.
+    DomainNotFinite,
+    /// No certificate for the surface kind (of the kinds that reach the fold rule, a
+    /// procedural blend).
+    KindNotCertified,
+    /// A swept surface's generator is continued past its natural interval, and that
+    /// generator's continuation has no certificate (a conic, or a revolution's B-spline
+    /// generator).
+    GeneratorNotCertified,
+    /// A line generator's closed form is not finite.
+    GeneratorNotFinite,
+    /// A revolved line's normal turns back or vanishes along its continuation.
+    GeneratorTurnsOrVanishes,
+    /// The net is in power-basis form, has no NURBS form or is two-dimensional.
+    NetForm,
+    /// A control point is not finite or a weight not positive.
+    NetNotFinite,
+    /// The normal's degrees exceed the Bernstein products'.
+    Degrees,
+    /// The Bezier patches are empty or degenerate, or an end span is narrower than the
+    /// span search's cut-off (whose continuation the patches would not follow).
+    Patches,
+    /// A construction of the certificate was refused as invalid input.
+    Construction,
+    /// The work bound ([`MAX_PIECES`] normals) was reached.
+    WorkBound,
+    /// A rational net's weight is not proved positive on a piece.
+    WeightNotPositive,
+    /// A coefficient or its bound overflowed (is not finite).
+    NotFinite,
+    /// Every coefficient has the right sign, but some not by more than its rounding
+    /// bound: the arithmetic is not precise enough to decide (typically far past a
+    /// short end span, where the twins grow like `(2 |t| + 1)^degree`).
+    Precision,
+    /// A zero of the normal on a piece of the continuation is not excluded.
+    NormalZero,
+    /// A turn back across the natural domain's side is not excluded.
+    TurnBackAcrossSide,
+    /// A turn back across a `C0` knot line of the continuation is not excluded.
+    TurnBackAcrossKnot,
+    /// A sphere's, cone's or torus's closed form is not finite.
+    AnalyticNotFinite,
+    /// A sphere's, cone's or torus's normal turns back.
+    AnalyticTurnsBack,
+    /// A sphere's, cone's or torus's normal vanishes past the natural domain.
+    AnalyticVanishes,
+    /// A sphere's, cone's or torus's normal sign is decided nowhere.
+    AnalyticUndecided,
+}
+
+impl core::fmt::Display for NotProvedReason {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::DomainNotFinite => "the merge domain is not a finite rectangle",
+            Self::KindNotCertified => "no fold certificate for this surface kind",
+            Self::GeneratorNotCertified => "the generator's continuation is not proved",
+            Self::GeneratorNotFinite => "the generator's closed form is not finite",
+            Self::GeneratorTurnsOrVanishes => {
+                "the normal turns back or vanishes along the generator's continuation"
+            }
+            Self::NetForm => "a power-basis, two-dimensional or missing NURBS form",
+            Self::NetNotFinite => "a coefficient not finite or a weight not positive",
+            Self::Degrees => "degrees past the certificate's",
+            Self::Patches => "degenerate Bezier patches or a too narrow end span",
+            Self::Construction => "a construction of the certificate was refused",
+            Self::WorkBound => "the certificate's work bound",
+            Self::WeightNotPositive => "the weight is not proved positive",
+            Self::NotFinite => "the arithmetic overflowed",
+            Self::Precision => "the arithmetic's bound does not decide the normal's sign",
+            Self::NormalZero => "a zero of the normal is not excluded",
+            Self::TurnBackAcrossSide => {
+                "a turn back across the natural domain's side is not excluded"
+            }
+            Self::TurnBackAcrossKnot => "a turn back across a C0 knot line is not excluded",
+            Self::AnalyticNotFinite => "a closed form not finite",
+            Self::AnalyticTurnsBack => "the normal turns back",
+            Self::AnalyticVanishes => "the normal vanishes past the natural domain",
+            Self::AnalyticUndecided => "the normal's sign is not decided",
+        })
+    }
 }
 
 /// Whether `s` (evaluated with out-of-bounds evaluation on, in its STEP parameters) is
@@ -124,8 +235,27 @@ pub enum FoldCertificate {
 ///
 /// # Errors
 ///
-/// Those of making the NURBS form's Bezier patches.
+/// Cancellation, and the errors [`crate::error::native_failure`] passes on (an
+/// unported call, the port's invariants); every other failure of a construction the
+/// certificate makes refuses ([`NotProvedReason::Construction`]).
 pub fn certify_no_fold(
+    k: &Kernel,
+    s: &Surface,
+    natural: &Extent2d,
+    domain: &Extent2d,
+) -> Result<FoldCertificate> {
+    Ok(
+        crate::error::native_failure(dispatch(k, s, natural, domain))?.unwrap_or_else(|| {
+            FoldCertificate::NotProved {
+                uv: domain.evaluate(0.5, 0.5),
+                reason: NotProvedReason::Construction,
+            }
+        }),
+    )
+}
+
+/// [`certify_no_fold`] by surface kind.
+fn dispatch(
     k: &Kernel,
     s: &Surface,
     natural: &Extent2d,
@@ -141,7 +271,7 @@ pub fn certify_no_fold(
         && above(hi.x, lo.x)
         && above(hi.y, lo.y))
     {
-        return Ok(not("the merge domain is not a finite rectangle"));
+        return Ok(not(NotProvedReason::DomainNotFinite));
     }
     match s.kind() {
         // `O + u sx X + v sy Y`: a constant normal
@@ -159,7 +289,7 @@ pub fn certify_no_fold(
         | SurfaceKind::OffsetSurface(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
-        | SurfaceKind::SrfInVolume(_) => Ok(not("no fold certificate for this surface kind")),
+        | SurfaceKind::SrfInVolume(_) => Ok(not(NotProvedReason::KindNotCertified)),
     }
 }
 
@@ -199,7 +329,7 @@ fn swept(
             Some((r.position().origin(), r.position().z_axis())),
             Vec3::ZERO,
         ),
-        _ => return Ok(not("not a swept surface")),
+        _ => return Ok(not(NotProvedReason::KindNotCertified)),
     };
     let (d, n) = if generator_is_u {
         (domain.u_interval(), natural.u_interval())
@@ -214,25 +344,39 @@ fn swept(
         (Some(CurveKind::BSpline(c)), None) => {
             return extruded_net(k, c, extrusion, n, d);
         }
-        _ => return Ok(not("the generator's continuation is not proved")),
+        _ => return Ok(not(NotProvedReason::GeneratorNotCertified)),
     };
     let Some((origin, axis)) = revolution else {
         // `C' x E`, the same everywhere
         return Ok(FoldCertificate::Proved);
     };
-    // `M(t)` and the rounding bound of `M(t) . d`: the line's point and the difference
-    // with `A` (each within `gamma_4` of its terms' sizes), then two cross products and
-    // a dot (generously `gamma_32` of the product of the sizes)
+    // `M(t)` and the rounding bound of `M(t) . d`, from the evaluation's own terms
+    // (`Line::evaluate_step`: `C = P + t V s`, `C' = V s`) in 1-norms `|.|_1`, which bound
+    // every sum of products of components below. Each coordinate of `C` is within
+    // `gamma_3 (|P|_1 + |t| |V|_1 |s|)` of `P + t V s` (two products and a sum), `C'`
+    // within `gamma_1 |V|_1 |s|` of `V s`, and `C - A` adds `gamma_1 (|C|_1 + |A|_1)`. Each
+    // cross product's coordinate is a difference of two products of these (`gamma_2` of
+    // `|x|_1 |y|_1`) and the dot a sum of three products (`gamma_3`). Over the at most 11
+    // rounding levels, the computed `M . d` is within `gamma_11 S |d|_1` of the exact
+    // `M(t) . d` (Higham §3.1), `S = (|P|_1 + |t| |V|_1 |s| + |A|_1) |a|_1 |V|_1 |s|`;
+    // `gamma_32` also covers the rounding of `S`, `|d|_1` and their product.
+    let canonical = line.canonical_unit();
+    let l1 = |v: Vec3| v.x.abs() + v.y.abs() + v.z.abs();
+    let (p1, v1, s1) = (
+        l1(canonical.point),
+        l1(canonical.vector),
+        canonical.scale.abs(),
+    );
     let m = |t: f64| -> (Vec3, f64) {
         let pv = line.evaluate_step(t, 1);
         let (Some(&c), Some(&tangent)) = (pv.first(), pv.get(1)) else {
             return (Vec3::new(f64::NAN, f64::NAN, f64::NAN), f64::NAN);
         };
-        let size = (c.length() + origin.length()) * axis.length() * tangent.length();
+        let size = (p1 + t.abs() * v1 * s1 + l1(origin)) * l1(axis) * v1 * s1;
         (axis.cross(c - origin).cross(tangent), size)
     };
     let (middle, _) = m(0.5 * (n.min() + n.max()));
-    let dlen = middle.length();
+    let dlen = l1(middle);
     let mut ts = vec![d.min(), d.max()];
     ts.extend(
         [n.min(), n.max()]
@@ -244,14 +388,12 @@ fn swept(
         let x = mt.dot(middle);
         let e = gamma(32) * size * dlen;
         if !(x.is_finite() && e.is_finite()) {
-            return Ok(not("the generator's closed form is not finite"));
+            return Ok(not(NotProvedReason::GeneratorNotFinite));
         }
         // positive, or undecided on the natural interval's closed ends
         let on_natural = t >= n.min() && t <= n.max();
         if !(above(x, e) || (on_natural && !above(-x, e))) {
-            return Ok(not(
-                "the normal turns back or vanishes along the generator's continuation",
-            ));
+            return Ok(not(NotProvedReason::GeneratorTurnsOrVanishes));
         }
     }
     Ok(FoldCertificate::Proved)
@@ -266,7 +408,8 @@ fn swept(
 /// two columns `c` and `c + w E` (degree 1 in `v` over `[0, 1]`: exactly `C(u) + v E`),
 /// over `n x [0, 1]` and `d x [0, 1]`. The second column's coordinates are rounded
 /// sums, within `gamma_2 (|c| + |w| |E|)` of the exact ones: that is the net's
-/// `extra` error ([`net_certificate`]).
+/// `extra` error ([`net_certificate`]). The normal does not depend on `v`, so the pieces
+/// span `[0, 1]` in `v` and are split in `u` only.
 fn extruded_net(
     k: &Kernel,
     c: &crate::nurbs::b_spline_curve::p1::BSplineCurve,
@@ -279,14 +422,14 @@ fn extruded_net(
         reason,
     };
     let Some(nurb) = c.gw_nurb() else {
-        return Ok(not("no NURBS form"));
+        return Ok(not(NotProvedReason::NetForm));
     };
     let emax = e.x.abs().max(e.y.abs()).max(e.z.abs());
     let mut extra = 0.0_f64;
     let mut net = Vec::new();
     for &cp in nurb.cpts() {
         if cp.z == NOZ {
-            return Ok(not("a two-dimensional form"));
+            return Ok(not(NotProvedReason::NetForm));
         }
         let w = if cp.w == NOW { 1.0 } else { cp.w };
         let moved = CPoint::new(cp.x + w * e.x, cp.y + w * e.y, cp.z + w * e.z, cp.w);
@@ -303,7 +446,7 @@ fn extruded_net(
     )?;
     let natural = Extent2d::from_bounds(n.min(), 0.0, n.max(), 1.0);
     let domain = Extent2d::from_bounds(d.min(), 0.0, d.max(), 1.0);
-    net_certificate(k, &surface, &natural, &domain, extra)
+    net_certificate(k, &surface, &natural, &domain, extra, false)
 }
 
 /// A polynomial with its two magnitude twins (see the module header).
@@ -369,14 +512,20 @@ impl Net {
         })
     }
 
-    /// The bound `E` of each coefficient (see the module header), for `k` levels.
+    /// The bound `E` of each coefficient (see the module header), for `k` levels. A twin
+    /// that overflowed gives a bound that is not finite (`inf - inf` stays NaN: a
+    /// negative difference, the twins' rounding, is the only one taken as `0`).
     fn bounds(&self, k: usize) -> Vec<f64> {
         let g = 3.0 * gamma(2 * k);
         self.t
             .coefficients()
             .iter()
             .zip(self.te.coefficients())
-            .map(|(&t, &te)| ((te - t).max(0.0) + g * te) * (1.0 + gamma(4)))
+            .map(|(&t, &te)| {
+                let gap = te - t;
+                let gap = if gap < 0.0 { 0.0 } else { gap };
+                (gap + g * te) * (1.0 + gamma(4))
+            })
             .collect()
     }
 }
@@ -490,8 +639,14 @@ struct Form {
     e0: f64,
     /// The rounding levels of a piece's `N . d`.
     levels: usize,
-    /// The most pieces computed ([`MAX_PIECES`] scaled by the degrees' work).
+    /// The most normals computed ([`MAX_PIECES`] scaled by the degrees' work).
     max_pieces: usize,
+    /// The `u` and `v` knots of multiplicity at least the degree (`C0` lines where they
+    /// fall between two spans).
+    c0_lines: (Vec<f64>, Vec<f64>),
+    /// Whether the normal depends on `v`: if not (an extrusion's net), the pieces span
+    /// the merge domain in `v` and are split in `u` only.
+    split_v: bool,
 }
 
 /// The certificate of a B-spline net's continuation.
@@ -504,24 +659,26 @@ fn polynomial(
     let centre = domain.evaluate(0.5, 0.5);
     let not = |reason| FoldCertificate::NotProved { uv: centre, reason };
     if b.form() == BSplineSurfaceForm::Polynomial {
-        return Ok(not("a power-basis form"));
+        return Ok(not(NotProvedReason::NetForm));
     }
     let Some(nurb) = b.gw_nurb() else {
-        return Ok(not("no NURBS form"));
+        return Ok(not(NotProvedReason::NetForm));
     };
-    net_certificate(k, nurb, natural, domain, 0.0)
+    net_certificate(k, nurb, natural, domain, 0.0, true)
 }
 
 /// The certificate of the NURBS net `nurb`'s continuation; `extra` bounds, per
 /// coefficient, how far the net may be from the exact net of the surface certified
 /// (added to the extraction's error `e0`: knot insertion takes convex combinations, so
-/// it moves no coefficient by more than the largest input error).
+/// it moves no coefficient by more than the largest input error). `split_v`: whether
+/// the normal depends on `v` ([`Form::split_v`]).
 fn net_certificate(
     k: &Kernel,
     nurb: &NlSurface,
     natural: &Extent2d,
     domain: &Extent2d,
     extra: f64,
+    split_v: bool,
 ) -> Result<FoldCertificate> {
     let centre = domain.evaluate(0.5, 0.5);
     let not = |reason| FoldCertificate::NotProved { uv: centre, reason };
@@ -531,7 +688,7 @@ fn net_certificate(
     for row in nurb.rows() {
         for c in row {
             if c.z == NOZ {
-                return Ok(not("a two-dimensional form"));
+                return Ok(not(NotProvedReason::NetForm));
             }
             let w = if c.w == NOW {
                 1.0
@@ -545,7 +702,7 @@ fn net_certificate(
                 && above(w, 0.0)
                 && w.is_finite())
             {
-                return Ok(not("a coefficient not finite or a weight not positive"));
+                return Ok(not(NotProvedReason::NetNotFinite));
             }
             net_size = net_size.max(c.x.abs()).max(c.y.abs()).max(c.z.abs()).max(w);
         }
@@ -556,7 +713,7 @@ fn net_certificate(
         (2 * p, 2 * q)
     };
     if du > MAX_DEGREE || dv > MAX_DEGREE || p == 0 || q == 0 {
-        return Ok(not("degrees past the certificate's"));
+        return Ok(not(NotProvedReason::Degrees));
     }
     // an interior knot below full multiplicity is where the extraction inserts
     let inserts = |knots: &[f64], degree: usize| {
@@ -576,6 +733,24 @@ fn net_certificate(
         }
         false
     };
+    // the knots of multiplicity at least the degree: there the net is at most `C0`, and
+    // its normal can jump (filtered to the lines between spans in `certify_pieces`)
+    let c0 = |knots: &[f64], degree: usize| {
+        let mut out = Vec::new();
+        let mut i = 0;
+        while let Some(&u) = knots.get(i) {
+            let mut m = 1;
+            while knots.get(i + m) == Some(&u) {
+                m += 1;
+            }
+            if m >= degree {
+                out.push(u);
+            }
+            i += m;
+        }
+        out
+    };
+    let c0_lines = (c0(nurb.u_knots(), p), c0(nurb.v_knots(), q));
     let extraction = if inserts(nurb.u_knots(), p) || inserts(nurb.v_knots(), q) {
         gamma(16 * (p + q)) * net_size
     } else {
@@ -588,7 +763,7 @@ fn net_certificate(
         extraction
     };
     if !e0.is_finite() {
-        return Ok(not("a coefficient not finite or a weight not positive"));
+        return Ok(not(NotProvedReason::NetNotFinite));
     }
     let mut patches = Vec::new();
     for column in decompose_to_bez(nurb)? {
@@ -599,10 +774,10 @@ fn net_certificate(
             let (Some(&u0), Some(&u1), Some(&v0), Some(&v1)) =
                 (uk.first(), uk.last(), vk.first(), vk.last())
             else {
-                return Ok(not("a patch without knots"));
+                return Ok(not(NotProvedReason::Patches));
             };
             if !(above(u1, u0) && above(v1, v0)) {
-                return Ok(not("an empty patch"));
+                return Ok(not(NotProvedReason::Patches));
             }
             let mut c: [Vec<f64>; 4] = Default::default();
             for row in patch.rows() {
@@ -635,7 +810,7 @@ fn net_certificate(
         patches.push(out);
     }
     if patches.first().is_none_or(Vec::is_empty) {
-        return Ok(not("no Bezier patches"));
+        return Ok(not(NotProvedReason::Patches));
     }
     // NLib's span search skips an end span narrower than `1e-12` (it continues the next
     // one past the knot range), which the patches here would not: refused
@@ -646,7 +821,7 @@ fn net_certificate(
         || narrow(column.first().map(|x| x.v))
         || narrow(column.last().map(|x| x.v))
     {
-        return Ok(not("an end span narrower than the span search's cut-off"));
+        return Ok(not(NotProvedReason::Patches));
     }
     // rounding levels: restriction, derivative, products and differences, the dot
     let product = |a: (usize, usize)| (a.0 + 1) * (a.1 + 1) + 7;
@@ -669,6 +844,8 @@ fn net_certificate(
             .saturating_mul(UNIT_WORK)
             .checked_div(cost)
             .unwrap_or(0),
+        c0_lines,
+        split_v,
     };
     certify_pieces(k, &form, natural, domain)
 }
@@ -691,9 +868,22 @@ impl Rect {
         self.x[0] <= hi.x && self.x[1] >= lo.x && self.y[0] <= hi.y && self.y[1] >= lo.y
     }
 
-    fn quarters(&self) -> [Self; 4] {
+    /// Its quarters, or (without `split_v`) its halves in `x`.
+    fn splits(&self, split_v: bool) -> Vec<Self> {
         let (xm, ym) = (0.5 * (self.x[0] + self.x[1]), 0.5 * (self.y[0] + self.y[1]));
-        [
+        if !split_v {
+            return vec![
+                Self {
+                    x: [self.x[0], xm],
+                    y: self.y,
+                },
+                Self {
+                    x: [xm, self.x[1]],
+                    y: self.y,
+                },
+            ];
+        }
+        vec![
             Self {
                 x: [self.x[0], xm],
                 y: [self.y[0], ym],
@@ -712,6 +902,19 @@ impl Rect {
             },
         ]
     }
+}
+
+/// How a computed `N . d` compares with its bounds ([`verdict`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Verdict {
+    /// Every coefficient holds its bound.
+    Holds,
+    /// Every coefficient has the right sign, but some not by more than their bound.
+    Precision,
+    /// Some coefficient has the wrong sign.
+    Fails,
+    /// Some coefficient or bound is not finite.
+    NotFinite,
 }
 
 /// The cuts of `[a, b]` at the values of `breaks` strictly inside it.
@@ -821,14 +1024,32 @@ fn normal_on(form: &Form, patch: &Patch, r: &Rect, b: &Binomials) -> Result<Opti
     ]))
 }
 
-/// Whether `N . d >= ` the bound (`strict`: `> E`; else `>= -E`) on every coefficient of
-/// the piece's `N . d`, so on the whole piece.
-fn holds(f: &Net, levels: usize, strict: bool) -> bool {
+/// How the computed `N . d` on a piece compares with its bounds `E`: with `strict`,
+/// whether every coefficient is above its `E` (so the exact `N . d > 0` on the piece);
+/// else whether none is below `-E` (so the exact `N . d >= -2 E`: the computed
+/// coefficient is within `E` of the exact one). A coefficient or bound that is not
+/// finite (an overflow, NaN) decides nothing.
+fn verdict(f: &Net, levels: usize, strict: bool) -> Verdict {
     let bound = f.bounds(levels);
-    f.v.coefficients()
-        .iter()
-        .zip(&bound)
-        .all(|(&x, &e)| if strict { above(x, e) } else { !above(-x, e) })
+    let mut out = Verdict::Holds;
+    for (&x, &e) in f.v.coefficients().iter().zip(&bound) {
+        if !(x.is_finite() && e.is_finite()) {
+            return Verdict::NotFinite;
+        }
+        let (holds, sign) = if strict {
+            (above(x, e), above(x, 0.0))
+        } else {
+            (!above(-x, e), !above(-x, 0.0))
+        };
+        if !holds {
+            out = if sign && out != Verdict::Fails {
+                Verdict::Precision
+            } else {
+                Verdict::Fails
+            };
+        }
+    }
+    out
 }
 
 /// The pieces of the continuation (see the module header).
@@ -855,14 +1076,30 @@ fn certify_pieces(
     let mut vbreaks: Vec<f64> = vspans.iter().flat_map(|s| *s).collect();
     vbreaks.extend([nlo.y, nhi.y]);
     let (lo, hi) = (domain.min(), domain.max());
-    let g = GRID as f64;
-    let at = |a: f64, b: f64, i: usize| {
-        if i == GRID {
+    // (one cell in `v` when the normal does not depend on `v`)
+    let vcells = if form.split_v { GRID } else { 1 };
+    let at = |a: f64, b: f64, i: usize, cells: usize| {
+        if i == cells {
             b
         } else {
-            a + (b - a) * (i as f64 / g)
+            a + (b - a) * (i as f64 / cells as f64)
         }
     };
+    // the `C0` knot lines strictly between the first span's start and the last's end
+    let between = |lines: &[f64], spans: &[[f64; 2]]| -> Vec<f64> {
+        let (Some(first), Some(last)) = (spans.first(), spans.last()) else {
+            return Vec::new();
+        };
+        lines
+            .iter()
+            .copied()
+            .filter(|&x| above(x, first[0]) && above(last[1], x))
+            .collect()
+    };
+    let (c0u, c0v) = (
+        between(&form.c0_lines.0, &uspans),
+        between(&form.c0_lines.1, &vspans),
+    );
     let inside =
         |r: &Rect| r.x[0] >= nlo.x && r.x[1] <= nhi.x && r.y[0] >= nlo.y && r.y[1] <= nhi.y;
     // a piece cut at knot lines and the natural domain's sides lies in one patch's
@@ -873,15 +1110,81 @@ fn certify_pieces(
             .get(span_of(&uspans, m.x))
             .and_then(|col| col.get(span_of(&vspans, m.y)))
     };
-    // `N . d` on the piece `r` holds the bound
-    let check = |r: &Rect, d: Vec3, strict: bool| -> Result<Option<bool>> {
+    // the normal on the piece `r`: one unit of the work bound, after a cancel poll
+    let work = core::cell::Cell::new(0_usize);
+    let normal = |r: &Rect| -> Result<core::result::Result<[Net; 3], NotProvedReason>> {
+        k.check_cancelled(OP)?;
+        work.set(work.get().saturating_add(1));
+        if work.get() > form.max_pieces {
+            return Ok(Err(NotProvedReason::WorkBound));
+        }
         let Some(patch) = patch_of(r) else {
-            return Ok(None);
+            return Ok(Err(NotProvedReason::Construction));
         };
-        let Some(n) = normal_on(form, patch, r, &b)? else {
-            return Ok(None);
-        };
-        Ok(Some(holds(&Net::combine(&n, d, &b)?, form.levels, strict)))
+        Ok(normal_on(form, patch, r, &b)?.ok_or(NotProvedReason::WeightNotPositive))
+    };
+    // `None` when the computed `N . d` holds its bound ([`verdict`]); else why not,
+    // `failed` when a coefficient has the wrong sign
+    let check = |n: &[Net; 3], d: Vec3, strict: bool, failed: NotProvedReason| {
+        Ok::<_, crate::error::SolidError>(
+            match verdict(&Net::combine(n, d, &b)?, form.levels, strict) {
+                Verdict::Holds => None,
+                Verdict::Precision => Some(NotProvedReason::Precision),
+                Verdict::NotFinite => Some(NotProvedReason::NotFinite),
+                Verdict::Fails => Some(failed),
+            },
+        )
+    };
+    // `None` when the computed `N . d >= -E` on every piece of the strip `s` (cut at
+    // the knot lines and the natural domain's sides); else why not
+    let strip = |s: &Rect, d: Vec3, failed: NotProvedReason| -> Result<Option<NotProvedReason>> {
+        for x in cuts(s.x[0], s.x[1], &ubreaks) {
+            for y in cuts(s.y[0], s.y[1], &vbreaks) {
+                let n = match normal(&Rect { x, y })? {
+                    Ok(n) => n,
+                    Err(why) => return Ok(Some(why)),
+                };
+                if let Some(why) = check(&n, d, false, failed)? {
+                    return Ok(Some(why));
+                }
+            }
+        }
+        Ok(None)
+    };
+    // the strips of `r`'s width across each `C0` knot line one of its sides lies on,
+    // inside the merge domain
+    let knot_strips = |r: &Rect| -> Vec<Rect> {
+        let mut out = Vec::new();
+        let (w, h) = (r.x[1] - r.x[0], r.y[1] - r.y[0]);
+        for &x in &c0u {
+            if x == r.x[1] && above(hi.x, x) {
+                out.push(Rect {
+                    x: [x, (x + w).min(hi.x)],
+                    y: r.y,
+                });
+            }
+            if x == r.x[0] && above(x, lo.x) {
+                out.push(Rect {
+                    x: [(x - w).max(lo.x), x],
+                    y: r.y,
+                });
+            }
+        }
+        for &y in &c0v {
+            if y == r.y[1] && above(hi.y, y) {
+                out.push(Rect {
+                    x: r.x,
+                    y: [y, (y + h).min(hi.y)],
+                });
+            }
+            if y == r.y[0] && above(y, lo.y) {
+                out.push(Rect {
+                    x: r.x,
+                    y: [(y - h).max(lo.y), y],
+                });
+            }
+        }
+        out
     };
     // the mirror of `r` across the natural domain's sides it touches, inside it
     let mirror = |r: &Rect| -> Option<Rect> {
@@ -903,9 +1206,17 @@ fn certify_pieces(
     };
     let mut stack: Vec<(Rect, usize)> = Vec::new();
     for i in 0..GRID {
-        for j in 0..GRID {
-            for x in cuts(at(lo.x, hi.x, i), at(lo.x, hi.x, i + 1), &ubreaks) {
-                for y in cuts(at(lo.y, hi.y, j), at(lo.y, hi.y, j + 1), &vbreaks) {
+        for j in 0..vcells {
+            for x in cuts(
+                at(lo.x, hi.x, i, GRID),
+                at(lo.x, hi.x, i + 1, GRID),
+                &ubreaks,
+            ) {
+                for y in cuts(
+                    at(lo.y, hi.y, j, vcells),
+                    at(lo.y, hi.y, j + 1, vcells),
+                    &vbreaks,
+                ) {
                     let r = Rect { x, y };
                     if !inside(&r) {
                         stack.push((r, 0));
@@ -914,75 +1225,61 @@ fn certify_pieces(
             }
         }
     }
-    let mut work = 0_usize;
     while let Some((r, depth)) = stack.pop() {
-        k.check_cancelled(OP)?;
-        work += 1;
-        if work > form.max_pieces {
-            return Ok(FoldCertificate::NotProved {
-                uv: r.centre(),
-                reason: "the certificate's work bound",
-            });
-        }
         let touching = r.touches(natural);
         let last = depth >= MAX_SPLITS;
-        // the direction: the normal at the piece's centre (restricted to the whole piece:
-        // the restriction's derivatives are the patch's scaled by the piece's positive
-        // widths, so the direction at its centre (0.5, 0.5) is kept)
-        let direction = match patch_of(&r) {
-            Some(patch) => normal_on(form, patch, &r, &b)?.map(|n| {
-                Vec3::new(
+        let failure = match normal(&r)? {
+            Err(why) => Some(why),
+            Ok(n) => {
+                // the direction: the normal at the piece's centre (the restriction's
+                // derivatives are the patch's scaled by the piece's positive widths, so
+                // the direction at its centre (0.5, 0.5) is kept)
+                let d = Vec3::new(
                     n[0].v.eval(0.5, 0.5),
                     n[1].v.eval(0.5, 0.5),
                     n[2].v.eval(0.5, 0.5),
-                )
-            }),
-            None => None,
-        }
-        .filter(|d| d.x.is_finite() && d.y.is_finite() && d.z.is_finite() && *d != Vec3::ZERO);
-        let proved = match direction {
-            None => false,
-            Some(d) => {
-                // away from the natural domain: a normal that never vanishes; touching
-                // it, the same unless the piece is down to the last split, and then a
-                // normal that does not turn back against `d`. A touching piece's mirror
-                // inside the natural domain must not turn back against `d` either: no
-                // reversal across the natural domain's side.
-                let own = check(&r, d, !touching || !last)?;
-                let across = if touching && own == Some(true) {
-                    // no mirror (a natural domain without width): nothing proved
-                    let mut ok = None;
-                    if let Some(m) = mirror(&r) {
-                        'pieces: for x in cuts(m.x[0], m.x[1], &ubreaks) {
-                            for y in cuts(m.y[0], m.y[1], &vbreaks) {
-                                ok = check(&Rect { x, y }, d, false)?;
-                                if ok != Some(true) {
-                                    break 'pieces;
-                                }
+                );
+                if !(d.x.is_finite() && d.y.is_finite() && d.z.is_finite()) {
+                    Some(NotProvedReason::NotFinite)
+                } else if d == Vec3::ZERO {
+                    Some(NotProvedReason::NormalZero)
+                } else {
+                    // away from the natural domain: a normal that never vanishes;
+                    // touching it, the same unless the piece is down to the last split,
+                    // and then a normal that does not turn back against `d`
+                    let mut why = check(&n, d, !touching || !last, NotProvedReason::NormalZero)?;
+                    // a touching piece's mirror inside the natural domain must not turn
+                    // back against `d` either: no reversal across the natural domain's
+                    // side (no mirror, a natural domain without width: nothing proved)
+                    if why.is_none() && touching {
+                        why = match mirror(&r) {
+                            Some(m) => strip(&m, d, NotProvedReason::TurnBackAcrossSide)?,
+                            None => Some(NotProvedReason::TurnBackAcrossSide),
+                        };
+                    }
+                    // nor across a `C0` knot line, where the normal may jump
+                    if why.is_none() {
+                        for s in knot_strips(&r) {
+                            why = strip(&s, d, NotProvedReason::TurnBackAcrossKnot)?;
+                            if why.is_some() {
+                                break;
                             }
                         }
                     }
-                    ok
-                } else {
-                    own
-                };
-                own == Some(true) && across == Some(true)
+                    why
+                }
             }
         };
-        if proved {
+        let Some(why) = failure else {
             continue;
-        }
-        if last {
+        };
+        if last || why == NotProvedReason::WorkBound {
             return Ok(FoldCertificate::NotProved {
                 uv: r.centre(),
-                reason: if touching {
-                    "a turn back across the natural domain's side is not excluded"
-                } else {
-                    "a zero of the normal is not excluded"
-                },
+                reason: why,
             });
         }
-        for q in r.quarters() {
+        for q in r.splits(form.split_v) {
             stack.push((q, depth + 1));
         }
     }
@@ -1002,7 +1299,7 @@ fn certify_pieces(
 /// (a pole or apex the face itself has). Its rounding is bounded by `gamma_16` of the
 /// terms' sizes, a generous count of the operations in each closed form.
 pub mod analytic {
-    use super::FoldCertificate;
+    use super::{FoldCertificate, NotProvedReason};
     use crate::error::Result;
     use crate::geom::certified::above;
     use crate::geom::extent2d::Extent2d;
@@ -1059,27 +1356,27 @@ pub mod analytic {
                     })
                     .collect()
             }
-            _ => return Ok(not("no analytic certificate for this surface kind")),
+            _ => return Ok(not(NotProvedReason::KindNotCertified)),
         };
         // the sign of `lambda` where it is decided; an undecided value only on the
         // natural domain's closed `v` interval
         let mut sign = 0.0_f64;
         for &(v, x, e) in &samples {
             if !(x.is_finite() && e.is_finite()) {
-                return Ok(not("a closed form not finite"));
+                return Ok(not(NotProvedReason::AnalyticNotFinite));
             }
             if above(x.abs(), e) {
                 let here = x.signum();
                 if sign != 0.0 && here != sign {
-                    return Ok(not("the normal turns back"));
+                    return Ok(not(NotProvedReason::AnalyticTurnsBack));
                 }
                 sign = here;
             } else if !on_natural(v) {
-                return Ok(not("the normal vanishes past the natural domain"));
+                return Ok(not(NotProvedReason::AnalyticVanishes));
             }
         }
         if sign == 0.0 {
-            return Ok(not("the normal's sign is not decided"));
+            return Ok(not(NotProvedReason::AnalyticUndecided));
         }
         Ok(FoldCertificate::Proved)
     }
@@ -1116,5 +1413,45 @@ pub mod analytic {
             out.push((f64::NAN, 0.0));
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A constant `N . d` (degree 0) with twins `t`, `te`.
+    fn net(x: f64, t: f64, te: f64) -> Net {
+        let c = |v| Bernstein2::new(0, 0, vec![v]).unwrap();
+        Net {
+            v: c(x),
+            t: c(t),
+            te: c(te),
+        }
+    }
+
+    /// A coefficient or bound that is not finite decides nothing, strict or not
+    /// (#17724 review: `!above(-x, e)` held for a NaN `x` or an infinite `e`, and
+    /// `(te - t).max(0.0)` turned an overflowed `inf - inf` into `0`).
+    #[test]
+    fn a_coefficient_or_bound_not_finite_proves_nothing() {
+        for strict in [true, false] {
+            for f in [
+                net(f64::NAN, 1.0, 1.0),
+                net(1.0, 1.0, f64::INFINITY),
+                net(f64::INFINITY, f64::INFINITY, f64::INFINITY),
+                net(1.0, f64::NAN, 1.0),
+            ] {
+                assert_eq!(verdict(&f, 10, strict), Verdict::NotFinite, "{f:?}");
+            }
+        }
+        let overflowed = net(1.0, f64::INFINITY, f64::INFINITY);
+        assert!(overflowed.bounds(10).iter().all(|e| e.is_nan()));
+        // finite: decided as before
+        assert_eq!(verdict(&net(1.0, 1.0, 1.0), 10, true), Verdict::Holds);
+        assert_eq!(verdict(&net(-1e-20, 1.0, 1.0), 10, false), Verdict::Holds);
+        assert_eq!(verdict(&net(1e-20, 1.0, 1.0), 10, true), Verdict::Precision);
+        assert_eq!(verdict(&net(-1.0, 1.0, 1.0), 10, true), Verdict::Fails);
+        assert_eq!(verdict(&net(-1.0, 1.0, 1.0), 10, false), Verdict::Fails);
     }
 }

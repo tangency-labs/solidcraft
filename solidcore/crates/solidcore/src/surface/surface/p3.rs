@@ -116,7 +116,7 @@ use crate::nurbs::knots::Side;
 use crate::surface::plane::Plane;
 use std::sync::Mutex;
 
-use super::fold_certificate::FoldCertificate;
+use super::fold_certificate::{FoldCertificate, NotProvedReason};
 use super::p1::{
     crossed_seam_or_pole, evaluate_1st_derivatives, evaluate_2nd_derivatives,
     evaluate_normal_section as smsurf_evaluate_normal_section, FindPsNormalEnfo, SsNormalizeEnfo,
@@ -398,7 +398,7 @@ pub enum ContinuationFold {
         /// The centre of the piece that failed (or of the merge domain).
         uv: Point2,
         /// What was not proved.
-        reason: &'static str,
+        reason: NotProvedReason,
     },
 }
 
@@ -1296,8 +1296,10 @@ impl Surface {
             let orig_domain = self.step_uv_domain();
             let update_domain = orig_domain.union(&new_domain);
             // Four corners determine the bilinear patches, not that this one's
-            // continuation is one sheet over the union: the fold rule below holds here
-            // too (WR-407; a planar 2 x 2 net can fold, as #434's swept sector does).
+            // continuation over the union is free of folds: the fold rule below holds
+            // here too (WR-407; a planar 2 x 2 net can fold, as #434's swept sector
+            // does). The rule excludes folds only, not a continuation that comes back
+            // over the face without folding (`fold_certificate`, "What is not proved").
             if out_of_bounds_enabled(self).is_some()
                 && !update_domain.is_contained_by(&orig_domain, 0.0)
             {
@@ -2525,8 +2527,8 @@ mod tests {
         let fold = s.continuation_fold(&k, &domain)?;
         assert!(
             matches!(fold, Some(ContinuationFold::NotCertified { uv, reason })
-                if uv.y < 0.0 && matches!(reason, "a zero of the normal is not excluded"
-                    | "a turn back across the natural domain's side is not excluded")),
+                if uv.y < 0.0 && matches!(reason, NotProvedReason::NormalZero
+                    | NotProvedReason::TurnBackAcrossSide)),
             "{fold:?}"
         );
         Ok(())
@@ -2573,8 +2575,8 @@ mod tests {
         assert!(
             matches!(refused, FoldCertificate::NotProved { uv, reason }
                 if uv.x < 2.0 + 0.25
-                    && matches!(reason, "a zero of the normal is not excluded"
-                    | "a turn back across the natural domain's side is not excluded")),
+                    && matches!(reason, NotProvedReason::NormalZero
+                    | NotProvedReason::TurnBackAcrossSide)),
             "{refused:?}"
         );
         Ok(())
@@ -2686,6 +2688,92 @@ mod tests {
                 FoldCertificate::NotProved { uv, .. } if uv.x > 9.0 && uv.x < 11.0
             ),
             "{past:?}"
+        );
+        Ok(())
+    }
+
+    /// A turn back across a `C0` knot line of the continuation is not proved away (#17724
+    /// review): the degree-1 (in u) sheet with u rows at x = 0, 1, 0 (knots
+    /// `0, 0, 1, 2, 2`) folds flat back onto itself at the knot u = 1, where its normal
+    /// jumps from +z to -z without vanishing: each piece alone has a normal that never
+    /// vanishes. Over `[0, 1.5] x [0, 1]` past the natural `[0, 0.9] x [0, 1]` it is
+    /// refused, at the knot line. The real crease next to it, x = 0, 1, 2 with
+    /// z = 0, 0, 1 (the normal turns from +z to `(-1, 0, 1)`, never back), is proved.
+    #[test]
+    fn wr_407_fold_certificate_refuses_a_turn_back_at_a_c0_knot() -> Result<()> {
+        use super::super::fold_certificate::{certify_no_fold, FoldCertificate};
+        use crate::nurbs::b_spline_surface::p1::BSplineSurface as Bss;
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+        let k = Kernel::default();
+        let sheet = |rows: [[f64; 2]; 3]| -> Result<Surface> {
+            let net = rows
+                .iter()
+                .map(|&[x, z]| {
+                    vec![
+                        CPoint::from_point(Vec3::new(x, 0.0, z)),
+                        CPoint::from_point(Vec3::new(x, 1.0, z)),
+                    ]
+                })
+                .collect();
+            let nl = NlSurface::new(
+                net,
+                1,
+                1,
+                vec![0.0, 0.0, 1.0, 2.0, 2.0],
+                vec![0.0, 0.0, 1.0, 1.0],
+            )?;
+            let mut s = Surface::from(Bss::from_nurb(nl, false));
+            set_out_of_bounds_enabled(&mut s, true);
+            Ok(s)
+        };
+        let natural = Extent2d::from_bounds(0.0, 0.0, 0.9, 1.0);
+        let domain = Extent2d::from_bounds(0.0, 0.0, 1.5, 1.0);
+        let folded = sheet([[0.0, 0.0], [1.0, 0.0], [0.0, 0.0]])?;
+        // the fold: u = 1.1 lands on u = 0.9, on the face
+        let at = |s: &Surface, u: f64| {
+            s.evaluate_step(&k, Point2::new(u, 0.5), 0, 0, EvaluateFlags::default())
+                .map(|p| p[0][0])
+        };
+        assert!(at(&folded, 1.1)?.distance(at(&folded, 0.9)?) < 1e-12);
+        let refused = certify_no_fold(&k, &folded, &natural, &domain)?;
+        assert!(
+            matches!(refused, FoldCertificate::NotProved { uv, reason }
+                if reason == NotProvedReason::TurnBackAcrossKnot && (uv.x - 1.0).abs() < 0.1),
+            "{refused:?}"
+        );
+        let crease = sheet([[0.0, 0.0], [1.0, 0.0], [2.0, 1.0]])?;
+        assert_eq!(
+            certify_no_fold(&k, &crease, &natural, &domain)?,
+            FoldCertificate::Proved
+        );
+        Ok(())
+    }
+
+    /// Overflowing arithmetic proves nothing (#17724 review): the planar bilinear sheet
+    /// `(S u, S v)`, `S = 1e80`, has the normal `S^2 z`, so `N . d = S^4` overflows on
+    /// every piece; its bounds are not finite either. The same sheet at `S = 1` is proved.
+    #[test]
+    fn wr_407_fold_certificate_refuses_overflowing_coefficients() -> Result<()> {
+        use super::super::fold_certificate::{certify_no_fold, FoldCertificate};
+        let k = Kernel::default();
+        let natural = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let domain = Extent2d::from_bounds(0.0, 0.0, 1.5, 1.0);
+        let sheet = |s: f64| wr_407_bezier_sheet(&[&[[0.0, 0.0], [0.0, s]], &[[s, 0.0], [s, s]]]);
+        assert_eq!(
+            certify_no_fold(&k, &sheet(1.0)?, &natural, &domain)?,
+            FoldCertificate::Proved
+        );
+        let refused = certify_no_fold(&k, &sheet(1e80)?, &natural, &domain)?;
+        assert!(
+            matches!(
+                refused,
+                FoldCertificate::NotProved {
+                    reason: NotProvedReason::NotFinite,
+                    ..
+                }
+            ),
+            "{refused:?}"
         );
         Ok(())
     }
@@ -2810,7 +2898,7 @@ mod tests {
         let refused = certify_no_fold(&k, &s, &natural, &apex)?;
         assert!(
             matches!(refused, FoldCertificate::NotProved { reason, .. }
-                if reason == "the normal turns back or vanishes along the generator's continuation"),
+                if reason == NotProvedReason::GeneratorTurnsOrVanishes),
             "{refused:?}"
         );
         Ok(())
