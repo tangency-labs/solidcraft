@@ -1574,22 +1574,24 @@ mod tests {
         }
     }
 
-    /// A tolerance the caller gives, larger than the other surface's own, keeps a touching
-    /// point within it: the crossing loop of `ssi-revolution-plane-oblique-swapped` (round
-    /// the axis of a revolution about 2 across) is bigger than the revolution's tolerance
-    /// 5.15e-3 but far smaller than the plane's default tolerance 3.49e3. Asked for at that
-    /// tolerance, the plane-first intersection gives one touching point, deviation 0.2,
-    /// past the revolution's tolerance and within the caller's: an answer at the size the
-    /// caller asked for, which `intersect_surfaces_within` keeps. Without a tolerance from
-    /// the caller the same point is refused
-    /// (`plane_first_pairs_refuse_touching_points_where_the_plane_crosses`).
+    /// A tolerance the caller gives, larger than the default, keeps a touching point
+    /// within it: the crossing loop of `ssi-revolution-plane-oblique-swapped` (round the
+    /// axis of a revolution about 2 across) is bigger than the default tolerance 5.15e-3
+    /// but far smaller than `t`, a thousandth of the plane's size over its natural domain
+    /// `[-1234567, 1234567]^2` (`|P(min) P(mid)| + |P(mid) P(max)|` along the diagonal,
+    /// `2 sqrt(2) 1234567`), the plane-first default before tangency-labs/solidcraft#17720.
+    /// Asked for at that tolerance, the plane-first intersection gives one touching point,
+    /// deviation 0.2, past the default tolerance and within the caller's: an answer at the
+    /// size the caller asked for, which `intersect_surfaces_within` keeps.
     #[test]
     fn a_touching_point_within_the_callers_tolerance_is_not_refused() {
         use solidcore::intersect::api_intersectors::intersect_surfaces_within;
+        use solidcore::math::INFINITE_PARAMETER;
         use solidcore::surface::surface::TsectCurveType;
         let name = "ssi-revolution-plane-oblique-swapped";
         let c = plane_first(name);
-        let (t, surface_tolerance) = c.tolerances();
+        let t = 2.0 * 2.0f64.sqrt() * INFINITE_PARAMETER / 1000.0;
+        let (surface_tolerance, _) = c.tolerances();
 
         // the premises: touching points only, one past the revolution's tolerance, none
         // past the caller's, and the loop is smaller than the caller's tolerance
@@ -1630,22 +1632,173 @@ mod tests {
         assert_eq!(curves.len(), r.curves_3d.len(), "{name}");
     }
 
-    /// Known failing, tangency-labs/solidcraft#17720 (replaces
+    /// tangency-labs/solidcraft#17720 (replaces
     /// `wr51_plane_first_pairs_report_their_touching_point`, which asserted the lone touching
-    /// point): with the plane first and the default tolerance, the intersection should find
-    /// the crossing curves of [`PLANE_FIRST`], within the revolution's own
-    /// tolerance, as the revolution-first order does. Today it finds one touching point
-    /// (deviation 0.500001, 0.2, 2.44 and 0.52), which `intersect_surfaces` refuses
-    /// (`plane_first_pairs_refuse_touching_points_where_the_plane_crosses`).
+    /// point): with the plane first and the default tolerance, the intersection finds the
+    /// crossing curves of [`PLANE_FIRST`], as the revolution-first order does, and
+    /// `intersect_surfaces` returns them. The default no longer depends on the order: the
+    /// plane over its natural domain has no scale, so both orders run at the revolution's.
+    /// Before, the plane first ran at a thousandth of its 2.47e6 domain and found one
+    /// touching point (deviation 0.500001, 0.2, 2.44 and 0.52).
     #[test]
-    #[ignore = "known failing: plane first, the default tolerance finds a lone touching point, not the crossing curves (tangency-labs/solidcraft#17720)"]
     fn wr51_plane_first_pairs_report_their_crossing_curves() {
         for (name, count, shape) in PLANE_FIRST {
             let c = plane_first(name);
-            let (_, surface_tolerance) = c.tolerances();
+            let (tolerance, revolution_first) = c.tolerances();
+            assert_eq!(tolerance, revolution_first, "{name}");
+            assert!(tolerance < 0.03, "{name}: {tolerance}");
             let (r, status) = c.intersect(None);
             status.unwrap();
-            assert_crossing_curves(&c, name, &r, (count, shape), surface_tolerance);
+            assert_crossing_curves(&c, name, &r, (count, shape), tolerance);
+            let (curves, status) = intersect_surfaces(&c.k, &c.plane, &c.revolution);
+            status.unwrap();
+            assert_eq!(curves.len(), count, "{name}");
+        }
+    }
+
+    /// The two surfaces of the surface-pair case `name`, built.
+    fn surface_pair(name: &str) -> (Kernel, Surface, Surface) {
+        let case = crate::case::regression_case(&Runner, name);
+        let Inputs::Surfaces { surface1, surface2 } = case.parse().unwrap() else {
+            panic!("{name}: expected a surface pair");
+        };
+        let mut k = Kernel::default();
+        let s1 = build_surface(&mut k, &surface1).unwrap();
+        let s2 = build_surface(&mut k, &surface2).unwrap();
+        (k, s1, s2)
+    }
+
+    /// The default tolerance of `s1` and `s2` over their natural domains, in both orders.
+    fn default_tolerances(k: &Kernel, s1: &Surface, s2: &Surface) -> [f64; 2] {
+        use solidcore::intersect::surface_intersector::p1::SurfaceIntersector;
+        let d1 = s1.natural_uv_domain_with_nurb(k).unwrap();
+        let d2 = s2.natural_uv_domain_with_nurb(k).unwrap();
+        [
+            SurfaceIntersector::new(k, s1, &d1, s2, &d2, false)
+                .unwrap()
+                .this_approx_tol_3d,
+            SurfaceIntersector::new(k, s2, &d2, s1, &d1, false)
+                .unwrap()
+                .this_approx_tol_3d,
+        ]
+    }
+
+    /// tangency-labs/solidcraft#17720: the default tolerance is the same in either order
+    /// (before, it was a thousandth of the first surface's size: 3.49e3 with a plane over
+    /// its natural domain first). The revolutions are bounded and an extrusion's sweep is
+    /// unbounded, so the plane, unbounded both ways, leaves the other surface's scale.
+    #[test]
+    fn the_default_tolerance_does_not_depend_on_the_order() {
+        let names = PLANE_FIRST.map(|(name, ..)| name);
+        for name in names.iter().copied().chain([
+            "ssi-revolution-plane-near-profile-extremum",
+            "ssi-extrusion-plane-oblique",
+            "ssi-extrusion-plane-near-perpendicular",
+        ]) {
+            let (k, s1, s2) = surface_pair(name);
+            let [forward, backward] = default_tolerances(&k, &s1, &s2);
+            assert_eq!(forward, backward, "{name}");
+            assert!(forward < 0.03, "{name}: {forward}");
+        }
+    }
+
+    /// tangency-labs/solidcraft#17720: the plane `x = 45/32` misses the barrel of
+    /// `ssi-revolution-plane-near-profile-extremum`, whose profile is the cubic Bezier
+    /// `x = 1 + 1.5 t (1 - t) <= 11/8` (`y = 0` at every control point), by `45/32 - 11/8 =
+    /// 1/32`. Both orders report no intersection; the plane first used to report one
+    /// touching point, deviation 1/32, at its tolerance 3.49e3.
+    #[test]
+    fn a_plane_past_the_barrel_misses_it_in_either_order() {
+        for name in [
+            "ssi-revolution-plane-near-profile-extremum",
+            "ssi-revolution-plane-near-profile-extremum-swapped",
+        ] {
+            let (k, s1, s2) = surface_pair(name);
+            let (curves, result) = intersect_surfaces(&k, &s1, &s2);
+            assert!(curves.is_empty(), "{name}: {} curves", curves.len());
+            let e = result.unwrap_err();
+            assert_eq!(status(&e), Some(1001.0), "{name}: {e}");
+        }
+    }
+
+    /// tangency-labs/solidcraft#17720: the plane of `ssi-extrusion-plane-oblique` (normal
+    /// `(0, -0.6, 0.8)`, so `z = 2 + 0.75 y`) is not parallel to the sweep `(0, 0, 5)`, and
+    /// the sweep runs over `[-1234567, 1234567]`: every profile point `(x, y, 0)` lifts
+    /// onto the plane at `z = 2 + 0.75 y`, one curve from `(0, 0, 2)` to `(3, 0, 2)` (the
+    /// profile's ends, where `y = 0`). Both orders find it; the plane first used to report
+    /// no intersection at its tolerance 3.49e3.
+    #[test]
+    fn an_oblique_plane_cuts_an_extrusion_in_either_order() {
+        for name in [
+            "ssi-extrusion-plane-oblique",
+            "ssi-extrusion-plane-oblique-swapped",
+        ] {
+            let (k, s1, s2) = surface_pair(name);
+            let [tolerance, _] = default_tolerances(&k, &s1, &s2);
+            let (curves, result) = intersect_surfaces(&k, &s1, &s2);
+            result.unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(curves.len(), 1, "{name}");
+            let curve = &curves[0];
+            let iv = curve.natural_interval();
+            let normal = Vec3::new(0.0, -0.6, 0.8);
+            for i in 0..=64 {
+                let p = curve
+                    .evaluate_point(&k, iv.evaluate(f64::from(i) / 64.0))
+                    .unwrap();
+                let off = normal.dot(p - Vec3::new(0.0, 0.0, 2.0)).abs();
+                assert!(off <= tolerance, "{name}: {p:?} off the plane by {off}");
+            }
+            let ends = [iv.min(), iv.max()].map(|t| curve.evaluate_point(&k, t).unwrap());
+            let (a, b) = (Vec3::new(0.0, 0.0, 2.0), Vec3::new(3.0, 0.0, 2.0));
+            let apart = ends[0].distance(a).max(ends[1].distance(b));
+            let swapped = ends[0].distance(b).max(ends[1].distance(a));
+            assert!(apart.min(swapped) <= tolerance, "{name}: ends {ends:?}");
+        }
+    }
+
+    /// Exploration (removed before review): plane x = 11/8 - delta against the barrel of
+    /// `ssi-revolution-plane-near-profile-extremum`, both orders.
+    #[test]
+    #[ignore = "exploration"]
+    fn explore_17720_tiny_loop() {
+        use solidcore::intersect::surface_intersector::p1::SurfaceIntersector;
+        let name = "ssi-revolution-plane-near-profile-extremum-swapped";
+        let case = crate::case::regression_case(&Runner, name);
+        let Inputs::Surfaces { surface2, .. } = case.parse().unwrap() else {
+            panic!();
+        };
+        let mut k = Kernel::default();
+        let rev = build_surface(&mut k, &surface2).unwrap();
+        for delta in [1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 2e-1] {
+            let plane = build_surface(
+                &mut k,
+                &SurfaceIn::Analytic {
+                    shape: AnalyticIn::Plane {
+                        origin: [1.375 - delta, 0.0, 0.0],
+                        x: [0.0, 1.0, 0.0],
+                        y: [0.0, 0.0, 1.0],
+                    },
+                    domain: None,
+                },
+            )
+            .unwrap();
+            for (order, a, b) in [("plane", &plane, &rev), ("rev", &rev, &plane)] {
+                let da = a.natural_uv_domain_with_nurb(&k).unwrap();
+                let db = b.natural_uv_domain_with_nurb(&k).unwrap();
+                let tau = SurfaceIntersector::new(&k, a, &da, b, &db, false)
+                    .unwrap()
+                    .this_approx_tol_3d;
+                let (r, st) =
+                    a.global_surface_intersect_with_partial(&k, &da, b, &db, [true, true], None, None);
+                let (curves, status) = intersect_surfaces(&k, a, b);
+                println!(
+                    "delta={delta:e} {order} tau={tau:e} global={st:?} types={:?} dev={:?} api={} {:?}",
+                    r.curve_types,
+                    r.deviations,
+                    curves.len(),
+                    status.err().map(|e| e.to_string())
+                );
+            }
         }
     }
 

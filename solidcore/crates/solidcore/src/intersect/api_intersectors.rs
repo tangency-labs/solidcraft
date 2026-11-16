@@ -46,8 +46,8 @@
 //! curve with its natural interval). `SM_ASSERT_VALID` and the
 //! `SM_DEBUG_CODE` drawing are not ported. Not upstream (tangency-labs/solidcraft#17720):
 //! [`intersect_surfaces`] and [`intersect_surfaces_within`] refuse a result of touching
-//! points only, any farther from the surfaces than the other surface's own tolerance
-//! (and than the caller's tolerance of [`intersect_surfaces_within`], when larger),
+//! points only, any farther from the surfaces than their default tolerance (and than
+//! the caller's tolerance of [`intersect_surfaces_within`], when larger),
 //! between a plane and a surface the plane crosses
 //! ([`IntersectFailure::PointsWhereAPlaneCrosses`]); upstream returns the points.
 
@@ -351,12 +351,15 @@ const CROSSING_WITNESS_REL: f64 = 1e-9;
 /// `f` separates them in the domain, so it holds a continuum, not isolated points. When
 /// the other surface's box lies over the plane's domain, every zero is a point of both
 /// surfaces, so the intersection has a curve. Touching points are still an answer when
-/// each lies within the other surface's own tolerance of both surfaces (its deviation),
+/// each lies within the surfaces' default tolerance of both surfaces (its deviation),
 /// as for a crossing curve smaller than that tolerance, or within `approx_tol_3d` when
 /// the caller gives a larger one (an answer at the size the caller asked for); a point
 /// farther apart than both is the wrong answer, and the result is refused. The grid
 /// only finds witnesses: a result with no witness on one side is kept as before, as is
-/// one whose tolerances cannot be computed.
+/// one whose tolerances cannot be computed. The default is the same in either order
+/// ([`SurfaceIntersector::new`]), so this is a post-condition on any plane pair: a
+/// crossing loop between that tolerance and about a hundred times it can still be
+/// traced as one touching point.
 ///
 /// # Errors
 ///
@@ -457,8 +460,8 @@ fn refuse_points_where_a_plane_crosses(
         return Ok(());
     };
     let surface_tolerance = other_first.this_approx_tol_3d;
-    // a point within the other surface's own tolerance of both surfaces is an answer at
-    // that surface's size (a crossing curve smaller than the tolerance, as at a cone's
+    // a point within the default tolerance of both surfaces is an answer at the
+    // surfaces' size (a crossing curve smaller than the tolerance, as at a cone's
     // apex), and one within the caller's tolerance is an answer at the size the caller
     // asked for; only points farther apart than both are refused (a NaN deviation is
     // not within)

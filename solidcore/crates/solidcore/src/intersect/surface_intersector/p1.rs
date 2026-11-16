@@ -105,6 +105,15 @@
 //!   span ([`SurfaceIntersector::span_images_certified`], [`super::sphere_span`],
 //!   bisection depth bound [`super::sphere_span::MAX_DEPTH`]). Otherwise it is rejected as
 //!   a sampled failure is, and the trace shortens its step.
+//! - **The default tolerance from both surfaces (not upstream).** Upstream's constructor
+//!   says its default is "based on the sizes of the surfaces" but sizes it from surface 1
+//!   alone, so a plane first ran at a thousandth of its 2.47e6 natural domain and the
+//!   swapped order at the other surface's size. Here each surface gives a scale
+//!   (`default_tolerance_measure`: its size over a bounded domain, the cross-section
+//!   at the parameter nearest 0 when one range is unbounded, none for two) and the
+//!   default is the smaller scale over 1000, then the smaller size, then upstream's
+//!   size of surface 1. Surface 2's evaluations now propagate `Unported` and
+//!   cancellation as surface 1's do.
 //! - **Not ported here.** `SmTsectPnt::Dump` / `Draw` (debug output) and the
 //!   `SM_DEBUG_CODE` blocks (graphics and jump statistics).
 //!
@@ -123,7 +132,9 @@ use crate::geom::tol::is_zero;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::{max2, max3, min2, EFF_ZERO, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
+use crate::math::{
+    max2, max3, min2, EFF_ZERO, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF_ZERO_SQRT, INFINITE_PARAMETER, PI,
+};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::knots::Side;
@@ -726,6 +737,86 @@ fn or_keep<T>(r: Result<T>, fallback: T) -> Result<T> {
     }
 }
 
+/// What one surface over the caller's domain gives the default tolerance of
+/// [`SurfaceIntersector::new`]: each value only when it counts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ToleranceMeasure {
+    /// Upstream's size, `|P(min) P(mid)| + |P(mid) P(max)|`.
+    size: Option<f64>,
+    /// The size for a bounded domain; with exactly one parameter range unbounded, the
+    /// same polyline along the bounded range at the point of the unbounded range nearest
+    /// 0; none when both ranges are unbounded.
+    scale: Option<f64>,
+}
+
+/// `|P(a) P(m)| + |P(m) P(b)|` on `surface`: `None` unless all three evaluations
+/// succeed and the length is finite and positive (`Unported` and cancellation
+/// propagate).
+fn polyline_length(k: &Kernel, surface: &Surface, uvs: [Point2; 3]) -> Result<Option<f64>> {
+    let mut pts = [Vec3::UNDEF; 3];
+    for (p, uv) in pts.iter_mut().zip(uvs) {
+        match or_keep(surface.evaluate_point(k, uv).map(Some), None)? {
+            Some(q) => *p = q,
+            None => return Ok(None),
+        }
+    }
+    let [a, m, b] = pts;
+    let length = a.distance(m) + m.distance(b);
+    Ok((length.is_finite() && length > 0.0).then_some(length))
+}
+
+/// Not upstream (tangency-labs/solidcraft#17720): the size and scale of `surface` over
+/// `domain` for the default tolerance of [`SurfaceIntersector::new`]. A domain with an
+/// inverted range (the inside-out extent among them) gives neither. A parameter range is
+/// unbounded when it is at least [`INFINITE_PARAMETER`] long. With exactly one
+/// unbounded range the scale is taken at `clamp(0, lo, hi)` of that range: an
+/// extrusion's profile, a cylinder's reference circle, an unbounded cone's base circle.
+///
+/// # Errors
+///
+/// `Unported` and cancellation from the surface's evaluations.
+fn default_tolerance_measure(
+    k: &Kernel,
+    surface: &Surface,
+    domain: &Extent2d,
+) -> Result<ToleranceMeasure> {
+    if domain.has_negative_area() {
+        return Ok(ToleranceMeasure {
+            size: None,
+            scale: None,
+        });
+    }
+    let size = polyline_length(
+        k,
+        surface,
+        [domain.min(), domain.evaluate(0.5, 0.5), domain.max()],
+    )?;
+    let unbounded = |lo: f64, hi: f64| hi - lo >= INFINITE_PARAMETER;
+    let nearest_zero = |lo: f64, hi: f64| min2(max2(0.0, lo), hi);
+    let (u0, u1, v0, v1) = (
+        domain.u_min(),
+        domain.u_max(),
+        domain.v_min(),
+        domain.v_max(),
+    );
+    let (um, vm) = (0.5 * (u0 + u1), 0.5 * (v0 + v1));
+    let scale = match (unbounded(u0, u1), unbounded(v0, v1)) {
+        (false, false) => size,
+        (false, true) => {
+            let v = nearest_zero(v0, v1);
+            let uvs = [Point2::new(u0, v), Point2::new(um, v), Point2::new(u1, v)];
+            polyline_length(k, surface, uvs)?
+        }
+        (true, false) => {
+            let u = nearest_zero(u0, u1);
+            let uvs = [Point2::new(u, v0), Point2::new(u, vm), Point2::new(u, v1)];
+            polyline_length(k, surface, uvs)?
+        }
+        (true, true) => None,
+    };
+    Ok(ToleranceMeasure { size, scale })
+}
+
 impl<'s> SurfaceIntersector<'s> {
     /// The intersector of `surface1` over `uv_domain1` and `surface2` over
     /// `uv_domain2` (`SmSurfaceIntersector(...)`; upstream default
@@ -733,9 +824,16 @@ impl<'s> SurfaceIntersector<'s> {
     ///
     /// Unless `from_fillet_intersector`, a domain not contained in its surface's
     /// natural domain is cut to the overlap (reset to the inside-out extent when they
-    /// are disjoint). The closedness flags and the default tolerance
-    /// `this_approx_tol_3d = (|P(min) P(mid)| + |P(mid) P(max)|) / 1000` are taken
-    /// on the given domains.
+    /// are disjoint). The closedness flags and the default tolerance are taken on the
+    /// given domains: `this_approx_tol_3d` is the smaller scale of the two surfaces over
+    /// 1000; with no scale, the smaller size; with no size either, upstream's
+    /// `(|P(min) P(mid)| + |P(mid) P(max)|) / 1000` of `surface1`
+    /// (`default_tolerance_measure`).
+    ///
+    /// # Errors
+    ///
+    /// `Unported` and cancellation from either surface's evaluations, and those of the
+    /// natural domains and closedness tests.
     pub fn new(
         k: &Kernel,
         surface1: &'s Surface,
@@ -773,15 +871,30 @@ impl<'s> SurfaceIntersector<'s> {
         let closed_v1 = surface_is_closed(k, surface2, uv_domain2, SurfParamType::V)?;
 
         // Compute a reasonable default tolerance for intersection based on the sizes
-        // of the surfaces (statuses are only reported upstream).
-        let p1 = or_keep(surface1.evaluate_point(k, uv_domain1.min()), Vec3::UNDEF)?;
-        let p_mid = or_keep(
-            surface1.evaluate_point(k, uv_domain1.evaluate(0.5, 0.5)),
-            Vec3::UNDEF,
-        )?;
-        let p2 = or_keep(surface1.evaluate_point(k, uv_domain1.max()), Vec3::UNDEF)?;
-        let size = p1.distance(p_mid) + p_mid.distance(p2);
-        let this_approx_tol_3d = size / 1000.0; // accuracy is 1/1000th size of surface
+        // of the surfaces (not upstream, which sizes it from surface1 alone; see
+        // `default_tolerance_measure`).
+        let m1 = default_tolerance_measure(k, surface1, uv_domain1)?;
+        let m2 = default_tolerance_measure(k, surface2, uv_domain2)?;
+        let least = |a: Option<f64>, b: Option<f64>| match (a, b) {
+            (Some(a), Some(b)) => Some(min2(a, b)),
+            (a, b) => a.or(b),
+        };
+        let this_approx_tol_3d = match (least(m1.scale, m2.scale), least(m1.size, m2.size)) {
+            (Some(scale), _) => scale / 1000.0,
+            (None, Some(size)) => size / 1000.0,
+            // degenerate input on both sides: upstream's size of surface1 (statuses
+            // are only reported upstream)
+            (None, None) => {
+                let p1 = or_keep(surface1.evaluate_point(k, uv_domain1.min()), Vec3::UNDEF)?;
+                let p_mid = or_keep(
+                    surface1.evaluate_point(k, uv_domain1.evaluate(0.5, 0.5)),
+                    Vec3::UNDEF,
+                )?;
+                let p2 = or_keep(surface1.evaluate_point(k, uv_domain1.max()), Vec3::UNDEF)?;
+                let size = p1.distance(p_mid) + p_mid.distance(p2);
+                size / 1000.0 // accuracy is 1/1000th size of surface
+            }
+        };
 
         Ok(Self {
             surfaces: [surface1, surface2],
@@ -2747,6 +2860,219 @@ mod tests {
         assert_eq!(si.compute_step_size(0.5), 0.5);
         let same = SurfaceIntersector::new(k, &s1, &d, &s1, &d, false).unwrap();
         assert!(same.doing_self_intersection);
+    }
+
+    /// The default tolerances of `s1` over `d1` with `s2` over `d2`, in both orders.
+    fn default_tolerances(
+        k: &Kernel,
+        (s1, d1): (&Surface, &Extent2d),
+        (s2, d2): (&Surface, &Extent2d),
+    ) -> [f64; 2] {
+        let tol = |a, da, b, db| {
+            SurfaceIntersector::new(k, a, da, b, db, false)
+                .unwrap()
+                .this_approx_tol_3d
+        };
+        [tol(s1, d1, s2, d2), tol(s2, d2, s1, d1)]
+    }
+
+    fn assert_near(got: [f64; 2], want: f64) {
+        for t in got {
+            assert!((t - want).abs() <= 1e-12 * want, "{got:?}, want {want}");
+        }
+    }
+
+    fn frame(
+        o: [f64; 3],
+        x: [f64; 3],
+        y: [f64; 3],
+    ) -> crate::geom::axis2_placement::Axis2Placement {
+        let mut f = crate::geom::axis2_placement::Axis2Placement::default();
+        f.set_canonical(
+            Vec3::from_array(o),
+            Vec3::from_array(x),
+            Vec3::from_array(y),
+        )
+        .unwrap();
+        f
+    }
+
+    /// The plane through `o` spanned by `x` and `y` over its natural domain,
+    /// `[-1234567, 1234567]^2`.
+    fn infinite_plane(o: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Surface {
+        Surface::from(Plane::create_canonical(&frame(o, x, y)).unwrap())
+    }
+
+    fn horizontal_plane(z: f64) -> Surface {
+        infinite_plane([0.0, 0.0, z], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+    }
+
+    /// The cone with no height of base radius `2 s` at `(1, 2, 3) s` and semi-angle
+    /// `semi_angle_deg`: its base circle is its cross-section at height 0.
+    fn unbounded_cone(k: &Kernel, s: f64, semi_angle_deg: f64, swap_uv: bool) -> Surface {
+        Surface::from(
+            crate::surface::cone::Cone::create_canonical_with_semi_angle(
+                k,
+                &frame([s, 2.0 * s, 3.0 * s], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+                2.0 * s,
+                semi_angle_deg,
+                None,
+                swap_uv,
+                false,
+            )
+            .unwrap(),
+        )
+    }
+
+    /// The extrusion along z of the profile from (0, 0, 0) to (3, 0, 0) (a cubic Bezier
+    /// with evenly spaced control points, so `x = 3u`), over `[-1234567, 1234567]` in v.
+    fn extrusion(k: &Kernel) -> Surface {
+        let profile: Vec<Point3> = (0..4).map(|i| Vec3::new(f64::from(i), 0.0, 0.0)).collect();
+        let profile = Curve::from(crate::primitive::api_curves::create_curve(&profile).unwrap());
+        Surface::from(
+            crate::surface::surf_of_extrusion::SurfOfExtrusion::create_canonical(
+                k,
+                profile,
+                Vec3::new(0.0, 0.0, 1.0),
+            )
+            .unwrap(),
+        )
+    }
+
+    /// tangency-labs/solidcraft#17720: two planes over their natural domains have no
+    /// scale (both ranges unbounded), so the default falls back to the smaller size,
+    /// `2 sqrt(2) 1234567 / 1000 = 3491.9`, upstream's value, in either order.
+    #[test]
+    fn two_infinite_planes_keep_the_size_default() {
+        let k = &Kernel::default();
+        let a = horizontal_plane(0.0);
+        let b = infinite_plane([5.0, -1.0, 2.0], [0.0, 0.6, 0.8], [1.0, 0.0, 0.0]);
+        let (da, db) = (
+            a.natural_uv_domain_with_nurb(k).unwrap(),
+            b.natural_uv_domain_with_nurb(k).unwrap(),
+        );
+        let got = default_tolerances(k, (&a, &da), (&b, &db));
+        assert_near(got, 2.0 * 2.0f64.sqrt() * INFINITE_PARAMETER / 1000.0);
+    }
+
+    /// tangency-labs/solidcraft#17720: a cone with no height runs over `[apex, 1234567]`
+    /// in v (`[-1234567, apex]` for a negative semi-angle), unbounded, so its scale is its
+    /// cross-section at height 0, the base circle, `4 r` along `[0, 360]`. Against a plane
+    /// over its natural domain (no scale) the default is `4 r / 1000` in either order, and
+    /// it scales with the model.
+    #[test]
+    fn an_unbounded_cone_scales_by_its_base_circle() {
+        let k = &Kernel::default();
+        for s in [1.0, 10.0] {
+            for semi_angle in [30.0, -30.0] {
+                let cone = unbounded_cone(k, s, semi_angle, false);
+                let dc = cone.natural_uv_domain_with_nurb(k).unwrap();
+                assert!(dc.v_max() - dc.v_min() >= INFINITE_PARAMETER, "{dc:?}");
+                let plane = horizontal_plane(7.0 * s);
+                let dp = plane.natural_uv_domain_with_nurb(k).unwrap();
+                let got = default_tolerances(k, (&cone, &dc), (&plane, &dp));
+                assert_near(got, 4.0 * 2.0 * s / 1000.0);
+            }
+        }
+    }
+
+    /// tangency-labs/solidcraft#17720: swapped, the cone's unbounded range is u, and its
+    /// scale is taken along v at the u nearest 0: the same default as unswapped.
+    #[test]
+    fn a_swapped_cone_scales_as_the_unswapped_one() {
+        let k = &Kernel::default();
+        let plane = horizontal_plane(0.0);
+        let dp = plane.natural_uv_domain_with_nurb(k).unwrap();
+        let tol = |swap| {
+            let cone = unbounded_cone(k, 1.0, 30.0, swap);
+            let dc = cone.natural_uv_domain_with_nurb(k).unwrap();
+            let long_u = dc.u_max() - dc.u_min() >= INFINITE_PARAMETER;
+            assert_eq!(long_u, swap, "{dc:?}");
+            default_tolerances(k, (&cone, &dc), (&plane, &dp))
+        };
+        let unswapped = tol(false);
+        assert_near(unswapped, 8.0 / 1000.0);
+        assert_near(tol(true), unswapped[0]);
+    }
+
+    /// tangency-labs/solidcraft#17720: an extrusion's scale is its profile (length 3)
+    /// whenever its sweep range is unbounded, `[-1234567, 1234567]` or the half-infinite
+    /// `[0, 1234567]`. A range one shorter is bounded, and the scale is then the size
+    /// along the diagonal, `2 sqrt(1.5^2 + 617283^2)`: the default jumps by about 4e5 at
+    /// that cut, which this rule inherits from upstream's `INFINITE_PARAMETER` (a limit,
+    /// not a fix).
+    #[test]
+    fn an_extrusion_scales_by_its_profile_over_an_unbounded_sweep() {
+        let k = &Kernel::default();
+        let e = extrusion(k);
+        let plane = horizontal_plane(2.0);
+        let dp = plane.natural_uv_domain_with_nurb(k).unwrap();
+        let natural = e.natural_uv_domain_with_nurb(k).unwrap();
+        let (u0, u1) = (natural.u_min(), natural.u_max());
+        for d in [
+            natural,
+            Extent2d::from_bounds(u0, 0.0, u1, INFINITE_PARAMETER),
+        ] {
+            assert_near(default_tolerances(k, (&e, &d), (&plane, &dp)), 3.0 / 1000.0);
+        }
+        let short = Extent2d::from_bounds(u0, 0.0, u1, INFINITE_PARAMETER - 1.0);
+        let half = 0.5 * (INFINITE_PARAMETER - 1.0);
+        let diagonal = 2.0 * (1.5f64 * 1.5 + half * half).sqrt();
+        assert_near(
+            default_tolerances(k, (&e, &short), (&plane, &dp)),
+            diagonal / 1000.0,
+        );
+    }
+
+    /// tangency-labs/solidcraft#17720: a surface counts for the default only over a domain
+    /// of positive area and where all its evaluations succeed; otherwise the other surface
+    /// decides, in either order. Here the unit plane (size `sqrt 2`) over the inside-out
+    /// extent, and a STEP surface with no base surface (every evaluation `InvalidInput`),
+    /// leave the cone's `8 / 1000`.
+    #[test]
+    fn a_surface_that_cannot_be_measured_leaves_the_other_one() {
+        let k = &Kernel::default();
+        let cone = unbounded_cone(k, 1.0, 30.0, false);
+        let dc = cone.natural_uv_domain_with_nurb(k).unwrap();
+        let unit = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let measured = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        assert_near(
+            default_tolerances(k, (&unit, &measured), (&cone, &dc)),
+            2.0f64.sqrt() / 1000.0,
+        );
+        assert_near(
+            default_tolerances(k, (&unit, &Extent2d::new()), (&cone, &dc)),
+            8.0 / 1000.0,
+        );
+        let empty = Surface::from(crate::surface::surface::StepSurface::empty());
+        assert!(empty.evaluate_point(k, Point2::new(0.5, 0.5)).is_err());
+        assert_near(
+            default_tolerances(k, (&empty, &measured), (&cone, &dc)),
+            8.0 / 1000.0,
+        );
+    }
+
+    /// tangency-labs/solidcraft#17720: a cancelled kernel stops the constructor with the
+    /// cancellation, whichever surface comes first.
+    #[test]
+    fn a_cancelled_kernel_stops_the_default_tolerance() {
+        let built = &Kernel::default();
+        let cone = unbounded_cone(built, 1.0, 30.0, false);
+        let dc = cone.natural_uv_domain_with_nurb(built).unwrap();
+        let plane = horizontal_plane(0.0);
+        let dp = plane.natural_uv_domain_with_nurb(built).unwrap();
+        let mut k = Kernel::default();
+        let token = crate::kernel::CancelToken::new();
+        token.cancel();
+        k.cancel = Some(token);
+        for (a, da, b, db) in [(&cone, &dc, &plane, &dp), (&plane, &dp, &cone, &dc)] {
+            let r = SurfaceIntersector::new(&k, a, da, b, db, false);
+            assert!(
+                r.as_ref().is_err_and(SolidError::is_cancelled),
+                "{:?}",
+                r.map(|si| si.this_approx_tol_3d)
+            );
+        }
     }
 
     #[test]
