@@ -917,6 +917,40 @@ impl ProtoBrep<H> for ArenaPair<'_> {
             .map(|e| hd(v1.b, K_EDGE, e.index()))
             .collect())
     }
+    fn face_edge_proved_along(
+        &self,
+        k: &Kernel,
+        face: H,
+        start: H,
+        end: H,
+        curve: &SmCurve,
+        interval: Extent1d,
+        tolerance: f64,
+    ) -> crate::Result<Option<H>> {
+        if face.kind != K_FACE
+            || start.kind != K_VERTEX
+            || end.kind != K_VERTEX
+            || start.b != face.b
+            || end.b != face.b
+        {
+            return Err(invalid("not a face and two of its B-rep's vertices"));
+        }
+        let b = self.brep_r(face)?;
+        let edges = crate::topology::face::p4::edges(b, fid(face), None, false, None)?;
+        let query = crate::geom::tools::CoincidentEdgeQuery {
+            start_vertex: vid(start),
+            end_vertex: vid(end),
+            curve,
+            curve_owner: None,
+            interval,
+            tolerance,
+        };
+        Ok(
+            crate::geom::tools::find_edge_proved_along(k, b, &query, &edges)?
+                .and_then(|found| edges.get(found))
+                .map(|e| hd(face.b, K_EDGE, e.index())),
+        )
+    }
     fn raise_edge_tolerance(&mut self, k: &Kernel, edge: H, tolerance: f64) -> crate::Result<()> {
         if edge.kind != K_EDGE {
             return Err(invalid("not an edge handle"));

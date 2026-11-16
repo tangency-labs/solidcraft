@@ -189,7 +189,6 @@ const APP_BAR_HANDLES: app_bar::Handles<'static> = app_bar::Handles {
     home_rect: &["titlebar:home", "appbar:home"],
     file: &["appbar:file", "appbar:folder"],
     file_rect: &["appbar:file"],
-    plugins: "appbar:plugins",
     button: &["appbar:", "titlebar:"],
     separator: "titlebar:separator:",
     search: "titlebar:search",
@@ -242,9 +241,6 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
                 file: app.tr("ui.file"),
                 file_open,
-                // The web build runs no plugins: no Plugins menu there. Its accessible name says
-                // "menu", so it is not taken for Preferences' Plugins page.
-                plugins: (!cfg!(target_arch = "wasm32")).then(|| (app.tr("ui.plugins"), app.plugin_menu.open, app.tr("ui.plugin_menu_name"))),
                 actions: vec![
                     action("save", "save", &save_tip, shown, false),
                     action("undo", "undo", &undo_tip, shown, true),
@@ -270,21 +266,13 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 handles: APP_BAR_HANDLES,
             };
             let out = app_bar::show(ui, &bar, r, content);
-            app.plugin_menu.in_file_menu = out.plugins_in_file;
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu_x"), out.file.left()));
             for action in &out.actions {
                 match action {
                     app_bar::BarAction::Home => app.home.show(app.session.revision),
-                    app_bar::BarAction::Plugins { rect } => {
-                        app.ui.palette_open = false;
-                        crate::plugin_menu::toggle(app, &ui.ctx().clone(), *rect);
-                    }
                     app_bar::BarAction::File { .. } => {
                         app.ui.palette_open = false;
                         app.plugin_menu.open = false;
-                        if app.plugin_menu.in_file_menu {
-                            crate::plugin_menu::refresh(app);
-                        }
                         let ctx = ui.ctx().clone();
                         let open = ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false));
                         let pass = ctx.cumulative_pass_nr();
@@ -474,7 +462,7 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 /// The File menu's rows, each named by what it runs ([`run_file_row`]).
-fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
+pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     use app_bar::{FileItem, FileRow};
     let row = |id: &str, label: &str, key: &str, icon: &str, enabled: bool| {
         FileRow::Item(FileItem { id: id.to_string(), label: label.to_string(), key: key.to_string(), icon: icon.to_string(), enabled })
@@ -532,9 +520,10 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(FileRow::Separator);
     rows.push(row("document.metadata", &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown));
     rows.push(FileRow::Separator);
-    // A narrow app bar has no room for the Plugins button: its menu is here instead.
-    if app.plugin_menu.in_file_menu {
-        rows.push(crate::plugin_menu::file_submenu(app));
+    // Plugins… opens Preferences on the Plugins page: install, turn on or off, and remove plugins
+    // there. The web build runs no plugins.
+    if !cfg!(target_arch = "wasm32") {
+        rows.push(row("plugins.preferences", &format!("{}…", app.tr("ui.plugins")), "", "prefs_plugins", true));
         rows.push(FileRow::Separator);
     }
     // The browser can install SolidCraft as an app (`install`): only while it offers to.
@@ -555,9 +544,9 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
 }
 
 /// Runs the File menu's row `id` ([`file_rows`]).
-fn run_file_row(app: &mut SolveApp, id: &str) {
-    if let Some(id) = id.strip_prefix("plugins:") {
-        crate::plugin_menu::choose(app, id);
+pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
+    if id == "plugins.preferences" {
+        crate::prefs::open_at(app, crate::prefs::PAGE_PLUGINS);
         return;
     }
     if crate::plugin_slots::items(app, crate::plugin_slots::Slot::Menu("File")).iter().any(|item| item.command == id) {

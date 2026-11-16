@@ -92,10 +92,8 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "offset_extension_from_base",
     "offset_open_edge_second_trim_point",
     "point_class_gap_3d_propagates_no_drop_error",
-    "point_solve_keeps_triangle_guess",
     "proto_edge_splits_at_captured_vertices",
     "proto_vertex_miss_is_false",
-    "revolution_round_offset_collapses",
     "revolve_analytic_profile_faces",
     "revolve_holed_profile_void",
     "shell_edges_on_analytics_exact",
@@ -106,7 +104,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "ssi_tangent_curve_tracer",
     "ssi_trace_tangent_curves_once",
     "surface_continuity_checks_last_v_knot",
-    "surface_parallel_to_vector_checks",
     "sweep_statuses_pass_on",
     "uv_trim_corner_end_points_only",
 ];

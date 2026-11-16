@@ -14,13 +14,10 @@ use solidcraft_viewport::Camera;
 
 /// The key the apps keep the preferences under in eframe's storage.
 pub const STORAGE_KEY: &str = "solidcraft.prefs";
-/// The key earlier releases used. Compatibility shim (docs/compatibility.md): read when the
-/// current key is missing, never written.
-pub const LEGACY_STORAGE_KEY: &str = "solvecraft.prefs";
 
-/// The stored preferences, from the current key or else the legacy one.
+/// The stored preferences.
 pub fn stored(get: impl Fn(&str) -> Option<String>) -> Option<String> {
-    get(STORAGE_KEY).or_else(|| get(LEGACY_STORAGE_KEY))
+    get(STORAGE_KEY)
 }
 
 mod design;
@@ -9562,11 +9559,10 @@ mod tests {
     }
 
     #[test]
-    fn stored_prefs_fall_back_to_the_legacy_key() {
-        let only_old = |k: &str| (k == super::LEGACY_STORAGE_KEY).then(|| "old".to_string());
-        assert_eq!(super::stored(only_old).as_deref(), Some("old"));
+    fn stored_prefs_come_from_the_current_key_only() {
         let both = |k: &str| Some(if k == super::STORAGE_KEY { "new" } else { "old" }.to_string());
         assert_eq!(super::stored(both).as_deref(), Some("new"));
+        assert_eq!(super::stored(|k| (k == "solvecraft.prefs").then(|| "old".to_string())), None);
         assert_eq!(super::stored(|_| None), None);
     }
 
