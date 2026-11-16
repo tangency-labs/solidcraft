@@ -1261,7 +1261,12 @@ mod tests {
             let corners = e.corners().map(|c| c.distance_along(origin, direction));
             let lowest = corners.iter().copied().fold(f64::INFINITY, f64::min);
             let highest = corners.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-            for (a, b) in [(got[0], want[0]), (got[1], want[1]), (lowest, want[0]), (highest, want[1])] {
+            for (a, b) in [
+                (got[0], want[0]),
+                (got[1], want[1]),
+                (lowest, want[0]),
+                (highest, want[1]),
+            ] {
                 assert!((a - b).abs() < 1e-12, "{direction:?}: {got:?} vs {want:?}");
             }
         }

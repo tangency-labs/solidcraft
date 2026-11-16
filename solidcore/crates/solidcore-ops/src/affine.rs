@@ -159,11 +159,17 @@ pub fn distance_along(origin: [f64; 3], direction: [f64; 3], point: [f64; 3]) ->
 ///
 /// # Errors
 /// [`Error::Argument`] for a number not finite, or a reach not.
-pub fn span_along(min: [f64; 3], max: [f64; 3], origin: [f64; 3], direction: [f64; 3]) -> Result<[f64; 2]> {
+pub fn span_along(
+    min: [f64; 3],
+    max: [f64; 3],
+    origin: [f64; 3],
+    direction: [f64; 3],
+) -> Result<[f64; 2]> {
     if !finite(&min) || !finite(&max) || !finite(&origin) || !finite(&direction) {
         return Err(Error::Argument);
     }
-    let span = Extent3d::from_points(vec3(min), vec3(max)).span_along(vec3(origin), vec3(direction));
+    let span =
+        Extent3d::from_points(vec3(min), vec3(max)).span_along(vec3(origin), vec3(direction));
     if !finite(&span) {
         return Err(Error::Argument);
     }
@@ -350,10 +356,25 @@ mod tests {
     #[test]
     fn span_along_takes_the_box_corners_either_way_round_and_refuses_what_is_not_finite() {
         let (o, d) = ([1.0, 1.0, 1.0], [1.0, 2.0, 2.0]);
-        assert_eq!(span_along([-1.0, 0.0, 2.0], [3.0, 5.0, 4.0], o, d), Ok([-2.0, 16.0]));
-        assert_eq!(span_along([3.0, 5.0, 4.0], [-1.0, 0.0, 2.0], o, d), Ok([-2.0, 16.0]));
-        assert_eq!(span_along([0.0; 3], [1.0; 3], o, [0.0, f64::NAN, 1.0]), Err(Error::Argument));
-        assert_eq!(span_along([0.0; 3], [f64::INFINITY; 3], o, d), Err(Error::Argument));
-        assert_eq!(span_along([0.0; 3], [f64::MAX; 3], o, d), Err(Error::Argument));
+        assert_eq!(
+            span_along([-1.0, 0.0, 2.0], [3.0, 5.0, 4.0], o, d),
+            Ok([-2.0, 16.0])
+        );
+        assert_eq!(
+            span_along([3.0, 5.0, 4.0], [-1.0, 0.0, 2.0], o, d),
+            Ok([-2.0, 16.0])
+        );
+        assert_eq!(
+            span_along([0.0; 3], [1.0; 3], o, [0.0, f64::NAN, 1.0]),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            span_along([0.0; 3], [f64::INFINITY; 3], o, d),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            span_along([0.0; 3], [f64::MAX; 3], o, d),
+            Err(Error::Argument)
+        );
     }
 }
