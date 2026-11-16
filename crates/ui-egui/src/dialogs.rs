@@ -6673,6 +6673,13 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             } else {
                 crate::primitive_placement::params(s, cmd, &d.extra, &mut p);
             }
+            // Flip winds the coil the other way along its axis, downward from a sketch profile
+            // (#17870): the reversed axis keeps the coil's hand, where a negative pitch mirrors it.
+            if *cmd == "solid.coil" && coil_flipped(&d.extra) {
+                let axis = p.get("axis").or_else(|| d.extra.get("axis")).and_then(|a| serde_json::from_value::<[f64; 3]>(a.clone()).ok());
+                let [x, y, z] = axis.unwrap_or([0.0, 0.0, 1.0]);
+                p.insert("axis".into(), json!([-x, -y, -z]));
+            }
             p.insert("operation".into(), json!(OPS.get(*operation).copied().unwrap_or("new")));
             (cmd, Value::Object(p))
         }
@@ -6744,8 +6751,15 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
     if let Value::Object(m) = &mut params {
         // A fillet option that doesn't apply with the others is never sent.
         let fillet = matches!(d.kind, Kind::Fillet { chamfer: false, .. });
+        let coil = matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. });
+        let coil_from_sketch = coil && m.contains_key("sketch");
         for (k, v) in &d.extra {
             if fillet && !dense::fillet_option_applies(&d.extra, k) {
+                continue;
+            }
+            // Flip is the dialog's own (it reverses the axis); a sketch profile brings its own
+            // section, so the primitive section's options are never sent with it (#17870).
+            if coil && (k == "flip" || (coil_from_sketch && COIL_SECTION_OPTIONS.contains(&k.as_str()))) {
                 continue;
             }
             m.entry(k.clone()).or_insert_with(|| v.clone());
@@ -7575,6 +7589,15 @@ fn world_axis(d: Vec3) -> Option<String> {
 
 fn pt3(v: Vec3) -> Value {
     json!([v.x, v.y, v.z])
+}
+
+/// The Coil dialog's options that shape the primitive section, which `solid.coil` refuses with a
+/// sketch profile (#17870).
+const COIL_SECTION_OPTIONS: [&str; 3] = ["section", "section_position", "start_angle"];
+
+/// Whether the Coil dialog's Flip is on: the coil winds the other way along its axis (#17870).
+fn coil_flipped(extra: &serde_json::Map<String, Value>) -> bool {
+    extra.get("flip").and_then(Value::as_bool).unwrap_or(false)
 }
 
 /// A point of expressions: numbers as numbers, expressions as strings.
