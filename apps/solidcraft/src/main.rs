@@ -330,7 +330,7 @@ impl eframe::App for App {
             menu.raw_input_hook(&mut self.solve, ctx, raw);
         }
         #[cfg(target_os = "macos")]
-        macos_fullscreen_content(ctx, raw);
+        macos_fullscreen_title_bar();
         // Before the app's own hook, which adds the control channel's events.
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         if let Some(space_mouse) = &mut self.space_mouse {
@@ -635,26 +635,37 @@ fn content_ui(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui.scope_builder(egui::UiBuilder::new().max_rect(content), |ui| app.ui(ui));
 }
 
-/// A transparent macOS title bar still intercepts clicks at the top in fullscreen (#3643).
-/// `contentLayoutRect` reports the whole content view once that bar auto-hides, so reserve
-/// the native titled-window height even then. AppKit supplies the height in logical points;
-/// egui's UI zoom is separate from the display's Retina scale.
+/// macOS full screen: AppKit moves the title bar (the traffic lights) into a window of its own
+/// over the top of the app's window, invisible (alpha 0) until the pointer reaches the top of the
+/// screen, when it slides down over the application bar like any full-screen app's. The bar keeps
+/// its place under it: no strip is reserved, so the bar starts right below the menu bar or the
+/// notch. That invisible window must not take the clicks meant for File, Undo and Redo under it
+/// (#3643): while it is fully transparent it ignores the mouse, and it takes clicks again as soon
+/// as it shows. The pointer moving over it reaches the app then, so the next frame restores it.
 #[cfg(target_os = "macos")]
-fn macos_fullscreen_content(ctx: &egui::Context, raw: &mut egui::RawInput) {
+fn macos_fullscreen_title_bar() {
+    use objc2_app_kit::{NSApplication, NSWindowButton, NSWindowStyleMask};
     let Some(mtm) = objc2::MainThreadMarker::new() else { return };
-    let frame = objc2_app_kit::NSWindow::frameRectForContentRect_styleMask(Default::default(), objc2_app_kit::NSWindowStyleMask::Titled, mtm);
-    fullscreen_content_insets(raw, frame.size.height as f32, ctx.zoom_factor());
+    for window in NSApplication::sharedApplication(mtm).windows().iter() {
+        if !window.styleMask().contains(NSWindowStyleMask::FullScreen) {
+            continue;
+        }
+        // In full screen the close button lives in the title bar's own window.
+        let Some(bar) = window.standardWindowButton(NSWindowButton::CloseButton).and_then(|b| b.window()) else { continue };
+        if bar == window {
+            continue;
+        }
+        let ignore = hidden_title_bar_ignores_clicks(bar.alphaValue());
+        if bar.ignoresMouseEvents() != ignore {
+            bar.setIgnoresMouseEvents(ignore);
+        }
+    }
 }
 
+/// The full-screen title bar's window lets clicks through while it can't be seen.
 #[cfg(any(target_os = "macos", test))]
-fn fullscreen_content_insets(raw: &mut egui::RawInput, title_height: f32, zoom: f32) {
-    let fullscreen = raw.viewports.get(&raw.viewport_id).and_then(|v| v.fullscreen).unwrap_or(false);
-    let mut insets = raw.safe_area_insets.unwrap_or_default();
-    if fullscreen && title_height.is_finite() && title_height > 0.0 && zoom.is_finite() && zoom > 0.0 {
-        insets.0.top = insets.0.top.max(title_height / zoom);
-    }
-    // Explicitly reset on leaving fullscreen: None would retain the preceding frame's inset.
-    raw.safe_area_insets = Some(insets);
+fn hidden_title_bar_ignores_clicks(alpha: f64) -> bool {
+    alpha.is_nan() || alpha <= 0.0
 }
 
 fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services {
@@ -2151,13 +2162,14 @@ mod viewport_tests {
         assert_eq!(viewport.app_id.as_deref(), Some(super::APP_ID));
     }
 
+    /// Full screen keeps the application bar at the top of the window, with no strip reserved
+    /// above it, and Undo and Redo in the bar keep working (#3643).
     #[test]
-    fn fullscreen_bar_clears_native_chrome_and_undo_redo_keep_working() {
+    fn fullscreen_bar_starts_at_the_top_and_undo_redo_keep_working() {
         use egui::{Event, PointerButton, Pos2, RawInput, Rect, ViewportId, vec2};
         use serde_json::json;
         use solidcraft_ui_egui::scenario::handle_at;
 
-        // AppKit points are independent of Retina scale and of the user's UI zoom.
         for (zoom, retina) in [(1.0, 1.0), (1.0, 2.0), (1.5, 2.0), (2.0, 2.0)] {
             let ctx = egui::Context::default();
             solidcraft_ui_egui::fonts::setup_bundled_fonts(&ctx);
@@ -2185,17 +2197,15 @@ mod viewport_tests {
                 let viewport = raw.viewports.get_mut(&ViewportId::ROOT).unwrap();
                 viewport.fullscreen = Some(fullscreen);
                 viewport.native_pixels_per_point = Some(retina);
-                super::fullscreen_content_insets(&mut raw, 32.0, zoom);
                 ctx.run_ui(raw, |ui| super::content_ui(app, ui)).textures_delta.clear();
             };
-            // Enter, leave, and enter again: no stale inset when returning to a normal window.
+            // Enter, leave, and enter again: nothing stale when returning to a normal window.
             for fullscreen in [false, true, false, true] {
                 frame(&mut app, fullscreen, vec![]);
                 frame(&mut app, fullscreen, vec![]);
-                let top = if fullscreen { 32.0 / zoom } else { 0.0 };
                 for name in ["appbar:file", "appbar:undo", "appbar:redo", "appbar:help"] {
                     let at = handle_at(name).unwrap();
-                    assert!((at.y - top - 17.0).abs() < 0.1, "{name}: {at:?}, fullscreen={fullscreen}, zoom={zoom}");
+                    assert!((at.y - 17.0).abs() < 0.1, "{name}: {at:?}, fullscreen={fullscreen}, zoom={zoom}");
                 }
                 for (handle, bodies) in [("appbar:undo", 0), ("appbar:redo", 1)] {
                     let at = handle_at(handle).unwrap();
@@ -2214,19 +2224,11 @@ mod viewport_tests {
     }
 
     #[test]
-    fn fullscreen_inset_preserves_existing_safe_areas_and_resets_on_exit() {
-        use egui::epaint::MarginF32;
-        use egui::{RawInput, SafeAreaInsets, ViewportId};
-        let mut raw = RawInput::default();
-        raw.viewports.get_mut(&ViewportId::ROOT).unwrap().fullscreen = Some(true);
-        raw.safe_area_insets = Some(SafeAreaInsets(MarginF32 { top: 40.0, left: 5.0, right: 6.0, bottom: 7.0 }));
-        super::fullscreen_content_insets(&mut raw, 32.0, 2.0);
-        assert_eq!(raw.safe_area_insets.unwrap().0, MarginF32 { top: 40.0, left: 5.0, right: 6.0, bottom: 7.0 });
-
-        raw.viewports.get_mut(&ViewportId::ROOT).unwrap().fullscreen = Some(false);
-        raw.safe_area_insets = None;
-        super::fullscreen_content_insets(&mut raw, 32.0, 1.0);
-        assert_eq!(raw.safe_area_insets, Some(SafeAreaInsets::default()));
+    fn hidden_fullscreen_title_bar_lets_clicks_through_only_while_unseen() {
+        assert!(super::hidden_title_bar_ignores_clicks(0.0));
+        assert!(super::hidden_title_bar_ignores_clicks(f64::NAN));
+        assert!(!super::hidden_title_bar_ignores_clicks(0.01));
+        assert!(!super::hidden_title_bar_ignores_clicks(1.0));
     }
 }
 
