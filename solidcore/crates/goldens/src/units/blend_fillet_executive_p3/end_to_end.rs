@@ -1839,7 +1839,8 @@ mod tests {
 /// closed result, the volume. [`solidcore::mass::enclosure::enclose_volume`] encloses the
 /// volume of the body as stored (the nets) with a certified `[lo, hi]`; the body bounded by
 /// the definitions differs from it by at most `sum A_f d_f` (each face within `d_f` of its
-/// net, `A_f` its area), bounded above by the certified area times the largest `d_f`. The
+/// net, `A_f` its area), bounded above by summing each blend face's certified area
+/// enclosure's upper end times its `d_f`. The
 /// volume the integrator converges to (its finest accuracy) lies in that band. The area,
 /// centroid, inertias and products are enclosed likewise
 /// ([`solidcore::mass::enclosure::enclose_mass_properties`], the body as stored), and the
@@ -1852,24 +1853,27 @@ mod tests {
 pub(super) mod round_definition_proof {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use solidcore::kernel::Kernel;
-    use solidcore::mass::enclosure::{enclose_quantity, enclose_volume, Quantity};
+    use solidcore::mass::enclosure::{enclose_face_area, enclose_volume};
     use solidcore::mass::integrator::properties::{
         brep_mass_properties, PropertyAttributes, ESTIMATE_ACCURACY_FINEST,
     };
     use solidcore::math::Vec3;
     use solidcore::surface::surface::Surface;
     use solidcore::topology::brep::p1;
-    use solidcore::topology::Brep;
+    use solidcore::topology::{Brep, FaceId};
 
     /// The golden's requested relative accuracy of the mass properties.
     pub(in super::super) const MASS_ACCURACY: f64 = 1e-4;
 
-    /// The largest proved distance `d_f` between a net and its definition over the faces
-    /// of `b` whose surface is a blend by its definition, each net re-certified (`d_f`, at
-    /// most its bound); asserts there is at least one.
-    pub(in super::super) fn certified_blends(k: &Kernel, b: &mut Brep, name: &str) -> f64 {
-        let mut count = 0;
-        let mut d_max: f64 = 0.0;
+    /// The faces of `b` whose surface is a blend by its definition, each with the proved
+    /// distance `d_f` between its net and its definition (`recertify`, at most its bound);
+    /// asserts there is at least one.
+    pub(in super::super) fn certified_blends(
+        k: &Kernel,
+        b: &mut Brep,
+        name: &str,
+    ) -> Vec<(FaceId, f64)> {
+        let mut blends = Vec::new();
         for f in p1::faces(b, None).unwrap() {
             let surface = b.face(f).unwrap().surface.clone();
             let Some(blend) = surface.as_ref().and_then(Surface::procedural_blend) else {
@@ -1883,31 +1887,46 @@ pub(super) mod round_definition_proof {
                 d <= bound,
                 "{name}: {f:?} proved {d:e} past its bound {bound:e}"
             );
-            d_max = d_max.max(d);
-            count += 1;
+            blends.push((f, d));
         }
-        assert!(count > 0, "{name}: no blend face is a definition");
-        d_max
+        assert!(!blends.is_empty(), "{name}: no blend face is a definition");
+        blends
+    }
+
+    /// `sum A_f d_f` bounded above: each face's area certified ([`enclose_face_area`],
+    /// refined until it is within 1% of its upper end or its budget is spent; the band holds
+    /// either way), each product and the sum rounded up.
+    fn spread(k: &Kernel, b: &mut Brep, blends: &[(FaceId, f64)]) -> f64 {
+        let mut sum = 0.0_f64;
+        for &(f, d) in blends {
+            let mut a = enclose_face_area(k, b, &[f], f64::MAX).unwrap();
+            for _ in 0..3 {
+                if a.width() <= 1e-2 * a.hi {
+                    break;
+                }
+                a = enclose_face_area(k, b, &[f], 1e-2 * a.hi).unwrap();
+            }
+            sum = (sum + (a.hi * d).next_up()).next_up();
+        }
+        sum
     }
 
     /// The certified volume band of the closed body `b`: its enclosure (asked 1e-6 wide
     /// relative; refinement stops earlier where the gaps between faces, which no cut
-    /// narrows, are wider) widened by `spread = A d_max`, an upper bound of `sum A_f d_f`:
-    /// `A` the upper end of the body's certified area enclosure (every face, so at least
-    /// the blend faces' area) and `d_max` the largest proved net distance
-    /// ([`certified_blends`]), the product rounded up. Asserts that the volume the integrator
+    /// narrows, are wider) widened by an upper bound of `sum A_f d_f` over the blend faces
+    /// ([`spread`]: each face's certified area times its proved net distance `d_f` from
+    /// [`certified_blends`]). Asserts that the volume the integrator
     /// converges to (its estimate at its finest accuracy, 1e-8 relative) lies in it. The
     /// golden's own estimate (at 1e-4) and the row before (`old`, the old body's) are
     /// printed beside the band for the record only: an estimate is not a bound.
     pub(in super::super) fn volume_band(
         k: &Kernel,
         b: &mut Brep,
-        d_max: f64,
+        blends: &[(FaceId, f64)],
         old: f64,
         name: &str,
     ) {
-        let area = enclose_quantity(k, b, Quantity::Area, f64::MAX).unwrap();
-        let spread = (area.hi * d_max).next_up();
+        let spread = spread(k, b, blends);
         let store = solidcore::geom::attribute::AttributeStore::default();
         let attributes = PropertyAttributes {
             store: &store,
@@ -2151,9 +2170,9 @@ pub(super) mod round_definition_rows {
             if name == "stubs4-delete-edge-bottle-e8-r0.1" {
                 rail_splits_at_a_c1_knot(&k, &body);
             }
-            let d_max = certified_blends(&k, &mut body, name);
+            let blends = certified_blends(&k, &mut body, name);
             if let Some(old) = old_volume {
-                volume_band(&k, &mut body, d_max, old, name);
+                volume_band(&k, &mut body, &blends, old, name);
                 mass_bands(&k, &mut body, name);
             }
         }

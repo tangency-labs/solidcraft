@@ -41,7 +41,8 @@
 //! ([`volume_sign`]), or until [`CELL_BUDGET`] cells are spent or no cell is left to cut
 //! ([`EnclosureStop`]); it answers the intersection of every enclosure it summed.
 //!
-//! **Moments and area** ([`enclose_quantity`], [`enclose_mass_properties`]). The same cells
+//! **Moments and area** ([`enclose_quantity`], [`enclose_mass_properties`],
+//! [`enclose_face_area`] for some of the faces). The same cells
 //! enclose `int X^a Y^b Z^c dV` (`X = x - x0`, and so on, about the bounding box's middle
 //! `(x0, y0, z0)`, `a + b + c <= 2`): the flux of `F = (0, 0, Phi)` with
 //! `Phi = X^a Y^b Z^(c+1) / (c+1)` (`dPhi/dz` the weight), so the integrand is
@@ -259,6 +260,29 @@ pub fn enclose_quantity(
         }
     }
     let mut w = Work::with(k, b, quantity)?;
+    w.refine(|e| e.hi - e.lo <= width, |_, _| false)
+}
+
+/// An enclosure of the total area of the faces `faces` of `b` at most `width` wide, as
+/// [`enclose_quantity`] refines [`Quantity::Area`] (an area is its faces' alone, so any set
+/// of faces has one; a face listed twice counts twice).
+///
+/// # Errors
+///
+/// Those of [`enclose_quantity`]; [`SolidError::InvalidInput`] for an empty `faces`.
+pub fn enclose_face_area(
+    k: &Kernel,
+    b: &mut Brep,
+    faces: &[FaceId],
+    width: f64,
+) -> Result<VolumeEnclosure> {
+    if width.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+        return Err(SolidError::invalid_input(OP, "width not positive"));
+    }
+    if faces.is_empty() {
+        return Err(SolidError::invalid_input(OP, "no faces"));
+    }
+    let mut w = Work::over(k, b, Quantity::Area, Some(faces))?;
     w.refine(|e| e.hi - e.lo <= width, |_, _| false)
 }
 
@@ -1086,6 +1110,17 @@ impl<'a> Work<'a> {
     }
 
     fn with(k: &'a Kernel, b: &mut Brep, quantity: Quantity) -> Result<Self> {
+        Self::over(k, b, quantity, None)
+    }
+
+    /// The work for `quantity` over every face of `b`, or over `only` (an area's faces;
+    /// the caller checks the quantity is an area).
+    fn over(
+        k: &'a Kernel,
+        b: &mut Brep,
+        quantity: Quantity,
+        only: Option<&[FaceId]>,
+    ) -> Result<Self> {
         let bbox = qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
         let mid = bbox.mid();
         let z0 = mid.z;
@@ -1112,7 +1147,10 @@ impl<'a> Work<'a> {
         // of each coordinate from the centre's near them
         let mut open_length = Ivl::from(0.0);
         let mut zcap = [0.0_f64; 3];
-        let faces = crate::topology::brep::p1::faces(b, None)?;
+        let faces = match only {
+            Some(only) => only.to_vec(),
+            None => crate::topology::brep::p1::faces(b, None)?,
+        };
         for f in faces {
             k.check_cancelled(OP)?;
             w.add_face(k, b, f, &mut sides, &mut open_length, &mut zcap)?;

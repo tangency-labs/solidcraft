@@ -516,8 +516,8 @@ mod round_definition_rows {
                     assert!(blend.chamfer().is_some(), "{name}: {f:?} is not a chamfer");
                 }
             }
-            let d_max = certified_blends(&k, &mut done.body, name);
-            volume_band(&k, &mut done.body, d_max, old, name);
+            let blends = certified_blends(&k, &mut done.body, name);
+            volume_band(&k, &mut done.body, &blends, old, name);
             mass_bands(&k, &mut done.body, name);
         }
     }

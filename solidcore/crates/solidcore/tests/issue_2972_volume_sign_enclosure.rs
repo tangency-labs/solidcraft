@@ -37,8 +37,8 @@ use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
 use solidcore::mass::enclosure::EnclosureStop;
 use solidcore::mass::enclosure::{
-    enclose_mass_properties, enclose_volume, volume_sign, Bounds, VolumeEnclosure, VolumeSign,
-    CELL_BUDGET,
+    enclose_face_area, enclose_mass_properties, enclose_volume, volume_sign, Bounds,
+    VolumeEnclosure, VolumeSign, CELL_BUDGET,
 };
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylindrical_box, create_sphere};
@@ -262,6 +262,37 @@ fn mass_properties_are_enclosed_around_their_closed_forms() {
     let mut s = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 2.0).unwrap();
     let i = 0.4 * (4.0 / 3.0 * PI * 8.0) * 4.0;
     check(&mut s, 1e-4, 16.0 * PI, [0.0; 3], [i; 3], [0.0; 3]);
+}
+
+/// `enclose_face_area` on some of a box's faces: each face's enclosure holds its exact area
+/// (`4 x 5`, `4 x 6` or `5 x 6`) and is at most 1e-9 of it wide; the faces together hold
+/// their sum, a face listed twice counts twice, and no faces is refused.
+#[test]
+fn face_areas_are_enclosed_one_face_at_a_time() {
+    let mut k = Kernel::default();
+    let mut b = create_box(&mut k, Point3::new(1.0, 2.0, 3.0), 4.0, 5.0, 6.0).unwrap();
+    let all = faces(&b, None).unwrap();
+    assert_eq!(all.len(), 6);
+    let mut total = 0.0;
+    for &f in &all {
+        let e = enclose_face_area(&k, &mut b, &[f], 1e-9).unwrap();
+        let exact = [20.0, 24.0, 30.0]
+            .into_iter()
+            .find(|a| e.lo <= *a && *a <= e.hi)
+            .unwrap_or_else(|| panic!("{f:?}: {e:?} holds no face area of the box"));
+        assert!(e.width() <= 1e-9 * exact, "{f:?}: {e:?}");
+        total += exact;
+    }
+    assert_eq!(total, 148.0);
+    let e = enclose_face_area(&k, &mut b, &all, 1e-9).unwrap();
+    assert!(e.lo <= 148.0 && 148.0 <= e.hi, "{e:?}");
+    let twice = enclose_face_area(&k, &mut b, &[all[0], all[0]], 1e-9).unwrap();
+    let once = enclose_face_area(&k, &mut b, &[all[0]], 1e-9).unwrap();
+    assert!(
+        twice.lo <= 2.0 * once.hi && 2.0 * once.lo <= twice.hi,
+        "{twice:?} {once:?}"
+    );
+    assert!(enclose_face_area(&k, &mut b, &[], 1.0).is_err());
 }
 
 #[test]
