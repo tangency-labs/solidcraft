@@ -128,6 +128,9 @@ struct BoxStyle {
     /// on the same two vertices: on the first one's LINE (`Some(0.0)`), or on a LINE of its own
     /// whose origin lies the given distance off.
     twin_edges: Option<f64>,
+    /// The first edge starts at a second VERTEX_POINT at its first corner's point, not at the
+    /// corner's own vertex, moved by the given distance along x (0 for the same point).
+    dup_vertex: Option<f64>,
 }
 
 /// The box from `lo` to `hi`: its faces (outward normals) and its top and bottom faces'
@@ -176,6 +179,10 @@ fn box_faces(w: &mut W, lo: V, hi: V, style: BoxStyle, inner: &mut dyn FnMut(&mu
                             let v = w.add(format!("VECTOR('',#{d},1.)"));
                             let l = w.add(format!("LINE('',#{o},#{v})"));
                             w.add(format!("EDGE_CURVE('',#{va},#{vb},#{l},.F.)"))
+                        } else if let Some(off) = style.dup_vertex.filter(|_| n == 0) {
+                            let at = [vs[key.0].1[0] + off, vs[key.0].1[1], vs[key.0].1[2]];
+                            let twin = (w.vertex(at), at);
+                            w.line_edge(twin, vs[key.1], !flip, 1.0)
                         } else {
                             w.line_edge(vs[key.0], vs[key.1], !flip, if n.is_multiple_of(3) { 1.0 } else { 2.5 })
                         };
@@ -328,6 +335,90 @@ fn a_cube_is_two_regions_six_faces_twelve_edges_eight_vertices() {
             assert_ne!(side(&e.uses[0]), side(&e.uses[1]));
         }
     }
+}
+
+/// A cube whose first edge starts at a second vertex at its corner's point (tangency-labs/solidcraft#17141):
+/// the faces meeting there close by position, and the corner is one vertex.
+#[test]
+fn a_corner_written_as_two_vertices_at_one_point_is_one_vertex() {
+    let s = one_solid(&cube(BoxStyle { dup_vertex: Some(0.0), ..Default::default() }));
+    assert!(!s.sheet);
+    assert_eq!(counts(&s.brep), [2, 1, 6, 12, 8]);
+    faces_away(&s.brep, 0, |_| [5.0, 10.0, 15.0]);
+}
+
+/// Two vertices that really are apart (1 mm, against tolerances of 1e-7 mm) are never one: the
+/// loop stays open and the solid is refused naming it, as before vertices could join.
+#[test]
+fn a_loop_whose_ends_are_apart_is_still_refused() {
+    let r = read_solids(&cube(BoxStyle { dup_vertex: Some(1.0), ..Default::default() }));
+    assert!(r.solids.is_empty(), "{}", r.solids.len());
+    assert_eq!(r.failures.len(), 1);
+    assert!(r.failures[0].message.contains("is not closed") || r.failures[0].message.contains("is not connected"), "{}", r.failures[0].message);
+}
+
+/// A builder over `ex` at its 1e-7 mm uncertainty, for reading single bounds and edges.
+fn with_builder<T>(ex: &p21::Exchange, f: impl FnOnce(&mut Builder<'_, '_>) -> T) -> T {
+    let mut reader = crate::read::Reader::new(ex, crate::read::Units::default());
+    let mut budget = MAX_FILE_FACES;
+    let mut b = Builder::new(ex, &mut reader, 1e-7, &mut budget, None);
+    f(&mut b)
+}
+
+/// Two vertices 1.5e-7 mm apart (within their two 1e-7 mm tolerances) that are the two ends of
+/// one LINE edge are never joined, even when a loop read before that edge meets them: the
+/// loop is refused and the edge, read later, stays a line between two vertices.
+#[test]
+fn the_two_ends_of_an_edge_read_later_are_never_joined() {
+    let mut w = W::default();
+    let (x, p, q) = ([0.0, 5.0, 0.0], [0.0; 3], [1.5e-7, 0.0, 0.0]);
+    let (vx, vp, vq) = ((w.vertex(x), x), (w.vertex(p), p), (w.vertex(q), q));
+    let short = w.line_edge(vp, vq, true, 1.0);
+    let (xp, qx) = (w.line_edge(vx, vp, true, 1.0), w.line_edge(vq, vx, true, 1.0));
+    let (a, z) = (w.oe(xp, true), w.oe(qx, true));
+    let bound = w.bound(&[a, z], true, true);
+    let ex = w.file(&[bound]);
+    with_builder(&ex, |b| {
+        let mut edges = 0;
+        let err = b.bound(bound, &mut edges).err().unwrap_or_default();
+        assert!(err.contains("is not connected"), "{err}");
+        let (e, _) = b.edge(short).unwrap();
+        let [s, t] = b.edges[e as usize].vertices;
+        assert_ne!(s, t);
+    });
+}
+
+/// A loop X→B, C→C (a circle), D→X with B, C and D at one point: every join resolves the
+/// vertex the last one left, so B, C and D are one vertex and the loop's edges meet there.
+#[test]
+fn a_loop_through_three_vertices_at_one_point_joins_all_three() {
+    let mut w = W::default();
+    let (x, c) = ([0.0, 5.0, 0.0], [0.0; 3]);
+    let vx = (w.vertex(x), x);
+    let (vb, vc, vd) = ((w.vertex(c), c), w.vertex(c), (w.vertex(c), c));
+    let xb = w.line_edge(vx, vb, true, 1.0);
+    let circle = w.circle([-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 1.0);
+    let cc = w.add(format!("EDGE_CURVE('',#{vc},#{vc},#{circle},.T.)"));
+    let dx = w.line_edge(vd, vx, true, 1.0);
+    let oes = [w.oe(xb, true), w.oe(cc, true), w.oe(dx, true)];
+    let bound = w.bound(&oes, true, true);
+    let ex = w.file(&[bound]);
+    with_builder(&ex, |b| {
+        let mut edges = 0;
+        let (LoopB::Edges(uses), _) = b.bound(bound, &mut edges).unwrap() else { panic!("an edge loop") };
+        b.join_vertices().unwrap();
+        let ends: Vec<[u32; 2]> = uses
+            .iter()
+            .map(|&(e, fwd)| {
+                let [s, t] = b.edges[e as usize].vertices;
+                if fwd { [s, t] } else { [t, s] }
+            })
+            .collect();
+        for (k, e) in ends.iter().enumerate() {
+            assert_eq!(e[1], ends[(k + 1) % ends.len()][0], "{ends:?}");
+        }
+        assert_eq!(b.edges.iter().flat_map(|e| e.vertices).collect::<HashSet<_>>().len(), 2);
+    });
 }
 
 #[test]
@@ -527,6 +618,39 @@ fn a_cone_with_its_seam_to_the_apex_gets_no_other() {
     assert_eq!(counts(&s.brep), [2, 1, 2, 2, 2]);
     assert!(!s.notes.iter().any(|n| n.contains("seam edges added")), "{:?}", s.notes);
     faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(1.0, 2.0)]);
+}
+
+/// A cone point (radius 3 at z = 0, half-angle atan ½, its apex at z = −6) closed by a disk,
+/// every bound a plain FACE_BOUND, the file's uncertainty 1e-5 mm: its apex VERTEX_LOOP's point
+/// written 1e-6 mm off the apex, across the axis or along it (within the uncertainty, as a
+/// writer's rounding leaves it). The vertex is the cone's pole: the seam from the rim runs up the
+/// ruling to the apex itself, the vertex's tolerance covering its gap, and the point reads closed.
+#[test]
+fn a_cone_point_whose_apex_vertex_is_a_little_off_its_apex_reads_closed() {
+    for off in [[6e-7, 8e-7, 0.0], [0.0, 0.0, 1e-6], [0.0, 0.0, -1e-6]] {
+        let mut w = W::default();
+        let v = w.vertex([3.0, 0.0, 0.0]);
+        let k = w.circle([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 3.0);
+        let rim = w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"));
+        let apex = w.vertex([off[0], off[1], -6.0 + off[2]]);
+        let point = w.add(format!("VERTEX_LOOP('',#{apex})"));
+        let point = w.add(format!("FACE_BOUND('',#{point},.T.)"));
+        let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let cone = w.add(format!("CONICAL_SURFACE('',#{a},3.,{})", real(0.5f64.atan())));
+        // The cone's normal points out and down: the face lies below its rim, which runs −u.
+        let x = w.oe(rim, false);
+        let bx = w.bound(&[x], false, true);
+        let side = w.face(&[point, bx], cone, true);
+        let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let x = w.oe(rim, true);
+        let bx = w.bound(&[x], false, true);
+        let disk = w.face(&[bx], plane, true);
+        let shell = closed_shell(&mut w, &[side, disk]);
+        let solid = w.add(format!("MANIFOLD_SOLID_BREP('point',#{shell})"));
+        let s = one_solid(&w.file_with_uncertainty(&[solid], 1e-5));
+        assert_eq!(counts(&s.brep), [2, 1, 2, 2, 2], "{off:?}");
+        faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(-4.0, -1.0)]);
+    }
 }
 
 /// A tube (radius 5 outside, 3 inside, from z = 0 to 4) whose cylinders carry no seam edges:

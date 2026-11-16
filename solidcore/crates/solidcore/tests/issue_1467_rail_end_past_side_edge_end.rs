@@ -16,9 +16,9 @@
 //! Both top edges along x are rounded. On the front one (y = 0) the side edges' UV trims
 //! are lines and the run-on finds the rail ends with the flags of #960 alone. On the back
 //! one (y = 20, `wr631_cliff_overflow_construction`'s #1467 case) the trims are exact
-//! degree-1 B-splines, which the run-on continues only with `fillet_run_on_bspline_trims`
-//! (WR-654); without it the rail ends are not found, the corner takes them as misses
-//! anyway, and that case never reaches the placement this tests.
+//! degree-1 B-splines, which the run-on continues along their lines (WR-654, formerly behind
+//! `fillet_run_on_bspline_trims`); without that the rail ends were not found, the
+//! corner took them as misses anyway, and that case never reached the placement this tests.
 
 #![allow(
     clippy::unwrap_used,
@@ -40,7 +40,6 @@ use solidcore::Kernel;
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_run_on_bspline_trims = true;
     k
 }
 

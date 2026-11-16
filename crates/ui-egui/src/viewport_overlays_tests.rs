@@ -164,6 +164,9 @@ fn modern_details_cards_open_focus_suspend_and_close_before_effects() {
         h.step(&json!({"key":"Escape"})).unwrap();
         assert!(h.app.viewport_status.open_key.is_none());
         h.step(&json!({"key":"Escape"})).unwrap();
+        assert_eq!(h.app.session.status_items().len(), 1, "an idle Escape keeps {command} by default");
+        h.app.preferences.escape_closes_analyses = true;
+        h.step(&json!({"key":"Escape"})).unwrap();
         assert!(h.app.session.status_items().is_empty());
     }
 }
@@ -1288,7 +1291,19 @@ fn comb_options_draw_the_combs_shown_again() {
     assert_eq!(comb_options().teeth, 4);
     let combs = shown_combs(&h.app);
     assert_eq!((combs.len(), combs[0].len()), (1, 4));
-    // The tool ends: the combs and the card go.
+    // Esc puts the tool and its card down; the combs stay on.
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(h.app.tool.is_none() && crate::scenario::rect_of("comb_options").is_none());
+    assert_eq!(shown_combs(&h.app).len(), 1, "Esc keeps the combs");
+    assert!(crate::toolbar::shows_pressed(&h.app, "inspect.curvature_comb"), "Esc keeps the analysis on");
+    // With escape_closes_analyses, Esc ends the tool and turns the combs off, as before.
+    h.app.run("inspect.curvature_comb", json!({"clear": true})).unwrap();
+    h.app.preferences.escape_closes_analyses = true;
+    h.step(&json!({"start": "inspect.curvature_comb"})).unwrap();
+    h.frame();
+    h.step(&json!({"click": {"world": [10, 0, 20]}})).unwrap();
+    assert_eq!(shown_combs(&h.app).len(), 1, "{:?}", h.app.status);
     h.step(&json!({"key": "Escape"})).unwrap();
     h.frames(2);
     assert!(shown_combs(&h.app).is_empty() && crate::scenario::rect_of("comb_options").is_none());
@@ -1826,7 +1841,10 @@ fn analysis_status_preference_restores_corner_legend_and_old_escape() {
     assert!(crate::scenario::rect_of("analysis:legend").is_none());
     assert!(crate::scenario::rect_of("viewport_status:row").is_some());
     h.step(&json!({"key":"Escape"})).unwrap();
-    assert!(h.app.session.analysis.is_none());
+    assert!(h.app.session.analysis.is_some(), "an idle Escape keeps the analysis by default");
+    h.app.preferences.escape_closes_analyses = true;
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.session.analysis.is_none(), "the preference restores Escape closing it");
 }
 
 #[test]
@@ -1850,6 +1868,7 @@ fn analysis_status_formats_units_and_truthful_non_axis_directions() {
 fn analysis_status_escape_ends_live_tool_before_effect_and_never_hidden_section() {
     let mut h = Harness::new();
     h.app.preferences.viewport_section_status = false;
+    h.app.preferences.escape_closes_analyses = true;
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
     h.app.start("inspect.continuity");
     assert!(h.app.tool.is_some());
@@ -1939,6 +1958,10 @@ fn section_status_and_analysis_keep_slots_clear_independently_and_filter_escape_
     h.app.run("inspect.draft", json!({})).unwrap();
     let before = h.app.session.status_items();
     assert_eq!(before.iter().map(|e| e.command.as_str()).collect::<Vec<_>>(), ["inspect.draft", "inspect.section"]);
+    assert!(!crate::viewport_status::escape(&mut h.app, false), "by default Escape is not the row's");
+    assert!(!crate::viewport_status::escape(&mut h.app, true));
+    assert_eq!(h.app.session.status_items(), before);
+    h.app.preferences.escape_closes_analyses = true;
     assert!(crate::viewport_status::escape(&mut h.app, false));
     assert!(h.app.session.analysis.is_none() && h.app.session.section.is_some());
     assert!(crate::viewport_status::escape(&mut h.app, true));
@@ -1967,6 +1990,7 @@ fn section_status_and_analysis_keep_slots_clear_independently_and_filter_escape_
 fn section_status_preserves_legacy_three_items_and_dialog_escape_ownership() {
     let mut h = Harness::new();
     h.app.preferences.viewport_status_summary = false;
+    h.app.preferences.escape_closes_analyses = true;
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
     h.call("ui.prefs", json!({"single_surface_analysis":false}));
     h.app.run("inspect.zebra", json!({})).unwrap();
@@ -1988,6 +2012,38 @@ fn section_status_preserves_legacy_three_items_and_dialog_escape_ownership() {
     h.step(&json!({"key":"Escape"})).unwrap();
     assert!(h.app.session.section.is_none());
     assert!(h.app.session.analysis.is_some() && !h.app.session.continuity.is_empty());
+}
+
+#[test]
+fn idle_escape_after_section_ok_keeps_the_section_unless_the_preference_is_on() {
+    for escape_closes in [false, true] {
+        let mut h = Harness::new();
+        h.app.preferences.escape_closes_analyses = escape_closes;
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+        h.app.session.selection = vec![solidcraft_engine::Sel::Plane { name: "XY".into() }];
+        h.app.start("inspect.section");
+        h.frames(3);
+        assert!(h.app.dialog.is_some(), "Section Analysis opens its dialog");
+        h.step(&json!({"widget":"OK"})).unwrap();
+        h.frames(3);
+        assert!(h.app.dialog.is_none() && h.app.tool.is_none());
+        let cut = h.app.session.section;
+        assert!(cut.is_some(), "OK keeps the section on");
+        h.ctx.memory_mut(|memory| {
+            if let Some(id) = memory.focused() {
+                memory.surrender_focus(id);
+            }
+        });
+        h.step(&json!({"key":"Escape"})).unwrap();
+        if escape_closes {
+            assert!(h.app.session.section.is_none(), "with escape_closes_analyses an idle Escape closes the section");
+        } else {
+            assert_eq!(h.app.session.section, cut, "an idle Escape keeps the section view");
+            h.step(&json!({"key":"Escape"})).unwrap();
+            assert_eq!(h.app.session.section, cut, "a second idle Escape keeps it too");
+        }
+    }
 }
 
 #[test]
@@ -2019,7 +2075,10 @@ fn analysis_status_preferences_take_first_escape_and_release_the_next_frame() {
     assert!(!h.app.prefs_window.shell.open);
     assert!(h.app.session.analysis.is_some(), "Preferences owns the first Escape even without text focus");
     h.step(&json!({"key":"Escape"})).unwrap();
-    assert!(h.app.session.analysis.is_none(), "the next idle frame may end the effect");
+    assert!(h.app.session.analysis.is_some(), "an idle Escape keeps the analysis by default");
+    h.app.preferences.escape_closes_analyses = true;
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.session.analysis.is_none(), "with the preference the next idle Escape ends the effect");
 }
 
 #[test]
@@ -2084,6 +2143,9 @@ fn analysis_status_escape_owner_survives_egui_layout_repasses() {
         assert!(!h.app.prefs_window.shell.open && h.app.dialog.is_none() && h.app.tool.is_none() && !h.app.ui.palette_open);
         assert!(h.app.viewport_status.open_key.is_none());
         h.frame();
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert_eq!(h.app.session.status_items(), before, "an idle Escape after {owner} keeps the analysis by default");
+        h.app.preferences.escape_closes_analyses = true;
         h.step(&json!({"key":"Escape"})).unwrap();
         assert!(h.app.session.status_items().is_empty(), "{owner} releases the following idle Escape");
     }
@@ -2185,7 +2247,10 @@ fn analysis_status_focused_dialog_and_real_text_popup_preserve_owner_priority_in
             assert!(h.app.dialog.is_none(), "the dialog's own Escape still cancels in policy {enabled}");
             assert!(h.app.session.analysis.is_some());
             h.step(&json!({"key":"Escape"})).unwrap();
-            assert_eq!(h.app.session.analysis.is_none(), enabled, "the idle Escape follows the selected policy");
+            assert!(h.app.session.analysis.is_some(), "an idle Escape keeps the analysis by default in policy {enabled}");
+            h.app.preferences.escape_closes_analyses = true;
+            h.step(&json!({"key":"Escape"})).unwrap();
+            assert_eq!(h.app.session.analysis.is_none(), enabled, "with the preference the idle Escape follows the selected policy");
         }
     }
 }
@@ -2232,6 +2297,9 @@ fn analysis_status_preferences_cancel_can_restore_either_policy_without_reusing_
         });
         assert_eq!(h.app.preferences.viewport_analysis_status, saved);
         assert!(h.app.session.analysis.is_some(), "Cancel owns this Escape through pass two while restoring policy {saved}");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert!(h.app.session.analysis.is_some(), "an idle Escape keeps the analysis by default");
+        h.app.preferences.escape_closes_analyses = true;
         h.step(&json!({"key":"Escape"})).unwrap();
         assert_eq!(h.app.session.analysis.is_none(), saved);
     }
@@ -2345,7 +2413,7 @@ fn the_status_toast_closes_with_its_x_and_shows_its_time_left() {
 fn section_only_status_modal_owners_take_first_escape_across_real_layout_repasses() {
     for owner in ["preferences", "command", "tool", "search"] {
         let mut h = Harness::new();
-        h.call("ui.prefs", json!({"viewport_analysis_status":false,"viewport_section_status":true}));
+        h.call("ui.prefs", json!({"viewport_analysis_status":false,"viewport_section_status":true,"escape_closes_analyses":true}));
         h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
         h.app.run("inspect.section", json!({"plane":"XY","at":4})).unwrap();
         match owner {
@@ -2376,7 +2444,7 @@ fn section_only_status_modal_owners_take_first_escape_across_real_layout_repasse
 #[test]
 fn section_only_status_real_editor_popup_then_dialog_own_escape_before_the_cut() {
     let mut h = Harness::new();
-    h.call("ui.prefs", json!({"viewport_analysis_status":false,"viewport_section_status":true}));
+    h.call("ui.prefs", json!({"viewport_analysis_status":false,"viewport_section_status":true,"escape_closes_analyses":true}));
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
     h.app.run("inspect.section", json!({"plane":"XY","at":4})).unwrap();
     h.app.start("solid.fillet");
@@ -2403,6 +2471,7 @@ fn section_only_status_real_editor_popup_then_dialog_own_escape_before_the_cut()
 #[test]
 fn section_and_analysis_key_release_distinct_idle_escape_to_the_newest_cut() {
     let mut h = Harness::new();
+    h.app.preferences.escape_closes_analyses = true;
     h.app.run("inspect.draft", json!({})).unwrap();
     h.app.run("inspect.section", json!({"plane":"XY","at":4})).unwrap();
     h.frames(3);
@@ -2424,7 +2493,7 @@ fn section_and_analysis_key_release_distinct_idle_escape_to_the_newest_cut() {
 fn section_only_preferences_cancel_restores_either_policy_and_shields_existing_dialog() {
     for saved in [false, true] {
         let mut h = Harness::new();
-        h.call("ui.prefs", json!({"viewport_analysis_status":false,"viewport_section_status":saved}));
+        h.call("ui.prefs", json!({"viewport_analysis_status":false,"viewport_section_status":saved,"escape_closes_analyses":true}));
         h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
         h.app.run("inspect.section", json!({"plane":"XY","at":4})).unwrap();
         if !saved {
@@ -2568,6 +2637,7 @@ fn summary_count_switch_is_independent_of_width_and_legacy_preference_keeps_effe
 #[test]
 fn summary_native_menu_escape_is_close_only_then_newest_replacement_clears_and_unfolds() {
     let mut h = summary_three_effects();
+    h.app.preferences.escape_closes_analyses = true;
     let oldest = h.app.session.status_items().first().unwrap().id;
     h.app.run("inspect.draft", json!({})).unwrap();
     h.frames(3);

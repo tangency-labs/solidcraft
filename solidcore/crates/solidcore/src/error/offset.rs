@@ -82,24 +82,31 @@ pub enum OffsetFailure {
     /// the B-rep's tolerance (a round inset by its radius). The offset is no surface there,
     /// and the faces beside it would have to meet across it, which the offset does not
     /// build (#2350).
+    ///
+    /// Also an extended inset's face whose offset reaches or passes such a radius (WR-346:
+    /// the face is dropped and its neighbours mated across it) where that mating cannot
+    /// bridge it: there the face is not built inside out, it is left out, so what fails is
+    /// the collapse, not a fold. `radius` is then a radius the face attains, sampled, not
+    /// a certified minimum, or, where the proof finds none, `|distance|`: an upper bound
+    /// (within the tolerance) on the face's least radius, not one it is known to attain.
     Collapses {
         /// The face whose offset collapses.
         face: FaceId,
         /// The offset distance asked for (signed, as the operation takes it).
         distance: f64,
-        /// The radius of curvature the face attains on the displaced side.
+        /// A radius of curvature the face attains on the displaced side, or (WR-346, where
+        /// no radius is proved) `|distance|`, an upper bound on its least radius.
         radius: f64,
     },
     /// Loops of the offset of `face` touch without crossing, so the offset walls they
-    /// come from meet there (with `fixes.offset_resolve_crossing_loops`).
+    /// come from meet there.
     WallsTouch {
         /// The face whose offset's loops touch, when known.
         face: Option<FaceId>,
         /// How they touch.
         contact: WallContact,
     },
-    /// Loops of the offset of `face` cross in a way the offset does not resolve (opt-in
-    /// `fixes.offset_resolve_crossing_loops`).
+    /// Loops of the offset of `face` cross in a way the offset does not resolve.
     LoopsCross {
         /// The face whose offset's loops cross, when known.
         face: Option<FaceId>,
@@ -315,6 +322,10 @@ pub enum LoopCrossing {
     ArriveMoreThanOneWay,
     /// The face comes apart around a hole.
     ComesApartAroundHole,
+    /// The offset's results are not merged, so the walls the crossing loops come from
+    /// are not cut where they pass through each other; only the merge cuts them (the local
+    /// operation, always unmerged, included).
+    Unmerged,
 }
 
 impl OffsetFailure {
@@ -539,6 +550,10 @@ impl core::fmt::Display for LoopCrossing {
                 "the loops arrive at a crossing more than one way"
             }
             LoopCrossing::ComesApartAroundHole => "the face comes apart around a hole",
+            LoopCrossing::Unmerged => {
+                "the results are not merged, so the walls the loops come from are not cut where \
+                 they cross; only a merged offset cuts them"
+            }
         })
     }
 }
@@ -1083,7 +1098,7 @@ mod tests {
             20,
             &[
                 ("offset/offset_executive/p1.rs", 9),
-                ("offset/offset_executive/p2.rs", 9),
+                ("offset/offset_executive/p2.rs", 8),
                 ("offset/offset_faces.rs", 4),
                 ("offset/offset_geometry_creation.rs", 1),
             ],

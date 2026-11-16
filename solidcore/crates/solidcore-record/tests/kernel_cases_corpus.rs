@@ -4,6 +4,8 @@
 //! validation, and every operation an entry lists takes records it gives or bodies an earlier
 //! operation made. Nonempty replay inputs are unique across the corpus: descriptions and
 //! expected answers cannot disguise duplicate calls on the same operand records.
+//! Recorded volumes of passing cases without known-failure markers must also agree with
+//! independent analytic expectations.
 
 #![allow(
     clippy::unwrap_used,
@@ -207,6 +209,50 @@ fn validate_continuations(e: &Value, f: &Path) {
     }
 }
 
+fn validate_analytic_volume(e: &Value, f: &Path) {
+    if e["expected"]["source"].as_str() != Some("analytic") {
+        return;
+    }
+    // Failing cases intentionally preserve the rig's incorrect output.
+    if !e["rig"]["known_failing"].is_null() || e["rig"]["status"].as_str() != Some("pass") {
+        return;
+    }
+    let Some(got) = e["rig"]["measured"]["volume_mm3"].as_f64() else {
+        return;
+    };
+    let expected = &e["expected"]["volume_mm3"];
+    if let Some(want) = expected.as_f64() {
+        // Match the replay runner: abs_mm takes precedence over relative tolerance.
+        let tolerance = &e["expected"]["tolerance"];
+        let limit = tolerance["abs_mm"]
+            .as_f64()
+            .unwrap_or_else(|| tolerance["rel"].as_f64().unwrap_or(1e-3) * want.abs());
+        assert!(
+            (got - want).abs() <= limit,
+            "{}: recorded volume {got} mm³ differs from analytic {want} mm³ (allowed difference {limit} mm³)",
+            f.display()
+        );
+    } else if let Some(bounds) = expected.as_array() {
+        assert_eq!(
+            bounds.len(),
+            2,
+            "{}: volume interval needs two bounds",
+            f.display()
+        );
+        let lo = bounds[0]
+            .as_f64()
+            .unwrap_or_else(|| panic!("{}: volume interval needs numeric bounds", f.display()));
+        let hi = bounds[1]
+            .as_f64()
+            .unwrap_or_else(|| panic!("{}: volume interval needs numeric bounds", f.display()));
+        assert!(
+            lo <= got && got <= hi,
+            "{}: recorded volume {got} mm³ is outside analytic interval [{lo}, {hi}] mm³",
+            f.display()
+        );
+    }
+}
+
 #[test]
 fn every_operand_is_a_valid_record_and_every_input_is_given() {
     let mut files = Vec::new();
@@ -218,6 +264,7 @@ fn every_operand_is_a_valid_record_and_every_input_is_given() {
     let mut records = 0;
     for f in &files {
         let e: Value = serde_json::from_str(&std::fs::read_to_string(f).unwrap()).unwrap();
+        validate_analytic_volume(&e, f);
         assert_eq!(
             Path::new(e["area"].as_str().unwrap()),
             f.strip_prefix(corpus()).unwrap().parent().unwrap(),
@@ -297,6 +344,123 @@ fn every_operand_is_a_valid_record_and_every_input_is_given() {
         }
     }
     assert!(records > 0);
+}
+
+#[test]
+fn regression_analytic_scalar_volumes() {
+    for (want, got, tolerance, accepted) in [
+        (1000.0, 1001.0, serde_json::json!(null), true),
+        (1000.0, 999.0, serde_json::json!(null), true),
+        (1000.0, 2000.0, serde_json::json!(null), false),
+        (1000.0, 998.0, serde_json::json!(null), false),
+        (0.001, 0.0015, serde_json::json!(null), false),
+        (0.0, 0.0, serde_json::json!(null), true),
+        (0.0, 1e-12, serde_json::json!(null), false),
+        (1000.0, 1010.0, serde_json::json!({"rel": 0.01}), true),
+        (1000.0, 1011.0, serde_json::json!({"rel": 0.01}), false),
+        (10.0, 10.5, serde_json::json!({"abs_mm": 0.5}), true),
+        (
+            10.0,
+            10.6,
+            serde_json::json!({"abs_mm": 0.5, "rel": 1.0}),
+            false,
+        ),
+        (
+            10.0,
+            10.5,
+            serde_json::json!({"abs_mm": 0.5, "rel": 0.0}),
+            true,
+        ),
+    ] {
+        let e = serde_json::json!({
+            "expected": {"source": "analytic", "volume_mm3": want, "tolerance": tolerance},
+            "rig": {"status": "pass", "measured": {"volume_mm3": got}},
+        });
+        assert_eq!(
+            std::panic::catch_unwind(|| validate_analytic_volume(&e, Path::new("case.json")))
+                .is_ok(),
+            accepted,
+            "wrong verdict for {e}"
+        );
+    }
+}
+
+#[test]
+fn regression_analytic_volume_intervals() {
+    for (got, accepted) in [
+        (9.0, false),
+        (10.0, true),
+        (15.0, true),
+        (20.0, true),
+        (21.0, false),
+    ] {
+        let e = serde_json::json!({
+            "expected": {"source": "analytic", "volume_mm3": [10.0, 20.0],
+                "tolerance": {"abs_mm": 100.0, "rel": 100.0}},
+            "rig": {"status": "pass", "measured": {"volume_mm3": got}},
+        });
+        assert_eq!(
+            std::panic::catch_unwind(|| validate_analytic_volume(&e, Path::new("case.json")))
+                .is_ok(),
+            accepted,
+            "wrong verdict for {e}"
+        );
+    }
+}
+
+#[test]
+fn regression_analytic_volume_check_respects_rig_status() {
+    for (rig, accepted) in [
+        (serde_json::json!({"status": "pass"}), false),
+        (
+            serde_json::json!({"status": "pass", "known_failing": null}),
+            false,
+        ),
+        (serde_json::json!({"status": "fail"}), true),
+        (serde_json::json!({"status": "error"}), true),
+        (serde_json::json!({}), true),
+        (
+            serde_json::json!({"status": "fail", "known_failing": "wrong volume"}),
+            true,
+        ),
+        (
+            serde_json::json!({"status": "pass", "known_failing": "wrong volume"}),
+            true,
+        ),
+    ] {
+        for expected in [serde_json::json!(1.0), serde_json::json!([1.0, 2.0])] {
+            let mut e = serde_json::json!({
+                "expected": {"source": "analytic", "volume_mm3": expected},
+                "rig": rig,
+            });
+            e["rig"]["measured"] = serde_json::json!({"volume_mm3": 3.0});
+            assert_eq!(
+                std::panic::catch_unwind(|| validate_analytic_volume(&e, Path::new("case.json")))
+                    .is_ok(),
+                accepted,
+                "wrong verdict for {e}"
+            );
+        }
+    }
+}
+
+#[test]
+fn analytic_volume_check_skips_unavailable_comparisons() {
+    for e in [
+        serde_json::json!({"expected": {"source": "analytic", "volume_mm3": 1.0}}),
+        serde_json::json!({"expected": {"source": "analytic", "volume_mm3": 1.0},
+            "rig": {"status": "pass"}}),
+        serde_json::json!({"expected": {"source": "analytic", "volume_mm3": 1.0},
+            "rig": {"status": "pass", "measured": {"volume_mm3": null}}}),
+        serde_json::json!({"expected": {"source": "analytic"},
+            "rig": {"status": "pass", "measured": {"volume_mm3": 2.0}}}),
+        serde_json::json!({"expected": {"source": "measured", "volume_mm3": 1.0},
+            "rig": {"status": "pass", "measured": {"volume_mm3": 2.0}}}),
+        serde_json::json!({"expected": {"volume_mm3": 1.0},
+            "rig": {"status": "pass", "measured": {"volume_mm3": 2.0}}}),
+    ] {
+        validate_analytic_volume(&e, Path::new("case.json"));
+    }
 }
 
 #[test]

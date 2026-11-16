@@ -279,7 +279,10 @@ What the port does today:
   it classifies to imprintable topology in both faces (`topology_intersector/p2.rs`).
 - **Contact curves inside a face.** A union, intersection or difference removes the zero-area
   inner loops a contact curve leaves and splits shells joined only through them (`merge/p4.rs`;
-  `topology/brep/p3.rs`, `remove_slit_loops_where_solids_touch`).
+  `topology/brep/p3.rs`, `remove_slit_loops_where_solids_touch`). The parts of a split shell
+  are regrouped by nesting: parts apart from each other bound solids of their own (a cylinder
+  resting on a box, united), and a void part lying inside an outer part bounds the same solid
+  (a cavity cut that touches the body's outside along a line: one solid with a void).
 - **Solids touching along an edge or at a vertex** are a valid result: ops checks the result with
   `is_outward_touching_solids` (§3).
 - **The sector test near tangency** steps off the edge and compares binormals until they separate
@@ -318,6 +321,22 @@ What the port does today:
   second tool whole, as a void.
   Parallel cones (drill points) are met by the marching intersection and are not decided this
   way, nor are coplanar faces bounded by such circles.
+- **A line a hair inside a circle.** A line in a circle's plane, δ inside the circle, crosses
+  it at two points `2√(2rδ)` apart and stays within δ of it between them, as two circles do.
+  `line_coplanar_circle_intersect_distinct` (`geom/geom_utility/p1.rs`) takes an overlap below
+  its contact tolerance as one touching point at the chord's midpoint, unless the whole circle
+  lies within that tolerance of the line. `Ellipse::intersect_with_line` (`curve/ellipse/p2.rs`)
+  moves that point to an end of the arc or the line that lies on the stretch between the two
+  crossings, so an arc that starts on the line there touches it at its start. The two sites
+  above that pass `contact_tol_3d` for circles pass it when one of the two is a line: an edge
+  against a face's intersection curve
+  (`curve/ellipse/p2.rs` through `intersect/curve_class/p9.rs`), and the curve/surface
+  classifier's line against an osculating circle where an edge meets a face
+  (`surface/surface/p4.rs`). A flat side a hair inside a round tangent to it then touches the
+  round's end circle at one point. A line tilted out of the circle's plane keeps its crossings:
+  it meets the circle where it pierces the plane, and the chord's midpoint lies off the line.
+  The other line/circle callers keep upstream's zero. The touching point is found only where
+  it lies on both curves' intervals.
 
 **The refusal that names a tangent contact.** The kernel's boolean has none today. The `ssi` crate
 refuses a contact it cannot prove with `Error::Tangent`, code `BOOLEAN_TANGENT`, carrying where it
@@ -424,11 +443,11 @@ A reviewer can check each of these on a change to the boolean.
   `known_failing.json` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
   returns 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16; #15669).
 - Opt-in fixes for the cases in §5, §6 and §8: `boolean_union_refuses_solid_leak`,
-  `keep_operand_uv_trims`, `boolean_vertex_by_best_crossing`,
-  `boolean_splits_definition_across_split` (`solidcore/src/kernel.rs`). Always on: the outer
-  shell first and the clean-up of slits. Every boolean, 3D included, skips the face pairs whose boxes lie
-  apart, and a new planar face leaves in place the inner loops whose boxes lie outside its outer
-  loop's box (WR-527), always.
+  `keep_operand_uv_trims`, `boolean_vertex_by_best_crossing` (`solidcore/src/kernel.rs`).
+  Always on: the outer shell first, the clean-up of slits and the split of a coincident
+  definition across a split point (WR-533). Every boolean, 3D included, skips the face pairs
+  whose boxes lie apart, and a new planar face leaves in place the inner loops whose boxes lie
+  outside its outer loop's box (WR-527), always.
 
 **Open.**
 - Retiring those flags: each fix on by default with its old path deleted (AGENTS.md §4b).

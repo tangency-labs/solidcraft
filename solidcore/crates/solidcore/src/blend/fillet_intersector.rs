@@ -48,6 +48,12 @@
 //!   `FlushCurve` makes to the geometry, its rails and their mate edge uses go to
 //!   the pseudo B-rep ([`FilletBrep`]) its caller passes (upstream reaches it through
 //!   the geometry pointer).
+//! - **Flush outcome (not upstream, tangency-labs/solidcraft#16686).** `FlushCurve`
+//!   notes what it did to its fillet geometry in [`FlushOutcome`], which the solver's
+//!   trace reads after each pass ([`FilletIntersector::take_flush_outcome`]): `made`
+//!   once it saved the surface, centre line and rails, `unmade` on any error exit
+//!   (where upstream leaves the geometry without curves, or partly written, and only
+//!   notes a skinning or smoothing failure in the solver's status).
 //! - **Virtual overrides.** `ComputeNextPoint`, `FlushCurve`, `ComputePointValues`,
 //!   `ComputePointValuesDelta`, `EvaluateLawPoint` and `TestSpanAccuracy` are
 //!   inherent methods here that take the solver; [`FilletDispatch`] implements the
@@ -1164,6 +1170,21 @@ pub struct FilletIntersector<'s, 't, O, G> {
     curr_fillet_touch_boundary: bool,
     /// `m_bSelfIntersect` (no longer used upstream).
     self_intersect: bool,
+    /// Not upstream (tangency-labs/solidcraft#16686): what the [`Self::flush_curve`]s did
+    /// to their fillet geometry since [`Self::take_flush_outcome`] last read it.
+    flush_outcome: FlushOutcome,
+}
+
+/// Not upstream (tangency-labs/solidcraft#16686): what [`FilletIntersector::flush_curve`]s
+/// did to their fillet geometry.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FlushOutcome {
+    /// A flush could not make its fillet geometry: it failed, possibly part-way through
+    /// writing it (the surface not skinned, the self-intersection not smoothed, or any
+    /// other error). Upstream notes the first two only in the solver's sticky status.
+    pub unmade: bool,
+    /// A flush made its fillet geometry (saved its surface, centre line and rails).
+    pub made: bool,
 }
 
 impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
@@ -1194,6 +1215,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             curr_fillet_geom,
             curr_fillet_touch_boundary: false,
             self_intersect: false,
+            flush_outcome: FlushOutcome::default(),
         })
     }
 
@@ -1224,6 +1246,39 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
     /// `SetSelfIntersect`.
     pub fn set_self_intersect(&mut self, is_self_intersect: bool) {
         self.self_intersect = is_self_intersect;
+    }
+
+    /// Not upstream (tangency-labs/solidcraft#16686): what the [`Self::flush_curve`]s since
+    /// the last call did to their fillet geometry; clears it.
+    pub fn take_flush_outcome(&mut self) -> FlushOutcome {
+        std::mem::take(&mut self.flush_outcome)
+    }
+
+    /// [`Self::flush_curve`], noting any error exit as the geometry left unmade
+    /// ([`FlushOutcome::unmade`]; not upstream, tangency-labs/solidcraft#16686): the flush
+    /// may have written part of it.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::flush_curve`].
+    pub fn flush_curve_noting<S: FilletSolverOps<FilletGeom = G>>(
+        &mut self,
+        solver: &mut S,
+        k: &Kernel,
+        pseudo: &mut FilletBrep,
+        out: &mut TsectCurves,
+    ) -> Result<()> {
+        let flushed = self.flush_curve(solver, k, pseudo, out);
+        if flushed.is_err() {
+            self.flush_outcome.unmade = true;
+        }
+        flushed
+    }
+
+    /// Test hook: set what [`Self::take_flush_outcome`] reads, as flushes would.
+    #[cfg(test)]
+    pub(crate) fn set_flush_outcome(&mut self, outcome: FlushOutcome) {
+        self.flush_outcome = outcome;
     }
 
     /// `IsKindOf`: `SmFilletIntersector_TYPE` or a type the advanced intersector is.
@@ -1973,6 +2028,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
     /// `SM_ERR_NULL_POINTER` without curve points; `SM_ERR` when a mid point has no
     /// solution or the handler or surface generator fails (after setting the solver
     /// status); those of the solver and the curve construction.
+    /// [`Self::flush_curve_noting`] notes any of them as the geometry left unmade.
     #[allow(clippy::too_many_lines)]
     pub fn flush_curve<S: FilletSolverOps<FilletGeom = G>>(
         &mut self,
@@ -2150,6 +2206,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         solver.set_rail_mate_uv_curve(pseudo, &fillet_geom, 0, uv1)?;
         solver.set_rail_curve(pseudo, &fillet_geom, 1, curve2)?;
         solver.set_rail_mate_uv_curve(pseudo, &fillet_geom, 1, uv2)?;
+        self.flush_outcome.made = true;
 
         // restore FilletSolver offset distances in offset Surfaces stored in the FilletSolver
         solver.reload_surface_offsets()?;
@@ -3114,10 +3171,11 @@ where
             .compute_next_point(self.solver, k, prev, step_size, next)
     }
 
-    /// [`FilletIntersector::flush_curve`].
+    /// [`FilletIntersector::flush_curve`], its failure noted
+    /// ([`FilletIntersector::flush_curve_noting`]).
     fn flush_curve(&mut self, k: &Kernel, out: &mut TsectCurves) -> Result<()> {
         self.intersector
-            .flush_curve(self.solver, k, self.pseudo, out)
+            .flush_curve_noting(self.solver, k, self.pseudo, out)
     }
 
     /// [`FilletIntersector::evaluate_law_point`] (the law arguments are unused).
@@ -3779,6 +3837,19 @@ mod tests {
         assert!(fi
             .flush_curve(&mut s, &Kernel::default(), &mut FilletBrep::new(), &mut out)
             .is_err());
+        // (not upstream, #16686) the same error exit through the noting wrapper notes the
+        // geometry unmade, and nothing made
+        assert_eq!(fi.take_flush_outcome(), FlushOutcome::default());
+        assert!(fi
+            .flush_curve_noting(&mut s, &Kernel::default(), &mut FilletBrep::new(), &mut out)
+            .is_err());
+        assert_eq!(
+            fi.take_flush_outcome(),
+            FlushOutcome {
+                unmade: true,
+                made: false
+            }
+        );
         // one point on the boundary of the first domain
         let p = fi
             .base

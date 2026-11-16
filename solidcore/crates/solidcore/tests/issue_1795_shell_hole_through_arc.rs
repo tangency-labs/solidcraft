@@ -12,9 +12,7 @@
 //! top-open result, including validity rather than only matching historical counts.
 //! `shell_open_at_y20_is_valid_and_keeps_the_input` checks the side-open result and
 //! preserves the borrowed input's topology and vertex positions.
-//! `issue_1795_extended_edges_mated` (ignored) shells the plate under WR-344's opt-in
-//! `offset_extended_edges_mated`, the setting that made the top-open shell fail before its
-//! refinement; `issue_1795_y20_read_back` (ignored) shells the y = 20 case on every
+//! `issue_1795_y20_read_back` (ignored) shells the y = 20 case on every
 //! operand (in memory, written and read back, the committed file, a copy), all of which
 //! fail alike.
 
@@ -34,7 +32,6 @@ use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
 use solidcore::geom::vector3d::{Point3, Vec3};
-use solidcore::kernel::UpstreamFixes;
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
 use solidcore::primitive::api_curves as curves;
@@ -231,40 +228,6 @@ impl Open {
     }
 }
 
-/// The plate shelled through the API (`SmApiShellBrepFull`, as `smlib_shell` and the
-/// difftest runner call it) under `fixes`.
-fn probe(fixes: &UpstreamFixes, create_offset_solid: bool, open: Open) -> solidcore::Result<Brep> {
-    let mut k = Kernel {
-        fixes: *fixes,
-        ..Default::default()
-    };
-    let mut b = drilled(&mut k);
-    let open = open.faces(&k, &b);
-    assert_eq!(open.len(), 1, "one open face");
-    api_shell(&mut k, &mut b, options(create_offset_solid), &open)
-}
-
-/// The plate under `offset_extended_edges_mated` (WR-344) alone, with `create_offset_solid`
-/// as `smlib_shell` passes it: the setting under which the top-open shell failed before
-/// WR-344's refinement left an unmated edge to the merge. Run with `--ignored --nocapture`.
-#[test]
-#[ignore = "probe: the #1795 failure under offset_extended_edges_mated"]
-fn issue_1795_extended_edges_mated() {
-    // (`UpstreamFixes` is `#[non_exhaustive]`: set the field on a default)
-    let mut fixes = UpstreamFixes::default();
-    fixes.offset_extended_edges_mated = true;
-    for open in [Open::Z27, Open::Y20] {
-        match probe(&fixes, true, open) {
-            Err(e) => eprintln!(
-                "PROBE 1795 open={open:?} offset_extended_edges_mated, cos=true: Err({e:?})"
-            ),
-            Ok(_) => {
-                eprintln!("PROBE 1795 open={open:?} offset_extended_edges_mated, cos=true: Ok");
-            }
-        }
-    }
-}
-
 /// The input as the issue states it: "passes `smlib_brep_check` level 2". Checked on a body
 /// of its own (a query can change the body a shell then sees). Run with `--ignored
 /// --nocapture`.
@@ -289,7 +252,6 @@ fn issue_1795_input_checks_clean() {
 #[ignore = "probe: the #1795 operand's edge uses and edges"]
 fn issue_1795_edge_map() {
     let mut k = Kernel::default();
-    k.fixes.offset_extended_edges_mated = true;
     let b = drilled(&mut k);
     let kind = |d: String| d.split(['(', ' ', '{']).next().unwrap_or("").to_string();
     for (eu, rec) in b.edgeuses().iter() {

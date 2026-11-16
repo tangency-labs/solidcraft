@@ -77,6 +77,10 @@ for the origin plane, the construction feature's numeric ID to select it, or an 
 `{origin: [x,y,z], normal: [x,y,z]}` plane. Existing saved references retain their meaning;
 opening a design does not reinterpret old sketches.
 
+An explicit plane's `origin` takes numbers or length expressions over the design's parameters:
+`sketch.create {"plane": {"origin": [0, "station + 2 mm", 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}`.
+An origin whose expressions name parameters is kept, so the sketch moves when they change.
+
 **Plane Through Axis And Point** (Model > Construct) creates a plane containing an
 origin or construction axis, straight model edge or sketch line, and a point off that
 line. Pick the axis first, then a vertex, sketch point or construction point. A point
