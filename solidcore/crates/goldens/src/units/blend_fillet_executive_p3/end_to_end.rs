@@ -815,7 +815,7 @@ fn record(
         store: &store,
         key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
     };
-    crate::dump::body(k, "mass", &body);
+    crate::dump::body(k, "mass", body);
     match solidcore::mass::integrator::properties::brep_mass_properties(
         k,
         body,
