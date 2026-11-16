@@ -347,8 +347,9 @@ fn cube_round_past_both_faces() {
 }
 
 /// The variable round, linear `r0` to `r1`, on the 10 x 20 x 30 box's top edge at x = 0, its
-/// volume, face count and the largest gap between an edge's curve and its vertices.
-fn variable_round(trim: bool, r0: f64, r1: f64) -> (f64, usize, f64) {
+/// volume, face, edge and vertex counts and the largest gap between an edge's curve and
+/// its vertices.
+fn variable_round(trim: bool, r0: f64, r1: f64) -> (f64, (usize, usize, usize), f64) {
     let mut k = kernel(trim);
     let mut b = box_10_20_30(&mut k);
     let e = edge_between(&k, &b, p(0.0, 0.0, 30.0), p(0.0, 20.0, 30.0));
@@ -380,7 +381,12 @@ fn variable_round(trim: bool, r0: f64, r1: f64) -> (f64, usize, f64) {
         gap = gap.max(s.distance(sp).min(s.distance(ep)));
         gap = gap.max(t.distance(sp).min(t.distance(ep)));
     }
-    let built = (volume(&k, &mut b), b.faces().ids().count(), gap);
+    let counts = (
+        b.faces().ids().count(),
+        b.edges().ids().count(),
+        b.vertices().ids().count(),
+    );
+    let built = (volume(&k, &mut b), counts, gap);
     b.use_arena_naming().unwrap();
     let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
         .unwrap()
@@ -395,7 +401,8 @@ fn variable_round(trim: bool, r0: f64, r1: f64) -> (f64, usize, f64) {
 /// where the section's edge crosses the crease's face, and both are fitted to a
 /// thousandth of the body's tolerance, so every edge's curve runs to its own vertices
 /// (the end section's stopped 1.1e-5 short of them) and the volume holds the closed form
-/// to 1e-7 (it was 1.9e-7 off from r 50 to 2). The face count is the subtraction's.
+/// to 1e-7 (it was 1.3e-7 off from r 50 to 2). The face, edge and vertex counts are the
+/// subtraction's.
 #[test]
 fn a_variable_round_past_a_box_top_trimmed_at_its_creases_keeps_its_closed_form() {
     for (r1, closed) in [
@@ -412,7 +419,10 @@ fn a_variable_round_past_a_box_top_trimmed_at_its_creases_keeps_its_closed_form(
                 "{r0} -> {r1}: volume {v} against {closed} (rel {})",
                 (v - closed).abs() / closed
             );
-            assert_eq!(n, faces, "{r0} -> {r1}: the subtraction's face count");
+            assert_eq!(
+                n, faces,
+                "{r0} -> {r1}: the subtraction's faces, edges, vertices"
+            );
             assert!(
                 gap <= 1e-12,
                 "{r0} -> {r1}: an edge's curve {gap} off its vertices"

@@ -60,7 +60,7 @@ use crate::blend::fillet_executive::p3::NoRoomReason;
 use crate::blend::fillet_geom::p1::{FilletEdgeType, FilletErrorType, FilletGeomId};
 use crate::blend::fillet_overflow::{
     creases, distance_to_surface, edge_curve, edge_on_surface, extend, in_material,
-    make_extension_face, pieces_along_edges, pieces_in_face, ExtendOutcome, Extension, Rail,
+    make_extension_face, pieces_along_edges, ExtendOutcome, Extension, Rail,
 };
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::{Curve, CurveKind};
@@ -68,6 +68,7 @@ use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::ids;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::object::ObjectRef;
+use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
 use crate::math::{Point3, BIG_DOUBLE};
 use crate::nurbs::b_spline_curve::ControlPointForm;
@@ -395,8 +396,9 @@ const SECTION_FIT: f64 = 1e-3;
 /// surface's tangent plane at the foot of the current point (the plane itself for a
 /// planar face), so it converges quadratically wherever the curve crosses the surface,
 /// however shallow the crossing. Accepted only on the solved residual: the point on
-/// `curve` when it lies within `tol * 1e-6` of its foot (iterated on while that still
-/// halves the residual). `None` when a drop or an evaluation fails, the curve runs along
+/// `curve` when its distance along the normal to the tangent plane at its foot is within
+/// `tol * 1e-6`, or within 64 eps of its own coordinates where those ulps are larger
+/// (iterated on while that still halves the residual). `None` when a drop or an evaluation fails, the curve runs along
 /// the tangent plane to rounding, or no step within 32 reaches the residual (a crossing
 /// past the curve's end, or none).
 fn crosses_surface(
@@ -419,7 +421,6 @@ fn crosses_surface(
     let Some((mut t, _)) = drop_on(k, curve, &interval, start)? else {
         return Ok(None);
     };
-    let accept = tol * 1e-6;
     let mut found: Option<(f64, Point3)> = None;
     for _ in 0..32 {
         let d = curve.evaluate(k, t, 1, false, false)?;
@@ -450,7 +451,14 @@ fn crosses_surface(
             }
             (None, None) => return Ok(None),
         };
-        let gap = p.distance(foot);
+        // the residual along the normal (a drop's tangential error is not the crossing's);
+        // accepted at `tol * 1e-6`, or at the rounding of `p`'s own coordinates where
+        // those are so large that their ulps exceed it
+        let gap = normal.dot(p - foot).abs();
+        let accept = smos_max(
+            tol * 1e-6,
+            64.0 * f64::EPSILON * smos_max(p.x.abs(), smos_max(p.y.abs(), p.z.abs())),
+        );
         // NaN fails every comparison and so is never accepted
         if gap <= accept {
             match found {
@@ -466,71 +474,223 @@ fn crosses_surface(
         if !solvable {
             break;
         }
-        t = (t - normal.dot(p - foot) / slope).clamp(interval.min(), interval.max());
+        t = smos_min(
+            smos_max(t - normal.dot(p - foot) / slope, interval.min()),
+            interval.max(),
+        );
     }
     Ok(found.map(|(_, p)| p))
 }
 
-/// #17673: each end of the crease `piece` (on face `f` of the target) that ends on a
-/// boundary edge of the sheet face, within `tol`, put at the point where that edge's
-/// curve crosses `f`'s surface: the merge then joins the two at a point both curves pass
-/// through, and the edge is split on its own curve (it was split where the crease's end
-/// dropped onto it, up to `tol` off, and kept its curve short of its new vertex). The
-/// nearest such edge is taken; the end moves by moving the piece's end control point
-/// (a clamped B-spline's end): its basis function is at most 1 and vanishes past the
-/// last span, so no point of the piece moves farther than the gap (at most `tol`), and
-/// only the last span moves. An end with no such edge, or whose meet lies farther than
-/// `tol`, is left.
-fn end_crease_at_boundary(
+/// `curve`'s end at `t` put at `q` by moving its end control point (`at_end`: the last;
+/// else the first): a clamped B-spline's end is that control point, whose basis function
+/// is at most 1 and vanishes past the end span, so no point of the curve moves farther
+/// than `|q - curve(t)|`, and only the end span moves. `false` (nothing moved) for another
+/// kind, or an end that is not its control point.
+fn move_end_to(k: &Kernel, curve: &mut Curve, at_end: bool, q: Point3, tol: f64) -> Result<bool> {
+    let ivl = curve.natural_interval();
+    let end = curve.evaluate_point(k, if at_end { ivl.max() } else { ivl.min() })?;
+    let CurveKind::BSpline(spline) = curve.kind_mut() else {
+        return Ok(false);
+    };
+    let idx = if at_end {
+        match spline.number_control_points()?.checked_sub(1) {
+            Some(i) => i,
+            None => return Ok(false),
+        }
+    } else {
+        0
+    };
+    let (cp, w) = spline.control_point(ControlPointForm::EuclideanRational, idx)?;
+    // only a clamped end is its end control point
+    let clamped = cp.distance(end) <= tol * 1e-6;
+    if !clamped {
+        return Ok(false);
+    }
+    spline.set_control_point(ControlPointForm::EuclideanRational, idx, q, w)?;
+    Ok(true)
+}
+
+/// #17673: [`crate::blend::fillet_overflow::pieces_in_face`] for a crease on target face `f`, each piece run on to the
+/// crease's own end where the classification puts the rest of the crease on the face's
+/// boundary (runs along an edge, within `tol`, that reach the crease's end). A crease of a
+/// sheet tangent to the face beside `f` (a round rolling on it) meets `f`'s edge there at
+/// a shallow angle: it comes within `tol` of that edge a run before its end, which lies on
+/// the edge (the sheet's rail end). Clipped where it comes within `tol`, the piece stops
+/// short of the corner by that run, and the sheet's boundary no longer closes there. A
+/// crease that runs along an edge and goes on inside the face, or ends off the face's
+/// boundary, is classified and clipped as before.
+fn pieces_in_face_to_ends(
     k: &Kernel,
-    piece: &mut Curve,
-    boundary: &[Curve],
+    crease: &Curve,
+    b: &mut Brep,
+    f: FaceId,
+    tol: f64,
+    pieces: &mut Vec<Curve>,
+) -> Result<()> {
+    let natural = crease.natural_interval();
+    let runs = face::p2::classify_free_curve_on_face(k, b, f, crease, natural, tol, true)?;
+    for (i, run) in runs.iter().enumerate() {
+        if run.mid != PointClassType::Face {
+            continue;
+        }
+        let (mut lo, mut hi) = (run.interval.min(), run.interval.max());
+        // the runs before it, all along an edge, reaching the crease's start
+        let before = runs.get(..i).unwrap_or_default();
+        if !before.is_empty()
+            && before.iter().all(|r| r.mid == PointClassType::Edge)
+            && before
+                .first()
+                .is_some_and(|r| r.interval.min() <= natural.min())
+        {
+            lo = natural.min();
+        }
+        let after = runs.get(i + 1..).unwrap_or_default();
+        if !after.is_empty()
+            && after.iter().all(|r| r.mid == PointClassType::Edge)
+            && after
+                .last()
+                .is_some_and(|r| r.interval.max() >= natural.max())
+        {
+            hi = natural.max();
+        }
+        let a = crease.evaluate_point(k, lo)?;
+        let z = crease.evaluate_point(k, hi)?;
+        if a.distance(z) <= tol && !crease.is_closed(k, &natural, tol)? {
+            continue;
+        }
+        let mut piece = crease.copy(k)?;
+        let ivl = crate::geom::extent1d::Extent1d::from_min_max(lo, hi);
+        if ivl != piece.natural_interval() {
+            let mut trim = ivl;
+            piece.trim(
+                k,
+                &mut trim,
+                crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+            )?;
+        }
+        pieces.push(piece);
+    }
+    Ok(())
+}
+
+/// #17673: the pieces of the crease `crease` (on face `f` of `target`) that lie inside the
+/// sheet face `s` (its runs classified in the face, as [`crate::blend::fillet_overflow::pieces_in_face`]), each end that
+/// the classification puts on a boundary edge of the sheet face (one no other sheet face
+/// shares) ended where that edge's curve crosses `f`'s surface ([`crosses_surface`]):
+/// the merge then joins the two at a point both curves pass through, and the edge is split
+/// on its own curve (it was split where the piece's end dropped onto it, up to `tol` off,
+/// and kept its curve short of its new vertex).
+///
+/// The meet is taken when it lies on the crease (within `tol`) at a parameter between the
+/// end and the far end of the runs beyond it that the classification puts along that same
+/// edge, `tol` past those, or within `tol` of the end. Where the crease runs into the edge
+/// at a shallow angle (a sheet tangent to the face the edge lies on), the classification
+/// ends the piece where the crease comes within `tol` of the edge, short of their meet by
+/// up to the length of that run. The piece is trimmed to the meet's parameter and its end
+/// moved onto the meet ([`move_end_to`]). An end with no such meet is left as classified.
+#[allow(clippy::too_many_arguments)]
+fn pieces_ending_at_meets(
+    k: &Kernel,
+    crease: &Curve,
+    sheet: &mut Brep,
+    s: FaceId,
     target: &Brep,
     f: FaceId,
     tol: f64,
+    pieces: &mut Vec<Curve>,
 ) -> Result<()> {
-    let ivl = piece.natural_interval();
-    for at_end in [false, true] {
-        let t = if at_end { ivl.max() } else { ivl.min() };
-        let end = piece.evaluate_point(k, t)?;
-        let mut nearest: Option<(f64, &Curve)> = None;
-        for c in boundary {
-            let Some((_, d)) = drop_on(k, c, &c.natural_interval(), end)? else {
+    let natural = crease.natural_interval();
+    let runs = face::p2::classify_free_curve_on_face(k, sheet, s, crease, natural, tol, true)?;
+    for (i, run) in runs.iter().enumerate() {
+        if run.mid != PointClassType::Face {
+            continue;
+        }
+        let ivl = run.interval;
+        let a = crease.evaluate_point(k, ivl.min())?;
+        let z = crease.evaluate_point(k, ivl.max())?;
+        if a.distance(z) <= tol && !crease.is_closed(k, &natural, tol)? {
+            continue;
+        }
+        // each end: its parameter, the boundary edge it lies on, and the parameter the
+        // runs beyond it along that edge reach
+        let mut ends: [(f64, Option<Point3>); 2] = [(ivl.min(), None), (ivl.max(), None)];
+        for (side, slot) in ends.iter_mut().enumerate() {
+            let (t, (_, on_edge)) = if side == 0 {
+                (ivl.min(), run.start)
+            } else {
+                (ivl.max(), run.end)
+            };
+            let Some(e) = on_edge else {
                 continue;
             };
-            if d <= tol && nearest.is_none_or(|(best, _)| d < best) {
-                nearest = Some((d, c));
+            if !edge::is_lamina(sheet, e)? {
+                continue;
+            }
+            // the runs beyond this end along the same edge
+            let mut reach = t;
+            let mut j = i;
+            loop {
+                let next = if side == 0 {
+                    j.checked_sub(1)
+                } else {
+                    Some(j + 1)
+                };
+                let Some(n) = next else { break };
+                let Some(r) = runs.get(n) else { break };
+                let along = r.mid == PointClassType::Edge
+                    && (if side == 0 { r.end.1 } else { r.start.1 }) == Some(e);
+                if !along {
+                    break;
+                }
+                reach = if side == 0 {
+                    r.interval.min()
+                } else {
+                    r.interval.max()
+                };
+                j = n;
+            }
+            let end = crease.evaluate_point(k, t)?;
+            let edge_curve = edge_curve(k, sheet, e)?;
+            let Some(q) = crosses_surface(k, &edge_curve, target, f, end, tol)? else {
+                continue;
+            };
+            let Some((tq, d)) = drop_on(k, crease, &natural, q)? else {
+                continue;
+            };
+            let on_crease = d <= tol;
+            let (lo, hi) = if t <= reach { (t, reach) } else { (reach, t) };
+            let within = (tq >= lo && tq <= hi) || q.distance(end) <= tol || {
+                let past = crease.evaluate_point(k, tq)?;
+                let at_reach = crease.evaluate_point(k, reach)?;
+                past.distance(at_reach) <= tol
+            };
+            if on_crease && within {
+                *slot = (tq, Some(q));
             }
         }
-        let Some((_, edge_curve)) = nearest else {
-            continue;
-        };
-        let Some(meet) = crosses_surface(k, edge_curve, target, f, end, tol)? else {
-            continue;
-        };
-        let gap = meet.distance(end);
-        let moves = gap <= tol && gap > 0.0;
-        if !moves {
+        let [(t0, q0), (t1, q1)] = ends;
+        let ordered = t0 < t1;
+        if !ordered {
             continue;
         }
-        let CurveKind::BSpline(spline) = piece.kind_mut() else {
-            continue;
-        };
-        let idx = if at_end {
-            match spline.number_control_points()?.checked_sub(1) {
-                Some(i) => i,
-                None => continue,
-            }
-        } else {
-            0
-        };
-        let (cp, w) = spline.control_point(ControlPointForm::EuclideanRational, idx)?;
-        // only a clamped end is its end control point
-        let clamped = cp.distance(end) <= tol * 1e-6;
-        if !clamped {
-            continue;
+        let mut piece = crease.copy(k)?;
+        let trim_to = crate::geom::extent1d::Extent1d::from_min_max(t0, t1);
+        if trim_to != piece.natural_interval() {
+            let mut trim = trim_to;
+            piece.trim(
+                k,
+                &mut trim,
+                crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+            )?;
         }
-        spline.set_control_point(ControlPointForm::EuclideanRational, idx, meet, w)?;
+        if let Some(q) = q0 {
+            move_end_to(k, &mut piece, false, q, tol)?;
+        }
+        if let Some(q) = q1 {
+            move_end_to(k, &mut piece, true, q, tol)?;
+        }
+        pieces.push(piece);
     }
     Ok(())
 }
@@ -904,7 +1064,7 @@ impl FilletSession<'_> {
     /// face's plane ([`cut_fillet_at_open_end`]). Each sheet face is sectioned by every
     /// face of the target near it whose surface holds none of its boundary ([`creases`]); a
     /// crease is kept where it lies inside the face it is on and the sheet face
-    /// ([`pieces_in_face`]), and the sheet face is split along all of them at once; a
+    /// ([`crate::blend::fillet_overflow::pieces_in_face`]), and the sheet face is split along all of them at once; a
     /// piece whose inner point lies inside the target is kept, the others go. A support
     /// face whose kept rail runs past its boundary into the material is carried on along
     /// its plane ([`extend`]). The kept pieces' lamina edges are imprinted on the target
@@ -1033,6 +1193,7 @@ impl FilletSession<'_> {
                 &end_surface,
                 vertex_point,
                 edge_mid,
+                solver_tol,
                 smos_min(solver_tol, self.objects.target.tolerance()) * SECTION_FIT,
                 &mut note,
             );
@@ -1205,14 +1366,6 @@ impl FilletSession<'_> {
                 crate::query::face::p1::calculate_bounding_box(k, &sheet, s, false)?;
             sheet_box.expand_absolute(on_tol);
             let sheet_edges = face::p4::edges(&sheet, s, None, false, None)?;
-            // #17673: the curves of the face's boundary edges no other face shares, which
-            // its creases may end on
-            let mut boundary: Vec<Curve> = Vec::new();
-            for &e in &sheet_edges {
-                if edge::is_lamina(&sheet, e)? {
-                    boundary.push(edge_curve(k, &sheet, e)?);
-                }
-            }
             let mut pieces: Vec<Curve> = Vec::new();
             let mut only: Option<Surface> = None;
             let mut crossed = 0_usize;
@@ -1257,9 +1410,9 @@ impl FilletSession<'_> {
                 if bx.are_disjoint(&sheet_box, on_tol) || skip {
                     continue;
                 }
-                // fitted to the body's own accuracy, so that creases meeting at a corner of
-                // the sheet (on two faces past a cliff) meet there within it; exact
-                // sections stay exact
+                // fitted to a thousandth of the body's accuracy (#17673, `SECTION_FIT`), so
+                // that creases meeting at a corner of the sheet (on two faces past a cliff)
+                // meet there well within it; exact sections stay exact
                 // Not upstream (#10876): the Roll-over's torus against a cliff face parallel
                 // to its axis, its creases as certified graphs over the face's profile
                 let certified = if self.executive.roll_over_pass {
@@ -1291,7 +1444,7 @@ impl FilletSession<'_> {
                 // each crease where it lies inside both faces
                 let mut in_face = Vec::new();
                 for c in &found {
-                    pieces_in_face(k, c, self.objects.target, f, tol, &mut in_face)?;
+                    pieces_in_face_to_ends(k, c, self.objects.target, f, tol, &mut in_face)?;
                 }
                 // Not the fork's (WR-717, #2385): a crease that runs along an edge of the
                 // face, within tolerance, is that edge. The sheet is split along it as along
@@ -1308,12 +1461,18 @@ impl FilletSession<'_> {
                 }
                 let before = pieces.len();
                 for c in &in_face {
-                    pieces_in_face(k, c, &mut sheet, s, tol, &mut pieces)?;
-                }
-                // #17673: each piece that ends on the sheet face's boundary ends where that
-                // edge crosses the face
-                for piece in pieces.get_mut(before..).unwrap_or_default() {
-                    end_crease_at_boundary(k, piece, &boundary, self.objects.target, f, tol)?;
+                    // #17673: each piece that ends on the sheet face's boundary ends where
+                    // that edge crosses the face
+                    pieces_ending_at_meets(
+                        k,
+                        c,
+                        &mut sheet,
+                        s,
+                        self.objects.target,
+                        f,
+                        tol,
+                        &mut pieces,
+                    )?;
                 }
                 if pieces.len() > before {
                     // A face past a cliff meets the face the rail leaves (one the blend
