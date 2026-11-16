@@ -24,7 +24,6 @@ use core::f64::consts::PI;
 
 use offset_fixture::{planar_faces_at, report, shell};
 use solidcore::blend::fillet_executive::api::fillet_edges;
-use solidcore::kernel::UpstreamFixes;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_cylinder;
 use solidcore::{Brep, Kernel};
@@ -61,16 +60,6 @@ fn expected(t: f64) -> f64 {
     PI * RD * RD * H - corner - PI * (RD - t) * (RD - t) * (H - t)
 }
 
-/// The default kernel (the rounds are mated across collapsed faces), with or without the
-/// revolution's collapse test.
-fn kernel(revolution_collapses: bool) -> Kernel {
-    let mut k = Kernel::default();
-    let mut f = UpstreamFixes::default();
-    f.revolution_round_offset_collapses = revolution_collapses;
-    k.fixes = f;
-    k
-}
-
 /// Shells the disc rounded at `edge_z` by `t`, open at `open_z`; whether the result is
 /// an intact manifold solid of the expected volume to 1e-6.
 fn shelled(k: &mut Kernel, edge_z: f64, open_z: f64, t: f64) -> bool {
@@ -88,17 +77,10 @@ fn shelled(k: &mut Kernel, edge_z: f64, open_z: f64, t: f64) -> bool {
 }
 
 #[test]
-fn wr567_default_fails_open_at_the_other_end() {
-    // upstream: the round's offset is the arc turned inside out
-    let mut k = kernel(false);
-    assert!(!shelled(&mut k, -H, 0.0, 1.6));
-}
-
-#[test]
 fn wr567_round_thinner_than_the_wall_collapses() {
     for (edge_z, open_z) in [(-H, 0.0), (-H, -H), (0.0, -H)] {
         for t in [1.6, 2.0] {
-            let mut k = kernel(true);
+            let mut k = Kernel::default();
             assert!(
                 shelled(&mut k, edge_z, open_z, t),
                 "rounded at z {edge_z}, open at z {open_z}, shelled {t}"

@@ -72,9 +72,11 @@
 //!   (non-zero: `TRUE`) for a missing patch; `sm_GoodDropResult` compares the guess and
 //!   result distances with swapped names (the opt-in
 //!   `Kernel::fixes.good_drop_result_distances_in_order` compares them the right way round
-//!   and takes a foot only at the local solve's tight tolerance, WR-56); `FindDegenParamForDirection` compares a sample fraction with the parameter
-//!   `dS` (the opt-in `Kernel::fixes.degen_param_tiebreak_uses_actual_param` compares the
-//!   mapped singular parameter `s_ivl.evaluate(...)` instead, WR-57).
+//!   and takes a foot only at the local solve's tight tolerance, WR-56).
+//! - **Degenerate-parameter tie-break (WR-57).** `FindDegenParamForDirection` compares a
+//!   `[0, 1]` sample fraction with the singular parameter `dS` upstream; the port
+//!   compares the mapped singular parameter `s_ivl.evaluate(...)`, so a singular
+//!   domain other than `[0, 1]` picks the starting guess nearest `dS`.
 //! - **Projection curve class.** `CreateParallelProjectionCurves` takes a [`Curve`] for
 //!   upstream's `const SmBSplineCurve&`; a curve outside the `SmBSplineCurve` classes
 //!   (B-spline, line, ellipse, hyperbola, parabola), which upstream's type rules out,
@@ -1066,11 +1068,10 @@ impl Surface {
     /// the non-singular tangent best matches `dir` (`FindDegenParamForDirection`):
     /// samples ten parameters, then runs a Newton solve from the best one.
     ///
-    /// In the near-equal starting-guess tie-break, upstream compares the `[0, 1]`
-    /// sample fractions `dThisParam` and `dNearBestParam` directly against the input
-    /// singular parameter `dS`; with
-    /// `Kernel::fixes.degen_param_tiebreak_uses_actual_param` (WR-57) it compares the
-    /// mapped singular parameters in `s_ivl` instead.
+    /// In the near-equal starting-guess tie-break, the mapped singular parameters in
+    /// `s_ivl` are compared with the input singular parameter `dS`; upstream compares
+    /// the `[0, 1]` sample fractions `dThisParam` and `dNearBestParam` with it directly
+    /// (WR-57).
     ///
     /// # Errors
     ///
@@ -1165,12 +1166,10 @@ impl Surface {
             }
 
             // for nearly equal starting guesses - save the one nearest the input value
-            // (WR-57: pinned C++ compares the [0, 1] fraction directly against `ds`)
-            let (cand_s, near_best_s) = if k.fixes.degen_param_tiebreak_uses_actual_param {
-                (s_ivl.evaluate(this_param), s_ivl.evaluate(near_best_param))
-            } else {
-                (this_param, near_best_param)
-            };
+            // (WR-57: compared as singular parameters in `s_ivl`, where `ds` lives;
+            // pinned C++ compares the [0, 1] fraction directly against `ds`)
+            let cand_s = s_ivl.evaluate(this_param);
+            let near_best_s = s_ivl.evaluate(near_best_param);
             if this_f > near_best_f - f_tol
                 && (this_f > near_best_f + f_tol || (cand_s - ds).abs() < (near_best_s - ds).abs())
             {
@@ -3673,320 +3672,170 @@ mod tests {
         )
     }
 
-    /// WR-57 (#2209): `UpstreamFixes::degen_param_tiebreak_uses_actual_param` defaults to
-    /// `false`, is enabled by `UpstreamFixes::all()`, and can be toggled through
-    /// `UpstreamFixes::flag_mut`.
-    #[test]
-    fn wr57_flag_default_off_and_lookup_by_name() {
-        use crate::kernel::UpstreamFixes;
-
-        let mut k = Kernel::default();
-        assert!(!k.fixes.degen_param_tiebreak_uses_actual_param);
-        assert!(UpstreamFixes::all().degen_param_tiebreak_uses_actual_param);
-        assert!(UpstreamFixes::NAMES.contains(&"degen_param_tiebreak_uses_actual_param"));
-
-        let flag = k
-            .fixes
-            .flag_mut("degen_param_tiebreak_uses_actual_param")
-            .unwrap();
-        assert!(!*flag);
-        *flag = true;
-        assert!(k.fixes.degen_param_tiebreak_uses_actual_param);
-
-        *k.fixes
-            .flag_mut("degen_param_tiebreak_uses_actual_param")
-            .unwrap() = false;
-        assert!(!k.fixes.degen_param_tiebreak_uses_actual_param);
+    /// `find_degen_param_for_direction` with the default kernel at `uv`, `dir`, outbound
+    /// unless `from_pole` is `false`.
+    fn wr57_solve(
+        s: &Surface,
+        uv: Point2,
+        dir: Vec3,
+        from_pole: bool,
+        singular: SurfParamType,
+    ) -> DegenParam {
+        s.find_degen_param_for_direction(&Kernel::default(), uv, dir, from_pole, singular, 1e-9)
+            .unwrap()
     }
 
     /// WR-57 (#2209): on a sphere reparameterized to `[0, 360]` or `[0, 2 * PI]` in `u`,
-    /// the south-pole seam tie-break (`ii = 0` vs `ii = 9` for `+X`) compares `[0, 1]`
-    /// fractions against `dS` by default (flipping `input_s = 5.0` to `360.0` and
-    /// `input_s = 0.8` to `2 * PI`), whereas the opt-in compares the mapped singular
-    /// parameters and keeps `u = 0.0`; on `[0, 1]` both modes agree identically.
+    /// the south-pole seam tie-break (`ii = 0` vs `ii = 9` for `+X`) compares the mapped
+    /// singular parameters with `dS` and keeps the seam end nearest the input: `u = 0.0`
+    /// for `input_s = 5.0` (upstream's `[0, 1]` fraction compare picked `360.0`) and for
+    /// `input_s = 0.8` rad (upstream picked `2 * PI`). On `[0, 1]` fractions and
+    /// parameters are the same numbers.
     #[test]
     fn wr57_sphere_pole_seam_tiebreak_on_non_unit_and_unit_domains() {
         use crate::geom::axis2_placement::Axis2Placement;
         use crate::math::PI;
         use crate::surface::sphere::Sphere;
 
-        let k_off = Kernel::default();
-        let mut k_on = Kernel::default();
-        k_on.fixes.degen_param_tiebreak_uses_actual_param = true;
+        let k = Kernel::default();
+        let sphere = Sphere::create_canonical(&k, &Axis2Placement::default(), 1.0).unwrap();
 
-        let sphere = Sphere::create_canonical(&k_off, &Axis2Placement::default(), 1.0).unwrap();
-
-        // Native `[0, 1]` singular domain: default and opt-in behave identically.
+        // Native `[0, 1]` singular domain: the nearer seam end.
         let unit_surf = Surface::from(sphere.clone());
         assert_eq!(
             unit_surf
-                .natural_uv_domain_with_nurb(&k_off)
+                .natural_uv_domain_with_nurb(&k)
                 .unwrap()
                 .u_interval(),
             Extent1d::from_min_max(0.0, 1.0)
         );
         for input_s in [-2.0, 0.0, 0.1, 0.49, 0.51, 0.9, 1.0, 5.0] {
-            let off = unit_surf
-                .find_degen_param_for_direction(
-                    &k_off,
-                    Point2::new(input_s, 0.0),
-                    Vec3::X,
-                    true,
-                    SurfParamType::U,
-                    1e-9,
-                )
-                .unwrap();
-            let on = unit_surf
-                .find_degen_param_for_direction(
-                    &k_on,
-                    Point2::new(input_s, 0.0),
-                    Vec3::X,
-                    true,
-                    SurfParamType::U,
-                    1e-9,
-                )
-                .unwrap();
-            assert_eq!(off, on);
-            assert!(off.converged);
+            let r = wr57_solve(
+                &unit_surf,
+                Point2::new(input_s, 0.0),
+                Vec3::X,
+                true,
+                SurfParamType::U,
+            );
+            assert!(r.converged);
             let expected = if input_s < 0.5 { 0.0 } else { 1.0 };
-            assert!((off.uv.x - expected).abs() < 1e-9);
+            assert!((r.uv.x - expected).abs() < 1e-9);
         }
 
-        // `[0, 360]` angular domain with `input_s = 5.0`: `5.0` is `5.0` from `0.0` vs
-        // `355.0` from `360.0`, yet `|1.0 - 5.0| = 4.0 < |0.0 - 5.0| = 5.0`.
+        // `[0, 360]` angular domain with `input_s = 5.0`: `5.0` from `0.0` vs `355.0`
+        // from `360.0`.
         let mut sphere_deg = sphere.clone();
         sphere_deg
-            .reparameterize(&k_off, &Extent2d::from_bounds(0.0, 0.0, 360.0, 1.0))
+            .reparameterize(&k, &Extent2d::from_bounds(0.0, 0.0, 360.0, 1.0))
             .unwrap();
         let surf_deg = Surface::from(sphere_deg);
-        let off_deg = surf_deg
-            .find_degen_param_for_direction(
-                &k_off,
-                Point2::new(5.0, 0.0),
-                Vec3::X,
-                true,
-                SurfParamType::U,
-                1e-9,
-            )
-            .unwrap();
-        let on_deg = surf_deg
-            .find_degen_param_for_direction(
-                &k_on,
-                Point2::new(5.0, 0.0),
-                Vec3::X,
-                true,
-                SurfParamType::U,
-                1e-9,
-            )
-            .unwrap();
-        assert!(off_deg.converged);
-        assert!((off_deg.uv.x - 360.0).abs() < 1e-9);
-        assert!(on_deg.converged);
-        assert!(on_deg.uv.x.abs() < 1e-9);
+        let deg = wr57_solve(
+            &surf_deg,
+            Point2::new(5.0, 0.0),
+            Vec3::X,
+            true,
+            SurfParamType::U,
+        );
+        assert!(deg.converged);
+        assert!(deg.uv.x.abs() < 1e-9);
 
-        // `[0, 2 * PI]` angular domain with `input_s = 0.8` rad (`0.8` from `0.0` vs
-        // `2 * PI - 0.8` from `2 * PI`, yet `|1.0 - 0.8| = 0.2 < |0.0 - 0.8| = 0.8`).
+        // `[0, 2 * PI]` angular domain with `input_s = 0.8` rad: `0.8` from `0.0` vs
+        // `2 * PI - 0.8` from `2 * PI`.
         let mut sphere_rad = sphere;
         sphere_rad
-            .reparameterize(&k_off, &Extent2d::from_bounds(0.0, 0.0, 2.0 * PI, 1.0))
+            .reparameterize(&k, &Extent2d::from_bounds(0.0, 0.0, 2.0 * PI, 1.0))
             .unwrap();
         let surf_rad = Surface::from(sphere_rad);
-        let off_rad = surf_rad
-            .find_degen_param_for_direction(
-                &k_off,
-                Point2::new(0.8, 0.0),
-                Vec3::X,
-                true,
-                SurfParamType::U,
-                1e-9,
-            )
-            .unwrap();
-        let on_rad = surf_rad
-            .find_degen_param_for_direction(
-                &k_on,
-                Point2::new(0.8, 0.0),
-                Vec3::X,
-                true,
-                SurfParamType::U,
-                1e-9,
-            )
-            .unwrap();
-        assert!(off_rad.converged);
-        assert!((off_rad.uv.x - 2.0 * PI).abs() < 1e-9);
-        assert!(on_rad.converged);
-        assert!(on_rad.uv.x.abs() < 1e-9);
+        let rad = wr57_solve(
+            &surf_rad,
+            Point2::new(0.8, 0.0),
+            Vec3::X,
+            true,
+            SurfParamType::U,
+        );
+        assert!(rad.converged);
+        assert!(rad.uv.x.abs() < 1e-9);
     }
 
     /// WR-57 (#2209): on B-spline degenerate patches with interior double solutions on
     /// `[10, 20]` and `[-20, -10]` (for both `SurfParamType::U` and `SurfParamType::V`),
-    /// default mode chooses the sample fraction closer in `[0, 1]` while opt-in chooses
-    /// the mapped singular parameter closer to `dS`, and `[0, 1]` patches match bit for
-    /// bit across both modes.
+    /// the tie-break picks the solution whose mapped singular parameter is nearer `dS`
+    /// (upstream's `[0, 1]` fraction compare picked the other one in each shifted case);
+    /// on `[0, 1]` patches the nearer of the two.
     #[test]
     fn wr57_nurbs_degenerate_patch_shifted_domains_and_both_singular_directions() {
-        let k_off = Kernel::default();
-        let mut k_on = Kernel::default();
-        k_on.fixes.degen_param_tiebreak_uses_actual_param = true;
-
         // Positive shifted `U` domain `[10, 20]`, interior roots at `12.5` and `17.5`.
         let pos_u = wr57_double_root_patch_u(10.0, 20.0);
-        let off_pos = pos_u
-            .find_degen_param_for_direction(
-                &k_off,
-                Point2::new(12.0, 0.0),
-                Vec3::X,
-                true,
-                SurfParamType::U,
-                1e-9,
-            )
-            .unwrap();
-        let on_pos = pos_u
-            .find_degen_param_for_direction(
-                &k_on,
-                Point2::new(12.0, 0.0),
-                Vec3::X,
-                true,
-                SurfParamType::U,
-                1e-9,
-            )
-            .unwrap();
-        assert!(off_pos.converged);
-        assert!((off_pos.uv.x - 17.5).abs() < 1e-9);
-        assert!(on_pos.converged);
-        assert!((on_pos.uv.x - 12.5).abs() < 1e-9);
+        let pos = wr57_solve(
+            &pos_u,
+            Point2::new(12.0, 0.0),
+            Vec3::X,
+            true,
+            SurfParamType::U,
+        );
+        assert!(pos.converged);
+        assert!((pos.uv.x - 12.5).abs() < 1e-9);
 
         // Inbound direction (`dir_from_pole = false` with `-X`) exercises the negated
         // direction branch with the same tie-break.
-        let off_in = pos_u
-            .find_degen_param_for_direction(
-                &k_off,
-                Point2::new(12.0, 0.0),
-                -Vec3::X,
-                false,
-                SurfParamType::U,
-                1e-9,
-            )
-            .unwrap();
-        let on_in = pos_u
-            .find_degen_param_for_direction(
-                &k_on,
-                Point2::new(12.0, 0.0),
-                -Vec3::X,
-                false,
-                SurfParamType::U,
-                1e-9,
-            )
-            .unwrap();
-        assert!((off_in.uv.x - 17.5).abs() < 1e-9);
-        assert!((on_in.uv.x - 12.5).abs() < 1e-9);
+        let inbound = wr57_solve(
+            &pos_u,
+            Point2::new(12.0, 0.0),
+            -Vec3::X,
+            false,
+            SurfParamType::U,
+        );
+        assert!((inbound.uv.x - 12.5).abs() < 1e-9);
 
-        // When `input_s = 18.0` is genuinely near `17.5`, both modes pick `17.5`.
-        let off_upper = pos_u
-            .find_degen_param_for_direction(
-                &k_off,
-                Point2::new(18.0, 0.0),
-                Vec3::X,
-                true,
-                SurfParamType::U,
-                1e-9,
-            )
-            .unwrap();
-        let on_upper = pos_u
-            .find_degen_param_for_direction(
-                &k_on,
-                Point2::new(18.0, 0.0),
-                Vec3::X,
-                true,
-                SurfParamType::U,
-                1e-9,
-            )
-            .unwrap();
-        assert!((off_upper.uv.x - 17.5).abs() < 1e-9);
-        assert!((on_upper.uv.x - 17.5).abs() < 1e-9);
+        // `input_s = 18.0` is nearest `17.5`.
+        let upper = wr57_solve(
+            &pos_u,
+            Point2::new(18.0, 0.0),
+            Vec3::X,
+            true,
+            SurfParamType::U,
+        );
+        assert!((upper.uv.x - 17.5).abs() < 1e-9);
 
         // Negative shifted `U` domain `[-20, -10]`, interior roots at `-17.5` and `-12.5`:
-        // at `input_s = -12.0`, default keeps `2/9` (`-17.5`) because `-12.0 < 0.5`,
-        // whereas opt-in switches to `7/9` (`-12.5`).
+        // `input_s = -12.0` is nearest `-12.5` (upstream kept `2/9`, `-17.5`, because
+        // `-12.0 < 0.5`).
         let neg_u = wr57_double_root_patch_u(-20.0, -10.0);
-        let off_neg = neg_u
-            .find_degen_param_for_direction(
-                &k_off,
-                Point2::new(-12.0, 0.0),
-                Vec3::X,
-                true,
-                SurfParamType::U,
-                1e-9,
-            )
-            .unwrap();
-        let on_neg = neg_u
-            .find_degen_param_for_direction(
-                &k_on,
-                Point2::new(-12.0, 0.0),
-                Vec3::X,
-                true,
-                SurfParamType::U,
-                1e-9,
-            )
-            .unwrap();
-        assert!(off_neg.converged);
-        assert!((off_neg.uv.x + 17.5).abs() < 1e-9);
-        assert!(on_neg.converged);
-        assert!((on_neg.uv.x + 12.5).abs() < 1e-9);
+        let neg = wr57_solve(
+            &neg_u,
+            Point2::new(-12.0, 0.0),
+            Vec3::X,
+            true,
+            SurfParamType::U,
+        );
+        assert!(neg.converged);
+        assert!((neg.uv.x + 12.5).abs() < 1e-9);
 
         // `SurfParamType::V` on `[0, 1] x [10, 20]`, interior roots at `v = 12.5` and `17.5`.
         let pos_v = wr57_double_root_patch_v(10.0, 20.0);
-        let off_v = pos_v
-            .find_degen_param_for_direction(
-                &k_off,
-                Point2::new(0.0, 12.0),
-                Vec3::X,
-                true,
-                SurfParamType::V,
-                1e-9,
-            )
-            .unwrap();
-        let on_v = pos_v
-            .find_degen_param_for_direction(
-                &k_on,
-                Point2::new(0.0, 12.0),
-                Vec3::X,
-                true,
-                SurfParamType::V,
-                1e-9,
-            )
-            .unwrap();
-        assert!(off_v.converged);
-        assert!((off_v.uv.y - 17.5).abs() < 1e-9);
-        assert!(on_v.converged);
-        assert!((on_v.uv.y - 12.5).abs() < 1e-9);
+        let v = wr57_solve(
+            &pos_v,
+            Point2::new(0.0, 12.0),
+            Vec3::X,
+            true,
+            SurfParamType::V,
+        );
+        assert!(v.converged);
+        assert!((v.uv.y - 12.5).abs() < 1e-9);
 
-        // `[0, 1]` singular `U` domain: bit-identical in both modes.
+        // `[0, 1]` singular `U` domain, roots at `0.25` and `0.75`.
         let unit_u = wr57_double_root_patch_u(0.0, 1.0);
         for input_s in [-2.0, 0.0, 0.2, 0.49, 0.51, 0.8, 1.0, 5.0] {
-            let off = unit_u
-                .find_degen_param_for_direction(
-                    &k_off,
-                    Point2::new(input_s, 0.0),
-                    Vec3::X,
-                    true,
-                    SurfParamType::U,
-                    1e-9,
-                )
-                .unwrap();
-            let on = unit_u
-                .find_degen_param_for_direction(
-                    &k_on,
-                    Point2::new(input_s, 0.0),
-                    Vec3::X,
-                    true,
-                    SurfParamType::U,
-                    1e-9,
-                )
-                .unwrap();
-            assert_eq!(off, on);
-            assert!(off.converged);
+            let r = wr57_solve(
+                &unit_u,
+                Point2::new(input_s, 0.0),
+                Vec3::X,
+                true,
+                SurfParamType::U,
+            );
+            assert!(r.converged);
             let expected = if input_s < 0.5 { 0.25 } else { 0.75 };
-            assert!((off.uv.x - expected).abs() < 1e-9);
+            assert!((r.uv.x - expected).abs() < 1e-9);
         }
     }
 

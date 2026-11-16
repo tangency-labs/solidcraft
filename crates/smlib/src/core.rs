@@ -91,10 +91,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.classify_edge_interval = true;
     f.degenerate_proto_edge_in_one_vertex = true;
     f.new_edge_vertex_tolerance_covers_gap = true;
-    f.point_solve_keeps_triangle_guess = true;
     f.imprint_extends_edge_to_proto_vertex = true;
     f.fillet_point_step_per_point = true;
-    f.analytic_copy_keeps_parameterization = true;
     f.offset_extension_from_base = true;
     f.fillet_cleanup_keeps_target_faces = true;
     f.curve_contacts_at_curve_ends = true;
@@ -107,7 +105,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ssi_tangent_curve_tracer = true;
     f.local_operation_step_walls = true;
     f.fillet_knife_edge_rounds = true;
-    f.revolution_round_offset_collapses = true;
     f.proto_edge_splits_at_captured_vertices = true;
     f.linear_sweep_arc_is_cylinder = true;
     f.fillet_trace_reaches_rails = true;
@@ -139,9 +136,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.surface_continuity_checks_last_v_knot = true;
     f.offset_open_edge_second_trim_point = true;
     f.ssi_split_curves_at_singular_points = true;
-    f.surface_parallel_to_vector_checks = true;
     f.geometric_g2_continuity = true;
-    f.degen_param_tiebreak_uses_actual_param = true;
     f.local_surface_intersect_guards_max_boundary_retry = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;

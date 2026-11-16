@@ -155,7 +155,6 @@ fn top_edges(k: &Kernel, b: &Brep) -> Vec<EdgeId> {
 /// SolidCraft's preset of fixes (all 182 of `solidcraft-flags/612ac9a36`) on.
 fn round() -> (f64, Result<(bool, f64), i32>) {
     let mut k = Kernel::default();
-    k.fixes.analytic_copy_keeps_parameterization = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.box_face_failures_propagate = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
@@ -189,10 +188,8 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.offset_extension_as_itself = true;
     k.fixes.offset_extension_from_base = true;
-    k.fixes.point_solve_keeps_triangle_guess = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.proto_vertex_miss_is_false = true;
-    k.fixes.revolution_round_offset_collapses = true;
     k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.revolve_holed_profile_void = true;
     k.fixes.shell_edges_on_analytics_exact = true;

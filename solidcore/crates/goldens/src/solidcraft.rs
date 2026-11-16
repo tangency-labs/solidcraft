@@ -1756,7 +1756,6 @@ fn measure(k: &Kernel, b: &mut Brep) -> Result<Measured, SolidError> {
 fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
     let field = match name {
         "imprint_extends_edge_to_proto_vertex" => &mut k.fixes.imprint_extends_edge_to_proto_vertex,
-        "analytic_copy_keeps_parameterization" => &mut k.fixes.analytic_copy_keeps_parameterization,
         "ssi_low_angle_start_on_probation" => &mut k.fixes.ssi_low_angle_start_on_probation,
         "fillet_mitre_concave_face_corners" => &mut k.fixes.fillet_mitre_concave_face_corners,
         "fillet_trace_reaches_rails" => &mut k.fixes.fillet_trace_reaches_rails,
@@ -2482,9 +2481,9 @@ mod tests {
     fn fixes_are_enabled_by_name() {
         let mut k = Kernel::default();
         enable_fix(&mut k, "imprint_extends_edge_to_proto_vertex").unwrap();
-        enable_fix(&mut k, "analytic_copy_keeps_parameterization").unwrap();
+        enable_fix(&mut k, "ssi_low_angle_start_on_probation").unwrap();
         assert!(k.fixes.imprint_extends_edge_to_proto_vertex);
-        assert!(k.fixes.analytic_copy_keeps_parameterization);
+        assert!(k.fixes.ssi_low_angle_start_on_probation);
         assert!(enable_fix(&mut k, "no_such_fix").is_err());
     }
 
