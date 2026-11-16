@@ -902,6 +902,30 @@ mod tests {
         }
     }
 
+    /// `InvertPointNearSingularity` near an edge that is not collapsed (`gen1191`: the
+    /// guess is at u = 0.996, and the boundary u = 1 runs from 4.003 to 36085 away from
+    /// the test point). The degenerate-parameter search converges there at the end
+    /// v = -0.652, the maximum of its alignment, and the iso-curve drop at that `v` lands
+    /// 35505.9 from the test point, against 1395.2 at the guess. An answer proven farther
+    /// than the guess is not the closest point: the inversion refuses it (1001, main's
+    /// status) where it reported success. Fails with the farther-than-the-guess refusal
+    /// removed.
+    #[test]
+    fn invert_near_singularity_refuses_an_answer_farther_than_its_guess() {
+        let case = crate::case::regression_case(&Runner, "gen1191");
+        let i: Inputs = case.parse().expect("inputs");
+        let OpIn::Invert { p, dom, uv, tol } = &i.op else {
+            panic!("gen1191: not an invert case");
+        };
+        let k = Kernel::default();
+        let s = surface_of(&k, &i.surface).expect("surface").expect("a surface");
+        let r = s.invert_point_near_singularity(&k, v3(*p), &dom_of(*dom), p2(*uv), *tol);
+        let e = r.expect_err("gen1191: an answer farther than the guess is refused");
+        assert_eq!(status(&e), 1001.0, "gen1191: {e}");
+        let row = rust_run(&i).unwrap_or_else(|_| panic!("gen1191: rust"));
+        assert_eq!(row, [1001.0], "gen1191: row");
+    }
+
     /// Generated cases reach every op, and the comparable ones mostly compare values.
     #[test]
     fn generated_cases_are_diverse() {

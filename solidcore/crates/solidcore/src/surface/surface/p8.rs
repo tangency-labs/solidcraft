@@ -63,6 +63,8 @@
 //! its status keeps what was found before the failure. `CoincidenceCheck` keeps the
 //! curve cache of each boundary curve for all its intersections, as upstream keeps
 //! it on the curve, so each boundary curve builds one cache per check.
+//! `InvertPointNearSingularity` refuses an answer proven farther from the test point
+//! than its guess (upstream reports it found).
 //! Unported callees return [`SolidError::Unported`], also where upstream ignores the
 //! status. Recursion: none.
 
@@ -83,6 +85,7 @@ use crate::curve::curve_cache::CurveCache;
 use crate::curve::line::Line;
 use crate::error::surface::SurfaceFailure;
 use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::geom::certified;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -3160,13 +3163,15 @@ impl Surface {
     /// to it, may already be the answer; else the degenerate parameter is found where
     /// the surviving tangent points to the test point
     /// ([`Surface::find_degen_param_for_direction`]), and the other parameter by
-    /// dropping the point to the iso curve there.
+    /// dropping the point to the iso curve there. Not upstream: an answer proven
+    /// farther from `test_pt` than the guess is refused (upstream reports it found).
     ///
     /// # Errors
     ///
     /// The status of a failing degenerate parameter search (`SM_ERR` when it does not
-    /// converge) or iso curve creation or curve drop; [`SolidError::Unported`] from
-    /// the evaluations and drops.
+    /// converge) or iso curve creation or curve drop; `SM_ERR` for an answer proven
+    /// farther from `test_pt` than the guess; [`SolidError::Unported`] from the
+    /// evaluations and drops.
     pub fn invert_point_near_singularity(
         &self,
         k: &Kernel,
@@ -3293,6 +3298,28 @@ impl Surface {
         } else {
             Point2::new(good_param, degen_param)
         };
+
+        // (not upstream) The answer is the closest point only if it is not farther from
+        // the test point than the guess: one proven farther (the certified distance of
+        // its evaluated point has its lower end above the guess's upper end) is not an
+        // answer. The evaluations' own rounding is not bounded, so an answer within it
+        // of the guess may be refused too; the stepper then takes its normal step from
+        // the guess. The method assumes the
+        // boundary at `sSingUV` is a pole; where it is not collapsed, the iso curve at the
+        // degenerate parameter can lie far from the test point (goldens `surface_p8`
+        // gen1191: 35505.9 away, the guess 1395.2), and upstream reports it found.
+        let found_pt = self.evaluate_point(k, uv)?;
+        let d_guess = certified::distance(srf_pt, test_pt);
+        let guess_hi = certified::next_up(d_guess.value + d_guess.bound);
+        if certified::distance(found_pt, test_pt)
+            .above(guess_hi)
+            .is_yes()
+        {
+            return Err(SolidError::surface_failed(
+                OP_INVERT,
+                "the point found is farther from the test point than the guess",
+            ));
+        }
         Ok(SingularityInversion { uv, reason })
     }
 }
