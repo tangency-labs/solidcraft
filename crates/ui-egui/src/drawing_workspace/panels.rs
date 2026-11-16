@@ -320,7 +320,7 @@ fn size_name(size: PaperSize) -> String {
     }
 }
 
-fn size_caption(size: PaperSize) -> String {
+pub(super) fn size_caption(size: PaperSize) -> String {
     let (short, long) = size.sides_mm();
     format!("{} · {long:.0} × {short:.0} mm", size_name(size))
 }
@@ -400,7 +400,7 @@ pub(super) fn add_window(app: &mut SolveApp, ctx: &egui::Context, mut form: AddS
     Some(form)
 }
 
-fn paper_preview(ui: &mut egui::Ui, size: PaperSize, orientation: Orientation, block: bool) {
+pub(super) fn paper_preview(ui: &mut egui::Ui, size: PaperSize, orientation: Orientation, block: bool) {
     let t = Tokens::get();
     let (short, long) = size.sides_mm();
     let (width, height) = if orientation == Orientation::Landscape { (long, short) } else { (short, long) };

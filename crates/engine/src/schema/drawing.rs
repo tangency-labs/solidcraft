@@ -27,6 +27,9 @@ pub struct DrawingCreateParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub template: Option<String>,
+    /// Starts the first sheet without a title block when true.
+    #[serde(default)]
+    pub omit_first_sheet_title_block: bool,
     /// Its content language, a BCP 47 tag (the template's when not given).
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
