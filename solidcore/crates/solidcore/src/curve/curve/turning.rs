@@ -12,12 +12,16 @@
 //! | [`Curve::add_turning_points`] | none     |
 //! | `isolate` (private)           | none     |
 //! | `bspline_pieces` (private)    | none     |
+//! | `bezier_points` (private)     | none     |
 //! | `hermite_pieces` (private)    | none     |
 //!
 //! Deviations: not a port. The subdivision is a loop over an explicit stack. It is
 //! bounded by [`MAX_DEPTH`] levels per piece and [`MAX_NODES`] subdivisions per curve
-//! and axis; past either it refuses with `InvalidInput`. Rounding is counted with
-//! [`gamma`] throughout (operation counts at each bound), ignoring underflow.
+//! and axis; past either it refuses with `InvalidInput`. Cancellation is polled every
+//! [`CANCEL_POLL`] subdivisions. The data's rounding (Bezier extraction, the numerator,
+//! the halving) and the acceptance tests' own arithmetic are counted with [`gamma`],
+//! ignoring underflow. Not counted: the rounding of the map from a sub-interval's `s` to
+//! the curve's `t`, which moves a kept range's ends by an ulp or two of `t`.
 
 use crate::curve::curve::p2::{Curve, CurveKind};
 use crate::error::{Result, SolidError};
@@ -25,18 +29,20 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::vector3d::Point3;
 use crate::kernel::Kernel;
 use crate::nurbs::crv_basic::Curve as NlCurve;
-use crate::nurbs::iges::clamp_curve;
 use crate::nurbs::math::{gamma, CPoint, NOW, NOZ};
-use crate::nurbs::nurbs_crv::{create_bez_segments, is_clamped};
 
 const OP: &str = "curve::curve::turning::add_turning_points";
 
 /// The deepest a piece is halved. Each level at least halves the bound on the
 /// coordinate's change over a sub-interval, so a piece needs about
-/// `52 + log2(2 p (wmax / wmin)^2)` levels to bring that bound under the coordinate's
-/// rounding (see `isolate`). That is under 200 for any degree up to the NURB limit (32)
-/// and a weight ratio up to `2^70`.
+/// `52 + log2(2 q (wmax / wmin)^2)` levels to bring that bound under the coordinate's
+/// rounding (see `isolate`), `q` the numerator's degree. That is under 200 for any
+/// degree a curve evaluation holds (below `nurbs_crv::MAX_DEGREE`, 32, so `q <= 61`;
+/// the NURB data limit `knots::MAX_DEGREE` is 17) and a weight ratio up to `2^70`.
 pub(crate) const MAX_DEPTH: usize = 200;
+
+/// Subdivisions between two polls of the kernel's cancel token.
+const CANCEL_POLL: usize = 1024;
 
 /// The most subdivisions for one curve and axis. Outside the flat stretches below, a
 /// degree `q` numerator has at most `q` roots in a piece and each root costs at most
@@ -140,21 +146,29 @@ struct Node {
 /// `p`: with `|x - X| <= e_x`, `|w - W| <= e_w` and `w > e_w`,
 /// `|x / w - X / W| <= (e_x + |x / w| e_w) / (w - e_w)`, plus `gamma_1 |y|` for the
 /// division. The factor `1 + gamma_8` covers `|x / w|` against `y` and the bound's own
-/// six operations, and `1 + gamma_1` the rounding of the spread. `false` when a weight
-/// is not above its error bound.
+/// six operations. The factor `1 + gamma_3` on the spread covers its own subtraction,
+/// that factor's product and the sum on the right (`2 p` and `EPSILON * scale` are
+/// exact). `false` when a weight is not above its error bound, or a value is NaN.
+///
+/// `p` is local: `x` and `w` carry the bounds of their own segment's extraction
+/// ([`bezier_points`]) and halvings, so it is a few tens of ulps of the segment's own
+/// `max |x| (w_max / w_min)`, whatever the weights elsewhere on the curve.
 fn hull_is_flat(x: &Bern, w: &Bern, scale: f64) -> bool {
     let (mut lo, mut hi, mut perr) = (f64::INFINITY, f64::NEG_INFINITY, 0.0_f64);
     for (((&xi, &exi), &wi), &ewi) in x.v.iter().zip(&x.e).zip(&w.v).zip(&w.e) {
-        if wi <= ewi {
+        if wi.is_nan() || ewi.is_nan() || wi <= ewi {
             return false;
         }
         let y = xi / wi;
         let p = ((exi + y.abs() * ewi) / (wi - ewi) + gamma(1) * y.abs()) * (1.0 + gamma(8));
+        if !(y.is_finite() && p.is_finite()) {
+            return false;
+        }
         lo = lo.min(y);
         hi = hi.max(y);
         perr = perr.max(p);
     }
-    let spread = (hi - lo) * (1.0 + gamma(1));
+    let spread = (hi - lo) * (1.0 + gamma(3));
     spread.is_finite() && spread <= 2.0 * perr + f64::EPSILON * scale
 }
 
@@ -176,19 +190,23 @@ fn hull_is_flat(x: &Bern, w: &Bern, scale: f64) -> bool {
 /// Without the second rule a stretch where the numerator is zero to within rounding is
 /// never dropped and the first takes a width under `1 / (C p^2 (w_max / w_min)^2)`, so it
 /// would be tiled into that many ranges.
+///
+/// The first rule's `change` is four roundings (`s1 - s0` is exact, both being dyadic),
+/// covered by the factor `1 + gamma_6`; `EPSILON * scale` is exact.
+///
+/// Every node's coefficients, points and bounds are checked finite (a halving can
+/// overflow past about `9e307`), so the `max` folds never see a NaN; a node that is not
+/// finite refuses with `InvalidInput`. The kernel's cancel token is polled every
+/// [`CANCEL_POLL`] subdivisions.
 fn isolate(
+    k: &Kernel,
     piece: &Piece,
     lo: f64,
     hi: f64,
     nodes: &mut usize,
     out: &mut Vec<(f64, f64)>,
 ) -> Result<()> {
-    if !(piece.num.is_finite()
-        && piece.x.is_finite()
-        && piece.w.is_finite()
-        && piece.scale.is_finite()
-        && piece.w_min > 0.0)
-    {
+    if !(piece.scale.is_finite() && piece.w_min > 0.0 && piece.w_min.is_finite()) {
         return Err(SolidError::invalid_input(
             OP,
             "a coordinate's derivative has a non-finite coefficient or weight bound",
@@ -216,6 +234,12 @@ fn isolate(
             continue;
         }
         let c = &node.num;
+        if !(c.is_finite() && node.x.is_finite() && node.w.is_finite()) {
+            return Err(SolidError::invalid_input(
+                OP,
+                "a coordinate's derivative has a non-finite coefficient or weight bound",
+            ));
+        }
         let above = c.v.iter().zip(&c.e).all(|(&v, &e)| v > e);
         let below = c.v.iter().zip(&c.e).all(|(&v, &e)| v < -e);
         if above || below {
@@ -223,7 +247,8 @@ fn isolate(
         }
         let big = c.v.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
         let err = c.e.iter().fold(0.0_f64, |m, e| m.max(*e));
-        let change = (node.s1 - node.s0) * (big + err) / (piece.w_min * piece.w_min);
+        let change =
+            (node.s1 - node.s0) * (big + err) / (piece.w_min * piece.w_min) * (1.0 + gamma(6));
         let ulp2 = 2.0 * f64::EPSILON * ta.abs().max(tb.abs());
         let zero = c.v.iter().zip(&c.e).all(|(&v, &e)| v.abs() <= e);
         if change <= f64::EPSILON * piece.scale
@@ -240,6 +265,9 @@ fn isolate(
             ));
         }
         *nodes += 1;
+        if *nodes % CANCEL_POLL == 0 {
+            k.check_cancelled(OP)?;
+        }
         if *nodes > MAX_NODES {
             return Err(SolidError::invalid_input(
                 OP,
@@ -302,31 +330,68 @@ fn homogeneous(c: CPoint, axis: usize) -> Option<(f64, f64)> {
     Some(if c.w == NOW { (x, 1.0) } else { (x, c.w) })
 }
 
-/// Whether some interior knot of the clamped `knots` has multiplicity under `p`, so
-/// Bezier extraction inserts knots (and rounds).
-fn extraction_inserts(knots: &[f64], p: usize) -> bool {
-    let inner = knots
-        .get(p + 1..knots.len().saturating_sub(p + 1))
-        .unwrap_or(&[]);
-    let mut run = 0_usize;
-    for (i, &u) in inner.iter().enumerate() {
-        run += 1;
-        if inner.get(i + 1) != Some(&u) {
-            if run < p {
-                return true;
-            }
-            run = 0;
-        }
+/// The Bezier control values, each with a bound on its absolute error, of one
+/// component of the B-spline over its non-empty span `[a, b] = [U_j, U_{j+1}]`.
+/// `vals` are the component's `p + 1` stored values `V_{j-p} ..= V_j` (exact: the
+/// stored curve is the reference), `u` the `2 p` knots `U_{j-p+1} ..= U_{j+p}`.
+///
+/// Bezier point `i` is the blossom `b(a^{p-i}, b^i)`, by de Boor's triangle: at level
+/// `r` (argument `t_r`), `d_l = (1 - al) d_{l-1} + al d_l` for `l = p` down to `r`, with
+/// `al = (t_r - U_{j-p+l}) / (U_{j+1+l-r} - U_{j-p+l})`. Since
+/// `U_{j-p+l} <= a <= t_r <= b <= U_{j+1+l-r}`, `al` is in `[0, 1]` (and so is its
+/// rounding, by monotonicity) and the denominator is at least `b - a > 0`: every step
+/// is a convex combination of values of this span's own support.
+///
+/// Rounding of one step, with operands `P`, `Q` off by at most `e_P`, `e_Q`: the
+/// computed `al` is within `gamma_3 al` (two subtractions and a division of exact
+/// knots), `1 - al` within `gamma_4`, and the two products and the sum add `gamma_2
+/// (|P| + |Q|)`, so the result is within `max(e_P, e_Q) + gamma_7 (|P| + |Q|)`, times
+/// `1 + gamma_5` for the bound's own arithmetic. A step whose `al` is exactly 0 or 1
+/// (`t_r` equal to a knot) copies its operand, with no rounding: a span whose knots
+/// already have full multiplicity is extracted exactly.
+///
+/// So after the `p` levels each bound is at most about `14 p u A`, `A` the largest
+/// `|V|` of the span's support: local to this span, whatever the curve's values and
+/// weights elsewhere. `None` when `vals` or `u` is short.
+fn bezier_points(vals: &[f64], u: &[f64], a: f64, b: f64) -> Option<Vec<(f64, f64)>> {
+    let p = vals.len().checked_sub(1)?;
+    if u.len() != 2 * p {
+        return None;
     }
-    false
+    let mut out = Vec::new();
+    for i in 0..=p {
+        let mut d: Vec<(f64, f64)> = vals.iter().map(|&v| (v, 0.0)).collect();
+        for r in 1..=p {
+            let t = if r <= p - i { a } else { b };
+            for l in (r..=p).rev() {
+                let (&(pv, pe), &(qv, qe)) = (d.get(l - 1)?, d.get(l)?);
+                let (&lo, &hi) = (u.get(l - 1)?, u.get(l + p - r)?);
+                let next = if t == lo {
+                    (pv, pe)
+                } else if t == hi {
+                    (qv, qe)
+                } else {
+                    let al = (t - lo) / (hi - lo);
+                    let v = (1.0 - al) * pv + al * qv;
+                    let e = (pe.max(qe) + gamma(7) * (pv.abs() + qv.abs())) * (1.0 + gamma(5));
+                    (v, e)
+                };
+                *d.get_mut(l)? = next;
+            }
+        }
+        out.push(*d.get(p)?);
+    }
+    Some(out)
 }
 
 /// The derivative numerators of coordinate `axis` of the B-spline `nl`, one piece per
-/// Bezier segment. `None` when the coordinate does not exist (2D), is the same at every
-/// control point (the coordinate is then constant, so its ends hold it), or the degree is
-/// 0 (`C' = 0` on every span). A curve with unclamped knots is first clamped to its domain
-/// `[U_p, U_{n+1}]` by knot insertion ([`clamp_curve`]), which leaves the curve over it
-/// the same.
+/// non-empty knot span of its domain `[U_p, U_{n+1}]` (clamped or not). `None` when the
+/// coordinate does not exist (2D), is the same at every control point (the coordinate
+/// is then constant, so its ends hold it), or the degree is 0 (`C' = 0` on every span).
+///
+/// Each span's Bezier points (homogeneous coordinate `X_i` and weight `w_i`) come from
+/// its own `p + 1` stored points by [`bezier_points`], each with its own error bound
+/// `e_X,i`, `e_w,i` (a non-rational curve's weights are exactly 1).
 ///
 /// A segment with homogeneous points `X_i` and weights `w_i` (degree `p`) has
 /// `x = X / W` and `x' = N / W^2` with
@@ -338,22 +403,24 @@ fn extraction_inserts(knots: &[f64], p: usize) -> bool {
 /// `D_{i,j} = X_i w_j - X_j w_i`. For a non-rational segment, `W = 1` and the hodograph
 /// `c_k = p (x_{k+1} - x_k)` (degree `p - 1`) is used.
 ///
-/// Rounding: the segment's points are those of the stored curve up to the rounding of
-/// clamping and extraction. Each is at most `2p` knot-insertion steps per pass
-/// (`p` at each end of its span), each a convex combination, so as in
-/// `nurbs_crv::piece_slack` every homogeneous component is within
-/// `gamma_{16 L}` of `w_max M` (`X`) or `w_max` (`w`), `L` the steps (0 when neither
-/// pass inserts a knot), `M` and `w_max` the stored curve's largest `|x|` and weight. `c_m`
-/// is then `p + 11` roundings of terms bounded by its magnitude sum (`D`: two products and
-/// a difference; the difference of two `D`; the binomial ratio, three roundings and two
-/// operations; the product; the sum of at most `p` terms; the factor `p`), plus the effect
-/// of the points' error on each `D`, `e_X (w_i + w_j) + e_w (|X_i| + |X_j|) + 2 e_X e_w`.
-/// A non-rational `c_k` has two roundings and `2 p e_X` from the points.
+/// Rounding: `c_m` is `p + 11` roundings of terms bounded by its magnitude sum (`D`: two
+/// products and a difference; the difference of two `D`; the binomial ratio, three
+/// roundings and two operations; the product; the sum of at most `p` terms; the factor
+/// `p`), plus the effect of the points' error on each `D`,
+/// `e_X,i (w_j + e_w,j) + e_w,j |X_i| + e_X,j (w_i + e_w,i) + e_w,i |X_j|`. A
+/// non-rational `c_k` has two roundings and `p (e_k + e_{k+1})` from the points. The
+/// weight bound `w_min` is `min (w_i - e_w,i)`, two roundings, times `1 - gamma_3`.
+///
+/// # Errors
+///
+/// `InvalidInput` for a non-finite or non-positive weight, a non-finite point or knot,
+/// decreasing knots, too few knots for the control points, or a degree at or above
+/// `nurbs_crv::MAX_DEGREE` (as Bezier extraction refuses).
 fn bspline_pieces(nl: &NlCurve, axis: usize) -> Result<Option<Vec<Piece>>> {
     let pts = nl.cpts();
     let mut first = None;
     let mut varies = false;
-    let (mut big_x, mut w_max) = (0.0_f64, 0.0_f64);
+    let mut hs_all = Vec::new();
     for c in pts {
         let Some(h) = homogeneous(*c, axis) else {
             return Ok(None);
@@ -365,71 +432,76 @@ fn bspline_pieces(nl: &NlCurve, axis: usize) -> Result<Option<Vec<Piece>>> {
             ));
         }
         let x = h.0 / h.1;
-        big_x = big_x.max(x.abs());
-        w_max = w_max.max(h.1);
         match first {
             None => first = Some(x),
             Some(f) => varies |= x != f,
         }
+        hs_all.push(h);
     }
     let p = nl.degree();
     if !varies || p == 0 {
         return Ok(None);
     }
-    let mut steps = 0_usize;
-    let mut clamped;
-    let mut nl = nl;
-    if !is_clamped(nl.knots(), p) {
-        let (Some(&a), Some(&b)) = (nl.knots().get(p), nl.knots().get(nl.n() + 1)) else {
-            return Err(SolidError::invalid_input(
-                OP,
-                "a B-spline's knots do not cover its control points",
-            ));
-        };
-        clamped = nl.clone();
-        clamp_curve(&mut clamped, [a, b])?;
-        nl = &clamped;
-        steps += 2 * p;
+    if p >= crate::nurbs::nurbs_crv::MAX_DEGREE {
+        return Err(SolidError::invalid_input(
+            OP,
+            "degree at or above the largest degree a curve evaluation holds",
+        ));
     }
-    if extraction_inserts(nl.knots(), p) {
-        steps += 2 * p;
+    let knots = nl.knots();
+    if !knots.iter().all(|u| u.is_finite()) {
+        return Err(SolidError::invalid_input(OP, "a knot is not finite"));
     }
-    let e_x = gamma(16 * steps) * w_max * big_x;
-    let e_w = if steps == 0 {
-        0.0
-    } else {
-        gamma(16 * steps) * w_max
-    };
     let rational = pts.iter().any(|c| c.w != NOW);
+    let xs_all: Vec<f64> = hs_all.iter().map(|h| h.0).collect();
+    let ws_all: Vec<f64> = hs_all.iter().map(|h| h.1).collect();
     let pf = p as f64;
     let mut pieces = Vec::new();
-    for seg in create_bez_segments(nl)? {
-        let (Some(&t0), Some(&t1)) = (seg.knots().first(), seg.knots().last()) else {
-            return Err(SolidError::invalid_input(
-                OP,
-                "a Bezier segment has no knots",
-            ));
-        };
-        let hs: Vec<(f64, f64)> = seg
-            .cpts()
-            .iter()
-            .filter_map(|&c| homogeneous(c, axis))
-            .collect();
-        if seg.degree() != p || hs.len() != p + 1 {
-            return Err(SolidError::invalid_input(
-                OP,
-                "a Bezier segment has not the curve's degree and dimension",
-            ));
+    for j in p..hs_all.len() {
+        let short =
+            || SolidError::invalid_input(OP, "a B-spline's knots do not cover its control points");
+        let (&t0, &t1) = (
+            knots.get(j).ok_or_else(short)?,
+            knots.get(j + 1).ok_or_else(short)?,
+        );
+        if t1 < t0 {
+            return Err(SolidError::invalid_input(OP, "a B-spline's knots decrease"));
         }
-        let scale = hs.iter().fold(0.0_f64, |m, &(x, w)| m.max((x / w).abs()));
-        let w_min = hs.iter().fold(f64::INFINITY, |m, &(_, w)| m.min(w - e_w));
+        if t1 == t0 {
+            continue;
+        }
+        let u = knots.get(j + 1 - p..=j + p).ok_or_else(short)?;
+        let support = j - p..=j;
+        let bez = |vals: &[f64]| {
+            vals.get(support.clone())
+                .and_then(|v| bezier_points(v, u, t0, t1))
+                .ok_or_else(short)
+        };
+        let xs = bez(&xs_all)?;
+        let ws = if rational {
+            bez(&ws_all)?
+        } else {
+            vec![(1.0, 0.0); p + 1]
+        };
+        // (X_i, w_i, e_X,i, e_w,i)
+        let hs: Vec<(f64, f64, f64, f64)> = xs
+            .iter()
+            .zip(&ws)
+            .map(|(&(x, ex), &(w, ew))| (x, w, ex, ew))
+            .collect();
+        let scale = hs
+            .iter()
+            .fold(0.0_f64, |m, &(x, w, _, _)| m.max((x / w).abs()));
+        let w_min = hs.iter().fold(f64::INFINITY, |m, &(_, w, _, ew)| {
+            m.min((w - ew) * (1.0 - gamma(3)))
+        });
         let num = if rational {
             let d = |i: usize, j: usize| -> (f64, f64, f64) {
                 match (hs.get(i), hs.get(j)) {
-                    (Some(&(xi, wi)), Some(&(xj, wj))) => (
+                    (Some(&(xi, wi, exi, ewi)), Some(&(xj, wj, exj, ewj))) => (
                         xi * wj - xj * wi,
                         (xi * wj).abs() + (xj * wi).abs(),
-                        e_x * (wi + wj) + e_w * (xi.abs() + xj.abs()) + 2.0 * e_x * e_w,
+                        exi * (wj + ewj) + ewj * xi.abs() + exj * (wi + ewi) + ewi * xj.abs(),
                     ),
                     _ => (0.0, 0.0, 0.0),
                 }
@@ -467,7 +539,7 @@ fn bspline_pieces(nl: &NlCurve, axis: usize) -> Result<Option<Vec<Piece>>> {
                 let c = pf * (a.0 - b.0);
                 num.v.push(c);
                 num.e
-                    .push(gamma(2) * c.abs() + (1.0 + gamma(2)) * 2.0 * pf * e_x);
+                    .push(gamma(2) * c.abs() + (1.0 + gamma(2)) * pf * (a.2 + b.2));
             }
             num
         };
@@ -479,11 +551,11 @@ fn bspline_pieces(nl: &NlCurve, axis: usize) -> Result<Option<Vec<Piece>>> {
             scale,
             x: Bern {
                 v: hs.iter().map(|h| h.0).collect(),
-                e: vec![e_x; p + 1],
+                e: hs.iter().map(|h| h.2).collect(),
             },
             w: Bern {
                 v: hs.iter().map(|h| h.1).collect(),
-                e: vec![e_w; p + 1],
+                e: hs.iter().map(|h| h.3).collect(),
             },
         });
     }
@@ -559,12 +631,25 @@ impl Curve {
     /// speed minimisation. The numerator of `C'_e` (that of the rational derivative for
     /// a rational curve) is taken in Bernstein form per Bezier segment, and sub-intervals
     /// are dropped where the convex hull of its coefficients, widened by their rounding
-    /// bounds (which count clamping and extraction), excludes zero. This misses no root
-    /// of the stored curve's numerator. Every kept range is one where the coordinate
-    /// changes by at most its rounding, one where the numerator is zero to within its
-    /// rounding and the coordinate's hull is that narrow (a constant or nearly constant
-    /// stretch), or one no wider than two ulps of the parameter. The curve's points at
-    /// both ends of each range are added.
+    /// bounds (which count each segment's own extraction), excludes zero. This misses no
+    /// root of the stored curve's numerator. The curve's points at both ends of each kept
+    /// range are added. On a kept range the coordinate's exact value at either end is
+    /// within the following of its extreme over the range (before the map from `s` to
+    /// `t`, and the evaluation, round):
+    ///
+    /// - `EPSILON * scale` where its change is bounded by that;
+    /// - `4 p + EPSILON * scale` where the numerator is zero to within its rounding and
+    ///   the hull is that narrow (a constant or nearly constant stretch). `p` bounds the
+    ///   rounding of the range's control points. Their homogeneous values are off by at
+    ///   most `14 deg u A` from their segment's extraction ([`bezier_points`]; `A` the
+    ///   largest `|X|`, or weight, of the segment's `deg + 1` stored points) plus
+    ///   `d u A` from `d` halvings, to first order. With `M` the largest `|x|` of those
+    ///   stored points and `rho` the ratio of their largest to smallest weight (every
+    ///   value is a convex combination of theirs, so `|X| <= M w_max` and
+    ///   `w >= w_min`), `p <= 2 (14 deg + d) u M rho + u M` to first order, so this bound is at
+    ///   most `8 (14 deg + d) u M rho + 3 EPSILON M`, `d <=` [`MAX_DEPTH`]. Both factors
+    ///   are the segment's own: weights and values elsewhere on the curve do not enter;
+    /// - `|C'|` times two ulps of `t`, where the range is that narrow.
     ///
     /// Kinds: the B-spline kinds ([`Curve::b_spline_base`], a curve with its NURB) and
     /// the cubic Hermite curve, over any `interval` (a Hermite curve's cubic is
@@ -613,7 +698,7 @@ impl Curve {
             };
             let mut nodes = 0;
             for piece in pieces.iter().flatten() {
-                isolate(piece, lo, hi, &mut nodes, &mut ranges)?;
+                isolate(k, piece, lo, hi, &mut nodes, &mut ranges)?;
             }
         }
         for (a, b) in ranges {
@@ -685,7 +770,7 @@ mod tests {
         let piece = test_piece(coefs, 1e-15);
         let mut out = Vec::new();
         let mut nodes = 0;
-        isolate(&piece, 0.0, 1.0, &mut nodes, &mut out).unwrap();
+        isolate(&Kernel::default(), &piece, 0.0, 1.0, &mut nodes, &mut out).unwrap();
         for root in [0.2, 0.5, 0.9] {
             assert!(
                 out.iter().any(|&(a, b)| a <= root && root <= b),
@@ -875,29 +960,6 @@ mod tests {
         assert!((top - 0.75).abs() <= 4.0 * f64::EPSILON * 0.75, "{top}");
     }
 
-    /// An inverted interval is empty: nothing to add, and no panic.
-    #[test]
-    fn an_inverted_interval_adds_nothing() {
-        let c = two_segment(1.0, 2.0, 1.0);
-        let mut calls = 0;
-        let mut pt = crate::geom::vector3d::Vec3::UNDEF;
-        let r = c.add_turning_points(
-            &Kernel::default(),
-            &Extent1d::from_raw(2.0, 0.0),
-            &mut pt,
-            &mut |_| calls += 1,
-        );
-        assert!(r.is_ok() && calls == 0, "{r:?} {calls}");
-    }
-
-    #[test]
-    fn non_finite_coefficients_are_refused() {
-        let piece = test_piece(vec![f64::NAN, 1.0], 0.0);
-        let mut out = Vec::new();
-        let mut nodes = 0;
-        let r = isolate(&piece, 0.0, 1.0, &mut nodes, &mut out);
-        assert!(matches!(r, Err(SolidError::InvalidInput { .. })));
-    }
     /// (#17961 review r2) Simple interior knots (0, 0, 0, 1, 2.3, 3.1, 4, 4, 4), so
     /// extraction inserts knots, under end weights 100 against `wl` = 1 or 1e-3 (weight
     /// ratios 1e2 and 1e5). z has a bump of `dz` (1e-10 or 1e-7) over [1, 2.3], whose
@@ -958,5 +1020,72 @@ mod tests {
                 peak - top
             );
         }
+    }
+
+    /// A cancelled kernel stops the search at its next poll: a numerator that is zero to
+    /// within a large bound over a hull that is not flat is tiled, past `CANCEL_POLL`.
+    #[test]
+    fn a_cancelled_search_stops_at_its_poll() {
+        let mut k = Kernel::default();
+        let token = crate::kernel::CancelToken::new();
+        token.cancel();
+        k.set_cancel_token(token);
+        let piece = test_piece(vec![0.0, 0.0], 1.0);
+        let (mut out, mut nodes) = (Vec::new(), 0);
+        let r = isolate(&k, &piece, 0.0, 1.0, &mut nodes, &mut out);
+        assert!(r.as_ref().is_err_and(SolidError::is_cancelled), "{r:?}");
+        assert_eq!(nodes, CANCEL_POLL);
+    }
+
+    /// A node that overflows mid-search (coefficients near `f64::MAX`, halved into
+    /// infinity) refuses instead of folding a NaN.
+    #[test]
+    fn an_overflowing_node_is_refused() {
+        let piece = test_piece(vec![f64::MAX, f64::MAX, -f64::MAX], 0.0);
+        let (mut out, mut nodes) = (Vec::new(), 0);
+        let r = isolate(&Kernel::default(), &piece, 0.0, 1.0, &mut nodes, &mut out);
+        assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+    }
+
+    /// Extraction of a span with full-multiplicity knots copies the stored values with no
+    /// rounding; a span with simple knots carries a bound of its own values' size.
+    #[test]
+    fn extraction_bounds_are_local() {
+        // Degree 2, span [1, 2] of knots .., 0, 1, 2, 3, ..: u = U_{j-1} ..= U_{j+2}.
+        let got = bezier_points(&[1e-3, 2e-3, 3e-3], &[0.0, 1.0, 2.0, 3.0], 1.0, 2.0).unwrap();
+        let want = [1.5e-3, 2e-3, 2.5e-3];
+        for (&(v, e), w) in got.iter().zip(want) {
+            assert!(
+                (v - w).abs() <= e && e <= 40.0 * f64::EPSILON * 3e-3,
+                "{v} {e}"
+            );
+        }
+        // Full multiplicity: knots 1, 1, 2, 2 around the span [1, 2].
+        let got = bezier_points(&[7.0, 8.0, 9.0], &[1.0, 1.0, 2.0, 2.0], 1.0, 2.0).unwrap();
+        assert_eq!(got, vec![(7.0, 0.0), (8.0, 0.0), (9.0, 0.0)]);
+    }
+
+    /// An inverted interval is empty: nothing to add, and no panic.
+    #[test]
+    fn an_inverted_interval_adds_nothing() {
+        let c = two_segment(1.0, 2.0, 1.0);
+        let mut calls = 0;
+        let mut pt = crate::geom::vector3d::Vec3::UNDEF;
+        let r = c.add_turning_points(
+            &Kernel::default(),
+            &Extent1d::from_raw(2.0, 0.0),
+            &mut pt,
+            &mut |_| calls += 1,
+        );
+        assert!(r.is_ok() && calls == 0, "{r:?} {calls}");
+    }
+
+    #[test]
+    fn non_finite_coefficients_are_refused() {
+        let piece = test_piece(vec![f64::NAN, 1.0], 0.0);
+        let mut out = Vec::new();
+        let mut nodes = 0;
+        let r = isolate(&Kernel::default(), &piece, 0.0, 1.0, &mut nodes, &mut out);
+        assert!(matches!(r, Err(SolidError::InvalidInput { .. })));
     }
 }
