@@ -1693,7 +1693,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// away, or one that remains when the proto vertex moves) holds, computed now: its position and, for each classification to an object that
     /// has points (all but unknown, nothing and region, whose point is the position
     /// itself), the object point at its parameters (`FindObjPoint3d`). Returns them and
-    /// whether every one was computed and is finite. The classifications' stored gaps
+    /// whether every one was computed and is finite (only finite points are returned). The classifications' stored gaps
     /// (`m_dGap3d`) are not used: several writers set them to something other than the
     /// distance at the stored parameters. An object point that cannot be computed (parameters
     /// not set, an evaluation error of any kind, a non-finite result) makes the result
@@ -1710,7 +1710,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         };
         let position = d.position();
         let mut bounded = finite_point(position);
-        let mut points = vec![position];
+        // only finite points are recorded: a non-finite one has no distance to cover
+        let mut points = Vec::new();
+        if bounded {
+            points.push(position);
+        }
         for which in [1, 2] {
             let pc = d.brep_point_classif(which);
             if matches!(
@@ -4417,6 +4421,57 @@ mod tests {
         let v = m.proto_vertex(pv).unwrap();
         assert_eq!(v.vertex_definitions(), &[b]);
         assert_eq!(v.position(), start);
+    }
+
+    /// #17839 review: an absorbed definition placed at an infinite position records only
+    /// its finite points (its object points), and no infinite distance widens the
+    /// tolerance: it stays finite (before the fix the infinite position was recorded and
+    /// the tolerance became +inf).
+    #[test]
+    fn an_absorbed_definition_at_an_infinite_position_keeps_the_tolerance_finite() {
+        let k = Kernel::default();
+        let geo = absorb_geo();
+        let mut m = manager();
+        let mut mk = |at: Point3, vd_gap: f64| {
+            let vd = VertexDefinition::new(
+                &k,
+                &geo,
+                &vertex_pc_at(0, 0.0),
+                &vertex_pc_at(1, 0.0),
+                at,
+                1e-4,
+                vd_gap,
+                None,
+            )
+            .unwrap();
+            m.insert_vertex_definition(vd).unwrap()
+        };
+        // both at an infinite x: their distance is NaN, which passes the distance check,
+        // so `a` (the larger gap) is combined away
+        let inf = Point3::new(f64::INFINITY, 2.0, 3.0);
+        let a = mk(inf, 2e-6);
+        let b = mk(inf, 1e-6);
+        let pv = m.new_proto_vertex(P, 1e-5).unwrap();
+        m.add_proto_vertex(pv);
+        for vd in [a, b] {
+            m.add_vertex_definition(pv, vd).unwrap();
+        }
+        m.resolve_proto_vertex(&k, &geo, pv).unwrap();
+        assert!(m.vertex_def(a).is_none());
+        let v = m.proto_vertex(pv).unwrap();
+        assert_eq!(v.vertex_definitions(), &[b]);
+        assert!(v.absorbed_unbounded(), "the infinite position has no bound");
+        assert!(
+            v.absorbed_points().iter().all(|p| finite_point(*p)),
+            "only finite points are recorded: {:?}",
+            v.absorbed_points()
+        );
+        assert!(
+            v.raw_tolerance().is_finite(),
+            "tolerance {:e} at {:?}",
+            v.raw_tolerance(),
+            v.position()
+        );
     }
 
     /// #16638 review: a proto vertex that absorbed definitions and is then combined with
