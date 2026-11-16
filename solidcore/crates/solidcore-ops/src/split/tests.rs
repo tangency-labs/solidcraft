@@ -227,6 +227,19 @@ fn a_sheet_is_not_split_into_two_bodies() {
     );
 }
 
+/// A tool that enters the body and stops inside it leaves no closed solid on both sides, so it
+/// is refused (`None`), and the body is as it was.
+#[test]
+fn body_by_a_tool_ending_inside_is_refused() {
+    let (b, _) = cube();
+    // the plane x = 5 over y in [-1, 11] and z in [-1, 5]: it enters through three faces and
+    // ends at z = 5, inside the cube
+    let ends_inside = plane([5.0, 0.0, 0.0], Y, Z, [-1.0, 11.0], [-1.0, 5.0]);
+    assert!(split_body(&b, &ends_inside).unwrap().is_none());
+    assert_eq!(b.counts().unwrap(), [6, 12, 8]);
+    assert!(rel(volume(&b), 1000.0) < 1e-12);
+}
+
 /// The body split is never changed.
 #[test]
 fn the_body_stays_as_it_was() {

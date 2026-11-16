@@ -312,6 +312,51 @@ fn a_plate_a_ball_sinks_into_has_no_needles_on_the_mesh_path() {
     assert_closed(&w, "sunk ball");
 }
 
+/// The kernel rig's `booleans/1984-rivet-with-flush-heads-a-hair-off-its-hole`, its body `Sheet`
+/// as SolidCraft exports it (frozen in `tests/data`): two cylinders a hair apart and two planes.
+/// On the plane face 5 two arcs leave a vertex tangentially. Their sampled chords cross nowhere
+/// when the body is prepared, but the nodes the shaping's rounds put on the edges move chords,
+/// and a new chord of one arc crossed a chord of the other: the face was refused ("boundary
+/// crosses itself"). Meshed at SolidCraft's export spec (a chord of 1/5000 of its size), the
+/// faces of the edges that took nodes are untangled again, and it meshes: nothing refused,
+/// nothing folds, and the body's mesh is closed.
+#[test]
+fn chords_moved_by_the_shaping_rounds_are_untangled_on_the_mesh_path() {
+    let b = crate::fixtures::fixture("rig_rivet_flush_heads_sheet");
+    // SolidCraft's size of the body (`Body::size`): the box diagonal of its vertices and of each
+    // edge's points at a quarter, a half and three quarters of its interval. It only picks the
+    // spec SolidCraft exports at (and the size the mesher is given), so the face is meshed as
+    // SolidCraft meshes it.
+    let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    let mut add = |p: [f64; 3]| {
+        for k in 0..3 {
+            lo[k] = lo[k].min(p[k]);
+            hi[k] = hi[k].max(p[k]);
+        }
+    };
+    for v in &b.vertices {
+        add(v.point);
+    }
+    for e in &b.edges {
+        let curve = solidcore_convert::curve(e.parameters()).expect("the edge's curve");
+        let c = solidcore::eval::CurveEval::new(&curve).expect("evaluates");
+        let [t0, t1] = e.interval;
+        for i in 1..4 {
+            let p = c.point(t0 + (t1 - t0) * f64::from(i) / 4.0).expect("on the curve");
+            add([p.x, p.y, p.z]);
+        }
+    }
+    let size = length(sub(P::new(hi[0], hi[1], hi[2]), P::new(lo[0], lo[1], lo[2])));
+    let spec = MeshSpec::chord(crate::MeshTolerance::export_of(size).chord);
+    let (plan, _) = meshed(&b, &spec, size, None);
+    let (m, refused) = plan.evaluate();
+    assert!(refused.is_empty(), "{refused:?}");
+    assert_nothing_folds(&m, "rivet sheet");
+    let (w, refused) = plan.welded();
+    assert!(refused.is_empty(), "{refused:?}");
+    assert_closed(&w, "rivet sheet");
+}
+
 /// A 20 x 10 x 5 box at a side of 2 mm: every triangle keeps 25 degrees (the faces' corners
 /// are right angles, so Ruppert shaping reaches its angle everywhere), no side is longer than
 /// 1.5 times the side asked (the refinement's own limit), and it is closed. The display path
@@ -359,6 +404,62 @@ fn a_cylinder_wall_on_the_mesh_path_is_shaped() {
     assert_nothing_folds(&m, "cylinder");
     let (w, _) = plan.welded();
     assert_closed(&w, "cylinder");
+}
+
+/// The kernel rig's `booleans/2928-join-cap-touching-lips-with-offset-walls`, its body `Base` as
+/// SolidCraft exports it (frozen in `tests/data`): two half-annulus lips joined onto a stadium
+/// ring with their cylinder walls 0.0001 mm off the base's, which leaves a crescent of the base's
+/// top face 0.0001 mm wide between two arcs. Every triangle of that crescent is a sliver of its
+/// boundary nodes, too sharp, and its circumcentre encroaches on the arcs' sides; the shaping
+/// halved those sides round after round, and the walls' with them, toward the crescent's width,
+/// until edge 20 passed 20000 nodes and its faces were refused. Meshed at SolidCraft's export
+/// spec (a chord of 1/5000 of its size), a triangle of boundary nodes narrower than the chord is
+/// left as it is: the body meshes, nothing folds, the mesh is closed, a face is named short of
+/// its shape for being narrower than the chord, and no edge is near the node bound.
+#[test]
+fn a_sliver_narrower_than_the_chord_is_not_split_without_end_on_the_mesh_path() {
+    let b = crate::fixtures::fixture("rig_join_cap_touching_lips_base");
+    // SolidCraft's size of the body (`Body::size`): the box diagonal of its vertices and of each
+    // edge's points at a quarter, a half and three quarters of its interval. It only picks the
+    // spec SolidCraft exports at (and the size the mesher is given), so the body is meshed as
+    // SolidCraft meshes it.
+    let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    let mut add = |p: [f64; 3]| {
+        for k in 0..3 {
+            lo[k] = lo[k].min(p[k]);
+            hi[k] = hi[k].max(p[k]);
+        }
+    };
+    for v in &b.vertices {
+        add(v.point);
+    }
+    for e in &b.edges {
+        let curve = solidcore_convert::curve(e.parameters()).expect("the edge's curve");
+        let c = solidcore::eval::CurveEval::new(&curve).expect("evaluates");
+        let [t0, t1] = e.interval;
+        for i in 1..4 {
+            let p = c.point(t0 + (t1 - t0) * f64::from(i) / 4.0).expect("on the curve");
+            add([p.x, p.y, p.z]);
+        }
+    }
+    let size = length(sub(P::new(hi[0], hi[1], hi[2]), P::new(lo[0], lo[1], lo[2])));
+    let spec = MeshSpec::chord(crate::MeshTolerance::export_of(size).chord);
+    let (plan, stats) = meshed(&b, &spec, size, None);
+    let (m, refused) = plan.evaluate();
+    assert!(refused.is_empty(), "{refused:?}");
+    assert_nothing_folds(&m, "lips on a base");
+    let (w, refused) = plan.welded();
+    assert!(refused.is_empty(), "{refused:?}");
+    assert_closed(&w, "lips on a base");
+    // Faces 11 and 17, the lips' end walls (1 x 18 mm), each have a side 0.0001 mm long at a
+    // corner, beside which the triangles are narrower than the chord: they are named. Their ears
+    // (two sides on the boundary) are still split, so they keep a smallest angle near the spec's.
+    for face in [11, 17] {
+        let u = stats.unshaped.iter().find(|u| u.face == face);
+        assert!(u.is_some_and(|u| u.limits.contains(&crate::ShapeLimit::Narrow) && u.smallest_angle > 15.0), "face {face}: {u:?}");
+    }
+    let most = plan.edges.iter().map(Vec::len).max().unwrap_or(0);
+    assert!(most < edges::MAX_EDGE_NODES / 10, "an edge has {most} nodes");
 }
 
 /// A size function that asks for half the side inside a ball on the box's top face: the sides
