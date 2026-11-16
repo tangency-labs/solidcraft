@@ -4246,8 +4246,17 @@ mod tests {
                 check.as_ref().map(BrepCheck::is_valid),
                 check.as_ref().map(BrepCheck::lines)
             );
-            // none of these reaches the refusal: the hull or the loose box is finite
-            assert!(r.is_ok(), "{variant}: {r:?}");
+            // a NaN in the net leaves no finite bound, so the box is the typed refusal; the
+            // domain and tolerance cases keep a finite hull or loose box
+            if variant == "nan net" {
+                assert!(
+                    matches!(&r, Err(SolidError::InvalidInput { reason, .. })
+                        if reason.contains("has no finite bound")),
+                    "{variant}: {r:?}"
+                );
+            } else {
+                assert!(r.is_ok(), "{variant}: {r:?}");
+            }
             assert!(!check.unwrap().is_valid(), "{variant} passes Level 2");
         }
         // The edgeless body itself, finite as made, fails Level 2 (its faceuse has no
