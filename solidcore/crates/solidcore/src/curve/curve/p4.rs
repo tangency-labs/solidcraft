@@ -729,8 +729,11 @@ pub struct AnalyticIntersection<O> {
 /// Intersections of `this` over `interval` with `other` over `other_interval`
 /// within `tol` by the analytic intersectors (`SmCurve::AnalyticCurveIntersect`):
 /// line/line, line/ellipse, ellipse/line and ellipse/ellipse; any other pair finds
-/// nothing and needs the general intersector. Solutions name `this_obj` and
-/// `other_obj`.
+/// nothing and needs the general intersector. Coplanar circles, or a circle and a line
+/// in its plane, overlapping by less than `contact_tol` touch
+/// ([`Ellipse::intersect_with_ellipse`], [`Ellipse::intersect_with_line`]; zero is
+/// upstream's).
+/// Solutions name `this_obj` and `other_obj`.
 ///
 /// # Errors
 ///
@@ -742,6 +745,7 @@ pub fn analytic_curve_intersect<O: Copy>(
     other: AnalyticOperand<'_>,
     other_interval: &Extent1d,
     tol: f64,
+    contact_tol: f64,
     this_obj: Option<O>,
     other_obj: Option<O>,
 ) -> Result<AnalyticIntersection<O>> {
@@ -777,6 +781,7 @@ pub fn analytic_curve_intersect<O: Copy>(
                 ellipse,
                 other_interval,
                 tol,
+                contact_tol,
                 this_obj,
                 other_obj,
             )?;
@@ -798,6 +803,7 @@ pub fn analytic_curve_intersect<O: Copy>(
                 line,
                 other_interval,
                 tol,
+                contact_tol,
                 this_obj,
                 other_obj,
             )?;
@@ -815,6 +821,7 @@ pub fn analytic_curve_intersect<O: Copy>(
                 ellipse,
                 other_interval,
                 tol,
+                contact_tol,
                 this_obj,
                 other_obj,
             )?;
@@ -1082,7 +1089,7 @@ impl SolutionObject for PlaneHandle {
 
 /// `pPlane->GlobalCurveIntersect(pPlane->GetNaturalUVDomain(), curve, ivl, tol)`:
 /// the solutions' types, starts and ends.
-fn plane_global_curve_intersect(
+pub(crate) fn plane_global_curve_intersect(
     k: &Kernel,
     plane: &Plane,
     curve: &Curve,
@@ -1309,6 +1316,7 @@ impl Curve {
             other,
             other_interval,
             tol,
+            0.0,
             this_obj,
             other_obj,
         )

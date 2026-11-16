@@ -836,6 +836,17 @@ impl BSplineCurve {
         crate::nurbs::nurbs_crv::crv_hull_points(self.nurb_ref().ok()?, ivl)
     }
 
+    /// The Euclidean control points of the piece over `ivl` alone, each with the error
+    /// bound of its coordinates; the first and last are the piece's end points
+    /// ([`crv_piece_hull_points`](crate::nurbs::nurbs_crv::crv_piece_hull_points)). `None`
+    /// without a NURB or when no such piece is certain.
+    ///
+    /// Not upstream.
+    #[must_use]
+    pub(crate) fn piece_hull_points(&self, ivl: &Extent1d) -> Option<Vec<(Vec3, f64)>> {
+        crate::nurbs::nurbs_crv::crv_piece_hull_points(self.nurb_ref().ok()?, ivl)
+    }
+
     /// The unique knots and their multiplicities, optionally only those in `ivl`
     /// (`GetKnots`, through `sm_GetKnots`).
     ///

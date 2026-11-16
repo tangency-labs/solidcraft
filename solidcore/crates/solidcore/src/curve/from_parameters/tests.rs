@@ -166,6 +166,18 @@ fn the_record_parameter_inverts_the_kernel_parameter() {
     );
 }
 
+/// A parameter a solve rounds just past an end (one ulp past 1, as a cone's silhouette end
+/// came back) is on that end; one past it by more than `EFF_ZERO` is outside.
+#[test]
+fn a_parameter_rounded_past_an_end_is_on_it() {
+    let past = 1.0 + f64::EPSILON;
+    assert_eq!(on_interval([0.0, 1.0], past), Some(1.0));
+    assert_eq!(on_interval([0.0, 1.0], -1e-13), Some(0.0));
+    assert_eq!(on_interval([0.0, 1.0], 0.5), Some(0.5));
+    assert_eq!(on_interval([0.0, 1.0], 1.0 + 1e-9), None);
+    assert_eq!(on_interval([0.0, 1.0], f64::NAN), None);
+}
+
 /// A frame not orthonormal is refused (the kernel would silently rebuild it), as is a radius
 /// of no length.
 #[test]

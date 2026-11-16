@@ -3871,3 +3871,25 @@ fn a_band_round_an_extruded_ellipse_imports_closed() {
     let roof = w.face(&[(top, false)], p1);
     assert_closed_solid(&w.solid(&[bands, floor, roof]), 3, std::f64::consts::PI * a * b * height);
 }
+
+/// #13736: the edition an AP242 file declares is read, and a file whose edition is unknown is still
+/// read in full, with one warning about the file.
+#[test]
+fn an_unknown_ap242_edition_is_read_with_a_warning() {
+    let body = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+    let ours = step_export(&[&body], "edition").unwrap();
+    let edition_1 = "{ 1 0 10303 442 1 1 4 }";
+    assert!(ours.contains(edition_1), "SolidCraft writes an AP242 identifier");
+    for (id, warned) in [(edition_1, false), ("{ 1 0 10303 442 7 1 4 }", false), ("{ 1 0 10303 442 9 1 4 }", true)] {
+        let imp = step_import(&ours.replace(edition_1, id)).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "{id}: {:?}", imp.warnings);
+        assert!((measure(&imp.bodies[0].body).unwrap().volume - 6000.0).abs() < 1e-6, "{id}");
+        let files: Vec<_> = imp.report.issues.iter().filter(|i| i.kind == IssueKind::File).map(|i| i.detail.as_str()).collect();
+        if warned {
+            assert_eq!(files.len(), 1, "{id}: {files:?}");
+            assert!(files[0].contains("442 9 1 4") && files[0].contains("read as AP242"), "{files:?}");
+        } else {
+            assert!(imp.warnings.is_empty(), "{id}: {:?}", imp.warnings);
+        }
+    }
+}
