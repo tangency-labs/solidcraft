@@ -588,7 +588,7 @@ fn chamfers_that_overlap_are_too_large_not_a_non_solid() {
         let hole = make_cylinder([2.0, 0.0, -1.0], 10.0, 42.0).unwrap();
         boolean(&disc, &hole, BooleanOp::Subtract).unwrap().unwrap()
     };
-    let (outer, rim) = ([-14.5, 0.0, 40.0], [12.0, 0.0, 40.0]);
+    let (outer, rim) = ([-14.5, 0.0, 40.0], [2.0, 10.0, 40.0]);
     timed("overlap_alone", move || {
         blend(&ring(), Blend::Chamfer, &[outer], &[1.5], TOL, &[], &[], Corners::Filled).unwrap();
         blend(&ring(), Blend::Chamfer, &[rim], &[1.5], TOL, &[], &[], Corners::Filled).unwrap();

@@ -5846,28 +5846,34 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                 continue;
                             }
                         }
-                        // Not the fork's (#18178): the two kept rails cross or touch on the
-                        // face they share. A rail is the edge of its blend's band there, so
-                        // the other rail runs into that band: the blends overlap where their
-                        // edges share no corner to trim them, and the body built from them is
-                        // not closed. The samples below can step over a short overlap (two
-                        // chamfers at a narrow place, where one's corner mitre reaches a few
-                        // hundredths past the other's rail); the crossing is exact, found by
-                        // the curves' intersection within the solvers' tolerance. Each pair
-                        // once.
-                        if a < b
-                            && !crate::intersect::api_intersectors::curve_crossings(
-                                k, curve_a, kept_a, curve_b, kept_b, None, tol,
-                            )?
-                            .is_empty()
-                        {
-                            return Ok(false);
-                        }
                         let ivl_a = *kept_a;
                         let ivl_b = curve_b.natural_interval();
-                        for s in 1..16_u32 {
-                            let p =
-                                curve_a.evaluate_point(k, ivl_a.evaluate(f64::from(s) / 16.0))?;
+                        // Not the fork's (#18178): where the kept rails cross on the face they
+                        // share. The samples alone can step over a short overlap (two chamfers
+                        // at a narrow place, where one's corner mitre reaches a few hundredths
+                        // past the other's rail). The crossings, found exactly by the curves'
+                        // intersection within the solvers' tolerance, cut rail `a` into pieces
+                        // that each lie wholly on one side of rail `b`, so the middle of each
+                        // piece is judged too, by the same band test as the samples: a piece
+                        // inside the band refuses, and rails that only touch (bands meeting at
+                        // their fit, closer than `apart`) do not.
+                        let mut at: Vec<f64> = (1..16_u32)
+                            .map(|s| ivl_a.evaluate(f64::from(s) / 16.0))
+                            .collect();
+                        let crossings = crate::intersect::api_intersectors::curve_crossings(
+                            k, curve_a, kept_a, curve_b, kept_b, None, tol,
+                        )?;
+                        if !crossings.is_empty() {
+                            let mut cuts = vec![ivl_a.min()];
+                            cuts.extend(crossings.iter().map(|&(t, _)| t));
+                            cuts.push(ivl_a.max());
+                            at.extend(cuts.windows(2).filter_map(|w| match w {
+                                [lo, hi] if lo < hi => Some(0.5 * (lo + hi)),
+                                _ => None,
+                            }));
+                        }
+                        for t_a in at {
+                            let p = curve_a.evaluate_point(k, t_a)?;
                             // Main classifies the sample first and drops a sample off its
                             // face before any of the geometry below. The classification is
                             // the costly step, so the geometry runs first; where it fails
