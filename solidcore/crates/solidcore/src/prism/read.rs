@@ -8,7 +8,8 @@
 //!   exact up to rounding) mapped into the frame, each control point at the curve's level within
 //!   the tolerance. A line is proposed by the ends and proved by every span: control points
 //!   within the tolerance of the chord, and `W T' - T W'` positive (an oriented traversal, not a
-//!   retracing). A circle is proposed by the curve's label (a circle kind's centre and radius)
+//!   retracing). A conic whose control points leave the chord by more than their rounding is
+//!   read as its arc or conic first, and as that line only when it is neither. A circle is proposed by the curve's label (a circle kind's centre and radius)
 //!   or by three of its points, and proved by every span: the Bernstein coefficients of
 //!   `x^2 + y^2 - r^2 w^2` within the rounding of computing them and the tolerance, the angular
 //!   determinant of one sign, the span in one open half plane about the centre (split in halves
@@ -408,11 +409,20 @@ pub fn planar_pieces(
     if !joins || first.distance(a) + error > tol || last.distance(b) + error > tol {
         return None;
     }
-    if a.distance(b) > tol
+    let line = a.distance(b) > tol
         && spans
             .iter()
-            .all(|s| line_span(s, a, b, tol, error).is_some())
-    {
+            .all(|s| line_span(s, a, b, tol, error).is_some());
+    // A conic (rational spans) whose control points leave its chord by more than their rounding
+    // bends, however short: read as a line within `tol`, a few hundredths of a millimetre of a
+    // circle made a flat prism side 1e-5 mm off the cylinder it lies on (#17707). It is read as
+    // the arc or conic it is, and as the line only when it is neither.
+    let rational = spans.iter().flatten().any(|p| (p[2] - 1.0).abs() > 1e-12);
+    let bends = || {
+        let pts: Vec<Point2> = spans.iter().flatten().map(|p| point_of(*p)).collect();
+        off_chord(&pts) > error
+    };
+    if line && !(rational && bends()) {
         return Some(vec![Seg2::Line { a, b }]);
     }
     let label = circle_label(run.curve).and_then(|(c, n, r)| {
@@ -432,6 +442,7 @@ pub fn planar_pieces(
                 None
             }
         })
+        .or_else(|| line.then(|| vec![Seg2::Line { a, b }]))
 }
 
 /// The circle through `a` and the run's points 5/16 and 11/16 along: a proposal only.

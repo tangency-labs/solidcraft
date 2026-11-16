@@ -482,12 +482,19 @@ fn read(run: &Run, plane: &Plane, tol: f64, work: &mut usize, each_span: bool, w
     {
         return None;
     }
-    if a.dist(b) > tol && spans.iter().all(|s| line_span(s, a, b, tol, error, work).is_some()) {
+    let line = a.dist(b) > tol && spans.iter().all(|s| line_span(s, a, b, tol, error, work).is_some());
+    // A conic (rational spans) whose control points leave its chord by more than their rounding
+    // bends, however short: read as a line within `tol`, a few hundredths of a millimetre of a
+    // circle made a flat prism side 1e-5 mm off the cylinder it lies on (#17707). It is read as
+    // the arc or conic it is, and as the line only when it is neither.
+    let rational = spans.iter().flatten().any(|p| (p[2] - 1.).abs() > 1e-12);
+    if line && !(rational && off_chord(&spans.iter().flatten().map(|p| point(*p)).collect::<Vec<_>>()) > error) {
         return Some(vec![Seg2::Line { a, b }]);
     }
     arc(&eval, (ts, te), &spans, plane, a, b, tol, error, work, whole)
         .or_else(|| free_form(&spans, a, b, tol))
         .or_else(|| if each_span { span_by_span(&spans, a, b, tol) } else { None })
+        .or_else(|| line.then(|| vec![Seg2::Line { a, b }]))
 }
 
 /// A polyline from parameter `ts` to `te` (either way round; segment i spans [i, i + 1]) as its
