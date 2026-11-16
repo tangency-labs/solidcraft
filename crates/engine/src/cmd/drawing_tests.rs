@@ -79,12 +79,22 @@ fn a_drawing_starts_from_a_template() {
 }
 
 #[test]
-fn first_sheet_can_omit_the_template_title_block_in_one_undo_step() {
+fn first_sheet_overrides_apply_in_one_undo_step() {
     let mut s = design();
     let undo_steps = s.undo.len();
-    let made = run(&mut s, "drawing.create", json!({"template":"iso-a4-part","omit_first_sheet_title_block":true}));
-    assert_eq!(made["sheets"][0]["size_mm"], json!([210.0, 297.0]));
+    let made = run(
+        &mut s,
+        "drawing.create",
+        json!({
+            "template":"iso-a4-part",
+            "first_sheet_name":"Detail",
+            "first_sheet_paper":{"size":{"custom":{"sides_mm":[350.0,500.0]}},"orientation":"portrait"},
+            "omit_first_sheet_title_block":true
+        }),
+    );
+    assert_eq!(made["sheets"][0]["size_mm"], json!([350.0, 500.0]));
     let sheet = &open_one(&s).sheets[0];
+    assert_eq!(sheet.name, "Detail");
     assert!(sheet.border.is_some());
     assert!(sheet.title_block.is_none());
     assert!(sheet.title_block_overrides.is_empty());

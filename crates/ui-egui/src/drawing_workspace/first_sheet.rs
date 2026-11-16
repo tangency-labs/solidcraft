@@ -2,23 +2,28 @@
 
 use egui::{Rect, RichText, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
-use solidcraft_engine::geom::drawing_sheet::{Orientation, PaperSize};
+use solidcraft_engine::geom::drawing_sheet::{DrawingBorderProfile, Orientation, PaperSize, Sheet, SheetSize};
 use solidcraft_theme::Tokens;
 
 use crate::SolveApp;
 use crate::ui_kit::{self, BackingTooltipExt as _, Container, Surface, type_face::RichTextExt as _};
 
-const SIZES: &[(&str, PaperSize)] =
-    &[("a4", PaperSize::A4), ("a3", PaperSize::A3), ("a2", PaperSize::A2), ("a1", PaperSize::A1), ("a0", PaperSize::A0)];
+use super::panels::{self, PaperChoice};
 
 pub(super) struct BlankSheet {
-    size: usize,
-    title_block: bool,
+    paper: PaperChoice,
+    name: String,
+    title_block: usize,
 }
 
 impl BlankSheet {
     fn new(app: &SolveApp) -> Self {
-        Self { size: if solidcraft_engine::doc::drawing::template::is_assembly(&app.session.doc) { 2 } else { 1 }, title_block: true }
+        let size = if solidcraft_engine::doc::drawing::template::is_assembly(&app.session.doc) { PaperSize::A2 } else { PaperSize::A3 };
+        Self {
+            paper: PaperChoice::new(Sheet { size: SheetSize::Standard(size), orientation: Orientation::Landscape }),
+            name: String::new(),
+            title_block: 0,
+        }
     }
 }
 
@@ -54,13 +59,13 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect) {
             egui::ScrollArea::vertical().id_salt("drawing_first_sheet").min_scrolled_height(0.0).show(ui, |ui| {
                 ui.set_width((width - t.space_24 * 2.0).max(0.0));
                 ui.vertical_centered(|ui| {
-                    ui.label(RichText::new(tr("ui.drawing_first.title")).size(t.font_start_title).semibold().color(t.form_ink));
+                    ui.label(RichText::new(tr("ui.drawing_first.title")).size(t.font_page_heading).semibold().color(t.form_ink));
                     let subtitle = if app.session.doc.features.is_empty() {
                         tr("ui.drawing_first.empty_model").to_owned()
                     } else {
                         solidcraft_ui_text::format("ui.drawing_first.subtitle", &[("name", &app.session.doc.name)])
                     };
-                    ui.label(RichText::new(subtitle).size(t.font_intro).color(t.form_dim));
+                    ui.label(RichText::new(subtitle).size(t.font_heading).color(t.form_dim));
                 });
                 ui.add_space(t.space_16);
                 let enabled = can_create(app);
@@ -72,11 +77,11 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect) {
                     options.into_iter().fold(None, |chosen, option| card(ui, option, enabled, picker).or(chosen))
                 };
                 let blank = BlankSheet::new(app);
-                if enabled && let Some((_, size)) = SIZES.get(blank.size).copied() {
+                if enabled && let Some(Sheet { size: SheetSize::Standard(size), .. }) = blank.paper.selected() {
                     ui.add_space(t.space_12);
                     let paper = super::panels::size_caption(size);
                     let defaults = solidcraft_ui_text::format("ui.drawing_first.defaults", &[("paper", &paper)]);
-                    ui.vertical_centered(|ui| ui.label(RichText::new(defaults).size(t.font_caption).medium().color(t.form_dim)));
+                    ui.vertical_centered(|ui| ui.label(RichText::new(defaults).size(t.font_caption).color(t.form_dim)));
                 }
                 match chosen {
                     Some(Choice::Blank) => app.drawing_workspace.first_sheet = Some(blank),
@@ -104,7 +109,7 @@ fn card(ui: &mut egui::Ui, choice: Choice, enabled: bool, picker: bool) -> Optio
         .show_frame(ui, frame, bounds, |ui| {
             thumbnail(ui, &choice);
             ui.add_space(t.space_8);
-            ui.label(RichText::new(tr(title)).size(t.font_article_heading).semibold().color(t.form_ink));
+            ui.label(RichText::new(tr(title)).size(t.font_subtitle).medium().color(t.form_ink));
             ui.label(RichText::new(tr(description)).size(t.font_label).color(t.form_dim));
             ui.add_space(t.space_8);
             let id = format!("drawing:first:{target}");
@@ -118,19 +123,14 @@ fn card(ui: &mut egui::Ui, choice: Choice, enabled: bool, picker: bool) -> Optio
 fn thumbnail(ui: &mut egui::Ui, choice: &Choice) {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_24 * 4.0), Sense::hover());
-    let (background, ink) = match choice {
-        Choice::Standard => (t.form_soft, t.form_tab_ink),
-        Choice::Blank => (t.sheet_soft, t.sheet_ink),
-        Choice::Template => (t.render_soft, t.render_ink),
-    };
-    ui.painter().rect_filled(rect, t.radius_sm, background);
+    ui.painter().rect_filled(rect, t.radius_sm, t.pref_well);
     let width = (rect.width() - t.space_16).clamp(0.0, t.space_24 * 5.0);
     if width <= 0.0 {
         return;
     }
     let paper = Rect::from_center_size(rect.center(), vec2(width, width * 0.7));
-    let line = Stroke::new(1.0, ink);
-    ui.painter().rect(paper, t.radius_sm, t.paper_white, Stroke::new(1.0, t.figure_line), egui::StrokeKind::Inside);
+    let line = Stroke::new(1.0, t.figure_line);
+    ui.painter().rect(paper, t.radius_sm, t.paper_white, line, egui::StrokeKind::Inside);
     let content = paper.shrink(width * 0.10);
     match choice {
         Choice::Standard => {
@@ -168,30 +168,39 @@ pub(super) fn show_picker(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_drawing_first_sheet"), "new", tr("ui.drawing_first.choose_sheet"))
+        .cards(2.5)
         .fields()
         .actions(tr("cmd.drawing_create"), tr("ui.cancel"), None)
-        .show(ctx, can_create(app), |ui| {
-            let labels = SIZES.iter().map(|(_, size)| super::panels::size_caption(*size)).collect::<Vec<_>>();
-            let choices = labels.iter().map(String::as_str).collect::<Vec<_>>();
-            ui_kit::choice_row(ui, tr("ui.drawing_panel.size"), "drawing_first_size", &mut form.size, &choices);
-            ui_kit::row(ui, tr("ui.drawing_panel.title_block"), |ui| {
-                ui_kit::checkbox(ui, tr("ui.drawing_panel.built_in"), &mut form.title_block);
+        .show(ctx, can_create(app) && panels::valid_sheet_name(&form.name) && form.paper.selected().is_some(), |ui| {
+            panels::sheet_columns(ui, &mut form.paper, |fields, paper| {
+                panels::paper_preview(fields, paper, true, form.title_block == 0);
+                ui_kit::text_row(fields, tr("ui.drawing_panel.name"), &mut form.name, "Sheet 1");
+                panels::paper_border(fields, paper, Some(&DrawingBorderProfile::iso()));
+                ui_kit::choice_row(
+                    fields,
+                    tr("ui.drawing_panel.title_block"),
+                    "drawing_first_title_block",
+                    &mut form.title_block,
+                    &[tr("ui.drawing_panel.built_in"), tr("ui.drawing_panel.none")],
+                );
             });
-            if let Some((_, size)) = SIZES.get(form.size).copied() {
-                let orientation = if size == PaperSize::A4 { Orientation::Portrait } else { Orientation::Landscape };
-                super::panels::paper_preview(ui, size, orientation, form.title_block);
-            }
         });
     if closed || action == ui_kit::Action::Cancel {
         return;
     }
     if action == ui_kit::Action::Ok
         && can_create(app)
-        && let Some((size, _)) = SIZES.get(form.size)
+        && panels::valid_sheet_name(&form.name)
+        && let Some(paper) = form.paper.selected()
     {
-        let kind = if solidcraft_engine::doc::drawing::template::is_assembly(&app.session.doc) { "assembly" } else { "part" };
-        let template = format!("iso-{size}-{kind}");
-        if create(app, json!({"template":template,"omit_first_sheet_title_block":!form.title_block})) {
+        let mut params = json!({
+            "first_sheet_paper": paper,
+            "omit_first_sheet_title_block": form.title_block != 0,
+        });
+        if !form.name.is_empty() {
+            params["first_sheet_name"] = json!(form.name);
+        }
+        if create(app, params) {
             return;
         }
     }
