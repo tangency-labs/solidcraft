@@ -5,7 +5,7 @@ use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI, TAU};
 use solidcore_record::{Loop2, MAX_BEZIER_CTRL, Seg2, Vec2};
 use solidcraft_geom::bezier;
 use solidcraft_geom::prelude::*;
-use solidcraft_io::{DxfEntity, DxfPath, DxfPathStyle, DxfShape, DxfVertex, Geom2, IoError, path_shapes, read_dxf, write_dxf_drawing};
+use solidcraft_io::{DxfFile, DxfPath, DxfPathStyle, DxfShape, DxfVertex, Geom2, IoError, path_shapes, read_dxf, write_dxf_file};
 
 // Accepted fixtures span at most 40 mm. Legacy entities keep twelve decimal places;
 // bulged polylines may retain more. These bounds allow roundoff in the independent
@@ -26,8 +26,13 @@ fn styles() -> [DxfPathStyle; 3] {
 }
 
 fn drawing(shapes: &[DxfShape]) -> String {
-    let entities: Vec<_> = shapes.iter().cloned().map(|shape| DxfEntity { layer: "0".into(), shape }).collect();
-    write_dxf_drawing(&[], &entities).unwrap()
+    // These are admitted converter outputs, including the deliberately preserved
+    // zero-length LINE. Use the flat producer contract, not stricter new admission.
+    let mut file = DxfFile::for_flat_pattern_export(1, 0, 0).unwrap();
+    for shape in shapes {
+        file.push(file.default_layer(), shape.clone(), None).unwrap();
+    }
+    write_dxf_file(&file).unwrap()
 }
 
 type RawEntity<'a> = (&'a str, Vec<(i32, &'a str)>);
