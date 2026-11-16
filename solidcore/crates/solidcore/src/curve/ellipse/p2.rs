@@ -1858,8 +1858,8 @@ impl Ellipse {
     /// solver. A line in the circle's plane (up to `SM_EFF_ZERO_SQRT`) that overlaps the
     /// circle past touching by less than `contact_tol` touches it at one point (WR-787,
     /// #14599; zero keeps upstream's two crossings): at an end of the arc or the line that
-    /// lies on the stretch between the two crossings, else at the chord's midpoint.
-    /// Solutions name `this_obj` and `line_obj`; `start.parameters` holds
+    /// lies on the stretch between the two crossings, else at the chord's midpoint, where
+    /// both curves reach it within `tol`; else the two crossings stay. Solutions name `this_obj` and `line_obj`; `start.parameters` holds
     /// `[ellipse param, line param]`.
     ///
     /// # Errors
@@ -1951,17 +1951,23 @@ impl Ellipse {
                 )
             };
             let mut line_params = intersect(contact)?;
-            if let ([touch], [t0, t1]) = (&mut line_params[..], &intersect(0.0)?[..]) {
-                // a touch where upstream crosses twice: at a curve's end on that stretch
-                *touch = self.touch_at_an_end(
+            if let (&[touch], &[t0, t1]) = (&line_params[..], &intersect(0.0)?[..]) {
+                // a touch where upstream crosses twice: at a curve's end on that stretch,
+                // where both curves reach it; else the crossings stay
+                line_params = match self.touch_at_an_end(
+                    k,
                     interval,
                     line,
                     other_interval,
-                    (line_plane_pnt, line_plane_vec),
-                    [*t0, *t1],
-                    *touch,
+                    (start, line_vec),
+                    [t0, t1],
+                    touch,
+                    tol,
                     contact + tol,
-                )?;
+                )? {
+                    Some(s) => vec![s],
+                    None => vec![t0, t1],
+                };
             }
             if line_params.is_empty() {
                 out.needs_more_intersections = false;
@@ -2067,48 +2073,83 @@ impl Ellipse {
     }
 
     /// Where a line in this circle's plane that overlaps it by less than the contact
-    /// tolerance touches it (not upstream, #14599): the line `(point, vector)` crosses the
-    /// circle at the line parameters `crossings` and stays within `near` of it between
-    /// them, so the curves touch along that whole stretch. Where an end of the arc
-    /// (`interval`) within `near` of the line, or an end of the line (`line_interval`),
-    /// lies on the stretch (to `near` along it), they touch at that end, the one nearest
-    /// `midpoint`, as the line parameter of its projection; otherwise at `midpoint`. An arc
-    /// that starts on the line inside the stretch then touches it at its start, not a
-    /// point further along it.
+    /// tolerance touches it (not upstream, #14599): the line `start + s · vector` crosses
+    /// the circle, projected to its plane, at `s` = `crossings` and stays within `near` of
+    /// it between them, so the curves touch along that whole stretch. They touch at an end
+    /// of the arc (`interval`) within `near` of the line, or an end of the line
+    /// (`line_interval`), that lies on the stretch (to `near` along it), the one nearest
+    /// `midpoint`, else at `midpoint`, as `s`; only at a point within `tol` of both curves
+    /// over their intervals, the test each crossing passes, else nowhere (`None`: the
+    /// crossings stay). An arc that starts on the line inside the stretch then touches it
+    /// at its start, not a point further along it, and a line that starts past an arc's
+    /// end on the stretch touches it at that end.
     ///
     /// # Errors
     ///
-    /// The arc's evaluation.
+    /// The arc's evaluation; an unported or cancelled point solve.
     fn touch_at_an_end(
         &self,
+        k: &Kernel,
         interval: &Extent1d,
         line: &Line,
         line_interval: &Extent1d,
-        (point, vector): (Point3, Vec3),
+        (start, vector): (Point3, Vec3),
         crossings: [f64; 2],
         midpoint: f64,
+        tol: f64,
         near: f64,
-    ) -> Result<f64> {
+    ) -> Result<Option<f64>> {
         let length_sq = vector.length_squared();
         let length = vector.length();
+        let along = |p: Point3| (p - start).dot(vector) / length_sq;
         let [lo, hi] = crossings;
-        let mut ends = Vec::with_capacity(4);
+        let [first, last] =
+            [line_interval.min(), line_interval.max()].map(|t| along(line.evaluate_point(t)));
+        let mut ends = vec![first, last];
         for t in [interval.min(), interval.max()] {
             let p = self.base.evaluate_point(t)?;
-            let s = (p - point).dot(vector) / length_sq;
-            if p.distance(point + s * vector) <= near {
+            let s = along(p);
+            if p.distance(start + s * vector) <= near {
                 ends.push(s);
             }
         }
-        for t in [line_interval.min(), line_interval.max()] {
-            ends.push((line.evaluate_point(t) - point).dot(vector) / length_sq);
+        ends.sort_by(|a, b| (a - midpoint).abs().total_cmp(&(b - midpoint).abs()));
+        ends.push(midpoint);
+        for s in ends {
+            let within = |a: f64, b: f64, by: f64| (a - s) * length <= by && (s - b) * length <= by;
+            if within(lo, hi, near)
+                && within(first.min(last), first.max(last), tol)
+                && self.reaches(k, interval, start + s * vector, tol)?
+            {
+                return Ok(Some(s));
+            }
         }
-        let on_stretch = |s: f64| (lo - s) * length <= near && (s - hi) * length <= near;
-        Ok(ends
-            .into_iter()
-            .filter(|&s| on_stretch(s))
-            .min_by(|a, b| (a - midpoint).abs().total_cmp(&(b - midpoint).abs()))
-            .unwrap_or(midpoint))
+        Ok(None)
+    }
+
+    /// Whether this ellipse over `interval` passes within `tol` of `point`, as the
+    /// intersection loop of [`Ellipse::intersect_with_line`] tests a candidate (a failing
+    /// point solve reaches nothing).
+    ///
+    /// # Errors
+    ///
+    /// The ellipse's evaluation; an unported or cancelled point solve.
+    fn reaches(&self, k: &Kernel, interval: &Extent1d, point: Point3, tol: f64) -> Result<bool> {
+        let found: Vec<Solution<()>> =
+            match ellipse_global_point_solve(k, self, interval, point, tol * 10.0) {
+                Ok(s) => s,
+                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                    return Err(e)
+                }
+                Err(_) => return Ok(false),
+            };
+        for s in &found {
+            let p = self.base.evaluate_point(s.start.parameters[0])?;
+            if p.distance(point) <= tol + EFF_ZERO * (1.0 + p.max_dimension()) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Whether the point at `t` on this ellipse lies within `tol` of the ellipse point

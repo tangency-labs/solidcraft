@@ -322,7 +322,10 @@ What the port does today:
   its contact tolerance as one touching point at the chord's midpoint, unless the whole circle
   lies within that tolerance of the line. `Ellipse::intersect_with_line` (`curve/ellipse/p2.rs`)
   moves that point to an end of the arc or the line that lies on the stretch between the two
-  crossings, so an arc that starts on the line there touches it at its start. The two sites
+  crossings, so an arc that starts on the line there touches it at its start. That point must
+  lie within the intersection tolerance of both curves over their intervals, as each crossing
+  does; where none does (a line parallel to the plane but above it, or an end off the arc), the
+  two crossings stay. The two sites
   above that pass `contact_tol_3d` for circles pass it when one of the two is a line: an edge
   against a face's intersection curve
   (`curve/ellipse/p2.rs` through `intersect/curve_class/p9.rs`), and the curve/surface
@@ -330,8 +333,7 @@ What the port does today:
   (`surface/surface/p4.rs`). A flat side a hair inside a round tangent to it then touches the
   round's end circle at one point. A line tilted out of the circle's plane keeps its crossings:
   it meets the circle where it pierces the plane, and the chord's midpoint lies off the line.
-  The other line/circle callers keep upstream's zero. The touching point is found only where
-  it lies on both curves' intervals.
+  The other line/circle callers keep upstream's zero.
 
 **The refusal that names a tangent contact.** The kernel's boolean has none today. The `ssi` crate
 refuses a contact it cannot prove with `Error::Tangent`, code `BOOLEAN_TANGENT`, carrying where it
