@@ -119,9 +119,28 @@ pub struct Built {
     /// The reply of a previewed assembly constraint (`dof`, `conflicts`): the Constrain dialog says
     /// how free the part is with the constraint it shows.
     pub placed: Option<serde_json::Value>,
+    /// Bodies the preview only moves, drawn moved on the GPU instead of built where they land
+    /// (a Move). `scene` is not read then.
+    pub layer: Option<Layer>,
+}
+
+/// What a preview only moves, as a layer of its own ([`crate::gpu::MovingLayer`]): scenes built
+/// once where the bodies stand and one rigid motion, so a change of the motion builds and
+/// uploads nothing.
+pub struct Layer {
+    /// Names the scenes: everything they are built from.
+    pub key: u64,
+    /// What stays where it is (the ghost of where the bodies were), then what moves; `None`
+    /// when the preview already shows the scenes of `key` ([`PreviewState::layer_shown`]).
+    pub scenes: Option<(GpuScene, GpuScene)>,
+    /// From where the moving scene was built to where it is drawn.
+    pub motion: solidcraft_engine::doc::Mat,
 }
 
 type Job = Result<Built, String>;
+
+/// Set in the keys of the scenes a [`Layer`] moves (see [`PreviewState::moving_layer`]).
+const LAYER_KEYS: u64 = 1 << 63;
 
 /// How many obsolete preview jobs may still run, left behind for newer inputs (#7167). Beyond
 /// them, a new job waits for the running one as before, so a quick series of picks keeps at
@@ -186,6 +205,16 @@ pub struct PreviewState {
     moving: crate::move_preview::MovePreview,
     /// PreviewReselect: Primary held - hide the preview and restore replaced bodies for picks.
     pub rolled_back: bool,
+    /// The scene a [`Layer`] moves, for the GPU, and its key (changes whenever the scene does).
+    /// The key counts on through [`PreviewState::reset`]: the renderer keeps the scene of the key
+    /// it last took, so another design's first layer must not come under that key.
+    layer_slot: SceneSlot,
+    layer_serial: u64,
+    /// The [`Layer::key`] of the scenes shown and their motion; `None`: no layer is drawn. It
+    /// holds while the scenes do: `key` names what they are built from (the bodies, the colours,
+    /// the ghost), and the renderer keeps the moving one only as long as every frame draws it
+    /// ([`PreviewState::layer_not_drawn`]).
+    layer: Option<(u64, solidcraft_engine::doc::Mat)>,
 }
 
 impl PreviewState {
@@ -194,8 +223,63 @@ impl PreviewState {
         if self.rolled_back { &[] } else { &self.replaced }
     }
 
+    /// The key of the [`Layer`] scenes shown: a result for the same key leaves them out.
+    pub(crate) fn layer_shown(&self) -> Option<u64> {
+        self.layer.map(|(key, _)| key)
+    }
+
+    /// The bodies the preview draws moved on the GPU, for this frame; none while the preview is
+    /// hidden for a pick (`rolled_back`), as its scene is, and the frame then draws no layer
+    /// ([`PreviewState::layer_not_drawn`]).
+    pub(crate) fn moving_layer(&mut self) -> Option<crate::gpu::MovingLayer> {
+        let Some((_, motion)) = self.layer.filter(|_| self.active && !self.rolled_back) else {
+            self.layer_not_drawn();
+            return None;
+        };
+        let transform = std::array::from_fn(|c| std::array::from_fn(|r| motion[c][r] as f32));
+        Some(crate::gpu::MovingLayer { key: self.layer_serial, slot: self.layer_slot.clone(), transform })
+    }
+
+    /// This frame draws without the preview's layer: the preview is hidden for a pick, or a
+    /// component's drag has the renderer's one layer. The renderer lets go of a moving scene it
+    /// is not handed, and a frame that hands it the same key again would find no scene to take,
+    /// so the moved bodies would stay undrawn. When the renderer has taken the scene, the layer is
+    /// therefore forgotten and its preview computed again, which hands the scenes over anew. A
+    /// scene still waiting in its slot was never taken and stays.
+    pub(crate) fn layer_not_drawn(&mut self) {
+        let taken = self.layer.is_some() && self.layer_slot.lock().is_ok_and(|slot| slot.is_none());
+        if taken {
+            self.layer = None;
+            self.shown_key = None;
+        }
+    }
+
+    /// As if a layer of scenes `key` had been applied and were shown.
+    #[cfg(test)]
+    pub(crate) fn show_layer_for_tests(&mut self, key: u64) {
+        self.active = true;
+        self.layer = Some((key, solidcraft_engine::doc::IDENTITY));
+    }
+
+    /// The renderer takes the scene waiting in the layer's slot, as a frame that draws the layer
+    /// does; whether one was waiting.
+    #[cfg(test)]
+    pub(crate) fn renderer_takes_layer_for_tests(&self) -> bool {
+        self.layer_slot.lock().is_ok_and(|mut slot| slot.take().is_some())
+    }
+
+    /// Stop drawing a [`Layer`]: its scene goes with it.
+    fn drop_layer(&mut self) {
+        if self.layer.take().is_some()
+            && let Ok(mut slot) = self.layer_slot.lock()
+        {
+            *slot = None;
+        }
+    }
+
     /// Stop drawing the preview scene and give the bodies it stood in for back to the model.
     fn hide_scene(&mut self) {
+        self.drop_layer();
         if self.active || !self.replaced.is_empty() {
             self.active = false;
             self.bounds = Aabb3::EMPTY;
@@ -231,7 +315,7 @@ impl PreviewState {
     pub fn reset(&mut self) {
         self.detach();
         let (slot, key, detached) = (std::mem::take(&mut self.slot), self.key, std::mem::take(&mut self.detached));
-        *self = PreviewState { slot, key, detached, ..PreviewState::default() };
+        *self = PreviewState { slot, key, detached, layer_serial: self.layer_serial, ..PreviewState::default() };
         self.set_scene(GpuScene::default());
     }
 
@@ -258,7 +342,29 @@ impl PreviewState {
                 self.tapered = b.tapered;
                 self.mirror_meets = b.mirror_meets;
                 self.points = b.points;
-                self.set_scene(b.scene);
+                match b.layer {
+                    // The scenes of this key are up: only the motion changes, nothing is uploaded.
+                    Some(Layer { key, scenes: None, motion }) if self.layer_shown() == Some(key) => self.layer = Some((key, motion)),
+                    Some(Layer { key, scenes: Some((still, moving)), motion }) => {
+                        self.set_scene(still);
+                        if let Ok(mut slot) = self.layer_slot.lock() {
+                            *slot = Some(moving);
+                        }
+                        // Apart from a drag's layer keys, which are hashes: the renderer has one layer.
+                        self.layer_serial = self.layer_serial.wrapping_add(1) | LAYER_KEYS;
+                        self.layer = Some((key, motion));
+                    }
+                    // Its scenes left out, but they are not the ones shown: there is nothing to
+                    // move, so nothing is drawn rather than another preview's scene moved.
+                    Some(Layer { scenes: None, .. }) => {
+                        self.drop_layer();
+                        self.set_scene(GpuScene::default());
+                    }
+                    None => {
+                        self.drop_layer();
+                        self.set_scene(b.scene);
+                    }
+                }
             }
             // The current inputs make no feature: the last good geometry would contradict
             // them (a 1 mm extrusion still drawn at 0 mm), so nothing is drawn.
@@ -460,7 +566,14 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     }
     colors.tint_new = app.preferences.preview_tint_new_faces;
     colors.cut_tint = app.preferences.cut_preview_tint;
-    let key = job_key(&cmds, app.session.revision, colors);
+    let mut key = job_key(&cmds, app.session.revision, colors);
+    // A Move is drawn as a layer where the view allows it (`move_preview::layered`), and built
+    // where it lands where not: when the view changes between the two, it is computed again.
+    if crate::move_preview::is_move(&cmds) {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (key, crate::move_preview::layered(app)).hash(&mut h);
+        key = h.finish();
+    }
     let stream_key = stream_key(&cmds, app.session.revision, colors);
     let tool = as_new_body(&cmds).is_some();
     let pv = &mut app.preview;
@@ -742,6 +855,7 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         mirror_meets: None,
         points: Vec::new(),
         placed: None,
+        layer: None,
     }
 }
 
@@ -792,6 +906,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         mirror_meets: None,
         points: Vec::new(),
         placed: None,
+        layer: None,
     }
 }
 
@@ -956,6 +1071,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         mirror_meets: None,
         points,
         placed: None,
+        layer: None,
     }
 }
 
@@ -1275,6 +1391,127 @@ mod tests {
             mirror_meets: None,
             points: Vec::new(),
             placed: None,
+            layer: None,
+        }
+    }
+
+    /// A result drawn as a layer of scenes `key`, handed over when `scenes`, moved `x` along X.
+    fn layered(key: u64, scenes: bool, x: f64) -> Built {
+        let mut motion = solidcraft_engine::doc::IDENTITY;
+        motion[3][0] = x;
+        Built { layer: Some(Layer { key, scenes: scenes.then(|| (GpuScene::default(), GpuScene::default())), motion }), ..pose() }
+    }
+
+    /// No layer is drawn and none waits for the renderer.
+    fn no_layer(pv: &mut PreviewState) -> bool {
+        pv.moving_layer().is_none() && pv.layer_shown().is_none() && pv.layer_slot.lock().unwrap().is_none()
+    }
+
+    /// A layer's scenes go to the renderer once: a change of its motion keeps both scene keys,
+    /// so nothing is uploaded. The layer goes when its preview does (another preview, a failure,
+    /// the dialog closed, the design gone), is not drawn while the preview is hidden for a pick,
+    /// and a result that left its scenes out for scenes that are not shown draws nothing.
+    #[test]
+    fn a_layer_hands_its_scenes_over_once_and_goes_with_its_preview() {
+        let mut pv = PreviewState::default();
+        assert!(no_layer(&mut pv));
+        pv.apply(1, Ok(layered(7, true, 10.0)));
+        let first = pv.moving_layer().expect("drawn as a layer");
+        let still = pv.key;
+        assert_eq!(pv.layer_shown(), Some(7));
+        assert!(pv.layer_slot.lock().unwrap().is_some(), "the moving scene waits for the renderer");
+        assert_eq!(first.transform[3][0], 10.0);
+        // A step of the drag: the motion alone.
+        pv.apply(2, Ok(layered(7, false, 25.0)));
+        let next = pv.moving_layer().expect("still a layer");
+        assert_eq!((pv.key, next.key), (still, first.key), "a step uploads nothing");
+        assert_eq!(next.transform[3][0], 25.0);
+        // Hidden for a pick, as the preview's scene is.
+        pv.rolled_back = true;
+        assert!(pv.moving_layer().is_none());
+        pv.rolled_back = false;
+        // Other scenes (other bodies or colours): handed over under other keys.
+        pv.apply(3, Ok(layered(8, true, 25.0)));
+        let other = pv.moving_layer().expect("a layer of the new scenes");
+        assert!(other.key != first.key && pv.key != still && pv.layer_shown() == Some(8));
+        // Scenes left out that are not the ones shown: nothing to move, so nothing is drawn.
+        let before = pv.key;
+        pv.apply(4, Ok(layered(9, false, 1.0)));
+        assert!(no_layer(&mut pv) && pv.key != before, "neither the layer nor the old still scene stays");
+        // The layer goes with its preview.
+        for end in 0..4 {
+            pv.apply(5, Ok(layered(7, true, 3.0)));
+            assert!(pv.moving_layer().is_some());
+            match end {
+                0 => pv.apply(6, Ok(pose())),
+                1 => pv.apply(6, Err("the inputs make no feature".into())),
+                2 => pv.clear(),
+                _ => pv.reset(),
+            }
+            assert!(no_layer(&mut pv), "end {end}");
+        }
+    }
+
+    /// A frame that draws no layer makes the renderer let the moving scene go. Left at that, the
+    /// next frame would hand it the same key and no scene, and the moved bodies would stay undrawn
+    /// (hidden in the model, as the preview stands in for them). So a layer whose scene the
+    /// renderer took is forgotten when a frame does not draw it, whether the preview is hidden for
+    /// a pick or a component's drag has the layer, and its preview is computed again: the scenes
+    /// come under a new key. A scene the renderer never took just waits.
+    #[test]
+    fn a_layer_the_renderer_let_go_is_handed_over_again() {
+        for hidden_for_pick in [true, false] {
+            let mut pv = PreviewState::default();
+            pv.apply(1, Ok(layered(7, true, 10.0)));
+            let first = pv.moving_layer().expect("drawn as a layer");
+            let not_drawn = |pv: &mut PreviewState| {
+                if hidden_for_pick {
+                    pv.rolled_back = true;
+                    assert!(pv.moving_layer().is_none());
+                    pv.rolled_back = false;
+                } else {
+                    pv.layer_not_drawn();
+                }
+            };
+            // Not drawn before the renderer took the scene: nothing is lost, it waits.
+            not_drawn(&mut pv);
+            assert_eq!((pv.layer_shown(), pv.shown_key), (Some(7), Some(1)), "kept");
+            assert_eq!(pv.moving_layer().expect("drawn again").key, first.key);
+            // The renderer has it, and a frame draws without it: it lets the scene go.
+            assert!(pv.renderer_takes_layer_for_tests());
+            pv.apply(2, Ok(layered(7, false, 25.0)));
+            assert_eq!(pv.moving_layer().expect("a step of the drag").key, first.key, "drawn at every frame, it is handed over once");
+            not_drawn(&mut pv);
+            assert_eq!((pv.layer_shown(), pv.shown_key), (None, None), "forgotten, and computed again");
+            assert!(pv.moving_layer().is_none(), "not under the key whose scene is gone");
+            // Computed again, the result brings its scenes (`layer_shown` says none are up).
+            pv.apply(2, Ok(layered(7, true, 25.0)));
+            let again = pv.moving_layer().expect("a layer again");
+            assert!(again.key != first.key, "a new key, so the renderer takes the scene");
+            assert_eq!(again.transform[3][0], 25.0);
+            assert!(pv.renderer_takes_layer_for_tests(), "the scene is there to take");
+        }
+    }
+
+    /// The renderer outlives a design: it keeps the moving scene of the key it last took until a
+    /// frame draws without a layer. The first layer of the next design must not come under that
+    /// key, or its scene would never be taken and the last design's bodies drawn in its place.
+    #[test]
+    fn a_reset_keeps_counting_the_layer_keys() {
+        let mut pv = PreviewState::default();
+        pv.apply(1, Ok(layered(7, true, 10.0)));
+        let first = pv.moving_layer().expect("drawn as a layer").key;
+        pv.reset();
+        assert!(no_layer(&mut pv), "the layer goes with its design");
+        pv.apply(1, Ok(layered(7, true, 10.0)));
+        let next = pv.moving_layer().expect("the next design's layer").key;
+        assert!(next != first, "the renderer would keep the scene of key {first:#x}");
+        // And on through any number of designs.
+        let mut seen = std::collections::HashSet::from([first, next]);
+        for _ in 0..50 {
+            pv.reset();
+            pv.apply(1, Ok(layered(7, true, 10.0)));
+            assert!(seen.insert(pv.moving_layer().expect("a layer").key));
         }
     }
 
