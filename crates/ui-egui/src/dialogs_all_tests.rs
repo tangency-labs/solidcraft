@@ -1990,9 +1990,37 @@ fn a_pattern_of_whole_components_bodies_offers_and_places_the_components() {
     assert_eq!(whole, vec![vec![first], vec![second]]);
     assert!(crate::pattern_components::whole_placements(&h.app.session, &bodies[1..]).is_empty(), "a placement missing a body is not whole");
 
-    h.app.session.selection = bodies;
+    h.app.session.selection = bodies.clone();
     h.app.start("solid.pattern.rectangular");
     h.frames(4);
+    let offered = |h: &Harness| h.app.dialog.as_ref().unwrap().whole_components.as_ref().map(|c| (c.revision, c.placements.clone()));
+    assert_eq!(offered(&h), Some((h.app.session.revision, whole.clone())));
+    // Activating a component changes what a pick takes (the design is the same), so the offer is
+    // worked out again for it.
+    for active in [json!({"component": comp, "occurrence": first}), json!({"component": "root"})] {
+        let doc = h.app.session.doc.clone();
+        h.app.run("component.activate", active).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
+        h.frames(2);
+        let now = crate::pattern_components::whole_placements(&h.app.session, &bodies);
+        assert_eq!(offered(&h), Some((h.app.session.revision, now)));
+    }
+    // Each Object Type keeps its own objects: Bodies by way of Features to Components gives the
+    // bodies' placements, not the bodies, and Features picked are kept past Bodies and Components.
+    let placements = vec![Sel::Occurrence { path: vec![first] }, Sel::Occurrence { path: vec![second] }];
+    let feature = vec![Sel::Feature { id: 1 }];
+    mirror_object_type(&mut h, "Features");
+    assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty());
+    mirror_object_type(&mut h, "Components");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, placements);
+    mirror_object_type(&mut h, "Features");
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clone_from(&feature);
+    mirror_object_type(&mut h, "Bodies");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, bodies);
+    mirror_object_type(&mut h, "Components");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, placements);
+    mirror_object_type(&mut h, "Features");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, feature);
     mirror_object_type(&mut h, "Components");
     {
         let d = h.app.dialog.as_mut().unwrap();

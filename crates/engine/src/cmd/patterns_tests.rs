@@ -1759,4 +1759,13 @@ fn a_pattern_of_a_placement_places_that_placement_again() {
     }
     // No body is copied.
     assert_eq!(s.model.state().bodies.len(), 1);
+    // `occurrences` that is not a list is refused, not read as none (which would copy the bodies).
+    for occurrences in [json!("7"), json!(7), json!({"path": [second]})] {
+        let p = json!({"occurrences": occurrences, "bodies": ["Base"], "dir1": [0, 1, 0], "count1": 3, "spacing1": 40});
+        assert!(s.execute("solid.pattern.rectangular", &p).is_err(), "{p}");
+    }
+    assert_eq!(s.model.state().bodies.len(), 1);
+    // `null` names none.
+    let p = json!({"occurrences": null, "components": ["Bracket"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 40});
+    assert!(s.execute("solid.pattern.rectangular", &p).is_ok(), "{p}");
 }

@@ -587,8 +587,9 @@ pub struct Dialog {
     pub(crate) picked_edges: Vec<Sel>,
     /// Whether `inputs[0]` currently includes the tangent chains of `picked_edges`.
     pub(crate) chain_applied: bool,
-    /// A pattern's objects of the Object Type not shown now, restored when it is chosen again.
-    pub(crate) other_objects: Vec<Sel>,
+    /// A pattern's (or Align's) objects of each Object Type not shown now, by its index in the
+    /// Object Type row, restored when it is chosen again.
+    pub(crate) other_objects: [Vec<Sel>; 3],
     /// The placements a pattern's body objects make up whole, for its offer to pattern those
     /// components instead ([`crate::pattern_components`]).
     pub(crate) whole_components: Option<crate::pattern_components::WholeCache>,
@@ -878,7 +879,7 @@ impl Dialog {
             then_start: None,
             picked_edges: Vec::new(),
             chain_applied,
-            other_objects: Vec::new(),
+            other_objects: Default::default(),
             whole_components: None,
             listed: None,
             list_hover: None,
@@ -3077,11 +3078,20 @@ fn object_type_row(d: &mut Dialog, ui: &mut egui::Ui, s: &Session) {
         };
         inp.label = objects_label(inp.accept);
         // The pre-selection moved into this input when the dialog opened, so switching back
-        // restores what the other type held instead of losing it. Bodies switched to Components
-        // become the placements they are in.
-        let back = std::mem::take(&mut d.other_objects);
-        let back = if ty == 2 && from_bodies { crate::pattern_components::as_placements(s, &inp.items) } else { back };
-        d.other_objects = std::mem::replace(&mut inp.items, back);
+        // restores what that type held instead of losing it; each type keeps its own. Bodies
+        // switched to Components become the placements they are in, and Components with none
+        // kept take the placements of the Bodies kept.
+        let saved = d.other_objects.get_mut(ty).map(std::mem::take).unwrap_or_default();
+        let items = std::mem::take(&mut inp.items);
+        let next = if ty == 2 && (from_bodies || saved.is_empty()) {
+            crate::pattern_components::as_placements(s, if from_bodies { &items } else { &d.other_objects[0] })
+        } else {
+            saved
+        };
+        if let Some(slot) = d.other_objects.get_mut(cur) {
+            *slot = items;
+        }
+        inp.items = next;
         d.active = 0;
         d.error = None;
     }
@@ -3099,8 +3109,11 @@ fn align_object_type_row(d: &mut Dialog, ui: &mut egui::Ui) {
     if ty != cur {
         *components = ty == 1;
         inp.label = if *components { "Components" } else { "Bodies" };
-        let back = std::mem::take(&mut d.other_objects);
-        d.other_objects = std::mem::replace(&mut inp.items, back);
+        let back = d.other_objects.get_mut(ty).map(std::mem::take).unwrap_or_default();
+        let items = std::mem::replace(&mut inp.items, back);
+        if let Some(slot) = d.other_objects.get_mut(cur) {
+            *slot = items;
+        }
         d.active = 0;
         d.error = None;
     }

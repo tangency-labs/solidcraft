@@ -9,10 +9,14 @@ use solidcraft_engine::{Sel, Session};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// What [`whole_placements`] said for one selection of one design.
-#[derive(Clone, Debug, Default)]
+/// Keyed on the session revision (which activating a component also moves: a pick's depth
+/// follows the active component) and on the design itself, kept so that its address is not
+/// reused by another.
+#[derive(Clone, Debug)]
 pub(crate) struct WholeCache {
     objects: Vec<Sel>,
-    doc: usize,
+    doc: std::sync::Arc<solidcraft_engine::doc::Document>,
+    pub(crate) revision: u64,
     pub(crate) placements: Vec<Vec<u64>>,
 }
 
@@ -59,15 +63,15 @@ pub(crate) fn whole_placements(s: &Session, objects: &[Sel]) -> Vec<Vec<u64>> {
 /// change.
 fn cached_whole(d: &mut Dialog, s: &Session) -> Vec<Vec<u64>> {
     let objects = d.inputs.first().map(|i| i.items.as_slice()).unwrap_or_default();
-    let doc = std::sync::Arc::as_ptr(&s.doc) as usize;
     if let Some(c) = &d.whole_components
-        && c.doc == doc
+        && c.revision == s.revision
+        && std::sync::Arc::ptr_eq(&c.doc, &s.doc)
         && c.objects == objects
     {
         return c.placements.clone();
     }
     let placements = whole_placements(s, objects);
-    d.whole_components = Some(WholeCache { objects: objects.to_vec(), doc, placements: placements.clone() });
+    d.whole_components = Some(WholeCache { objects: objects.to_vec(), doc: s.doc.clone(), revision: s.revision, placements: placements.clone() });
     placements
 }
 
@@ -93,7 +97,7 @@ pub(crate) fn offer_row(d: &mut Dialog, ui: &mut egui::Ui, s: &Session) {
         inp.accept = OCCURRENCES;
         inp.label = "Components";
         // Switching back to Bodies restores the bodies.
-        d.other_objects = bodies;
+        d.other_objects[0] = bodies;
         d.active = 0;
         d.error = None;
     }

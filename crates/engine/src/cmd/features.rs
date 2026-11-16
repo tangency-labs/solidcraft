@@ -2754,14 +2754,19 @@ fn finish_pattern(
 /// The placements a pattern places again (`occurrences`: occurrence paths from the root, each a
 /// list of occurrence ids), empty when it names none.
 fn pattern_occurrences(p: &Value, cmd: &str) -> Result<Vec<Vec<u64>>> {
-    let Some(list) = p.get("occurrences") else { return Ok(Vec::new()) };
+    let list = match p.get("occurrences") {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(list) => list,
+    };
+    // Anything but a list is refused, not read as no placements: that would copy the bodies instead.
+    let want = || bad(cmd, "`occurrences` must list occurrence paths, each a list of occurrence ids");
     let paths: Vec<Vec<u64>> = list
         .as_array()
-        .into_iter()
-        .flatten()
+        .ok_or_else(want)?
+        .iter()
         .map(|path| path.as_array().and_then(|ids| ids.iter().map(Value::as_u64).collect::<Option<Vec<u64>>>()).filter(|ids| !ids.is_empty()))
         .collect::<Option<_>>()
-        .ok_or_else(|| bad(cmd, "`occurrences` must list occurrence paths, each a list of occurrence ids"))?;
+        .ok_or_else(want)?;
     if paths.len() > 1000 {
         return Err(bad(cmd, "`occurrences` must list at most 1000 occurrence paths"));
     }
