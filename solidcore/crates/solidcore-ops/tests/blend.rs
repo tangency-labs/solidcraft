@@ -1470,6 +1470,70 @@ fn a_round_too_small_to_change_the_part_is_refused() {
     assert!(volume(&b) < before);
 }
 
+/// #17511: a round of 8 on a quarter circle of radius 10 that meets a straight side 16.7
+/// degrees off tangent. On the top, the round of the arc touches the circle of radius 2 about
+/// the arc's centre and the round of the side touches the line 8 in from it; they cross twice,
+/// 2.4 apart, and the corner is where the arc's own round meets the side's: on the arc's side of
+/// its end. The arc is shorter than twice the radius, so a guess measured along the edges lies
+/// near the arc's far end, and the solve found the other crossing, a ball past the arc's end,
+/// whose mitre with the side's round did not reach it. The crossing nearest the vertex builds.
+#[test]
+fn a_round_on_an_arc_shorter_than_its_diameter_meets_the_next_side_at_its_own_crossing() {
+    all_fixes();
+    let b = swept(
+        &[
+            segment((0.0, 0.0), (30.0, 0.0)),
+            segment((30.0, 0.0), (30.0, 20.0)),
+            arc_deg((20.0, 20.0), 10.0, 0.0, 90.0),
+            segment((20.0, 30.0), (0.0, 24.0)),
+            segment((0.0, 24.0), (0.0, 0.0)),
+        ],
+        10.0,
+    );
+    let half = 0.5_f64.sqrt() * 10.0;
+    let edges = [
+        edge_at(&b, [15.0, 0.0, 10.0]),
+        edge_at(&b, [30.0, 10.0, 10.0]),
+        edge_at(&b, [20.0 + half, 20.0 + half, 10.0]),
+        edge_at(&b, [10.0, 27.0, 10.0]),
+        edge_at(&b, [0.0, 12.0, 10.0]),
+    ];
+    let before = volume(&b);
+    blend(&b, Blend::Round, &edges, &[8.0], &[], Corners::Filled).unwrap();
+    assert!(volume(&b) < before);
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    // the side's unit direction from the arc's end and its normal into the part
+    let len = 436.0_f64.sqrt();
+    let (t, n) = ((-20.0 / len, -6.0 / len), (6.0 / len, -20.0 / len));
+    // the round's contact circle about (20, 20) meets the side's contact line 8 in from it
+    let h = 8.0 - 200.0 / len;
+    let w = (4.0 - h * h).sqrt();
+    let crossing = |sign: f64| {
+        [
+            20.0 + h * n.0 + sign * w * t.0,
+            20.0 + h * n.1 + sign * w * t.1,
+            10.0,
+        ]
+    };
+    let nearest = |p: [f64; 3]| {
+        let (_, brep) = kernel_copy(&b);
+        brep.vertex_list()
+            .iter()
+            .map(|&v| {
+                let q = solidcore::query::api_queries::vertex_get_point(&brep, v).unwrap();
+                ((q.x - p[0]).powi(2) + (q.y - p[1]).powi(2) + (q.z - p[2]).powi(2)).sqrt()
+            })
+            .fold(f64::INFINITY, f64::min)
+    };
+    // on the arc's side of its end (x > 20): a vertex; past it: none
+    assert!(
+        nearest(crossing(-1.0)) < 1e-6,
+        "{}",
+        nearest(crossing(-1.0))
+    );
+    assert!(nearest(crossing(1.0)) > 1.0, "{}", nearest(crossing(1.0)));
+}
+
 /// solidcore#2250's box: 40 x 30 x 20, its top back edge chamfered 5 (V0 23500); A, the
 /// chamfer's top edge (a 135 degree wedge), and B, the bottom front edge (90 degrees), rounded
 /// curvature-continuously r 2 in one call, in either order. Each round takes off its own ball's

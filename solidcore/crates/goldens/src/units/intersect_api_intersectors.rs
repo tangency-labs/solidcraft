@@ -1235,9 +1235,56 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
 
-    /// The face counts the generators reduce drawn face indices by are the bodies' own
-    /// (`GetFaces`), for every body kind (the holed box: four sides, the top and bottom
-    /// with the hole, the hole's wall).
+    /// WR-51: surface pairs, plane first, where upstream found no curve (1001) because
+    /// the boundary search dropped its touching point for a start point whose trace
+    /// did not cover it. The touching point is now the answer, certified on both
+    /// surfaces and within the intersector's tolerance (a thousandth of the plane's
+    /// 2.47e6 domain). In `ssi-revolution-plane-near-axis-parallel-swapped` it sits
+    /// at the revolution's bottom circle, 0.5 from the plane. (The crossing curves
+    /// the other operand order finds are still missed in this order.)
+    #[test]
+    fn wr51_plane_first_pairs_report_their_touching_point() {
+        use solidcore::intersect::surface_intersector::p1::SurfaceIntersector;
+        for name in [
+            "ssi-revolution-plane-near-axis-parallel-swapped",
+            "ssi-revolution-plane-oblique-swapped",
+            "ssi0043",
+        ] {
+            let case = crate::case::regression_case(&Runner, name);
+            let Inputs::Surfaces { surface1, surface2 } = case.parse().unwrap() else {
+                panic!("{name}: expected a surface pair");
+            };
+            let mut k = Kernel::default();
+            let s1 = build_surface(&mut k, &surface1).unwrap();
+            let s2 = build_surface(&mut k, &surface2).unwrap();
+            let d1 = s1.natural_uv_domain_with_nurb(&k).unwrap();
+            let d2 = s2.natural_uv_domain_with_nurb(&k).unwrap();
+            let tol = SurfaceIntersector::new(&k, &s1, &d1, &s2, &d2, false)
+                .unwrap()
+                .this_approx_tol_3d;
+            let (r, st) = s1.global_surface_intersect_with_partial(
+                &k,
+                &d1,
+                &s2,
+                &d2,
+                [true, true],
+                None,
+                None,
+            );
+            st.unwrap();
+            crate::units::intersect_surface_intersector_p5::certify_restored_touching_point(
+                &k,
+                [&s1, &s2],
+                [&d1, &d2],
+                tol,
+                &r,
+            );
+            if name == "ssi-revolution-plane-near-axis-parallel-swapped" {
+                assert!((r.deviations[0] - 0.5).abs() < 1e-5);
+            }
+        }
+    }
+
     #[test]
     fn face_counts_are_the_bodies_own() {
         let bodies = [
