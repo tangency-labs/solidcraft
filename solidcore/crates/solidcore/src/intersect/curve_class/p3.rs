@@ -2304,19 +2304,28 @@ fn piece_within_band(
     edge_params: [f64; 2],
     band: f64,
 ) -> bool {
-    let [s0, s1] = edge_params;
-    let (Some(c), Some(e)) = (
-        curve.piece_hull_points(interval),
-        edge_curve.piece_hull_points(&Extent1d::from_min_max(s0.min(s1), s0.max(s1))),
-    ) else {
-        return false;
-    };
-    let (Some(&(a, ea)), Some(&(b, eb))) = (c.first(), c.last()) else {
-        return false;
-    };
-    let (Some(&first), Some(&last)) = (e.first(), e.last()) else {
-        return false;
-    };
+    pieces_apart_bound(curve, interval, edge_curve, edge_params).is_some_and(|d| d < band)
+}
+
+/// Not upstream: a bound `d` such that every point of `curve` over `interval` is within `d`
+/// of the piece of `other` between `other_params` and every point of that piece within `d`
+/// of the curve over `interval`, the first of `other_params` paired with `interval`'s start;
+/// the sum [`piece_within_band`] compares (its docs). Both directions hold: the curve piece
+/// lies within `dev_c` of its chord and its chord within `dev_c` of it (the projection onto
+/// the chord's line covers the chord), the two chords within the end gaps of each other at
+/// every fraction, and likewise for the other piece. `None` when either piece has no
+/// certified hull; NaN propagates.
+fn pieces_apart_bound(
+    curve: &Curve,
+    interval: &Extent1d,
+    other: &Curve,
+    other_params: [f64; 2],
+) -> Option<f64> {
+    let [s0, s1] = other_params;
+    let c = curve.piece_hull_points(interval)?;
+    let e = other.piece_hull_points(&Extent1d::from_min_max(s0.min(s1), s0.max(s1)))?;
+    let (&(a, ea), &(b, eb)) = (c.first()?, c.last()?);
+    let (&first, &last) = (e.first()?, e.last()?);
     // the edge piece's end at the curve's start first
     let ((a2, ea2), (b2, eb2)) = if s0 <= s1 {
         (first, last)
@@ -2343,8 +2352,75 @@ fn piece_within_band(
     } else {
         gap_b
     };
-    let total = (dev_c + ends + dev_e) * (1.0 + gamma(3));
-    total < band
+    Some((dev_c + ends + dev_e) * (1.0 + gamma(3)))
+}
+
+/// Pieces [`curve_runs_along`] bounds before it refuses.
+const RUN_ALONG_PIECES: usize = 1024;
+
+/// Not upstream (WR-580): whether `curve` over `interval` and `other` over `other_interval`
+/// lie within `tol` of each other as wholes, each point of either within `tol` of a point of
+/// the other (their Hausdorff distance); decided on control points, never on samples.
+///
+/// The two are cut into pieces paired end to end, the curve's start with the end of `other`
+/// whose point is nearer to it; a pair is proved by [`pieces_apart_bound`] (each piece within
+/// its control points' distance from its chord, the chords within their end gaps). A pair
+/// whose bound is not below `tol` is halved: the curve at its middle parameter, `other` at the
+/// drop of the curve's middle point onto its piece. The drop only chooses where `other` is
+/// cut; any cut gives pieces that cover both curves, so the bound holds whatever it returns.
+/// Every pair proved, the curves are within `tol`. A pair that cannot be cut any further, a
+/// failed drop, a curve of a kind with no certified hull, or more than [`RUN_ALONG_PIECES`]
+/// pairs bounded proves nothing: `false`.
+///
+/// # Errors
+///
+/// Those of the evaluations and of the drops.
+pub(crate) fn curve_runs_along(
+    k: &Kernel,
+    curve: &Curve,
+    interval: &Extent1d,
+    other: &Curve,
+    other_interval: &Extent1d,
+    tol: f64,
+) -> Result<bool> {
+    let (t0, t1) = (interval.min(), interval.max());
+    let (u0, u1) = (other_interval.min(), other_interval.max());
+    let start = curve.evaluate_point(k, t0)?;
+    let reversed =
+        start.distance(other.evaluate_point(k, u1)?) < start.distance(other.evaluate_point(k, u0)?);
+    let (s0, s1) = if reversed { (u1, u0) } else { (u0, u1) };
+    let mut pending = vec![(t0, t1, s0, s1)];
+    let mut bounded = 0_usize;
+    while let Some((t0, t1, s0, s1)) = pending.pop() {
+        let piece = Extent1d::from_min_max(t0, t1);
+        // written so that a NaN bound refuses
+        if pieces_apart_bound(curve, &piece, other, [s0, s1]).is_some_and(|d| d < tol) {
+            continue;
+        }
+        bounded += 1;
+        let tm = 0.5 * (t0 + t1);
+        if bounded > RUN_ALONG_PIECES || !(t0 < tm && tm < t1) {
+            return Ok(false);
+        }
+        let mid = curve.evaluate_point(k, tm)?;
+        let (lo, hi) = (s0.min(s1), s0.max(s1));
+        let dropped = other.drop_point(
+            k,
+            &Extent1d::from_min_max(lo, hi),
+            mid,
+            None,
+            tol,
+            None,
+            SolverOperation::Minimize,
+        )?;
+        let sm = dropped.parameter;
+        if !(dropped.success && lo < sm && sm < hi) {
+            return Ok(false);
+        }
+        pending.push((tm, t1, sm, s1));
+        pending.push((t0, tm, s0, sm));
+    }
+    Ok(true)
 }
 
 /// An upper bound of the distance from `q` to the segment `[a, b]`: the distance to its

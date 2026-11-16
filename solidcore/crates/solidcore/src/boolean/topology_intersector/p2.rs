@@ -1878,8 +1878,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
     /// Not upstream (#16937): whether two distinct edges `a` and `b` of one operand stand
     /// at one place: `b` is open, runs between `a`'s two vertices, and lies along `a`
-    /// within the sum of the two edges' tolerances, found as WR-580 finds an edge a face
-    /// already has along a curve (`SmTools::FindCoincidentEdge` over the edges of each of
+    /// within the sum of the two edges' tolerances, found as an edge a face already has
+    /// along a curve (`SmTools::FindCoincidentEdge` over the edges of each of
     /// `a`'s faces, with `b`'s curve over its interval at `b`'s tolerance), and only where
     /// `coincidence_bound` proves the two edges within the sum of their tolerances over
     /// their whole lengths (no bound for the pair: not at one place).

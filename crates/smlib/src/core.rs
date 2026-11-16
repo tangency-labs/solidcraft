@@ -99,12 +99,10 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_extension_from_base = true;
     f.fillet_cleanup_keeps_target_faces = true;
     f.curve_contacts_at_curve_ends = true;
-    f.ssi_tangent_contact_points = true;
     f.ssi_trace_tangent_curves_once = true;
     f.found_torus_sphere_keep_tested_nurb = true;
     f.local_operation_box_holds_new_surfaces = true;
     f.shell_edges_on_analytics_exact = true;
-    f.ssi_pole_point_keeps_its_tangent = true;
     f.fillet_patch_keeps_fillet_edges = true;
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;
@@ -112,7 +110,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_knife_edge_rounds = true;
     f.revolution_round_offset_collapses = true;
     f.proto_edge_splits_at_captured_vertices = true;
-    f.imprint_reuses_coincident_face_edge = true;
     f.linear_sweep_arc_is_cylinder = true;
     f.fillet_trace_reaches_rails = true;
     f.box_face_failures_propagate = true;
