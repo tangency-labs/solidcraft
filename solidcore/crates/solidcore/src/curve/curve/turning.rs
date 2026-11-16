@@ -538,6 +538,107 @@ mod tests {
         assert!(close(bx.min().z, -1.709407713716475), "{}", bx.min().z);
     }
 
+    /// A rational quadratic in two Bezier segments (knots 0, 0, 0, 1, 1, 2, 2, 2). Over
+    /// [0, 1] z is 5 at both ends and `5 + dz` at the middle control point, with weights
+    /// `wa`, `wb`, `wa`; over [1, 2] it falls to 1 with weights `wa`. x and y vary on both.
+    fn two_segment(wa: f64, wb: f64, dz: f64) -> Curve {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        let pts = [
+            [0.0, 0.0, 5.0],
+            [0.5, 0.1, 5.0 + dz],
+            [1.0, 0.0, 5.0],
+            [1.5, 0.1, 3.0],
+            [2.0, 0.0, 1.0],
+        ];
+        let w = [wa, wb, wa, wa, wa];
+        let pw = pts
+            .iter()
+            .zip(w)
+            .map(|(p, w)| CPoint::new(p[0] * w, p[1] * w, p[2] * w, w))
+            .collect();
+        let knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 2.0];
+        let nl = NlCurve::new(pw, 2, knots).unwrap();
+        Curve::from(BSplineCurve::from_nurb(nl, 3, false))
+    }
+
+    /// The number of points [`Curve::add_turning_points`] adds over the natural interval.
+    fn turning_calls(c: &Curve) -> Result<usize> {
+        let mut calls = 0;
+        let mut pt = crate::geom::vector3d::Vec3::UNDEF;
+        c.add_turning_points(
+            &Kernel::default(),
+            &c.natural_interval(),
+            &mut pt,
+            &mut |_| calls += 1,
+        )?;
+        Ok(calls)
+    }
+
+    /// (#17961 review) A segment whose z is constant, or constant to 1e-13 or 1e-10, under
+    /// weight ratios 1e2, 1e3 and 1e5: the derivative's numerator is zero to within its
+    /// rounding there, so its sign test never drops a piece. The search must still end
+    /// after a few pieces, not tile the segment (2^19 ranges at ratio 1e2) or run out of
+    /// subdivisions (`InvalidInput` from ratio 1e3), and the box reaches z's greatest value,
+    /// `(X_0 + X_1) / (w_a + w_b)` at t = 1/2 (both 5 when `dz` is 0), to 4 ulp.
+    #[test]
+    fn a_flat_segment_under_heavy_weights_ends_in_a_few_pieces() {
+        for (wa, wb) in [(1.0, 100.0), (1.0, 1000.0), (1e-3, 1.0), (1e-3, 100.0)] {
+            for dz in [0.0, 1e-13, 1e-10] {
+                let c = two_segment(wa, wb, dz);
+                let calls = turning_calls(&c);
+                assert!(
+                    matches!(calls, Ok(n) if n <= 400),
+                    "weights {wa} {wb} dz {dz}: {calls:?}"
+                );
+                let bx = c
+                    .calculate_tight_bounding_box(&Kernel::default(), &c.natural_interval())
+                    .unwrap();
+                let peak = ((5.0 * wa) + (5.0 + dz) * wb) / (wa + wb);
+                let top = bx.max().z;
+                assert!(
+                    (top - peak).abs() <= 4.0 * f64::EPSILON * peak,
+                    "weights {wa} {wb} dz {dz}: {top} against {peak}"
+                );
+            }
+        }
+    }
+
+    /// (#17961 review) An unclamped B-spline (uniform knots 0..5, degree 2, domain [2, 3])
+    /// crawling along x as the first test's: its box reaches z's peak 3/4 at t = 5/2
+    /// (`z = 1/2 + s - s^2`, `s = t - 2`) to 4 ulp, rather than refusing.
+    #[test]
+    fn an_unclamped_curves_box_reaches_its_peak() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        let pw = vec![
+            CPoint::new(0.0, 0.0, 0.0, NOW),
+            CPoint::new(0.5e-7, 0.0, 1.0, NOW),
+            CPoint::new(1e-7, 0.0, 0.0, NOW),
+        ];
+        let nl = NlCurve::new(pw, 2, vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
+        let c = Curve::from(BSplineCurve::from_nurb(nl, 3, false));
+        let ivl = Extent1d::from_min_max(2.0, 3.0);
+        let bx = c
+            .calculate_tight_bounding_box(&Kernel::default(), &ivl)
+            .unwrap();
+        let top = bx.max().z;
+        assert!((top - 0.75).abs() <= 4.0 * f64::EPSILON * 0.75, "{top}");
+    }
+
+    /// An inverted interval is empty: nothing to add, and no panic.
+    #[test]
+    fn an_inverted_interval_adds_nothing() {
+        let c = two_segment(1.0, 2.0, 1.0);
+        let mut calls = 0;
+        let mut pt = crate::geom::vector3d::Vec3::UNDEF;
+        let r = c.add_turning_points(
+            &Kernel::default(),
+            &Extent1d::from_raw(2.0, 0.0),
+            &mut pt,
+            &mut |_| calls += 1,
+        );
+        assert!(r.is_ok() && calls == 0, "{r:?} {calls}");
+    }
+
     #[test]
     fn non_finite_coefficients_are_refused() {
         let piece = Piece {
