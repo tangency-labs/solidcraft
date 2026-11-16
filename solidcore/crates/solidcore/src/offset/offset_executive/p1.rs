@@ -80,7 +80,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::boolean::merge::p4::KernelManifoldIntersector;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::{ignore_status, EntityRef, Result, SolidError};
 use crate::geom::context::{Context, MarkType};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -101,8 +101,6 @@ use crate::offset::offset_geometry_creation::{OffsetGeometryCreation, SsiData};
 
 use super::edgeuse::{CapNotifications, MarkSource};
 use super::p2::OffsetNotifications;
-use crate::surface::extend::Continuity;
-use crate::surface::side::BoxSide;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p1::{self as bp1, SetRegionVoidType};
@@ -237,12 +235,21 @@ pub struct OffsetExecutive {
     crossing_edgeuses: BTreeSet<EdgeuseId>,
     /// Not upstream (WR-346): the original faces of an inset whose offset collapses (a
     /// convex round thinner than the wall), mated across instead of offset
-    /// (`m_sCollapsedFaces`; only with `Kernel::fixes.offset_collapsed_rounds_mated`).
+    /// (`m_sCollapsedFaces`).
     pub(super) collapsed_faces: Vec<FaceId>,
+    /// Not upstream (WR-346): for each of [`Self::collapsed_faces`], the signed distance its
+    /// surface was offset by along its own NURB normal (the offset distance, negated where
+    /// the offset face use is opposite its face), for [`OffsetFailure::Collapses`]'s radius.
+    ///
+    /// [`OffsetFailure::Collapses`]: crate::error::offset::OffsetFailure::Collapses
+    pub(super) collapsed_displacements: Vec<(FaceId, f64)>,
+    /// Not upstream (solidcraft#16983): the offset faces with an edge whose offset is
+    /// inverted (its neighbours' offsets crossed over it; `TrimmedEdge`), which
+    /// `resolve_crossing_loops` resolves when they have one loop.
+    pub(super) inverted_faces: BTreeSet<FaceId>,
     /// Not upstream (WR-344 refinement, tangency-labs/solidcore#1795): the original edge
     /// uses whose edge `EdgeuseOffset` could not mate (`MateEdges` failed); the merge
-    /// intersects their faces' offsets as upstream does, not taking them as mated (only
-    /// with `Kernel::fixes.offset_extended_edges_mated`).
+    /// intersects their faces' offsets as upstream does, not taking them as mated.
     pub(super) unmated_edgeuses: BTreeSet<EdgeuseId>,
     /// The faces of a local operation and the surfaces replacing theirs, in step (the
     /// part of `SmLocalOperationGeometryCreation` the executive reads: `m_vFaces`,
@@ -302,6 +309,8 @@ impl OffsetExecutive {
             kept_edgeuses: BTreeSet::new(),
             crossing_edgeuses: BTreeSet::new(),
             collapsed_faces: Vec::new(),
+            collapsed_displacements: Vec::new(),
+            inverted_faces: BTreeSet::new(),
             unmated_edgeuses: BTreeSet::new(),
             local_faces: Vec::new(),
             local_surfaces: Vec::new(),
@@ -373,6 +382,12 @@ impl OffsetExecutive {
     /// Faces created to close lamina boundaries.
     pub fn closing_faces(&self) -> &[FaceId] {
         &self.closing_faces
+    }
+
+    /// Notes a face made to close a gap in the offset exactly, which the face extensions
+    /// leave as it is.
+    pub(super) fn push_closing_face(&mut self, face: FaceId) {
+        self.closing_faces.push(face);
     }
 
     /// Sets `m_bInset`.
@@ -827,11 +842,22 @@ impl OffsetExecutive {
 
     /// Returns a cached extension, creating it `margin` past every side of `base`'s box
     /// (none for a margin of zero: the base itself), every side exactly ruled
-    /// ([`Surface::extended_sides_keeping_parameters`], [`Continuity::Ruled`]): a plane,
+    /// ([`Surface::extended_sides_keeping_parameters`],
+    /// [`Continuity::Ruled`](crate::surface::extend::Continuity::Ruled); the construction is
+    /// [`super::reach::extended_by_margin`], which the local reach's ball check builds too): a plane,
     /// cone, sphere or torus as itself, a ball patch with its pole (a side collapsed to a
     /// point) as a ball patch on the same sphere (one without a pole takes the generic ruled
-    /// extension), a procedural blend by its definition, an offset surface as the offset of
-    /// its base extended. A hit never re-extends or replaces the cached surface.
+    /// extension), an offset surface as the offset of its base extended. A hit never
+    /// re-extends or replaces the cached surface.
+    ///
+    /// A procedural blend is extended as its net, the B-spline the face's surface is (its
+    /// definition is the certificate's, within its bound of the net): the margin runs past
+    /// where the definition holds. Along the spine the definition is
+    /// continued only while each foot stays on its support, and a round's supports end with
+    /// the face; across, its bound grows by the closed-form Chebyshev factor of the span
+    /// continued (`surface::extend::blend`). A margin is a ruled piece of surface for the
+    /// neighbours' offsets to meet, which the net continued gives at any distance, as for
+    /// every other spline face (#17373).
     ///
     /// The margin is how far the face's offset must reach past the face for its
     /// neighbours' offsets to meet it ([`Self::original_extension_margin`],
@@ -869,31 +895,16 @@ impl OffsetExecutive {
                 let extension = if margin == 0.0 {
                     base.clone()
                 } else {
-                    let extend = |asked: f64| {
-                        base.extended_sides_keeping_parameters(
-                            kernel,
-                            &BoxSide::ALL,
-                            Continuity::Ruled,
-                            asked,
-                        )
-                    };
-                    // An extension meets its distance at the middle of each side; a margin is
-                    // needed at every station of it (#2908): where the rows narrow along a side
-                    // it is asked again, scaled by the shortest length across (Ruled: the
-                    // lengths at a station grow together).
-                    let mut made = extend(margin)?;
-                    if let Some(shortest) = super::reach::shortest_across(kernel, base, &made)? {
-                        if shortest < margin * (1.0 - 1.0e-9) {
-                            // a surface that cannot go that far keeps what it has: the extension
-                            // above is what its faces have always had
-                            match extend(margin * margin / shortest) {
-                                Ok(grown) => made = grown,
-                                Err(SolidError::ExtendRefused { .. }) => {}
-                                Err(e) => return Err(e),
-                            }
+                    // a blend as its net (above)
+                    let net;
+                    let base = match base.kind() {
+                        SurfaceKind::ProceduralBlend(pb) => {
+                            net = Surface::from(pb.net.clone());
+                            &net
                         }
-                    }
-                    made.surface
+                        _ => base,
+                    };
+                    super::reach::extended_by_margin(kernel, base, margin)?
                 };
                 Ok(entry.insert(extension))
             }
@@ -934,10 +945,7 @@ impl OffsetExecutive {
     ) -> Result<()> {
         // remove curve and surface portions not used by edges and faces (status
         // ignored upstream)
-        ignore_status(crate::error::passed_on(
-            shrink_geometry(kernel, brep),
-            kernel.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        shrink_geometry(kernel, brep)?;
 
         // for every face
         let mut fix = Vec::new();
@@ -1045,12 +1053,9 @@ impl OffsetExecutive {
 
         // Clean up those faces we have collected.
         let editing_enabled = result.editing_enabled();
-        // cpp:2099–2102 ignores ordinary RemoveFaces failures but still executes
-        // its editing guard and traversal-mark effects. Missing work must defer.
-        ignore_status(crate::error::passed_on(
-            crate::topology::brep::p5::remove_faces(kernel, result, editing_enabled, &delete_faces),
-            kernel.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        // cpp:2099–2102 ignores RemoveFaces' status; it is passed on here (WR-658,
+        // tangency-labs/smlib 4803d6d).
+        crate::topology::brep::p5::remove_faces(kernel, result, editing_enabled, &delete_faces)?;
 
         // Forget the deleted faces and edgeuses, so later lookups in the relations
         // (lamina side walls, PiecewiseMerge) cannot return them. For m_vEUToEU also
@@ -1093,12 +1098,9 @@ impl OffsetExecutive {
         for id in crate::topology::brep::p1::edges(result, None)? {
             let primary = required(eu::primary_edgeuse(result, id)?)?;
             // NormalizedEvaluate(0.5, FALSE, sPnt): 3d. Upstream ignores the evaluation
-            // status and keeps the initialized point.
-            let point = ignored(crate::error::passed_on(
-                eu3::normalized_evaluate(kernel, result, primary, 0.5, false, false, true),
-                kernel.fixes.brep_edit_statuses_pass_on,
-            )?)?
-            .map_or(Vec3::UNDEF, |eval| eval.point);
+            // status and keeps the initialized point; it is passed on here (WR-658).
+            let point =
+                eu3::normalized_evaluate(kernel, result, primary, 0.5, false, false, true)?.point;
             // cpp:2069–2072: the solve runs with the original's editing disabled and
             // leaves it enabled afterwards (still disabled when the solve fails)
             original.set_editing_enabled(false);
@@ -1873,7 +1875,7 @@ impl OffsetExecutive {
         if !self.merge_results {
             self.clear_relations();
             let mut result = required(self.offset_brep.take())?;
-            // the stitch statuses are ignored upstream. Its edits notify the offset's
+            // the stitch statuses are ignored upstream and passed on here (WR-658). Its edits notify the offset's
             // objects (its glue merges and splits carry their attributes, as upstream's
             // objects' own do) through the caller's stores under the result identities;
             // without them, on call-local records.
@@ -1886,16 +1888,11 @@ impl OffsetExecutive {
                     // Tol: StitchIntoShell() adds in the tols of the topology objects,
                     // so the Brep's tolerance should be plenty.
                     let stitch_tol_3d = result.tolerance();
-                    ignore_status(crate::error::passed_on(
-                        stitch::stitch_into_shell_with(kernel, result, true, stitch_tol_3d, edits),
-                        kernel.fixes.brep_edit_statuses_pass_on,
-                    )?)
+                    stitch::stitch_into_shell_with(kernel, result, true, stitch_tol_3d, edits)?;
                 } else {
-                    ignore_status(crate::error::passed_on(
-                        stitch::stitch_into_solid_with(kernel, result, edits),
-                        kernel.fixes.brep_edit_statuses_pass_on,
-                    )?)
+                    stitch::stitch_into_solid_with(kernel, result, edits)?;
                 }
+                Ok(())
             };
             match notifications {
                 Some(n) => {
@@ -1962,32 +1959,24 @@ impl OffsetExecutive {
                     }
                     if edge::is_manifold(original, edge_id)? {
                         let primary = required(eu::primary_edgeuse(original, edge_id)?)?;
-                        // Not upstream (WR-344, tangency-labs/solidcore#469), opt-in
-                        // `Kernel::fixes.offset_extended_edges_mated`: see
+                        // Not upstream (WR-344, tangency-labs/solidcore#469): see
                         // `relates_mated_offsets`.
-                        let flag = kernel.fixes.offset_extended_edges_mated;
-                        let unmated = flag
-                            && edge::edgeuses(original, edge_id, None, None)?
-                                .iter()
-                                .any(|eu| self.unmated_edgeuses.contains(eu));
+                        let unmated = edge::edgeuses(original, edge_id, None, None)?
+                            .iter()
+                            .any(|eu| self.unmated_edgeuses.contains(eu));
                         // (not upstream: a kept edge's offsets keep their own curves)
                         let kept = self.kept_edges.contains(&edge_id);
                         if kept
-                            || relates_mated_offsets(
-                                flag,
-                                self.extend_convex_edges(),
-                                unmated,
-                                || {
-                                    eu2::is_tangent_sector(
-                                        kernel,
-                                        original,
-                                        primary,
-                                        self.tangency_tol_degrees(),
-                                        false,
-                                        true,
-                                    )
-                                },
-                            )?
+                            || relates_mated_offsets(self.extend_convex_edges(), unmated, || {
+                                eu2::is_tangent_sector(
+                                    kernel,
+                                    original,
+                                    primary,
+                                    self.tangency_tol_degrees(),
+                                    false,
+                                    true,
+                                )
+                            })?
                         {
                             for edgeuse in edge::edgeuses(original, edge_id, None, None)? {
                                 if eu::faceuse(original, edgeuse)? == Some(faceuse) {
@@ -2097,26 +2086,17 @@ impl OffsetExecutive {
         let faceuse = original.faceuse(faceuse)?;
         let face_id = required(faceuse.face)?;
         let orientation = faceuse.orientation;
-        // Not upstream (WR-342, tangency-labs/solidcore#974), opt-in
-        // `Kernel::fixes.offset_clip_right_side_out`: a face that does not fit the offset
-        // surface's domain is clipped to it by a 2D boolean of planar faces made from its
-        // UV loops, which need them counterclockwise (the SM_OT_SAME faceuse's sense); an
-        // inset's SM_OT_OPPOSITE loops made that face inside out and the clip empty.
-        let right_side_out = kernel.fixes.offset_clip_right_side_out;
-        let loop_orientation = if right_side_out {
-            let fits = original
-                .face(face_id)?
-                .uv_domain
-                .is_contained_by(&surface.natural_uv_domain_with_nurb(kernel)?, EFF_ZERO)
-                || self.operation == OffsetOperation::LocalOperation;
-            if fits {
-                orientation
-            } else {
-                OrientType::Same
-            }
-        } else {
-            orientation
-        };
+        // Not upstream (WR-342, tangency-labs/solidcore#974): a face that does not fit the
+        // offset surface's domain is clipped to it by a 2D boolean of planar faces made
+        // from its UV loops, which need them counterclockwise (the SM_OT_SAME faceuse's
+        // sense); upstream takes an inset's SM_OT_OPPOSITE loops, which made that face
+        // inside out and the clip empty.
+        let fits = original
+            .face(face_id)?
+            .uv_domain
+            .is_contained_by(&surface.natural_uv_domain_with_nurb(kernel)?, EFF_ZERO)
+            || self.operation == OffsetOperation::LocalOperation;
+        let loop_orientation = if fits { orientation } else { OrientType::Same };
         // The translated-3D-curve plane case (cpp:3560–3600) is `#if 0` upstream.
         let mut curves = face::create_curves_from_face(
             kernel,
@@ -2263,10 +2243,7 @@ impl OffsetExecutive {
                         Vec3::new(start.x, start.y, 0.0),
                         Vec3::new(end.x, end.y, 0.0),
                     )?;
-                    ignore_status(crate::error::passed_on(
-                        line.edit_parameterization(&ivl),
-                        kernel.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    line.edit_parameterization(&ivl)?;
                     box_curves.push(Curve::from(line));
                 }
 
@@ -2322,10 +2299,7 @@ impl OffsetExecutive {
                 ] {
                     copy_domain.add_point(plane.project_point_to_uv_domain(corner));
                 }
-                ignore_status(crate::error::passed_on(
-                    plane.adjust_step_uv_domain(&copy_domain),
-                    kernel.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                plane.adjust_step_uv_domain(&copy_domain)?;
                 let copy_plane_domain = copy_plane.natural_uv_domain_with_nurb(kernel)?;
 
                 // make a planar face using the offset UV trim curves (as 3D curves)
@@ -2395,28 +2369,20 @@ impl OffsetExecutive {
         let result_faces = bp1::faces(&result, None)?;
         let mut new_faces = Vec::new();
         for (index, &result_face) in result_faces.iter().enumerate() {
-            // (WR-342 opt-in: the loops in the sense of the faceuse's orientation, which
-            // the offset face is made with)
-            let result_orientation = if kernel.fixes.offset_clip_right_side_out {
-                orientation
-            } else {
-                OrientType::Same
-            };
+            // (not upstream, WR-342: the loops in the sense of the faceuse's orientation,
+            // which the offset face is made with; upstream takes SM_OT_SAME)
             let made = face::create_curves_from_face(
                 kernel,
                 &mut result,
                 result_face,
-                result_orientation,
+                orientation,
                 true,
                 false,
             )?;
             let mut uv_curves = made.curves_3d.unwrap_or_default();
             // Convert face 3dCurves into 2D curves (all their Z components are zero).
             for curve in &mut uv_curves {
-                ignore_status(crate::error::passed_on(
-                    curve.convert_to_2d(kernel),
-                    kernel.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                curve.convert_to_2d(kernel)?;
             }
             let mut loops = Vec::new();
             for &count in &made.curve_loops {
@@ -2642,21 +2608,19 @@ impl OffsetExecutive {
             // The deletion edits the offset B-rep through the kernel context, whose
             // callbacks a kernel-context caller has lent to `notifications.context`
             // (upstream: the one context); without returning them the deletion
-            // failed as a nested edit and, its status ignored, kept the face.
+            // fails as a nested edit. Upstream ignores its status; it is passed on
+            // here (WR-658).
             let lent = notifications.context.as_deref_mut();
-            ignore_status(crate::error::passed_on(
-                Context::with_lease_returned(kernel, lent, |kernel| {
-                    KernelManifoldIntersector::delete_faces_in(
-                        kernel,
-                        brep,
-                        &delete_faces,
-                        &mut *notifications.records,
-                        &mut *notifications.attributes,
-                        DELETE_FACES_NAMESPACE,
-                    )
-                }),
-                kernel.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            Context::with_lease_returned(kernel, lent, |kernel| {
+                KernelManifoldIntersector::delete_faces_in(
+                    kernel,
+                    brep,
+                    &delete_faces,
+                    &mut *notifications.records,
+                    &mut *notifications.attributes,
+                    DELETE_FACES_NAMESPACE,
+                )
+            })?;
             new_faces.retain(|face| !delete_faces.contains(face));
         }
         Ok(new_faces)
@@ -2725,34 +2689,23 @@ impl OffsetExecutive {
         let original_face = original.face(required(original_use.face)?)?;
         let brep = self.required_offset_brep()?;
         let offset_face = brep.face(offset_face)?;
-        // Intersect's status is ignored; upstream initializes its output on failure.
-        let domain = ignored(crate::error::passed_on(
-            original_face.uv_domain.intersect(&offset_face.uv_domain),
-            kernel.kernel().fixes.brep_edit_statuses_pass_on,
-        )?)?
-        .unwrap_or_else(Extent2d::new);
+        // Upstream ignores Intersect's status and initializes its output on failure;
+        // it is passed on here (WR-658).
+        let domain = original_face.uv_domain.intersect(&offset_face.uv_domain)?;
         let mid_uv = domain.evaluate(0.5, 0.5);
         // (`EvaluateNormal(sMidUV, TRUE, TRUE, ..)`: from the left)
-        let normal = ignored(crate::error::passed_on(
-            required(original_face.surface.as_ref())?.evaluate_normal(
-                kernel.kernel(),
-                mid_uv,
-                Side::Left,
-                Side::Left,
-            ),
-            kernel.kernel().fixes.brep_edit_statuses_pass_on,
-        )?)?
-        .unwrap_or(Vec3::UNDEF);
-        let offset_normal = ignored(crate::error::passed_on(
-            required(offset_face.surface.as_ref())?.evaluate_normal(
-                kernel.kernel(),
-                mid_uv,
-                Side::Left,
-                Side::Left,
-            ),
-            kernel.kernel().fixes.brep_edit_statuses_pass_on,
-        )?)?
-        .unwrap_or(Vec3::UNDEF);
+        let normal = required(original_face.surface.as_ref())?.evaluate_normal(
+            kernel.kernel(),
+            mid_uv,
+            Side::Left,
+            Side::Left,
+        )?;
+        let offset_normal = required(offset_face.surface.as_ref())?.evaluate_normal(
+            kernel.kernel(),
+            mid_uv,
+            Side::Left,
+            Side::Left,
+        )?;
         let same_normals = normal.dot(offset_normal) > 0.0;
         let mut original_uses: Vec<Option<EdgeuseId>> =
             eu::faceuse_edgeuses(original, original_faceuse, false, None)?
@@ -2829,9 +2782,12 @@ impl OffsetExecutive {
                         // the matched original edge's tolerance and its vertices' largest.
                         if kernel.kernel().fixes.offset_edges_keep_source_tolerance {
                             keep_source_tolerances(
+                                kernel.kernel(),
                                 original,
+                                original_use,
                                 original_edge,
                                 required(self.offset_brep.as_mut())?,
+                                offset,
                                 offset_edge,
                             )?;
                         }
@@ -2883,37 +2839,85 @@ impl OffsetExecutive {
 
 /// (Not upstream, WR-671, `Kernel::fixes.offset_edges_keep_source_tolerance`.) Raises
 /// `offset_edge` of `result` to the tolerance of the original edge it was matched to,
-/// and both its vertices to the larger of the original edge's vertices' tolerances
-/// (matched edge uses may run in opposite directions, so the ends are not paired).
-/// Tolerances only grow (`SetTolerance(.., bUpdateOnlyIfLarger = TRUE)`).
+/// and each of its vertices to the tolerance of the original vertex it stands for.
+/// `original_use` and `offset_use` are the matched edge uses (matched at their
+/// midpoints, so they may run either way). An edge use starts at its vertex use's vertex
+/// and its mate at the other end. Uses that run the same way (their 3D tangents at the
+/// midpoint point the same way: an offset curve runs beside its original) pair start
+/// with start. Uses that run opposite ways pair each start with the start of the other's
+/// mate. An offset edge with one vertex stands for both original ends and takes the
+/// larger. An end takes only its own vertex's tolerance otherwise: taking the larger of
+/// the two ends' grew a thin vertex to its edge's other end's tolerance, one edge further
+/// at each operation, until it reached past a short neighbouring edge and the merge
+/// joined that edge's two ends. Tolerances only grow
+/// (`SetTolerance(.., bUpdateOnlyIfLarger = TRUE)`).
+///
+/// # Errors
+///
+/// [`SolidError::PortInvariant`] for a matched edge use without a mate or vertex, or
+/// matched uses of an edge with two vertices whose tangents do not tell their directions
+/// apart; those of the evaluations.
 fn keep_source_tolerances(
+    k: &Kernel,
     original: &Brep,
+    original_use: EdgeuseId,
     original_edge: EdgeId,
     result: &mut Brep,
+    offset_use: EdgeuseId,
     offset_edge: EdgeId,
 ) -> Result<()> {
+    const OP: &str = "offset::offset_executive::keep_source_tolerances";
     let edge_tolerance = edge::tolerance(original, original_edge)?;
-    let mut vertex_tolerance = 0.0_f64;
-    for v in [
-        edge::start_vertex(original, original_edge)?,
-        edge::end_vertex(original, original_edge)?,
-    ]
-    .into_iter()
-    .flatten()
-    {
-        vertex_tolerance = vertex_tolerance.max(vertex::tolerance(original, v)?);
-    }
     edge::set_tolerance(result, offset_edge, edge_tolerance, true, true)?;
-    for v in [
-        edge::start_vertex(result, offset_edge)?,
-        edge::end_vertex(result, offset_edge)?,
-    ]
-    .into_iter()
-    .flatten()
-    {
-        vertex::set_tolerance(result, v, vertex_tolerance, true, true)?;
+    let mates = |b: &Brep, u: EdgeuseId| -> Result<[VertexId; 2]> {
+        let mate = eu::mate(b, u)?
+            .ok_or_else(|| SolidError::port_invariant(OP, "a matched edge use without a mate"))?;
+        Ok([use_vertex(b, u)?, use_vertex(b, mate)?])
+    };
+    let source = mates(original, original_use)?;
+    let made = mates(result, offset_use)?;
+    let [source_start, source_end] = source;
+    let starts = vertex::tolerance(original, source_start)?;
+    let ends = vertex::tolerance(original, source_end)?;
+    if made[0] == made[1] {
+        vertex::set_tolerance(result, made[0], starts.max(ends), true, true)?;
+        return Ok(());
     }
+    let tangent = |b: &Brep, u: EdgeuseId| -> Result<Vec3> {
+        eu3::normalized_evaluate_read_only(k, b, u, 0.5, false, true)?
+            .first_deriv
+            .ok_or_else(|| SolidError::port_invariant(OP, "an edge use without a tangent"))
+    };
+    let along = tangent(original, original_use)?.dot(tangent(result, offset_use)?);
+    let [made_start, made_end] = if along > 0.0 {
+        made
+    } else if along < 0.0 {
+        [made[1], made[0]]
+    } else {
+        return Err(SolidError::port_invariant(
+            OP,
+            "matched edge uses whose tangents do not tell their directions apart",
+        ));
+    };
+    vertex::set_tolerance(result, made_start, starts, true, true)?;
+    vertex::set_tolerance(result, made_end, ends, true, true)?;
     Ok(())
+}
+
+/// The vertex an edge use starts at (`GetVertexuse()->GetVertex()`).
+fn use_vertex(b: &Brep, u: EdgeuseId) -> Result<VertexId> {
+    let vu = eu::vertexuse(b, u)?.ok_or_else(|| {
+        SolidError::port_invariant(
+            "offset::offset_executive::keep_source_tolerances",
+            "an edge use without a vertex use",
+        )
+    })?;
+    crate::topology::vertexuse::vertex(b, vu)?.ok_or_else(|| {
+        SolidError::port_invariant(
+            "offset::offset_executive::keep_source_tolerances",
+            "a vertex use without a vertex",
+        )
+    })
 }
 
 /// The notification environment of offset-side entities: the caller's records,
@@ -2936,24 +2940,22 @@ fn offset_env<'a>(
 /// `IsTangentSector` of the edge's primary edge use, evaluated only when needed.
 ///
 /// Upstream relates a tangent sector only. Not upstream (WR-344, tangency-labs/solidcore#469;
-/// the fork's tangency-labs/smlib@85bbfaf), opt-in `flag`
-/// (`Kernel::fixes.offset_extended_edges_mated`): with `extend_convex` (extended convex
-/// edges) every such edge had its faces' offsets mated along it (`EdgeuseOffset`), so it is
-/// related without the tangency test, as the fork's `||` does. Under the same flag an edge
-/// whose mate failed in `EdgeuseOffset` (`unmated`; #1795: the offsets stop meeting round a
-/// closed edge) is related in neither case, tangent sector or not, and its faces' offsets are
-/// intersected as any other pair's (the fork's tangency-labs/smlib@9d8ace9:
+/// the fork's tangency-labs/smlib@85bbfaf): with `extend_convex` (extended convex edges)
+/// every such edge had its faces' offsets mated along it (`EdgeuseOffset`), so it is
+/// related without the tangency test, as the fork's `||` does. An edge whose mate failed
+/// in `EdgeuseOffset` (`unmated`; #1795: the offsets stop meeting round a closed edge) is
+/// related in neither case, tangent sector or not, and its faces' offsets are intersected
+/// as any other pair's (the fork's tangency-labs/smlib@9d8ace9:
 /// `!m_sUnmatedEdges.IsIn(pE) && (m_bExtendConvexEdges || IsTangentSector(..))`).
 fn relates_mated_offsets(
-    flag: bool,
     extend_convex: bool,
     unmated: bool,
     tangent_sector: impl FnOnce() -> Result<bool>,
 ) -> Result<bool> {
-    if flag && unmated {
+    if unmated {
         return Ok(false);
     }
-    if flag && extend_convex {
+    if extend_convex {
         return Ok(true);
     }
     tangent_sector()
@@ -2980,14 +2982,8 @@ fn relate_surface_pair(
 fn uv_curve_bounding_box(kernel: &Kernel, curve: &mut Curve) -> Result<Extent3d> {
     // CreateCurvesFromFace supplied B-spline slicing copies or lines.
     match curve.kind_mut() {
-        CurveKind::BSpline(curve) => ignore_status(crate::error::passed_on(
-            curve.convert_to_3d(),
-            kernel.fixes.brep_edit_statuses_pass_on,
-        )?)?,
-        CurveKind::Line(curve) => ignore_status(crate::error::passed_on(
-            curve.convert_to_3d(),
-            kernel.fixes.brep_edit_statuses_pass_on,
-        )?)?,
+        CurveKind::BSpline(curve) => curve.convert_to_3d()?,
+        CurveKind::Line(curve) => curve.convert_to_3d()?,
         // UV curves from CreateCurvesFromFace are slicing copies, never analytic
         // non-line kinds. Reject malformed values rather than silently changing them.
         _ => {
@@ -2997,10 +2993,10 @@ fn uv_curve_bounding_box(kernel: &Kernel, curve: &mut Curve) -> Result<Extent3d>
             ));
         }
     }
-    // cpp:3777–3780 ignores both statuses. An ordinary bounding-box failure leaves
-    // the initialized extent, while a genuinely missing dependency must still defer.
-    Ok(ignored(crate::error::passed_on(
-        curve.calculate_bounding_box(
+    // cpp:3777–3780 ignores both statuses and keeps the initialized extent; they are
+    // passed on here (WR-658, tangency-labs/smlib 4803d6d).
+    Ok(curve
+        .calculate_bounding_box(
             kernel,
             &curve.natural_interval(),
             crate::nurbs::b_spline_curve::BoundingBoxRequest {
@@ -3009,11 +3005,9 @@ fn uv_curve_bounding_box(kernel: &Kernel, curve: &mut Curve) -> Result<Extent3d>
                 polar: false,
             },
             true,
-        ),
-        kernel.fixes.brep_edit_statuses_pass_on,
-    )?)?
-    .and_then(|boxes| boxes.normal)
-    .unwrap_or_else(Extent3d::new))
+        )?
+        .normal
+        .unwrap_or_else(Extent3d::new))
 }
 
 fn required<T>(value: Option<T>) -> Result<T> {
@@ -3412,40 +3406,32 @@ mod tests {
     use crate::geom::vector2d::Vec2;
     use crate::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
     use crate::nurbs::b_spline_surface::BSplineSurface;
+    use crate::surface::extend::Continuity;
     use crate::surface::plane::Plane;
+    use crate::surface::side::BoxSide;
     use crate::topology::{Edge, Edgeuse, Face, Faceuse, ShellId, Vertex, Vertexuse};
 
     /// The fork's tangency-labs/smlib@9d8ace9 (tangency-labs/solidcore#1795, WR-344):
-    /// under `offset_extended_edges_mated` an edge whose mate failed is left out of the
-    /// merge's no-SSI pairs in the tangent-sector branch too, not only the extended
-    /// convex one. A tangent sector whose mate failed is intersected; with the flag off
-    /// the tangency test alone decides, as upstream.
+    /// an edge whose mate failed is left out of the merge's no-SSI pairs in the
+    /// tangent-sector branch too, not only the extended convex one. A tangent sector whose
+    /// mate failed is intersected.
     #[test]
     fn fork_9d8ace9_unmated_tangent_sector_is_intersected() {
         let tangent = || Ok(true);
         let not_tangent = || Ok(false);
         // the fork's fix: an unmated edge is related in neither branch
         for extend_convex in [false, true] {
-            assert!(!relates_mated_offsets(true, extend_convex, true, tangent).unwrap());
-            assert!(!relates_mated_offsets(true, extend_convex, true, not_tangent).unwrap());
+            assert!(!relates_mated_offsets(extend_convex, true, tangent).unwrap());
+            assert!(!relates_mated_offsets(extend_convex, true, not_tangent).unwrap());
         }
         // a mated edge: related with extended convex edges, else when tangent
-        assert!(relates_mated_offsets(true, true, false, not_tangent).unwrap());
-        assert!(relates_mated_offsets(true, false, false, tangent).unwrap());
-        assert!(!relates_mated_offsets(true, false, false, not_tangent).unwrap());
-        // flag off (upstream): the tangency test alone, whatever the mate did
-        for extend_convex in [false, true] {
-            for unmated in [false, true] {
-                assert!(relates_mated_offsets(false, extend_convex, unmated, tangent).unwrap());
-                assert!(
-                    !relates_mated_offsets(false, extend_convex, unmated, not_tangent).unwrap()
-                );
-            }
-        }
+        assert!(relates_mated_offsets(true, false, not_tangent).unwrap());
+        assert!(relates_mated_offsets(false, false, tangent).unwrap());
+        assert!(!relates_mated_offsets(false, false, not_tangent).unwrap());
         // the tangency test is not evaluated where the fork short-circuits it
         let unreachable = || -> Result<bool> { Err(SolidError::sm_err("test: not evaluated")) };
-        assert!(!relates_mated_offsets(true, true, true, unreachable).unwrap());
-        assert!(relates_mated_offsets(true, true, false, unreachable).unwrap());
+        assert!(!relates_mated_offsets(true, true, unreachable).unwrap());
+        assert!(relates_mated_offsets(true, false, unreachable).unwrap());
     }
 
     /// Runs `run` with empty notification stores keyed by arena identity.
@@ -4080,6 +4066,52 @@ mod tests {
         assert_eq!(executive.extended_surfaces.len(), 2);
     }
 
+    /// A round's margin is its net continued, past where its definition holds (#17373).
+    /// The round's spine runs x = 0 to 10 and its supports x = 0 to 20, so its definition
+    /// continued 15 before x = 0 leaves both supports and is refused; the margin of 15 is
+    /// the net extended ruled on every side, the net itself over the face and its straight
+    /// spine continued 15 past each end.
+    #[test]
+    fn a_rounds_margin_is_its_net_continued_past_its_supports() {
+        let (kernel, pb) = crate::surface::extend::tests::round_blend(1, true);
+        let round = Surface::from(pb);
+        let margin = 15.0;
+        assert!(round
+            .extended_sides_keeping_parameters(&kernel, &BoxSide::ALL, Continuity::Ruled, margin)
+            .is_err());
+        let mut executive = executive();
+        let made = executive
+            .get_create_extended_surface(&kernel, 7, &round, margin)
+            .unwrap()
+            .clone();
+        assert!(
+            matches!(made.kind(), SurfaceKind::BSpline(_)),
+            "{:?}",
+            made.kind()
+        );
+        let face = round.natural_uv_domain_with_nurb(&kernel).unwrap();
+        let grown = made.natural_uv_domain_with_nurb(&kernel).unwrap();
+        assert!(
+            grown.min().x < face.min().x
+                && grown.max().x > face.max().x
+                && grown.min().y < face.min().y
+                && grown.max().y > face.max().y,
+            "{face:?} {grown:?}"
+        );
+        for i in 0..=4 {
+            for j in 0..=4 {
+                let uv = face.evaluate(f64::from(i) / 4.0, f64::from(j) / 4.0);
+                let a = made.evaluate_point(&kernel, uv).unwrap();
+                let b = round.evaluate_point(&kernel, uv).unwrap();
+                assert!(a.distance(b) <= 1e-9, "{uv:?}: {a:?} {b:?}");
+            }
+        }
+        let mid = 0.5 * (face.min().y + face.max().y);
+        let end = |u: f64| made.evaluate_point(&kernel, Vec2::new(u, mid)).unwrap().x;
+        assert!(end(grown.max().x) >= 25.0 - 1e-6, "{}", end(grown.max().x));
+        assert!(end(grown.min().x) <= -15.0 + 1e-6, "{}", end(grown.min().x));
+    }
+
     #[test]
     fn a_surface_is_extended_by_its_margin_none_by_zero_and_a_negative_one_is_refused() {
         let kernel = Kernel::default();
@@ -4278,20 +4310,25 @@ mod tests {
             .remove_excess_faces(&mut kernel, &mut original, &mut result)
             .unwrap();
         executive.set_shell_faces(&[]);
+        // RemoveFaces' editing-disabled refusal, which upstream ignores (cpp:2099-2102)
+        // and the fork passes on (WR-658, tangency-labs/smlib 4803d6d)
+        let editing_refused = |r: Result<()>| {
+            assert!(
+                matches!(&r, Err(e) if e.sm_status() == Some(1001)
+                    && e.to_string().contains("editing is not enabled")),
+                "{r:?}"
+            );
+        };
         // No result edge: the original's editing flag is not touched; the empty
-        // deletion list still reaches RemoveFaces, whose editing-disabled refusal is
-        // ignored (cpp:2099-2102).
-        executive
-            .remove_excess_faces(&mut kernel, &mut original, &mut result)
-            .unwrap();
+        // deletion list still reaches RemoveFaces, which refuses on the result whose
+        // editing is disabled.
+        editing_refused(executive.remove_excess_faces(&mut kernel, &mut original, &mut result));
         assert!(!original.editing_enabled());
         add_use(&mut result, 0.0, 1.0, 1.0);
         add_use(&mut result, 0.0, 1.0, 2.0);
         // The edges evaluate and solve against the empty original; no result face is
-        // close to it, so nothing is removed.
-        executive
-            .remove_excess_faces(&mut kernel, &mut original, &mut result)
-            .unwrap();
+        // close to it, so nothing is removed, and RemoveFaces refuses as above.
+        editing_refused(executive.remove_excess_faces(&mut kernel, &mut original, &mut result));
         assert_eq!(result.edges().len(), 2);
         assert_eq!(result.edgeuses().len(), 2);
         assert!(result.faces().is_empty());
@@ -4508,9 +4545,14 @@ mod tests {
         let mut exec = executive();
         exec.set_merge_results(true);
         // Native RemoveExcessFaces ignores the editing-disabled refusal from
-        // RemoveFaces. No traversal mark is acquired by that refused inner call.
-        exec.remove_excess_faces(&mut kernel, &mut original, &mut result)
-            .unwrap();
+        // RemoveFaces; the fork passes it on (WR-658, tangency-labs/smlib 4803d6d). No
+        // traversal mark is acquired by that refused inner call.
+        let r = exec.remove_excess_faces(&mut kernel, &mut original, &mut result);
+        assert!(
+            matches!(&r, Err(e) if e.sm_status() == Some(1001)
+                && e.to_string().contains("editing is not enabled")),
+            "{r:?}"
+        );
         assert!(!result.editing_enabled());
         assert_eq!(kernel.context.current_mark(MarkType::Mark), 1);
         result.set_editing_enabled(true);
@@ -4892,13 +4934,25 @@ mod tests {
     }
 
     #[test]
-    fn uv_boolean_bounds_ignore_ordinary_failures_and_keep_conversion_side_effects() {
+    fn uv_boolean_bounds_return_a_failed_conversion() {
         let kernel = Kernel::default();
         // Rust-only error-path input: upstream ConvertTo3D dereferences the missing NURB.
+        // The conversion's status is passed on (WR-658, tangency-labs/smlib 4803d6d), so no
+        // initialized extent stands in for the box of a curve that was not converted.
         let mut curve = Curve::from(BSplineCurve::new(2));
-        let bbox = uv_curve_bounding_box(&kernel, &mut curve).unwrap();
-        assert_eq!(bbox.min(), Extent3d::new().min());
-        assert_eq!(bbox.max(), Extent3d::new().max());
+        let r = uv_curve_bounding_box(&kernel, &mut curve);
+        assert!(
+            matches!(
+                r,
+                Err(SolidError::Upstream {
+                    operation: "nurbs::b_spline_curve::p1::BSplineCurve::make_nurb",
+                    code: 1001,
+                    ..
+                })
+            ),
+            "{r:?}"
+        );
+        // the conversion's side effects before its failure stay
         let CurveKind::BSpline(curve) = curve.kind() else {
             panic!("expected the original B-spline kind");
         };
@@ -5459,17 +5513,16 @@ mod tests {
     /// tangency-labs/solidcore#974: an inset (`SM_OT_OPPOSITE`) face use whose face does
     /// not fit its offset surface's domain is clipped by a 2D boolean of planar faces made
     /// from its UV loops. Taken in the face use's sense the loops run clockwise, the planar
-    /// face is inside out and the clip empty: the face gets no offset. With the opt-in the
-    /// loops are taken counterclockwise and the clipped face is made.
+    /// face is inside out and the clip empty: the face gets no offset (upstream). The loops
+    /// are taken counterclockwise and the clipped face is made.
     #[test]
     #[ignore = "fixture does not reproduce the inside-out clip: on this create_plane sheet \
-                the default path also clips to one offset face; needs the shell/4567 vase's \
+                upstream's path also clipped to one offset face; needs the shell/4567 vase's \
                 inset bottom"]
     fn issue_974_inset_face_clipped_right_side_out() {
         use crate::primitive::api_primitives::create_plane;
-        let offsets = |right_side_out: bool| -> usize {
+        let offsets = || -> usize {
             let mut kernel = Kernel::default();
-            kernel.fixes.offset_clip_right_side_out = right_side_out;
             let mut original = create_plane(&mut kernel, Vec3::ZERO, 10.0, 10.0).unwrap();
             let inset = original
                 .faceuses()
@@ -5521,7 +5574,48 @@ mod tests {
             .unwrap();
             executive.offset_faces(inset).len()
         };
-        assert_eq!(offsets(false), 0);
-        assert!(offsets(true) >= 1);
+        assert!(offsets() >= 1);
+    }
+
+    /// `keep_source_tolerances` pairs each end of a matched edge with the original vertex
+    /// it stands for, whichever way the matched uses run (tangency-labs/solidcraft#17624):
+    /// a box's copy, matched once by the same edge use and once by its mate (the same edge
+    /// run the other way), gives the loose start vertex's tolerance to that vertex only.
+    #[test]
+    fn keep_source_tolerances_pairs_ends_either_way() {
+        let mut k = Kernel::default();
+        let mut original = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            10.0,
+            10.0,
+            10.0,
+        )
+        .unwrap();
+        let e = original.edges().ids().next().unwrap();
+        let u = edge::edgeuses(&original, e, None, None).unwrap()[0];
+        let start = use_vertex(&original, u).unwrap();
+        let end = use_vertex(&original, eu::mate(&original, u).unwrap().unwrap()).unwrap();
+        vertex::set_tolerance(&mut original, start, 1e-3, true, true).unwrap();
+        let thin = vertex::tolerance(&original, end).unwrap();
+        assert!(thin < 1e-3);
+        for reversed in [false, true] {
+            let mut result = original.clone_standing_for_self().unwrap();
+            for v in [start, end] {
+                result.vertex_mut(v).unwrap().tolerance = thin;
+            }
+            let matched = if reversed {
+                eu::mate(&result, u).unwrap().unwrap()
+            } else {
+                u
+            };
+            keep_source_tolerances(&k, &original, u, e, &mut result, matched, e).unwrap();
+            assert_eq!(
+                vertex::tolerance(&result, start).unwrap(),
+                1e-3,
+                "{reversed}"
+            );
+            assert_eq!(vertex::tolerance(&result, end).unwrap(), thin, "{reversed}");
+        }
     }
 }

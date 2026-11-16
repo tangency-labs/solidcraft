@@ -8,6 +8,7 @@
 //! Bézier pieces of degree 7 elsewhere, such as a slanted edge across a bend, which folds to a
 //! helix.
 
+use solidcraft_develop::prelude::*;
 use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 

@@ -25,15 +25,11 @@
 //! `PiecewiseMerge` ends on an error of its first `IntersectInsertRelate` (SolidCraft
 //! fix, tangency-labs/smlib af8db37, UB-242), where upstream ignores the status and
 //! goes on with half-imprinted B-reps.
-//! `BooleanLists` copies its surface operands with the base copy constructor, which slices
-//! every derived surface to a geometry-less `SmSurface` (WR-196). The `Surface` enum has no
-//! geometry-less kind, so that copy is its own type here (`BaseSlicedSurface`) with the
-//! base virtual defaults the list path reaches on it: `GetNaturalUVDomain` is the zero
-//! extent and `CreateFaceFromSurface` fails at the base `Evaluate` / `EvaluatePoint` with
-//! `SM_ERR`, so a surface list fails as upstream's does and the planar 2D path is never
-//! taken. `Kernel::fixes.boolean_lists_virtual_surface_copies` copies with the virtual
-//! `Copy` instead (the function's documented intent); the planar outputs are then virtual
-//! copies too. The sliced copy's `SM_NO_CONSTRUCTION` notification has no arena counterpart.
+//! `BooleanLists` copies its surface operands with the virtual `Copy` (the derived surface,
+//! its natural domain and its kind; the function's documented intent), and its planar
+//! outputs too. Upstream's base copy constructor slices every derived surface to a
+//! geometry-less `SmSurface` (WR-196), so there a surface list always fails with `SM_ERR`
+//! and the planar 2D path is never taken.
 //! Component-copy notifications use caller-owned records/attributes through
 //! `boolean_lists_with_notifications`; the arena-only entry passes an arena-only
 //! notification store (default topology records, no attributes), because the arena
@@ -54,10 +50,8 @@ use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::a_object::BooleanOperation;
 use crate::geom::attribute::AttributeStore;
 use crate::geom::context::{with_mark_lock, MarkLock, ALL_MARKS};
-use crate::geom::extent2d::Extent2d;
 use crate::geom::tol::Relation;
 use crate::kernel::Kernel;
-use crate::math::EFF_ZERO;
 use crate::surface::surface::p2::PLANE_TYPE;
 use crate::surface::surface::Surface;
 use crate::topology::brep::{p1 as bp, p7 as bp7};
@@ -810,11 +804,55 @@ pub(crate) fn combine_brep(
     reverse_map: Option<&mut CopyBrepMap<EntityRef>>,
     add_analytics: bool,
 ) -> Result<()> {
+    let mut records = crate::topology::topology::NotifyRecords::new();
+    combine_brep_keeping(
+        k,
+        &mut records,
+        target,
+        source,
+        copy_map,
+        reverse_map,
+        add_analytics,
+    )
+}
+
+/// [`combine_brep`] for a caller that merges many B-reps into one `target` in a row
+/// ([`list_operand`]), keeping the record store of one merge for the next in `records`
+/// (empty before the first).
+///
+/// (not upstream) A merge notifies through a store that holds a default record for every
+/// object of `target` and for `target` itself, and no other, when the merge starts; an
+/// empty store gets them from the merge ([`combine_brep`]), which costs the size of
+/// `target`, so merging N B-reps one after another visited the square of N objects. A kept
+/// store is first left exactly so (`reseed_records`: what the last merge changed, added and
+/// removed is visited, nothing else), and the merge then gives a record only to the objects
+/// it has not seen. The store a merge starts from is the same either way.
+fn combine_brep_keeping(
+    k: &mut Kernel,
+    records: &mut crate::topology::topology::NotifyRecords,
+    target: &mut Brep,
+    source: &Brep,
+    copy_map: Option<&mut CopyBrepMap<EntityRef>>,
+    reverse_map: Option<&mut CopyBrepMap<EntityRef>>,
+    add_analytics: bool,
+) -> Result<()> {
+    use crate::topology::loopuse::{entity_of_notify_key, notify_ref};
+    if !records.is_empty() {
+        // the names the merge gives `target`'s objects and `target` (`ArenaNotifyState::env`
+        // and `brep_ref`), under the serial the merge reads
+        let scheme = crate::topology::brep::p3::KeyScheme {
+            key_of: &notify_ref,
+            entity_of: &entity_of_notify_key,
+            brep_key: crate::topology::brep::p2::brep_ref(target).key,
+            serial: k.context.issued_brep_serial(target.notify_identity()),
+        };
+        crate::topology::brep::p3::reseed_records(records, target, &scheme);
+    }
     // (not upstream) both B-reps' own attributes, the source's under `source_ref`; the
     // target keeps those its objects end with
     let mut state = crate::topology::brep::p2::ArenaNotifyState {
+        records: std::mem::take(records),
         attributes: target.take_attributes(),
-        ..Default::default()
     };
     let seeded = crate::topology::brep::p2::seed_brep_attributes(
         &mut state.attributes,
@@ -834,83 +872,11 @@ pub(crate) fn combine_brep(
         )
     });
     let restored = state.restore_attributes(target);
+    k.work_counters
+        .add_merge_record_visits(state.records.take_visits());
+    *records = state.records;
     r?;
     restored
-}
-
-/// A surface copied by the base copy constructor `SmSurface::SmSurface(const SmSurface&)`
-/// as `BooleanLists` does (`new (*pContext) SmSurface(*pOrig)`, WR-196): `SmAObject`'s
-/// attributes and an empty owner slot, no geometry. The `Surface` enum has no
-/// geometry-less kind, so this type carries the base virtual defaults the list path reaches
-/// on such a copy.
-#[derive(Debug, Clone, Copy)]
-struct BaseSlicedSurface;
-
-impl BaseSlicedSurface {
-    /// The base copy constructor: nothing of `source` the list path can observe survives
-    /// (the attributes it copies have no arena-only counterpart).
-    const fn copy_of(_source: &Surface) -> Self {
-        Self
-    }
-
-    /// `SmSurface::GetNaturalUVDomain`'s base default: `ERR(SM_ERR)` (logged) and the zero
-    /// extent `[(0, 0), (0, 0)]`.
-    const fn natural_uv_domain() -> Extent2d {
-        Extent2d::from_bounds(0.0, 0.0, 0.0, 0.0)
-    }
-
-    /// `IsKindOf(SmPlane_TYPE)` of the base class: only `SmSurface_TYPE` and its bases.
-    fn is_plane() -> bool {
-        crate::surface::surface::p2::is_kind_of(PLANE_TYPE)
-    }
-}
-
-/// `SmBrep::CreateFaceFromSurface(pSurfaceCopy, pSurfaceCopy->GetNaturalUVDomain(), pFace)`
-/// on a [`BaseSlicedSurface`], as upstream's `CreateFaceInRegionFromSurface` runs it: the
-/// surface is not null; `uv_domain` (the zero extent) is contained by the zero natural
-/// domain within `SM_EFF_ZERO`; `CreateNaturalUVTrimCurves` then asks the base
-/// `CreateIsoParametricCurve` for the minimum-`u` side, whose `IsSingularity` fails its
-/// `EvaluateSimple` at the base `Evaluate` (`SM_ERR`, which that `SmBoolean` function's
-/// `SER` returns as a nonzero "singular"), so the singular branch's base `EvaluatePoint`
-/// returns `SM_ERR` through every `SER` to the caller. No face is made and the B-rep is
-/// left as it was (`m_bEditingEnabled` is restored).
-///
-/// # Errors
-///
-/// `SM_ERR`, always, as upstream.
-fn create_face_from_base_sliced_surface(
-    _surface: BaseSlicedSurface,
-    uv_domain: &Extent2d,
-) -> Result<FaceId> {
-    // check input - crUVDomain contained within the pSurface->GetNaturalUVDomain()
-    if !uv_domain.is_contained_by(&BaseSlicedSurface::natural_uv_domain(), EFF_ZERO) {
-        return Err(SolidError::stage_failed(
-            OP,
-            "the UV domain is not within the natural domain of the surface",
-        ));
-    }
-    // SER(pSurface->CreateNaturalUVTrimCurves(...)): the minimum-u side's
-    // CreateIsoParametricCurve -> IsSingularity -> EvaluateSimple -> Evaluate (base:
-    // SM_ERR, so "singular") -> SER(EvaluatePoint(sUV, sPnt)) (base: SM_ERR)
-    Err(SolidError::stage_failed(
-        OP,
-        "the sliced surface cannot be trimmed into a face",
-    ))
-}
-
-/// `new (*pContext) SmSurface(*pSurface)` for an output surface of the planar path. That
-/// path is reached only with `Kernel::fixes.boolean_lists_virtual_surface_copies` (a
-/// base-sliced input never makes a face), so the output copies are virtual copies too;
-/// upstream's sliced output copies would carry no geometry.
-fn copy_list_surface(k: &Kernel, surface: &Surface) -> Result<Surface> {
-    if k.fixes.boolean_lists_virtual_surface_copies {
-        surface.copy(k)
-    } else {
-        Err(SolidError::invalid_input(
-            OP,
-            "planar list outputs need boolean_lists_virtual_surface_copies (WR-196)",
-        ))
-    }
 }
 
 fn stitch_and_orient(
@@ -994,12 +960,11 @@ fn remove_faces(k: &mut Kernel, brep: &mut Brep, faces: &[FaceId]) -> Result<()>
 fn list_operand(k: &mut Kernel, breps: &[Brep], surfaces: &[Surface]) -> Result<(Brep, bool)> {
     let (mut result, planar) = if let Some((first, rest)) = breps.split_first() {
         let mut result = copy_brep(k, first, None, None, true, true)?;
+        // (one record store for the merges: each costs its B-rep, not the operand so far)
+        let mut records = crate::topology::topology::NotifyRecords::new();
         for source in rest {
             // MergeBrep's ordinary status is ignored upstream.
-            ignored(crate::error::passed_on(
-                combine_brep(k, &mut result, source, None, None, true),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            combine_brep_keeping(k, &mut records, &mut result, source, None, None, true)?;
         }
         (result, false)
     } else {
@@ -1020,21 +985,12 @@ fn list_operand(k: &mut Kernel, breps: &[Brep], surfaces: &[Surface]) -> Result<
         for source in surfaces {
             // Upstream records ONLY the last surface's kind ("we hope they are all the
             // same").
-            planar = if k.fixes.boolean_lists_virtual_surface_copies {
-                // the virtual Copy: the derived surface, its natural domain and its kind
-                let copy = source.copy(k)?;
-                let is_plane = copy.is_kind_of(PLANE_TYPE)?;
-                let domain = copy.natural_uv_domain_with_nurb(k)?;
-                crate::topology::brep::sheet::face_on(k, &mut result, copy, &domain)?;
-                is_plane
-            } else {
-                // new (*pContext) SmSurface(*pOrig): the base copy constructor slices the
-                // surface (WR-196); the face creation fails on the copy
-                let copy = BaseSlicedSurface::copy_of(source);
-                let domain = BaseSlicedSurface::natural_uv_domain();
-                create_face_from_base_sliced_surface(copy, &domain)?;
-                BaseSlicedSurface::is_plane()
-            };
+            // the virtual Copy: the derived surface, its natural domain and its kind, where
+            // upstream's base copy constructor slices the surface (WR-196)
+            let copy = source.copy(k)?;
+            planar = copy.is_kind_of(PLANE_TYPE)?;
+            let domain = copy.natural_uv_domain_with_nurb(k)?;
+            crate::topology::brep::sheet::face_on(k, &mut result, copy, &domain)?;
         }
         (result, planar)
     };
@@ -1196,7 +1152,7 @@ pub fn boolean_lists_with_notifications(
     let mut output = BooleanListsResult::default();
     if both_planar {
         for surface in bp::surfaces(&result, None)? {
-            output.surfaces.push(copy_list_surface(k, surface)?);
+            output.surfaces.push(surface.copy(k)?);
         }
     } else {
         let region = result.infinite_region().ok_or_else(|| {
@@ -1281,16 +1237,10 @@ pub fn boolean_lists_with_notifications(
                             // reference attribute) and the result keeps its own.
                             copy_component(k, &mut result, &connected, &mut component, &face_ref)?;
                         }
-                        ignored(crate::error::passed_on(
-                            stitch_and_orient(k, &mut component, -0.1, false, None, None),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?;
+                        stitch_and_orient(k, &mut component, -0.1, false, None, None)?;
                         output.breps.push(component);
                         result.set_editing_enabled(true);
-                        ignored(crate::error::passed_on(
-                            remove_faces(k, &mut result, &connected),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?;
+                        remove_faces(k, &mut result, &connected)?;
                         let next = bp::faces(&result, None)?;
                         if next.len() >= faces.len() {
                             return Err(SolidError::invalid_input(
@@ -1315,6 +1265,7 @@ pub fn boolean_lists_with_notifications(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geom::extent2d::Extent2d;
 
     #[derive(Default)]
     struct Trace {
@@ -1489,7 +1440,14 @@ mod tests {
                     "{operation:?}: {result:?}"
                 );
             } else {
-                assert!(result.is_ok(), "{operation:?}: {result:?}");
+                // Intersection and Difference delete faces instead, and deleting a bare
+                // face record needs its upward face use: upstream ignores that status and
+                // the fork passes it on (WR-658, tangency-labs/smlib e7ebc8d)
+                assert!(
+                    matches!(&result, Err(e) if e.operation() == "topology::brep::p3"
+                        && e.sm_status() == Some(1006)),
+                    "{operation:?}: {result:?}"
+                );
             }
             assert!(kernel.context.doing_boolean());
         }
@@ -1523,67 +1481,22 @@ mod tests {
         ))
     }
 
-    /// Upstream's base copy constructor slices every surface operand (WR-196): the copy
-    /// has no geometry, `CreateFaceFromSurface` fails on it with `SM_ERR`, and so does the
-    /// whole call, before the operation is looked at; a list with B-reps never reads its
-    /// surfaces.
-    #[test]
-    fn surface_list_makes_the_native_empty_brep_then_fails_on_the_sliced_copy() {
-        let mut k = Kernel::default();
-        k.tolerances.zone_tol_3d = 0.002;
-        let sliced = |result: Result<(Brep, bool)>| {
-            let error = result.as_ref().unwrap_err();
-            assert_eq!(error.operation(), OP, "{result:?}");
-            assert_eq!(error.sm_status(), Some(crate::error::SM_ERR), "{result:?}");
-            assert_eq!(
-                error.to_string(),
-                "boolean::merge::p3: the sliced surface cannot be trimmed into a face"
-            );
-        };
-        sliced(list_operand(&mut k, &[], &[square_plane(0.0)]));
-        let infinite = Surface::from(crate::surface::plane::Plane::from_normal(
-            crate::math::Vec3::ZERO,
-            crate::math::Vec3::new(0.0, 0.0, 1.0),
-        ));
-        sliced(list_operand(&mut k, &[], &[infinite, square_plane(1.0)]));
-        // the base copy's checks: the zero domain is contained by the zero natural domain
-        assert!(BaseSlicedSurface::natural_uv_domain()
-            .is_contained_by(&BaseSlicedSurface::natural_uv_domain(), EFF_ZERO));
-        assert!(!BaseSlicedSurface::is_plane());
-        // the whole call: list 1 fails first, even for an operation BooleanLists rejects
-        let result = boolean_lists(
-            &mut k,
-            &[],
-            &[square_plane(0.0)],
-            &[],
-            &[square_plane(1.0)],
-            -1,
-            None,
-        );
-        let error = result.as_ref().unwrap_err();
-        assert_eq!(error.operation(), OP, "{result:?}");
-        assert_eq!(error.sm_status(), Some(crate::error::SM_ERR), "{result:?}");
-        // a list with a B-rep ignores its surfaces
-        let (brep, planar) = list_operand(&mut k, &[Brep::new()], &[square_plane(0.0)]).unwrap();
-        assert!(!planar);
-        assert!(bp::faces(&brep, None).unwrap().is_empty());
+    /// The bounded unit-square plane `x0 <= x <= x0 + 1`, `0 <= y <= 1`, `z = 0`.
+    fn square_plane_from(x0: f64) -> Surface {
+        Surface::from(crate::surface::plane::Plane::new(
+            crate::math::Vec3::new(x0, 0.0, 0.0),
+            crate::math::Vec3::new(1.0, 0.0, 0.0),
+            crate::math::Vec3::new(0.0, 1.0, 0.0),
+            crate::math::Vec2::new(1.0, 1.0),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        ))
     }
 
-    /// `Kernel::fixes.boolean_lists_virtual_surface_copies`: the operands are copied with
-    /// the virtual `Copy`, so each surface makes a face over its natural domain and a list
-    /// of planes is recognised as planar (the function's documented intent).
-    #[test]
-    fn virtual_surface_copies_make_faces_and_recognise_planes() {
-        let mut k = Kernel::default();
-        k.fixes.boolean_lists_virtual_surface_copies = true;
-        let (brep, planar) =
-            list_operand(&mut k, &[], &[square_plane(0.0), square_plane(2.0)]).unwrap();
-        assert!(planar);
-        assert_eq!(bp::faces(&brep, None).unwrap().len(), 2);
-        // the last surface's kind decides (upstream: "we hope they are all the same")
-        let sphere = Surface::from(
+    /// The whole unit sphere about the origin.
+    fn unit_sphere(k: &Kernel) -> Surface {
+        Surface::from(
             crate::surface::sphere::Sphere::new(
-                &k,
+                k,
                 crate::math::Vec3::ZERO,
                 crate::math::Vec3::new(1.0, 0.0, 0.0),
                 crate::math::Vec3::new(0.0, 1.0, 0.0),
@@ -1596,26 +1509,95 @@ mod tests {
                 },
             )
             .unwrap(),
-        );
+        )
+    }
+
+    /// `BooleanLists` copies its surface operands with the virtual `Copy` (WR-196): each
+    /// surface makes a face over its natural domain, a list of planes is recognised as
+    /// planar and takes the planar 2D path, whose outputs are copies of the derived
+    /// surfaces; a list with B-reps never reads its surfaces.
+    #[test]
+    fn surface_lists_copy_each_surface_whole() {
+        let mut k = Kernel::default();
+        let (brep, planar) =
+            list_operand(&mut k, &[], &[square_plane(0.0), square_plane(2.0)]).unwrap();
+        assert!(planar);
+        assert_eq!(bp::faces(&brep, None).unwrap().len(), 2);
+        // the last surface's kind decides (upstream: "we hope they are all the same")
+        let sphere = unit_sphere(&k);
         let (brep, planar) = list_operand(&mut k, &[], &[square_plane(0.0), sphere]).unwrap();
         assert!(!planar);
         assert_eq!(bp::faces(&brep, None).unwrap().len(), 2);
-        // the planar outputs are virtual copies too; without the flag they cannot be made
-        let (brep, _) = list_operand(&mut k, &[], &[square_plane(0.0)]).unwrap();
-        let surface = bp::surfaces(&brep, None)
-            .unwrap()
-            .into_iter()
-            .next()
+        // two unit squares overlapping in [0.5, 1] x [0, 1]: each output plane spans one
+        // region of the result, [x0, x1] x [0, 1] at z = 0, from its natural domain
+        let regions: [(i32, &[(f64, f64)]); 5] = [
+            (0, &[(0.5, 1.0)]),
+            (1, &[(0.0, 1.5)]),
+            (2, &[(0.0, 0.5), (1.0, 1.5)]),
+            (3, &[(0.0, 0.5)]),
+            (4, &[(1.0, 1.5)]),
+        ];
+        for (operation, expected) in regions {
+            let result = boolean_lists(
+                &mut k,
+                &[],
+                &[square_plane_from(0.0)],
+                &[],
+                &[square_plane_from(0.5)],
+                operation,
+                None,
+            )
             .unwrap();
-        assert!(copy_list_surface(&k, surface)
-            .unwrap()
-            .is_kind_of(PLANE_TYPE)
-            .unwrap());
-        k.fixes.boolean_lists_virtual_surface_copies = false;
-        assert!(matches!(
-            copy_list_surface(&k, surface),
-            Err(SolidError::InvalidInput { operation: OP, .. })
-        ));
+            assert!(result.breps.is_empty(), "operation {operation}");
+            let mut spans = Vec::new();
+            for surface in &result.surfaces {
+                assert!(
+                    surface.is_kind_of(PLANE_TYPE).unwrap(),
+                    "operation {operation}"
+                );
+                let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
+                let low = surface.evaluate_point(&k, domain.min()).unwrap();
+                let high = surface.evaluate_point(&k, domain.max()).unwrap();
+                assert_eq!([low.y, low.z, high.y, high.z], [0.0, 0.0, 1.0, 0.0]);
+                spans.push((low.x, high.x));
+            }
+            spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+            assert_eq!(spans, expected, "operation {operation}");
+        }
+        // a list ending in a plane is planar whatever comes before it, so the planar path
+        // refuses a sphere in it
+        let sphere = unit_sphere(&k);
+        let result = boolean_lists(
+            &mut k,
+            &[],
+            &[sphere, square_plane_from(0.0)],
+            &[],
+            &[square_plane_from(0.5)],
+            1,
+            None,
+        );
+        assert!(
+            matches!(result, Err(SolidError::InvalidInput { .. })),
+            "{result:?}"
+        );
+        // an operation BooleanLists does not know is refused once both lists are built
+        let result = boolean_lists(
+            &mut k,
+            &[],
+            &[square_plane(0.0)],
+            &[],
+            &[square_plane(1.0)],
+            -1,
+            None,
+        );
+        assert!(
+            matches!(result, Err(SolidError::InvalidInput { operation: OP, .. })),
+            "{result:?}"
+        );
+        // a list with a B-rep ignores its surfaces
+        let (brep, planar) = list_operand(&mut k, &[Brep::new()], &[square_plane(0.0)]).unwrap();
+        assert!(!planar);
+        assert!(bp::faces(&brep, None).unwrap().is_empty());
     }
 
     #[test]
@@ -1873,6 +1855,63 @@ mod tests {
             for f in bp::faces(b, None).unwrap() {
                 assert_eq!(b.entity_attributes(EntityRef::Face(f)).len(), 1);
             }
+        }
+    }
+
+    /// Keeping the record store from one merge to the next changes nothing: boxes and
+    /// cylinders (with an attribute on every face) merged one after another make the same
+    /// operand, object for object and attribute for attribute (its whole `Debug` dump), and
+    /// leave the same records after every merge, as with a store made for each merge. Both
+    /// ways with the fixes on and off.
+    #[test]
+    fn merges_that_keep_their_record_store_make_the_same_operand() {
+        use crate::geom::attribute::{Attribute, Behavior};
+        use crate::kernel::UpstreamFixes;
+        use crate::math::Point3;
+        use crate::primitive::api_primitives::{create_box, create_cylinder};
+        use crate::topology::topology::NotifyRecords;
+        let operand = |fixes: UpstreamFixes, keep: bool| {
+            let mut k = Kernel {
+                fixes,
+                ..Kernel::default()
+            };
+            let mut breps = Vec::new();
+            for i in 0..7_i64 {
+                let at = Point3::new(20.0 * i as f64, 0.0, 0.0);
+                let mut b = if i % 2 == 0 {
+                    create_cylinder(&mut k, at, 4.0, 14.0).unwrap()
+                } else {
+                    create_box(&mut k, at, 10.0, 10.0, 10.0).unwrap()
+                };
+                for f in bp::faces(&b, None).unwrap() {
+                    b.add_attribute(EntityRef::Face(f), Attribute::long(7, i, Behavior::Copy))
+                        .unwrap();
+                }
+                breps.push(b);
+            }
+            let (first, rest) = breps.split_first().unwrap();
+            let mut result = copy_brep(&mut k, first, None, None, true, true).unwrap();
+            let mut kept = NotifyRecords::new();
+            let mut after = Vec::new();
+            for source in rest {
+                let mut fresh = NotifyRecords::new();
+                let records = if keep { &mut kept } else { &mut fresh };
+                combine_brep_keeping(&mut k, records, &mut result, source, None, None, true)
+                    .unwrap();
+                after.push(records.clone());
+            }
+            assert_eq!(bp::faces(&result, None).unwrap().len(), 4 * 3 + 3 * 6);
+            // (a kept store names the value whose removals it follows, which gives the
+            // B-rep's removal log its tag, as any stitched B-rep has: named here both ways,
+            // so the dumps compare everything else)
+            let _ = result.removal_tag();
+            (format!("{result:?}"), after)
+        };
+        for fixes in [UpstreamFixes::default(), UpstreamFixes::all()] {
+            let (kept, kept_records) = operand(fixes, true);
+            let (fresh, fresh_records) = operand(fixes, false);
+            assert!(kept == fresh, "the operands differ");
+            assert_eq!(kept_records, fresh_records);
         }
     }
 }

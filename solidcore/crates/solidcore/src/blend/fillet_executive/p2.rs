@@ -9,7 +9,8 @@
 //! | [`FilletExecutive::set_fillet_parameters`], [`FilletParameters`] | `SmFilletExecutive::SetFilletParameters` (edge pointers, per-edge parameters; the fork's `pOptSecondRadii`, `f653ac9`) |
 //! | `reset_parameter_state` (crate-private) | `SmFilletExecutive::SetFilletParameters` reset block |
 //! | `check_edges_are_in_brep` (private) | `SmFilletExecutive::CheckEdgesAreInBrep` |
-//! | [`FilletParametersAccess::parameters_split_blended_vertex_fans`] | the fork's `SmFilletExecutive::SplitBlendedVertexFans` (`e418750`, WR-665; with `fixes.fillet_corner_per_vertex_fan`) |
+//! | [`FilletParametersAccess::parameters_split_blended_vertex_fans`] | the fork's `SmFilletExecutive::SplitBlendedVertexFans` (`e418750`, WR-665) |
+//! | [`FilletParametersAccess::parameters_runs_on_across_seams`], [`RunOn`] | none (#2864: a picked edge's blend runs on across a seam's vertex) |
 //! | [`surface_surface_fillet`], [`SurfaceFilletOptions`] | `SmFilletExecutive::SurfaceSurfaceFillet` |
 //! | [`FilletExecutive::do_surface_filleting`] | `SmFilletExecutive::DoSurfaceFilleting` |
 //! | [`FilletExecutive::set_fillet_brep_edge_map`] | `SmFilletExecutive::SetFilletBrepEdgeMap` |
@@ -57,9 +58,8 @@
 //!   plus one step, past which the port returns [`SolidError::InvalidInput`].
 //! - **Law evaluation status.** `SmTemporaryRadiusChange::SetUp` ignores the status of
 //!   `SmFilletLaw::Evaluate` and reads its first value, uninitialised after a failure;
-//!   the port propagates the error before reading that value (UB-252). Constructors
-//!   retain pinned status handling by default; `new_with_fixes` and the matching
-//!   scope helper opt into reporting setup errors before entering the body (#458).
+//!   the port propagates the error before reading that value (UB-252). The constructors
+//!   and the scope helpers report setup errors before entering the body (#458).
 //! - The upstream debug drawing (`SM_GFX_CODE`) is omitted.
 //! - Calls into units that are not ported return [`SolidError::Unported`] through the
 //!   adapter defaults of [`ExecutiveAccess`].
@@ -466,9 +466,9 @@ pub trait FilletParametersAccess<O: ClassObject + SolutionObject + Ord>:
     /// # Errors
     /// Object resolution failures.
     fn parameters_edge_is_live(&self, brep: O, edge: O) -> Result<bool>;
-    /// The fork's `SplitBlendedVertexFans` (tangency-labs/smlib `e418750`, WR-665; run only
-    /// with `fixes.fillet_corner_per_vertex_fan`): each filleted edge's start and end
-    /// vertex, once each and not one made here, split into one vertex per fan of faces
+    /// The fork's `SplitBlendedVertexFans` (tangency-labs/smlib `e418750`, WR-665): each
+    /// filleted edge's start and end vertex, once each and not one made here, split into
+    /// one vertex per fan of faces
     /// (`SmBrep::SplitVertexByFans`); the points of the vertices split, in order, for
     /// `JoinBlendedVertexFans`. Only an adapter over a live target can split; the default
     /// splits nothing.
@@ -484,6 +484,37 @@ pub trait FilletParametersAccess<O: ClassObject + SolutionObject + Ord>:
         let _ = (k, brep, edges);
         Ok(Vec::new())
     }
+    /// The edges that continue `edges` across seams' vertices: where a picked edge's end is
+    /// a vertex that only a seam splits it at, the rest of its own curve between the same two
+    /// faces is the same edge to the user, and a blend does not end there (#2864). Each
+    /// continuation names the picked edge it continues (its index in `edges`), whether its
+    /// blend edge use lies on the other face of the two than that edge's (so a size given per
+    /// support swaps), and it is a new edge, not picked and not named twice. Not upstream
+    /// (solidcore's). Only an adapter over a live target can walk; the default finds none.
+    ///
+    /// # Errors
+    /// Those of the topology walks and the seam and tangency tests.
+    fn parameters_runs_on_across_seams(
+        &mut self,
+        k: &Kernel,
+        edges: &[O],
+        ang_tol_deg: f64,
+    ) -> Result<Vec<RunOn<O>>> {
+        let _ = (k, edges, ang_tol_deg);
+        Ok(Vec::new())
+    }
+}
+
+/// An edge a picked edge runs on into across a seam's vertex
+/// ([`FilletParametersAccess::parameters_runs_on_across_seams`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunOn<O> {
+    /// The index of the picked edge it continues, among the picked edges.
+    pub source: usize,
+    /// The edge.
+    pub edge: O,
+    /// Whether its blend edge use is on the other face of the two than the picked edge's.
+    pub flipped: bool,
 }
 
 impl<O, A> FilletParametersAccess<O> for A
@@ -618,8 +649,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // the fork's (WR-634): no overflow edges yet, no mitred edges (9ba2b12)
         self.overflow_edges.clear();
         self.mitred_edges.clear();
-        // the fork's (WR-665, e418750): no fan split points yet
-        self.fan_split_points.clear();
+        // Not the fork's (WR-665, e418750, clears them here): the fan split points are
+        // kept. An earlier preparation's split is still in the body, and this one finds
+        // those vertices split already and records nothing, so clearing them would leave
+        // `JoinBlendedVertexFans` nothing to join. They are cleared by the join and when
+        // the target changes (`set_fillet_parameters`).
     }
 
     /// `SetFilletParameters`: resets the five operation switches to their common
@@ -649,6 +683,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         self.initialized = false;
 
         if let Some(brep) = params.brep {
+            // another body: the points split on the earlier one are not this one's
+            if self.target != Some(brep) {
+                self.fan_split_points.clear();
+            }
             self.target = Some(brep);
         }
 
@@ -660,12 +698,38 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         }
 
         self.check_edges_are_in_brep(access, params.brep, params.edges)?;
-        // the fork's SplitBlendedVertexFans (WR-665, tangency-labs/smlib@e418750)
-        if k.fixes.fillet_corner_per_vertex_fan {
-            let brep = params.brep.ok_or_else(|| null!("the B-rep"))?;
-            let points = access.parameters_split_blended_vertex_fans(k, brep, params.edges)?;
-            self.fan_split_points.extend(points);
+        let mut ang_tol_deg = params.ang_tol_deg;
+        if ang_tol_deg <= EFF_ZERO {
+            ang_tol_deg = 20.0;
         }
+        let mut tan_tol_deg = params.tan_tol_deg;
+        if tan_tol_deg <= EFF_ZERO {
+            tan_tol_deg = 10.0;
+        }
+        // Not upstream (#2864): a seam is the surface's parameterisation, not a feature, so
+        // the blend of a picked edge runs on across a seam's vertex into the rest of its own
+        // curve, which takes the picked edge's parameters. A variable radius's law runs along
+        // its own edge and gives no radius past it: its edge is not run on, and its End at the
+        // seam's vertex is refused (`blend_corner::end`).
+        let mut edges = params.edges.to_vec();
+        // per edge: the index of the picked edge whose parameters it takes, and whether its
+        // supports are that edge's swapped
+        let mut sources: Vec<(usize, bool)> = (0..num_filleted_edges).map(|i| (i, false)).collect();
+        let has_law = |i: usize| {
+            let at = if params.radius_types.len() == 1 { 0 } else { i };
+            params.radius_types.get(at) == Some(&FilletSolverType::VariableRadius)
+        };
+        for run_on in access.parameters_runs_on_across_seams(k, params.edges, tan_tol_deg)? {
+            if !has_law(run_on.source) {
+                edges.push(run_on.edge);
+                sources.push((run_on.source, run_on.flipped));
+            }
+        }
+        let edges = edges.as_slice();
+        // the fork's SplitBlendedVertexFans (WR-665, tangency-labs/smlib@e418750)
+        let brep = params.brep.ok_or_else(|| null!("the B-rep"))?;
+        let points = access.parameters_split_blended_vertex_fans(k, brep, edges)?;
+        self.fan_split_points.extend(points);
 
         let single_xsect_type = single(params.xsect_types.len(), num_filleted_edges);
         let single_radius_type = single(params.radius_types.len(), num_filleted_edges);
@@ -688,14 +752,6 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // tolerance) is computed but never read.
         if params.approx_tol <= EFF_ZERO {
             let _ = 10.0 * access.parameters_tolerance(k, brep, false)?;
-        }
-        let mut ang_tol_deg = params.ang_tol_deg;
-        if ang_tol_deg <= EFF_ZERO {
-            ang_tol_deg = 20.0;
-        }
-        let mut tan_tol_deg = params.tan_tol_deg;
-        if tan_tol_deg <= EFF_ZERO {
-            tan_tol_deg = 10.0;
         }
         let mut xsect_tol = params.xsect_tol;
         if xsect_tol <= EFF_ZERO {
@@ -764,8 +820,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             self.add_fillet_surface_generator(fsg);
         }
 
-        // Now for each Filleted Edge.
-        for (ii, &edge) in params.edges.iter().enumerate() {
+        // Now for each Filleted Edge (and each edge one runs on into, with its parameters).
+        for (&edge, &(ii, flipped)) in edges.iter().zip(&sources) {
             // 1. Find the appropriate Edgeuse for the fillet.
             let Some(eu) = access.parameters_blend_edgeuse(k, edge)? else {
                 // This edge is not filletable.
@@ -811,6 +867,12 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                         }
                         second_radius = second_radii.get(ii).copied();
                     }
+                    // a run-on edge whose blend edge use is on the other face: its supports
+                    // are the picked edge's swapped
+                    let (radius, second_radius) = match second_radius {
+                        Some(second) if flipped => (second, Some(radius)),
+                        _ => (radius, second_radius),
+                    };
                     Some(SolverSpec::ConstantRadius {
                         approx_tol,
                         ang_tol_rad,
@@ -1623,8 +1685,7 @@ pub struct TemporaryRadiusChange<O> {
 
 impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
     /// The constructor: records the solver, rail and side edge use and runs
-    /// [`TemporaryRadiusChange::set_up`], ignoring ordinary statuses as upstream.
-    /// Use [`Self::new_with_fixes`] to opt into reporting setup failure.
+    /// [`TemporaryRadiusChange::set_up`], reporting its failure (upstream ignores it).
     ///
     /// # Errors
     ///
@@ -1642,10 +1703,8 @@ impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
         )
     }
 
-    /// Constructs a radius change with the caller's opt-in upstream policy.
-    /// `temporary_radius_setup_errors` reports a failed setup before the caller
-    /// starts filleting; the original constructor keeps its default call shape.
-    /// Unported dependencies still propagate under either policy.
+    /// Constructs a radius change with the caller's upstream fixes. A failed setup is
+    /// reported before the caller starts filleting (UB-252).
     pub fn new_with_fixes<A>(
         access: &mut A,
         fs: O,
@@ -1664,14 +1723,9 @@ impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
             fs,
             rail_idx: rail_index,
         };
-        // fork 873c7c9 SERs inside SetUp (its constructor still cannot report, so the
-        // status reaches the caller only with temporary_radius_setup_errors)
-        let setup = change.set_up_with(access, fixes.fillet_statuses_pass_on);
-        if fixes.temporary_radius_setup_errors {
-            setup?;
-        } else {
-            ignored(setup)?;
-        }
+        // fork 873c7c9 SERs inside SetUp (its constructor still cannot report; here the
+        // status reaches the caller)
+        change.set_up_with(access, fixes.fillet_statuses_pass_on)?;
         Ok(change)
     }
 
@@ -1899,7 +1953,7 @@ where
 }
 
 /// Runs a temporary radius scope using the caller's upstream fix policy.
-/// With `temporary_radius_setup_errors`, a setup failure returns before `body`.
+/// A setup failure returns before `body`.
 /// A completed setup is reverted even when `body` fails.
 pub fn with_temporary_radius_change_with_fixes<O, A, T>(
     access: &mut A,

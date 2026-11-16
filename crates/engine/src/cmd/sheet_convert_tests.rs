@@ -9,6 +9,7 @@ use solidcraft_geom::prelude::*;
 use std::f64::consts::{FRAC_PI_2, PI, SQRT_2};
 
 use serde_json::{Value, json};
+use solidcraft_io::DxfShape;
 
 use crate::Session;
 
@@ -626,11 +627,40 @@ fn a_bend_modelled_with_another_radius_takes_the_rules() {
     }
 }
 
+/// Convert takes a modelled bend picked on either of its cylinders (#6748): a pick on the one
+/// across the thickness from the face picked (the outside, the face picked inside, or the other
+/// way round) is a pick of the bend on the face's side, whose faces are the sheet's. Otherwise
+/// that cylinder and the faces it runs into would be panels too, the rule's thickness behind each
+/// meeting the face's. `main`'s Convert took it so (its
+/// `a_bend_modelled_with_its_radius_is_one_bend_of_the_rules_radius`). The L of
+/// `a_bend_modelled_with_another_radius_takes_the_rules` under its rule: Convert takes the rule's
+/// thickness behind the face, which is the L's own, so the sheet is the one Recognize reads, the
+/// same blank and metal from either face with either pick.
+#[test]
+fn a_bend_picked_on_the_cylinder_across_from_the_face_converts_as_the_face_sides() {
+    let (t, k, r) = (2.0, 0.5, 3.0);
+    let across = 60.0 + 40.0 - deduction(FRAC_PI_2, r, t, k);
+    for (face, inner_pick) in [([30.0, 0.0, 50.0], false), ([30.0, 0.0, 50.0], true), ([30.0, 2.0, 50.0], false), ([30.0, 2.0, 50.0], true)] {
+        let mut s = Session::default();
+        rule(&mut s, "Test", t, k, r, 0.5);
+        let (outer, inner) = bent_section(&mut s, &[(0.0, 40.0), (0.0, 0.0), (60.0, 0.0)], t, 2.0, 100.0)[0];
+        let bend = if inner_pick { inner } else { outer };
+        run(&mut s, "sheet.convert", json!({"body": "Section", "face": face, "bends": [bend]}));
+        let f = flat(&mut s);
+        let radii: Vec<f64> = f["bends"].as_array().into_iter().flatten().filter_map(|b| b["radius"].as_f64()).collect();
+        assert!(f["rolls"] == 0 && radii.len() == 1 && (radii[0] - r).abs() < 1e-9, "{face:?} {bend:?}: {f}");
+        assert!(same_size(flat_size(&mut s), (across, 100.0), 1e-6), "{face:?} {bend:?}: {:?} vs {across}", flat_size(&mut s));
+        let metal = across * 100.0 * t;
+        assert!((volume(&mut s) - metal).abs() < 1e-6 * metal, "{face:?} {bend:?}: {} vs {metal}", volume(&mut s));
+    }
+}
+
 /// Whether a cylinder modelled between two planes is a bend or a roll is its inside radius in the
 /// rule's thicknesses (Convert reads no thickness of the body's): short of 10^0.7 (about 5), where
 /// DIN 6935's correction of the neutral fiber reaches 1, a bend, bent with the rule's radius; from
-/// there a roll, which keeps the model's radius and has its lines in the flat. Both are developed
-/// with the rule's K-factor. T 2: the line is at 2 · 10^0.7 = 10.0237, so an inside radius of 10
+/// there a roll, which keeps the model's radius and has its lines in the flat. A bend is developed
+/// with the rule's K-factor, a roll at K 0.5 (DIN 6935's mid-thickness). T 2: the line is at
+/// 2 · 10^0.7 = 10.0237, so an inside radius of 10
 /// is a bend and one of 10.05 a roll.
 #[test]
 fn a_modelled_corner_is_a_bend_short_of_about_five_thicknesses_and_a_roll_from_there() {
@@ -983,11 +1013,18 @@ fn flat_circles(s: &mut Session) -> Vec<(f64, [f64; 2])> {
 
 /// How many entities of each kind the flat pattern's DXF has.
 fn dxf_entities(s: &mut Session) -> (usize, usize, usize) {
-    let dxf = run(s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or("").replace("\r\n", "\n");
-    // Group codes may be padded (`  0`): compare the code and value lines trimmed.
-    let lines: Vec<&str> = dxf.lines().map(str::trim).collect();
-    let n = |kind: &str| lines.chunks(2).filter(|pair| pair == &["0", kind]).count();
-    (n("LINE"), n("ARC"), n("CIRCLE"))
+    let result = run(s, "sheet.export_dxf", json!({}));
+    let file = solidcraft_io::read_dxf_file(result["dxf"].as_str().unwrap()).unwrap();
+    let mut counts = (0, 0, 0);
+    for entity in file.entities() {
+        match entity.geometry() {
+            DxfShape::Line(..) => counts.0 += 1,
+            DxfShape::Arc { .. } => counts.1 += 1,
+            DxfShape::Circle { .. } => counts.2 += 1,
+            _ => {}
+        }
+    }
+    counts
 }
 
 /// A plate whose round holes' walls are two half-cylinders each (as many exporters write a hole)
@@ -1206,19 +1243,13 @@ fn contains(s: &Session, p: [f64; 3]) -> bool {
         .is_some_and(|b| b.body.classify_point(solidcore_record::Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside)
 }
 
-/// The LINE entities a DXF draws on `layer` (group codes and values alternate, a line each).
+/// Count actual LINE geometry on an owned layer after the shared layered read.
 fn lines_on(dxf: &str, layer: &str) -> usize {
-    let lines: Vec<&str> = dxf.lines().map(str::trim).collect();
-    let mut in_line = false;
-    let mut count = 0;
-    for pair in lines.chunks(2) {
-        match pair {
-            ["0", kind] => in_line = *kind == "LINE",
-            ["8", name] if in_line && *name == layer => count += 1,
-            _ => {}
-        }
-    }
-    count
+    let file = solidcraft_io::read_dxf_file(dxf).unwrap();
+    file.entities()
+        .iter()
+        .filter(|entity| matches!(entity.geometry(), DxfShape::Line(..)) && file.layer(entity.layer()).unwrap().name() == layer)
+        .count()
 }
 
 /// A plate with an engraving is recognized: the engraving is a pocket of the sheet, so the sheet
@@ -2042,7 +2073,7 @@ fn trays_of_its_own_sheet_metal_convert_back() {
     // A round relief's edge on a bend is a circle of the flat folded round the bend: its angle
     // round the bend runs as the circle's sine does along it, which no spline holds exactly. The
     // kernel folds it as degree-7 pieces within FOLD_TOL times the edge's size of the fold
-    // (FOLD_TOL = 1e-7, crates/kernel/src/sew.rs, as close as a folded edge's own chain keeps to
+    // (FOLD_TOL = 1e-7, solidcore's eval/folded.rs, as close as a folded edge's own chain keeps to
     // the fold), and the converted tray reads its reliefs back from those pieces. So the round
     // trip keeps a round relief to that tolerance, not to a rounding: each of its arcs on a bend
     // may lie up to off = 1e-7 x 120 mm from the circle (120 mm, the tray's largest coordinate,

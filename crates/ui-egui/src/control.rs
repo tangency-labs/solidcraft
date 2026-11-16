@@ -285,11 +285,21 @@ fn switches_design(step: &Value) -> Option<&'static str> {
     SWITCHES_DESIGN.into_iter().find(|id| is_command(command(step), id))
 }
 
+/// Package I/O runs through the dedicated worker, so it cannot share a synchronous batch.
+fn has_plugin_management_steps(steps: &[Value]) -> bool {
+    steps
+        .iter()
+        .any(|step| batch_step_command(step).is_some_and(|id| id.eq_ignore_ascii_case("plugin.install") || id.eq_ignore_ascii_case("plugin.remove")))
+}
+
 /// Why `engine.batch` refuses these steps before running any: a step loads a file or switches
 /// to another design (send such steps one by one).
 pub(crate) fn batch_refusal(steps: &[Value]) -> Option<String> {
     if steps.iter().any(|step| batch_step_command(step).is_some_and(|id| id.eq_ignore_ascii_case("plugin.run"))) {
         return Some(solidcraft_ui_text::tr("ui.plugin_standalone").into());
+    }
+    if has_plugin_management_steps(steps) {
+        return Some(solidcraft_ui_text::tr("ui.plugin_management_standalone").into());
     }
     if let Some((i, c)) = steps.iter().enumerate().find_map(|(i, step)| switches_design(step).map(|c| (i, c))) {
         return Some(format!("engine.batch unavailable: step {i} ({c}) switches to another design"));
@@ -416,6 +426,9 @@ fn script(app: &mut SolveApp, p: &Value) -> Outcome {
     let steps = p.as_array().or_else(|| p.get("commands").and_then(Value::as_array));
     if steps.is_some_and(|steps| steps.iter().any(|step| batch_step_command(step).is_some_and(|id| id.eq_ignore_ascii_case("plugin.run")))) {
         return err(solidcraft_ui_text::tr("ui.plugin_standalone"));
+    }
+    if steps.is_some_and(|steps| has_plugin_management_steps(steps)) {
+        return err(solidcraft_ui_text::tr("ui.plugin_management_standalone"));
     }
     let steps = match solidcraft_engine::script_steps(p) {
         Ok(steps) => steps,
@@ -1941,8 +1954,8 @@ mod tests {
             assert!(takeover.is_err());
             assert_eq!(crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap(), second);
             h.step(&json!({"panel_fixture":{"enabled":false}})).unwrap();
-            assert!(h.app.panel_runtime().is_none());
-            assert!(!h.app.universal_panel_host_enabled());
+            assert!(h.app.panel_runtime().is_some());
+            assert!(h.app.universal_panel_host_enabled());
         }
     }
 
@@ -2144,7 +2157,9 @@ mod tests {
         assert_eq!(crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap(), before);
         click_visible_guard(&mut h, &guard);
         h.step(&json!({"panel_fixture":{"enabled":false}})).unwrap();
-        assert!(h.app.panel_runtime().is_none());
+        let layout = h.app.panel_runtime().unwrap().layout().layout();
+        let browser = solidcraft_engine::panels::InstanceId::new("browser").unwrap();
+        assert!(layout.instance(&browser).is_ok(), "the workspace restores production panels after teardown");
     }
 
     #[test]

@@ -18,6 +18,8 @@
     clippy::indexing_slicing
 )] // test helpers
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use solidcore::boolean::api_brep as sm;
 use solidcore::curve::curve::Curve;
 use solidcore::curve::line::Line;
@@ -159,6 +161,9 @@ struct Union {
     volume: f64,
     tolerances: Vec<(Point3, f64)>,
     check: Vec<String>,
+    /// The volume's move from 44443.49387571212 (before `brep_volume` closed tolerant edges'
+    /// gaps, #16735) checked on the body: `volume_leak::moved_by_the_old_leak`'s figures.
+    moved: Result<String, String>,
 }
 
 fn union_with_only_the_new_edge_flag(fix: bool) -> Union {
@@ -198,6 +203,7 @@ fn union_with_only_the_new_edge_flag(fix: bool) -> Union {
         key_of: &|_| ObjectKey(0),
     };
     let volume = brep_volume(k, &mut r, 1e-8, &attrs).unwrap();
+    let moved = volume_leak::moved_by_the_old_leak(k, &mut r, 44443.49387571212, volume, 1e-8);
     let check = check_brep(k, &mut r, CheckLevel::Level2).unwrap();
     Union {
         faces: r.face_list().len(),
@@ -207,6 +213,7 @@ fn union_with_only_the_new_edge_flag(fix: bool) -> Union {
         worst_end_gap,
         volume,
         tolerances,
+        moved,
         check: check.lines(),
     }
 }
@@ -314,12 +321,16 @@ fn wr469_union_flag_alone_grows_eight_vertex_tolerances() {
         // crossing ridges' edges where they pass nearest their points (2.2476e-6 ->
         // 2.2417e-6 and 2.2381e-6 -> 2.2298e-6 off), not at the classifications'
         // parameters, 1.8e-8 along; topology, worst end gap and check are unchanged and
-        // the volume moves 4.0e-9 relative.
+        // the volume moves 4.0e-9 relative. 44443.49387571212 until `brep_volume` closed
+        // tolerant edges' gaps (#16735): -3.0e-8 relative with topology, end gap and check
+        // unchanged (MEASURED), the move within the old integrator's leak bound on the body
+        // (`moved`).
         assert!(
-            close(u.volume, 44443.49387571212),
+            close(u.volume, 44443.49253850169),
             "{name} volume {:?}",
             u.volume
         );
+        assert!(u.moved.is_ok(), "{name}: {:?}", u.moved);
     }
     // The two runs are deterministic: same vertices in the same order, same outcome.
     assert_eq!(off.tolerances.len(), on.tolerances.len());

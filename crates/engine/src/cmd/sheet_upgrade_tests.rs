@@ -122,6 +122,75 @@ fn a_flange_and_a_hem_main_saved_rebuild_on_their_edges() {
     }
 }
 
+/// The volume of `saved_by_main`'s part as it rebuilds (see
+/// `a_flange_and_a_hem_main_saved_rebuild_on_their_edges`): 8200 + 225π.
+fn mains_part() -> f64 {
+    5800.0 + 1800.0 + 600.0 + 225.0 * PI
+}
+
+/// Holes main saved on the faces of a sheet by their numbers among the faces the sheet's feature
+/// made (`F2:face:1`, as `kc/560-hole-through-a-sheet-metal-base`, `kc/955-…-rim` and
+/// `kc/1280-…-flange` were saved) open on the faces their saved points lie on: a sheet feature
+/// names its faces after what made each now, and numbers none. Through the base's bottom (z = 0)
+/// at (30, 30), 5 across: π · 2.5² · 1; 10 deep into the back rim (y = 60) mid-thickness, 0.6
+/// across: π · 0.3² · 10; through the flange's leg from its outside (y = 0) at x = 30, z = 8,
+/// clear of its bend (z < 2) and the hem (z > 14), 4 across: π · 2² · 1. A name of the base's
+/// whose point lies on the flange is no face of the base's there, and asks for it again.
+#[test]
+fn holes_main_saved_on_a_sheets_numbered_faces_open_on_those_faces() {
+    let mut design = saved_by_main();
+    let hole = |id: u64, name: &str, face: &str, position: [f64; 3], direction: [f64; 3], diameter: &str, depth: Option<&str>| {
+        let mut f = json!({
+            "id": id, "name": name, "suppressed": false, "type": "hole", "param_names": [format!("d{id}")], "hole": {"type": "simple"},
+            "diameter": diameter, "direction": direction, "position": position, "face_names": [face],
+        });
+        if let Some(depth) = depth {
+            f["depth"] = json!(depth);
+            f["param_names"] = json!([format!("d{id}"), format!("d{}", id + 10)]);
+        }
+        f
+    };
+    if let Some(features) = design["features"].as_array_mut() {
+        features.extend([
+            hole(6, "Hole1", "F2:face:1", [30.0, 30.0, 0.0], [0.0, 0.0, 1.0], "5", None),
+            hole(7, "Hole2", "F2:face:4", [50.0, 60.0, 0.5], [0.0, -1.0, 0.0], "0.6", Some("10")),
+            hole(8, "Hole3", "F3:face:6", [30.0, 0.0, 8.0], [0.0, 1.0, 0.0], "4", None),
+            hole(9, "Hole4", "F2:face:0", [70.0, 0.0, 8.0], [0.0, 1.0, 0.0], "4", None),
+        ]);
+    }
+    design["next_id"] = json!(10);
+    let doc = solidcraft_doc::Document::from_json(&design.to_string()).unwrap();
+    let mut s = Session::new(doc);
+    let errors: Vec<_> = s.model.results.iter().filter_map(|r| r.error.as_ref().map(|e| (&r.name, e))).collect();
+    assert!(errors.len() == 1 && errors[0].1.contains("`F2:face:0`"), "{errors:?}");
+    let want = mains_part() - PI * (2.5 * 2.5 + 0.3 * 0.3 * 10.0 + 2.0 * 2.0);
+    assert!(rel(volume(&mut s), want) < 1e-6, "{} vs {want}", volume(&mut s));
+}
+
+/// A part main mirrored once its flange and hem were on (`kc/3353-mirrored-sheet-body-keeps-its-
+/// flat-pattern`) rebuilds both copies whole: the flange's and the hem's edges were picked on the
+/// one sheet there was before the mirror (format pending sheet-edge-names). Mirrored in YZ, the
+/// copy lies at x = −100…0: twice the part's metal.
+#[test]
+fn a_part_main_mirrored_after_its_flanges_rebuilds_both_copies() {
+    let mut design = saved_by_main();
+    design["features"][1]["body_names"] = json!(["Body1"]);
+    if let Some(features) = design["features"].as_array_mut() {
+        features.push(json!({
+            "id": 6, "name": "Mirror1", "suppressed": false, "type": "mirror", "plane": {"type": "origin", "name": "YZ"},
+            "bodies": ["Body1"], "body_names": ["Body1 (2)"], "features": [],
+        }));
+    }
+    design["next_id"] = json!(7);
+    let doc = solidcraft_doc::Document::from_json(&design.to_string()).unwrap();
+    assert_eq!(doc.feature(3).map(|f| f.edge_names.clone()).unwrap_or_default(), ["F2:side:l1|F2:top"]);
+    let mut s = Session::new(doc);
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results.iter().map(|r| (&r.name, &r.error)).collect::<Vec<_>>());
+    assert_eq!(s.model.state().bodies.len(), 2);
+    let want = 2.0 * mains_part();
+    assert!(rel(volume(&mut s), want) < 1e-6, "{} vs {want}", volume(&mut s));
+}
+
 /// Without the upgrade (the design says it has it already), the flange's saved name is no edge's
 /// and it asks for its edge to be picked again: the names are what the upgrade changes.
 #[test]

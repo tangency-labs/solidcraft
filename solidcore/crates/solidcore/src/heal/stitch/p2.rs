@@ -486,10 +486,7 @@ impl Stitch<'_> {
                 // when face is a lamina sliver
                 if face_is_lamina(b, f)? && face_is_degenerate(k, b, f, true, Some(zone_tol))? {
                     // delete Face and its boundary edges and vertices from the Brep
-                    ignore_status(crate::error::passed_on(
-                        self.edit_delete_face(k, b, f, true, true, None, None),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    self.edit_delete_face(k, b, f, true, true, None, None)?;
                 }
             }
         }
@@ -583,12 +580,10 @@ impl Stitch<'_> {
 
             // Check for Vertices coincident with Edges if asked.
             if self.split_edges_with_vertices {
-                // get modified Brep Bounding box (status not checked)
-                let brep_bbox = ignored(crate::error::passed_on(
-                    qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default()),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?
-                .unwrap_or_default();
+                // get modified Brep Bounding box (status not checked upstream; passed on
+                // here, WR-658)
+                let brep_bbox =
+                    qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
 
                 // build modified Brep Edge spatial tree (lNumPerNode only sizes the
                 // memory blocks)
@@ -1582,40 +1577,31 @@ impl Stitch<'_> {
                     let mid = (vertex::point(b, v)? + vertex::point(b, new_v)?) * 0.5;
                     self.edit_set_point(k, b, v, mid)?;
 
-                    // (status not checked)
-                    ignore_status(crate::error::passed_on(
-                        self.edit_glue_vertices(k, b, v, new_v, None),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    // (status not checked upstream; passed on here, WR-658)
+                    self.edit_glue_vertices(k, b, v, new_v, None)?;
                     out.processed.push(v);
                     set_none(verts, ii)?;
 
                     // Set max distance.
                     out.max_vertex_gap = smos_max(out.max_vertex_gap, dist_to_edge);
 
-                    // (statuses not checked)
-                    ignore_status(crate::error::passed_on(
-                        update_object_tolerance(
-                            k,
-                            b,
-                            Some(TopologyToUpdate::Vertex(v)),
-                            dist_to_edge,
-                            0.0,
-                            false,
-                        ),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
-                    ignore_status(crate::error::passed_on(
-                        update_object_tolerance(
-                            k,
-                            b,
-                            Some(TopologyToUpdate::Edge(e)),
-                            dist_to_edge,
-                            0.0,
-                            false,
-                        ),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    // (statuses not checked upstream; passed on here, WR-658)
+                    update_object_tolerance(
+                        k,
+                        b,
+                        Some(TopologyToUpdate::Vertex(v)),
+                        dist_to_edge,
+                        0.0,
+                        false,
+                    )?;
+                    update_object_tolerance(
+                        k,
+                        b,
+                        Some(TopologyToUpdate::Edge(e)),
+                        dist_to_edge,
+                        0.0,
+                        false,
+                    )?;
                 } else if split.reason == SplitReason::FarFromGeom {
                     // Set min distance, if it didn't split due to being too far away
                     // (as opposed to being at a vertex).
@@ -1629,17 +1615,14 @@ impl Stitch<'_> {
                     out.new_edges.push(new_e);
 
                     let e_tol = edge::tolerance(b, e)?;
-                    ignore_status(crate::error::passed_on(
-                        update_object_tolerance(
-                            k,
-                            b,
-                            Some(TopologyToUpdate::Edge(new_e)),
-                            dist_to_edge,
-                            e_tol,
-                            false,
-                        ),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    update_object_tolerance(
+                        k,
+                        b,
+                        Some(TopologyToUpdate::Edge(new_e)),
+                        dist_to_edge,
+                        e_tol,
+                        false,
+                    )?;
 
                     // Also add to main Edges list: might still need processing here.
                     edges.push(Some(new_e));
@@ -1719,15 +1702,13 @@ pub fn solid_stitch_start(k: &Kernel, b: &Brep) -> Result<(f64, f64)> {
 /// compare, no edge splitting and manifold gluing, from a tenth of the B-rep tolerance,
 /// doubling it while lamina edges remain and it is below 1/200 of the bounding box
 /// diagonal. The result is a solid when no lamina edge is left and the B-rep has more
-/// than one region. With
-/// [`UpstreamFixes::stitch_solid_nests_cavities`](crate::kernel::UpstreamFixes::stitch_solid_nests_cavities)
-/// (WR-569) such a solid is then made a nested solid model, so a closed shell inside
-/// another bounds a void.
+/// than one region. Such a solid is then made a nested solid model, so a closed shell
+/// inside another bounds a void (WR-569; upstream leaves it solid).
 ///
 /// # Errors
 ///
 /// Those of `CalculateBoundingBox` and [`Stitch::do_stitching`];
-/// [`SolidError::InvalidInput`] past [`MAX_TOL_DOUBLINGS`]; with the opt-in, those of
+/// [`SolidError::InvalidInput`] past [`MAX_TOL_DOUBLINGS`]; those of
 /// `FindAndSetInfiniteRegion`.
 pub fn stitch_into_solid(k: &mut Kernel, b: &mut Brep) -> Result<AdvancedStitch> {
     stitch_into_solid_with(k, b, None)
@@ -1790,18 +1771,16 @@ pub(crate) fn stitch_into_solid_with(
     }
 
     if num_lamina == 0 && bp1::regions(b, None)?.len() > 1 {
-        // Not upstream (WR-569, opt-in; the fork's tangency-labs/smlib@351c57c): the
-        // stitching found the infinite region but left the regions inside nested closed
-        // shells solid, each shell where the glue put it. A solid is a nested solid model:
-        // inside the outer shell is material, inside a shell within it a void, and so on,
-        // each region's outer shell first.
-        if k.fixes.stitch_solid_nests_cavities {
-            let old = b.editing_enabled();
-            b.set_editing_enabled(false);
-            let r = find_and_set_infinite_region(k, b, None, SetRegionVoidType::NestedSolid, None);
-            b.set_editing_enabled(old);
-            r?;
-        }
+        // Not upstream (WR-569; the fork's tangency-labs/smlib@351c57c): the stitching
+        // found the infinite region but left the regions inside nested closed shells
+        // solid, each shell where the glue put it. A solid is a nested solid model: inside
+        // the outer shell is material, inside a shell within it a void, and so on, each
+        // region's outer shell first.
+        let old = b.editing_enabled();
+        b.set_editing_enabled(false);
+        let r = find_and_set_infinite_region(k, b, None, SetRegionVoidType::NestedSolid, None);
+        b.set_editing_enabled(old);
+        r?;
         out.produces_a_solid = true;
     }
     Ok(out)
@@ -2095,14 +2074,12 @@ mod tests {
     }
 
     /// A cube of side 10 with a cube cavity of side 4, as twelve loose faces: the stitch
-    /// closes both shells. With the opt-in (WR-569, the fork's
-    /// tangency-labs/smlib@351c57c) the region inside the inner shell is a void, as is the
-    /// infinite region; upstream leaves it solid.
+    /// closes both shells. The region inside the inner shell is a void (WR-569, the fork's
+    /// tangency-labs/smlib@351c57c), as is the infinite region; upstream leaves it solid.
     #[test]
     fn stitched_solid_cavity_is_a_void() {
-        let build = |fix: bool| {
+        let build = || {
             let mut k = Kernel::default();
-            k.fixes.stitch_solid_nests_cavities = fix;
             let mut b = crate::topology::brep::p3::new_brep(
                 &mut k,
                 crate::geom::tol::USE_DEFAULT,
@@ -2118,9 +2095,7 @@ mod tests {
             b
         };
         // the infinite region and the cavity are voids, between them the material
-        assert_eq!(void_count(&build(true)), 2);
-        // upstream: only the infinite region
-        assert_eq!(void_count(&build(false)), 1);
+        assert_eq!(void_count(&build()), 2);
     }
 
     /// (#2506) Four loose faces end on the z axis from the origin to (0, 0, 1): two half

@@ -24,8 +24,10 @@
 //! | [`place_rolled_rail_end`]         | none (#2406: a rail end not reached on the End's plane before the rollover) |
 //! | `side_edge_in_cap` (private)      | none (#2406: a cap edge along a side edge in the cap's plane) |
 //! | [`EndEdges`], `end_face_runs_on_past_side_edge`, `rail_face` (private) | none: an end face running on tangentially past the side edge is the global merge's, not refused |
+//! | `classify_rail_end` (private), `rail_end_on_surfaces` (crate) | none (an End's rail end off its side face at the face's zone solved on the faces, and classified there) |
 //! | `run_on_leaves_the_part` (private) | none (#2656: a blend run on past a smooth vertex that runs out of the part ends on the end face, not capped) |
-//! | `runs_on_across_seam` (private), [`RUNS_ON_ACROSS_SEAM`] | none (#2864: a round does not end at a seam's vertex; refused until it runs on across it) |
+//! | `depth_under_edge_continued` (private) | none (a bend at the smooth vertex that takes the continuing edge to the far side of the blended edge continued: the part stands across the blend run on, which is capped) |
+//! | `runs_on_across_seam` (private), [`RUNS_ON_ACROSS_SEAM`] | none (#2864: a round does not end at a seam's vertex; a variable round's End there is refused, every other blend runs on across it) |
 //!
 //! Deviations: the fork's `NoteError(SM_FILERR_NO_ROOM, ...)` and `NoteFitRadius` before
 //! `SM_ERR` are returned ([`EndRefusal`]) for the executive's caller to note, which then
@@ -271,7 +273,8 @@ pub fn continuing_edges(
 /// not the fork's).
 ///
 /// The two edges E (blended) and E' (continuing) share a face A, and leave the vertex V
-/// opposite to each other with one tangent. The blend run on past V keeps its section, the
+/// opposite to each other, within the corner's tangency tolerance of one tangent. The blend
+/// run on past V keeps its section, the
 /// corner between A and E's other face continued; the part there is bounded on A by E'.
 /// Where E' turns into A away from E continued (towards the blend's side of E: the rail on A
 /// lies that way), the part falls away from the blend run on, which takes off (or, concave,
@@ -282,9 +285,20 @@ pub fn continuing_edges(
 /// tangency-labs/solidcore#2176), E' along E continued, or one face round V (#453's rim).
 ///
 /// The two curves are compared in A's binormal `d` into A at V (unit, square to the edge),
-/// each as its height `c2 x^2 + c3 x^3` along `d` over the distance `x` past V along the
-/// tangent, from its derivatives at V (E's run on past V), at `x` the shorter of the two
-/// edges' chords from V, against A's zone tolerance. Where the second orders' difference
+/// each as its height `c1 x + c2 x^2 + c3 x^3` along `d` over the distance `x` past V along
+/// E's tangent, from its derivatives at V (E's run on past V; E's `c1` is zero, `d` being
+/// square to it), over the shorter of the two edges' chords from V, against A's zone
+/// tolerance.
+///
+/// First the bend. E' leaving V on the far side of E continued from the blend (its `c1`
+/// below E's) runs under E continued until their curvatures bring it back, if they do
+/// ([`depth_under_edge_continued`]). Where that is deeper than the tolerance, the part
+/// stands across the blend run on from V on, which cannot run out through it, whatever E'
+/// does farther along, and the cap stays: an arc meeting a circle a few degrees off
+/// tangent, where the circle crosses the arc continued a second time past V. A bend the
+/// other way, or one that takes E' no deeper than the tolerance, decides nothing.
+///
+/// Then the turn, at the chord's end. Where the second orders' difference
 /// there exceeds both third orders, it decides: E' turns away where its height exceeds E's
 /// continued. Otherwise the curvatures nearly agree (an edge of a curvature-continuous round,
 /// which leaves its face with little curvature and turns as it goes), and E' turns away only
@@ -361,8 +375,10 @@ fn run_on_leaves_the_part(
     };
     // past V, along the continuing edge
     let along = -leave;
-    // (c2, c3) of an edge's curve at V, its parameter turned to run past V along `along`
-    let heights = |target: &Brep, e: EdgeId| -> Result<Option<(f64, f64)>> {
+    // (c1, c2, c3) of an edge's curve at V, its parameter turned to run past V along `along`:
+    // the height h over the distance x, both functions of the parameter, differentiated
+    // by x
+    let heights = |target: &Brep, e: EdgeId| -> Result<Option<(f64, f64, f64)>> {
         let start = at_start(target, e)?;
         let c = edge::curve(target, e)?.ok_or_else(nul)?;
         let ds = c.evaluate(k, param_at(target, e)?, 3, !start, true)?;
@@ -379,12 +395,16 @@ fn run_on_leaves_the_part(
         if x1 <= 0.0 {
             return Ok(None);
         }
-        let (x2, h2, h3) = (d2.dot(along), d2.dot(d), d3.dot(d));
-        let c2 = h2 / (2.0 * x1 * x1);
-        let c3 = h3 / (6.0 * x1 * x1 * x1) - h2 * x2 / (2.0 * x1 * x1 * x1 * x1);
-        Ok(Some((c2, c3)))
+        let (x2, x3) = (d2.dot(along), d3.dot(along));
+        let (h1, h2, h3) = (d1.dot(d), d2.dot(d), d3.dot(d));
+        let c1 = h1 / x1;
+        // h'' x' - h' x'', the second derivative by x times x'^3
+        let turn = h2 * x1 - h1 * x2;
+        let c2 = turn / (2.0 * x1 * x1 * x1);
+        let c3 = ((h3 * x1 - h1 * x3) * x1 - 3.0 * x2 * turn) / (6.0 * x1 * x1 * x1 * x1 * x1);
+        Ok(Some((c1, c2, c3)))
     };
-    let (Some((e2, e3)), Some((o2, o3))) =
+    let (Some((e1, e2, e3)), Some((o1, o2, o3))) =
         (heights(target, fil_edge)?, heights(target, other_edge)?)
     else {
         return Ok(false);
@@ -401,11 +421,38 @@ fn run_on_leaves_the_part(
         return Ok(false);
     }
     let tol = zone_tol3d(k, target.face(face_of(target, eu_a)?)?.tolerance);
+    // the bend: the part stands across the blend run on from V on
+    if depth_under_edge_continued(o1 - e1, o2 - e2, span) > tol {
+        return Ok(false);
+    }
     let second = (o2 - e2) * span * span;
     if second.abs() > (o3.abs() + e3.abs()) * span * span * span {
         return Ok(second > tol);
     }
     Ok(o3 * span * span * span > tol)
+}
+
+/// How deep the bend at V takes the continuing edge E' under the blended edge E continued,
+/// on the far side of it from the blend ([`run_on_leaves_the_part`]): E' stands
+/// `first x + second x^2` over E continued at the distance `x` past V, to second order
+/// (`first` the bend's slope, `second` the difference of the two edges' second orders), over
+/// `0 < x <= span`.
+///
+/// 0 where E' leaves V on the blend's side or along E continued (`first >= 0`). Else, where
+/// the curvatures bring E' back (`second > 0`), its depth where it turns back, at
+/// `x = -first / (2 second)`: `first^2 / (4 second)`, or its depth at `span` where it turns
+/// back past it. Where they never do (`second <= 0`), the bend's own share at `span`,
+/// `-first span`: the second order's share there is the turn's to judge, as without a bend.
+fn depth_under_edge_continued(first: f64, second: f64, span: f64) -> f64 {
+    if first >= 0.0 {
+        return 0.0;
+    }
+    if second > 0.0 {
+        let x = (-first / (2.0 * second)).min(span);
+        -first * x - second * x * x
+    } else {
+        -first * span
+    }
 }
 
 /// The fork's `SmBlendCorner::BallTouchingAt` (54a4ee7; 41a39ec's
@@ -430,6 +477,26 @@ fn ball_touching_at(
     p: Point3,
 ) -> Result<(bool, bool, f64)> {
     let fs = solvers.solver_of_edgeuse(fil_eu)?;
+    ball_touching_with(k, target, fs, side_eu, other_face, p, None)
+}
+
+/// [`ball_touching_at`] for the solver `fs`: the ball touching F (the solver's face that
+/// the side edge of `side_eu` bounds) at its point `p` and the solver's other face G
+/// (`other_face`), its radius looked for on `(0, cap]`, `cap` the solver's radius where
+/// `None`. Returns `(on_g, within, rho)` as [`ball_touching_at`] does, `rho` being `cap`
+/// where the root lies past it.
+///
+/// # Errors
+/// As [`ball_touching_at`].
+pub(crate) fn ball_touching_with(
+    k: &Kernel,
+    target: &Brep,
+    fs: &crate::blend::fillet_solver::p1::FilletSolver,
+    side_eu: EdgeuseId,
+    other_face: FaceId,
+    p: Point3,
+    cap: Option<f64>,
+) -> Result<(bool, bool, f64)> {
     let side_faces = [face_of(target, side_eu)?, radial_face(target, side_eu)?];
     let mut f_index = 2;
     for ii in 0..2 {
@@ -448,7 +515,7 @@ fn ball_touching_at(
     let offset_f = &fs.surface(f_index)?.ok_or_else(nul)?.surface;
     let f = offset_f.base_surface();
     let g = crate::topology::face::p2::surface(target, other_face)?.ok_or_else(nul)?;
-    let radius = offset_f.offset_distance().abs();
+    let radius = cap.unwrap_or_else(|| offset_f.offset_distance().abs());
     let sign = if offset_f.offset_distance() < 0.0 {
         -1.0
     } else {
@@ -1129,6 +1196,278 @@ fn side_edge_in_cap(
     Ok(Some(side))
 }
 
+/// Newton steps of [`rail_end_on_surfaces`].
+const RAIL_END_STEPS: usize = 32;
+
+/// Not the fork's: the End's rail end on F solved on the faces themselves. The point p of
+/// `f` (F's surface) on the End's plane (through `origin`, square to `normal`) where the
+/// ball touches F: its centre c = p + `f_offset` `N_F(p)` lies `g_offset` from `g` (the
+/// other face's surface) along G's normal, (c - q) . `N_G(q)` = `g_offset` with q c's foot on
+/// G.
+/// Both offsets are signed, as the solver offsets its surfaces (along the base surface's
+/// normal), so the root with the centre on G's other side does not solve this system.
+///
+/// Newton's method on p's (u, v) from the foot p0 of `start` (the rail curve's crossing with
+/// the plane, which approximates p), at most [`RAIL_END_STEPS`] steps, its Jacobian J by
+/// forward differences. p is accepted where
+/// - both residuals are at most `tol` = min(1e-9 (1 + |`f_offset`| + |`g_offset`|) + 64 eps
+///   (|`origin`| + |`start`| + |`f_offset`| + |`g_offset`|), `zone` / 1000): the first term
+///   is the solve's target, independent of where the part lies; the second the rounding of
+///   the residuals' own arithmetic (eps the machine epsilon); the cap keeps `tol` a
+///   thousandth of the zone the point is classified at (`zone`, F's), wherever the part
+///   lies and however large the ball. Where rounding keeps the residuals above the cap the
+///   solve finds nothing;
+/// - the Newton correction from p, J^-1 r mapped onto `f`, is at most `tol` long. To first
+///   order that correction is p's distance from the root, however ill-conditioned J is, so
+///   a small residual alone (a near-singular J) does not accept p;
+/// - p lies at most twice the first correction (plus `tol`) from p0, and at most
+///   |`f_offset`| from `start`: Newton's steps from a start that converges shrink
+///   quadratically, so their sum is close to the first; a root farther away is another
+///   ball's contact, not this rail's.
+///
+/// `None` (the rail end left as it is) where a step leaves `f`'s domain, a centre does not
+/// drop onto `g`, the Jacobian is singular, or the solve settles nowhere acceptable within its
+/// steps.
+///
+/// # Errors
+/// Those of the evaluations and drops; [`SolidError::Cancelled`] when the kernel is
+/// cancelled.
+#[allow(clippy::too_many_arguments)] // the two faces' offsets, the plane and the zone
+pub(crate) fn rail_end_on_surfaces(
+    k: &Kernel,
+    f: &crate::surface::surface::Surface,
+    f_offset: f64,
+    g: &crate::surface::surface::Surface,
+    g_offset: f64,
+    origin: Point3,
+    normal: Vec3,
+    start: Point3,
+    zone: f64,
+) -> Result<Option<Point3>> {
+    let f_domain = f.natural_uv_domain_with_nurb(k)?;
+    let g_domain = g.natural_uv_domain_with_nurb(k)?;
+    let foot = f.drop_point::<NoObject>(k, start, &f_domain, &DropPointOptions::default())?;
+    if !foot.success {
+        return Ok(None);
+    }
+    let offsets = f_offset.abs() + g_offset.abs();
+    let tol = (1e-9 * (1.0 + offsets)
+        + 64.0 * f64::EPSILON * (origin.length() + start.length() + offsets))
+        .min(zone / 1000.0);
+    let in_domain = |uv: crate::math::Point2| {
+        uv.x >= f_domain.min.x
+            && uv.x <= f_domain.max.x
+            && uv.y >= f_domain.min.y
+            && uv.y <= f_domain.max.y
+    };
+    // the plane's and the ball's equations at (u, v), and the point
+    let residual = |uv: crate::math::Point2| -> Result<Option<(f64, f64, Point3)>> {
+        if !in_domain(uv) {
+            return Ok(None);
+        }
+        let p = f.evaluate_point(k, uv)?;
+        let n = f.evaluate_normal(k, uv, Side::Left, Side::Left)?;
+        let centre = p + n * f_offset;
+        let at = g.drop_point::<NoObject>(k, centre, &g_domain, &DropPointOptions::default())?;
+        if !at.success {
+            return Ok(None);
+        }
+        let q = g.evaluate_point(k, at.result_uv)?;
+        let n_g = g.evaluate_normal(k, at.result_uv, Side::Left, Side::Left)?;
+        Ok(Some((
+            (p - origin).dot(normal),
+            (centre - q).dot(n_g) - g_offset,
+            p,
+        )))
+    };
+    let hu = 1e-7 * (f_domain.max.x - f_domain.min.x);
+    let hv = 1e-7 * (f_domain.max.y - f_domain.min.y);
+    let mut uv = foot.result_uv;
+    let p0 = f.evaluate_point(k, uv)?;
+    let mut first = None;
+    for _ in 0..RAIL_END_STEPS {
+        k.check_cancelled(OP)?;
+        let Some((r1, r2, p)) = residual(uv)? else {
+            return Ok(None);
+        };
+        let (Some((u1, u2, _)), Some((v1, v2, _))) = (
+            residual(crate::math::Point2::new(uv.x + hu, uv.y))?,
+            residual(crate::math::Point2::new(uv.x, uv.y + hv))?,
+        ) else {
+            return Ok(None);
+        };
+        let (a, b) = ((u1 - r1) / hu, (v1 - r1) / hv);
+        let (c, d) = ((u2 - r2) / hu, (v2 - r2) / hv);
+        let det = a * d - b * c;
+        // a singular (or NaN) Jacobian has no step
+        if det.abs().partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+            return Ok(None);
+        }
+        let next = crate::math::Point2::new(
+            uv.x - (d * r1 - b * r2) / det,
+            uv.y - (a * r2 - c * r1) / det,
+        );
+        if !in_domain(next) {
+            return Ok(None);
+        }
+        let step = f.evaluate_point(k, next)?.distance(p);
+        let first = *first.get_or_insert(step);
+        if r1.abs() <= tol && r2.abs() <= tol && step <= tol {
+            let near = p.distance(p0) <= 2.0 * first + tol && p.distance(start) <= f_offset.abs();
+            return Ok(near.then_some(p));
+        }
+        uv = next;
+    }
+    Ok(None)
+}
+
+/// Not the fork's: an End's rail end `point` classified on its side face `face` (F), at F's
+/// zone. The rail end is the rail curve's crossing with the End's plane, and the rail is the
+/// trace's Hermite approximation of the contact line: its span is accepted by a check at
+/// sample points, so the rail end carries no bound and can lie off F's surface by more than
+/// F's zone while the ball does touch F there. A rail end off F at F's zone (unknown) is
+/// therefore solved on the faces ([`rail_end_on_surfaces`]: the point of F's surface on the
+/// plane where the ball touches F, offset from F by the solver's distance on the rail's side
+/// and from G, the solver's other side, by its distance there) and that point is classified
+/// at F's zone instead. It lies on F's surface, so its class is F's trim boundary's: on F
+/// where the ball touches F inside it, unknown where it touches F's surface past its tangent
+/// edge (the rail rolled over) or past F's surface. The ball's offsets are the solver's radii
+/// times its orientations (signed, as the solver offsets its surfaces), so only a
+/// constant-radius solver is solved: one whose offsets change along the blend (constant
+/// distance, variable radius) leaves the rail end unknown, as does a solve that finds no
+/// point. Unknown is refused, or awaits the rollover, as before.
+/// A rail end on F at F's zone is classified as before.
+///
+/// # Errors
+/// Those of the classification (a face without surface is refused there); `SM_ERR_NULL_POINTER`
+/// for a corner without cap or rib edge, a solver without the other side's surface or a face
+/// without surface, and those of the corner's lookups (the rail end at neither of its
+/// geometry's rails); an unported or cancelled solve. A failure of the solve's own
+/// evaluations and drops keeps the rail end unknown.
+fn classify_rail_end(
+    k: &Kernel,
+    target: &mut Brep,
+    pseudo: &FilletBrep,
+    corner: &FilletCorner,
+    solvers: &dyn SweptSolvers,
+    face: FaceId,
+    rail_end: VertexId,
+) -> Result<PointClassification<EntityRef>> {
+    let point = pseudo.vertex_point(rail_end)?;
+    let zone = zone_tol3d(k, target.face(face)?.tolerance);
+    let mut on = PointClassification::new(zone);
+    point_3d_classify(
+        k,
+        target,
+        face,
+        point,
+        zone,
+        true,
+        &mut on,
+        Point3dClassifyOptions::default(),
+    )?;
+    if on.point_class() != PointClassType::Unknown {
+        return Ok(on);
+    }
+    // the corner's data the solve reads. A missing piece is a defect of the corner, and its
+    // error propagates as `calc_end_cap_edges`' does; a corner without a constant-radius
+    // solver has nothing to solve with
+    let cap = corner.end_cap.as_ref().ok_or_else(nul)?;
+    let crate::surface::surface::p2::SurfaceKind::Plane(plane) = cap.kind() else {
+        return Ok(on);
+    };
+    let rib = *corner.edges.first().ok_or_else(nul)?;
+    let geom = match eu1::primary_edgeuse(pseudo.brep(), rib)? {
+        Some(eu) => pseudo.fillet_edgeuse(eu)?.fillet_geom(),
+        None => None,
+    };
+    let Some(geom) = geom else {
+        return Ok(on);
+    };
+    let Some(solver) = pseudo.geom(geom)?.fillet_solver() else {
+        return Ok(on);
+    };
+    // the offsets are the solver's radii times its orientations, its fixed data: the offset
+    // surfaces' own distances are working state its solves overwrite. A solver whose
+    // offsets change along the blend (constant distance, variable radius) is not solved
+    let Some(offsets) = solvers.constant_offsets(solver)? else {
+        return Ok(on);
+    };
+    // the rail end's rail is the solver's side on F; the other side is G
+    let side = pseudo.rail_index_of_vertex(geom, Some(rail_end))?;
+    let other = usize::from(side == 0);
+    let f_distance = offsets.get(side).copied().ok_or_else(nul)?.abs();
+    let g_offset = offsets.get(other).copied().ok_or_else(nul)?;
+    let fs = solvers.solver(solver)?;
+    let g = fs.surface(other)?.ok_or_else(nul)?.surface.base_surface();
+    // F is solved on the face's own surface (after a rollover the rail lies on the face
+    // rolled onto, which need not be one of the solver's faces), offset by the solver's
+    // distance on its side, towards the centre that lies the solver's signed offset from G
+    let f = crate::topology::face::p2::surface(target, face)?
+        .ok_or_else(nul)?
+        .clone_for_evaluation()?;
+    // the solve's own evaluations and drops: one that fails proves nothing about the
+    // point, so the rail end keeps its class (unknown, the conservative side)
+    let solved = || -> Result<Option<Point3>> {
+        let f_domain = f.natural_uv_domain_with_nurb(k)?;
+        let g_domain = g.natural_uv_domain_with_nurb(k)?;
+        let foot = f.drop_point::<NoObject>(k, point, &f_domain, &DropPointOptions::default())?;
+        if !foot.success {
+            return Ok(None);
+        }
+        let at = f.evaluate_point(k, foot.result_uv)?;
+        let n = f.evaluate_normal(k, foot.result_uv, Side::Left, Side::Left)?;
+        let mut sign = None;
+        let mut best = BIG_DOUBLE;
+        for s in [1.0, -1.0] {
+            let centre = at + n * (s * f_distance);
+            let on_g =
+                g.drop_point::<NoObject>(k, centre, &g_domain, &DropPointOptions::default())?;
+            if !on_g.success {
+                continue;
+            }
+            let q = g.evaluate_point(k, on_g.result_uv)?;
+            let n_g = g.evaluate_normal(k, on_g.result_uv, Side::Left, Side::Left)?;
+            let miss = ((centre - q).dot(n_g) - g_offset).abs();
+            if miss < best {
+                best = miss;
+                sign = Some(s);
+            }
+        }
+        let Some(sign) = sign else {
+            return Ok(None);
+        };
+        rail_end_on_surfaces(
+            k,
+            &f,
+            sign * f_distance,
+            g,
+            g_offset,
+            plane.is_planar().0,
+            plane.evaluate_normal(),
+            point,
+            zone,
+        )
+    };
+    let at = match solved() {
+        Ok(Some(at)) => at,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Ok(None) | Err(_) => return Ok(on),
+    };
+    let mut on_solved = PointClassification::new(zone);
+    point_3d_classify(
+        k,
+        target,
+        face,
+        at,
+        zone,
+        true,
+        &mut on_solved,
+        Point3dClassifyOptions::default(),
+    )?;
+    Ok(on_solved)
+}
+
 /// The fork's `SmBlendCorner::CalcEndCapEdges` (41a39ec): an End at a smooth vertex's
 /// cap edges on the side faces, each the face's intersection with the cap's plane
 /// between the rail's end and the vertex. A rail ending off its side face (rolling over
@@ -1171,18 +1510,7 @@ fn calc_end_cap_edges(
             } else {
                 start
             };
-        let zone = zone_tol3d(k, target.face(face)?.tolerance);
-        let mut on = PointClassification::new(zone);
-        point_3d_classify(
-            k,
-            target,
-            face,
-            pseudo.vertex_point(rail_end)?,
-            zone,
-            true,
-            &mut on,
-            Point3dClassifyOptions::default(),
-        )?;
+        let on = classify_rail_end(k, target, pseudo, corner, solvers, face, rail_end)?;
         if on.point_class() == PointClassType::Unknown {
             // The rail ends off its side face, past the face's tangent edge at the vertex:
             // it rolls over into the End, which is not built. That edge runs through the
@@ -1453,18 +1781,7 @@ fn end_rolls_over(
             if !pseudo.fillet_vertex(rail_end)?.is_processed() {
                 continue;
             }
-            let zone = zone_tol3d(k, target.face(face)?.tolerance);
-            let mut on = PointClassification::new(zone);
-            point_3d_classify(
-                k,
-                target,
-                face,
-                pseudo.vertex_point(rail_end)?,
-                zone,
-                true,
-                &mut on,
-                Point3dClassifyOptions::default(),
-            )?;
+            let on = classify_rail_end(k, target, pseudo, corner, solvers, face, rail_end)?;
             if on.point_class() != PointClassType::Unknown {
                 continue;
             }
@@ -1492,8 +1809,10 @@ fn end_rolls_over(
 /// runs on there across a seam's vertex into the rest of its own curve, between the same two
 /// faces ([`side_edgeuse_across_seam_vertex`]'s narrow rule, the side edge's in 63c7962). A
 /// seam is the surface's parameterisation, not a feature: the round runs on there or not at
-/// all, and never ends in a step. Until the blend's chain runs on across a seam's vertex, the
-/// End is refused, no radius building it.
+/// all, and never ends in a step. A blend of constant size runs on across it (its edge's
+/// continuation is blended with it, `FilletParametersAccess::parameters_runs_on_across_seams`),
+/// so this End is met only by a variable round, whose law runs along its own edge and gives
+/// no radius past it: refused, no radius building it.
 ///
 /// # Errors
 /// `SM_ERR_NULL_POINTER` without the corner's blended edge use or vertex; those of the seam
@@ -1853,5 +2172,152 @@ pub fn create_end_cap_patch(
         Ok(()) => Ok(true),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(false),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::surface::cone::p1::Cone;
+    use crate::surface::plane::p1::Plane;
+    use crate::surface::surface::Surface;
+
+    /// A real rollover just past the face: the ball touches F's surface 1e-5 rad (3e-5)
+    /// past its tangent edge T, more than F's zone (1e-5) past it, and the rail end the trace
+    /// gives sits on T's near side, 2e-5 off F's surface (within the blend's approximation
+    /// tolerance, 4e-5, which a foot taken to that tolerance would accept as on F). Solved on
+    /// the faces, the rail end is the closed-form contact, past T, so it classifies off F.
+    ///
+    /// F: the cylinder of radius 3 about the z axis, trimmed at T, the line at 60 degrees;
+    /// the ball (radius 1) touches it from inside, its centre at radius 2, and touches G, the
+    /// plane x = a, from the side x < a: 2 cos(theta) = a - 1. The End's plane is z = 0.
+    #[test]
+    fn a_rail_end_rolled_just_past_its_face_is_solved_past_it() {
+        let k = Kernel::default();
+        let f = Surface::from(Cone::new_cylinder_bounded(
+            Point3::new(0.0, 0.0, -10.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            3.0,
+            0.0,
+            360.0,
+            20.0,
+            false,
+            false,
+            false,
+        ));
+        let t = 60.0_f64.to_radians();
+        let theta = t + 1e-5;
+        let a = 2.0 * theta.cos() + 1.0;
+        let g = Surface::from(Plane::from_normal(
+            Point3::new(a, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+        ));
+        let want = Point3::new(3.0 * theta.cos(), 3.0 * theta.sin(), 0.0);
+        // the centre lies inside F: against F's normal where it points out
+        let domain = f.natural_uv_domain_with_nurb(&k).unwrap();
+        let foot = f
+            .drop_point::<NoObject>(&k, want, &domain, &DropPointOptions::default())
+            .unwrap();
+        let n = f
+            .evaluate_normal(&k, foot.result_uv, Side::Left, Side::Left)
+            .unwrap();
+        let f_offset = if n.dot(want) > 0.0 { -1.0 } else { 1.0 };
+        // the trace's rail end: on T's near side, 2e-5 off F's surface
+        let near = t - 0.5e-5;
+        let start = Point3::new(3.0 * near.cos(), 3.0 * near.sin(), 0.0) * (1.0 + 2e-5 / 3.0);
+        assert!(start.distance(want) < 4e-5 * 2.0);
+        // a near miss: the rail end's foot on F lies inside T by more than F's zone, so a
+        // foot taken at the rail's tolerance would call it on F
+        let zone = 1e-5;
+        let inside = 3.0 * (t - start.y.atan2(start.x));
+        assert!(inside > zone, "{inside}");
+        // the centre lies on G's negative side (x < a): G's signed offset is -1
+        let solve = |g_offset: f64| {
+            rail_end_on_surfaces(
+                &k,
+                &f,
+                f_offset,
+                &g,
+                g_offset,
+                Point3::new(0.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+                start,
+                zone,
+            )
+            .unwrap()
+        };
+        let got = solve(-1.0).unwrap();
+        assert!(got.distance(want) <= 1e-9, "{got:?} against {want:?}");
+        // past T, by more than F's zone, along F
+        let past = 3.0 * (got.y.atan2(got.x) - t);
+        assert!(past > 2e-5, "{past}");
+        // the offset is signed: a ball on G's other side (x > a) would need its centre at
+        // radius 2 with x = a + 1 > 2, which no point of F gives, so nothing is solved
+        assert_eq!(solve(1.0), None);
+    }
+
+    /// A circle of radius R meeting, at the angle `b` off tangent, the arc of radius `rho`
+    /// continued, on the far side of it from the blend, and curving back across it (their
+    /// centres on opposite sides): over the arc's tangent it stands `-tan(b) x` to first order
+    /// and `x^2 / (2 R cos^3 b)` to second, the arc `-x^2 / (2 rho)`.
+    fn circle_over_arc(big: f64, rho: f64, b: f64) -> (f64, f64) {
+        (
+            -b.tan(),
+            1.0 / (2.0 * big * b.cos().powi(3)) + 1.0 / (2.0 * rho),
+        )
+    }
+
+    #[test]
+    fn the_bend_takes_the_continuing_edge_under_the_edge_continued_until_it_turns_back() {
+        // it turns back at x = 0.1 / (2 * 0.02) = 2.5, 0.1 * 2.5 - 0.02 * 2.5^2 deep
+        assert!((depth_under_edge_continued(-0.1, 0.02, 40.0) - 0.125).abs() < 1e-15);
+        // past the span's end: its depth there
+        let at_end = 0.1 * 2.0 - 0.02 * 2.0 * 2.0;
+        assert!((depth_under_edge_continued(-0.1, 0.02, 2.0) - at_end).abs() < 1e-15);
+        // never: the bend's own share at the span's end, whatever the second order
+        assert!((depth_under_edge_continued(-0.1, 0.0, 40.0) - 4.0).abs() < 1e-15);
+        assert!((depth_under_edge_continued(-0.1, -0.02, 40.0) - 4.0).abs() < 1e-15);
+        // circles of R 55 and R 49 meeting 6 degrees off tangent: first^2 / (4 second), which
+        // is, to second order, how thick the two discs' overlap is: the radii less the
+        // distance between the centres
+        let b = 6.0_f64.to_radians();
+        let (first, second) = circle_over_arc(55.0, 49.0, b);
+        let depth = depth_under_edge_continued(first, second, 33.9);
+        assert!((depth - first * first / (4.0 * second)).abs() < 1e-15);
+        let apart = (55.0_f64 * 55.0 + 49.0 * 49.0 + 2.0 * 55.0 * 49.0 * b.cos()).sqrt();
+        assert!((depth - (55.0 + 49.0 - apart)).abs() < 2e-4, "{depth}");
+    }
+
+    #[test]
+    fn a_bend_towards_the_blend_or_none_takes_the_continuing_edge_nowhere_under() {
+        for second in [-0.02, 0.0, 0.02] {
+            assert_eq!(depth_under_edge_continued(0.0, second, 40.0), 0.0);
+            assert_eq!(depth_under_edge_continued(0.1, second, 40.0), 0.0);
+        }
+        // an undefined slope decides nothing: no depth exceeds a tolerance
+        let undefined = depth_under_edge_continued(f64::NAN, 0.02, 40.0);
+        assert!(undefined.is_nan() || undefined == 0.0);
+    }
+
+    /// The bend whose depth is the tolerance, on the same circles: `tan(b) = 2 sqrt(second
+    /// tol)` with `second` at that bend (two steps of the fixed point; it barely moves).
+    /// Just inside it the depth is under the tolerance, just past it over.
+    #[test]
+    fn the_depth_crosses_the_tolerance_at_the_bend_that_reaches_it() {
+        let tol = 1e-5;
+        let mut b = 0.0_f64;
+        for _ in 0..4 {
+            let (_, second) = circle_over_arc(55.0, 49.0, b);
+            b = (2.0 * (second * tol).sqrt()).atan();
+        }
+        // about 0.05 degrees
+        assert!((b.to_degrees() - 0.0503).abs() < 1e-3, "{}", b.to_degrees());
+        let depth = |b: f64| {
+            let (first, second) = circle_over_arc(55.0, 49.0, b);
+            depth_under_edge_continued(first, second, 33.9)
+        };
+        assert!(depth(b * (1.0 - 1e-6)) < tol);
+        assert!(depth(b * (1.0 + 1e-6)) > tol);
     }
 }

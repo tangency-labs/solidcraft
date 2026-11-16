@@ -6,6 +6,7 @@ use crate::EmbossFace;
 use crate::apply_point;
 use crate::sheet;
 use solidcore_record::{Loop2, Seg2};
+use solidcraft_develop::prelude::*;
 use solidcraft_geom::{Aabb3, Ring};
 
 pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
@@ -75,7 +76,11 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             Ok(())
         }
         FeatureKind::Rib { .. } => {
-            let tools = rib_tools(vals, st, f, None)?;
+            // The rib is built against the bodies where its sketch is drawn: a body of another,
+            // moved component is met where it is shown (#17655), whether it takes part or only
+            // stops the wall.
+            let shown = targets_as_shown(st, f, &["*".to_string()])?;
+            let tools = rib_tools(vals, &shown, f, None)?;
             apply_op(doc, st, f, tools, Operation::Join, &[])
         }
         FeatureKind::ReplaceFace { faces, target, body } => {
@@ -349,58 +354,81 @@ fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: O
     let pts = chain_points(ss, ids)?;
     let (Some(a), Some(b)) = (pts.first().copied(), pts.last().copied()) else { return Err(DocError::Invalid("empty rib curve".into())) };
     let chord = (b - a).normalized().ok_or_else(|| DocError::Invalid("a closed or zero-length rib curve".into()))?;
-    let mid = pts.get(pts.len() / 2).copied().unwrap_or(a);
-    // Toward the material: the side of the curve where the bodies are (unless flipped).
-    let mut n = chord.perp();
-    let reach = st.bodies.iter().map(|b| b.mesh().bounds()).fold(0.0f64, |acc, bb| acc.max((bb.max - bb.min).len()));
-    let probe = |side: Vec2| {
-        let mut hits = 0;
-        for k in 1..=20 {
-            let q = ss.plane.to_world(mid + side * (reach * k as f64 / 20.0));
-            if st.bodies.iter().any(|b| b.mesh().contains(q)) {
-                hits += 1;
+    let meshes: Vec<_> = st.bodies.iter().map(|b| b.mesh()).collect();
+    let reach = meshes.iter().map(|m| m.bounds()).fold(0.0f64, |acc, bb| acc.max((bb.max - bb.min).len()));
+    let tol = 1e-7 * (1.0 + reach);
+    let inside = |q: Vec2| {
+        let w = ss.plane.to_world(q);
+        meshes.iter().any(|m| m.contains(w))
+    };
+    // Where the body begins and ends again from `q` along `d` (a unit direction in the plane),
+    // up to `limit`: the ray's crossings of the bodies' surfaces, with the first beyond `limit`,
+    // each span between two tested at its middle. Fixed steps passed over thin walls or landed
+    // on their faces, so whether a rib found the floor of a long tray hung on its length (#16874).
+    let entry = |q: Vec2, d: Vec2, limit: f64| -> Option<(f64, f64)> {
+        let (o, dir) = (ss.plane.to_world(q), ss.plane.dir_to_world(d));
+        let mut cuts = Vec::new();
+        for m in &meshes {
+            let mut from = 0.0;
+            while cuts.len() < 4096 {
+                let Some((s, _)) = m.raycast(o + dir * from, dir) else { break };
+                from += s;
+                cuts.push(from);
+                if !(from <= limit) {
+                    break;
+                }
+                from += tol;
             }
         }
-        hits
+        ray_entry(cuts, tol, |s| inside(q + d * s)).filter(|(h, _)| *h <= limit)
     };
-    if probe(n * -1.0) > probe(n) {
+    let len: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
+    let samples = ((len / (t.min(len) * 0.25).max(len / 400.0)).ceil() as usize).clamp(2, 400);
+    let along: Vec<Vec2> = (0..=samples).map(|k| point_on_polyline(&pts, len * k as f64 / samples as f64)).collect();
+    // Toward the material: the side of the curve whose points reach a body across the plane
+    // (the nearer body when both sides do), unless flipped.
+    let mut n = chord.perp();
+    let probe = |side: Vec2| {
+        let (mut reached, mut nearest) = (0usize, f64::INFINITY);
+        for q in along.iter().step_by((along.len() / 24).max(1)) {
+            if let Some((h, _)) = entry(*q, side, reach * 2.0 + 1.0) {
+                reached += 1;
+                nearest = nearest.min(h);
+            }
+        }
+        (reached, nearest)
+    };
+    let (ahead, behind) = (probe(n), probe(n * -1.0));
+    if behind.0 > ahead.0 || (behind.0 == ahead.0 && behind.1 < ahead.1) {
         n = n * -1.0;
     }
     if flip {
         n = n * -1.0;
     }
-    // From each point of the curves, walk across the plane until the body begins (or `depth`);
-    // walls that reach the body go a little into it so they merge with it.
-    let inside = |q: Vec2| {
-        let w = ss.plane.to_world(q);
-        st.bodies.iter().any(|b| b.mesh().contains(w))
-    };
-    let len: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
-    let samples = ((len / (t.min(len) * 0.25).max(len / 400.0)).ceil() as usize).clamp(2, 400);
-    let along: Vec<Vec2> = (0..=samples).map(|k| point_on_polyline(&pts, len * k as f64 / samples as f64)).collect();
+    // From each point of the curves, across the plane until the body begins (or `depth`);
+    // walls that reach the body go a little into it so they merge with it, never more than
+    // half through the material there, so a rib on a floor thinner than the overlap does not
+    // come out below it (#16874).
     let limit = depth.unwrap_or(reach * 2.0 + 1.0);
     let step = (limit.min(reach * 2.0 + 1.0) / 400.0).max(1e-3);
     let overlap = (len / samples as f64 * 2.0).max(step * 2.0).min(t);
+    // An end of the curves often sits exactly on a wall (a rib from wall to wall), where the
+    // body's inside is ambiguous; search from just inside the curve there, so the end does not
+    // read the wall it touches as the body ahead and the end face stays square.
+    let nudge = len / samples as f64 * 0.01;
     let mut far = Vec::with_capacity(along.len());
-    for q in &along {
-        let mut hit = None;
-        let mut k = 1;
-        while (k as f64) * step <= limit + step && k < 100_000 {
-            if inside(*q + n * (k as f64 * step)) {
-                // Refine between the last outside and the first inside sample.
-                let (mut lo, mut hi) = ((k - 1) as f64 * step, k as f64 * step);
-                for _ in 0..30 {
-                    let m = 0.5 * (lo + hi);
-                    if inside(*q + n * m) { hi = m } else { lo = m }
-                }
-                hit = Some(hi);
-                break;
-            }
-            k += 1;
-        }
+    for (i, q) in along.iter().enumerate() {
+        let from = if i == 0 {
+            point_on_polyline(&pts, nudge)
+        } else if i == samples {
+            point_on_polyline(&pts, len - nudge)
+        } else {
+            *q
+        };
+        let hit = entry(from, n, limit);
         let h = match (hit, depth) {
-            (Some(h), Some(d)) if h >= d => d,
-            (Some(h), _) => h + overlap,
+            (Some((h, _)), Some(d)) if h >= d => d,
+            (Some((h, out)), _) => h + overlap.min(0.5 * (out - h)),
             (None, Some(d)) => d,
             (None, None) => return Err(DocError::Invalid("the rib curves do not face a body (give a depth)".into())),
         };
@@ -428,21 +456,35 @@ fn rib_tool_normal(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, d
     let samples = ((len / (t * 0.5).max(len / 400.0)).ceil() as usize).clamp(2, 400);
     let along: Vec<Vec3> = (0..=samples).map(|k| ss.plane.to_world(point_on_polyline(&pts, len * k as f64 / samples as f64))).collect();
     let normal = ss.plane.normal();
-    let reach = st.bodies.iter().map(|b| b.mesh().bounds()).fold(0.0f64, |acc, bb| acc.max((bb.max - bb.min).len()));
-    let inside = |q: Vec3| st.bodies.iter().any(|b| b.mesh().contains(q));
-    // Where the body begins from each point of the curves, along `sign` × the sketch normal.
+    let meshes: Vec<_> = st.bodies.iter().map(|b| b.mesh()).collect();
+    let reach = meshes.iter().map(|m| m.bounds()).fold(0.0f64, |acc, bb| acc.max((bb.max - bb.min).len()));
+    let tol = 1e-7 * (1.0 + reach);
+    let inside = |q: Vec3| meshes.iter().any(|m| m.contains(q));
+    // Where the body begins from each point of the curves, along `sign` × the sketch normal:
+    // the ray's crossings of the bodies' surfaces, each span between two tested at its middle,
+    // so no thin wall is stepped over (#16874).
     let limit = reach * 2.0 + 1.0;
     let step = (limit / 400.0).max(1e-3);
-    let hits = |sign: f64| -> Vec<f64> {
+    let hits = |sign: f64| -> Vec<(f64, f64)> {
+        let dir = normal * sign;
         let mut out = Vec::new();
         for q in &along {
-            let Some(k) = (1..=400).find(|k| inside(*q + normal * (sign * *k as f64 * step))) else { continue };
-            let (mut lo, mut hi) = ((k - 1) as f64 * step, k as f64 * step);
-            for _ in 0..30 {
-                let m = 0.5 * (lo + hi);
-                if inside(*q + normal * (sign * m)) { hi = m } else { lo = m }
+            let mut cuts = Vec::new();
+            for m in &meshes {
+                let mut from = 0.0;
+                while cuts.len() < 4096 {
+                    let Some((s, _)) = m.raycast(*q + dir * from, dir) else { break };
+                    from += s;
+                    cuts.push(from);
+                    if !(from <= limit) {
+                        break;
+                    }
+                    from += tol;
+                }
             }
-            out.push(hi);
+            if let Some(h) = ray_entry(cuts, tol, |s| inside(*q + dir * s)).filter(|(h, _)| *h <= limit) {
+                out.push(h);
+            }
         }
         out
     };
@@ -457,11 +499,12 @@ fn rib_tool_normal(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, d
     let h = match depth {
         Some(d) => d,
         None => {
-            let far = reached.iter().copied().fold(f64::NAN, f64::max);
-            if !far.is_finite() {
+            // The farthest entry, and into its material at most half way through it, so the
+            // wall does not come out beyond a plate thinner than the overlap (#16874).
+            let Some((far, out)) = reached.iter().copied().max_by(|a, b| a.0.total_cmp(&b.0)) else {
                 return Err(DocError::Invalid("the rib curves do not face a body along the sketch normal (give a depth)".into()));
-            }
-            far + (t * 0.5).max(step)
+            };
+            far + (t * 0.5).max(step).min(0.5 * (out - far))
         }
     };
     // The curves widened to `t`: each point offset by half the thickness along the miter of its
@@ -492,6 +535,25 @@ fn rib_tool_normal(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, d
     let (a, b) = if sign > 0.0 { (0.0, h) } else { (-h, 0.0) };
     let tools = kernel::extrude(&ss.plane, &[region], a, b)?;
     tools.into_iter().next().ok_or_else(|| DocError::Invalid("the rib made no solid".into()))
+}
+
+/// Where the material begins and ends along a ray, from where the ray crosses the bodies'
+/// surfaces (`cuts`, distances from its start, in any order) and whether the point at a
+/// distance lies inside: the start and end of the first span between crossings whose middle is
+/// inside, starting at 0 when the ray starts in the material. Crossings within `tol` of each
+/// other are one; a span is only tested at its middle, clear of the faces at its ends.
+fn ray_entry(mut cuts: Vec<f64>, tol: f64, inside: impl Fn(f64) -> bool) -> Option<(f64, f64)> {
+    cuts.retain(|c| c.is_finite() && *c > 0.0);
+    cuts.sort_by(f64::total_cmp);
+    cuts.dedup_by(|c, prev| *c - *prev <= tol);
+    let mut start = 0.0;
+    for c in cuts {
+        if c - start > tol && inside(0.5 * (start + c)) {
+            return Some((start, c));
+        }
+        start = c;
+    }
+    None
 }
 
 /// The point `d` along a polyline.
@@ -1741,13 +1803,17 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[(Trace
         let tol = 1e-7;
         let mut out = sk.clone();
         for &&(base, axis, radius, height, reach) in &reaching {
-            let mut found: Option<(usize, bool, Vec3, Vec3, (f64, f64))> = None;
+            let mut found: Option<(usize, bool, Vec3, Vec3, (f64, f64), (f64, f64))> = None;
             for (p, frame, own) in &panels {
                 let inv = frame.inverse();
                 let (b, a) = (inv.point(base), inv.vector(axis));
                 let Some(a) = a.normalized() else { return Ok(Vec::new()) };
                 let across = a.z.abs() >= 1.0 - 1e-9;
                 let mut span = (height.min(0.0), height.max(0.0));
+                // How far a bore along the panel runs on past each end of `span`: a hair where the
+                // panel's material ends there, so its end is no face of the panel's rim; none where
+                // the drill ends inside the material (a blind hole's floor), which is as deep as drilled.
+                let mut past = (0.0, 0.0);
                 let meets = if across {
                     let (z0, z1) = (b.z.min(b.z + a.z * height), b.z.max(b.z + a.z * height));
                     let circle = Region2 { outer: Loop2::circle(Vec2::new(b.x, b.y), radius), holes: Vec::new() };
@@ -1761,9 +1827,12 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[(Trace
                     // the base, beside a flange standing on it, runs along the flange's plane.
                     let (b2, a2) = (Vec2::new(b.x, b.y), Vec2::new(a.x, a.y));
                     let clear = b.z - radius > t + tol || b.z + radius < -tol;
-                    let inside = crate::sheet_surface_convert::extent_across(own, (b2, a2)).map(|(s0, s1)| (s0.max(span.0), s1.min(span.1)));
+                    let material = crate::sheet_surface_convert::extent_across(own, (b2, a2));
+                    let inside = material.map(|(s0, s1)| (s0.max(span.0), s1.min(span.1)));
                     let through = !clear && inside.is_some_and(|(u0, u1)| u0 < u1);
-                    if let Some(inside) = inside.filter(|_| through) {
+                    if let (Some(inside), Some((s0, s1))) = (inside.filter(|_| through), material) {
+                        let hair = t * 1e-2;
+                        past = (if inside.0 <= s0 + tol { hair } else { 0.0 }, if inside.1 >= s1 - tol { hair } else { 0.0 });
                         span = inside;
                     }
                     if through && !(b.z - radius > tol && b.z + radius < t - tol) {
@@ -1777,25 +1846,24 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[(Trace
                     if found.is_some() {
                         return Ok(Vec::new());
                     }
-                    found = Some((*p, across, b, a, span));
+                    found = Some((*p, across, b, a, span, past));
                 }
             }
-            let Some((p, across, b, a, (u0, u1))) = found else { return Ok(Vec::new()) };
+            let Some((p, across, b, a, (u0, u1), (p0, p1))) = found else { return Ok(Vec::new()) };
             if boxes.iter().any(|(k, bx)| *k != Some(p) && !boxes_apart(&reach, &Some(*bx))) {
                 return Ok(Vec::new());
             }
             // What the hole takes from its panel, in the panel's chart: its circle across it, or
-            // the band its bore runs along inside it (as far as the bore runs, a hair past either
-            // end). It goes the general way where that meets a pocket on the panel or a cut
-            // through the sheet, read exactly; clear of them, it is cut here.
+            // the band its bore runs along inside it (as far as the bore runs, a hair past an end
+            // where the material ends). It goes the general way where that meets a pocket on the
+            // panel or a cut through the sheet, read exactly; clear of them, it is cut here.
             let footprint = if across {
                 Loop2::circle(Vec2::new(b.x, b.y), radius)
             } else {
-                let past = t * 1e-2;
                 let (o, d) = (Vec2::new(b.x, b.y), Vec2::new(a.x, a.y));
                 let Some(d) = d.normalized() else { return Ok(Vec::new()) };
                 let side = Vec2::new(-d.y, d.x) * radius;
-                let (s, e) = (o + d * (u0 - past), o + d * (u1 + past));
+                let (s, e) = (o + d * (u0 - p0), o + d * (u1 + p1));
                 Loop2::polygon(&[s - side, e - side, e + side, s + side])
             };
             if out.recesses.iter().any(|r| r.panel == p && !crate::sheet_surface::loop_clear_of(&footprint, &r.region)) {
@@ -1822,9 +1890,8 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[(Trace
                 }
                 panel.region.holes.push(circle.outer.ccw().reversed());
             } else {
-                // Through the panel's material only, a hair past it at either end.
-                let past = t * 1e-2;
-                out.bores.push(crate::sheet::SheetBore { panel: Some(p), base: b + a * (u0 - past), axis: a, radius, height: u1 - u0 + 2.0 * past });
+                // Through the panel's material only, a hair past it where it runs out of it.
+                out.bores.push(crate::sheet::SheetBore { panel: Some(p), base: b + a * (u0 - p0), axis: a, radius, height: u1 - u0 + p0 + p1 });
             }
         }
         plans.push((i, out));
@@ -2191,6 +2258,33 @@ pub(super) fn beyond_cylinder_reach(mb: &ModelBody, p: Vec3) -> bool {
 pub(super) fn boxes_apart(a: &Option<Aabb3>, b: &Option<Aabb3>) -> bool {
     let (Some(a), Some(b)) = (a, b) else { return false };
     a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y || a.max.z < b.min.z || b.max.z < a.min.z
+}
+
+/// Whether `tools` may cover `body`: the body's exact box lies inside the box around the tools'
+/// ([`exact_box`]), grown by twice the body's own tolerance, as it does for a body inside its
+/// tools. A cut that leaves nothing of a body they cannot cover is a failed boolean, not an empty
+/// result (#15700). Unknown is covered, and so is a mesh body or a body cut by a mesh, as such a
+/// cut always was.
+pub(super) fn tools_may_cover(body: &Body, tools: &[Traced]) -> bool {
+    if body.is_mesh() || tools.iter().any(|t| t.body.is_mesh()) {
+        return true;
+    }
+    let mut hull = Aabb3::EMPTY;
+    for t in tools {
+        let Some(b) = exact_box(&t.body) else { return true };
+        hull = hull.union(&b);
+    }
+    let hull = hull.inflated(2.0 * body.record().tolerance);
+    match body.exact_bounds() {
+        Ok(b) if !b.is_empty() && b.min.is_finite() && b.max.is_finite() => hull.contains(b.min) && hull.contains(b.max),
+        _ => true,
+    }
+}
+
+/// The refusal of a cut that left nothing of `body` although its tools cannot cover it
+/// ([`tools_may_cover`]): the body is kept instead of vanishing without a word (#15700).
+pub(super) fn failed_cut(body: &str) -> DocError {
+    DocError::Invalid(format!("the cut failed: it would remove all of `{body}`, which the tools do not cover"))
 }
 
 /// The face that [`FaceSlice::loops`], [`FaceSlice::outline`] and [`FaceSlice::recesses`] measure:
