@@ -768,11 +768,6 @@ pub fn legacy_dxf_baseline(layers: &[DxfLayer], entities: &[DxfEntity]) -> Resul
     write_dxf_file(&file)
 }
 
-/// The existing borrowed drawing API, retained for upstream sketch export.
-pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<String> {
-    write_dxf_drawing_units(layers, entities, 4)
-}
-
 /// The existing drawing API with explicit DXF units, using the owned writer's same backend.
 pub fn write_dxf_drawing_units(layers: &[DxfLayer], entities: &[DxfEntity], insunits: i32) -> Result<String> {
     let mut extents = None;
@@ -1651,7 +1646,7 @@ mod tests {
             vertices: vec![DxfVertex { at: Vec2::new(-1.0, 0.0), bulge: 1.0 }, DxfVertex { at: Vec2::new(1.0, 0.0), bulge: 1.0 }],
             closed: true,
         };
-        let output = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape: closed }]).unwrap();
+        let output = write_dxf_drawing_units(&[], &[DxfEntity { layer: "0".into(), shape: closed }], 4).unwrap();
         let records = entities(&output);
         assert_eq!((field(&records[0].1, 90), field(&records[0].1, 70)), ("2", "129"));
         assert_eq!(values(&records[0], 70), [129.0]);
@@ -1682,7 +1677,7 @@ mod tests {
             vertices: vec![DxfVertex { at: Vec2::ZERO, bulge: 0.0 }, DxfVertex { at: Vec2::X, bulge: 0.0 }, DxfVertex { at: Vec2::ZERO, bulge: 0.0 }],
             closed: true,
         };
-        assert!(write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape: invalid }]).is_err());
+        assert!(write_dxf_drawing_units(&[], &[DxfEntity { layer: "0".into(), shape: invalid }], 4).is_err());
     }
 
     #[test]
@@ -1725,7 +1720,7 @@ mod tests {
             vertices: vec![DxfVertex { at: Vec2::new(1e-14, -0.0), bulge: 0.0 }, DxfVertex { at: Vec2::new(2e-14, 1e-14), bulge: 0.0 }],
             closed: false,
         };
-        let text = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape }]).unwrap();
+        let text = write_dxf_drawing_units(&[], &[DxfEntity { layer: "0".into(), shape }], 4).unwrap();
         let e = entities(&text);
         assert_eq!(e.len(), 1);
         assert_eq!(e[0].0, "LWPOLYLINE");
@@ -1755,7 +1750,7 @@ mod tests {
         ];
         for (vertices, closed) in invalid {
             let shape = DxfShape::BulgedPolyline { vertices, closed };
-            let error = write_dxf_drawing(&[], &[DxfEntity { layer: "CUT".into(), shape }]).unwrap_err().to_string();
+            let error = write_dxf_drawing_units(&[], &[DxfEntity { layer: "CUT".into(), shape }], 4).unwrap_err().to_string();
             assert!(error.contains("entity 1") && error.contains("CUT"), "{error}");
         }
     }
@@ -1815,7 +1810,7 @@ mod tests {
             file.push(file.default_layer(), DxfShape::Point(point), None).unwrap();
             let error = write_dxf_file(&file).unwrap_err().to_string();
             assert!(error.contains("entity 1") && error.contains("layer"));
-            assert!(write_dxf_drawing(&[], &[DxfEntity { layer: "DATUM".into(), shape: DxfShape::Point(point) }]).is_err());
+            assert!(write_dxf_drawing_units(&[], &[DxfEntity { layer: "DATUM".into(), shape: DxfShape::Point(point) }], 4).is_err());
             assert_eq!(file.entities().len(), 1);
         }
     }
@@ -1829,7 +1824,7 @@ mod tests {
         }
         let legacy: Vec<_> = shapes.into_iter().map(|shape| DxfEntity { layer: "0".into(), shape }).collect();
         let owned_output = write_dxf_file(&file).unwrap();
-        assert_eq!(owned_output, write_dxf_drawing(&[], &legacy).unwrap());
+        assert_eq!(owned_output, write_dxf_drawing_units(&[], &legacy, 4).unwrap());
         assert_eq!(entities(&owned_output).iter().map(|record| record.0.as_str()).collect::<Vec<_>>(), ["POINT", "LINE"]);
     }
 
@@ -1912,7 +1907,7 @@ mod tests {
     fn explicit_centre_baseline_matches_legacy_bytes_when_given_the_same_layout_bounds() {
         let at = Vec2::new(5.0, 6.0);
         let legacy = DxfShape::Text { at, height: 2.5, angle_deg: 0.0, text: "AB".into() };
-        let legacy_output = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape: legacy }]).unwrap();
+        let legacy_output = write_dxf_drawing_units(&[], &[DxfEntity { layer: "0".into(), shape: legacy }], 4).unwrap();
         let mut file = DxfFile::new().unwrap();
         file.push(
             file.default_layer(),
@@ -1949,7 +1944,7 @@ mod tests {
         file.push(file.default_layer(), DxfShape::Point(Vec2::X), None).unwrap();
         file.push(file.default_layer(), shape.clone(), None).unwrap();
         assert!(write_dxf_file(&file).is_err());
-        assert!(write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape }]).is_err());
+        assert!(write_dxf_drawing_units(&[], &[DxfEntity { layer: "0".into(), shape }], 4).is_err());
         for bounds in
             [DxfGeometryBounds { min: Vec2::new(f64::NAN, 0.0), max: Vec2::X }, DxfGeometryBounds { min: Vec2::new(1.0, 1.0), max: Vec2::ZERO }]
         {
@@ -2148,7 +2143,7 @@ mod tests {
             DxfEntity { layer: "OUTLINE".into(), shape: DxfShape::Circle { c: Vec2::new(5.0, 5.0), r: 4.0 } },
             DxfEntity { layer: "CUT".into(), shape: DxfShape::Line(Vec2::ZERO, Vec2::X) },
         ];
-        let dxf = write_dxf_drawing(&[DxfLayer::new("OUTLINE", 7), DxfLayer::new("CUT", 1)], &ents).unwrap();
+        let dxf = write_dxf_drawing_units(&[DxfLayer::new("OUTLINE", 7), DxfLayer::new("CUT", 1)], &ents, 4).unwrap();
         let p = pairs(&dxf);
         let after = |var: &str| &p[p.iter().position(|(c, v)| (*c, v.as_str()) == (9, var)).unwrap() + 1..];
         assert_eq!(after("$ACADVER")[0], (1, "AC1015".to_string()));
@@ -2185,7 +2180,7 @@ mod tests {
         assert!(handles.len() > ents.len() && handles.iter().all(|h| *h < u64::from_str_radix(&p[seed_at].1, 16).unwrap()));
         assert!(dxf.ends_with("  0\nEOF\n"));
         // No entities: a valid, empty drawing.
-        assert_eq!(entities(&write_dxf_drawing(&[], &[]).unwrap()).len(), 0);
+        assert_eq!(entities(&write_dxf_drawing_units(&[], &[], 4).unwrap()).len(), 0);
     }
 
     #[test]
@@ -2201,7 +2196,7 @@ mod tests {
             seg_shape(&Seg2::Cubic { p0: cubic[0], p1: cubic[1], p2: cubic[2], p3: cubic[3] }),
         ];
         let ents: Vec<DxfEntity> = shapes.into_iter().map(|shape| DxfEntity { layer: "0".into(), shape }).collect();
-        let dxf = write_dxf_drawing(&[], &ents).unwrap();
+        let dxf = write_dxf_drawing_units(&[], &ents, 4).unwrap();
         let back = read_dxf(&dxf).unwrap();
         assert_eq!(back.len(), 6, "{back:?}");
         assert!(matches!(&back[0], Geom2::Line(a, b) if a.dist(Vec2::ZERO) < 1e-9 && b.dist(Vec2::new(10.0, 0.0)) < 1e-9));
@@ -2228,7 +2223,7 @@ mod tests {
         for (i, s) in q.iter_mut().enumerate() {
             *s = Vec2::new(i as f64, (i % 3) as f64);
         }
-        let nine = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape: seg_shape(&Seg2::Bezier { n: 9, p: q }) }]).unwrap();
+        let nine = write_dxf_drawing_units(&[], &[DxfEntity { layer: "0".into(), shape: seg_shape(&Seg2::Bezier { n: 9, p: q }) }], 4).unwrap();
         let back_nine = read_dxf(&nine).unwrap();
         assert!(
             matches!(&back_nine[..], [Geom2::Spline { pts, control: true, degree: 9 }] if pts.len() == 10 && pts.iter().zip(&q).all(|(a, b)| a.dist(*b) < 1e-9)),
@@ -2264,7 +2259,7 @@ mod tests {
     #[test]
     fn a_rational_spline_lists_knots_then_weights_then_control_points() {
         let hyperbola = seg_shape(&Seg2::Conic { a: Vec2::ZERO, apex: Vec2::new(1.0, 2.0), b: Vec2::new(3.0, 0.0), w: 2.0 });
-        let dxf = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape: hyperbola }]).unwrap();
+        let dxf = write_dxf_drawing_units(&[], &[DxfEntity { layer: "0".into(), shape: hyperbola }], 4).unwrap();
         let e = &entities(&dxf)[0];
         let file = crate::read_dxf_file(&dxf).unwrap();
         let DxfShape::Spline { knots, weights: Some(weights), .. } = file.entities()[0].geometry() else { panic!("{file:?}") };
@@ -2281,7 +2276,7 @@ mod tests {
 
     #[test]
     fn a_dashed_layer_names_its_linetype_and_the_table_defines_it() {
-        let dxf = write_dxf_drawing(&[DxfLayer::new("BEND", 1).dashed(), DxfLayer::new("CUT", 4)], &[]).unwrap();
+        let dxf = write_dxf_drawing_units(&[DxfLayer::new("BEND", 1).dashed(), DxfLayer::new("CUT", 4)], &[], 4).unwrap();
         let p = pairs(&dxf);
         // The linetypes of every drawing, then DASHED: a dash of 12.7 mm and a gap of 6.35 mm, 19.05 mm in all.
         let types = table_records(&p, "LTYPE");
@@ -2304,7 +2299,7 @@ mod tests {
     fn hidden_polylines_continue_short_dashes_across_chords_and_round_trip() {
         let points = vec![Vec2::ZERO, Vec2::new(1., 0.), Vec2::new(2., 1.), Vec2::new(3., 1.)];
         let layer = DxfLayer { linetype: DxfLinetype::Hidden, ..DxfLayer::new("HIDDEN", 8) };
-        let text = write_dxf_drawing(&[layer], &[DxfEntity { layer: "HIDDEN".into(), shape: DxfShape::Polyline { points } }]).unwrap();
+        let text = write_dxf_drawing_units(&[layer], &[DxfEntity { layer: "HIDDEN".into(), shape: DxfShape::Polyline { points } }], 4).unwrap();
         let records = entities(&text);
         assert_eq!(records[0].0, "LWPOLYLINE");
         assert_eq!(field(&records[0].1, 70), "128");
@@ -2319,7 +2314,7 @@ mod tests {
     fn text_is_centred_on_its_point_and_the_reader_gets_it_back() {
         let at = Vec2::new(30.0, 12.0);
         let note = DxfShape::Text { at, height: 3.0, angle_deg: 90.0, text: "AB%%d\nC\u{b0}".into() };
-        let dxf = write_dxf_drawing(&[DxfLayer::new("NOTES", 8)], &[DxfEntity { layer: "NOTES".into(), shape: note }]).unwrap();
+        let dxf = write_dxf_drawing_units(&[DxfLayer::new("NOTES", 8)], &[DxfEntity { layer: "NOTES".into(), shape: note }], 4).unwrap();
         let file = entities(&dxf);
         let [text] = file.as_slice() else { panic!("{file:?}") };
         assert_eq!(text.0, "TEXT");
@@ -2353,7 +2348,7 @@ mod tests {
             let shape = DxfShape::Text { at: Vec2::ZERO, height: 3.0, angle_deg: 0.0, text: format!("中{c}") };
             let entities =
                 [DxfEntity { layer: "OUTLINE".into(), shape: DxfShape::Line(Vec2::ZERO, Vec2::X) }, DxfEntity { layer: "NOTES".into(), shape }];
-            let error = write_dxf_drawing(&[DxfLayer::new("NOTES", 8)], &entities).unwrap_err();
+            let error = write_dxf_drawing_units(&[DxfLayer::new("NOTES", 8)], &entities, 4).unwrap_err();
             assert!(matches!(error, IoError::Invalid(_)), "{error}");
             let message = error.to_string();
             assert!(message.contains("DXF TEXT entity 2 on layer \"NOTES\""), "{message}");
@@ -2367,7 +2362,7 @@ mod tests {
         // Even a character beyond the existing output limit must not vanish unnoticed.
         for prefix in [249, 250, 10_000] {
             let shape = DxfShape::Text { at: Vec2::ZERO, height: 3.0, angle_deg: 0.0, text: format!("{}𠀋", "中".repeat(prefix)) };
-            let error = write_dxf_drawing(&[], &[DxfEntity { layer: "NOTES".into(), shape }]).unwrap_err().to_string();
+            let error = write_dxf_drawing_units(&[], &[DxfEntity { layer: "NOTES".into(), shape }], 4).unwrap_err().to_string();
             assert!(error.contains(&format!("U+2000B) at position {}", prefix + 1)), "{error}");
             assert!(error.len() < 300, "the error must not repeat unbounded input text");
         }
@@ -2380,7 +2375,7 @@ mod tests {
             ("\u{ffff}".repeat(250), "\\U+FFFF".repeat(250)),
         ] {
             let shape = DxfShape::Text { at: Vec2::ZERO, height: 3.0, angle_deg: 0.0, text };
-            let dxf = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape }]).unwrap();
+            let dxf = write_dxf_drawing_units(&[], &[DxfEntity { layer: "0".into(), shape }], 4).unwrap();
             let file = entities(&dxf);
             let [entity] = file.as_slice() else { panic!("{file:?}") };
             assert_eq!(field(&entity.1, 1), expected);
@@ -2397,7 +2392,7 @@ mod tests {
             DxfEntity { layer: "VISIBLE".into(), shape: DxfShape::Line(Vec2::new(0.0, 0.0), Vec2::new(30.0, 0.0)) },
             DxfEntity { layer: "VISIBLE".into(), shape: DxfShape::Circle { c: Vec2::new(15.0, 5.0), r: 5.0 } },
         ];
-        let dxf = write_dxf_drawing(&[DxfLayer::new("VISIBLE", 7)], &ents).unwrap();
+        let dxf = write_dxf_drawing_units(&[DxfLayer::new("VISIBLE", 7)], &ents, 4).unwrap();
         let p = pairs(&dxf);
         let sections: Vec<&str> = p.windows(2).filter(|w| w[0] == (0, "SECTION".into())).map(|w| w[1].1.as_str()).collect();
         assert_eq!(sections, ["HEADER", "CLASSES", "TABLES", "BLOCKS", "ENTITIES", "OBJECTS"]);
@@ -2464,7 +2459,7 @@ mod tests {
         // ACAD_LAYOUT, which holds a Model and a Layout1 LAYOUT; each space's block record names
         // its layout under 340 and the layout names the block record back under 330.
         let ents = [DxfEntity { layer: "OUTLINE".into(), shape: DxfShape::Circle { c: Vec2::new(5.0, 5.0), r: 4.0 } }];
-        let dxf = write_dxf_drawing(&[DxfLayer::new("OUTLINE", 7)], &ents).unwrap();
+        let dxf = write_dxf_drawing_units(&[DxfLayer::new("OUTLINE", 7)], &ents, 4).unwrap();
         let p = pairs(&dxf);
         let objects = section_objects(&p, "OBJECTS");
         let by_handle = |h: &str| objects.iter().find(|(_, o)| field(o, 5) == h).unwrap_or_else(|| panic!("no object {h}"));
@@ -2531,7 +2526,7 @@ mod tests {
         // Five letters of 3 mm, turned to read upwards: 0.8 × 3 × 5 = 12 mm long around y = 12, and
         // 3 mm to the left of the baseline at x = 30.
         let shape = DxfShape::Text { at: Vec2::new(30.0, 12.0), height: 3.0, angle_deg: 90.0, text: "ABCDE".into() };
-        let dxf = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape }]).unwrap();
+        let dxf = write_dxf_drawing_units(&[], &[DxfEntity { layer: "0".into(), shape }], 4).unwrap();
         let p = pairs(&dxf);
         let after = |var: &str| &p[p.iter().position(|(c, v)| (*c, v.as_str()) == (9, var)).unwrap() + 1..];
         assert_eq!(&after("$EXTMIN")[..2], &[(10, "27.0".to_string()), (20, "6.0".to_string())]);
@@ -2598,7 +2593,7 @@ mod tests {
 
     #[test]
     fn owned_file_and_legacy_drawing_have_identical_bytes_without_weights() {
-        assert_eq!(write_dxf_file(&DxfFile::new().unwrap()).unwrap(), write_dxf_drawing(&[], &[]).unwrap());
+        assert_eq!(write_dxf_file(&DxfFile::new().unwrap()).unwrap(), write_dxf_drawing_units(&[], &[], 4).unwrap());
         let shapes = vec![
             DxfShape::Line(Vec2::new(-0.0, -1.25), Vec2::new(1e-15, 8.0)),
             DxfShape::Polyline { points: vec![Vec2::ZERO, Vec2::X, Vec2::new(4.0, -2.0)] },
@@ -2617,7 +2612,7 @@ mod tests {
             for shape in &shapes {
                 file.push(cut, shape.clone(), None).unwrap();
             }
-            assert_eq!(write_dxf_file(&file).unwrap(), write_dxf_drawing(&layers, &legacy).unwrap());
+            assert_eq!(write_dxf_file(&file).unwrap(), write_dxf_drawing_units(&layers, &legacy, 4).unwrap());
         }
     }
 
@@ -2738,7 +2733,7 @@ mod tests {
             let shape = DxfShape::Text { at: Vec2::ZERO, height: 1.0, angle_deg: 0.0, text };
             let mut file = DxfFile::new().unwrap();
             file.push(file.default_layer(), shape.clone(), None).unwrap();
-            assert_eq!(write_dxf_file(&file).unwrap(), write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape }]).unwrap());
+            assert_eq!(write_dxf_file(&file).unwrap(), write_dxf_drawing_units(&[], &[DxfEntity { layer: "0".into(), shape }], 4).unwrap());
         }
         for text in ["A".repeat(251), "中".repeat(251), "😀".into(), format!("{}😀", "A".repeat(250))] {
             let mut file = DxfFile::new().unwrap();
@@ -2746,7 +2741,7 @@ mod tests {
             assert!(write_dxf_file(&file).unwrap_err().to_string().contains("250 BMP characters"));
         }
         let shape = DxfShape::Text { at: Vec2::ZERO, height: 1.0, angle_deg: 0.0, text: "A".repeat(251) };
-        let legacy = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape }]).unwrap();
+        let legacy = write_dxf_drawing_units(&[], &[DxfEntity { layer: "0".into(), shape }], 4).unwrap();
         assert_eq!(field(&entities(&legacy)[0].1, 1), "A".repeat(250));
     }
 
@@ -2846,7 +2841,7 @@ mod tests {
             file.push(file.default_layer(), shape.clone(), None).unwrap();
             assert!(write_dxf_file(&file).unwrap_err().to_string().contains("twelve decimals"));
             // This stricter admission is exclusive to the owned API.
-            assert!(write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape }]).is_ok());
+            assert!(write_dxf_drawing_units(&[], &[DxfEntity { layer: "0".into(), shape }], 4).is_ok());
         }
     }
 
@@ -2876,7 +2871,8 @@ mod tests {
     fn legacy_layer_deduplication_and_permissive_numbers_stay_unchanged() {
         let layers = [DxfLayer::new("0", 1), DxfLayer::new("中", 3), DxfLayer::new("中", 5), DxfLayer::new("cut", 1), DxfLayer::new("CUT", 2)];
         let output =
-            write_dxf_drawing(&layers, &[DxfEntity { layer: " \t".into(), shape: DxfShape::Line(Vec2::new(f64::NAN, 0.0), Vec2::X) }]).unwrap();
+            write_dxf_drawing_units(&layers, &[DxfEntity { layer: " \t".into(), shape: DxfShape::Line(Vec2::new(f64::NAN, 0.0), Vec2::X) }], 4)
+                .unwrap();
         let p = pairs(&output);
         let layers = table_records(&p, "LAYER");
         assert_eq!(layers.iter().map(|r| field(r, 2)).collect::<Vec<_>>(), ["0", "中", "cut", "CUT"]);
@@ -2989,7 +2985,7 @@ mod tests {
         let explicit_output = write_dxf_file_with_text_bounds(&explicit, |_| panic!("LINE/POINT must not request TEXT metrics")).unwrap();
         let legacy: Vec<_> = shapes.into_iter().map(|shape| DxfEntity { layer: "0".into(), shape }).collect();
         assert_eq!(explicit_output, ordinary_output);
-        assert_eq!(explicit_output, write_dxf_drawing(&[], &legacy).unwrap());
+        assert_eq!(explicit_output, write_dxf_drawing_units(&[], &legacy, 4).unwrap());
         let groups = pairs(&explicit_output);
         let layers = table_records(&groups, "LAYER");
         assert_eq!(layers.len(), 1);
@@ -3131,7 +3127,8 @@ mod tests {
         let mut file = DxfFile::for_current_view_arc_export(4, 0, 0).unwrap();
         let visible = file.declare_layer("VISIBLE", 7, DxfLinetype::Continuous, None).unwrap();
         file.push(visible, arc.clone(), None).unwrap();
-        let expected = write_dxf_drawing(&[DxfLayer::new("VISIBLE", 7)], &[DxfEntity { layer: "VISIBLE".into(), shape: arc.clone() }]).unwrap();
+        let expected =
+            write_dxf_drawing_units(&[DxfLayer::new("VISIBLE", 7)], &[DxfEntity { layer: "VISIBLE".into(), shape: arc.clone() }], 4).unwrap();
         assert_eq!(write_dxf_file(&file).unwrap().as_bytes(), expected.as_bytes());
         let mut lines = DxfFile::for_current_view_export(4, 0, 0).unwrap();
         let visible = lines.declare_layer("VISIBLE", 7, DxfLinetype::Continuous, None).unwrap();
@@ -3146,7 +3143,7 @@ mod tests {
         let mut file = DxfFile::new().unwrap();
         let cut = file.declare_layer("CUT", 4, DxfLinetype::Continuous, None).unwrap();
         file.push(cut, shape.clone(), None).unwrap();
-        let expected = write_dxf_drawing(&[DxfLayer::new("CUT", 4)], &[DxfEntity { layer: "CUT".into(), shape }]).unwrap();
+        let expected = write_dxf_drawing_units(&[DxfLayer::new("CUT", 4)], &[DxfEntity { layer: "CUT".into(), shape }], 4).unwrap();
         assert_eq!(write_dxf_file(&file).unwrap(), expected);
         let copied = file.translated_scaled(Vec2::new(3.0, 4.0), 2.0).unwrap();
         assert_eq!(

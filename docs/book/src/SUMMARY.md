@@ -18,6 +18,7 @@
 - [Keeping designs on a network share](guide/network-share.md)
 - [Keyboard shortcuts](guide/shortcuts.md)
 - [Updates and privacy](guide/updates.md)
+- [Managing SolidCraft in an organization](guide/managed-deployment.md)
 - [Code signing policy](code-signing-policy.md)
 - [Troubleshooting: SolidCraft won't start](guide/troubleshooting.md)
 - [Driving SolidCraft with an AI agent (MCP)](guide/mcp.md)

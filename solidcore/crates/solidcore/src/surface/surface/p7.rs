@@ -64,15 +64,20 @@
 //!   `SM_ASSERT`s, `EvaluateNormal`'s static list of bad surfaces) is not ported, nor
 //!   is `FindDegenParamForDirection`'s angle bookkeeping (`dBestRad`,
 //!   `dNearBestRad`: computed in release builds but never read).
+//! - **Good drop result (WR-56).** `sm_GoodDropResult` takes a result as the foot only
+//!   when its gap's components along the unit tangents sum under the local solve's
+//!   tight tolerance (upstream: under 1e-4), and refuses an interior result more than
+//!   that tight tolerance off along either unit tangent (upstream: 1e-3) (the fork's
+//!   tangency-labs/smlib@eaa998a); its last test takes only a result at the guess
+//!   itself, where upstream compares the guess and result distances with swapped names
+//!   (taking a result farther than its guess, refusing one nearer): a result the local
+//!   solve moved to, nearer or not, goes to the global solve (#17773).
 //! - **Flat corners (WR-384).** `GetFlatCorners` tests each corner bit while filling
 //!   the corner points; upstream masks its return value with `&=` there, so it returns
 //!   at most the first corner's flag and point.
 //! - **Upstream quirks kept:** `SmSSGlobalSolver::BranchMayContainAnswers` returns
 //!   `SM_SUCCESS` (that is, `FALSE`) for a node outside its face and `NER`'s status
-//!   (non-zero: `TRUE`) for a missing patch; `sm_GoodDropResult` compares the guess and
-//!   result distances with swapped names (the opt-in
-//!   `Kernel::fixes.good_drop_result_distances_in_order` compares them the right way round
-//!   and takes a foot only at the local solve's tight tolerance, WR-56); `FindDegenParamForDirection` compares a sample fraction with the parameter
+//!   (non-zero: `TRUE`) for a missing patch; `FindDegenParamForDirection` compares a sample fraction with the parameter
 //!   `dS` (the opt-in `Kernel::fixes.degen_param_tiebreak_uses_actual_param` compares the
 //!   mapped singular parameter `s_ivl.evaluate(...)` instead, WR-57).
 //! - **Projection curve class.** `CreateParallelProjectionCurves` takes a [`Curve`] for
@@ -2783,31 +2788,56 @@ pub fn check_seam_drop<S: SurfaceEvaluate + ?Sized>(
     Ok(out)
 }
 
-/// Whether a local point drop from `guess_uv` (solution value `sol_value` at
-/// `sol_uv`) converged well enough to skip the global solve (`sm_GoodDropResult`).
+/// What [`drop_result_verdict`] makes of a local point drop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DropVerdict {
+    /// A foot the local solve converged to at its guess (or right on the point): the
+    /// drop's answer, without the global solve.
+    Foot,
+    /// A foot the local solve converged to away from its guess, passing every test but
+    /// the last (not upstream, WR-56, #17773): the global solve decides, and the caller
+    /// may keep it as a candidate.
+    MovedFoot,
+    /// Not a converged foot, or a suspicious one: the global solve answers.
+    Refused,
+}
+
+/// How a local point drop from `guess_uv` (solution value `sol_value` at `sol_uv`)
+/// converged (`sm_GoodDropResult`, which returns whether it is [`DropVerdict::Foot`]).
 ///
-/// Its last test, meant to refuse a result farther from the point than the guess,
-/// measures the two distances the wrong way round, as upstream; with
-/// `Kernel::fixes.good_drop_result_distances_in_order` (WR-56, the fork's
-/// tangency-labs/smlib@0b4de8c / eaa998a) it measures them the right way, and takes a
-/// result as the foot only when the gap's components along the unit tangents are
-/// within the local solve's tight tolerance `EFF_ZERO * (1 + max|P|)` (upstream: their
-/// sum under 1e-4, an interior result each under 1e-3).
+/// Not upstream (WR-56; the fork's tangency-labs/smlib@0b4de8c / eaa998a, fork PR #70):
+/// - its last test takes only a result at the guess itself (upstream compares the
+///   result's and the guess's distances with their names swapped, so it took a result
+///   farther than its guess and refused one nearer; in either order a result the local
+///   solve moved to can be a local minimum that is not the nearest point, #17773): any
+///   other result passing every test is [`DropVerdict::MovedFoot`], for the global
+///   solve to decide;
+/// - a result is taken as the foot only when the gap's components along the unit
+///   tangents sum under the local solve's tight tolerance `EFF_ZERO * (1 + max|P|)`
+///   (upstream: under 1e-4), and an interior result with either component over it is
+///   refused (upstream: over 1e-3), so a result the local solve did not converge to
+///   goes to the global solve. Next to a pole a converged result can fail this test
+///   (the component along the unit short tangent divides the solve's residual by that
+///   tangent's length); it then goes to the global solve too, which answers the drop
+///   as it does without a guess;
+/// - not upstream or the fork: a result at the guess itself is taken without measuring
+///   the guess again (upstream's `EvaluatePoint` can round one ulp away from the result's
+///   evaluation, which then measured the result farther than itself).
 ///
 /// # Errors
 ///
 /// Only [`SolidError::Unported`] (upstream ignores the evaluation statuses).
-pub fn good_drop_result<S: SurfaceEvaluate + ?Sized>(
+pub fn drop_result_verdict<S: SurfaceEvaluate + ?Sized>(
     k: &Kernel,
     surface: &S,
     domain: &Extent2d,
     pt_to_drop: Point3,
     guess_uv: Point2,
     sol: &SolutionEnd,
-) -> Result<bool> {
+) -> Result<DropVerdict> {
     // Check whether it's right on.
     if sol.solution_value < EFF_ZERO {
-        return Ok(true);
+        return Ok(DropVerdict::Foot);
     }
 
     let result_uv = Point2::new(sol.param(0)?, sol.param(1)?);
@@ -2816,10 +2846,10 @@ pub fn good_drop_result<S: SurfaceEvaluate + ?Sized>(
     let max_step = 0.50;
     let uv_step = result_uv - guess_uv;
     if uv_step.x.abs() > max_step * domain.x_length() {
-        return Ok(false);
+        return Ok(DropVerdict::Refused);
     }
     if uv_step.y.abs() > max_step * domain.y_length() {
-        return Ok(false);
+        return Ok(DropVerdict::Refused);
     }
 
     // Evaluate the error functions: how far from the surface normal.
@@ -2827,7 +2857,7 @@ pub fn good_drop_result<S: SurfaceEvaluate + ?Sized>(
     // tangency-labs/smlib 21dcf69; the fork keeps the dropped `Unitize` statuses)
     let mut d = (Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF);
     if !eval_1st_keep(k, surface, result_uv, Side::Left, Side::Left, &mut d)? {
-        return Ok(false);
+        return Ok(DropVerdict::Refused);
     }
     let (srf_point, su, sv) = d;
     let su = su.unitize_or_z();
@@ -2835,68 +2865,68 @@ pub fn good_drop_result<S: SurfaceEvaluate + ?Sized>(
     let gap = pt_to_drop - srf_point;
     let fu = gap.dot(su);
     let fv = gap.dot(sv);
-    // Upstream takes any foot 1e-4 off along the surface (an interior one 1e-3 off in
-    // each direction). With the opt-in (tangency-labs/smlib@eaa998a, with the distance
-    // swap below), a foot is one the local solve converged to by its own tight
-    // tolerance, `LocalPointSolve_1`'s; a stalled solve goes to the global solve.
-    let (foot_tol, interior_tol) = if k.fixes.good_drop_result_distances_in_order {
-        let tight_tol = EFF_ZERO * (1.0 + pt_to_drop.max_dimension());
-        (tight_tol, tight_tol)
-    } else {
-        (0.0001, 0.001)
-    };
-    if fu.abs() + fv.abs() < foot_tol {
-        return Ok(true);
+    // A foot is one the local solve converged to by its own tight tolerance,
+    // `LocalPointSolve_1`'s (WR-56; upstream: |Fu| + |Fv| < 1e-4).
+    let tight_tol = EFF_ZERO * (1.0 + pt_to_drop.max_dimension());
+    if fu.abs() + fv.abs() < tight_tol {
+        return Ok(DropVerdict::Foot);
     }
 
     // Check u-param first.
     if result_uv.x < domain.min().x + EFF_ZERO {
         if fu > EFF_ZERO {
-            return Ok(false);
+            return Ok(DropVerdict::Refused);
         }
     } else if result_uv.x > domain.max().x - EFF_ZERO {
         if fu < -EFF_ZERO {
-            return Ok(false);
+            return Ok(DropVerdict::Refused);
         }
-    } else if fu.abs() > interior_tol {
-        return Ok(false); // interior, bad fcn value.
+    } else if fu.abs() > tight_tol {
+        return Ok(DropVerdict::Refused); // interior, bad fcn value.
     }
 
     // Now check v-param.
     if result_uv.y < domain.min().y + EFF_ZERO {
         if fv > EFF_ZERO {
-            return Ok(false);
+            return Ok(DropVerdict::Refused);
         }
     } else if result_uv.y > domain.max().y - EFF_ZERO {
         if fv < -EFF_ZERO {
-            return Ok(false);
+            return Ok(DropVerdict::Refused);
         }
-    } else if fv.abs() > interior_tol {
-        return Ok(false); // interior, bad fcn value.
+    } else if fv.abs() > tight_tol {
+        return Ok(DropVerdict::Refused); // interior, bad fcn value.
     }
 
-    // One more: if the solution 3d point is farther than the guess (upstream's names
-    // are swapped).
-    let Some(guess_3d) = ignored(surface.evaluate_point(k, guess_uv))? else {
-        return Ok(false);
-    };
-    let (dsq_guess, dsq_result) = if k.fixes.good_drop_result_distances_in_order {
-        // Not upstream (WR-56; tangency-labs/smlib@0b4de8c): each distance to its own point
-        (
-            pt_to_drop.distance_squared(guess_3d),
-            pt_to_drop.distance_squared(srf_point),
-        )
-    } else {
-        (
-            pt_to_drop.distance_squared(srf_point),
-            pt_to_drop.distance_squared(guess_3d),
-        )
-    };
-    if dsq_result > dsq_guess {
-        return Ok(false);
+    // One more: upstream refuses a result whose 3d point is farther than the guess's,
+    // with the two distances' names swapped, so it took a result farther than its
+    // guess and sent one nearer to the global solve. Not upstream (WR-56, #17773):
+    // neither order shows a result the local solve moved to is the nearest point (a
+    // nearer one can be a local minimum the global solve beats), so only a result at
+    // the guess itself is taken here; any other goes to the global solve.
+    if guess_uv != result_uv {
+        return Ok(DropVerdict::MovedFoot);
     }
 
-    Ok(true)
+    Ok(DropVerdict::Foot)
+}
+
+/// Whether a local point drop from `guess_uv` converged well enough to skip the
+/// global solve (`sm_GoodDropResult`): [`drop_result_verdict`] is
+/// [`DropVerdict::Foot`].
+///
+/// # Errors
+///
+/// As [`drop_result_verdict`].
+pub fn good_drop_result<S: SurfaceEvaluate + ?Sized>(
+    k: &Kernel,
+    surface: &S,
+    domain: &Extent2d,
+    pt_to_drop: Point3,
+    guess_uv: Point2,
+    sol: &SolutionEnd,
+) -> Result<bool> {
+    Ok(drop_result_verdict(k, surface, domain, pt_to_drop, guess_uv, sol)? == DropVerdict::Foot)
 }
 
 // ---- the global solvers --------------------------------------------------------------------
@@ -3372,11 +3402,11 @@ mod tests {
         );
     }
 
-    /// WR-56 (#1852; the fork's tangency-labs/smlib@0b4de8c): the flat patch
+    /// WR-56 (#1852; the fork's tangency-labs/smlib@0b4de8c / eaa998a): the flat patch
     /// (10 u, 10 v, 0) and the point (5, 5, 1), whose foot is (0.5, 0.5). A local result
-    /// 5e-4 along the patch from the foot passes every test before the last (the gap
-    /// along the patch is between 1e-4 and 1e-3); the last should take it when its guess
-    /// is farther from the point and refuse it when its guess is the foot itself.
+    /// 5e-4 along the patch from the foot (between upstream's 1e-4 foot test and its
+    /// 1e-3 interior refusal, so upstream decided it by the swapped distance test) is
+    /// not a converged foot, so it is refused whatever its guess.
     #[test]
     fn wr_56_good_drop_result_compares_the_right_distances() {
         use crate::nurbs::math::{CPoint, NOW};
@@ -3405,18 +3435,14 @@ mod tests {
         // guess (0.5, 0.5)
         let nearer_guess = Point2::new(0.3, 0.5);
         let foot_guess = Point2::new(0.5, 0.5);
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let good = |k: &Kernel, guess: Point2| {
             good_drop_result(k, &s, &domain, point, guess, &sol).unwrap()
         };
-        // upstream: the nearer result is refused, the farther one taken
-        assert!(!good(&k, nearer_guess));
-        assert!(good(&k, foot_guess));
-        // With the opt-in, a result 5e-4 off along the surface is not one the local
-        // solve converged to (tight tolerance 6e-12 here), whatever the guess
-        // (tangency-labs/smlib@eaa998a); the distance test is covered on the domain
-        // boundary by `issue_1852_good_drop_compares_the_actual_guess_distance`.
-        k.fixes.good_drop_result_distances_in_order = true;
+        // A result 5e-4 off along the surface is not one the local solve converged to
+        // (tight tolerance 6e-12 here), whatever the guess (tangency-labs/smlib@eaa998a);
+        // the distance test is covered on the domain boundary by
+        // `issue_1852_good_drop_compares_the_actual_guess_distance`.
         assert!(!good(&k, nearer_guess));
         assert!(!good(&k, foot_guess));
     }
@@ -3432,7 +3458,7 @@ mod tests {
     fn wr_56_good_drop_result_takes_only_a_tightly_converged_foot() {
         let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let s = Surface::from(Plane::from_normal(Point3::ZERO, Vec3::Z));
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let result_uv = Point2::new(0.5, 0.5);
         let (result_point, su, _) =
             evaluate_1st_derivatives(&k, &s, result_uv, Side::Left, Side::Left).unwrap();
@@ -3442,19 +3468,13 @@ mod tests {
         *sol.param_mut(0).unwrap() = result_uv.x;
         *sol.param_mut(1).unwrap() = result_uv.y;
         let good = |k: &Kernel, d: f64| {
-            good_drop_result(k, &s, &domain, result_point + d * su, result_uv, &sol).unwrap()
+            let p = result_point + d * su;
+            good_drop_result(k, &s, &domain, p, result_uv, &sol).unwrap()
         };
         let tight = EFF_ZERO * (1.0 + (result_point + 1e-6 * su).max_dimension());
         assert!(tight < 1e-11);
-        // Upstream: every foot within 1e-4 is taken, and an interior one up to 1e-3
-        // that passes the distance test.
-        assert!(good(&k, 1e-6));
-        assert!(good(&k, 5e-5));
-        assert!(good(&k, 5e-4));
-        assert!(good(&k, 1e-13));
-        assert!(!good(&k, 2e-3));
-        // Opt-in: only the foot within the tight tolerance.
-        k.fixes.good_drop_result_distances_in_order = true;
+        // Only the foot within the tight tolerance (upstream took every foot within
+        // 1e-4, and an interior one up to 1e-3 that passed the distance test).
         assert!(!good(&k, 1e-6));
         assert!(!good(&k, 5e-5));
         assert!(!good(&k, 5e-4));
@@ -3582,20 +3602,19 @@ mod tests {
 
     /// tangency-labs/solidcore#1852 (WR-56): `sm_GoodDropResult` stores the result
     /// distance in `dDsqGuess` and the guess distance in `dDsqResult`, so its last
-    /// test rejects a drop that improved on the guess. The opt-in
-    /// `Kernel::fixes.good_drop_result_distances_in_order` compares the actual
-    /// guess and result distances. Every case reaches the final comparison: the
+    /// test rejects a drop that improved on the guess and takes one that got worse;
+    /// the port takes only a result at its guess (a moved one, nearer or not, goes to
+    /// the global solve, #17773). Every case reaches the final comparison: the
     /// result lies on the domain's `u = 0` side and the point on the plane `1/2048`
     /// beyond it along `-S_u`, so `Fu` is `-1/2048` (allowed on that side) and `Fv`
-    /// is zero, past the residual early return in both modes. On that side the
-    /// opt-in's tight foot test (tangency-labs/smlib@eaa998a), which refuses an
-    /// interior result that far off, leaves the comparison reachable.
+    /// is zero. The foot test (tangency-labs/smlib@eaa998a) does not take it, and on
+    /// that side no interior refusal applies, so the comparison decides.
     #[test]
     fn issue_1852_good_drop_compares_the_actual_guess_distance() {
         let h = 1.0 / 2048.0;
         let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let s = Surface::from(Plane::from_normal(Point3::ZERO, Vec3::Z));
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let result_uv = Point2::new(0.0, 0.5);
         let (result_point, su, _) =
             evaluate_1st_derivatives(&k, &s, result_uv, Side::Left, Side::Left).unwrap();
@@ -3605,23 +3624,405 @@ mod tests {
         *sol.param_mut(0).unwrap() = result_uv.x;
         *sol.param_mut(1).unwrap() = result_uv.y;
 
-        // The result is closer than the guess: upstream rejects it (its swapped
-        // names make the guess look farther); the fix accepts it.
+        // The result is closer than the guess: upstream rejected it (its swapped
+        // names make the guess look farther), and so does the port: a nearer result
+        // is not shown to be the nearest point (#17773).
         let nearer_guess = result_uv + Point2::new(0.1, 0.0);
-        // The guess is closer than the result: upstream accepts it; the fix
-        // rejects it, as the final test intends.
+        // The guess is closer than the result: upstream accepted it; the port sends
+        // it to the global solve, as every moved result.
         let farther_guess = result_uv - Point2::new(h, 0.0);
-        // Equidistant: both accept.
+        // Equidistant but moved: upstream accepted it; the port sends it to the
+        // global solve too.
         let equal_guess = result_uv - Point2::new(2.0 * h, 0.0);
 
-        assert!(!good_drop_result(&k, &s, &domain, pt_to_drop, nearer_guess, &sol).unwrap());
-        assert!(good_drop_result(&k, &s, &domain, pt_to_drop, farther_guess, &sol).unwrap());
-        assert!(good_drop_result(&k, &s, &domain, pt_to_drop, equal_guess, &sol).unwrap());
+        let good =
+            |guess: Point2| good_drop_result(&k, &s, &domain, pt_to_drop, guess, &sol).unwrap();
+        assert!(!good(nearer_guess));
+        assert!(!good(farther_guess));
+        assert!(!good(equal_guess));
+        // A result at its guess is taken; a moved one passing every other test is a
+        // candidate for the global solve to decide.
+        assert!(good(result_uv));
+        let verdict =
+            |guess: Point2| drop_result_verdict(&k, &s, &domain, pt_to_drop, guess, &sol).unwrap();
+        for g in [nearer_guess, farther_guess, equal_guess] {
+            assert_eq!(verdict(g), DropVerdict::MovedFoot);
+        }
+    }
 
-        k.fixes.good_drop_result_distances_in_order = true;
-        assert!(good_drop_result(&k, &s, &domain, pt_to_drop, nearer_guess, &sol).unwrap());
-        assert!(!good_drop_result(&k, &s, &domain, pt_to_drop, farther_guess, &sol).unwrap());
-        assert!(good_drop_result(&k, &s, &domain, pt_to_drop, equal_guess, &sol).unwrap());
+    /// The surface of the goldens case `surface.surface_p5` gen0494: a quadratic x
+    /// linear B-spline whose whole `u = u_min` row of poles is one point (an apex),
+    /// and its NURB.
+    fn wr56_apex_patch() -> (Surface, crate::nurbs::srf_basic::Surface) {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+        const NO_WEIGHT: f64 = -f64::MAX;
+        let rows: [[[f64; 3]; 4]; 5] = [
+            [[-1.0, 1.5, -0.3528299405334874]; 4],
+            [
+                [1.1391515183914103, 0.1895073079961052, 0.004900509158002478],
+                [1.0708103395113426, 0.8720049041597548, -0.6986994559112379],
+                [1.0299464879505382, 1.8721875018478356, 0.5513240971150135],
+                [0.9886903687364608, 2.8721080300372805, -0.48747652542845554],
+            ],
+            [
+                [
+                    2.1070309924156483,
+                    0.11252880589006203,
+                    -0.09370566140577241,
+                ],
+                [1.8849670020261053, 0.8723426468667175, -0.4988989261051539],
+                [2.011556087011981, 1.9943285182684183, 0.025765388172125484],
+                [1.907948877077642, 3.0838646904906293, -0.3489740696354065],
+            ],
+            [
+                [2.9979566621921303, 0.04456506475475272, -0.7170664294387074],
+                [2.96929757059988, 0.9358628089642543, -0.36760236227136067],
+                [3.097639384127755, 1.8705066502896766, -0.4996455533550941],
+                [3.019229993279216, 3.1669045079545723, 0.3281058049061327],
+            ],
+            [
+                [
+                    3.965244874290516,
+                    -0.14668692832331526,
+                    -0.06349669667494616,
+                ],
+                [3.907750128272427, 0.9123093020535409, -0.8132176028786268],
+                [3.879469837315649, 1.8031101430879306, -0.25026091166160747],
+                [3.869116187812298, 2.8362574458656624, 0.3290943172231638],
+            ],
+        ];
+        let net = rows
+            .iter()
+            .map(|r| {
+                r.iter()
+                    .map(|&[x, y, z]| CPoint::new(x, y, z, NO_WEIGHT))
+                    .collect()
+            })
+            .collect();
+        let u0 = 0.5130221717994283;
+        let u1 = 3.34766559576863;
+        let u = vec![
+            u0,
+            u0,
+            u0,
+            2.1430395924882157,
+            2.860429223096711,
+            u1,
+            u1,
+            u1,
+        ];
+        let v = vec![0.0, 0.0, 0.15893773335490313, 0.4332409252690698, 1.0, 1.0];
+        let nl = NlSurface::new(net, 2, 1, u, v).unwrap();
+        let mut s = BSplineSurface::from_nurb(nl.clone(), false);
+        s.set_b_spline_surface_form(
+            crate::nurbs::b_spline_surface::BSplineSurfaceForm::from_code(11).unwrap(),
+        );
+        (Surface::from(s), nl)
+    }
+
+    /// WR-56, the goldens case `surface.surface_p7` gen1133: a local result at the guess
+    /// itself (on the low `u` and `v` sides of the domain, so only the distance test
+    /// decides) is not farther than its guess. `EvaluatePoint` and
+    /// `Evaluate1stDerivatives` give points one ulp apart there (distances 1.4e-17
+    /// apart), so measuring the guess with the one and the result with the other
+    /// refused it (on the fixed path; upstream's swapped names took it by the same
+    /// ulp); a result at its guess is measured with its own point.
+    #[test]
+    fn wr56_a_result_at_its_guess_is_not_farther_than_it() {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+        let rows: [[[f64; 3]; 3]; 4] = [
+            [
+                [
+                    -0.07296530912965596,
+                    -0.13382827179692552,
+                    0.3125667436025059,
+                ],
+                [0.01658945595744149, 1.1585060264215579, 0.2233463644045514],
+                [0.17084750753940459, 1.8042104340655583, 0.2204320166305955],
+            ],
+            [
+                [1.124479345643036, 0.07892894130757921, -0.2544119249279014],
+                [0.9615756188060413, 1.0219778380212683, -0.2715618821244925],
+                [1.092391702103946, 2.093603799947143, -0.316753420972412],
+            ],
+            [
+                [1.9856421638499013, 0.11995203969368912, -0.1156204836566543],
+                [2.0294866006275982, 0.9932631100376418, -0.22997466919577964],
+                [1.8926576235496195, 1.811117753252593, 0.12993999364080164],
+            ],
+            [
+                [3.093427183178206, -0.1053012036490268, -0.2067762023192355],
+                [2.859093226931018, 0.8968430268449183, -0.15153709187625078],
+                [
+                    2.9190967480132652,
+                    1.8283899891115807,
+                    -0.061125560771756994,
+                ],
+            ],
+        ];
+        let net = rows
+            .iter()
+            .map(|r| {
+                r.iter()
+                    .map(|&[x, y, z]| CPoint::new(x, y, z, -f64::MAX))
+                    .collect()
+            })
+            .collect();
+        let u0 = 0.8609971713540157;
+        let u1 = 3.5508292632660834;
+        let u = vec![u0, u0, 1.1222893888182777, 1.8763197218556462, u1, u1];
+        let v = vec![0.0, 0.0, 0.5987377657284333, 1.0, 1.0];
+        let mut b = BSplineSurface::from_nurb(NlSurface::new(net, 1, 1, u, v).unwrap(), false);
+        b.set_b_spline_surface_form(
+            crate::nurbs::b_spline_surface::BSplineSurfaceForm::from_code(11).unwrap(),
+        );
+        let s = Surface::from(b);
+        let k = Kernel::default();
+        let dom = Extent2d::from_bounds(
+            1.6227666457241092,
+            0.07002218305834061,
+            3.3091732897880504,
+            0.7675665673892663,
+        );
+        let uv = Point2::new(0.8609994164241573, 0.04752690390728609);
+        let p = Point3::new(
+            -0.07300334888722718,
+            -0.13391703284631928,
+            0.31251048415221666,
+        );
+        // the two evaluations differ in the last bit here
+        let by_point = s.evaluate_point(&k, uv).unwrap();
+        let (by_derivs, su, sv) =
+            evaluate_1st_derivatives(&k, &s, uv, Side::Left, Side::Left).unwrap();
+        assert_ne!(by_point, by_derivs);
+        // and the result's point is the farther one, so measuring the guess with
+        // `EvaluatePoint` (distances in order) would refuse the result
+        assert!(p.distance_squared(by_derivs) > p.distance_squared(by_point));
+        // both sides of the domain allow the gap's components (only the distance test
+        // decides)
+        assert!(uv.x < dom.min().x && uv.y < dom.min().y);
+        let gap = p - by_derivs;
+        assert!(gap.dot(su.unitize_or_z()) < 0.0 && gap.dot(sv.unitize_or_z()) < 0.0);
+        let mut sol = SolutionEnd::new();
+        sol.solution_value = 0.5;
+        *sol.param_mut(0).unwrap() = uv.x;
+        *sol.param_mut(1).unwrap() = uv.y;
+        assert!(good_drop_result(&k, &s, &dom, p, uv, &sol).unwrap());
+    }
+
+    /// A lower bound on the distance from `p` to a non-rational Bezier patch of degrees
+    /// (2, 1) with control net `net` (3 rows in u, 2 in v), or `None` past `budget`
+    /// sub-patches: the patch lies in the convex hull of its net, so in the net's
+    /// bounding box; a sub-patch whose box (grown by `margin`) is at least `bound`
+    /// from `p` is done, else it is split in half (de Casteljau) along the direction
+    /// whose control polygon is longer. Returns `bound` when every piece is done.
+    fn bezier21_distance_at_least(
+        net: [[Point3; 2]; 3],
+        p: Point3,
+        bound: f64,
+        margin: f64,
+        budget: usize,
+    ) -> Option<f64> {
+        let mut stack = vec![net];
+        let mut pieces = 0;
+        while let Some(n) = stack.pop() {
+            pieces += 1;
+            if pieces > budget {
+                return None;
+            }
+            let pts = n.iter().flatten();
+            let lo = pts
+                .clone()
+                .fold(Vec3::new(f64::MAX, f64::MAX, f64::MAX), |a, q| {
+                    Vec3::new(a.x.min(q.x), a.y.min(q.y), a.z.min(q.z))
+                });
+            let hi = pts.fold(Vec3::new(f64::MIN, f64::MIN, f64::MIN), |a, q| {
+                Vec3::new(a.x.max(q.x), a.y.max(q.y), a.z.max(q.z))
+            });
+            let gap = |x: f64, l: f64, h: f64| (l - margin - x).max(x - h - margin).max(0.0);
+            let d = Vec3::new(
+                gap(p.x, lo.x, hi.x),
+                gap(p.y, lo.y, hi.y),
+                gap(p.z, lo.z, hi.z),
+            );
+            if d.length() >= bound {
+                continue;
+            }
+            let u_len = (0..2)
+                .map(|j| n[0][j].distance(n[1][j]) + n[1][j].distance(n[2][j]))
+                .fold(0.0, f64::max);
+            let v_len = (0..3)
+                .map(|i| n[i][0].distance(n[i][1]))
+                .fold(0.0, f64::max);
+            if u_len >= v_len {
+                let mut left = n;
+                let mut right = n;
+                for j in 0..2 {
+                    let a01 = (n[0][j] + n[1][j]) * 0.5;
+                    let a12 = (n[1][j] + n[2][j]) * 0.5;
+                    let mid = (a01 + a12) * 0.5;
+                    left[1][j] = a01;
+                    left[2][j] = mid;
+                    right[0][j] = mid;
+                    right[1][j] = a12;
+                }
+                stack.push(left);
+                stack.push(right);
+            } else {
+                let mut low = n;
+                let mut high = n;
+                for i in 0..3 {
+                    let mid = (n[i][0] + n[i][1]) * 0.5;
+                    low[i][1] = mid;
+                    high[i][0] = mid;
+                }
+                stack.push(low);
+                stack.push(high);
+            }
+        }
+        Some(bound)
+    }
+
+    /// WR-56, the goldens case `surface.surface_p5` gen0494: a point 7.6e-5 from an
+    /// apex (a whole row of poles) and 3.36e-5 off the surface, dropped with
+    /// [`SolverOperation::Intersect`] from a guess. The local solve stops at the foot
+    /// next to the apex, where the gap's component along the unit `S_v` (`|S_v|`
+    /// 7.7e-5) is 5.7e-11, over the tight tolerance 2.5e-12, so the foot test sends the
+    /// drop to the global solve. That finds no intersection within the intersection
+    /// tolerance 2e-5, as the same drop without a guess does: the point is at least
+    /// 3.3e-5 from the surface (a convex-hull bound over the Bezier patches, below).
+    /// Upstream's 1e-4 foot test returned the foot as a successful intersection only
+    /// when given that guess. A minimise drop from the same guess still returns the
+    /// foot, at the distance the global solve finds.
+    #[test]
+    fn wr56_intersect_drop_from_a_guess_answers_as_without_one() {
+        use crate::geom::tol::ZONE_TOL_3D;
+        use crate::nurbs::srf_tool::p1::decompose_to_bez;
+        use crate::surface::surface::p4::NoObject;
+        use crate::surface::surface::p5::DropPointOptions;
+        // `SM_XSECT_TOL_3D`, the drop's tolerance for a surface without a face
+        // (`drop_point_from`: `face_zone_tol_3d()` or `XSECT_TOL_3D`, p5.rs)
+        let xsect_tol_3d = 2.0 * ZONE_TOL_3D;
+        let (s, nl) = wr56_apex_patch();
+        let k = Kernel::default();
+        let p = Point3::new(-0.9999526462492969, 1.5000491995315461, -0.3527975781749486);
+        let dom = Extent2d::from_bounds(0.5130221717994283, 0.0, 3.34766559576863, 1.0);
+        let guess = Point2::new(1.9248388350119723, 0.4139249704993634);
+        let opts = |op: SolverOperation, guess_uv: Option<Point2>| DropPointOptions {
+            guess_uv,
+            operation: op,
+            tgt_seam_side: Some(Vec3::new(
+                -0.48155218659663124,
+                -0.5708253216475445,
+                0.7039419181183777,
+            )),
+            want_solutions: false,
+        };
+        let drop = |op, g| s.drop_point::<NoObject>(&k, p, &dom, &opts(op, g)).unwrap();
+
+        // The local solve stops at the foot next to the apex; the foot test refuses it.
+        let local = s
+            .local_point_solve::<NoObject>(&k, &dom, SolverOperation::Intersect, p, guess)
+            .unwrap();
+        assert!(local.found);
+        let foot_uv = Point2::new(
+            local.solution.start.param(0).unwrap(),
+            local.solution.start.param(1).unwrap(),
+        );
+        assert!(foot_uv.x - dom.min().x < 3e-5, "{foot_uv:?}");
+        assert!(!good_drop_result(&k, &s, &dom, p, guess, &local.solution.start).unwrap());
+
+        // Intersect: no answer, with the guess as without it.
+        let with_guess = drop(SolverOperation::Intersect, Some(guess));
+        let without = drop(SolverOperation::Intersect, None);
+        assert!(!with_guess.success && !without.success);
+        assert_eq!(with_guess.gap, BIG_DOUBLE);
+        assert_eq!(without.gap, BIG_DOUBLE);
+
+        // Minimise from the guess: the foot, at the global solve's distance.
+        let minimise = drop(SolverOperation::Minimize, Some(guess));
+        assert!(minimise.success);
+        let global = s
+            .global_point_solve::<NoObject>(
+                &k,
+                None,
+                &dom,
+                SolverOperation::Minimize,
+                p,
+                xsect_tol_3d,
+                None,
+                SolutionRequested::All,
+            )
+            .unwrap();
+        let nearest = global
+            .as_slice()
+            .iter()
+            .map(|sl| sl.start.solution_value)
+            .fold(f64::INFINITY, f64::min);
+        assert!(
+            (minimise.gap - nearest).abs() < 1e-15,
+            "{} {nearest}",
+            minimise.gap
+        );
+        assert!(
+            minimise.gap > 3.3e-5 && minimise.gap < 3.4e-5,
+            "{}",
+            minimise.gap
+        );
+
+        // Certificate: every point of the surface is at least 3.3e-5 from `p`, so no
+        // point is within the intersection tolerance. The Bezier patches' control
+        // points come from the B-spline's by affine combinations with weights in
+        // [0, 1] (a few ulps of coordinates under 4: under 1e-14), and the subdivision
+        // midpoints add an ulp per level; the 1e-12 margin covers both.
+        let patches = decompose_to_bez(&nl).unwrap();
+        let bound = 3.3e-5;
+        let u_breaks = [
+            dom.min().x,
+            2.1430395924882157,
+            2.860429223096711,
+            dom.max().x,
+        ];
+        let v_breaks = [0.0, 0.15893773335490313, 0.4332409252690698, 1.0];
+        let mut count = 0;
+        for (i, row) in patches.iter().enumerate() {
+            for (j, patch) in row.iter().enumerate() {
+                let c = patch.cpts();
+                assert_eq!((c.len(), c[0].len()), (3, 2));
+                let pt = |i: usize, j: usize| Point3::new(c[i][j].x, c[i][j].y, c[i][j].z);
+                let net = [
+                    [pt(0, 0), pt(0, 1)],
+                    [pt(1, 0), pt(1, 1)],
+                    [pt(2, 0), pt(2, 1)],
+                ];
+                // the patch is the surface's span (i, j): it interpolates its corners
+                for (a, b) in [(0, 0), (0, 1), (2, 0), (2, 1)] {
+                    let uv = Point2::new(u_breaks[i + a / 2], v_breaks[j + b]);
+                    let corner = s.evaluate_point(&k, uv).unwrap();
+                    assert!(corner.distance(net[a][b]) < 1e-14, "{i} {j} {a} {b}");
+                }
+                // and agrees with it at the u-midpoints of both v ends: with the corners
+                // that is six points of a 3 x 2 grid, which determine a degree (2, 1)
+                // patch, so the patch is the span (up to the rounding above)
+                for b in 0..2 {
+                    let mid = (net[0][b] + net[1][b] * 2.0 + net[2][b]) * 0.25;
+                    let u_mid = 0.5 * (u_breaks[i] + u_breaks[i + 1]);
+                    let on_span = s
+                        .evaluate_point(&k, Point2::new(u_mid, v_breaks[j + b]))
+                        .unwrap();
+                    assert!(on_span.distance(mid) < 1e-14, "{i} {j} mid {b}");
+                }
+                assert_eq!(
+                    bezier21_distance_at_least(net, p, bound, 1e-12, 1_000_000),
+                    Some(bound)
+                );
+                count += 1;
+            }
+        }
+        assert_eq!(count, 9);
+        assert!(bound > xsect_tol_3d);
     }
 
     fn wr57_double_root_patch_u(u_min: f64, u_max: f64) -> Surface {

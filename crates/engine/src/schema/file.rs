@@ -294,8 +294,10 @@ pub struct ExportResult {
     /// With `lay_on_print_faces` only: the bodies that were written laid on their print face.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub print_faces: Vec<String>,
-    /// With `lay_on_print_faces` only: a warning for each body that has a print face but was
-    /// written as it lies.
+    /// STL, OBJ and 3MF: a warning for each face the mesh path left short of its smallest angle
+    /// or chord tolerance (and each edge whose sampling stopped off it), led by its body's name.
+    /// With `lay_on_print_faces`, also one for each body that has a print face but was written
+    /// as it lies.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
@@ -510,6 +512,14 @@ pub struct OpenParams {
     /// design opens without spending the time a full verification takes.
     #[serde(default)]
     pub verify: Option<bool>,
+    /// An installed importer plugin to open the file with, as `plugin_id.entry` (see `plugin.list`'s
+    /// `importers`). Default: SolidCraft's own reader when it reads the file, else the installed
+    /// importer that claims its extension.
+    #[serde(default)]
+    pub format: Option<String>,
+    /// For a file an importer plugin opens: its declared options. Default: its defaults.
+    #[serde(default)]
+    pub options: Option<Value>,
     /// For a point cloud, STL, OBJ or PLY file: the unit its coordinates are in, scaled to
     /// millimetres as it is read (refused for a 3MF or glTF file, which states its own; ignored
     /// for other files). Default: mm.
@@ -789,6 +799,8 @@ pub enum OpenResult {
     PointCloud(OpenedPointCloud),
     /// A STEP, IGES, FreeCAD, Rhino or mesh file.
     File(OpenedFile),
+    /// A file an importer plugin made into a new, unsaved design, with its loss report.
+    Imported(crate::schema::plugin::ImportedDesign),
 }
 
 /// List the designs that apps which crashed, or closed with unsaved changes, autosaved. Nothing is

@@ -1146,4 +1146,28 @@ mod tests {
         assert_eq!(h.app.session.doc.features.len(), 1, "a sketch with a line is kept");
         assert!(crate::scenario::handles("timeline:").iter().any(|(n, _)| n.contains("Sketch")));
     }
+
+    #[test]
+    fn starting_drawing_tool_clears_selection_so_construction_switches_mode() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let circle = h.app.run("sketch.circle.center", json!({"center":[10,10],"radius":5})).unwrap()["curves"][0].as_str().unwrap().to_string();
+        let sid = h.app.session.active_sketch.unwrap();
+        h.app.session.selection = vec![Sel::SketchCurve { id: circle.clone(), sketch: Some(sid) }];
+        set_mode(&mut h.app, 0);
+        h.settle();
+
+        h.app.start("sketch.line");
+        h.settle();
+        assert!(h.app.session.selection.is_empty(), "starting a drawing tool clears the prior curve selection");
+
+        let construction = crate::scenario::handle_at("dialog:Line Type:construction").unwrap();
+        h.call("ui.click", json!({"x": construction.x, "y": construction.y}));
+        assert_eq!(mode(&h.app), 1, "Construction switches drawing mode instead of converting the circle");
+        let state = crate::open_meshing::session_world(&h.app.session);
+        let sk = &state.sketch(sid).unwrap().sketch;
+        let idx = sk.curve_index(&circle).unwrap();
+        assert!(!sk.curves[idx].construction, "the previously selected circle stays a normal curve");
+        set_mode(&mut h.app, 0);
+    }
 }

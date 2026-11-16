@@ -128,3 +128,76 @@ fn wr_407_walls_join_to_the_closed_form_with_the_fix() {
         closed_form()
     );
 }
+
+/// Every face's UV trims lie in its surface's natural (knot) domain widened by `margin`,
+/// checked on the trims' control points (PROVEN for B-spline trims: each control point is
+/// read in homogeneous form `(x w, y w, z w, w)`, its weight must be positive, and its
+/// point `(x w / w, y w / w)` inside the widened domain; with positive weights a B-spline
+/// lies in the convex hull of its control points, and the widened domain is convex). A
+/// trim with no B-spline form, a weight that is not positive or a NaN fails. `margin`
+/// covers the one division's rounding. `Err` names the first trim that fails. An edge use
+/// with no UV trim gets one first, built as the volume's gap closure builds it
+/// (`get_or_create_uv_trim_curve`), so the trims checked are the ones the closure joins.
+fn trims_inside_domain(k: &Kernel, b: &mut Brep, margin: f64) -> Result<(), String> {
+    use solidcore::blend::fillet_section::certificate::NurbsCurve;
+    use solidcore::topology::brep::p1::faces;
+    use solidcore::topology::edgeuse::p1::{faceuse_loopuses, loopuse_edgeuses, uv_trim_curve};
+    use solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve;
+    for f in faces(b, None).unwrap() {
+        let face = b.face(f).unwrap();
+        let dom = face
+            .surface
+            .as_ref()
+            .unwrap()
+            .natural_uv_domain_with_nurb(k)
+            .unwrap();
+        let (u0, u1) = (dom.u_min() - margin, dom.u_max() + margin);
+        let (v0, v1) = (dom.v_min() - margin, dom.v_max() + margin);
+        let up = face.faceuse.unwrap();
+        for lu in faceuse_loopuses(b, up, false, None).unwrap() {
+            for eu in loopuse_edgeuses(b, lu).unwrap() {
+                if uv_trim_curve(b, eu).unwrap().0.is_none() {
+                    get_or_create_uv_trim_curve(k, b, eu, false, false, true)
+                        .unwrap()
+                        .status
+                        .unwrap();
+                }
+                let t = uv_trim_curve(b, eu)
+                    .unwrap()
+                    .0
+                    .unwrap_or_else(|| panic!("edge use {eu:?} of face {f:?} has no UV trim"));
+                let Some(bs) = t.b_spline_base() else {
+                    return Err(format!("face {f:?}: a trim with no B-spline form"));
+                };
+                let cn = NurbsCurve::of(bs).unwrap();
+                for p in cn.pw.chunks(4) {
+                    let &[xw, yw, _, w] = p else {
+                        return Err(format!("face {f:?}: a control point not homogeneous"));
+                    };
+                    // written so a NaN fails
+                    if w.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+                        return Err(format!("face {f:?}: a control point's weight {w}"));
+                    }
+                    let (x, y) = (xw / w, yw / w);
+                    if !(x >= u0 && x <= u1 && y >= v0 && y <= v1) {
+                        return Err(format!(
+                            "face {f:?}: control point ({x}, {y}) outside [{u0}, {u1}] x \
+                             [{v0}, {v1}]"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The default join's trims each lie inside their surface's natural domain (to 1e-9, on
+/// their control points), so the gap closure's uv lines between them stay in the domain.
+#[test]
+fn wr_407_default_join_keeps_its_trims_in_their_domains() {
+    let (k, mut b) = joined();
+    if let Err(e) = trims_inside_domain(&k, &mut b, 1e-9) {
+        panic!("a trim leaves its domain: {e}");
+    }
+}

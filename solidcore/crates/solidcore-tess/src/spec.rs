@@ -12,9 +12,11 @@ use crate::{MeshTolerance, PlanStats, RefusedFace, Result, TessError, TessPlan};
 /// The smallest angle the mesh path aims for unless asked otherwise (degrees).
 pub const MESH_MIN_ANGLE: f64 = 25.0;
 
-/// The largest smallest angle the mesh path takes (degrees). Ruppert refinement past about 30°
-/// may not end (each point it adds makes new triangles to refine), as spade, the triangulation
-/// it runs on, documents.
+/// The largest smallest angle the mesh path takes (degrees): the bound of the Ruppert refinement
+/// its 3D shaping runs (Delaunay refinement on the surface, a point at the 3D circumcentre of
+/// each triangle sharper than the angle). Asked for more than about 30°, that refinement may not
+/// end: each point it adds can make new triangles sharper than the angle. spade only makes the
+/// first triangulation in (u, v), which the shaping then refines; this bound is the shaping's.
 pub const MAX_MESH_MIN_ANGLE: f64 = 30.0;
 
 /// How the mesh path ([`mesh()`]) meshes a body. Plain data: a size that varies from point to
@@ -145,18 +147,32 @@ impl TessPlan {
     /// own. No normals: a face's are [`TessPlan::evaluate`]'s. Returns the mesh and the faces
     /// left out of it, each with why (the surface does not evaluate at one of its nodes), as
     /// [`TessPlan::evaluate`] leaves them out.
-    #[must_use]
-    pub fn welded(&self) -> (WeldedMesh, Vec<RefusedFace>) {
+    ///
+    /// # Errors
+    /// [`TessError::TooManyVertices`] for a mesh with more vertices than a `u32` index names:
+    /// none is numbered past `u32::MAX`, so no two vertices share an index.
+    pub fn welded(&self) -> Result<(WeldedMesh, Vec<RefusedFace>)> {
         let mut out = WeldedMesh::default();
         let mut refused = Vec::new();
         // The shared nodes so far, by position bit for bit (-0.0 as 0.0). Only looked up: the
         // numbering follows the faces' order.
         let mut shared: BitsMap<[u64; 3], u32> = BitsMap::default();
         let key = |p: Vec3| [p.x, p.y, p.z].map(|x| (x + 0.0).to_bits());
-        let push = |positions: &mut Vec<Vec3>, p: Vec3| {
-            let i = u32::try_from(positions.len()).unwrap_or(u32::MAX);
+        let push = |positions: &mut Vec<Vec3>, p: Vec3| -> Result<u32> {
+            let i = vertex_index(positions.len())?;
             positions.push(p);
-            i
+            Ok(i)
+        };
+        let shared_id = |shared: &mut BitsMap<[u64; 3], u32>,
+                         positions: &mut Vec<Vec3>,
+                         p: Vec3|
+         -> Result<u32> {
+            if let Some(id) = shared.get(&key(p)) {
+                return Ok(*id);
+            }
+            let id = push(positions, p)?;
+            shared.insert(key(p), id);
+            Ok(id)
         };
         for f in &self.faces {
             let nodes = self.nodes(f);
@@ -170,11 +186,9 @@ impl TessPlan {
             let mut ids: Vec<u32> = Vec::with_capacity(nodes.positions.len());
             for (k, p) in nodes.positions.iter().enumerate() {
                 let id = if k < f.fixed.len() {
-                    *shared
-                        .entry(key(*p))
-                        .or_insert_with(|| push(&mut out.positions, *p))
+                    shared_id(&mut shared, &mut out.positions, *p)?
                 } else {
-                    push(&mut out.positions, *p)
+                    push(&mut out.positions, *p)?
                 };
                 ids.push(id);
             }
@@ -189,14 +203,40 @@ impl TessPlan {
         for e in &self.edges {
             let line = e
                 .iter()
-                .map(|p| {
-                    *shared
-                        .entry(key(*p))
-                        .or_insert_with(|| push(&mut out.positions, *p))
-                })
-                .collect();
+                .map(|p| shared_id(&mut shared, &mut out.positions, *p))
+                .collect::<Result<Vec<u32>>>()?;
             out.edges.push(line);
         }
-        (out, refused)
+        Ok((out, refused))
+    }
+}
+
+/// The index of the vertex after `numbered` others, or [`TessError::TooManyVertices`] where a
+/// `u32` cannot name it.
+fn vertex_index(numbered: usize) -> Result<u32> {
+    u32::try_from(numbered).map_err(|_| TessError::TooManyVertices {
+        vertices: numbered.saturating_add(1),
+    })
+}
+
+#[cfg(test)]
+mod welded_tests {
+    use super::*;
+
+    /// The vertex past `u32::MAX` is an error naming the count, not a second vertex numbered
+    /// `u32::MAX` (as the index was capped before). Only where `usize` holds a count past
+    /// `u32::MAX` (64-bit targets): on 32-bit ones no such count exists.
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn a_vertex_past_u32_max_is_an_error_not_a_capped_index() {
+        assert_eq!(vertex_index(0), Ok(0));
+        assert_eq!(vertex_index(u32::MAX as usize), Ok(u32::MAX));
+        let past = u32::MAX as usize + 1;
+        assert_eq!(
+            vertex_index(past),
+            Err(TessError::TooManyVertices { vertices: past + 1 })
+        );
+        let message = vertex_index(past).unwrap_err().to_string();
+        assert!(message.contains(&u32::MAX.to_string()), "{message}");
     }
 }

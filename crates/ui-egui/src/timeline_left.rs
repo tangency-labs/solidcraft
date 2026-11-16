@@ -677,7 +677,12 @@ fn timeline_group_name(
     if escape {
         // Dropping the shared state cancels the edit and leaves the old name intact.
     } else if commit {
-        let _ = crate::context_menu::commit_rename(app, &rename);
+        // A refused name keeps the editor open, focused with the name selected; the status line
+        // says why.
+        if crate::context_menu::commit_rename(app, &rename).is_err() {
+            rename.focused = false;
+            app.menu.rename = Some(rename);
+        }
     } else {
         app.menu.rename = Some(rename);
     }
@@ -1672,6 +1677,24 @@ mod tests {
         harness.step(&json!({"text": "Again"})).unwrap();
         harness.step(&json!({"key": "Enter"})).unwrap();
         assert_eq!(harness.app.session.doc.timeline_groups.first().map(|group| group.name.as_str()), Some("Again"));
+
+        // A name the command refuses keeps the editor open and says why.
+        crate::context_menu::start_rename(&mut harness.app, crate::context_menu::RenameWhat::TimelineGroup(group), pos2(0.0, 0.0));
+        harness.frames(2);
+        harness.step(&json!({"text": "x".repeat(200)})).unwrap();
+        harness.step(&json!({"key": "Enter"})).unwrap();
+        harness.frames(2);
+        assert!(harness.app.menu.rename.is_some(), "the folder's editor stays open after a refused rename");
+        let (text, _, error) = harness.app.status.clone().expect("the refusal is shown");
+        assert!(error && text.contains("128 characters"), "{text}");
+        assert_eq!(harness.app.session.doc.timeline_groups.first().map(|group| group.name.as_str()), Some("Again"));
+        harness.step(&json!({"text": "Fixed"})).unwrap();
+        harness.step(&json!({"key": "Enter"})).unwrap();
+        assert_eq!(
+            harness.app.session.doc.timeline_groups.first().map(|group| group.name.as_str()),
+            Some("Fixed"),
+            "the name can be corrected at once"
+        );
     }
 
     /// The upright History can be on screen with `timeline_left` off (a side zone, a tall narrow

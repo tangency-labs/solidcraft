@@ -4,6 +4,52 @@ use serde_json::json;
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::MeshGeom;
 
+/// A completed unground command shows both lost-origin and conflicting-joint reports, even
+/// when the part stays where it was. The saved language applies outside a rendered frame too.
+#[test]
+fn unground_joint_issues_reach_status_and_messages_in_the_saved_language() {
+    let mut h = Harness::new();
+    let occurrence = h.app.run("component.create", json!({"name":"Part"})).unwrap()["occurrence"].as_u64().unwrap();
+    for language in ["en", "ja"] {
+        h.app.preferences.language = language.into();
+        h.app.session.log.clear();
+        h.app.messages.clear();
+        h.app.status = None;
+        let reply = json!({
+            "occurrence": occurrence, "grounded": false, "moved": [],
+            "errors": [{"joint": 10, "name": "Foot joint", "why": "the face no longer exists"}],
+            "conflicts": [{"joint": 11, "name": "Brace joint", "why": "the other joints give a different placement"}]
+        });
+        assert_eq!(h.app.command_completed("occurrence.ground", Ok(reply.clone())).unwrap(), reply);
+        let locale = solidcraft_ui_text::Locale::for_language(language);
+        let expected: Vec<String> = [("Foot joint", "the face no longer exists"), ("Brace joint", "the other joints give a different placement")]
+            .iter()
+            .map(|(joint, reason)| locale.format("joint.unground_issue", &[("occurrence", "Part:1"), ("joint", joint), ("reason", reason)]))
+            .collect();
+        assert_eq!(h.app.session.log.iter().skip(1).collect::<Vec<_>>(), expected.iter().collect::<Vec<_>>());
+        assert_eq!(h.app.messages.iter().map(|m| (&m.text, m.error)).collect::<Vec<_>>(), expected.iter().map(|m| (m, false)).collect::<Vec<_>>());
+        assert_eq!(h.app.status.as_ref().map(|(text, _, error)| (text, *error)), expected.last().map(|text| (text, false)));
+        assert!(!expected[0].contains("joint.unground_issue"), "the pending message must be embedded");
+    }
+}
+
+/// An unchanged part is normal when no joint needs to move it. Grounding does not show the
+/// unground notice, even when the assembly already has an unrelated joint issue.
+#[test]
+fn unchanged_or_grounded_occurrences_do_not_show_an_unground_issue() {
+    let mut h = Harness::new();
+    for reply in [
+        json!({"occurrence": 1, "grounded": false, "moved": [], "errors": [], "conflicts": []}),
+        json!({"occurrence": 1, "grounded": true, "errors": [{"joint": 2, "name": "Other", "why": "lost origin"}], "conflicts": []}),
+    ] {
+        h.app.messages.clear();
+        h.app.status = None;
+        h.app.command_completed("occurrence.ground", Ok(reply)).unwrap();
+        assert!(h.app.messages.iter().next().is_none());
+        assert!(h.app.status.is_none());
+    }
+}
+
 /// A new component lists its own expandable Origin in the Browser: the design's Origin stays
 /// closed when the component's opens, and all seven items carry their rows and handles (#7313).
 #[test]

@@ -1389,7 +1389,7 @@ mod byte_regressions {
 
         // The writer is the reachable API for arbitrary TEXT. Sheet text is outlines and
         // bend notes are generated ASCII; no synthetic public command is added to inject text.
-        use solidcraft_io::test_support::{DxfEntity, DxfLayer, legacy_dxf_baseline as write_dxf_drawing};
+        use solidcraft_io::test_support::{DxfEntity, DxfLayer, legacy_dxf_baseline};
         use solidcraft_io::{DxfShape, IoError};
         let note = |text: String| DxfEntity {
             layer: "NOTES".into(),
@@ -1399,7 +1399,7 @@ mod byte_regressions {
         for (name, text) in
             [("writer-bmp-controls", "ASCII %%d %%p %%c ° 中 \u{ffff}\n\t\u{7f}".to_string()), ("writer-bmp-cap", "\u{ffff}".repeat(251))]
         {
-            let dxf = write_dxf_drawing(&layers, &[note(text)]).unwrap();
+            let dxf = legacy_dxf_baseline(&layers, &[note(text)]).unwrap();
             let es = entities(&dxf);
             let value = encoded_text(es.iter().find(|e| e.0 == "TEXT").unwrap());
             if name == "writer-bmp-cap" {
@@ -1420,7 +1420,7 @@ mod byte_regressions {
             ("unicode-far-after-cap", format!("{}\u{2000b}", "中".repeat(10_000)), "U+2000B", 10_001),
         ] {
             let entities = [DxfEntity { layer: "OUTLINE".into(), shape: DxfShape::Line(Vec2::ZERO, Vec2::X) }, note(text)];
-            let error = write_dxf_drawing(&layers, &entities).unwrap_err();
+            let error = legacy_dxf_baseline(&layers, &entities).unwrap_err();
             assert!(matches!(error, IoError::Invalid(_)));
             let message = error.to_string();
             assert!(message.contains("DXF TEXT entity 2 on layer \"NOTES\""));

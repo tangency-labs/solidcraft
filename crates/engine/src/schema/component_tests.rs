@@ -144,15 +144,15 @@ fn strict_keeps_todays_errors() {
     ]);
 }
 
-/// A name of 128 bytes is taken once trimmed, and one of 129 is not, as the handler counts.
+/// A name of 128 characters is taken once trimmed, and one of 129 is not, as the handler counts.
 #[test]
 fn a_name_is_counted_as_the_handler_counts_it() {
     let issues = |p: Value| crate::schema::issues("component.rename", &p).len();
     assert_eq!(issues(json!({"component": 0, "name": format!("  {}  ", "x".repeat(128))})), 0);
     assert_eq!(issues(json!({"component": 0, "name": "x".repeat(129)})), 1);
-    // 64 two-byte characters are 128 bytes.
-    assert_eq!(issues(json!({"component": 0, "name": "é".repeat(64)})), 0);
-    assert_eq!(issues(json!({"component": 0, "name": "é".repeat(65)})), 1);
+    // Characters, not bytes: 128 two-byte characters are taken.
+    assert_eq!(issues(json!({"component": 0, "name": "é".repeat(128)})), 0);
+    assert_eq!(issues(json!({"component": 0, "name": "é".repeat(129)})), 1);
 }
 
 /// The contracts say what the handlers need: a key a handler refuses without is required in the

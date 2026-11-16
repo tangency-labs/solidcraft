@@ -4791,6 +4791,37 @@ fn sketch_inspect_names_each_curve_of_a_free_form_loop_once() {
     assert!((volume[0] - 10.0 * ring).abs() < 0.02 * volume[0], "{volume:?} against {areas:?}");
 }
 
+#[test]
+fn a_frame_around_a_shape_split_in_two_by_an_inner_curve_extrudes() {
+    // An SVG drawing from #17613: a 96 mm square of cubic Béziers around a 60 mm square that
+    // a middle curve splits into two halves. Both halves are holes of the frame and share the
+    // middle curve, so the frame's pick names that curve in two holes. The pick was refused
+    // ("whole-source boundary needs canonical disjoint curve identities").
+    let svg = r#"<svg width="100mm" height="100mm" viewBox="0 0 100 100"><g fill="none" stroke="black">
+        <path d="M2 2 C34 2 66 2 98 2"/><path d="M98 2 C98 34 98 66 98 98"/>
+        <path d="M98 98 C66 98 34 98 2 98"/><path d="M2 98 C2 66 2 34 2 2"/>
+        <path d="M20 20 C30 20 40 20 50 20"/><path d="M50 20 C60 20 70 20 80 20"/>
+        <path d="M80 20 C80 40 80 60 80 80"/><path d="M80 80 C70 80 60 80 50 80"/>
+        <path d="M50 80 C40 80 30 80 20 80"/><path d="M20 80 C20 60 20 40 20 20"/>
+        <path d="M50 20 C50 40 50 60 50 80"/></g></svg>"#;
+    let mut s = new_sketch();
+    run(&mut s, "sketch.insert_svg", json!({"text": svg}));
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    let profiles = si["profiles"].as_array().unwrap();
+    assert_eq!(profiles.len(), 3, "the frame and the two halves: {si}");
+    let frame = profiles.iter().position(|p| p["holes"].as_array().is_some_and(|h| !h.is_empty())).unwrap();
+    let holes: Vec<Vec<String>> = profiles[frame]["holes"].as_array().unwrap().iter().map(ids).collect();
+    assert_eq!(holes.len(), 2, "{si}");
+    assert!(holes[0].iter().any(|c| holes[1].contains(c)), "the halves share the middle curve: {holes:?}");
+    run(&mut s, "sketch.finish", json!({}));
+    // As the Extrude dialog sends a click on the frame.
+    run(&mut s, "solid.extrude", json!({"distance": 10, "profiles": [frame], "exact_regions": true}));
+    let volume = body_volumes(&mut s);
+    let want = 10.0 * (96.0 * 96.0 - 60.0 * 60.0);
+    assert_eq!(volume.len(), 1, "{volume:?}");
+    assert!((volume[0] - want).abs() < 1e-6 * want, "{volume:?} against {want}");
+}
+
 /// The arc's counter-clockwise sweep from its stored start to its end, degrees, from `sketch.inspect`.
 fn arc_sweep_deg(si: &Value, id: &str) -> f64 {
     let c = si["curves"].as_array().unwrap().iter().find(|c| c["id"] == id).unwrap();
