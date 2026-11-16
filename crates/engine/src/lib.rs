@@ -1855,12 +1855,13 @@ impl Session {
         if outermost {
             frames::reset_inner_undoable();
         }
-        let mapped = if outermost {
+        let mut mapped = if outermost {
             frames::forget_picks();
             frames::to_local(self, spec.id, params)?
         } else {
             None
         };
+        let _copy_context = outermost.then(|| frames::copy_context(spec.id, mapped.as_mut()));
         let params = mapped.as_ref().unwrap_or(params);
         if outermost {
             crash::command_begin(self, spec.id, given);

@@ -192,7 +192,16 @@ impl MovePreview {
         let [(id, params)] = commands else { return None };
         let params = match id.as_str() {
             "solid.move" => params,
-            "timeline.redefine" if params.get("command").and_then(Value::as_str) == Some("solid.move") => params.get("params")?,
+            "timeline.redefine" if params.get("command").and_then(Value::as_str) == Some("solid.move") => {
+                let key = params.get("feature").and_then(|v| v.as_str().map(str::to_string).or_else(|| v.as_u64().map(|id| id.to_string())))?;
+                // Copies can use a captured placement or legacy local geometry, neither
+                // necessarily where today's source mesh is shown. Evaluate the saved move.
+                if app.session.doc.find_feature(&key).is_some_and(|f| matches!(&f.kind, solidcraft_engine::doc::FeatureKind::Move { copy: true, .. }))
+                {
+                    return None;
+                }
+                params.get("params")?
+            }
             _ => return None,
         };
         // A matrix is the engine's to read (`move_matrix_params`).
