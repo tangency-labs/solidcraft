@@ -175,23 +175,25 @@ fn number(ui: &mut egui::Ui, label_key: &str, handle: &str, v: &mut f64, range: 
 
 pub fn rows(ui: &mut egui::Ui, g: &mut Gear) {
     form_row(ui, solidcraft_ui_text::tr("gear.presets"), |ui| {
-        for (key, handle, p) in [
-            ("gear.preset_spur", "dialog:gear:preset_spur", Preset::Spur),
-            ("gear.preset_helical", "dialog:gear:preset_helical", Preset::Helical),
-            ("gear.preset_herringbone", "dialog:gear:preset_herringbone", Preset::Herringbone),
-            ("gear.preset_ring", "dialog:gear:preset_ring", Preset::Ring),
-        ] {
-            let r = crate::ui_kit::button(ui, solidcraft_ui_text::tr(key), crate::ui_kit::Button::Normal);
-            crate::scenario::publish_handle(handle, r.rect.center());
-            if r.clicked() {
-                g.preset(p);
+        ui.horizontal_wrapped(|ui| {
+            for (key, handle, p) in [
+                ("gear.preset_spur", "dialog:gear:preset_spur", Preset::Spur),
+                ("gear.preset_helical", "dialog:gear:preset_helical", Preset::Helical),
+                ("gear.preset_herringbone", "dialog:gear:preset_herringbone", Preset::Herringbone),
+                ("gear.preset_ring", "dialog:gear:preset_ring", Preset::Ring),
+            ] {
+                let r = crate::ui_kit::button(ui, solidcraft_ui_text::tr(key), crate::ui_kit::Button::Normal);
+                crate::scenario::publish_handle(handle, r.rect.center());
+                if r.clicked() {
+                    g.preset(p);
+                }
             }
-        }
-        let r = crate::ui_kit::button(ui, solidcraft_ui_text::tr("gear.reset"), crate::ui_kit::Button::Normal);
-        crate::scenario::publish_handle("dialog:gear:reset", r.rect.center());
-        if r.clicked() {
-            g.reset();
-        }
+            let r = crate::ui_kit::button(ui, solidcraft_ui_text::tr("gear.reset"), crate::ui_kit::Button::Normal);
+            crate::scenario::publish_handle("dialog:gear:reset", r.rect.center());
+            if r.clicked() {
+                g.reset();
+            }
+        });
     });
     form_row(ui, "", |ui| {
         let r = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("gear.internal"), &mut g.internal);
