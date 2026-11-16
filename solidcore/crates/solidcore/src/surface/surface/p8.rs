@@ -64,7 +64,7 @@
 //! curve cache of each boundary curve for all its intersections, as upstream keeps
 //! it on the curve, so each boundary curve builds one cache per check.
 //! `InvertPointNearSingularity` refuses an answer proven farther from the test point
-//! than its guess (upstream reports it found).
+//! than its guess, other than its own point (upstream reports it found).
 //! Unported callees return [`SolidError::Unported`], also where upstream ignores the
 //! status. Recursion: none.
 
@@ -3164,13 +3164,14 @@ impl Surface {
     /// the surviving tangent points to the test point
     /// ([`Surface::find_degen_param_for_direction`]), and the other parameter by
     /// dropping the point to the iso curve there. Not upstream: an answer proven
-    /// farther from `test_pt` than the guess is refused (upstream reports it found).
+    /// farther from `test_pt` than the guess, other than the guess's own point within rounding, is refused (upstream
+    /// reports it found).
     ///
     /// # Errors
     ///
     /// The status of a failing degenerate parameter search (`SM_ERR` when it does not
     /// converge) or iso curve creation or curve drop; `SM_ERR` for an answer proven
-    /// farther from `test_pt` than the guess; [`SolidError::Unported`] from the
+    /// farther from `test_pt` than the guess (other than its own point); [`SolidError::Unported`] from the
     /// evaluations and drops.
     pub fn invert_point_near_singularity(
         &self,
@@ -3302,18 +3303,28 @@ impl Surface {
         // (not upstream) The answer is the closest point only if it is not farther from
         // the test point than the guess: one proven farther (the certified distance of
         // its evaluated point has its lower end above the guess's upper end) is not an
-        // answer. The evaluations' own rounding is not bounded, so an answer within it
-        // of the guess may be refused too; the stepper then takes its normal step from
-        // the guess. The method assumes the
+        // answer, unless it is the guess's own point within rounding (16 ulps of the
+        // largest coordinate: the certified distances bound the distances' rounding
+        // only, not the two evaluations'). The method assumes the
         // boundary at `sSingUV` is a pole; where it is not collapsed, the iso curve at the
         // degenerate parameter can lie far from the test point (goldens `surface_p8`
         // gen1191: 35505.9 away, the guess 1395.2), and upstream reports it found.
         let found_pt = self.evaluate_point(k, uv)?;
         let d_guess = certified::distance(srf_pt, test_pt);
+        let allowance = 16.0
+            * f64::EPSILON
+            * (1.0
+                + srf_pt
+                    .max_dimension()
+                    .max(test_pt.max_dimension())
+                    .max(found_pt.max_dimension()));
         let guess_hi = certified::next_up(d_guess.value + d_guess.bound);
         if certified::distance(found_pt, test_pt)
             .above(guess_hi)
             .is_yes()
+            && certified::distance(found_pt, srf_pt)
+                .above(allowance)
+                .is_yes()
         {
             return Err(SolidError::surface_failed(
                 OP_INVERT,

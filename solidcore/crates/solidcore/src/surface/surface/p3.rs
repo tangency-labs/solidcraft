@@ -2394,6 +2394,52 @@ mod tests {
         Ok(())
     }
 
+    /// #17856: why `issue_434_default_refuses_the_fold_of_a_planar_sheet`'s search
+    /// failed before the fold rule ran. Its pole inversion, for the test point
+    /// `(3, 0, 0)` from a guess at `u = 1.4999983` (on the continuation, where the
+    /// sheet's x is `3` to 1e-11), reported the iso curve `u = 0.975` found: by the
+    /// sheet's Bezier x(u) (control x 0, 1, 2, 23/9) x(0.975) = 2.5130625, so that
+    /// answer is 0.487 from the point (certified) while the guess is within 1e-10 of
+    /// it. No answer proven farther than its guess is the closest point; the
+    /// inversion now refuses it, the search finds its points, and the fold rule
+    /// (`ContinuationFold::TurnsBack`) refuses the cover instead. The line
+    /// `assert_eq!(covered.fold, None)` above records the old mechanism, not the
+    /// cover's outcome (still refused): a maintainer decides that expectation.
+    #[test]
+    fn issue_434_the_inversion_answer_behind_the_old_search_failure_was_not_the_closest_point(
+    ) -> Result<()> {
+        use crate::geom::certified;
+        let k = Kernel::default();
+        // the sheet of `issue_434_cover_across_a_fold`, evaluated past its domain as
+        // the cover does
+        let mut sheet = wr_407_bezier_sheet(&[
+            &[[0.0, 0.0], [0.0, 1.0]],
+            &[[1.0, 0.0], [1.0, 1.0]],
+            &[[2.0, 0.0], [2.0, 1.0]],
+            &[[2.0 + 5.0 / 9.0, 0.0], [2.0 + 5.0 / 9.0, 1.0]],
+        ])?;
+        set_out_of_bounds_enabled(&mut sheet, true);
+        let test = Vec3::new(3.0, 0.0, 0.0);
+        let guess = Point2::new(1.4999983138763073, 0.0);
+        let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        // the old answer's point: closed form, and as evaluated
+        let old = sheet.evaluate_point(&k, Point2::new(0.975, 0.0))?;
+        let x = |u: f64| {
+            let w = 1.0 - u;
+            3.0 * w * w * u + 2.0 * 3.0 * w * u * u + (2.0 + 5.0 / 9.0) * u * u * u
+        };
+        assert!((old.x - x(0.975)).abs() < 1e-12 && (x(0.975) - 2.5130625).abs() < 1e-12);
+        let guess_d = certified::distance(sheet.evaluate_point(&k, guess)?, test);
+        assert!(guess_d.at_most(1e-10).is_yes(), "{guess_d:?}");
+        let old_d = certified::distance(old, test);
+        assert!(old_d.above(0.48).is_yes(), "{old_d:?}");
+        // the inversion refuses that answer
+        assert!(sheet
+            .invert_point_near_singularity(&k, test, &domain, guess, 4e-12)
+            .is_err());
+        Ok(())
+    }
+
     /// The Bezier surface over `[0, 1]^2` with control net `net` (`net[i][j]`: u index
     /// `i`, v index `j`), with out-of-bounds evaluation on, as `CoverCoincidentSurface`
     /// evaluates it.

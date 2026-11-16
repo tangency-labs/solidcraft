@@ -91,7 +91,9 @@
 //!   local maximum of the alignment on the closed interval, checked at the answer
 //!   with the solve's own `F` and `F'`: an end where the alignment grows outward, a
 //!   stationary point with curvature not positive (polished by one Newton step), or a
-//!   knot where the one-sided slopes change from `+` to `-` (a kink). A maximum less
+//!   knot where the one-sided slopes change from `+` to `-` (a kink); on a direction
+//!   closed across the seam an end counts only at a crease, otherwise the solve
+//!   restarts at the other end. A maximum less
 //!   aligned than the best sample is not the largest: then the best sample's solve,
 //!   and the end where the best sample is an end sample, are tried too, and the most
 //!   aligned maximum is kept. Upstream accepts any answer the solve reports found (a
@@ -1093,7 +1095,8 @@ impl Surface {
     /// the near-equal tie-break compares those parameters with the input's, and the
     /// Newton solve starts at the chosen guess. An answer has converged only where it is
     /// a local maximum of the alignment on the closed interval (an end where the
-    /// alignment grows outward, a stationary point whose curvature is not positive, or
+    /// alignment grows outward, unless the direction is closed across the seam and the
+    /// alignment does not also grow toward it at the other end, a stationary point whose curvature is not positive, or
     /// a knot where the slope changes from `+` to `-`); of the maxima found the most
     /// aligned is kept when the first is less aligned than the best sample; otherwise
     /// the best sample is returned, unconverged. Upstream has no input guess,
@@ -1272,10 +1275,17 @@ impl Surface {
         let slope = |t: f64| -> Result<Option<(f64, f64)>> {
             Ok(ignored(efo.evaluate(t))?.map(|(f, f_prime, _)| (f, f_prime)))
         };
+        // WR-57: where the surface is closed in the singular direction the interval's
+        // ends meet at the seam, so an end where `A` grows outward is not a maximum:
+        // `A` keeps growing past the seam, from the other end. (The continuity is
+        // asked for so that `IsClosed` also runs its test for short, large-radius
+        // iso-curves, which are not closed.)
+        let closed =
+            ignored(self.is_closed(k, &domain, singular_dir, None, true))?.is_some_and(|(c, _)| c);
+        let grows_outward =
+            |t: f64, f: f64| (t <= s_ivl.min() && f < 0.0) || (t >= s_ivl.max() && f > 0.0);
         let is_local_max = |t: f64, f: f64, f_prime: f64| -> bool {
-            (t <= s_ivl.min() && f < 0.0)
-                || (t >= s_ivl.max() && f > 0.0)
-                || (f.abs() < tol && f_prime <= scaled_zero())
+            (!closed && grows_outward(t, f)) || (f.abs() < tol && f_prime <= scaled_zero())
         };
         // the interior knots in the singular direction: where `A'` may jump (a kink)
         let knots: Vec<f64> = ignored(self.knots_with_nurb(k, singular_dir, Some(&s_ivl)))?
@@ -1287,7 +1297,7 @@ impl Surface {
         let side_slope = |s: f64, side: Side| -> Result<Option<f64>> {
             ignored(alignment_slope(k, self, uv, s_dir, singular_dir, s, side))
         };
-        let local_max = |t: f64| -> Result<Option<f64>> {
+        let interior_max = |t: f64| -> Result<Option<f64>> {
             let Some((f, f_prime)) = slope(t)? else {
                 return Ok(None);
             };
@@ -1322,6 +1332,43 @@ impl Surface {
                 }
             }
             Ok(Some(t))
+        };
+        // WR-57: on a closed direction an answer at an end where `A` grows outward
+        // continues across the seam: the seam is a maximum where `A` also grows toward
+        // it at the other end (a crease), otherwise the solve restarts at the other
+        // end and its answer is checked as any other
+        let local_max = |t: f64| -> Result<Option<f64>> {
+            if closed {
+                if let Some((f, _)) = slope(t)? {
+                    if grows_outward(t, f) {
+                        let other = if t <= s_ivl.min() {
+                            s_ivl.max()
+                        } else {
+                            s_ivl.min()
+                        };
+                        if let Some((of, _)) = slope(other)? {
+                            if grows_outward(other, of) {
+                                return Ok(Some(t));
+                            }
+                        }
+                        let restart = singular_param_solve(
+                            k,
+                            self,
+                            uv,
+                            s_dir,
+                            singular_dir,
+                            &s_ivl,
+                            other,
+                            tol,
+                        );
+                        return match ignored(restart)? {
+                            Some((_, t2)) => interior_max(t2),
+                            None => Ok(None),
+                        };
+                    }
+                }
+            }
+            interior_max(t)
         };
 
         // solve with NewtonRaphson iteration starting at the near best guess, then
