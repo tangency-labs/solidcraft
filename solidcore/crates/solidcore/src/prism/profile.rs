@@ -141,6 +141,129 @@ impl Region2 {
             bound: bound + gamma(self.holes.len() + 2) * size,
         })
     }
+
+    /// Its extent along the unit direction `d`: the least and the greatest `d · p` over the
+    /// points `p` of its outer loop (its holes lie inside it). Lines and arcs exactly; conics
+    /// and Béziers to within `eps`, by halving their spans until the control points'
+    /// projections bound the extreme that tightly.
+    ///
+    /// `None` for a non-finite or non-unit `d`, an `eps` that is not finite and positive, an
+    /// empty or malformed loop, or a span that will not tighten within [`MAX_EXTENT_PIECES`].
+    #[must_use]
+    pub fn extent_along(&self, d: Vec2, eps: f64) -> Option<(f64, f64)> {
+        if !(finite2(d) && (d.length() - 1.0).abs() <= 8.0 * f64::EPSILON) {
+            return None;
+        }
+        if !(eps.is_finite() && eps > 0.0) || self.outer.segs.is_empty() {
+            return None;
+        }
+        let mut lo = f64::INFINITY;
+        let mut hi = f64::NEG_INFINITY;
+        for seg in &self.outer.segs {
+            hi = hi.max(seg_max_along(seg, d, eps)?);
+            lo = lo.min(-seg_max_along(seg, -d, eps)?);
+        }
+        (lo.is_finite() && hi.is_finite()).then_some((lo, hi))
+    }
+}
+
+/// The most pieces [`Region2::extent_along`] halves one span into before it gives up.
+pub const MAX_EXTENT_PIECES: usize = 4096;
+
+/// The greatest `d · p` over the points `p` of `seg` (`d` a unit vector).
+fn seg_max_along(seg: &Seg2, d: Vec2, eps: f64) -> Option<f64> {
+    match *seg {
+        Seg2::Line { a, b } => (finite2(a) && finite2(b)).then(|| d.dot(a).max(d.dot(b))),
+        Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } => {
+            if !(finite2(center)
+                && radius.is_finite()
+                && radius > 0.0
+                && start.is_finite()
+                && sweep.is_finite())
+            {
+                return None;
+            }
+            let ends = d.dot(seg.start()).max(d.dot(seg.end()));
+            // The circle's point furthest along `d` is at angle `atan2(d)`; the arc holds it
+            // when that angle lies within its sweep.
+            let toward = d.y.atan2(d.x);
+            let into = ((toward - start) * sweep.signum()).rem_euclid(TAU);
+            Some(if into <= sweep.abs() {
+                d.dot(center) + radius
+            } else {
+                ends
+            })
+        }
+        _ => {
+            let mut best = f64::NEG_INFINITY;
+            for span in seg.spans()? {
+                best = best.max(span_max_along(span, d, eps)?);
+            }
+            Some(best)
+        }
+    }
+}
+
+/// The greatest `d · p` over a homogeneous Bézier span with positive weights, within `eps`: the
+/// span lies in its control points' hull, so their greatest projection bounds it above and its
+/// ends' bound it below; halve until the two meet.
+fn span_max_along(span: Vec<H2>, d: Vec2, eps: f64) -> Option<f64> {
+    let along = |q: &H2| d.dot(point_of(*q));
+    let ends = |s: &[H2]| Some(along(s.first()?).max(along(s.last()?)));
+    let hull = |s: &[H2]| s.iter().map(along).fold(f64::NEG_INFINITY, f64::max);
+    if span.len() < 2
+        || !span
+            .iter()
+            .all(|q| q[2] > 0.0 && q.iter().all(|c| c.is_finite()))
+    {
+        return None;
+    }
+    let mut best = ends(&span)?;
+    let mut stack = vec![span];
+    let mut pieces = 0usize;
+    while let Some(s) = stack.pop() {
+        pieces += 1;
+        if pieces > MAX_EXTENT_PIECES {
+            return None;
+        }
+        best = best.max(ends(&s)?);
+        if hull(&s) <= best + eps {
+            continue;
+        }
+        let (left, right) = halves(&s);
+        stack.push(left);
+        stack.push(right);
+    }
+    best.is_finite().then_some(best)
+}
+
+/// A homogeneous Bézier span split at its middle (de Casteljau): the two halves' control points.
+fn halves(span: &[H2]) -> (Vec<H2>, Vec<H2>) {
+    let mut left = Vec::with_capacity(span.len());
+    let mut right = Vec::with_capacity(span.len());
+    let mut q = span.to_vec();
+    while let (Some(&first), Some(&last)) = (q.first(), q.last()) {
+        left.push(first);
+        right.push(last);
+        q = q
+            .iter()
+            .zip(q.iter().skip(1))
+            .map(|(a, b)| {
+                [
+                    (a[0] + b[0]) * 0.5,
+                    (a[1] + b[1]) * 0.5,
+                    (a[2] + b[2]) * 0.5,
+                ]
+            })
+            .collect();
+    }
+    right.reverse();
+    (left, right)
 }
 
 /// A homogeneous control point `[x w, y w, w]`.

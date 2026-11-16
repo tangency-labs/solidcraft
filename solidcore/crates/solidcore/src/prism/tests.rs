@@ -907,3 +907,116 @@ fn a_tapered_flange_changes_by_half_its_length_times_the_slope_tangent() {
     // A non-finite input gives a non-finite answer, never a panic.
     assert!(tapered_flange_ends(f64::NAN, 1.0, 5.0).0.is_nan());
 }
+
+#[test]
+fn a_region_reaches_along_a_direction_as_far_as_its_outer_loop() {
+    let x = p(1.0, 0.0);
+    let y = p(0.0, 1.0);
+    let diag = p(FRAC_1_SQRT_2, FRAC_1_SQRT_2);
+    // A rectangle: its sides; a hole changes nothing.
+    let mut r = rectangle(p(-2.0, 1.0), p(4.0, 7.0));
+    assert_eq!(r.extent_along(x, 1e-9), Some((-2.0, 4.0)));
+    assert_eq!(r.extent_along(y, 1e-9), Some((1.0, 7.0)));
+    r.holes
+        .push(polygon(&[p(0.0, 2.0), p(0.0, 3.0), p(1.0, 3.0)]));
+    assert_eq!(r.extent_along(x, 1e-9), Some((-2.0, 4.0)));
+    let (lo, hi) = r.extent_along(diag, 1e-9).unwrap();
+    assert!(
+        (lo - (-1.0) * FRAC_1_SQRT_2).abs() < 1e-12 && (hi - 11.0 * FRAC_1_SQRT_2).abs() < 1e-12
+    );
+    // A half disc of radius 2 about the origin, the arc on top: up to 2, across to +-2; the arc
+    // runs past +-x only at its ends, so along x it is exact too.
+    let half = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line {
+                    a: p(-2.0, 0.0),
+                    b: p(2.0, 0.0),
+                },
+                Seg2::Arc {
+                    center: p(0.0, 0.0),
+                    radius: 2.0,
+                    start: 0.0,
+                    sweep: PI,
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    assert_eq!(half.extent_along(y, 1e-9), Some((0.0, 2.0)));
+    let (lo, hi) = half.extent_along(x, 1e-9).unwrap();
+    assert!(
+        (lo + 2.0).abs() < 1e-12 && (hi - 2.0).abs() < 1e-12,
+        "{lo} {hi}"
+    );
+    // The same arc run clockwise from pi back to 0 holds the same top.
+    let cw = Seg2::Arc {
+        center: p(0.0, 0.0),
+        radius: 2.0,
+        start: PI,
+        sweep: -PI,
+    };
+    let back = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                cw,
+                Seg2::Line {
+                    a: p(2.0, 0.0),
+                    b: p(-2.0, 0.0),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    assert_eq!(back.extent_along(y, 1e-9), Some((0.0, 2.0)));
+    // A cubic bulge from (0,0) to (3,0) with inner points at height 4: its top is 3 (at t = 1/2),
+    // under its hull's 4, found within eps.
+    let bulge = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Cubic {
+                    p0: p(0.0, 0.0),
+                    p1: p(1.0, 4.0),
+                    p2: p(2.0, 4.0),
+                    p3: p(3.0, 0.0),
+                },
+                Seg2::Line {
+                    a: p(3.0, 0.0),
+                    b: p(0.0, 0.0),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    let (lo, hi) = bulge.extent_along(y, 1e-9).unwrap();
+    assert!(lo == 0.0 && (hi - 3.0).abs() <= 1e-9, "{lo} {hi}");
+    // A conic quarter circle (apex weight cos 45) reaches its radius along the diagonal.
+    let quarter = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Conic {
+                    a: p(1.0, 0.0),
+                    apex: p(1.0, 1.0),
+                    b: p(0.0, 1.0),
+                    w: FRAC_1_SQRT_2,
+                },
+                Seg2::Line {
+                    a: p(0.0, 1.0),
+                    b: p(0.0, 0.0),
+                },
+                Seg2::Line {
+                    a: p(0.0, 0.0),
+                    b: p(1.0, 0.0),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    let (_, hi) = quarter.extent_along(diag, 1e-9).unwrap();
+    assert!((hi - 1.0).abs() <= 1e-9, "{hi}");
+    // Refusals: a direction that is not a unit vector, a bad eps, no outer loop.
+    assert_eq!(r.extent_along(p(2.0, 0.0), 1e-9), None);
+    assert_eq!(r.extent_along(p(f64::NAN, 0.0), 1e-9), None);
+    assert_eq!(r.extent_along(x, 0.0), None);
+    assert_eq!(Region2::default().extent_along(x, 1e-9), None);
+}
