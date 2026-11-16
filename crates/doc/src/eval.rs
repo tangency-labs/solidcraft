@@ -10211,6 +10211,9 @@ fn eval_feature_kind(
             Ok(())
         }
         FeatureKind::Hole { thread, thread_depth, thread_class, diameter, hand, modeled, ease_out, depth, to, .. } => {
+            if st.bodies.is_empty() {
+                return Err(empty_boolean_targets(doc, st, f, &[], f.participants.is_empty()));
+            }
             let thread_depth = thread_depth.as_ref().map(|d| val(vals, d, Kind::Length)).transpose()?;
             if thread_depth.is_some() && thread.is_none() {
                 return Err(DocError::Invalid("thread depth requires a tapped hole".into()));
