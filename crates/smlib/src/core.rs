@@ -157,6 +157,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.volume_lift_third_derivative_terms = true;
     f.volume_representational_end_continuities = true;
     f.offset_open_edge_second_trim_point = true;
+    f.ssi_split_curves_at_singular_points = true;
     f.surface_parallel_to_vector_checks = true;
     f.geometric_g2_continuity = true;
     f.degen_param_tiebreak_uses_actual_param = true;
