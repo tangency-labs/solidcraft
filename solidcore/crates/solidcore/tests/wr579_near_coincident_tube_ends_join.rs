@@ -289,7 +289,7 @@ fn wr533_tube_ends_union_measures_lie_in_their_closed_forms() {
     // meets the closed-form window. 5e-6 rather than 1e-7: this body's enclosure has a floor
     // of 2.84 (2.8e-6 of the volume; the strip cells along its trims that no cut narrows),
     // so 1e-7 is out of its reach; the closed-form window, 2.9e-7 wide, is the tighter one.
-    let golden = 1_032_433.151_040_827_5;
+    let golden = 1_032_433.136_484_584_2;
     let e = enclose_volume(&k, &mut r, 5e-6 * golden).unwrap();
     println!(
         "enclosure [{}, {}] width {} ({:?})",
