@@ -754,7 +754,7 @@ fn read_and_shown(s: &mut Session, dimensions: &[Value]) -> (Vec<Option<String>>
 }
 
 /// The M2 checkpoint (#4894 W23): the milestone plate's drawing run in order by commands alone.
-/// Its steps and checks: `docs/drawing-foundations.md#m2-checkpoint-w23`.
+/// Its steps and checks: `docs/drawing-delivery.md#m2-checkpoint-w23`.
 #[test]
 fn the_milestone_plate_runs_the_m2_checkpoint_by_commands_alone() {
     let (mut s, views, made) = milestone_plate();
