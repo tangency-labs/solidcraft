@@ -137,7 +137,7 @@ pub struct SheetSceneBalloon {
     pub balloon: String,
     pub view: String,
     pub status: &'static str,
-    /// `ok`, `no_list`, `not_found`, `reference` or `no_row`.
+    /// `ok`, `no_list`, `not_found`, `reference`, `no_row` or `unread` (its list's design can't be read).
     pub row_status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub item: Option<String>,

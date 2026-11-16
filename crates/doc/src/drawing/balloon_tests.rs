@@ -279,6 +279,41 @@ fn a_list_counts_only_the_balloons_that_read_it() {
     d.validate().unwrap();
 }
 
+/// Each source's design is asked for once, and a list whose design can't be read numbers none of
+/// its balloons, saying why; a list of another source still reads its own design.
+#[test]
+fn a_list_whose_design_cant_be_read_numbers_none() {
+    let (mut d, [one, two]) = ballooned();
+    let sheet = d.sheets[0].id;
+    let (read, unread) = (d.sources[0].id, 1 << 45);
+    let lists = [1 << 41, 1 << 42];
+    for (balloon, list) in [one, two].into_iter().zip(lists) {
+        add_list(&mut d, sheet, list);
+        let at = d.balloons.index_of(balloon).unwrap();
+        Arc::make_mut(&mut d.balloons[at]).parts_list = Some(list);
+    }
+    d.sources.push(Source { id: unread, path: Some("plate.solidcraft".into()) });
+    d.sources.sort_by_key(|source| source.id);
+    let at = d.tables.index_of(lists[1]).unwrap();
+    if let Kind::PartsList(list) = &mut Arc::make_mut(&mut d.tables[at]).kind {
+        list.of.source = unread;
+    }
+    d.validate().unwrap();
+
+    let doc = Document::default();
+    let mut asked = Vec::new();
+    let balloons: Vec<&Balloon> = [one, two, one].iter().map(|id| d.balloons.by_id(*id).unwrap()).collect();
+    let rows = balloon_rows(&d, &balloons, |source| {
+        asked.push(source);
+        if source == read { Ok((&doc, Arc::new(ModelState::default()))) } else { Err("it can't be read".into()) }
+    });
+    assert_eq!(asked, [unread.min(read), unread.max(read)], "once per source, in id order");
+    let unread_row = RowRead::Unread { list: lists[1], why: "it can't be read".into() };
+    assert!(matches!(rows[0], RowRead::Unlisted { list, .. } if list == lists[0]), "read from its own design: {rows:?}");
+    assert_eq!((&rows[1], &rows[2]), (&unread_row, &rows[0]), "{rows:?}");
+    assert_eq!((rows[1].list(), rows[1].item()), (Some(lists[1]), None));
+}
+
 /// A link names one of the drawing's parts lists.
 #[test]
 fn a_balloons_link_is_to_a_parts_list() {

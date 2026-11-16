@@ -1308,6 +1308,12 @@ impl Session {
         }
     }
 
+    /// [`Self::drawn`] as doc's readers of a source's design take it: that design and its model
+    /// now, or why it can't be read, in words.
+    pub(crate) fn source_design(&self, d: &solidcraft_doc::drawing::Drawing, source: u64) -> solidcraft_doc::drawing::balloon::Design<'_> {
+        self.drawn(d, source).map(|on| (&*on.doc, on.model.state())).map_err(|why| why.to_string())
+    }
+
     /// Whether `object` can be selected in `drawing`: a view, dimension or balloon of the drawing open.
     pub(crate) fn selectable_in_drawing(&self, drawing: u64, object: u64) -> bool {
         self.open_drawing == Some(drawing) && self.doc.drawing(drawing).is_some_and(|d| d.has_object(object))
