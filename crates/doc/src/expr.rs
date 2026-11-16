@@ -335,6 +335,15 @@ fn unit(name: &str) -> Option<Value> {
     })
 }
 
+const INCH_MM: f64 = 25.4;
+const FOOT_MM: f64 = 304.8;
+
+/// Whether `id` names a length unit of this size in millimetres, whatever its spelling (`in` and
+/// `inch`).
+fn is_length_unit(id: &str, mm: f64) -> bool {
+    unit(id).is_some_and(|u| u.len == 1 && u.ang == 0 && u.v == mm)
+}
+
 fn is_constant(id: &str) -> bool {
     CONSTANTS.contains(&id)
 }
@@ -774,8 +783,10 @@ impl Parser<'_> {
                 base = mul(base, d, true)?;
             }
             if self.unit_at(self.pos) {
+                let feet = matches!(self.peek(), Some(Tok::Id(id)) if is_length_unit(id, FOOT_MM));
                 let u = self.power(false)?;
-                return mul(base, u, false);
+                let whole = mul(base, u, false)?;
+                return if feet { self.with_inches(whole) } else { Ok(whole) };
             }
         }
         if let Some(Tok::Op('^')) = self.peek() {
@@ -787,6 +798,25 @@ impl Parser<'_> {
             return pow(base, e);
         }
         Ok(base)
+    }
+    /// Feet written with inches after them (`5' 3"`, `5 ft 3 1/2 in`) are one length, as sizes are
+    /// said: 5 ft and 3 in, not their product. Anything else after the feet is left to the caller.
+    fn with_inches(&mut self, feet: Value) -> Result<Value, DocError> {
+        let start = self.pos;
+        if feet.len != 1 || feet.ang != 0 || !matches!(self.toks.get(start), Some(Tok::Num(_))) {
+            return Ok(feet);
+        }
+        let fraction = matches!((self.toks.get(start + 1), self.toks.get(start + 2)), (Some(Tok::Op('/')), Some(Tok::Num(_))));
+        if !matches!(self.toks.get(start + if fraction { 3 } else { 1 }), Some(Tok::Id(id)) if is_length_unit(id, INCH_MM)) {
+            return Ok(feet);
+        }
+        let inches = self.power(true)?;
+        if inches.len != 1 || inches.ang != 0 {
+            // `3 in^2` and the like: not inches to add.
+            self.pos = start;
+            return Ok(feet);
+        }
+        Ok(Value { v: feet.v + inches.v, ..feet })
     }
     /// Whether the operand starting at token `i` is divided by: a `/` before it, past any signs.
     fn after_division(&self, i: usize) -> bool {
@@ -1807,5 +1837,36 @@ mod tests {
         ] {
             assert!((rem(e) - want).abs() < 1e-9 * want.abs().max(1.0), "{e} gave {}", rem(e));
         }
+    }
+
+    #[test]
+    fn feet_and_inches_written_together_are_one_length() {
+        // `5'3"` is 5 ft 3 in, as such sizes are written; it used to multiply the two lengths.
+        let inch = 25.4;
+        for (s, inches) in [
+            ("5'3\"", 63.0),
+            ("5' 3\"", 63.0),
+            ("5 ft 3 in", 63.0),
+            ("5 ft 3 inch", 63.0),
+            ("5 ft 3 1/2 inch", 63.5),
+            ("5 ft 1/2 inch", 60.5),
+            ("5′3″", 63.0),
+            ("5' 3 1/2\"", 63.5),
+            ("5' 1/2\"", 60.5),
+            ("-5'3\"", -63.0),
+            ("2 * 5'3\"", 126.0),
+            ("5'3\" + 1\"", 64.0),
+            ("1 1/2' 6\"", 24.0),
+        ] {
+            let v = ev(s, Kind::Length).unwrap_or_else(|e| panic!("{s}: {e}"));
+            assert!((v - inches * inch).abs() < 1e-9, "{s} is {v}");
+        }
+        assert!((ev("5'3\" / 1\"", Kind::Unitless).unwrap() - 63.0).abs() < 1e-9);
+        // Unchanged: a sign between them subtracts, a bare number or another unit after the feet
+        // multiplies, and inches with a power are an area.
+        assert!((ev("5' - 3\"", Kind::Length).unwrap() - 57.0 * inch).abs() < 1e-9);
+        assert_eq!(ev("5' 3", Kind::Length).unwrap(), 5.0 * 304.8 * 3.0);
+        assert_eq!(ev("5' 3 mm", Kind::Length).ok(), None);
+        assert_eq!(eval_with("5' 3\"^2", &|_| Err(DocError::Expr(String::new()))).unwrap().len, 3);
     }
 }

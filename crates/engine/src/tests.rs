@@ -1313,6 +1313,29 @@ fn unknown_commands_suggest_the_closest_ids() {
     assert_eq!(msg(&long), format!("unknown command `{long}`"));
 }
 
+/// Common verbs recover the command in the same namespace, without executing an alias.
+#[test]
+fn unknown_commands_suggest_equivalent_verbs_in_the_same_namespace() {
+    for (id, candidate) in [("note.create", "notes.add"), ("render.lights.create", "render.cameras.add"), ("create", "add"), (".create", ".add")] {
+        assert!(!crate::cmd::command_verb_alternative(id, candidate), "{id}: {candidate}");
+    }
+    let mut s = Session::default();
+    for (id, wanted) in [
+        ("note.create", "note.add"),
+        ("NOTE.CREATE", "note.add"),
+        ("note.new", "note.add"),
+        ("note.remove", "note.delete"),
+        ("parameters.create", "parameters.add"),
+        ("render.lights.create", "render.lights.add"),
+        ("render.lights.delete", "render.lights.remove"),
+    ] {
+        let error = s.execute(id, &json!({})).unwrap_err();
+        assert!(matches!(error, crate::EngineError::UnknownCommand(_)), "{id}: {error}");
+        let message = error.to_string();
+        assert!(message.starts_with(&format!("unknown command `{id}` (did you mean `{wanted}`")), "{message}");
+    }
+}
+
 #[test]
 fn sample_design_builds() {
     let mut s = Session::default();

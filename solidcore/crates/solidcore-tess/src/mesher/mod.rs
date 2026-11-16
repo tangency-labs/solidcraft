@@ -187,9 +187,10 @@ pub(crate) struct SplitSide {
 const MAX_UNTANGLE: u32 = 16;
 
 /// An error's own words, without its kind's prefix, for a message that names where it happened.
-fn detail(e: &TessError) -> &str {
+fn detail(e: &TessError) -> std::borrow::Cow<'_, str> {
     match e {
-        TessError::Invalid(m) | TessError::Failed(m) | TessError::Internal(m) => m,
+        TessError::Invalid(m) | TessError::Failed(m) | TessError::Internal(m) => std::borrow::Cow::Borrowed(m),
+        TessError::TooManyVertices { .. } => std::borrow::Cow::Owned(e.to_string()),
     }
 }
 

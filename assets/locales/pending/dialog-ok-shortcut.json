@@ -1,0 +1,30 @@
+{
+  "en": {
+    "cmd.ui.dialog_ok": "Dialog OK",
+    "ui.dialog_ok_none": "No dialog with an OK button is open."
+  },
+  "es": {
+    "cmd.ui.dialog_ok": "Aceptar diálogo",
+    "ui.dialog_ok_none": "No hay ningún diálogo abierto con botón Aceptar."
+  },
+  "ar": {
+    "cmd.ui.dialog_ok": "موافق في مربع الحوار",
+    "ui.dialog_ok_none": "لا يوجد مربع حوار مفتوح فيه زر موافق."
+  },
+  "he": {
+    "cmd.ui.dialog_ok": "אישור בתיבת דו-שיח",
+    "ui.dialog_ok_none": "אין תיבת דו-שיח פתוחה עם לחצן אישור."
+  },
+  "ja": {
+    "cmd.ui.dialog_ok": "ダイアログの OK",
+    "ui.dialog_ok_none": "OK ボタンのあるダイアログが開いていません。"
+  },
+  "vi": {
+    "cmd.ui.dialog_ok": "OK trong hộp thoại",
+    "ui.dialog_ok_none": "Không có hộp thoại nào có nút OK đang mở."
+  },
+  "zh": {
+    "cmd.ui.dialog_ok": "对话框确定",
+    "ui.dialog_ok_none": "没有打开带“确定”按钮的对话框。"
+  }
+}

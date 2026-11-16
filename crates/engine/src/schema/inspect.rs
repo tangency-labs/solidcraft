@@ -937,6 +937,15 @@ pub struct MeasuredItems {
     /// Two items: the closest distance, as `distance_mm`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min: Option<f64>,
+    /// Two items: `false` when the closest distance between edges, faces or vertices of a solid
+    /// or surface body is approximate, measured on the display mesh because the kernel's exact
+    /// solve gave no answer for them (`closest_note` says why). Absent where it is exact, and for
+    /// mesh bodies, whose triangles are their geometry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closest_exact: Option<bool>,
+    /// Two items: why the closest distance is approximate (`closest_exact` false).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closest_note: Option<String>,
     /// Two items: the farthest distance (mm).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max: Option<f64>,
