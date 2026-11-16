@@ -38,6 +38,15 @@ One card per agent, with an "Add agent..." and a "Refresh" button at the end.
 | Dock the chat: Left / Right / Own window | Segmented | `Prefs.agent_chat_side` (`"left"`, `"right"`) and `Prefs.agent_chat_popped` (Own window) | Right | none | none | Two fields behind one control. |
 | Changes per message | Unlimited / Limited dropdown; number field when Limited | `Prefs.agent_chat_turn_limit` (aria "Limit") | `DEFAULT_TURN_LIMIT` = 0 (Unlimited) | none | none | Every value 1–200 remains reachable. Switching from Unlimited to Limited seeds 24; rendering never changes a value. The existing saved-value migration remains unchanged. |
 
+## Dictation
+
+| Label | Control | Edits | Default | Hover | Figure | Notes |
+|---|---|---|---|---|---|---|
+| Base URL | Text field, hint "e.g. http://127.0.0.1:8178/v1" | `Prefs.dictation_url` | empty (no microphone button) | none | none | Marked invalid when it is not an `http(s)://` address. |
+| Model | Text field | `Prefs.dictation_model` | `whisper-1` | none | none | |
+| Language | Text field, hint "automatic" | `Prefs.dictation_language` | empty (the service detects it) | two-letter code, empty detects | none | |
+| API key | Password field, Remove key button when one is stored | system keychain entry `dictation-endpoint`; `Prefs.dictation_key` says one is stored | none | none | none | Stored when the field loses focus. |
+
 ## Connecting
 
 | Label | Control | Edits | Default | Hover | Figure | Notes |

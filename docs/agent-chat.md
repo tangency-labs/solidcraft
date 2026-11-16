@@ -123,6 +123,31 @@ allow and Allow once. The composer’s permission menu uses the same Ask / Edits
 Preferences, for the selected agent, and shows the actual changes used against the configured
 turn limit. Queue, Send now and Stop keep their existing behavior.
 
+## Dictation
+
+You can dictate a message instead of typing it. The **microphone** button beside **Send**
+records what you say. Press it again to stop: the recording goes to a speech-to-text service,
+and the text it answers lands in the message box, after what you had typed. Nothing is sent
+until you send it, so you can read and correct the text first. **Ctrl+Shift+Space**
+(Cmd+Shift+Space on a Mac) does the same while the pointer or the keyboard is in the chat.
+While the text is on its way the button shows a spinner. Closing the panel while it records
+stops the recording and sends nothing.
+
+The button shows once a service is set under Preferences → AI → **Dictation**:
+
+- **Base URL**: a service that offers the OpenAI-compatible speech-to-text API
+  (`/audio/transcriptions`). A server on this computer keeps the audio here, for example
+  [whisper.cpp](https://github.com/ggml-org/whisper.cpp)'s `whisper-server`
+  (`--inference-path /v1/audio/transcriptions`, then `http://127.0.0.1:8080/v1`), Speaches or
+  LocalAI. A hosted one, such as OpenAI's `https://api.openai.com/v1`, needs a key.
+- **Model**: `whisper-1` by default, which OpenAI takes; local servers use the model they loaded.
+- **Language**: the language you speak, as a two-letter code (`en`, `it`, `de`). Empty lets the
+  service detect it.
+- **API key**: kept in the system keychain, and sent only over HTTPS or to this computer.
+
+Leave the address empty to hide the button. Dictation records the system's default microphone;
+it is in the desktop app only. A recording is at most ten minutes long.
+
 ## Files and pictures
 
 A message can carry up to eight files, to show the agent what you mean: a concept picture, a
