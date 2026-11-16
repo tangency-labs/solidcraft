@@ -59,10 +59,16 @@ pub(super) fn check(ir: &CadIr, records: &ImportRecords, origins: &[Origin], imp
     let definitions: HashMap<&str, &cadmpeg_ir::products::ProductDefinition> =
         ir.model.product_definitions.iter().map(|d| (d.id.as_str(), d)).collect();
     let hidden: HashSet<&str> = ir.model.bodies.iter().filter(|b| b.visible == Some(false)).map(|b| b.id.as_str()).collect();
+    // Definitions that place parts of their own (assemblies): the file means their figures as
+    // totals over those parts where they are placed, which the neutral model does not compose, so
+    // they are not compared (as cadmpeg's own measuring leaves them), rather than compared with
+    // the assembly's own bodies alone.
+    let assemblies = assemblies(ir);
     let mut cache: HashMap<usize, Option<Measured>> = HashMap::new();
     let mut warnings = Vec::new();
     for m in stated {
         let (bodies, name): (Vec<&str>, String) = match &m.target {
+            DeclaredTarget::Definition { definition } if assemblies.contains(definition.as_str()) => continue,
             DeclaredTarget::Definition { definition } => match definitions.get(definition.as_str()) {
                 Some(d) => (
                     d.bodies.iter().map(|b| b.as_str()).filter(|b| !hidden.contains(b)).collect(),
@@ -142,6 +148,24 @@ pub(super) fn check(ir: &CadIr, records: &ImportRecords, origins: &[Origin], imp
         warnings.extend(warning);
     }
     warnings
+}
+
+/// The definitions whose occurrences place child occurrences.
+fn assemblies(ir: &CadIr) -> HashSet<&str> {
+    use cadmpeg_ir::products::{OccurrenceParent, PrototypeReference};
+    let by_id: HashMap<&str, &cadmpeg_ir::products::Occurrence> = ir.model.occurrences.iter().map(|o| (o.id.as_str(), o)).collect();
+    ir.model
+        .occurrences
+        .iter()
+        .filter_map(|o| match &o.parent {
+            OccurrenceParent::Occurrence { occurrence } => by_id.get(occurrence.as_str()),
+            OccurrenceParent::Root {} => None,
+        })
+        .filter_map(|parent| match &parent.prototype {
+            PrototypeReference::Local { definition } => Some(definition.as_str()),
+            _ => None,
+        })
+        .collect()
 }
 
 fn quantity_name(q: &DeclaredQuantity) -> &'static str {

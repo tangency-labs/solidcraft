@@ -747,4 +747,14 @@ fn a_placed_parts_centre_is_checked_in_its_own_coordinates() {
     };
     assert_eq!(stating(own), Vec::<String>::new());
     assert_eq!(stating(world).len(), 1, "the world centre is not the part's own");
+    // A figure on the assembly (#13) is a total over its placed parts, which the neutral model does
+    // not compose: it is not compared, rather than against the assembly's own bodies (none).
+    let props = "#300=PROPERTY_DEFINITION('geometric validation property','volume',#13);\n\
+         #301=REPRESENTATION('',(#302),#5);\n\
+         #302=MEASURE_REPRESENTATION_ITEM('volume measure',VOLUME_MEASURE(1.),#304);\n\
+         #304=DERIVED_UNIT((#305));\n#305=DERIVED_UNIT_ELEMENT(#1,3.);\n\
+         #306=PROPERTY_DEFINITION_REPRESENTATION(#300,#301);\n";
+    let at = text.rfind("ENDSEC;").unwrap();
+    let (_, warnings, _) = cadmpeg_step_records(format!("{}{props}{}", &text[..at], &text[at..]).as_bytes(), "cylinder_placed.step").unwrap();
+    assert!(!warnings.iter().any(|w| w.contains("the file states")), "{warnings:?}");
 }
