@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
 use solidcraft_doc::drawing::DEFAULT_DPI;
+use solidcraft_doc::drawing::view::Diagonal;
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_view::ProjectedSide;
 use solidcraft_geom::paper::NoPictures;
@@ -3324,4 +3326,388 @@ fn a_section_view_inspects_copies_and_waits_for_its_cut() {
         "{scene}"
     );
     assert_eq!(state(front)["status"], json!("drawn"), "{scene}");
+}
+
+/// A pictorial view's boundary is the gap past its parent's on both axes, corner to corner: above
+/// right of the 50 x 10 front view at 1:2 (185..235 x 143.5..153.5), the block's isometric view,
+/// 150 / sqrt 2 / 2 = 53.03 wide and 190 / sqrt 6 / 2 = 38.78 high, goes to 255..308.03 x
+/// 173.5..212.28, saved at that box's centre, at its parent's scale, looking from the corner
+/// between the top and right views (`iso_front_right`) and following its parent. Below left it
+/// looks from below in third angle, and is the same named view in first. A point given is kept; a
+/// place lined up is refused.
+#[test]
+fn a_pictorial_view_sits_a_gap_past_its_parents_corner() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let (wide, high) = (150.0 / 2f64.sqrt() / 2.0, 190.0 / 6f64.sqrt() / 2.0);
+    let (iso, iso_id) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "above_right"}));
+    assert_box(&iso, [255.0, 173.5], [255.0 + wide, 173.5 + high]);
+    assert_eq!(iso["scale"]["text"], "1:2");
+    let view = saved(&s, iso_id);
+    assert_eq!(view.kind, ViewKind::Pictorial { parent: front, diagonal: Diagonal::AboveRight });
+    let ViewPlace::At([x, y]) = view.place else { panic!("placed at a point: {:?}", view.place) };
+    assert!((Vec2::new(x, y) - Vec2::new(255.0 + wide / 2.0, 173.5 + high / 2.0)).len() < EPS, "{x} {y}");
+    let inspected = inspect_view(&mut s, iso_id);
+    assert_eq!(
+        (&inspected["kind"], &inspected["side"], &inspected["parent"]),
+        (&json!("pictorial"), &json!("above_right"), &json!(ids::encode(front)))
+    );
+    assert_eq!(inspected["direction"]["named"], "iso_front_right");
+    assert_eq!((&inspected["settings"]["scale"]["from"], &inspected["linked"]), (&json!("parent"), &json!(true)));
+
+    let (below, below_id) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "below_left"}));
+    assert_box(&below, [185.0 - 20.0 - wide, 143.5 - 20.0 - high], [165.0, 123.5]);
+    assert_eq!(inspect_view(&mut s, below_id)["direction"].get("named"), None, "third angle: from below");
+    set_projection(&mut s, Projection::First);
+    assert_eq!(inspect_view(&mut s, below_id)["direction"]["named"], "iso_front_right", "first angle");
+    set_projection(&mut s, Projection::Third);
+
+    let (_, apart) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "above_left", "place": {"at": [300.0, 60.0]}}));
+    assert_eq!(saved(&s, apart).place, ViewPlace::At([300.0, 60.0]));
+    let lined = create_refused(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "above_right", "place": {"aligned": 300.0}}));
+    assert!(lined.contains("a pictorial view is placed at a point"), "{lined}");
+}
+
+/// An isometric view of a 100 x 60 x 20 block at 1:1 is its outline at the isometric ratio:
+/// 160 / sqrt 2 = 113.14 wide and 200 / sqrt 6 = 81.65 high.
+#[test]
+fn an_isometric_view_of_a_100_60_20_block_is_its_isometric_outline() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 20, "body_name": "Block"}));
+    run(&mut s, "drawing.create", json!({}));
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:1", "position_mm": [100.0, 100.0]}));
+    let (iso, _) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "above_right"}));
+    let (size, _) = boundary(&iso);
+    assert!((size.x - 160.0 / 2f64.sqrt()).abs() < EPS && (size.y - 200.0 / 6f64.sqrt()).abs() < EPS, "{size:?}");
+}
+
+/// `drawing.view.projection_for` names the view a point gives, under the drawing's projection: in
+/// third angle 80 mm above the front view's centre the top view, 80 mm right the right view; in
+/// first angle 80 mm below gives the top view and 80 mm left the right view; on a diagonal an
+/// isometric view, not lined up, at the parent's scale. On the centre, or from a pictorial parent,
+/// none, with why. It reads no model, saves nothing, and agrees with what `drawing.view.projected`
+/// makes for each of the eight.
+#[test]
+fn the_view_beside_a_point_follows_the_drawings_projection() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let ask = |s: &mut Session, offset: [f64; 2]| {
+        let reply = run(s, PROJECTION_FOR, json!({"parent": ids::encode(front), "offset_mm": offset}));
+        let schema = output_schema_for::<ProjectionForResult>();
+        assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+        reply
+    };
+    let (steps, evaluations, record) = (s.undo.len(), s.evaluations, s.drawing("test").unwrap().clone());
+    let above = ask(&mut s, [0.0, 80.0]);
+    assert_eq!(
+        (&above["kind"], &above["side"], &above["lined_up"], &above["direction"]["named"], &above["scale"]["text"], &above["projection"]),
+        (&json!("orthographic"), &json!("above"), &json!(true), &json!("top"), &json!("1:2"), &json!("third"))
+    );
+    let right = ask(&mut s, [80.0, 0.0]);
+    assert_eq!((&right["side"], &right["direction"]["named"]), (&json!("right"), &json!("right")));
+    let iso = ask(&mut s, [80.0, 80.0]);
+    assert_eq!(
+        (&iso["kind"], &iso["side"], &iso["lined_up"], &iso["direction"]["named"], &iso["scale"]["text"]),
+        (&json!("pictorial"), &json!("above_right"), &json!(false), &json!("iso_front_right"), &json!("1:2"))
+    );
+    let centre = ask(&mut s, [0.0, 0.0]);
+    assert_eq!((&centre["kind"], centre.get("side"), &centre["why"]), (&json!("none"), None, &json!("on the parent's centre")));
+    assert!(ask(&mut s, [10000.0, -10000.0])["kind"] == "pictorial");
+    assert_eq!((s.undo.len(), s.evaluations, s.drawing("test").unwrap().clone()), (steps, evaluations, record), "reads no model, saves nothing");
+
+    set_projection(&mut s, Projection::First);
+    let below = ask(&mut s, [0.0, -80.0]);
+    assert_eq!((&below["side"], &below["direction"]["named"], &below["projection"]), (&json!("below"), &json!("top"), &json!("first")));
+    assert_eq!(ask(&mut s, [-80.0, 0.0])["direction"]["named"], "right");
+    assert_eq!(ask(&mut s, [-80.0, -80.0])["direction"]["named"], "iso_front_right");
+    set_projection(&mut s, Projection::Third);
+
+    for (offset, side) in [
+        ([80.0, 0.0], "right"),
+        ([-80.0, 0.0], "left"),
+        ([0.0, 80.0], "above"),
+        ([0.0, -80.0], "below"),
+        ([80.0, 80.0], "above_right"),
+        ([-80.0, 80.0], "above_left"),
+        ([80.0, -80.0], "below_right"),
+        ([-80.0, -80.0], "below_left"),
+    ] {
+        let answer = ask(&mut s, offset);
+        assert_eq!(answer["side"], side);
+        let (_, made) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": side, "place": {"at": [300.0, 60.0]}}));
+        assert_eq!(inspect_view(&mut s, made)["direction"], answer["direction"], "{side}");
+        if side == "above_right" {
+            let from_iso = run(&mut s, PROJECTION_FOR, json!({"parent": ids::encode(made), "offset_mm": [80.0, 0.0]}));
+            assert_eq!(from_iso["kind"], "none");
+            assert_eq!(from_iso["why"], "not supported yet: a view projected from a pictorial view");
+        }
+    }
+}
+
+/// What `drawing.view.projection_for` can't read is refused, and nothing changes: an offset
+/// missing, null, not two numbers, or past 10000 mm either way; a parent that isn't a view, or not
+/// a view's id; an unknown field; no drawing open.
+#[test]
+fn hostile_projection_for_is_refused() {
+    let mut s = block();
+    let message = s.execute(PROJECTION_FOR, &json!({"parent": ids::encode(1), "offset_mm": [1, 0]})).unwrap_err().to_string();
+    assert!(message.contains("drawing"), "{message}");
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let parent = json!(ids::encode(front));
+    for p in [
+        json!({"parent": parent}),
+        json!({"parent": parent, "offset_mm": null}),
+        json!({"parent": parent, "offset_mm": [1]}),
+        json!({"parent": parent, "offset_mm": [1, 2, 3]}),
+        json!({"parent": parent, "offset_mm": ["a", 0]}),
+        json!({"parent": parent, "offset_mm": [1e300, 0]}),
+        json!({"parent": parent, "offset_mm": [10000.001, 0]}),
+        json!({"parent": parent, "offset_mm": [0, -10000.001]}),
+        json!({"parent": ids::encode(99), "offset_mm": [1, 0]}),
+        json!({"parent": 1, "offset_mm": [1, 0]}),
+        json!({"parent": parent, "offset_mm": [1, 0], "side": "right"}),
+    ] {
+        create_refused(&mut s, PROJECTION_FOR, p);
+    }
+}
+
+/// A pictorial view made from what can't take one is refused whole: a side that isn't one of the
+/// eight, a pictorial parent, and a 33rd view in a chain.
+#[test]
+fn hostile_pictorial_view_creation_is_refused() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let parent = json!(ids::encode(front));
+    for side in ["above-right", "aboveright", "diagonal", "top"] {
+        create_refused(&mut s, PROJECTED, json!({"parent": parent, "side": side}));
+    }
+    let (_, iso) = create(&mut s, PROJECTED, json!({"parent": parent, "side": "above_right"}));
+    for side in ["right", "below_left"] {
+        let message = create_refused(&mut s, PROJECTED, json!({"parent": ids::encode(iso), "side": side}));
+        assert!(message.contains("not supported yet: a view projected from a pictorial view"), "{message}");
+    }
+    let mut last = front;
+    for _ in 1..32 {
+        last = create(&mut s, PROJECTED, json!({"parent": ids::encode(last), "side": "above", "place": {"at": [100.0, 100.0]}})).1;
+    }
+    let message = create_refused(&mut s, PROJECTED, json!({"parent": ids::encode(last), "side": "above_right"}));
+    assert!(message.contains("at most 32"), "{message}");
+}
+
+/// A pictorial view copied alone is a base view looking the way it did, saved by its name; the
+/// drawing lists it after its parent with its diagonal and its label; deleting its parent's sheet
+/// is refused while it is on another sheet.
+#[test]
+fn a_pictorial_view_copies_lists_and_keeps_its_parents_sheet() {
+    let (mut s, [front, right, top]) = three_views();
+    let (made, iso) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "above_right", "place": {"at": [60.0, 250.0]}}));
+    assert!(made.get("letter").is_none(), "nothing names a pictorial view by a letter: {made}");
+    let second = second_sheet(&mut s);
+    let copied = to_sheet(&mut s, COPY, json!({"view": ids::encode(iso), "sheet": ids::encode(second)}));
+    let copy = ids::decode(copied["view"].as_str().unwrap()).unwrap();
+    assert!(
+        matches!(saved(&s, copy).kind, ViewKind::Base { view: ViewDirection::Named(NamedView::IsoFrontRight), .. }),
+        "{:?}",
+        saved(&s, copy).kind
+    );
+
+    let listed = run(&mut s, "drawing.inspect", json!({}));
+    let views = listed["sheets"][0]["views"].as_array().unwrap();
+    let entry = views.iter().find(|v| v["id"] == json!(ids::encode(iso))).unwrap();
+    assert_eq!(
+        (&entry["kind"], &entry["parent"], &entry["side"], &entry["label"]),
+        (&json!("pictorial"), &json!(ids::encode(front)), &json!("above_right"), &json!("Pictorial above right of Front"))
+    );
+    let at = |id: u64| views.iter().position(|v| v["id"] == json!(ids::encode(id))).unwrap();
+    assert!(at(front) < at(iso), "after its parent");
+    assert!([right, top].iter().all(|v| views.iter().any(|e| e["id"] == json!(ids::encode(*v)))));
+
+    run(&mut s, MOVE, json!({"view": ids::encode(iso), "sheet": ids::encode(second)}));
+    let sheet = ids::encode(saved(&s, front).sheet);
+    let message = s.execute("drawing.sheet.delete", &json!({"sheet": sheet, "contents": "delete"})).unwrap_err().to_string();
+    assert!(message.contains("projected or cut from them on other sheets"), "{message}");
+}
+
+/// The block with its top front edge chamfered 10√3 along the top and 10 down the front, so the new
+/// face slopes 30° from the top and is 20 long up the slope; its front view at `scale` and the right
+/// view lined up with it, which shows the slope as a line. The session and the two views.
+fn sloped(scale: &str) -> (Session, [u64; 2]) {
+    let mut s = block();
+    run(&mut s, "solid.chamfer", json!({"edges": [[50, 0, 20]], "distance": 10.0 * 3f64.sqrt(), "distance2": 10, "body": "Block"}));
+    run(&mut s, "drawing.create", json!({}));
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": scale, "position_mm": [120.0, 120.0]}));
+    let (_, right) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "right"}));
+    (s, [front, right])
+}
+
+/// The slope's corners on the block's end at `x`: its foot on the front face and its top on the top.
+fn slope_foot(x: f64) -> Vec3 {
+    Vec3::new(x, 0.0, 10.0)
+}
+
+fn slope_top(x: f64) -> Vec3 {
+    Vec3::new(x, 10.0 * 3f64.sqrt(), 20.0)
+}
+
+/// A point inside the slope's edge on the block's right end, to pick it by.
+fn slope_edge() -> Value {
+    let middle = (slope_foot(100.0) + slope_top(100.0)) * 0.5;
+    json!([middle.x, middle.y, middle.z])
+}
+
+/// Where view `id` puts the model point `p` on its sheet: the one rule its lines are placed by.
+fn on_paper(s: &Session, id: u64, p: Vec3) -> Vec2 {
+    let d = s.drawing("test").unwrap();
+    let resolved = d.resolve_view(id).unwrap();
+    let placed = crate::drawing_view::on_sheet(s, d, id, "test").unwrap();
+    let centre = d.view_centre(id).unwrap();
+    crate::drawing_view::frame(resolved.basis, resolved.scale.value, &placed.extents.model, centre, "test").unwrap().to_paper(p)
+}
+
+/// An auxiliary view of the 30° slope, made from the right view by the slope's edge on the block's
+/// right end, shows the slope at its true length, 20 (the front view shows only its 10 rise), and
+/// the slope's other side at its 100, square to it: the face at its true shape, measured on paper at
+/// 1:1 and 1:2. It sits up and left of the right view, away from its middle, at its scale. Made by
+/// the sloped face itself, it is the same view.
+#[test]
+fn an_auxiliary_view_of_a_30_degree_slope_shows_its_true_length() {
+    for (scale, factor) in [("1:1", 1.0), ("1:2", 0.5)] {
+        let (mut s, [front, right]) = sloped(scale);
+        let (made, aux) = create(&mut s, AUXILIARY, json!({"parent": ids::encode(right), "edge": slope_edge()}));
+        assert_eq!(made["scale"]["text"], scale);
+        let apart = |s: &Session, view: u64, a: Vec3, b: Vec3| (on_paper(s, view, a) - on_paper(s, view, b)).len();
+        let up_the_slope = apart(&s, aux, slope_foot(100.0), slope_top(100.0));
+        assert!((up_the_slope - 20.0 * factor).abs() < EPS, "{scale}: the slope's true length, {up_the_slope}");
+        assert!((apart(&s, aux, slope_foot(0.0), slope_foot(100.0)) - 100.0 * factor).abs() < EPS, "{scale}: its other side");
+        let foot = on_paper(&s, aux, slope_foot(100.0));
+        let (up, across) = (on_paper(&s, aux, slope_top(100.0)) - foot, on_paper(&s, aux, slope_foot(0.0)) - foot);
+        assert!((up.x * across.x + up.y * across.y).abs() < EPS, "{scale}: square, the face's true shape");
+        assert!((apart(&s, front, slope_foot(100.0), slope_top(100.0)) - 10.0 * factor).abs() < EPS, "{scale}: the front view shows its rise");
+        let ViewKind::Auxiliary { parent, toward } = saved(&s, aux).kind else { panic!("{:?}", saved(&s, aux).kind) };
+        assert_eq!(parent, right);
+        assert!((toward[0] + 0.5).abs() < EPS && (toward[1] - 3f64.sqrt() / 2.0).abs() < EPS, "up and left: {toward:?}");
+        let face = (slope_foot(50.0) + slope_top(50.0)) * 0.5;
+        let (_, by_face) = create(&mut s, AUXILIARY, json!({"parent": ids::encode(right), "face": [face.x, face.y, face.z]}));
+        let ViewKind::Auxiliary { toward: same, .. } = saved(&s, by_face).kind else { panic!("{:?}", saved(&s, by_face).kind) };
+        assert!((same[0] - toward[0]).abs() < EPS && (same[1] - toward[1]).abs() < EPS, "{same:?} {toward:?}");
+    }
+}
+
+/// An auxiliary view goes where its parent unfolds to: every corner of the block keeps its place
+/// along the fold line (the line the slope's edge shows as in the right view), so each lies on a
+/// projector square to it; and it is moved along its side until its boundary is 20 mm past its
+/// parent's on the nearer axis. Toward the other side it goes there; a point given is kept. Folded
+/// right of the front view it is the right view, placed where the projected view goes.
+#[test]
+fn an_auxiliary_view_lines_up_a_gap_past_its_parent() {
+    let (mut s, [front, right]) = sloped("1:2");
+    let (made, aux) = create(&mut s, AUXILIARY, json!({"parent": ids::encode(right), "edge": slope_edge()}));
+    let fold = Vec2::new(3f64.sqrt() / 2.0, 0.5);
+    for i in 0..8 {
+        let p = Vec3::new(f64::from(i & 1) * 100.0, f64::from((i >> 1) & 1) * 50.0, f64::from((i >> 2) & 1) * 20.0);
+        let projector = on_paper(&s, aux, p) - on_paper(&s, right, p);
+        assert!((projector.x * fold.x + projector.y * fold.y).abs() < EPS, "{p:?}: {projector:?}");
+    }
+    let theirs = inspect_view(&mut s, right);
+    let (their_lo, their_hi) = (point(&theirs["boundary_mm"]["min"]), point(&theirs["boundary_mm"]["max"]));
+    let (lo, hi) = (point(&made["boundary_mm"]["min"]), point(&made["boundary_mm"]["max"]));
+    // Up and left: past the parent's top, or its left side, whichever it clears first.
+    let gap = (lo.y - their_hi.y).max(their_lo.x - hi.x);
+    assert!((gap - 20.0).abs() < EPS, "{gap}: {made}");
+
+    let p = json!({"parent": ids::encode(right), "edge": slope_edge(), "toward": [0.5, -1.0]});
+    let (_, other) = create(&mut s, AUXILIARY, p);
+    let ViewKind::Auxiliary { toward, .. } = saved(&s, other).kind else { panic!("{:?}", saved(&s, other).kind) };
+    assert!((toward[0] - 0.5).abs() < EPS && (toward[1] + 3f64.sqrt() / 2.0).abs() < EPS, "down and right: {toward:?}");
+    let p = json!({"parent": ids::encode(right), "edge": slope_edge(), "place": {"at": [300.0, 60.0]}});
+    let (_, apart) = create(&mut s, AUXILIARY, p);
+    assert_eq!(saved(&s, apart).place, ViewPlace::At([300.0, 60.0]));
+
+    // The block's back right upright edge is a vertical line in the front view: folded to its right.
+    let p = json!({"parent": ids::encode(front), "edge": [100.0, 50.0, 10.0], "toward": [1.0, 0.0]});
+    let (folded, folded_id) = create(&mut s, AUXILIARY, p);
+    let d = s.drawing("test").unwrap().clone();
+    assert_eq!(d.resolve_view(folded_id).unwrap().basis, d.resolve_view(right).unwrap().basis);
+    let (lo, hi) = (point(&folded["boundary_mm"]["min"]), point(&folded["boundary_mm"]["max"]));
+    assert!((lo - their_lo).len() < EPS && (hi - their_hi).len() < EPS, "{folded} {theirs}");
+}
+
+/// What `drawing.view.auxiliary` refuses, each with the drawing and the undo steps unchanged: no edge
+/// or face, or both; an edge the parent sees end-on; a face it doesn't see edge-on, with its angle; a
+/// side along the fold line or of no length; a place lined up; no edge at the point; badly given
+/// fields; an edge that isn't straight and a face that isn't flat; a pictorial parent.
+#[test]
+fn hostile_auxiliary_view_creation_is_refused() {
+    let (mut s, [front, right]) = sloped("1:2");
+    let parent = json!(ids::encode(right));
+    let face = (slope_foot(50.0) + slope_top(50.0)) * 0.5;
+    for (p, says) in [
+        (json!({"parent": parent}), "one of them"),
+        (json!({"parent": parent, "edge": slope_edge(), "face": [face.x, face.y, face.z]}), "one of them"),
+        (json!({"parent": parent, "edge": [50.0, 50.0, 20.0]}), "end-on"),
+        (json!({"parent": ids::encode(front), "face": [50.0, 0.0, 5.0]}), "90.00°"),
+        (json!({"parent": parent, "edge": slope_edge(), "toward": [3f64.sqrt() / 2.0, 0.5]}), "along the fold line"),
+        (json!({"parent": parent, "edge": slope_edge(), "toward": [0, 0]}), "no length"),
+        (json!({"parent": parent, "edge": slope_edge(), "place": {"aligned": 10.0}}), "an auxiliary view is placed at a point"),
+        (json!({"parent": parent, "edge": [500, 500, 500]}), "no edge"),
+        (json!({"parent": parent, "edge": slope_edge(), "toward": [1, 2, 3]}), ""),
+        (json!({"parent": parent, "edge": slope_edge(), "toward": null}), ""),
+        (json!({"parent": parent, "edge": slope_edge(), "side": "right"}), ""),
+        (json!({"parent": ids::encode(99), "edge": slope_edge()}), ""),
+        (json!({"parent": parent, "edge": slope_edge(), "place": {"at": [1e300, 0]}}), ""),
+    ] {
+        let message = create_refused(&mut s, AUXILIARY, p.clone());
+        assert!(message.contains(says), "{p}: {message}");
+    }
+    let (_, iso) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "above_right"}));
+    let message = create_refused(&mut s, AUXILIARY, json!({"parent": ids::encode(iso), "edge": slope_edge()}));
+    assert!(message.contains("not supported yet: a view projected from a pictorial view"), "{message}");
+
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20}));
+    run(&mut s, "drawing.create", json!({}));
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:1"}));
+    let rim = create_refused(&mut s, AUXILIARY, json!({"parent": ids::encode(front), "edge": [0.0, 10.0, 20.0]}));
+    assert!(rim.contains("isn't straight"), "{rim}");
+    let side = create_refused(&mut s, AUXILIARY, json!({"parent": ids::encode(front), "face": [0.0, 10.0, 10.0]}));
+    assert!(side.contains("isn't flat"), "{side}");
+}
+
+/// An auxiliary view is inspected with its kind, its parent and its side, looking along the slope's
+/// normal; the drawing lists it after its parent, with its parent and its label; copied alone it is
+/// a base view looking the way it did.
+#[test]
+fn an_auxiliary_view_inspects_lists_and_copies() {
+    let (mut s, [front, right]) = sloped("1:2");
+    let (made, aux) = create(&mut s, AUXILIARY, json!({"parent": ids::encode(right), "edge": slope_edge()}));
+    assert_eq!(made["letter"], "A", "placed apart, it is named by its letter: {made}");
+    let inspected = inspect_view(&mut s, aux);
+    assert_eq!((&inspected["kind"], &inspected["parent"], inspected.get("side")), (&json!("auxiliary"), &json!(ids::encode(right)), None));
+    let toward = point(&inspected["toward"]);
+    assert!((toward - Vec2::new(-0.5, 3f64.sqrt() / 2.0)).len() < EPS, "{inspected}");
+    let sight = Vec3::new(0.0, 0.5, -3f64.sqrt() / 2.0);
+    let looking = &inspected["direction"]["direction"];
+    let looking = Vec3::new(looking[0].as_f64().unwrap(), looking[1].as_f64().unwrap(), looking[2].as_f64().unwrap());
+    assert!((looking - sight).len() < EPS, "into the slope: {inspected}");
+    assert_eq!((&inspected["settings"]["scale"]["from"], &inspected["linked"]), (&json!("parent"), &json!(true)));
+
+    let listed = run(&mut s, "drawing.inspect", json!({}));
+    let views = listed["sheets"][0]["views"].as_array().unwrap();
+    let entry = views.iter().find(|v| v["id"] == json!(ids::encode(aux))).unwrap();
+    assert_eq!(
+        (&entry["kind"], &entry["parent"], entry.get("side"), &entry["label"]),
+        (&json!("auxiliary"), &json!(ids::encode(right)), None, &json!("Auxiliary of Right of Front"))
+    );
+    let at = |id: u64| views.iter().position(|v| v["id"] == json!(ids::encode(id))).unwrap();
+    assert!(at(front) < at(right) && at(right) < at(aux), "after its parent");
+
+    let copied = to_sheet(&mut s, COPY, json!({"view": ids::encode(aux), "sheet": "Sheet 1"}));
+    let copy = ids::decode(copied["view"].as_str().unwrap()).unwrap();
+    assert!(matches!(saved(&s, copy).kind, ViewKind::Base { view: ViewDirection::Looking(_), .. }), "{:?}", saved(&s, copy).kind);
+    let d = s.drawing("test").unwrap().clone();
+    let (was, is) = (d.resolve_view(aux).unwrap().basis, d.resolve_view(copy).unwrap().basis);
+    for (a, b) in [(was.x, is.x), (was.y, is.y), (was.origin, is.origin)] {
+        assert!((a - b).len() < 1e-12, "{a:?} {b:?}");
+    }
 }

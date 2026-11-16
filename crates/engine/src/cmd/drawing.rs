@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::bom::{self, Tree};
 use solidcraft_doc::drawing::balloon::balloons_by_row;
 use solidcraft_doc::drawing::table::Kind;
-use solidcraft_doc::drawing::view::{MAX_VIEW_DEPTH, View, ViewKind};
+use solidcraft_doc::drawing::view::{Diagonal, MAX_VIEW_DEPTH, View, ViewKind};
 use solidcraft_doc::drawing::{self, Drawing, Source, template};
 use solidcraft_doc::drawing_view::ViewDirection;
 use solidcraft_doc::ids;
@@ -323,8 +323,8 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// What view `view` is called until views have saved names: which way it looks, where it sits of
-/// the view it is projected from, or what it is a section of (`Front`, `Right of Front`, `Above Right
-/// of Front`, `Section of Front`).
+/// the view it is made from, or what it is a section of (`Front`, `Right of Front`, `Section of
+/// Front`, `Pictorial above right of Front`, `Auxiliary of Right of Front`).
 fn view_label(d: &Drawing, view: &View) -> String {
     let mut label = String::new();
     let mut at = view;
@@ -353,6 +353,21 @@ fn view_label(d: &Drawing, view: &View) -> String {
             }
             ViewKind::Section { parent, .. } => {
                 label.push_str("Section of ");
+                let Some(next) = d.view(*parent) else { break };
+                at = next;
+            }
+            ViewKind::Pictorial { parent, diagonal } => {
+                label.push_str(match diagonal {
+                    Diagonal::AboveRight => "Pictorial above right of ",
+                    Diagonal::AboveLeft => "Pictorial above left of ",
+                    Diagonal::BelowRight => "Pictorial below right of ",
+                    Diagonal::BelowLeft => "Pictorial below left of ",
+                });
+                let Some(next) = d.view(*parent) else { break };
+                at = next;
+            }
+            ViewKind::Auxiliary { parent, .. } => {
+                label.push_str("Auxiliary of ");
                 let Some(next) = d.view(*parent) else { break };
                 at = next;
             }
@@ -419,7 +434,8 @@ fn sheet_views(d: &Drawing, on: &[u64], [dimensions, balloons, notes]: &[BTreeMa
         if let Some(parent) = view.kind.parent() {
             entry["parent"] = json!(ids::encode(parent));
         }
-        if let ViewKind::Projected { side, .. } = view.kind {
+        // A side (a projected view) or a diagonal (a pictorial view), by the name the command takes.
+        if let Some(side) = view.kind.beside() {
             entry["side"] = json!(side);
         }
         listed.push(entry);

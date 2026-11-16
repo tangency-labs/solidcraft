@@ -667,11 +667,14 @@ mod tests {
         json!(ids_of.iter().map(|id| ids::encode(*id)).collect::<Vec<_>>())
     }
 
-    /// A view goes with its dimensions and balloons, as one undo step that brings all back. A dry run
-    /// says the same and changes nothing, and the selection is cleared only by the real delete.
+    /// A view goes with its dimensions and balloons and the views made from it, its pictorial view
+    /// too, as one undo step that brings all back. A dry run says the same and changes nothing, and
+    /// the selection is cleared only by the real delete.
     #[test]
     fn a_view_goes_with_what_is_in_it_after_a_dry_run() {
         let (mut s, [front, right, top], dimension, balloon, drawing) = sheet_objects();
+        let iso = run(&mut s, "drawing.view.projected", json!({"parent": ids::encode(front), "side": "above_right", "place": {"at": [60.0, 250.0]}}));
+        let iso = ids::decode(iso["view"].as_str().unwrap()).unwrap();
         let record = s.drawing("test").unwrap().clone();
         let (doc, steps) = (s.doc.clone(), s.undo.len());
         run(&mut s, "select.set", json!({"items": [item(drawing, top)]}));
@@ -683,7 +686,7 @@ mod tests {
         assert_eq!(s.selection.len(), 1);
         let reply = run(&mut s, "selection.delete", p);
         assert_eq!(said, reply);
-        let mut views = vec![front, right, top];
+        let mut views = vec![front, right, top, iso];
         views.sort_unstable();
         assert_eq!(
             (&reply["views"], &reply["dimensions"], &reply["balloons"]),
