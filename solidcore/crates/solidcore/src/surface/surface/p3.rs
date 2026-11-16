@@ -116,6 +116,7 @@ use crate::nurbs::knots::Side;
 use crate::surface::plane::Plane;
 use std::sync::Mutex;
 
+use super::fold_certificate::FoldCertificate;
 use super::p1::{
     crossed_seam_or_pole, evaluate_1st_derivatives, evaluate_2nd_derivatives,
     evaluate_normal_section as smsurf_evaluate_normal_section, FindPsNormalEnfo, SsNormalizeEnfo,
@@ -388,6 +389,16 @@ pub enum ContinuationFold {
     NotEvaluated {
         /// The sample.
         uv: Point2,
+    },
+    /// No sample witnesses a fold, but the continuation could not be proved free of
+    /// folds near `uv` ([`super::fold_certificate::certify_no_fold`]): `reason` says
+    /// what was not proved. Sampling alone cannot accept a cover: a fold can lie between
+    /// samples.
+    NotCertified {
+        /// The centre of the grid cell whose window failed (or of the merge domain).
+        uv: Point2,
+        /// What was not proved.
+        reason: &'static str,
     },
 }
 
@@ -1284,6 +1295,19 @@ impl Surface {
             // our domain with our original domain, and update our domain to it.
             let orig_domain = self.step_uv_domain();
             let update_domain = orig_domain.union(&new_domain);
+            // Four corners determine the bilinear patches, not that this one's
+            // continuation is one sheet over the union: the fold rule below holds here
+            // too (WR-407; a planar 2 x 2 net can fold, as #434's swept sector does).
+            if out_of_bounds_enabled(self).is_some()
+                && !update_domain.is_contained_by(&orig_domain, 0.0)
+            {
+                if let Some(fold) = self.continuation_fold(k, &update_domain)? {
+                    return Ok(CoverCoincident {
+                        fold: Some(fold),
+                        ..failure
+                    });
+                }
+            }
             // (status ignored upstream; passed on as the fork does)
             self.adjust_step_uv_domain(k, &update_domain)?;
 
@@ -1677,7 +1701,17 @@ impl Surface {
                 *above = Some((uv, unit));
             }
         }
-        Ok(None)
+        // No sampled witness: the samples alone prove nothing between them, so the
+        // continuation must be proved free of folds
+        // ([`super::fold_certificate::certify_no_fold`]).
+        Ok(
+            match super::fold_certificate::certify_no_fold(k, self, &natural, domain)? {
+                FoldCertificate::Proved => None,
+                FoldCertificate::NotProved { uv, reason } => {
+                    Some(ContinuationFold::NotCertified { uv, reason })
+                }
+            },
+        )
     }
 
     /// The normal (`Du × Dv`) and its length at `uv` in the STEP parameterisation
@@ -2468,6 +2502,74 @@ mod tests {
                 dot: -1.0,
             })
         );
+        Ok(())
+    }
+
+    /// A fold between samples is not accepted (tangency-labs/solidcraft#17453 review):
+    /// `P(u, v) = (u + v, 64 v^3 + 3 v^2)` (Bezier y controls `0, 0, 1, 67`) has the
+    /// normal `(0, 0, 192 v^2 + 6 v)`, zero on its own edge v = 0 and at v = -1/32, and
+    /// negative between them, on the continuation. Over `[0, 1] x [-1, 1]` the grid's
+    /// samples step 0.1 in v, so none lies in `(-1/32, 0)`; the zero at v = 0 is passed
+    /// over and every sampled normal is +z. The certificate finds the turn back.
+    #[test]
+    fn wr_407_fold_between_samples_is_not_accepted() -> Result<()> {
+        let k = Kernel::default();
+        let s = wr_407_bezier_sheet(&[
+            &[[0.0, 0.0], [1.0 / 3.0, 0.0], [2.0 / 3.0, 1.0], [1.0, 67.0]],
+            &[[1.0, 0.0], [4.0 / 3.0, 0.0], [5.0 / 3.0, 1.0], [2.0, 67.0]],
+        ])?;
+        let domain = Extent2d::from_bounds(0.0, -1.0, 1.0, 1.0);
+        // the normal there is reversed, and no grid sample lies there
+        let (normal, _) = s.step_normal(&k, Point2::new(0.5, -1.0 / 64.0))?.unwrap();
+        assert!(normal.z < 0.0, "{normal:?}");
+        let fold = s.continuation_fold(&k, &domain)?;
+        assert!(
+            matches!(fold, Some(ContinuationFold::NotCertified { uv, .. }) if uv.y < 0.0),
+            "{fold:?}"
+        );
+        Ok(())
+    }
+
+    /// The certificate proves what it should: the degenerate edge `(u + v, v^3)` (normal
+    /// `3 v^2 z`, zero on the natural domain's edge, positive elsewhere) and the
+    /// collapsed edge `(u, u^2 v)` continue without a fold, and a planar bilinear sheet
+    /// whose normal `(1 - u / 2) z` vanishes at u = 2 does not, past it.
+    #[test]
+    fn wr_407_fold_certificate_proves_and_refuses() -> Result<()> {
+        use super::super::fold_certificate::{certify_no_fold, FoldCertificate};
+        let k = Kernel::default();
+        let natural = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let cubic = wr_407_bezier_sheet(&[
+            &[[0.0, 0.0], [1.0 / 3.0, 0.0], [2.0 / 3.0, 0.0], [1.0, 1.0]],
+            &[[1.0, 0.0], [4.0 / 3.0, 0.0], [5.0 / 3.0, 0.0], [2.0, 1.0]],
+        ])?;
+        let below = Extent2d::from_bounds(0.0, -1.0, 1.0, 1.0);
+        assert_eq!(
+            certify_no_fold(&k, &cubic, &natural, &below)?,
+            FoldCertificate::Proved
+        );
+        let collapsed = wr_407_bezier_sheet(&[
+            &[[0.0, 0.0], [0.0, 0.0]],
+            &[[0.5, 0.0], [0.5, 0.0]],
+            &[[1.0, 0.0], [1.0, 1.0]],
+        ])?;
+        let left = Extent2d::from_bounds(-1.0, 0.0, 1.0, 1.0);
+        assert_eq!(
+            certify_no_fold(&k, &collapsed, &natural, &left)?,
+            FoldCertificate::Proved
+        );
+        // (u, v (1 - u / 2)): bilinear, planar, normal (1 - u / 2) z
+        let sheet = wr_407_bezier_sheet(&[&[[0.0, 0.0], [0.0, 1.0]], &[[1.0, 0.0], [1.0, 0.5]]])?;
+        let short = Extent2d::from_bounds(0.0, 0.0, 1.9, 1.0);
+        assert_eq!(
+            certify_no_fold(&k, &sheet, &natural, &short)?,
+            FoldCertificate::Proved
+        );
+        let past = Extent2d::from_bounds(0.0, 0.0, 2.5, 1.0);
+        assert!(matches!(
+            certify_no_fold(&k, &sheet, &natural, &past)?,
+            FoldCertificate::NotProved { .. }
+        ));
         Ok(())
     }
 
