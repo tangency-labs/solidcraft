@@ -1480,6 +1480,208 @@ fn a_corner_round_whose_cap_edge_crosses_a_slot_in_the_side_is_refused_as_on_mai
     }
 }
 
+/// #17590's part: a box x in [-40, 40], y in [-20, 20], z in [0, 30] with a boss of radius 5.5
+/// about (0, -19), from z = 28 to 40, joined across the box's edge y = -20, z = 30. The boss
+/// overhangs the side y = -20 and meets it along the line E, x = -[`boss_side_x`], from the top
+/// z = 30 down to W at z = 28, where the boss's bottom face starts.
+fn box_and_boss() -> Body {
+    fixes();
+    let b = make_box([-40.0, -20.0, 0.0], [80.0, 40.0, 30.0]).unwrap();
+    let boss = solidcore_ops::make_cylinder([0.0, -19.0, 28.0], 5.5, 12.0).unwrap();
+    boolean(b, boss, BooleanOp::Union).unwrap().unwrap()
+}
+
+/// Where the boss's wall crosses the side y = -20: x = ±sqrt(5.5^2 - 1).
+fn boss_side_x() -> f64 {
+    (5.5_f64 * 5.5 - 1.0).sqrt()
+}
+
+/// What the round `r` on [`box_and_boss`]'s edge y = -20, z = 30 takes, from x = -40 to the
+/// boss's wall: its section (the corner's square less the quarter disc about (-20 + r, 30 - r))
+/// at angle `phi` from the top, y = -20 + r - r sin phi, is r - r cos phi high and ends at
+/// x = -sqrt(5.5^2 - (y + 19)^2) on the wall. Simpson's rule in `phi`, where the integrand is
+/// smooth.
+fn boss_edge_round_removed(r: f64) -> f64 {
+    let f = |phi: f64| {
+        let y = -20.0 + r - r * phi.sin();
+        let end = -(5.5_f64 * 5.5 - (y + 19.0).powi(2)).sqrt();
+        r * (1.0 - phi.cos()) * (end + 40.0) * r * phi.cos()
+    };
+    let n = 2000;
+    let h = PI / 2.0 / f64::from(n);
+    let mut sum = f(0.0) + f(PI / 2.0);
+    for i in 1..n {
+        sum += f64::from(if i % 2 == 1 { 4 } else { 2 }) * f(f64::from(i) * h);
+    }
+    sum * h / 3.0
+}
+
+/// #17590: the box's edge y = -20, z = 30 of [`box_and_boss`] rounded `r`, up to the boss. The
+/// round's rail on the side runs at z = 30 - r: up to r = 2 it ends on E; past it, it meets E's
+/// line at R = (-[`boss_side_x`], -20, 30 - r), below W, under the boss. The end face there is
+/// the boss's wall, a cylinder whose ruling E is, and the edge leaving W on it is the boss's
+/// bottom circle, square to E. The round ends on the wall continued below the boss's bottom,
+/// with a cap edge from R to W on the side. Before, the end corner's patch on the wall failed:
+/// "Fillet Corner Error: Corner Geometry Computation Failure" (status 1001), with the corpus's
+/// fix set and with none. Now, with either, from r = 2.05 (a cap edge 0.05 long) to r = 6 (the
+/// round's top rail, y = -14, still on the boss, which reaches y = -13.5): valid at the full
+/// check, the round one face on its
+/// exact cylinder with its rails the lines along x through (x, -20 + r, 30) and (x, -20, 30 - r),
+/// the cap edge through R and W, and the volume the input's less [`boss_edge_round_removed`].
+/// 10 faces, 24 edges and 16 vertices: the input's 9, 21 and 14 with the round's face; its two
+/// rails, its two end curves and the cap edge in place of the rounded edge and E (the cap lies
+/// on the boss's wall, one face with it); the rails' four ends, R one of them, in place of the
+/// rounded edge's two. The shells are the input's.
+///
+/// Control: at r = 2 the rail ends at W itself (R not past W), the corner is main's, and the
+/// round builds with one edge and one vertex fewer, 10, 23 and 15.
+///
+/// Only the edge left of the boss: its mirror, right of it, still fails (status 1001) on this
+/// boss, on main as here.
+#[test]
+fn a_round_ending_at_a_boss_across_its_edge_ends_on_the_boss_s_wall_below_its_bottom() {
+    for (r, topology) in [
+        (2.0, (10, 23, 15)),
+        (2.05, BOSS_EDGE_ROUND_TOPOLOGY),
+        (3.0, BOSS_EDGE_ROUND_TOPOLOGY),
+        (4.0, BOSS_EDGE_ROUND_TOPOLOGY),
+        (5.0, BOSS_EDGE_ROUND_TOPOLOGY),
+        (6.0, BOSS_EDGE_ROUND_TOPOLOGY),
+    ] {
+        for corpus in [true, false] {
+            assert_round_into_boss_builds(
+                box_and_boss,
+                boss_side_x(),
+                boss_edge_round_removed(r),
+                topology,
+                (r, corpus, -1.0),
+            );
+        }
+    }
+}
+
+/// The topology of [`box_and_boss`] with its edge rounded past r = 2: faces, edges, vertices.
+const BOSS_EDGE_ROUND_TOPOLOGY: (usize, usize, usize) = (10, 24, 16);
+
+/// [`box_and_boss`] with a block x in [-5, 5], y in [-24, -16], z in [28, 40] for the boss: the
+/// end face is the block's side x = -5, a plane, and the edge leaving W on it is the block's
+/// bottom edge along y, square to E, not turned back.
+fn box_and_block() -> Body {
+    fixes();
+    let b = make_box([-40.0, -20.0, 0.0], [80.0, 40.0, 30.0]).unwrap();
+    let block = make_box([-5.0, -24.0, 28.0], [10.0, 8.0, 12.0]).unwrap();
+    boolean(b, block, BooleanOp::Union).unwrap().unwrap()
+}
+
+/// The same with a block for the boss ([`box_and_block`]), up to r = 3.5 (the round's top rail
+/// on the block's side, which ends at y = -16): its side x = -5 ends the round, and the round
+/// takes its section r^2 (1 - pi / 4) along the 35 from x = -40 (or to x = 40). Before, as with
+/// the boss (status 1001), with the corpus's fix set and with none; now built the same way, the
+/// input's 12 faces, 30 edges and 20 vertices with the same changes.
+#[test]
+fn a_round_ending_at_a_block_across_its_edge_ends_on_the_block_s_side_below_its_bottom() {
+    for r in [2.5, 3.0, 3.5] {
+        for corpus in [true, false] {
+            for side in [-1.0, 1.0] {
+                assert_round_into_boss_builds(
+                    box_and_block,
+                    5.0,
+                    35.0 * r * r * (1.0 - PI / 4.0),
+                    BLOCK_EDGE_ROUND_TOPOLOGY,
+                    (r, corpus, side),
+                );
+            }
+        }
+    }
+}
+
+/// The topology of [`box_and_block`] with its edge rounded past r = 2: faces, edges, vertices.
+const BLOCK_EDGE_ROUND_TOPOLOGY: (usize, usize, usize) = (13, 33, 22);
+
+/// The box's edge y = -20, z = 30 of `input` rounded `r` on the side `side` of the boss (-1 its
+/// left, x < 0; 1 its mirror), with the corpus's fix set (`corpus`) or none: built, valid at the
+/// full check, `topology` (faces, edges, vertices) and the input's shells, the round one face on
+/// its exact class, the cylinder of radius r along x about (-20 + r, 30 - r), its rails the
+/// lines along x through (x, -20 + r, 30) and (x, -20, 30 - r), the cap edge on the side through
+/// x = `side` `side_x`, z = (30 - r + 28) / 2, and the volume the input's less `removed`.
+fn assert_round_into_boss_builds(
+    input: fn() -> Body,
+    side_x: f64,
+    removed: f64,
+    topology: (usize, usize, usize),
+    (r, corpus, side): (f64, bool, f64),
+) {
+    use solidcore::query::api_queries::edge_closest_point;
+    use solidcore::surface::surface::SurfaceKind;
+    let what = format!("r {r} corpus {corpus} side {side}");
+    let b = input();
+    let before = b.volume(1e-9).unwrap();
+    let shells = common::kernel_copy(&b).1.shells().len();
+    let e = edge_at(&b, [30.0 * side, -20.0, 30.0]);
+    if !corpus {
+        session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
+    }
+    let result = blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled);
+    fixes();
+    result.unwrap_or_else(|err| panic!("{what}: {err:?}"));
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{what}: {report}");
+    let (k, brep) = common::kernel_copy(&b);
+    let counts = (
+        brep.face_list().len(),
+        brep.edge_list().len(),
+        brep.vertex_list().len(),
+    );
+    assert_eq!(counts, topology, "{what}: faces, edges, vertices");
+    assert_eq!(brep.shells().len(), shells, "{what}: shells");
+    // the round's face is its exact class: the cylinder of radius r along x about
+    // (-20 + r, 30 - r)
+    let rounds = brep
+        .face_list()
+        .iter()
+        .filter(|&&f| {
+            let surface = brep.face(f).unwrap().surface.as_ref().unwrap();
+            match surface.kind() {
+                SurfaceKind::Cone(c) if c.is_cylinder() && (c.bot_radius() - r).abs() < 1e-9 => {
+                    let place = c.rev().position();
+                    let (o, a) = (place.origin(), place.z_axis());
+                    (o.y - (-20.0 + r)).hypot(o.z - (30.0 - r)) < 1e-9
+                        && a.y.hypot(a.z) < 1e-9 * a.length()
+                }
+                _ => false,
+            }
+        })
+        .count();
+    assert_eq!(rounds, 1, "{what}: the round's cylinder");
+    let on_edge = |p: [f64; 3]| {
+        let q = solidcore::Vec3::new(p[0], p[1], p[2]);
+        brep.edge_list().iter().any(|&e| {
+            edge_closest_point(&k, &brep, e, q)
+                .unwrap()
+                .closest
+                .distance
+                < 1e-7
+        })
+    };
+    for along in [35.0, 20.0, 10.0] {
+        let x = along * side;
+        for p in [[x, -20.0 + r, 30.0], [x, -20.0, 30.0 - r]] {
+            assert!(on_edge(p), "{what}: no rail through {p:?}");
+        }
+    }
+    let z = (30.0 - r + 28.0) / 2.0;
+    assert!(
+        on_edge([side_x * side, -20.0, z]),
+        "{what}: no cap edge through z {z}"
+    );
+    let after = b.volume(1e-9).unwrap();
+    let expected = before - removed;
+    assert!(
+        (after - expected).abs() < 1e-6,
+        "{what}: volume {after}, expected {expected}"
+    );
+}
+
 /// Edge 28 of `b27` rounded past the R3 round's own radius (3.5 and 4): the ball does not fit
 /// the R3 round, and the irregular-ball refusal used to name 2.99 (the round's radius less the
 /// fit margin), at which every ball on the edge's faces still lies past the End on x = 0 (2.99
