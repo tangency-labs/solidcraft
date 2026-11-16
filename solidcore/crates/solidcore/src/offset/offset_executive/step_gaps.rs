@@ -351,7 +351,19 @@ impl OffsetExecutive {
         }
         let faces = bp1::faces(b, None)?;
         segments.retain(|s| faces.contains(&s.face));
-        Ok(segments)
+        // a gap at a vertex of an open face is a step between that face's rim and the
+        // offset faces, which the step walls close: no vertex polygon
+        let mut kept: Vec<GapSegment> = Vec::new();
+        for s in segments {
+            let on_open = match s.vertex {
+                Some(v) => on_a_face_of(original, v, self.shell_faces())?,
+                None => false,
+            };
+            if !on_open {
+                kept.push(s);
+            }
+        }
+        Ok(kept)
     }
 
     /// The passes of [`OffsetExecutive::close_loop_gaps`] over the faces of `b`: each gap
@@ -1084,7 +1096,8 @@ impl OffsetExecutive {
     /// the merge joins to each face along its side.
     ///
     /// A side is a segment no other face borders (a segment of a step wall or one two faces
-    /// share is no side); the segments are chained end to end, each end meeting exactly
+    /// share is no side) at a vertex on no open face (`shell_faces`: there the gap is a step
+    /// from the open face's rim, which the step walls close); the segments are chained end to end, each end meeting exactly
     /// one other within the larger of the two segments' tolerances. A chain that does not
     /// close is closed by the straight stretch from its last end to its first only where an
     /// offset edge runs along all of it (its ends and three points between within the
@@ -1271,6 +1284,23 @@ fn bordered_elsewhere(b: &Brep, s: &GapSegment) -> Result<bool> {
             && crate::query::edge::edge_faces(b, e)?
                 .iter()
                 .any(|&f| f != s.face)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Whether vertex `v` of `b` lies on one of `faces`: one of its edges borders one of them.
+fn on_a_face_of(b: &Brep, v: VertexId, faces: &[FaceId]) -> Result<bool> {
+    if faces.is_empty() {
+        return Ok(false);
+    }
+    for &e in b.edge_list() {
+        if crate::query::edge::edge_vertices(b, e)?.contains(&v)
+            && crate::query::edge::edge_faces(b, e)?
+                .iter()
+                .any(|f| faces.contains(f))
         {
             return Ok(true);
         }

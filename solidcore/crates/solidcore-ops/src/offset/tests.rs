@@ -196,14 +196,17 @@ fn a_frustum_on_a_ledge_tangent_into_its_wall_shells_closed() {
         make_box([-r, 0.0, -h], [2.0 * r, len, h]).unwrap(),
     ])
     .unwrap();
-    let frustum = PI * h / 3.0 * (r * r + r * (r + h * tan) + (r + h * tan).powi(2));
+    // the frustum's top radius
+    let top = r + h * tan;
+    let frustum = PI * h / 3.0 * (r * r + r * top + top * top);
     let whole = frustum + (PI * r * r / 2.0 + 2.0 * r * len) * h;
     assert!(rel(volume(&body), whole) < 1e-9);
     for t in [0.5, 1.0, 2.0] {
         let wall = r - t;
         let inner = |z: f64| r + z * tan - t / cos;
         // the integral of inner(z)^2 from z0 to z1
-        let squared = |z0: f64, z1: f64| (inner(z1).powi(3) - inner(z0).powi(3)) / (3.0 * tan);
+        let cube = |z: f64| inner(z) * inner(z) * inner(z);
+        let squared = |z0: f64, z1: f64| (cube(z1) - cube(z0)) / (3.0 * tan);
         let z1 = t * (1.0 / cos - 1.0) / tan;
         let cavity = (PI * wall * wall / 2.0 + 2.0 * wall * len) * (h - 2.0 * t)
             + PI * wall * wall / 2.0 * (z1 + t)
