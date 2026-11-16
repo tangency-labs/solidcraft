@@ -1996,7 +1996,8 @@ fn a_lone_round_between_two_hole_walls_rolls_over_the_seam_of_one() {
         // approximation tolerance (5e-6), so the removed volume may differ from the exact
         // ball's by at most that times the round's area (under 15 r pi); it measures 2.6e-6 at
         // r 5 and 2.2e-4 at r 10, the same at any volume accuracy, the same on either side of
-        // the seam, and the same on main where main builds.
+        // the seam, and bit-identical on main at R5 and at R8, past the seam (built there with
+        // the corpus's fixes): it is the fit's, not this change's.
         let before = input.volume(1e-9).unwrap();
         for r in [5.0, 5.99, 6.03, 8.0, 10.0] {
             assert_eq!(r > reach, r > 6.0, "r {r}");
@@ -2136,10 +2137,19 @@ fn a_lone_round_between_a_plane_and_a_cylinder_rolls_over_the_seam() {
             let b = input.copy().unwrap();
             let e = edge_at(&b, [edge.0, edge.1, LOBE_HEIGHT / 2.0]);
             let built = blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled);
-            // Without the corpus fixes, a contact within 0.03 past the seam is still refused
-            // (SM_ERR; main refused every r past the reach here, in both modes), a refusal and
-            // never a wrong body. Everything else must build.
-            if !corpus && r > reach && r < reach + 0.03 && built.is_err() {
+            // Without the corpus fixes, a contact within 0.03 past the seam is still refused, as
+            // the blend failure matched exactly here (`SM_ERR`, "the faces the rails enclose
+            // reach past the rails"; main refused every r past the reach here, in both modes):
+            // a refusal and never a wrong body. Everything else must build.
+            if !corpus
+                && r > reach
+                && r < reach + 0.03
+                && matches!(
+                    &built,
+                    Err(Error::BlendFailed { status: 1001, phrase, .. })
+                        if phrase == "the faces the rails enclose reach past the rails"
+                )
+            {
                 continue;
             }
             built.unwrap_or_else(|err| panic!("corpus {corpus} r {r}: {err:?}"));
@@ -2216,12 +2226,14 @@ fn four_rounds_on_a_seamed_disc_build_across_its_seam() {
         .unwrap_or_else(|err| panic!("{err:?}"));
     let report = b.check(CheckLevel::All).unwrap();
     assert!(report.is_valid(), "{report}");
-    // the band |y| <= 60 of the disc, less the four corners' rounds
+    // the band |y| <= 60 of the disc, less the four corners' rounds; a convex round's surface
+    // is fitted to the kernel's approximation tolerance (5e-6), so the volume may differ from
+    // the exact balls' by at most that times the four rounds' area (each under 30 x 18 pi)
     let band = 2.0 * (60.0 * 80.0 + 10000.0 * 0.6_f64.asin());
     let expected = 30.0 * (band - 4.0 * disc_corner_round_area(100.0, 60.0, 18.0));
     let v = b.volume(1e-9).unwrap();
     assert!(
-        (v - expected).abs() < 1e-6 * expected,
+        (v - expected).abs() < 5e-6 * 4.0 * 30.0 * 18.0 * PI,
         "volume {v}, expected {expected}"
     );
 }

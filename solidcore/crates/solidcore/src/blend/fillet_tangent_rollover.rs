@@ -714,12 +714,14 @@ fn cylinder_rollover_supports(
         let v = p - m;
         (v.dot(x), v.dot(y))
     };
-    // the section stands for every point of the edge up to the skew its lines are allowed (the
-    // edge, each face's axis or plane direction, the far edge, each within DIR_TOL of the
-    // edge's direction): over the edge's length each moves at most `length DIR_TOL` in the
-    // section, the ball's centre, where the two offset profiles meet at the angle of sine
-    // `sine`, at most twice that over `sine`, and a contact and the far edge by that and their
-    // own line's move
+    // a margin, to first order, for the skew the section's lines are allowed (the edge, each
+    // face's axis or plane direction, the far edge, each within DIR_TOL of the edge's
+    // direction): over the edge's length each moves at most `length DIR_TOL` in the section,
+    // the ball's centre, where the two offset profiles meet at the angle of sine `sine`, about
+    // twice that over `sine`, and a contact and the far edge by about that and their own line's
+    // move. It is not a strict bound (a circle's contact moves with the centre scaled by its
+    // radius over the offset one's, and near tangency the meet moves as the root of the skew),
+    // but every term is orders of magnitude under the body's tolerance it is added to
     let [e0, e1] = ends;
     let length = e1.distance(e0);
     let skew = length * DIR_TOL;

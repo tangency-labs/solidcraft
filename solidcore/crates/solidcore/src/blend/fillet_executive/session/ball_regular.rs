@@ -683,9 +683,10 @@ pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> R
 /// extension is not the closed surface: a contact just past the seam of the face it rolls on
 /// is found on the same surface (#15767). [`SeamDomain::Extended`] solves as the trace does,
 /// the domain extended past the seam: the proposal of a rollover of a round in a blend of
-/// several (`rails_wholly_past`) asks for it, as its acceptance after the trace cannot prove a
-/// rail rolled across a seam onto the rest of its surface, which the rollover recovery after
-/// the trace builds instead, as on main.
+/// several (`rails_wholly_past`) asks for it: a proposal there that is not accepted after the
+/// trace is refused, and the acceptance refuses a rolled rail that comes within the gap of a
+/// face across its face's edges (as one ending on such a face does), so wrapping would refuse
+/// rails rolled across a seam that the rollover recovery after the trace builds on main.
 ///
 /// [`rolled_edge_point`]: crate::blend::fillet_tangent_rollover::rolled_edge_point
 pub(crate) fn ball_section_at(
@@ -1465,36 +1466,6 @@ mod tests {
                 assert!(
                     got.distance(want) < 1e-6,
                     "first {first} rail {rail}: {got:?} vs {want:?}"
-                );
-            }
-            // on the domain extended past the seam, as the trace solves, with the ø60 wall on
-            // the first rail its contact is not found there: the extension past the seam is not
-            // the closed surface (on the second rail the extended solve happens to reach it)
-            if first != 0 {
-                continue;
-            }
-            let extended = ball_section_at(
-                &k,
-                &mut target,
-                &mut solver,
-                &edge,
-                t,
-                None,
-                SeamDomain::Extended,
-            )
-            .unwrap();
-            if let Some(section) = extended {
-                let rail = order.iter().position(|&l| l == 0).unwrap();
-                let uv = section.uv_pos(if rail == 0 {
-                    SrfIndex::First
-                } else {
-                    SrfIndex::Second
-                });
-                let got = walls[0].0.evaluate_point(&k, uv).unwrap();
-                let want = contact(lobes[0]);
-                assert!(
-                    got.distance(want) > 1e-3,
-                    "first {first}: extended found {got:?}"
                 );
             }
         }

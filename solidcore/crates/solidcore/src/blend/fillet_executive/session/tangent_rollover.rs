@@ -284,10 +284,13 @@ fn sections(
     let mut out: Vec<TsectPnt> = Vec::new();
     for &t in ts {
         k.check_cancelled(OP)?;
-        // on the trace's domain, extended past a closed surface's seam: a rail rolled across a
-        // seam onto the rest of its surface is not proposed here, as its acceptance after the
-        // trace ([`rail_within_face`]) cannot prove it; the rollover recovery after the trace
-        // builds it, as on main
+        // on the trace's domain, extended past a closed surface's seam, as on main: a proposal
+        // that fires and is not accepted after the trace is refused (`RailLeavesFace`), not
+        // left to the rollover recovery after the trace, and the acceptance
+        // ([`rail_within_face`]) refuses a rolled rail that comes within the gap of a face
+        // across its face's edges, as one does that ends on such a face; wrapped, the sections
+        // would propose rails rolled across a seam onto the rest of their surface, which the
+        // recovery builds on main
         let Some(section) = ball_section_at(
             k,
             target,
