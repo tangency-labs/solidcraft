@@ -2548,6 +2548,10 @@ pub(crate) fn crv_accel_bound(cur: &Curve, ivl: &Extent1d) -> Option<f64> {
         };
         homo.push(h);
     }
+    // the smallest nonzero quotient kept: its square is a normal f64, so neither the
+    // division nor the length below loses value to underflow (the consumer multiplies
+    // the bound by squared parameter steps, which would scale up a value lost there)
+    let tiny = 1.0e-150_f64;
     // one derivative level: `k (b[j+1] - b[j]) / (U[j+p+1] - U[j+shift])` for `j` from
     // `i0`, with the largest coordinate error of the outputs
     let level = |b: &[[f64; 4]], e: f64, k: f64, shift: usize| -> Option<(Vec<[f64; 4]>, f64)> {
@@ -2570,6 +2574,16 @@ pub(crate) fn crv_accel_bound(cur: &Curve, ivl: &Extent1d) -> Option<f64> {
                 k * (y[2] - x[2]) / g,
                 k * (y[3] - x[3]) / g,
             ];
+            // a quotient that lost its value to underflow, or is not finite, refuses
+            // (f64::max below would also drop a NaN)
+            let lost = |num: f64, quot: f64| num != 0.0 && quot.abs() < tiny;
+            let num = [y[0] - x[0], y[1] - x[1], y[2] - x[2], y[3] - x[3]];
+            if q.iter().any(|v| !v.is_finite())
+                || num.iter().zip(&q).any(|(&n, &v)| lost(n, v))
+                || lost(e, k * e / g)
+            {
+                return None;
+            }
             let mag = q.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
             err = err.max(2.0 * (gamma(4) * mag + 2.0 * k * e / g));
             out.push(q);
@@ -2578,6 +2592,8 @@ pub(crate) fn crv_accel_bound(cur: &Curve, ivl: &Extent1d) -> Option<f64> {
     };
     let pf = p as f64;
     let (q1, e1) = level(&homo, e0, pf, 1)?;
+    // `level` refused every nonzero coordinate below `tiny`, so the squares in the
+    // length stay normal and keep their relative rounding
     let norms = |q: &[[f64; 4]], e: f64| -> (f64, f64) {
         q.iter().fold((0.0_f64, 0.0_f64), |(pm, wm), v| {
             let [x, y, z, w] = *v;
@@ -2800,6 +2816,34 @@ mod tests {
         ];
         let u = vec![0.0, 0.0, 0.0, 0.0, 0.3, 0.6, 1.0, 1.0, 1.0, 1.0];
         Curve::new(pw, 3, u).unwrap()
+    }
+
+    /// The acceleration bound refuses a curve whose divided differences underflow, or
+    /// are not finite, instead of returning a bound that lost them. The parabola
+    /// `(0,0,0), (1,1,0), (2,0,0)` on `[0, L]` has `|c''| = 4 / L^2`. With `L = 1e200`
+    /// that underflows to 0, and the curve-end move then certified a stretch 0.5 from its
+    /// chord at tolerance 0.01. A coordinate range of 2e308 overflows the difference.
+    #[test]
+    fn accel_bound_refuses_underflow_and_overflow() {
+        let parabola = |l: f64, x: [f64; 3]| {
+            let pw = vec![
+                CPoint::new(x[0], 0.0, 0.0, NOW),
+                CPoint::new(x[1], 1.0, 0.0, NOW),
+                CPoint::new(x[2], 0.0, 0.0, NOW),
+            ];
+            Curve::new(pw, 2, vec![0.0, 0.0, 0.0, l, l, l]).unwrap()
+        };
+        let whole = |l: f64| Extent1d::from_min_max(0.0, l);
+        let a = crv_accel_bound(&parabola(1.0, [0.0, 1.0, 2.0]), &whole(1.0)).unwrap();
+        assert!((4.0..4.0 * (1.0 + 1e-12)).contains(&a), "{a}");
+        let a = crv_accel_bound(&parabola(1e60, [0.0, 1.0, 2.0]), &whole(1e60)).unwrap();
+        assert!(a >= 4e-120, "{a}");
+        assert_eq!(
+            crv_accel_bound(&parabola(1e200, [0.0, 1.0, 2.0]), &whole(1e200)),
+            None
+        );
+        let wide = parabola(1.0, [-1e308, 1e300, 1e308]);
+        assert_eq!(crv_accel_bound(&wide, &whole(1.0)), None);
     }
 
     #[test]
