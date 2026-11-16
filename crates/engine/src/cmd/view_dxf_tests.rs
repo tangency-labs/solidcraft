@@ -77,9 +77,13 @@ fn view_dxf_blind_back_hole_is_omitted_or_dashed_and_front_hole_is_visible() {
     assert_eq!(top["hidden"], 0);
     assert!(dashed["hidden"].as_u64().unwrap() > 12, "{dashed}");
     assert_eq!(top["visible"], dashed["visible"]);
-    assert!(!top["dxf"].as_str().unwrap().contains("HIDDEN"));
-    assert!(dashed["dxf"].as_str().unwrap().contains("LWPOLYLINE"));
-    assert!(dashed["dxf"].as_str().unwrap().contains("128\n"));
+    let top_file = solidcraft_io::read_dxf_file(top["dxf"].as_str().unwrap()).unwrap();
+    let dashed_file = solidcraft_io::read_dxf_file(dashed["dxf"].as_str().unwrap()).unwrap();
+    assert!(!top_file.layers().iter().any(|layer| layer.name() == "HIDDEN"));
+    let hidden = dashed_file.entities().iter().filter(|entity| dashed_file.layer(entity.layer()).unwrap().name() == "HIDDEN").collect::<Vec<_>>();
+    assert!(!hidden.is_empty());
+    assert!(hidden.iter().all(|entity| matches!(entity.geometry(), solidcraft_io::DxfShape::Polyline { points } if points.len() >= 2)));
+    assert!(hidden.iter().all(|entity| dashed_file.layer(entity.layer()).unwrap().linetype() == solidcraft_io::DxfLinetype::Hidden));
     let bottom = export(&mut s, camera(StandardView::Bottom), "omit");
     assert!(bottom["visible"].as_u64().unwrap() > top["visible"].as_u64().unwrap());
     assert_eq!(s.undo.len(), undo);
@@ -243,7 +247,11 @@ fn view_dxf_hides_finished_sketches_behind_bodies_but_draws_the_active_sketch_on
     };
     let active = export(&mut s, camera(StandardView::Top), "omit");
     assert_eq!(active["sketch"], 1, "{active}");
-    assert!((length(&active) - 80.).abs() < 1e-3 && active["dxf"].as_str().unwrap().contains("SKETCH"));
+    let active_file = solidcraft_io::read_dxf_file(active["dxf"].as_str().unwrap()).unwrap();
+    assert!(
+        (length(&active) - 80.).abs() < 1e-3
+            && active_file.entities().iter().any(|entity| active_file.layer(entity.layer()).unwrap().name() == "SKETCH")
+    );
     run(&mut s, "sketch.finish", json!({}));
     let finished = export(&mut s, camera(StandardView::Top), "omit");
     assert_eq!(finished["sketch"], 2, "{finished}");
@@ -350,6 +358,98 @@ fn view_dxf_curves_arcs_write_a_round_hole_as_one_circle_and_the_default_still_w
     assert!(as_lines.len() > 40);
     let err = s.execute(CMD, &json!({"camera": top, "curves": "splines"})).unwrap_err().to_string();
     assert!(err.contains("curves must be lines or arcs"), "{err}");
+}
+
+// Frozen pre-X2 assembly recipe, with its real shared projection and legacy
+// byte-baseline seam. This is not another production writer or parser.
+fn legacy_view_projection_bytes(s: &Session, cam: &Camera, dashed: bool) -> String {
+    use solidcraft_io::test_support::{DxfEntity, DxfLayer, legacy_dxf_baseline};
+    let meshes = mesh_lines::prepare(s, CMD, 0.01, |b| s.body_visible(&b.name)).unwrap();
+    let parts = sketch::parts(s, 0.01).unwrap();
+    let drawing = mesh_lines::drawing(&meshes, &parts, &View::from_camera(cam)).unwrap();
+    let mut entities = Vec::new();
+    let mut hidden = Vec::new();
+    for line in drawing.lines {
+        if line.hidden {
+            if dashed {
+                hidden.push((line.a, line.b));
+            }
+        } else {
+            entities.push(DxfEntity { layer: "VISIBLE".into(), shape: DxfShape::Line(line.a, line.b) });
+        }
+    }
+    for path in connect(hidden) {
+        entities.push(DxfEntity { layer: "HIDDEN".into(), shape: DxfShape::Polyline { points: path.points } });
+    }
+    let mut shown = 0;
+    for path in drawing.sketch.into_iter().filter(|path| dashed || !path.hidden) {
+        let layer = if path.hidden { "HIDDEN" } else { "SKETCH" };
+        shown += usize::from(!path.hidden);
+        let shape = match <[Vec2; 2]>::try_from(path.points) {
+            Ok([a, b]) => DxfShape::Line(a, b),
+            Err(points) => DxfShape::Polyline { points },
+        };
+        entities.push(DxfEntity { layer: layer.into(), shape });
+    }
+    let mut layers = vec![DxfLayer::new("VISIBLE", 7)];
+    if dashed {
+        layers.push(DxfLayer { linetype: DxfLinetype::Hidden, ..DxfLayer::new("HIDDEN", 8) });
+    }
+    if shown > 0 {
+        layers.push(DxfLayer::new("SKETCH", 5));
+    }
+    legacy_dxf_baseline(&layers, &entities).unwrap()
+}
+
+#[test]
+fn view_dxf_owned_file_keeps_current_header_tables_and_legacy_projection_bytes() {
+    let mut s = sample();
+    let cam = camera(StandardView::Top);
+    for hidden in ["omit", "dashed"] {
+        let expected = legacy_view_projection_bytes(&s, &cam, hidden == "dashed");
+        let doc = s.doc.clone();
+        let actual = export(&mut s, cam, hidden);
+        assert_eq!(actual["dxf"].as_str().unwrap().as_bytes(), expected.as_bytes());
+        assert!(expected.contains("$DWGCODEPAGE\n") && expected.contains("ACAD_GROUP\n"));
+        assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
+    }
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,0,-5],"x_dir":[1,0,0],"y_dir":[0,1,0]}}));
+    run(&mut s, "sketch.line", json!({"points":[[-20,15],[60,15]]}));
+    for finish in [false, true] {
+        if finish {
+            run(&mut s, "sketch.finish", json!({}));
+        }
+        for hidden in ["omit", "dashed"] {
+            let expected = legacy_view_projection_bytes(&s, &cam, hidden == "dashed");
+            let actual = export(&mut s, cam, hidden);
+            assert_eq!(actual["dxf"].as_str().unwrap().as_bytes(), expected.as_bytes(), "finish={finish}, hidden={hidden}");
+        }
+    }
+}
+
+#[test]
+fn hidden_line_runs_keep_endpoint_order_and_disconnected_runs() {
+    let (a, b, c) = (Vec2::new(0., 0.), Vec2::new(1., 0.), Vec2::new(2., 0.));
+    let (d, e) = (Vec2::new(10., 0.), Vec2::new(11., 0.));
+    let paths = connect(vec![(a, b), (c, b), (d, e)]);
+    assert_eq!(paths.len(), 2);
+    assert_eq!(paths[0].points, [a, b, c]);
+    assert_eq!(paths[1].points, [d, e]);
+    assert!(paths.iter().all(|path| path.hidden));
+}
+
+#[test]
+fn hidden_line_junctions_stop_runs_and_cycles_keep_the_repeated_endpoint() {
+    let (a, b, c, d) = (Vec2::new(0., 0.), Vec2::new(1., 0.), Vec2::new(1., 1.), Vec2::new(0., 1.));
+    let junction = connect(vec![(d, a), (a, b), (a, c)]);
+    assert_eq!(junction.len(), 3);
+    assert_eq!(junction[0].points, [d, a]);
+    assert_eq!(junction[1].points, [a, b]);
+    assert_eq!(junction[2].points, [a, c]);
+    let cycle = connect(vec![(a, b), (b, c), (c, d), (d, a)]);
+    assert_eq!(cycle.len(), 1);
+    assert_eq!(cycle[0].points, [a, b, c, d, a]);
+    assert!(junction.iter().chain(&cycle).all(|path| path.hidden));
 }
 
 #[test]

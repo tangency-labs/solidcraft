@@ -24,18 +24,17 @@
 //! including error/imprint exits, extraction and deletion of either operand.
 //! The complete subsequent stages remain here.
 //! Component face copies use `brep::p7::copy_faces` with the native merge defaults.
-//! Opt-in fixes (`Kernel::fixes`, off by default, so the default is SMLib's):
-//! with `slice_coincident_faces_sheet_side`, `SM_BO_SLICE` gets its own coincident-face
-//! rule in steps 7.3e and 7.B for a primary face bounding material (keep the pair on the
-//! sheet's `SM_OT_SAME` side only) instead of upstream's difference rule, which keeps a
-//! face lying in the sheet in both parts (issue #528, WR-254). With
-//! `boolean_outer_shell_first`, after step 8 a Union, Difference or Intersection whose
-//! result is a manifold solid with a nested shell runs
+//! Not upstream: `SM_BO_SLICE` gets its own coincident-face rule in steps 7.3e and 7.B
+//! for a primary face bounding material (keep the pair on the sheet's `SM_OT_SAME` side
+//! only) instead of upstream's difference rule, which keeps a face lying in the sheet in
+//! both parts (issue #528, WR-254). After step 8 a Union, Difference or Intersection
+//! whose result is a manifold solid with a nested shell runs
 //! `SetRegionIsVoidFlagsForNestedSolids`, so every region's outer shell is first (and
-//! its void flags follow the nesting): a union that seals a void left the void's shell
-//! first and failed `SmBrep::AssertValid` test 12 (the fork's fix,
+//! its void flags follow the nesting): upstream's union that seals a void left the
+//! void's shell first and failed `SmBrep::AssertValid` test 12 (the fork's fix,
 //! tangency-labs/smlib `abastran/void-shell-check`; WR-265,
-//! `plan/upstream-issues/WR-265--manifold-boolean-void-shell-first.md`). With
+//! `plan/upstream-issues/WR-265--manifold-boolean-void-shell-first.md`). Opt-in
+//! (`Kernel::fixes`, off by default): with
 //! `boolean_union_refuses_solid_leak` (own design, WR-619), a union whose step 6 would
 //! delete a face between the infinite region and a solid region is refused with `SM_ERR`
 //! (the face in the error) instead of returning a body whose solid merged into the outside.
@@ -409,9 +408,8 @@ struct Faces {
     other_sets: Vec<Vec<FaceId>>,
 }
 
-// `slice_same` (`Slice` with a primary face bounding material only, and only with the
-// opt-in `Kernel::fixes.slice_coincident_faces_sheet_side`): that material lies on the
-// side the sheet's `SM_OT_SAME` faceuse bounds. Upstream (and the default) gives
+// `slice_same` (`Slice` with a primary face bounding material only; WR-254): that
+// material lies on the side the sheet's `SM_OT_SAME` faceuse bounds. Upstream gives
 // `SM_BO_SLICE` the difference rule, which never deletes a pair against a sheet (void on
 // both sides), so a face lying in the slicing sheet is kept in both parts (issue #528,
 // WR-254). The fix keeps such a pair on the sheet's same side only, the rule step 7.4d
@@ -715,9 +713,7 @@ fn classify_edge_faces(
             let non_solid = first_equal && !second_equal;
             // the coincident faceuses point the same way (FindRadialSector): when the
             // primary face bounds material, its faceuse faces it if its region is solid
-            let slice_same = if operation == BooleanOperation::Slice
-                && kernels.primary.fixes.slice_coincident_faces_sheet_side
-            {
+            let slice_same = if operation == BooleanOperation::Slice {
                 let solid = void(primary, pf_regions.0)? == 0;
                 if solid == (void(primary, pf_regions.1)? == 0) {
                     None
@@ -1293,9 +1289,8 @@ fn joined_without_data(
 
 /// Every region's enclosing shell first, the region's outer shell that
 /// `SmBrep::AssertValid` test 12 takes it to be (the fork's fix, tangency-labs/smlib
-/// `abastran/void-shell-check`), only with the opt-in
-/// `Kernel::fixes.boolean_outer_shell_first` (WR-265); off (the default), upstream's
-/// order is left. Step 6 merges regions and appends the merged region's shells after
+/// `abastran/void-shell-check`; WR-265); upstream leaves step 6's order. Step 6 merges
+/// regions and appends the merged region's shells after
 /// the survivor's own, so when a union seals a void the void's shell can come first;
 /// step 8 only swaps void flags. [`bp::set_region_is_void_flags_for_nested_solids`]
 /// walks the nesting from the infinite region and makes each nested region's outer
@@ -1306,12 +1301,10 @@ fn put_outer_shells_first(
     primary: &mut Brep,
     operation: BooleanOperation,
 ) -> Result<()> {
-    if !kernels.primary.fixes.boolean_outer_shell_first
-        || !matches!(
-            operation,
-            BooleanOperation::Union | BooleanOperation::Difference | BooleanOperation::Intersection
-        )
-    {
+    if !matches!(
+        operation,
+        BooleanOperation::Union | BooleanOperation::Difference | BooleanOperation::Intersection
+    ) {
         return Ok(());
     }
     let regions = bp::regions(primary, None)?;
@@ -2090,14 +2083,13 @@ mod tests {
     /// floor 10) joined with a lid over its top 10 closes the cavity 80 x 80 x 80. For
     /// either operand order, whether each shell of the one solid region is mated to the
     /// infinite region (the outer shell).
-    fn cup_and_lid_outer_shells(fix: bool) -> Vec<Vec<bool>> {
+    fn cup_and_lid_outer_shells() -> Vec<Vec<bool>> {
         use crate::boolean::api_brep::boolean;
         use crate::math::Point3;
         use crate::primitive::api_primitives::create_box;
         let mut out = Vec::new();
         for lid_first in [false, true] {
             let mut k = Kernel::default();
-            k.fixes.boolean_outer_shell_first = fix;
             let cube = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 100.0, 100.0, 100.0).unwrap();
             let hollow =
                 create_box(&mut k, Point3::new(10.0, 10.0, 10.0), 80.0, 80.0, 100.0).unwrap();
@@ -2132,23 +2124,13 @@ mod tests {
         out
     }
 
-    /// WR-265 with `Kernel::fixes.boolean_outer_shell_first`: the outer shell comes
-    /// first, as `SmBrep::AssertValid` test 12 wants.
+    /// WR-265: the outer shell comes first, as `SmBrep::AssertValid` test 12 wants
+    /// (SMLib's step 6 left the cavity's shell first).
     #[test]
     fn issue_388_union_sealing_a_void_puts_the_outer_shell_first() {
         assert_eq!(
-            cup_and_lid_outer_shells(true),
+            cup_and_lid_outer_shells(),
             [vec![true, false], vec![true, false]]
-        );
-    }
-
-    /// WR-265 by default (SMLib): step 6 leaves the cavity's shell first, as the C++
-    /// build does (`boolean.api_brep` cases `cup_lid_*`).
-    #[test]
-    fn union_sealing_a_void_leaves_the_cavity_shell_first_by_default() {
-        assert_eq!(
-            cup_and_lid_outer_shells(false),
-            [vec![false, true], vec![false, true]]
         );
     }
 }
