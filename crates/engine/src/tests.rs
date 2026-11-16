@@ -5317,6 +5317,62 @@ fn a_round_as_large_as_the_round_it_runs_along_is_refused_not_failed() {
     }
 }
 
+/// #17224: a sphere of radius 25 with a cylinder of radius 15 cut through it along Y, its axis 10.1
+/// above the centre, so the cylinder comes out at the top and meets the sphere in one loop of three
+/// edges (split where the cylinder's seam, at +X, crosses it). Rounding the loop, the two rounds
+/// that meet at a seam vertex end on one section where their contact lines cross the seam. The
+/// ball touching the cylinder on the seam (x = 15, z = 10.1) and the sphere inside has radius
+/// (297.99 - y^2) / 80, at most 3.725: a larger round's contact line never reaches the seam, and
+/// it failed there with "Unable to Compute Geometry". It is refused naming the largest radius
+/// that fits (297.99 / 80 less the fit margin, 3.724 mm, which builds); 2 mm builds as before.
+fn sphere_with_a_cylindrical_cut() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "flip": true}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [0, 25], "end": [0, -25]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 25], [0, -25]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"axis": {"curve": "l1"}, "angle": "360 deg"}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "flip": true}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 10.1], "radius": 15}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 60, "direction": "symmetric", "operation": "cut"}));
+    s
+}
+
+#[test]
+fn a_round_whose_contact_line_misses_the_seam_it_joins_across_names_the_radius_that_fits() {
+    let loop_edges = json!([
+        [-11.698264765965028, -22.08234508421787, 0.7117938036342516],
+        [2.716453680812133, 0, 24.851978818427593],
+        [-11.69826476596502, 22.08234508421787, 0.7117938036342424]
+    ]);
+    let mut s = sphere_with_a_cylindrical_cut();
+    run(&mut s, "solid.fillet", json!({"edges": loop_edges, "radius": 2}));
+    assert!(rel(volume(&mut s), 36554.03) < 1e-5, "{}", volume(&mut s));
+    // The kernel's own refusal: without the search that builds candidates to confirm the size.
+    let mut s = sphere_with_a_cylindrical_cut();
+    s.set_validation(solidcraft_kernel::Validation::Off);
+    let e = s.execute("solid.fillet", &json!({"edges": loop_edges, "radius": 6})).unwrap_err().to_string();
+    assert!(!e.contains("Unable to Compute Geometry"), "{e}");
+    assert!(e.contains("larger than the faces beside its edges allow"), "{e}");
+    // The size named: the largest ball touching the seam, 297.99 / 80 at y = 0, less the fit
+    // margin (a thousand of the edge's tolerances, about 1.2e-5 here: 0.012).
+    let named: f64 = e
+        .split_once("the largest radius that fits is ")
+        .and_then(|(_, rest)| rest.split_once(" mm"))
+        .and_then(|(n, _)| n.parse().ok())
+        .unwrap_or_else(|| panic!("no radius named: {e}"));
+    let bound = 297.99 / 80.0;
+    assert!(named < bound && bound - named < 0.02, "named {named}, bound {bound}: {e}");
+    // The size named builds: its contact line crosses the seam just inside the bound.
+    let mut s = sphere_with_a_cylindrical_cut();
+    if let Err(e) = s.execute("solid.fillet", &json!({"edges": loop_edges, "radius": named})) {
+        panic!("the named radius {named} does not build: {e}");
+    }
+    let v = volume(&mut s);
+    assert!(v > 0.0 && v < 36554.03, "{v}");
+}
+
 #[test]
 fn fillet_fit_reduce_uses_the_largest_radius_that_fits() {
     // #293: 3.5 is too large for the 6 mm end faces of a 14 x 6 x 10 box; reduce gives 3 (a full
