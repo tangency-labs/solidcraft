@@ -29,7 +29,8 @@
   250: 10015.883451427 mm³, 10 faces, 28 edges and 20 vertices at each).
 - **Fix (always on, no flag):** the touching point is kept aside (WR-51 addendum of 2026-11-16) and, at the end
   of `DoIntersection`, every crossing curve (type crossing or near tangent) through it that stays within the
-  tolerance of the boundary curve it lies on (each distinct knot of the curve and each midpoint between two of
-  them drops onto the boundary curve closer than the tolerance) is removed; the touching point takes its place
-  (`SurfaceIntersector::runs_along_boundary`). Tangent, coincident and region boundary curves stay. Test:
+  tolerance of the boundary curve it lies on is removed; the touching point takes its place
+  (`SurfaceIntersector::runs_along_boundary`). That is proved on control points, never at sample points: each
+  rational Bézier piece of the curve has its control points within the tolerance of the chord of one piece of the
+  boundary curve, less that piece's own distance from its chord and the rounding of both. Tangent, coincident and region boundary curves stay. Test:
   `intersect::surface_intersector::p3::tests::a_crossing_curve_along_the_boundary_of_a_deferred_contact_gives_way_to_it`.
