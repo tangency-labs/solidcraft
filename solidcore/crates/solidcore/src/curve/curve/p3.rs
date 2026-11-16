@@ -75,8 +75,9 @@
 //!   (not upstream, #17735): the step is unchanged, and the `|F| < SM_EFF_ZERO` stop,
 //!   which left the gap's component along a short curve's tangent up to
 //!   `SM_EFF_ZERO / |C'|` from a point on it (beyond the intersection's tolerance), leaves
-//!   it below `SM_EFF_ZERO`. The stop ends the iteration only; the intersection is decided
-//!   by the foot's distance against its tolerance. The
+//!   it below `SM_EFF_ZERO` (the residual stop; the gap and angle tests stop as before). A
+//!   stop ends the iteration only; the intersection is decided by the foot's distance
+//!   against its tolerance. The
 //!   separate [`MAX_PC_SCALE_STEPS`] cap is retained as a backstop and returns
 //!   [`SolidError::InvalidInput`] after 400 divisions (a finite tangent needs at
 //!   most 310). Upstream loops forever on the infinite rational B-spline tangent
@@ -968,13 +969,15 @@ impl EvalFunction for FindPcExtremaEfo<'_, Curve> {
         // |F| < SM_EFF_ZERO, and F = (C - P) . C' is that component times |C'|: undivided,
         // a short tangent stopped it with the component up to SM_EFF_ZERO / |C'|, so a
         // point on a 0.03 mm cubic was found 2e-11 off it and its intersection within the
-        // scaled zero (1.5e-11) reported no point. Divided, the stop leaves the component
-        // below SM_EFF_ZERO whatever the tangent (|C'| >= 1 already did). This only ends
-        // the iteration: it bounds the gap along the tangent, not the distance (a
-        // stationary point that is not the point stops it too, as it did before), and the
-        // intersection keeps the foot only when its distance |C - P| is within the
-        // tolerance (`CpGlobalSolver::local_solve_branch`). The tangent is not zero here
-        // (the test above).
+        // scaled zero (1.5e-11) reported no point. Divided, the residual stop leaves the
+        // component below SM_EFF_ZERO whatever the tangent (|C'| >= 1 already did). The
+        // angular test below, unchanged, stops with the gap within SM_EFF_ZERO of square
+        // to the tangent, a component below SM_EFF_ZERO times the gap. Neither bounds the
+        // distance (a stationary point that is not the point stops it too, as it did
+        // before): a stop only ends the iteration, and the intersection keeps the foot
+        // only when its distance |C - P| is within the tolerance
+        // (`CpGlobalSolver::local_solve_branch`). The tangent is not zero here (the test
+        // above).
         if self.intersecting && tan_dot_tan < 1.0 {
             let tan_len = tan_dot_tan.sqrt();
             out.f /= tan_len;
@@ -1237,10 +1240,13 @@ impl Curve {
     }
 
     /// [`Curve::local_point_solve`] for a minimisation that decides an intersection
-    /// when `intersecting` (not upstream, #17735): the Newton solve then stops only with
-    /// the gap's component along the tangent below `SM_EFF_ZERO`
-    /// ([`FindPcExtremaEfo::intersecting`]). The solution's value is the foot's distance
-    /// from the point, which the intersection compares with its tolerance.
+    /// when `intersecting` (not upstream, #17735): the Newton solve's residual stop
+    /// (`|F| < SM_EFF_ZERO`) then leaves the gap's component along the tangent below
+    /// `SM_EFF_ZERO` ([`FindPcExtremaEfo::intersecting`]). The solve also stops on
+    /// [`FindPcExtremaEfo`]'s own tests, a gap below `SM_EFF_ZERO` or within an angle of
+    /// `SM_EFF_ZERO` of square to the tangent, which bounds that component only relative to
+    /// the gap. Whichever stop ends it, the solution's value is the foot's distance from the
+    /// point, which the intersection compares with its tolerance.
     ///
     /// # Errors
     ///

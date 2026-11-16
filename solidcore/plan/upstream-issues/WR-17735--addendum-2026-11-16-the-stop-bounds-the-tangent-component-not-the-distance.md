@@ -2,8 +2,10 @@
 
 - **Correction:** WR-17735 says that, for the minimisation that decides an intersection,
   dividing `F` and `F'` by `|C'|` makes the `|F| < SM_EFF_ZERO` stop leave "the foot at
-  most `SM_EFF_ZERO` along the curve from the point". It bounds the gap's component along
-  the unit tangent at the foot, not the distance from the point. A stationary point of
+  most `SM_EFF_ZERO` along the curve from the point". That residual stop bounds the gap's
+  component along the unit tangent at the foot, not the distance from the point; the
+  solve's other stops, unchanged (a gap below `SM_EFF_ZERO`, or one within an angle of
+  `SM_EFF_ZERO` of square to the tangent), bound that component only relative to the gap. A stationary point of
   the distance that is not the point stops the iteration too, as it did before the change:
   on `C(t) = (0.1 t (t - 1), 0.1 (1 - (1 - t)^3))` with `P = C(0)`, the end `t = 1` is
   0.1 from `P` and its gap is square to the tangent.

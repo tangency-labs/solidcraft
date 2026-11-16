@@ -2114,8 +2114,9 @@ pub struct FindPcExtremaEfo<'a, C: ?Sized> {
     pub num_scale: u64,
     /// Whether the minimisation decides an intersection (not upstream, #17735): along a
     /// tangent shorter than 1, `F` and `F'` are then divided by `|C'|`, so that the
-    /// solve's `|F| < SM_EFF_ZERO` stop leaves the gap's component along the tangent below
-    /// `SM_EFF_ZERO` (the distance is the caller's to judge).
+    /// solve's residual stop `|F| < SM_EFF_ZERO` leaves the gap's component along the
+    /// tangent below `SM_EFF_ZERO` (the gap and angle tests stop as before; the distance is
+    /// the caller's to judge).
     pub intersecting: bool,
 }
 
