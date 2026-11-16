@@ -45,9 +45,7 @@
 use goldens::case::repo_root;
 use goldens::{registry, CaseContext};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::mass::enclosure::{
-    enclose_mass_properties, Bounds,
-};
+use solidcore::mass::enclosure::{enclose_mass_properties, Bounds};
 use solidcore::mass::integrator::properties::{
     brep_mass_properties, PropertyAttributes, ESTIMATE_ACCURACY_FINEST,
 };
@@ -1280,10 +1278,10 @@ const CLOSED_FORM_ROUNDING: f64 = 1e-12;
 /// of the core rectangle `24 x 14` (vertical rounds), whose measures are Steiner's
 /// polynomials:
 /// * all 12 edges: the outer surface is the core box `a x b x c = 24 x 14 x 4` grown by 3
-///   and the inner one the same core grown by 1, with `A(r) = 2(ab + bc + ca) + 2 pi (a + b
-///   + c) r + 4 pi r^2` and `V(r) = abc + 2(ab + bc + ca) r + pi (a + b + c) r^2 + 4/3 pi
-///   r^3`: closed, area `A(3) + A(1) = 1952 + 376 pi`, volume `V(3) - V(1) = 1952 + 1112/3
-///   pi`;
+///   and the inner one the same core grown by 1, with, for `s = a + b + c` and
+///   `q = ab + bc + ca`, the area `A(r) = 2 q + 2 pi s r + 4 pi r^2` and the volume
+///   `V(r) = abc + 2 q r + pi s r^2 + 4/3 pi r^3`; closed: area `A(3) + A(1)`, which is
+///   `1952 + 376 pi`, and volume `V(3) - V(1)`, which is `1952 + 1112/3 pi`;
 /// * the same, open at the top (its plane face at z = 10 removed): the slab
 ///   `[3, 27] x [3, 17] x [8, 10]` above the inner top goes, so the two `24 x 14` top
 ///   planes go and the rim, perimeter `76` by height `2`, comes: area `1952 + 376 pi -
@@ -1306,7 +1304,6 @@ fn shell_closed_form(name: &str) -> (f64, f64) {
         _ => panic!("{name}: no closed form"),
     }
 }
-
 
 fn group(name: &str) -> usize {
     if name.starts_with("corner3x2-") || name.starts_with("overhang-") {
