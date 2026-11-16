@@ -104,7 +104,7 @@
       "ungraded": {}
     },
     "fillets": {
-      "cases": 321,
+      "cases": 320,
       "chain": {
         "1": 15,
         "13": 9,
@@ -116,13 +116,12 @@
         "4": 259,
         "5": 6,
         "7": 2,
-        "8": 1
+        "8": 2
       },
-      "expressible": 98,
-      "not_expressible": 16,
-      "operation_expressible": 305,
+      "expressible": 99,
+      "not_expressible": 14,
+      "operation_expressible": 306,
       "reasons": {
-        "SolidCraft has no command for it yet": 2,
         "refused or failed in SolidCraft, not in a kernel operation": 14
       },
       "ungraded": {
@@ -926,18 +925,6 @@
       ]
     },
     {
-      "case": "fillets/9-fillet-corner-curvature-with-reduce-fit",
-      "why": [
-        "SolidCraft has no command for it yet: solid.fillet builds `corner: g2` with `fit: exact` only"
-      ]
-    },
-    {
-      "case": "fillets/9-fillet-corner-curvature-with-taper-fit",
-      "why": [
-        "SolidCraft has no command for it yet: solid.fillet builds `corner: g2` with `fit: exact` only"
-      ]
-    },
-    {
       "case": "fillets/9-fillet-corner-setback-1-5-not-past-r2-curvature",
       "why": [
         "the failure is SolidCraft's, not a kernel operation's: step 2 (solid.fillet): invalid input: the setback must be more than the radius (2 mm) at the corner (60.000, 40.000, 20.000): the rounds' contact lines meet 2 mm from it along its edges, and the corner's patch starts past that"
@@ -1030,7 +1017,7 @@
     {
       "case": "history/cov-parameters-cyclic-expression-refused",
       "why": [
-        "the failure is SolidCraft's, not a kernel operation's: step 4 (parameters.change): expression: circular reference: A \u2192 B \u2192 A"
+        "the failure is SolidCraft's, not a kernel operation's: step 4 (parameters.change): expression: circular reference: A → B → A"
       ]
     },
     {
@@ -1277,7 +1264,7 @@
     {
       "case": "inspect/cov-continuity-refuses-too-few-samples",
       "why": [
-        "the failure is SolidCraft's, not a kernel operation's: step 2 (inspect.continuity): invalid parameters for `inspect.continuity`: `samples` must be 3\u2026257 stations along each edge"
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (inspect.continuity): invalid parameters for `inspect.continuity`: `samples` must be 3…257 stations along each edge"
       ]
     },
     {
@@ -1295,7 +1282,7 @@
     {
       "case": "inspect/cov-isocurve-refuses-zero-curves",
       "why": [
-        "the failure is SolidCraft's, not a kernel operation's: step 2 (inspect.isocurve): invalid parameters for `inspect.isocurve`: `count` must be a whole number of curves each way, 1\u2026100"
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (inspect.isocurve): invalid parameters for `inspect.isocurve`: `count` must be a whole number of curves each way, 1…100"
       ]
     },
     {
@@ -1678,7 +1665,7 @@
     {
       "case": "sheet-metal/570-flange-refuses-thickness-it-would-ignore",
       "why": [
-        "no kernel operation ran before the failure: step 4 (sheet.flange): invalid parameters for `sheet.flange`: `thickness` is not a sheet.flange parameter: the sheet metal rule sets it. Make a rule with sheet.manage_rules {name, thickness, \u2026} and pass its name as `rule`"
+        "no kernel operation ran before the failure: step 4 (sheet.flange): invalid parameters for `sheet.flange`: `thickness` is not a sheet.flange parameter: the sheet metal rule sets it. Make a rule with sheet.manage_rules {name, thickness, …} and pass its name as `rule`"
       ]
     },
     {
@@ -1984,7 +1971,7 @@
     {
       "case": "surfaces/cov-offset-tolerance-out-of-range-refused",
       "why": [
-        "the failure is SolidCraft's, not a kernel operation's: step 2 (surface.offset): invalid input: the offset tolerance must be 0.000001\u202610 mm"
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (surface.offset): invalid input: the offset tolerance must be 0.000001…10 mm"
       ]
     },
     {
