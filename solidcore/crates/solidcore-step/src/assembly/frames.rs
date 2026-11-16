@@ -31,7 +31,7 @@ use std::f64::consts::TAU;
 use solidcore_record::Vec3;
 use solidcore_record::brep::{self, Curve as BCurve};
 
-use super::{Builder, LoopB, R};
+use super::{Assembly, Bound, R};
 
 /// A circle edge bounds a face about the circle's own axis: the faces it joins share a grid.
 fn about_axis(edge: &BCurve, interval: [f64; 2], frame: &brep::Frame, tol: f64) -> bool {
@@ -59,12 +59,12 @@ fn root(parent: &mut [usize], mut i: usize) -> usize {
     i
 }
 
-impl Builder<'_, '_> {
+impl Assembly<'_> {
     /// Measure every round face's box on its label, and turn the frames of the faces whose
     /// forms would run past one turn, with the faces their circle edges join them to, so that
     /// each starts on a quarter line; a torus face whose tube would, its tube start too. Returns
     /// how many faces were turned.
-    pub(super) fn turn_frames(&mut self) -> R<usize> {
+    pub(crate) fn turn_frames(&mut self) -> R<usize> {
         let about_axis = self.turn_about_axes()?;
         Ok(about_axis + self.turn_tubes())
     }
@@ -81,7 +81,7 @@ impl Builder<'_, '_> {
         let mut bounding: Vec<Vec<usize>> = vec![Vec::new(); self.edges.len()];
         for (fi, f) in self.faces.iter().enumerate() {
             for l in &f.loops {
-                if let LoopB::Edges(es) = l {
+                if let Bound::Edges(es) = l {
                     for (e, _) in es {
                         if frames.get(fi).is_some_and(Option::is_some)
                             && let Some(b) = bounding.get_mut(*e as usize)
@@ -103,7 +103,7 @@ impl Builder<'_, '_> {
             // Its tube circles about another round face's axis, with that face's frame.
             let mut joined = Vec::new();
             for l in &face.loops {
-                let LoopB::Edges(es) = l else { continue };
+                let Bound::Edges(es) = l else { continue };
                 for (ei, _) in es {
                     let Some(edge) = self.edges.get(*ei as usize) else { continue };
                     for other in bounding.get(*ei as usize).into_iter().flatten().filter(|o| **o != fi) {
@@ -158,7 +158,7 @@ impl Builder<'_, '_> {
                 continue;
             }
             for l in &f.loops {
-                if let LoopB::Edges(es) = l {
+                if let Bound::Edges(es) = l {
                     for (e, _) in es {
                         if let Some(b) = bounding.get_mut(*e as usize)
                             && !b.contains(&fi)

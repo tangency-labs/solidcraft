@@ -75,6 +75,16 @@ impl ProtoBrep<FilletObject> for InsertionGeometry<'_> {
             self, k, face, start, end, curve, interval, tolerance,
         )
     }
+    fn raise_edge_tolerance(
+        &mut self,
+        k: &Kernel,
+        edge: FilletObject,
+        tolerance: f64,
+    ) -> Result<()> {
+        crate::boolean::topology_intersector::p1::IntersectorBrep::set_topology_tolerance(
+            self, k, edge, tolerance, true, true,
+        )
+    }
     fn face_coincident_edge(
         &self,
         k: &Kernel,
