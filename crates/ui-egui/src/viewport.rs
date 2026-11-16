@@ -502,7 +502,7 @@ pub(crate) fn scene_bounds(app: &SolveApp) -> solidcraft_engine::geom::Aabb3 {
 /// so a preview in an empty design has its own. Nothing to draw has no occlusion (#9327).
 fn ao_radius(app: &SolveApp) -> f32 {
     let size = scene_bounds(app).diagonal();
-    if app.preferences.ambient_occlusion && app.ui.visual_style != 2 && size > 0.0 { (size * 0.04).clamp(1e-4, 1e6) as f32 } else { 0.0 }
+    if crate::safe_graphics::ambient_occlusion(app) && app.ui.visual_style != 2 && size > 0.0 { (size * 0.04).clamp(1e-4, 1e6) as f32 } else { 0.0 }
 }
 
 /// How close a perspective eye may come to the target: a small fraction of the scene, so zoom-in
@@ -910,7 +910,7 @@ pub(crate) fn sky_uniform(dark_parts: bool, finish: bool, up: solidcraft_viewpor
 
 fn ao_samples(app: &mut SolveApp, ctx: &egui::Context, view_proj: [[f32; 4]; 4], size_px: [f32; 2]) -> u32 {
     // Without AO (off, or wireframe) the count is unused: no repaint is asked for it.
-    if !app.preferences.ambient_occlusion || app.ui.visual_style == 2 || view_settled(app, ctx, view_proj, size_px) {
+    if !crate::safe_graphics::ambient_occlusion(app) || app.ui.visual_style == 2 || view_settled(app, ctx, view_proj, size_px) {
         solidcraft_viewport_gpu::view::AO_SAMPLES
     } else {
         solidcraft_viewport_gpu::view::AO_SAMPLES_MOVING
@@ -921,7 +921,7 @@ fn ao_samples(app: &mut SolveApp, ctx: &egui::Context, view_proj: [[f32; 4]; 4],
 /// ambient occlusion drawn, the view has held still for [`SS_SETTLE`], so the picture has all
 /// its samples (#7165). Reads the state the last painted frame left.
 pub(crate) fn ao_settled(app: &SolveApp, ctx: &egui::Context) -> bool {
-    !app.preferences.ambient_occlusion || app.ui.visual_style == 2 || ctx.input(|i| i.time) - app.viewport.ss_view.1 >= SS_SETTLE
+    !crate::safe_graphics::ambient_occlusion(app) || app.ui.visual_style == 2 || ctx.input(|i| i.time) - app.viewport.ss_view.1 >= SS_SETTLE
 }
 
 /// Whether the view (its view-projection and pixels) has held still for [`SS_SETTLE`]. Until it
@@ -6168,7 +6168,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let [r, g, b, _] = c.to_normalized_gamma_f32();
                 [r, g, b]
             }),
-            sky: sky_uniform(app.preferences.dark_parts_shading, app.preferences.viewport_material_finish, proj.cam.up),
+            sky: sky_uniform(crate::safe_graphics::dark_parts_shading(app), crate::safe_graphics::material_finish(app), proj.cam.up),
             moving,
         });
         crate::blur::viewport(&painter, rect, cb, rect, [t.viewport_top, t.viewport_bottom]);
@@ -7000,6 +7000,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
         && !agent_computing
         && crate::space_mouse_offer::offerable(app).is_none()
         && !crate::stand_up::note_pending(app)
+        && crate::safe_graphics::line(app).is_none()
     {
         return Vec::new();
     }
@@ -7015,6 +7016,27 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
     let mut free = crate::viewport_layout::free_rect(view, &obstacles).shrink(t.space_8);
     if ToastPlace::current(ui.ctx()) == ToastPlace::Corner {
         free = corner_free(view, &obstacles);
+    }
+    // Safe graphics mode (`safe_graphics`): one line with its one button, until closed.
+    if let Some(line) = crate::safe_graphics::line(app) {
+        let (text, button) = crate::safe_graphics::line_text(app, line);
+        let actions: Vec<(&str, ToastKind)> = button.into_iter().map(|label| (label, ToastKind::Secondary)).collect();
+        let extras = ToastExtras { close: Some("toast:safe_graphics:close"), ..Default::default() };
+        if let Some(toast) = paint_toast_ext(ui, free, text.to_string(), ToastLead::Dot(false), &actions, extras) {
+            let r = toast.rect;
+            crate::scenario::publish_rect("toast:safe_graphics", r);
+            if let Some(button) = toast.buttons.first() {
+                crate::scenario::publish_target("toast:safe_graphics:button", *button);
+            }
+            obstacles.push(r);
+            free.max.y = r.top() - t.space_8;
+            shown.push(r);
+            if toast.clicked == Some(0) {
+                crate::safe_graphics::act(app, line);
+            } else if toast.closed {
+                app.safe_graphics_dismissed = true;
+            }
+        }
     }
     // The note offering to stand up a file just opened from a program not known to save Y up
     // (#7717): the shared toast with its buttons, which go by themselves and never block input.

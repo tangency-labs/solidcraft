@@ -1,0 +1,10 @@
+{
+  "en": {
+    "graphics.safe_mode_full_next": "Full graphics at the next start",
+    "graphics.safe_mode_restart": "Restart now",
+    "graphics.safe_mode_started": "Started in safe graphics mode",
+    "graphics.safe_mode_try_full": "Try full graphics",
+    "prefs.safe_graphics_next": "Start in safe graphics mode",
+    "prefs.safe_graphics_next_help": "Next start only: plain drawing without anti-aliasing, ambient occlusion, blur behind panels or the path tracer, on the graphics API wgpu picks. SolidCraft also starts this way by itself after a start that failed or lost its graphics device."
+  }
+}
