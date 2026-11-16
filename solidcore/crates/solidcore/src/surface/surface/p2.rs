@@ -83,11 +83,11 @@
 //!   `Kernel::fixes.join_touching_loops`): `create_plane_with_3d_curves`
 //!   joins a loop touching another loop of its face at a vertex into that loop
 //!   (`join_touching_loops`, the SolidCraft fork's `JoinTouchingLoops`).
-//! - **`IsParallelToVector`** (WR-39, #2145, opt-in
-//!   `Kernel::fixes.surface_parallel_to_vector_checks`): [`Surface::is_parallel_to_vector`]
-//!   forwards `k` to [`BSplineSurface::is_parallel_to_vector_with_kernel`] and
-//!   [`Plane::is_parallel_to_vector_with_kernel`] for every `SmBSplineSurface`-derived
-//!   kind (`BSpline`, `Plane`, `Cone`, `SurfOfRevolution`, `SurfOfExtrusion`, `Sphere`,
+//! - **`IsParallelToVector`** (WR-39, #2145): [`Surface::is_parallel_to_vector`] is
+//!   `false` for a vector that cannot be unitised and tests the control net against the
+//!   chord direction ([`BSplineSurface::is_parallel_to_vector`],
+//!   [`Plane::is_parallel_to_vector`]) for every `SmBSplineSurface`-derived kind
+//!   (`BSpline`, `Plane`, `Cone`, `SurfOfRevolution`, `SurfOfExtrusion`, `Sphere`,
 //!   `Torus`).
 //! - **Edit notifications.** `SwapUV`'s `Notify` calls (`SetCanonical`'s for the
 //!   kinds built on `SmBSplineSurface`, `SmSrfInVolume`'s own) need a context and an
@@ -2633,18 +2633,18 @@ impl Surface {
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_)
             | SurfaceKind::SrfInVolume(_) => return Ok(base_is_parallel_to_vector()),
-            SurfaceKind::Plane(s) => return Ok(s.is_parallel_to_vector_with_kernel(k, vector)),
+            SurfaceKind::Plane(s) => return Ok(s.is_parallel_to_vector(vector)),
             // (not a plane: the SmBSplineSurface net test)
             SurfaceKind::Cone(s) => s.rev().base(),
             SurfaceKind::SurfOfRevolution(s) => s.base(),
             SurfaceKind::SurfOfExtrusion(s) => {
                 let b = s.base_with_nurb_or_base(k)?;
-                return b.is_parallel_to_vector_with_kernel(k, vector);
+                return b.is_parallel_to_vector(vector);
             }
             SurfaceKind::Sphere(s) => s.base().base(),
             SurfaceKind::Torus(s) => s.base().base(),
         };
-        bspline.is_parallel_to_vector_with_kernel(k, vector)
+        bspline.is_parallel_to_vector(vector)
     }
 
     /// The unique knots in `param`'s direction and their multiplicities, optionally

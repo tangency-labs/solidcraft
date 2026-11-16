@@ -1,0 +1,46 @@
+{
+  "en": {
+    "nav.upright_orbit_unrolls.help": "When the view is rolled (Look At on a tilted sketch, or the view cube's turn arrows), orbiting stands it upright again as you drag, and the model turns the way the pointer goes. Off: a rolled view keeps its roll while you orbit, so an upside-down view stays upside down.",
+    "nav.upright_orbit_unrolls.label": "Orbiting stands a rolled view upright"
+  },
+  "ar": {
+    "nav.upright_orbit_unrolls.help": "عندما يكون العرض مائلاً حول محوره (النظر إلى رسم على مستوى مائل، أو أسهم التدوير في مكعب العرض)، يعيده الدوران قائماً أثناء السحب، ويدور النموذج في اتجاه المؤشر. عند الإيقاف: يحتفظ العرض المائل بميله أثناء الدوران، فيبقى العرض المقلوب مقلوباً.",
+    "nav.upright_orbit_unrolls.label": "الدوران يعيد العرض المائل قائماً"
+  },
+  "de": {
+    "nav.upright_orbit_unrolls.help": "Ist die Ansicht gekippt (Ausrichten auf eine Skizze auf einer geneigten Ebene oder die Drehpfeile des Ansichtswürfels), richtet das Orbiten sie beim Ziehen wieder auf, und das Modell dreht sich in Zeigerrichtung. Aus: Eine gekippte Ansicht behält beim Orbiten ihre Neigung, eine auf dem Kopf stehende Ansicht bleibt so.",
+    "nav.upright_orbit_unrolls.label": "Orbiten richtet eine gekippte Ansicht auf"
+  },
+  "es": {
+    "nav.upright_orbit_unrolls.help": "Si la vista está girada sobre su eje (Mirar a un boceto en un plano inclinado, o las flechas de giro del cubo de vista), al orbitar vuelve a ponerse derecha mientras arrastras, y el modelo gira hacia donde va el puntero. Desactivado: una vista girada conserva su giro al orbitar, así que una vista boca abajo sigue boca abajo.",
+    "nav.upright_orbit_unrolls.label": "Orbitar endereza una vista girada"
+  },
+  "fr": {
+    "nav.upright_orbit_unrolls.help": "Quand la vue est inclinée sur son axe (Regarder une esquisse sur un plan incliné, ou les flèches de rotation du cube de vue), l'orbite la redresse pendant le glissement, et le modèle tourne dans le sens du pointeur. Désactivé : une vue inclinée garde son inclinaison pendant l'orbite, et une vue à l'envers reste à l'envers.",
+    "nav.upright_orbit_unrolls.label": "L'orbite redresse une vue inclinée"
+  },
+  "he": {
+    "nav.upright_orbit_unrolls.help": "כשהתצוגה מוטה סביב צירה (הסתכלות על סקיצה במישור נטוי, או חיצי הסיבוב של קוביית התצוגה), הסיבוב מסביב מיישר אותה תוך כדי גרירה, והמודל מסתובב לכיוון הסמן. כבוי: תצוגה מוטה שומרת על ההטיה בזמן הסיבוב, ותצוגה הפוכה נשארת הפוכה.",
+    "nav.upright_orbit_unrolls.label": "סיבוב מסביב מיישר תצוגה מוטה"
+  },
+  "hr": {
+    "nav.upright_orbit_unrolls.help": "Kad je pogled zakrenut oko svoje osi (Pogledaj skicu na nagnutoj ravnini ili strelice za zakretanje kocke pogleda), orbitiranje ga tijekom povlačenja ponovno uspravlja, a model se okreće kamo ide pokazivač. Isključeno: zakrenut pogled zadržava zakret tijekom orbitiranja, pa pogled naglavačke ostaje naglavačke.",
+    "nav.upright_orbit_unrolls.label": "Orbitiranje uspravlja zakrenut pogled"
+  },
+  "ja": {
+    "nav.upright_orbit_unrolls.help": "ビューが回転して傾いているとき（傾いた平面上のスケッチに正対、またはビューキューブの回転矢印）、オービットするとドラッグ中にビューが正立に戻り、モデルはポインタの方向に回ります。オフ：傾いたビューはオービット中も傾きを保ち、上下逆のビューは上下逆のままです。",
+    "nav.upright_orbit_unrolls.label": "オービットで傾いたビューを正立に戻す"
+  },
+  "ko": {
+    "nav.upright_orbit_unrolls.help": "보기가 시선 축을 중심으로 기울어져 있을 때(기울어진 평면의 스케치 정면 보기, 또는 뷰 큐브의 회전 화살표), 궤도 회전을 하면 드래그하는 동안 보기가 다시 똑바로 서고 모델은 포인터가 가는 방향으로 돕니다. 끄기: 기울어진 보기는 궤도 회전 중에도 기울기를 유지하므로 뒤집힌 보기는 뒤집힌 채로 남습니다.",
+    "nav.upright_orbit_unrolls.label": "궤도 회전으로 기울어진 보기를 똑바로 세우기"
+  },
+  "vi": {
+    "nav.upright_orbit_unrolls.help": "Khi khung nhìn bị xoay nghiêng (Nhìn thẳng vào phác thảo trên mặt phẳng nghiêng, hoặc các mũi tên xoay của khối hướng nhìn), quay quanh sẽ dựng khung nhìn thẳng lại khi bạn kéo, và mô hình xoay theo hướng con trỏ. Tắt: khung nhìn nghiêng giữ độ nghiêng khi quay quanh, nên khung nhìn lộn ngược vẫn lộn ngược.",
+    "nav.upright_orbit_unrolls.label": "Quay quanh dựng thẳng khung nhìn bị nghiêng"
+  },
+  "zh": {
+    "nav.upright_orbit_unrolls.help": "当视图绕视线方向倾斜时（正视倾斜平面上的草图，或使用视图立方体的旋转箭头），环绕时视图会在拖动中恢复正立，模型随指针方向转动。关闭：倾斜的视图在环绕时保持倾斜，倒置的视图保持倒置。",
+    "nav.upright_orbit_unrolls.label": "环绕时将倾斜的视图恢复正立"
+  }
+}

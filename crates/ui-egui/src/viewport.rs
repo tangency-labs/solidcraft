@@ -4790,6 +4790,8 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     } else {
         crate::dialogs_move::chained(app).map(|(_, c)| c.iter().flatten().map(|v| v.to_bits()).collect::<Vec<_>>()).hash(&mut h);
     }
+    // And whether the preview draws them, so they are not lit whole (`build_highlight_with_projection`).
+    crate::dialogs_move::drawn_as_layer(app).hash(&mut h);
     app.origin_visible().hash(&mut h);
     app.picking_plane().hash(&mut h);
     app.preferences.reference_geometry_through_bodies.hash(&mut h);
@@ -5163,6 +5165,11 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     let chained = live.as_ref().filter(|_| !dragging);
     let carry = |b: &solidcraft_engine::doc::ModelBody| chain_of(chained, &b.name);
     let replaced = |name: &str| moving(name) || (app.preview.effective_replaced().iter().any(|n| n == name) && chain_of(chained, name).is_none());
+    // A moved body the preview draws as a layer moved on the GPU is lit by that layer, which
+    // draws it in the selection colour: lighting it here copied and moved its every triangle
+    // again at each change of the move, seconds a keystroke on a large assembly (#17804).
+    let as_layer = crate::dialogs_move::drawn_as_layer(app);
+    let lit_by_layer = |name: &str| as_layer && chain_of(chained, name).is_some();
     let shown = |b: &solidcraft_engine::doc::ModelBody| carried_mesh(carry(b), if product { b.mesh() } else { shown_mesh(app, b, &active_bodies) });
     let drawn = |b: &solidcraft_engine::doc::ModelBody| carried_mesh(carry(b), drawn_mesh(app, b));
     let items = app.highlighted();
@@ -5444,7 +5451,9 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                         }
                     } else {
                         let lit = WholeBody { selected: true, colour: c4(t.body_selected) };
-                        if !(gpu_lit(b) && light_whole_body(app, b, &active_bodies, lit, &body_slots, &mut feedback, &mut selected_instances)) {
+                        if !lit_by_layer(name)
+                            && !(gpu_lit(b) && light_whole_body(app, b, &active_bodies, lit, &body_slots, &mut feedback, &mut selected_instances))
+                        {
                             let m = shown(b);
                             let count = b.body.face_count();
                             mesh_tris(&mut feedback, &m, c4(t.body_selected), true, |f| (f as usize) < count);
