@@ -114,7 +114,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.shell_edges_on_analytics_exact = true;
     f.ssi_pole_point_keeps_its_tangent = true;
     f.fillet_patch_keeps_fillet_edges = true;
-    f.boolean_splits_definition_across_split = true;
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;
     f.local_operation_step_walls = true;
