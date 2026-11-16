@@ -89,7 +89,8 @@ pub enum ShapeLimit {
     Corner,
     /// A point it would add encroaches on a boundary side, for a triangle of boundary nodes alone
     /// narrower than the spec's chord: the face is narrower than the chord there (two of its
-    /// curves within the chord of each other), which splitting sides cannot widen. Kept whole.
+    /// curves within the chord of each other), which splitting sides cannot widen. The triangle
+    /// is left as it is.
     Narrow,
 }
 
