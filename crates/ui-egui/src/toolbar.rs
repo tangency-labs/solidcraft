@@ -5410,6 +5410,26 @@ mod command_start_tab_tests {
         assert!(!grounded(&h), "a second press ungrounds it: {:?}", h.app.status);
     }
 
+    /// #14911: most people pick the part in the view, not the Browser. A body or a face of a
+    /// placed component, selected in the view, makes the ribbon's Ground ground that placement.
+    #[test]
+    fn ribbon_ground_grounds_the_placement_of_a_body_or_face_picked_in_the_view() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        let occurrence = h.app.run("component.create", json!({"name": "Part"})).unwrap()["occurrence"].as_u64().unwrap();
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("occurrence.ground", json!({"occurrence": occurrence, "grounded": false})).unwrap();
+        let grounded = |h: &Harness| h.app.session.occurrence_placement(&[occurrence]).is_ok_and(|p| p.grounded);
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": "Body1"}]})).unwrap();
+        h.app.start("occurrence.ground");
+        assert!(grounded(&h), "the picked body's placement is grounded: {:?}", h.app.status);
+        let face = solidcraft_engine::Sel::Face { body: "Body1".into(), index: 0, point: Default::default() };
+        h.app.session.selection = vec![face];
+        h.app.start("occurrence.ground");
+        assert!(!grounded(&h), "a picked face toggles its placement back: {:?}", h.app.status);
+    }
+
     /// #10540: View Fit, Home and the other view display commands act on the view the same way
     /// however they are started. F6, the navigation bar and the navigator never move the ribbon,
     /// so command search and the VIEW tab's menus must not either.

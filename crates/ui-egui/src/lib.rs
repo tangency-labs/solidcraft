@@ -1955,15 +1955,24 @@ impl SolveApp {
         }
     }
 
-    /// Ground (or, when every one is already grounded, unground) the selected placements and the
-    /// components picked in the Browser, the way the Browser's Ground row toggles one. With
+    /// Ground (or, when every one is already grounded, unground) the selected placements, the
+    /// placements owning the bodies or faces picked in the view, and the components picked in the
+    /// Browser, the way the Browser's Ground row toggles one. With
     /// nothing to act on it says what to pick.
     fn ground_selected_occurrences(&mut self) {
         let mut targets: Vec<(u64, bool)> = Vec::new();
         for sel in &self.session.selection {
-            if let solidcraft_engine::Sel::Occurrence { path } = sel
-                && let Ok(placement) = self.session.occurrence_placement(path)
-            {
+            use solidcraft_engine::Sel;
+            // A body, face, edge or vertex picked in the view stands for the placement that owns
+            // it, the one a drag on it would move (the outermost inside the active component).
+            let path = match sel {
+                Sel::Occurrence { path } => Some(path.clone()),
+                Sel::Body { name: body } | Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => {
+                    occurrence_drag::placement_of(self, body)
+                }
+                _ => None,
+            };
+            if let Some(placement) = path.and_then(|path| self.session.occurrence_placement(&path).ok()) {
                 targets.push((placement.occurrence, placement.grounded));
             }
         }
