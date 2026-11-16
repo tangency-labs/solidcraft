@@ -167,7 +167,10 @@ pub enum OffsetFailure {
     /// times the larger of the edge tolerance and the approximation tolerance (WR-530):
     /// only one of the two faces moved, so they no longer meet along the edge, and no
     /// later step of a local operation closes the gap.
-    LooseTangentEdge,
+    LooseTangentEdge {
+        /// The tangent edge, of the operation's input, where the handle names one.
+        edge: Option<EdgeId>,
+    },
     /// Two curved faces tangent at the old edge now cross, but the intersection
     /// branch on their retained sides has not been certified.
     TangentBranchUncertified,
@@ -353,10 +356,10 @@ impl OffsetFailure {
                 .map(EntityRef::Edge)
                 .or_else(|| face.map(EntityRef::Face)),
             Self::LoopGapUncertified { face } => face.map(EntityRef::Face),
+            Self::LooseTangentEdge { edge } => edge.map(EntityRef::Edge),
             Self::Unsound { what } => what.entity(),
             Self::ExactCurveUncut
             | Self::TangentEndOffCurve
-            | Self::LooseTangentEdge
             | Self::TangentBranchUncertified
             | Self::DistanceUnresolved { .. }
             | Self::ToleranceUnresolved { .. }
@@ -404,7 +407,7 @@ impl OffsetFailure {
             | Self::SeamOpened { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
-            | Self::LooseTangentEdge
+            | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
@@ -437,7 +440,7 @@ impl OffsetFailure {
             | Self::SeamOpened { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
-            | Self::LooseTangentEdge
+            | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
@@ -460,7 +463,7 @@ impl OffsetFailure {
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
-            | Self::LooseTangentEdge
+            | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
@@ -492,7 +495,7 @@ impl OffsetFailure {
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
-            | Self::LooseTangentEdge
+            | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. } => ErrorKind::Unsupported,
@@ -732,9 +735,11 @@ impl core::fmt::Display for OffsetFailure {
                 "two curved faces tangent at the old edge now cross, but the intersection \
                  branch on their retained sides has no certificate",
             ),
-            Self::LooseTangentEdge => f.write_str(
-                "in a local operation, the new faces beside an edge that was tangent no longer \
+            Self::LooseTangentEdge { edge } => write!(
+                f,
+                "in a local operation, the new faces beside {} that was tangent no longer \
                  meet along it: one moved off the other, and nothing closes the gap",
+                edge.map_or_else(|| "an edge".to_owned(), |e| format!("edge {}", e.index()))
             ),
             Self::TangentEndOffCurve => f.write_str(
                 "an edge ends beside a tangent edge whose new faces now cross, and that edge's new \
@@ -1006,7 +1011,12 @@ mod tests {
             ),
             // a stage that failed with no reason the kernel names: its fault, in its class
             (O::StageFailed, ErrorKind::StageFailed, false, true),
-            (O::LooseTangentEdge, ErrorKind::Unsupported, false, false),
+            (
+                O::LooseTangentEdge { edge: None },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -1031,7 +1041,7 @@ mod tests {
                 O::Inconsistent(_) => 18,
                 O::TangentBranchUncertified => 19,
                 O::StageFailed => 20,
-                O::LooseTangentEdge => 21,
+                O::LooseTangentEdge { .. } => 21,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {

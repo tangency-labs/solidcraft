@@ -186,12 +186,34 @@ fn wr_530_turned_and_raised_piece_beside_its_coplanar_twin_is_refused_as_loose()
     )
     .unwrap_err();
     drop(notifications);
-    assert!(
-        matches!(
-            e.failure().map(|f| &f.reason),
-            Some(Reason::Offset(OffsetFailure::LooseTangentEdge))
-        ),
-        "{e}"
+    let Some(Reason::Offset(OffsetFailure::LooseTangentEdge { edge: Some(edge) })) =
+        e.failure().map(|f| &f.reason)
+    else {
+        panic!("not the loose tangent edge, by name: {e}");
+    };
+    // the refusal names the input's tangent edge between the piece and its twin, along
+    // the split line
+    let mut faces = solidcore::topology::edge::faces(&b, *edge, None).unwrap();
+    faces.sort();
+    assert_eq!(faces.len(), 2, "{faces:?}");
+    assert!(faces.contains(&piece), "{faces:?}");
+    for v in [
+        solidcore::topology::edge::start_vertex(&b, *edge)
+            .unwrap()
+            .unwrap(),
+        solidcore::topology::edge::end_vertex(&b, *edge)
+            .unwrap()
+            .unwrap(),
+    ] {
+        let p = b.vertex(v).unwrap().point;
+        assert!(
+            (p.x - 30.0).abs() < 1e-9 && (p.z - 20.0).abs() < 1e-9,
+            "{p:?}"
+        );
+    }
+    assert_eq!(
+        e.failure().and_then(|f| f.reason.entity()),
+        Some(solidcore::error::EntityRef::Edge(*edge))
     );
     assert_eq!(e.sm_status(), Some(SM_ERR));
     assert_eq!(format!("{b:?}"), before, "refused, the input as it came in");

@@ -2850,15 +2850,13 @@ impl OffsetExecutive {
 /// the two ends' grew a thin vertex to its edge's other end's tolerance, one edge further
 /// at each operation, until it reached past a short neighbouring edge and the merge
 /// joined that edge's two ends. Tolerances only grow
-/// (`SetTolerance(.., bUpdateOnlyIfLarger = TRUE)`). Matched uses of edges with two
-/// vertices whose tangents are square to each other are no edge and its offset (a local
-/// operation's surface parametrised otherwise than its face matches by UV elsewhere):
-/// nothing is raised.
+/// (`SetTolerance(.., bUpdateOnlyIfLarger = TRUE)`).
 ///
 /// # Errors
 ///
-/// [`SolidError::PortInvariant`] for a matched edge use without a mate, vertex or
-/// tangent; those of the evaluations.
+/// [`SolidError::PortInvariant`] for a matched edge use without a mate or vertex, or
+/// matched uses of an edge with two vertices whose tangents do not tell their directions
+/// apart; those of the evaluations.
 fn keep_source_tolerances(
     k: &Kernel,
     original: &Brep,
@@ -2869,6 +2867,8 @@ fn keep_source_tolerances(
     offset_edge: EdgeId,
 ) -> Result<()> {
     const OP: &str = "offset::offset_executive::keep_source_tolerances";
+    let edge_tolerance = edge::tolerance(original, original_edge)?;
+    edge::set_tolerance(result, offset_edge, edge_tolerance, true, true)?;
     let mates = |b: &Brep, u: EdgeuseId| -> Result<[VertexId; 2]> {
         let mate = eu::mate(b, u)?
             .ok_or_else(|| SolidError::port_invariant(OP, "a matched edge use without a mate"))?;
@@ -2879,9 +2879,7 @@ fn keep_source_tolerances(
     let [source_start, source_end] = source;
     let starts = vertex::tolerance(original, source_start)?;
     let ends = vertex::tolerance(original, source_end)?;
-    let edge_tolerance = edge::tolerance(original, original_edge)?;
     if made[0] == made[1] {
-        edge::set_tolerance(result, offset_edge, edge_tolerance, true, true)?;
         vertex::set_tolerance(result, made[0], starts.max(ends), true, true)?;
         return Ok(());
     }
@@ -2896,13 +2894,11 @@ fn keep_source_tolerances(
     } else if along < 0.0 {
         [made[1], made[0]]
     } else {
-        // Uses matched by their UV midpoints whose 3D tangents are square to each other
-        // are not an edge and its offset: a local operation's surface parametrised
-        // otherwise than the face's carries the face's UV elsewhere. The new edge keeps
-        // the tolerances it was made with, as upstream's.
-        return Ok(());
+        return Err(SolidError::port_invariant(
+            OP,
+            "matched edge uses whose tangents do not tell their directions apart",
+        ));
     };
-    edge::set_tolerance(result, offset_edge, edge_tolerance, true, true)?;
     vertex::set_tolerance(result, made_start, starts, true, true)?;
     vertex::set_tolerance(result, made_end, ends, true, true)?;
     Ok(())
@@ -5579,65 +5575,6 @@ mod tests {
             executive.offset_faces(inset).len()
         };
         assert!(offsets() >= 1);
-    }
-
-    /// Uses matched by UV whose tangents are square to each other (a local operation's
-    /// surface parametrised otherwise than its face) are no edge and its offset:
-    /// `keep_source_tolerances` raises nothing, where it refused the operation before.
-    #[test]
-    fn keep_source_tolerances_raises_nothing_for_square_matches() {
-        let mut k = Kernel::default();
-        let mut original = crate::primitive::api_primitives::create_box(
-            &mut k,
-            crate::math::Point3::new(0.0, 0.0, 0.0),
-            10.0,
-            10.0,
-            10.0,
-        )
-        .unwrap();
-        let ids: Vec<EdgeId> = original.edges().ids().collect();
-        let e = ids[0];
-        let u = edge::edgeuses(&original, e, None, None).unwrap()[0];
-        let dir = |b: &Brep, u: EdgeuseId| {
-            eu3::normalized_evaluate_read_only(&k, b, u, 0.5, false, true)
-                .unwrap()
-                .first_deriv
-                .unwrap()
-        };
-        let (square, square_use) = ids
-            .iter()
-            .find_map(|&f| {
-                let fu = edge::edgeuses(&original, f, None, None).unwrap()[0];
-                (dir(&original, u).dot(dir(&original, fu)) == 0.0).then_some((f, fu))
-            })
-            .unwrap();
-        let mut result = original.clone_standing_for_self().unwrap();
-        // the source edge and both its ends loose; the result as the box was made
-        edge::set_tolerance(&mut original, e, 1e-3, true, true).unwrap();
-        let mate = eu::mate(&original, u).unwrap().unwrap();
-        for v in [
-            use_vertex(&original, u).unwrap(),
-            use_vertex(&original, mate).unwrap(),
-        ] {
-            vertex::set_tolerance(&mut original, v, 1e-3, true, true).unwrap();
-        }
-        let before_edge = edge::tolerance(&result, square).unwrap();
-        let ends = [
-            use_vertex(&result, square_use).unwrap(),
-            use_vertex(&result, eu::mate(&result, square_use).unwrap().unwrap()).unwrap(),
-        ];
-        let before: Vec<f64> = ends
-            .iter()
-            .map(|&v| vertex::tolerance(&result, v).unwrap())
-            .collect();
-        keep_source_tolerances(&k, &original, u, e, &mut result, square_use, square).unwrap();
-        assert_eq!(edge::tolerance(&result, square).unwrap(), before_edge);
-        let after: Vec<f64> = ends
-            .iter()
-            .map(|&v| vertex::tolerance(&result, v).unwrap())
-            .collect();
-        assert_eq!(after, before);
-        assert!(before.iter().all(|&t| t < 1e-3) && before_edge < 1e-3);
     }
 
     /// `keep_source_tolerances` pairs each end of a matched edge with the original vertex

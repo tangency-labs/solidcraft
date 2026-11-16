@@ -177,6 +177,7 @@ use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_standard_solver::p1::CircularCrossSectionFsg;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::{Curve, CurveKind, ELLIPSE_TYPE, LINE_TYPE};
+use crate::curve::curve::p4::is_closed_base;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::error::offset::OffsetFailure;
 use crate::error::{EntityRef, Failure, Reason, Result, SolidError, SM_ERR_NULL_POINTER};
@@ -384,7 +385,7 @@ fn is_tangent_end_off_curve(e: &SolidError) -> bool {
 fn is_loose_tangent_edge(e: &SolidError) -> bool {
     matches!(
         e.failure().map(|f| &f.reason),
-        Some(Reason::Offset(OffsetFailure::LooseTangentEdge))
+        Some(Reason::Offset(OffsetFailure::LooseTangentEdge { .. }))
     )
 }
 
@@ -1327,6 +1328,25 @@ fn seam_twin(k: &Kernel, curve: &Curve, t: f64, tol: f64) -> Result<Option<f64>>
     };
     let on_seam = distance(curve.evaluate_point(k, t)?, curve.evaluate_point(k, near)?) <= tol;
     Ok(on_seam.then_some(far))
+}
+
+/// Not upstream (WR-673, #2174): whether the point of `curve` at `t` is the first trim
+/// point (at `t_first`) again, reached round a closed curve: the curve is closed over
+/// its natural interval, and over the span from `t_first` to `t` its ends lie within
+/// `tol` of each other while its middle does not (`SmCurve::IsClosed` on that span),
+/// so the span runs round the curve back to its start. A short open edge whose second
+/// point lies within `tol` of its first is no such span (its middle is near both ends,
+/// or the curve is not closed): that point stays a candidate.
+///
+/// # Errors
+///
+/// Those of [`Curve::is_closed`] and [`is_closed_base`].
+fn is_first_point_again(k: &Kernel, curve: &Curve, t_first: f64, t: f64, tol: f64) -> Result<bool> {
+    if !curve.is_closed(k, &curve.natural_interval(), tol)? {
+        return Ok(false);
+    }
+    let span = Extent1d::from_min_max(smos_min(t_first, t), smos_max(t_first, t));
+    is_closed_base(k, curve, &span, tol)
 }
 
 /// The surface behind `h` (a dereference upstream).
@@ -3765,18 +3785,20 @@ impl OffsetGeometryCreation {
             let base_point = brep.vertex_point(base_vertex)?;
             // Not upstream (WR-673, #2174; the fork's
             // tangency-labs/smlib@7ee0876): an open edge's second trim point is where its
-            // other vertex goes, never the first trim point again. On a closed 3D curve
-            // (the whole offset circle lifted for half a sphere cap's rim) the first point's
-            // twin across the curve's seam is another parameter but the same point: taken,
-            // it gave the half edge the whole circle and the loop a gap.
+            // other vertex goes, never the first trim point again reached round a closed 3D
+            // curve. On a closed 3D curve (the whole offset circle lifted for half a sphere
+            // cap's rim) the first point's twin across the curve's seam is another parameter
+            // but the same point: taken, it gave the half edge the whole circle and the loop
+            // a gap. Only that twin is passed over ([`is_first_point_again`]): an open edge
+            // that is short now keeps its real second point, however near the first.
             let open_second = i == 1 && !brep.edge_is_closed(base_edge)?;
-            let first = if open_second {
-                Some(curve_of(brep, curve_3d)?.evaluate_point(k, trim_ivl.min())?)
-            } else {
-                None
-            };
             let same_tol = 10.0 * self.this_approx_tol_3d;
-            let first_again = |pnt: Point3| first.is_some_and(|f| distance(pnt, f) <= same_tol);
+            let first_again = |t: f64| -> Result<bool> {
+                if !open_second {
+                    return Ok(false);
+                }
+                is_first_point_again(k, curve_of(brep, curve_3d)?, trim_ivl.min(), t, same_tol)
+            };
             // (not upstream, #14062) a closed edge's second trim point is its one vertex
             // again: where that point is the seam of a closed 3D curve (a loft's floor circle
             // offset, its seam at the vertex) it has the curve's two ends as parameters, and
@@ -3799,8 +3821,7 @@ impl OffsetGeometryCreation {
 
                     // search for the best solution
                     let dist_moved = distance(pnt, base_point);
-                    if dist_moved < found_dist && !are_same(t, trim_ivl.min()) && !first_again(pnt)
-                    {
+                    if dist_moved < found_dist && !are_same(t, trim_ivl.min()) && !first_again(t)? {
                         found_param = t;
                         found_dist = dist_moved;
                         found = true;
@@ -3815,8 +3836,7 @@ impl OffsetGeometryCreation {
                     let pnt = curve_of(brep, curve_3d)?.evaluate_point(k, t)?;
                     let dist_moved = distance(pnt, base_point);
 
-                    if dist_moved < found_dist && !are_same(t, trim_ivl.min()) && !first_again(pnt)
-                    {
+                    if dist_moved < found_dist && !are_same(t, trim_ivl.min()) && !first_again(t)? {
                         found_param = t;
                         found_dist = dist_moved;
                         found = true;
@@ -4620,8 +4640,15 @@ impl OffsetGeometryCreation {
             if executive.is_local_operation() {
                 let meet_tol = 10.0 * smos_max(off_tol, self.this_approx_tol_3d());
                 if dropped.max_drop_to_surf > meet_tol {
+                    // the edge of the input, named for the refusal where the handle names
+                    // one (error context only)
+                    let edge = match brep.topology_entity(edge) {
+                        Some((_, EntityRef::Edge(e))) => Some(e),
+                        _ => None,
+                    };
                     return Err(
-                        Failure::new(OP_EXTEND, OffsetFailure::LooseTangentEdge).into_error()
+                        Failure::new(OP_EXTEND, OffsetFailure::LooseTangentEdge { edge })
+                            .into_error(),
                     );
                 }
             }
@@ -7013,6 +7040,85 @@ mod tests {
         assert_eq!(smallest_tolerance(&[f64::NAN, 1e-5]), None);
         assert_eq!(smallest_tolerance(&[1e-5, f64::NAN]), None);
         assert_eq!(smallest_tolerance(&[]), None);
+    }
+
+    /// WR-673: an open edge's second trim point is passed over only where it is the first
+    /// trim point again, reached round a closed 3D curve (its twin across the seam). An
+    /// open edge whose real second point lies within the "same point" tolerance of the
+    /// first keeps it, on an open curve and on a closed one alike: a test of the distance
+    /// alone (the guard as first retired) passed both over and left the edge with no
+    /// second point.
+    #[test]
+    fn a_short_open_edge_keeps_its_second_trim_point() {
+        let k = Kernel::default();
+        let tol = 1e-5;
+        // an open line: its second point 4e-6 along, within the tolerance of the first
+        let line = Curve::from(
+            BSplineCurve::create_line_segment(
+                3,
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(1.0, 0.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let ivl = line.natural_interval();
+        let (t0, t) = (ivl.min(), ivl.evaluate(4e-6));
+        let near = distance(
+            line.evaluate_point(&k, t0).unwrap(),
+            line.evaluate_point(&k, t).unwrap(),
+        );
+        assert!(near > 0.0 && near <= tol, "{near}");
+        assert!(!is_first_point_again(&k, &line, t0, t, tol).unwrap());
+
+        // a closed circle of radius 10: the seam twin of its start is the first point
+        // again; a point 5e-6 along the circle from the start is a real second point
+        let circle = Curve::from(
+            crate::curve::ellipse::Ellipse::new_circle(
+                &k,
+                Point3::new(1.0, 2.0, 3.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Extent1d::from_min_max(0.0, 360.0),
+                10.0,
+                &crate::curve::ellipse::EllipseOptions::default(),
+            )
+            .unwrap(),
+        );
+        let ivl = circle.natural_interval();
+        let (t0, twin) = (ivl.min(), ivl.max());
+        let same = distance(
+            circle.evaluate_point(&k, t0).unwrap(),
+            circle.evaluate_point(&k, twin).unwrap(),
+        );
+        assert!(same <= tol, "{same}");
+        assert!(is_first_point_again(&k, &circle, t0, twin, tol).unwrap());
+        assert!(is_first_point_again(&k, &circle, twin, t0, tol).unwrap());
+        let step = 5e-6 / (10.0 * 2.0 * PI) * (ivl.max() - ivl.min());
+        let short = t0 + step;
+        let near = distance(
+            circle.evaluate_point(&k, t0).unwrap(),
+            circle.evaluate_point(&k, short).unwrap(),
+        );
+        assert!(near > 0.0 && near <= tol, "{near}");
+        assert!(!is_first_point_again(&k, &circle, t0, short, tol).unwrap());
+        // a point half way round is not the first point at all
+        assert!(!is_first_point_again(&k, &circle, t0, ivl.evaluate(0.5), tol).unwrap());
+
+        // an open half circle whose ends are apart: never the first point again
+        let arc = Curve::from(
+            crate::curve::ellipse::Ellipse::new_circle(
+                &k,
+                Point3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Extent1d::from_min_max(0.0, 180.0),
+                10.0,
+                &crate::curve::ellipse::EllipseOptions::default(),
+            )
+            .unwrap(),
+        );
+        let ivl = arc.natural_interval();
+        assert!(!is_first_point_again(&k, &arc, ivl.min(), ivl.min() + step / 2.0, tol).unwrap());
     }
 
     /// #17210: a saddle `z = x y` and the plane `z = 0` are tangent at the origin, where the
