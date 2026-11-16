@@ -2445,28 +2445,28 @@ pub(crate) fn crv_speed_bound(cur: &Curve, ivl: &Extent1d) -> Option<f64> {
 ///   quotient by a positive weight function, so it is C1 wherever the homogeneous one is).
 /// * Homogeneous derivatives: with `H = sum N[i,p] h[i]` (here `h[i] = (w[i] (P[i] - c),
 ///   w[i])` for a fixed point `c`, or the points themselves when polynomial), on span
-///   `[U[s], U[s+1]]` `H' = sum N[j+1,p-1] Q1[j]` over `j` in `s-p..s`, `Q1[j] = p (h[j+1]
-///   - h[j]) / (U[j+p+1] - U[j+1])`, and `H'' = sum N[j+2,p-2] Q2[j]` over `j` in
+///   `[U[s], U[s+1]]` `H' = sum N[j+1,p-1] Q1[j]` over `j` in `s-p..s`,
+///   `Q1[j] = p (h[j+1] - h[j]) / (U[j+p+1] - U[j+1])`, and `H'' = sum N[j+2,p-2] Q2[j]` over `j` in
 ///   `s-p..s-1`, `Q2[j] = (p-1) (Q1[j+1] - Q1[j]) / (U[j+p+1] - U[j+2])` (the
 ///   denominators all cover the span, so are positive). The bases are non-negative and sum
 ///   to one, so the largest `|Q1|` and `|Q2|` (`P1`, `P2` for the point part, `W1`, `W2`
 ///   for the weight) bound `|P'|`, `|P''|`, `|w'|`, `|w''|` there.
 /// * Polynomial: `c'' = H''`, so `P2` is the bound.
 /// * Rational (weights positive): from `P = w (c - c0)` with `P` the point part of `H`
-///   and `c0` the fixed point, `P' = w' (c - c0) + w c'` and `P'' = w'' (c - c0) + 2 w' c'
-///   + w c''`, so `c' = (P' - w' (c - c0)) / w` and `c'' = (P'' - 2 w' c' - w'' (c - c0)) /
-///   w`. With `w >= w_min` (a convex combination of the span's weights) and `|c - c0| <=
-///   R`, the largest distance from `c0` to the span's points (`c` is in their hull),
+///   and `c0` the fixed point, `P' = w' (c - c0) + w c'` and `P'' = w'' (c - c0) + 2 w' c' + w c''`,
+///   so `c' = (P' - w' (c - c0)) / w` and `c'' = (P'' - 2 w' c' - w'' (c - c0)) / w`.
+///   With `w >= w_min` (a convex combination of the span's weights) and `|c - c0| <= R`,
+///   `R` the largest distance from `c0` to the span's points (`c` is in their hull),
 ///   `|c'| <= S = (P1 + W1 R) / w_min` and `|c''| <= (P2 + 2 W1 S + W2 R) / w_min`. `c0`
 ///   is the points' mean, so `R` is about half their spread rather than their distance
 ///   from the origin.
 ///
 /// Rounding, per coordinate as absolute bounds that are carried along: a homogeneous
 /// coordinate `x - c0 w` is within `γ_2 (|x| + |c0| w)` of exact (none for a polynomial,
-/// `c0 = 0`); a computed `Q = k (b - a) / g` from inputs off by `e` is within `2 (γ_4 |Q|
-/// + 2 k e / g)` of exact (the factor 2 covers the `(1 + γ) / (1 - γ)` of solving for the
-/// exact value); a norm of a 3-vector with coordinate errors `e` is within `|v|_computed (1
-/// + γ_4) + 2 e` (`√3 < 2`); a point `x / w - c0` is within `γ_2 (|x / w| + |c0|)`
+/// `c0 = 0`); a computed `Q = k (b - a) / g` from inputs off by `e` is within
+/// `2 (γ_4 |Q| + 2 k e / g)` of exact (the factor 2 covers the `(1 + γ) / (1 - γ)` of solving for the
+/// exact value); a norm of a 3-vector with coordinate errors `e` is within
+/// `|v|_computed (1 + γ_4) + 2 e` (`√3 < 2`); a point `x / w - c0` is within `γ_2 (|x / w| + |c0|)`
 /// per coordinate. The result is widened by `1 + γ_8` for the final products and
 /// quotients.
 ///
@@ -2561,7 +2561,7 @@ pub(crate) fn crv_accel_bound(cur: &Curve, ivl: &Extent1d) -> Option<f64> {
             let g = *knots.get(jj.checked_add(p)?.checked_add(1)?)?
                 - *knots.get(jj.checked_add(shift)?)?;
             // NaN refuses too
-            if !(g > 0.0) {
+            if g.is_nan() || g <= 0.0 {
                 return None;
             }
             let q = [

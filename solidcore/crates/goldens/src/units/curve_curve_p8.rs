@@ -1244,7 +1244,7 @@ mod tests {
                 };
                 bounded[0] += 1;
                 let h = (hi - lo) / 1000.0;
-                if !(h > 0.0) {
+                if h.is_nan() || h <= 0.0 {
                     continue;
                 }
                 for i in 0..=64 {

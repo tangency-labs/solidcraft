@@ -449,13 +449,15 @@ pub fn curves_stay_within(
         // second order, when both curves are C1 over the piece's own stretches (a piece
         // holding a knot where a curve is only C0 keeps the first-order bound; halving
         // shrinks such pieces around the knot)
-        let span = |i: usize| Extent1d::from_min_max(n0.t[i].min(n1.t[i]), n0.t[i].max(n1.t[i]));
+        let span = |x: f64, y: f64| Extent1d::from_min_max(x.min(y), x.max(y));
+        let [ta0, tb0] = n0.t;
+        let [ta1, tb1] = n1.t;
         let second = a
-            .accel_bound(&span(0))
-            .zip(b.accel_bound(&span(1)))
+            .accel_bound(&span(ta0, ta1))
+            .zip(b.accel_bound(&span(tb0, tb1)))
             .map(|(acc_a, acc_b)| {
                 // the squares, products and sum round five times; the max and sum twice more
-                let (da, db) = (n1.t[0] - n0.t[0], n1.t[1] - n0.t[1]);
+                let (da, db) = (ta1 - ta0, tb1 - tb0);
                 let m2 = (acc_a * da * da + acc_b * db * db) * (1.0 + gamma(8));
                 (n0.above.max(n1.above) + 0.125 * m2) * (1.0 + gamma(4))
             });
@@ -471,7 +473,7 @@ pub fn curves_stay_within(
         // nearest to it (any parameter between the neighbours' keeps the path monotone,
         // so the choice only steers the bounds; a failed solve takes the straight path's)
         let ta = along(mid, s0, e0, &ivl[0]);
-        let piece_b = span(1);
+        let piece_b = span(tb0, tb1);
         let straight = along(mid, s1, e1, &ivl[1])
             .max(piece_b.min())
             .min(piece_b.max());
