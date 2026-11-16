@@ -35,6 +35,12 @@
 //! plane is evaluated; the plane's net is its exact bilinear form), a curve-bounded surface
 //! as its basis ([`crate::certify::measured`]); the curves in theirs
 //! ([`Curve::b_spline_base`], a line's [`Line::base_with_nurb`]).
+//!
+//! **An edge curve on a surface** (`CrvOnSurf`, [`EdgeCurve::OnSurface`]) is
+//! `C(s) = S_c(U(s))`, its UV curve `U` on its own surface `S_c`, as the kernel evaluates
+//! it: `C` and `C' = S_c,u U_u' + S_c,v U_v'` are enclosed by the same means, `U` and `U'`
+//! over `s` from `U`'s NURBS data, then `S_c` and its partials over the box of `U`'s values
+//! (cut at its knot lines and hulled, as for `S`). No point of either is sampled.
 
 use solidcore::blend::fillet_section::certificate::{
     curve_derivs_over, nurbs_partials_over_piece, NurbsCurve,
@@ -46,6 +52,7 @@ use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::kernel::Kernel;
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId};
+use std::cell::Cell;
 
 /// The deepest a piece is halved.
 pub(crate) const MAX_DEPTH: u32 = 30;
@@ -67,8 +74,8 @@ pub(crate) struct TrimCertificate {
     pub(crate) pieces: usize,
     /// Whether the trim runs against the edge's parameter.
     pub(crate) reversed: bool,
-    /// The farthest the trim's UV values reach past the surface's knots (0: inside); there
-    /// the surface is its end piece continued.
+    /// The farthest the trim's UV values (or a curve-on-surface edge's) reach past their
+    /// surface's knots (0: inside); there the surface is its end piece continued.
     pub(crate) past: f64,
     /// The largest `|D(m)|` enclosed at a piece's midpoint: the bound's lower part, near
     /// the distance the trim actually lies from its edge.
@@ -96,9 +103,45 @@ pub(crate) fn curve_nurbs(c: &Curve) -> Result<NurbsCurve, String> {
         }
         _ => NurbsCurve::of(
             c.b_spline_base()
-                .ok_or_else(|| "a curve with no B-spline base".to_string())?,
+                .ok_or_else(|| format!("a curve (type {}) with no B-spline base", c.type_code()))?,
         )
         .map_err(e),
+    }
+}
+
+/// An edge's curve as the certificate reads it.
+pub(crate) enum EdgeCurve {
+    /// Its NURBS data ([`curve_nurbs`]).
+    Nurbs(NurbsCurve),
+    /// A curve on a surface (`CrvOnSurf`): the surface's NURBS form at its UV curve's points.
+    OnSurface {
+        /// The UV curve's NURBS data.
+        uv: NurbsCurve,
+        /// The surface's NURBS form.
+        surface: Nurbs,
+    },
+}
+
+/// An edge curve's reading ([`EdgeCurve`]): a curve on a surface as its UV curve and its
+/// surface's NURBS form ([`crate::certify::measured`]), any other kind as [`curve_nurbs`].
+///
+/// # Errors
+///
+/// Those of [`curve_nurbs`]; a surface with no NURBS form.
+pub(crate) fn edge_curve(k: &Kernel, c: &Curve) -> Result<EdgeCurve, String> {
+    let e = |x: solidcore::SolidError| x.to_string();
+    match c.kind() {
+        CurveKind::CrvOnSurf(cs) => {
+            let surface = crate::certify::measured(cs.surface());
+            let form = as_b_spline(k, surface)
+                .map_err(e)?
+                .ok_or("a curve on a surface with no NURBS form")?;
+            Ok(EdgeCurve::OnSurface {
+                uv: curve_nurbs(cs.uv_curve())?,
+                surface: Nurbs::of(&form).map_err(e)?,
+            })
+        }
+        _ => Ok(EdgeCurve::Nurbs(curve_nurbs(c)?)),
     }
 }
 
@@ -156,12 +199,13 @@ fn mid(a: V3<Ivl>) -> [f64; 3] {
 struct Pieces<'a> {
     trim: &'a NurbsCurve,
     surface: &'a Nurbs,
-    curve: &'a NurbsCurve,
+    curve: &'a EdgeCurve,
     /// The edge's interval.
     s0: f64,
     s1: f64,
-    /// The farthest a UV box reached past the surface's knots.
-    past: std::cell::Cell<f64>,
+    /// The farthest a UV box reached past the surface's knots (the face's surface, or an
+    /// edge curve's own surface).
+    past: Cell<f64>,
 }
 
 fn v_hull(a: V3<Ivl>, b: V3<Ivl>) -> V3<Ivl> {
@@ -196,6 +240,34 @@ fn cuts(u: &[f64], p: usize, n: usize, lo: f64, hi: f64) -> Vec<(f64, f64, usize
         .collect()
 }
 
+/// A surface `n` and its first partials over the UV box `uv`: the box cut at the knot
+/// lines inside it, each part on its own polynomial piece, a part past the knots on the
+/// end piece continued ([`Nurbs`]'s continuation, the distance past kept in `past_out`),
+/// and the parts' hull.
+fn surface_over(n: &Nurbs, uv: V3<Ivl>, past_out: &Cell<f64>) -> Result<[V3<Ivl>; 3], String> {
+    let us = cuts(&n.u, n.p, n.nu, uv.x.lo, uv.x.hi);
+    let vs = cuts(&n.v, n.q, n.nv, uv.y.lo, uv.y.hi);
+    let mut out: Option<[V3<Ivl>; 3]> = None;
+    for &(a0, a1, ku) in &us {
+        for &(b0, b1, kv) in &vs {
+            let p = nurbs_partials_over_piece(n, ku, kv, a0, a1, b0, b1, 1)
+                .map_err(|e| e.to_string())?;
+            let q = [p.at(0, 0), p.at(1, 0), p.at(0, 1)];
+            out = Some(match out {
+                None => q,
+                Some(h) => [v_hull(h[0], q[0]), v_hull(h[1], q[1]), v_hull(h[2], q[2])],
+            });
+        }
+    }
+    let past = (knot(&n.u, n.p) - uv.x.lo)
+        .max(uv.x.hi - knot(&n.u, n.nu))
+        .max(knot(&n.v, n.q) - uv.y.lo)
+        .max(uv.y.hi - knot(&n.v, n.nv))
+        .max(0.0);
+    past_out.set(past_out.get().max(past));
+    out.ok_or_else(|| "no piece encloses the box".to_string())
+}
+
 impl Pieces<'_> {
     /// `T` and `T'` over `t`.
     fn trim_over(&self, t: Ivl) -> Result<(V3<Ivl>, V3<Ivl>), String> {
@@ -203,38 +275,40 @@ impl Pieces<'_> {
         Ok((d[0], d[1]))
     }
 
-    /// `S` and its first partials over the UV box `uv`: the box cut at the knot lines
-    /// inside it, each part on its own polynomial piece, a part past the knots on the end
-    /// piece continued ([`Nurbs`]'s continuation), and the parts' hull.
+    /// `S` and its first partials over the UV box `uv` ([`surface_over`]).
     fn surface_over(&self, uv: V3<Ivl>) -> Result<[V3<Ivl>; 3], String> {
-        let n = self.surface;
-        let us = cuts(&n.u, n.p, n.nu, uv.x.lo, uv.x.hi);
-        let vs = cuts(&n.v, n.q, n.nv, uv.y.lo, uv.y.hi);
-        let mut out: Option<[V3<Ivl>; 3]> = None;
-        for &(a0, a1, ku) in &us {
-            for &(b0, b1, kv) in &vs {
-                let p = nurbs_partials_over_piece(n, ku, kv, a0, a1, b0, b1, 1)
-                    .map_err(|e| e.to_string())?;
-                let q = [p.at(0, 0), p.at(1, 0), p.at(0, 1)];
-                out = Some(match out {
-                    None => q,
-                    Some(h) => [v_hull(h[0], q[0]), v_hull(h[1], q[1]), v_hull(h[2], q[2])],
-                });
-            }
-        }
-        let past = (knot(&n.u, n.p) - uv.x.lo)
-            .max(uv.x.hi - knot(&n.u, n.nu))
-            .max(knot(&n.v, n.q) - uv.y.lo)
-            .max(uv.y.hi - knot(&n.v, n.nv))
-            .max(0.0);
-        self.past.set(self.past.get().max(past));
-        out.ok_or_else(|| "no piece encloses the box".to_string())
+        surface_over(self.surface, uv, &self.past)
     }
 
-    /// `C` and `C'` over `s`.
+    /// `C` and `C'` over `s`: a curve on a surface as `S_c(U(s))` and
+    /// `S_c,u U_u' + S_c,v U_v'` (see the module docs).
     fn curve_over(&self, s: Ivl) -> Result<(V3<Ivl>, V3<Ivl>), String> {
-        let d = curve_derivs_over(self.curve, s, 1, None).map_err(|e| e.to_string())?;
-        Ok((d[0], d[1]))
+        match self.curve {
+            EdgeCurve::Nurbs(c) => {
+                let d = curve_derivs_over(c, s, 1, None).map_err(|e| e.to_string())?;
+                Ok((d[0], d[1]))
+            }
+            EdgeCurve::OnSurface { uv, surface } => {
+                let d = curve_derivs_over(uv, s, 1, None).map_err(|e| e.to_string())?;
+                let [p, su, sv] = surface_over(surface, d[0], &self.past)?;
+                Ok((p, add(scale(d[1].x, su), scale(d[1].y, sv))))
+            }
+        }
+    }
+
+    /// `C`, `C'` and `C''` at `s` (midpoints; `C''` of a curve on a surface taken as 0, a
+    /// Gauss-Newton step): only for [`Pieces::foot`], where any value is sound.
+    fn jet(&self, s: f64) -> Option<[[f64; 3]; 3]> {
+        match self.curve {
+            EdgeCurve::Nurbs(c) => {
+                let d = curve_derivs_over(c, Ivl::from(s), 2, None).ok()?;
+                Some([mid(d[0]), mid(d[1]), mid(d[2])])
+            }
+            EdgeCurve::OnSurface { .. } => {
+                let (c, c1) = self.curve_over(Ivl::from(s)).ok()?;
+                Some([mid(c), mid(c1), [0.0; 3]])
+            }
+        }
     }
 
     /// The trim's image point at `t` (the middle of its enclosure).
@@ -247,10 +321,9 @@ impl Pieces<'_> {
     /// kept in `[s0, s1]`): only `sigma`'s nodes, any value sound.
     fn foot(&self, p: [f64; 3], mut s: f64) -> f64 {
         for _ in 0..16 {
-            let Ok(d) = curve_derivs_over(self.curve, Ivl::from(s), 2, None) else {
+            let Some([c, c1, c2]) = self.jet(s) else {
                 break;
             };
-            let (c, c1, c2) = (mid(d[0]), mid(d[1]), mid(d[2]));
             let r = [c[0] - p[0], c[1] - p[1], c[2] - p[2]];
             let f = r[0] * c1[0] + r[1] * c1[1] + r[2] * c1[2];
             let df = c1[0] * c1[0]
@@ -340,7 +413,7 @@ pub(crate) fn certify_edgeuse(
     let sn = Nurbs::of(&form).map_err(e)?;
     let erec = b.edge(edge).map_err(e)?;
     let curve = erec.curve.as_ref().ok_or("no edge curve")?;
-    let cn = curve_nurbs(curve)?;
+    let cn = edge_curve(k, curve)?;
     let tn = curve_nurbs(trim)?;
     let (t0, t1) = range(&tn);
     let pieces = Pieces {
@@ -349,7 +422,7 @@ pub(crate) fn certify_edgeuse(
         curve: &cn,
         s0: erec.interval.min(),
         s1: erec.interval.max(),
-        past: std::cell::Cell::new(0.0),
+        past: Cell::new(0.0),
     };
     // which end of the edge the trim starts at
     let start = pieces.image(t0)?;
@@ -524,6 +597,61 @@ mod tests {
         let next = b.edgeuse(eu).unwrap().ccw.unwrap();
         let moved = b.edgeuse(next).unwrap().uv_trim_curve.clone();
         b.edgeuse_mut(eu).unwrap().uv_trim_curve = moved;
+        match certify_edgeuse(&k, &b, eu, 1.0) {
+            Ok(c) => assert!(c.bound >= 5.0, "{c:?}"),
+            Err(e) => assert!(e.contains("sigma"), "{e}"),
+        }
+    }
+
+    /// An edge whose curve is a curve on a surface (`CrvOnSurf`): with the face's own trim
+    /// as its UV curve on the face's surface, the trim is certified on it; with the next
+    /// edge use's trim as its UV curve (the curve now runs along another edge of the
+    /// face), it is not.
+    #[test]
+    fn a_trim_on_a_curve_on_surface_edge() {
+        use solidcore::curve::crv_on_surf::CrvOnSurf;
+        use solidcore::geom::extent1d::Extent1d;
+        let mut k = Kernel::default();
+        let mut b = solidcore::primitive::api_primitives::create_box(
+            &mut k,
+            solidcore::Point3::new(0.0, 0.0, 0.0),
+            10.0,
+            20.0,
+            30.0,
+        )
+        .unwrap();
+        let ids: Vec<EdgeuseId> = b.edgeuses().iter().map(|(eu, _)| eu).collect();
+        for &eu in &ids {
+            solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve(
+                &k, &mut b, eu, false, false, true,
+            )
+            .unwrap()
+            .status
+            .unwrap();
+        }
+        // an edge use holding its trim in its own slot (a face's two sides share one)
+        let eu = *ids
+            .iter()
+            .find(|&&x| b.edgeuse(x).unwrap().uv_trim_curve.is_some())
+            .unwrap();
+        let next = b.edgeuse(eu).unwrap().ccw.unwrap();
+        let face = eu1::face(&b, eu).unwrap().unwrap();
+        let surface = b.face(face).unwrap().surface.clone().unwrap();
+        let edge = b.edgeuse(eu).unwrap().edge.unwrap();
+        let on = |b: &mut Brep, k: &Kernel, uv: Curve| {
+            let range = curve_nurbs(&uv).map(|n| range(&n)).unwrap();
+            let c = CrvOnSurf::new(k, uv, surface.clone(), None, 0).unwrap();
+            let rec = b.edge_mut(edge).unwrap();
+            rec.curve = Some(Curve::from(c));
+            rec.interval = Extent1d::from_min_max(range.0, range.1);
+        };
+        let own = b.edgeuse(eu).unwrap().uv_trim_curve.clone().unwrap();
+        on(&mut b, &k, own);
+        let c = certify_edgeuse(&k, &b, eu, 1e-12).unwrap();
+        assert!(c.holds() && c.bound < 1e-10, "{c:?}");
+        // the next edge use's trim, from its slot or its mate's (the same face)
+        let other = eu1::uv_trim_curve(&b, next).unwrap().0.unwrap().clone();
+        on(&mut b, &k, other);
         match certify_edgeuse(&k, &b, eu, 1.0) {
             Ok(c) => assert!(c.bound >= 5.0, "{c:?}"),
             Err(e) => assert!(e.contains("sigma"), "{e}"),

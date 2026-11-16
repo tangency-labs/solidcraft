@@ -654,18 +654,51 @@ mod trim_blocks {
         }
     }
 
-    /// Certifies `rows` of `runner`'s unit (see the module docs); the trims certified.
-    fn certify(runner: &dyn UnitDiff, rows: &[Row]) -> usize {
+    /// A scratch copy of `b` where each edge use of a face that holds no trim, nor its mate,
+    /// gets the one `create_uv_trim_curve` drops from its edge (as a caller asking for it
+    /// makes it): the copy and the number made.
+    fn remade(k: &Kernel, b: &Brep) -> (Brep, usize) {
+        use solidcore::topology::edgeuse::{p1 as eu1, p3 as eu3};
+        let mut s = b.clone_standing_for_self().unwrap();
+        let ids: Vec<_> = s.edgeuses().ids().collect();
+        let mut made = 0;
+        for eu in ids {
+            if eu1::face(&s, eu).unwrap().is_none()
+                || eu1::uv_trim_curve(&s, eu).unwrap().0.is_some()
+            {
+                continue;
+            }
+            let c = eu3::create_uv_trim_curve(k, &mut s, eu, false, None).unwrap();
+            s.edgeuse_mut(eu).unwrap().uv_trim_curve = Some(c.curve);
+            made += 1;
+        }
+        (s, made)
+    }
+
+    /// Certifies `rows` of `runner`'s unit (see the module docs): the trims certified and
+    /// the trims made. With `remake`, each written body's missing trims are first made on a
+    /// scratch copy ([`remade`]) and certified with the rest.
+    fn certify(runner: &dyn UnitDiff, rows: &[Row], remake: bool) -> (usize, usize) {
         let mut trims = 0;
+        let made_all: Rc<RefCell<usize>> = Rc::default();
         for row in rows {
             let case = crate::case::regression_case(runner, row.case);
             let certs: Rc<RefCell<Vec<TrimCertificate>>> = Rc::default();
             let sink = Rc::clone(&certs);
+            let made_sink = Rc::clone(&made_all);
             let name = row.case;
             let out = with_hook(
                 Box::new(move |b: &mut Brep| {
                     let k = Kernel::default();
-                    let c = certify_brep(&k, b).unwrap_or_else(|e| panic!("{name}: {e}"));
+                    let c = if remake {
+                        let (s, made) = remade(&k, b);
+                        eprintln!("{name}: {made} trims made");
+                        *made_sink.borrow_mut() += made;
+                        certify_brep(&k, &s)
+                    } else {
+                        certify_brep(&k, b)
+                    }
+                    .unwrap_or_else(|e| panic!("{name}: {e}"));
                     sink.borrow_mut().extend(c);
                 }),
                 || runner.run_rust(&case),
@@ -690,13 +723,14 @@ mod trim_blocks {
             eprintln!("{name}: {} trims certified on their edges", certs.len());
             trims += certs.len();
         }
-        trims
+        let made = *made_all.borrow();
+        (trims, made)
     }
 
     /// The 15 `boolean.merge_p4` rows.
     #[test]
     fn merge_p4_rows_are_certified() {
-        let trims = certify(&crate::units::boolean_merge_p4::Runner, MERGE_P4);
+        let (trims, _) = certify(&crate::units::boolean_merge_p4::Runner, MERGE_P4, false);
         eprintln!("{} rows, {trims} trims", MERGE_P4.len());
         assert_eq!(MERGE_P4.len(), 15);
     }
@@ -704,9 +738,25 @@ mod trim_blocks {
     /// The 9 `topology.brep_p7` rows.
     #[test]
     fn brep_p7_rows_are_certified() {
-        let trims = certify(&crate::units::topology_brep_p7::Runner, BREP_P7);
+        let (trims, _) = certify(&crate::units::topology_brep_p7::Runner, BREP_P7, false);
         eprintln!("{} rows, {trims} trims", BREP_P7.len());
         assert_eq!(BREP_P7.len(), 9);
+    }
+
+    /// The `topology.brep_p10` subdivide cases the trim drop moves (two rows, plus two that
+    /// move below the comparison tolerance): their faces' surfaces changed kind in the
+    /// separating cut, so this branch keeps no trim on them (`brep::p9`'s
+    /// `drop_face_trims`), where main kept the old ones. Nothing but the trim blocks moved,
+    /// and the trims made again from the edges where a caller asks for them lie on their
+    /// edges.
+    #[test]
+    fn brep_p10_rows_are_certified() {
+        let (trims, made) = certify(&crate::units::topology_brep_p10::Runner, BREP_P10, true);
+        eprintln!("{} cases, {trims} trims, {made} made again", BREP_P10.len());
+        assert_eq!(BREP_P10.len(), 4);
+        // the dropped trims were made again and certified (the two rows; the other two
+        // cases keep every trim)
+        assert!(made > 0, "no dropped trim was made again");
     }
 
     include!("operand_trim_rows/trim_blocks.rs");
