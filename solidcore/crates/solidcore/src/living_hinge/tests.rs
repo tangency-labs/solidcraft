@@ -71,13 +71,13 @@ fn lattice_of_case_a() {
     assert!(close(lattice.row_v(0), 30.5));
     assert!(close(lattice.row_v(13), 50.0));
     assert!(close(lattice.row_v(26), 69.5));
-    // t even: centres 30 + 23j; t odd: 30 + 23(j + 1/2).
+    // Centres 30 + 23(j + t/2); row 0 has t = -13, so its slots -4.5 .. 64.5 are j = 5 ..= 8.
     assert!(close(lattice.centre(13, 0), 30.0));
     assert!(close(lattice.centre(13, -1), 7.0));
-    assert!(close(lattice.centre(0, 1), 41.5));
-    assert!(close(lattice.centre(0, -1), -4.5));
+    assert!(close(lattice.centre(0, 7), 41.5));
+    assert!(close(lattice.centre(0, 5), -4.5));
     assert_eq!(lattice.slots_meeting(13, 0.0, 60.0), (-1, 1));
-    assert_eq!(lattice.slots_meeting(0, 0.0, 60.0), (-2, 1));
+    assert_eq!(lattice.slots_meeting(0, 0.0, 60.0), (5, 8));
 }
 
 #[test]
