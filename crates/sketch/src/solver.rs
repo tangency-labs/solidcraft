@@ -2005,7 +2005,31 @@ pub fn keep_sides_at_zero(sk: &mut Sketch, before: &[Vec2]) {
     let (points, constraints) = (&sk.points, &mut sk.constraints);
     let now = |p: usize| points.get(p).map(|x| x.pos);
     let was = |p: usize| before.get(p).copied();
+    // Pairs of points held level (`HorizontalPoints`) or plumb (`VerticalPoints`): a plain
+    // distance between two of them is a distance along that axis, and has a side all the same.
+    let aligned: Vec<(usize, usize, bool)> = constraints
+        .iter()
+        .filter(|c| !c.driven)
+        .filter_map(|c| match c.kind {
+            ConstraintKind::HorizontalPoints { p, q } => Some((p, q, true)),
+            ConstraintKind::VerticalPoints { p, q } => Some((p, q, false)),
+            _ => None,
+        })
+        .collect();
     for c in constraints.iter_mut() {
+        if let ConstraintKind::Distance { p, q, value } = c.kind
+            && value.abs() <= TOL
+            && !c.driven
+            && now(p).zip(now(q)).is_some_and(|(a, b)| a.dist(b) <= TOL)
+        {
+            let behind = aligned.iter().filter(|&&(a, b, _)| (a, b) == (p, q) || (a, b) == (q, p)).any(|&(_, _, level)| {
+                was(p).zip(was(q)).is_some_and(|(a, b)| if level { b.x < a.x - TOL } else { b.y < a.y - TOL })
+            });
+            if behind && let ConstraintKind::Distance { p, q, .. } = &mut c.kind {
+                std::mem::swap(p, q);
+            }
+            continue;
+        }
         let behind = match c.kind {
             ConstraintKind::DistanceX { p, q, value } if value.abs() <= TOL => {
                 now(p).zip(now(q)).is_some_and(|(a, b)| (b.x - a.x).abs() <= TOL) && was(p).zip(was(q)).is_some_and(|(a, b)| b.x < a.x - TOL)
@@ -2025,8 +2049,11 @@ pub fn keep_sides_at_zero(sk: &mut Sketch, before: &[Vec2]) {
 /// constraint solved: where [`keep_sides_at_zero`] swapped them, the stored sketch keeps that
 /// order with the solved positions.
 pub fn keep_point_order(stored: &mut ConstraintKind, solved: &ConstraintKind) {
-    use ConstraintKind::{DistanceX, DistanceY};
-    if let (DistanceX { p, q, .. }, DistanceX { p: sp, q: sq, .. }) | (DistanceY { p, q, .. }, DistanceY { p: sp, q: sq, .. }) = (stored, solved) {
+    use ConstraintKind::{Distance, DistanceX, DistanceY};
+    if let (DistanceX { p, q, .. }, DistanceX { p: sp, q: sq, .. })
+    | (DistanceY { p, q, .. }, DistanceY { p: sp, q: sq, .. })
+    | (Distance { p, q, .. }, Distance { p: sp, q: sq, .. }) = (stored, solved)
+    {
         (*p, *q) = (*sp, *sq);
     }
 }
