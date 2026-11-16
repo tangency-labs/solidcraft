@@ -835,6 +835,65 @@ fn revolved_planar_faces_come_out_whole() {
     }
 }
 
+/// A profile edge almost square to the axis that rises less along it than the cone
+/// recogniser's height floor (1e-6 mm) comes out a surface of revolution, which the body reads
+/// back with, so the body measures (#17085). Before, Revolve wrote a cone the record reader
+/// refused ("a NURBS form that is not its analytic surface"): Revolve reported success and
+/// Measure and Fillet then failed. The axis is `l1` (along X), so the fourth point's offset
+/// `dx` is the edge's rise along the axis; 1e-7 on a full turn is the issue's own script.
+/// Controls, which measured before the fix too: square (dx 0) the edge sweeps a plane, a rise
+/// of 1e-9 is not written as a cone, and at dx 1e-5 the cone is tall enough to read back. The
+/// 1e-6 relative bound is Measure's accuracy with room (the doc of
+/// `solidcraft_smlib::MEASURE_ACCURACY`: analytic primitives within 2e-7 of their
+/// closed forms): it shows the body measures at the right volume, not that it resolves the
+/// rise (1e-9 changes the volume by 1e-10 relative).
+#[test]
+fn revolved_edge_almost_square_to_the_axis_reads_back() {
+    // Pappus, for each turn and offset of the fourth point (exact rational arithmetic on the
+    // profile, times 2 pi and the turn's share of a full one).
+    let cases = [
+        ("360 deg", 0.0, 61.308285354560), // control
+        ("360 deg", 1e-7, 61.308286062989),
+        ("360 deg", 1e-9, 61.308285361644), // control
+        ("360 deg", -1e-7, 61.308284646131),
+        ("360 deg", 1e-5, 61.308356197474), // control
+        ("90 deg", 1e-7, 15.327071515747),
+        ("90 deg", 1e-9, 15.327071340411), // control
+        ("90 deg", -1e-7, 15.327071161533),
+    ];
+    let mut wrong = Vec::new();
+    for (angle, dx, want) in cases {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [6, 0], [6, 1], [6.0 + dx, 1.01], [5, 2.5], [0, 1]], "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.revolve", json!({"axis": "l1", "angle": angle, "body_name": "B"}));
+        let v = volume(&mut s);
+        if rel(v, want) >= 1e-6 {
+            wrong.push(format!("{angle} dx {dx:e}: volume {v}, want {want}"));
+        }
+    }
+    // A sketch fillet that leaves a short remnant of an edge drawn a hair off square: the edge
+    // from (6, 1) to (6 + dx, 2) is rounded into the top by 0.95, leaving 0.05 of it, which
+    // rises 5e-7 along the axis at dx 1e-5. Each is measured against its closed form (Pappus
+    // on the outline less the fillet's corner, the kite between corner, tangent points and
+    // centre less the circular sector, worked in double precision; square, the corner is
+    // r^2 (1 - pi/4) at its centroid), to the same bound. Square (dx 0) is the control.
+    for (dx, want) in [(0.0, 73.222621144273), (1e-5, 73.222625776381)] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [6, 0], [6, 1], [6.0 + dx, 2], [0, 2]], "closed": true}));
+        run(&mut s, "sketch.fillet", json!({"a": "l3", "b": "l4", "radius": 0.95}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.revolve", json!({"axis": "l1", "angle": "360 deg", "body_name": "B"}));
+        let v = volume(&mut s);
+        if rel(v, want) >= 1e-6 {
+            wrong.push(format!("filleted dx {dx:e}: volume {v}, want {want}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
 /// A spherical shell (a half ring between two arcs, both radial lines on the axis) revolved on a
 /// sketch plane that does not pass through the origin: the body is the shell, as it is on XY.
 /// Before, built in place, it measured a third too large (truck tessellates the degenerate faces
