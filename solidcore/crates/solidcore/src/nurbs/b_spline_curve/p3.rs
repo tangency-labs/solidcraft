@@ -1393,8 +1393,8 @@ impl BSplineCurve {
 
     /// The intersection step of [`BSplineCurve::trim_gap`], which `trim_gap` runs before
     /// it moves any end: the closest ends of this curve and `other`, both curves extended
-    /// (G1, by 3% of their domain) past them, and the extensions intersected at five times
-    /// the gap. Not upstream as a function (the first half of `TrimGap`); made public so
+    /// (G1, by 3% of their domain) past them, and the extensions intersected at a tolerance of
+    /// five times the squared gap (as upstream). Not upstream as a function (the first half of `TrimGap`); made public so
     /// that a check of the contacts `trim_gap` uses runs this very step.
     ///
     /// # Errors

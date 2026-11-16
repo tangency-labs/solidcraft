@@ -2332,9 +2332,11 @@ fn is_continuous_clamped(cur: &Curve) -> bool {
     else {
         return false;
     };
-    !knots.windows(p + 1).any(|w| match (w.first(), w.last()) {
-        (Some(&a), Some(&b)) => a == b && first < a && a < last,
-        _ => false,
+    // a knot equal to the one `p` places on, strictly inside the domain: multiplicity > p
+    !knots.iter().enumerate().any(|(i, &a)| {
+        i.checked_add(p)
+            .and_then(|j| knots.get(j))
+            .is_some_and(|&b| a == b && first < a && a < last)
     })
 }
 

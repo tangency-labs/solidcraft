@@ -70,8 +70,8 @@
 //!   tolerance along the parameter path between the two contacts by a Lipschitz bound
 //!   from the curves' own data ([`curves_stay_within`], [`Curve::speed_bound`]); a
 //!   stretch it cannot certify (a curve kind with no speed bound, at most 4096 halved
-//!   pieces) keeps the solution where upstream puts it. Moved solutions are put back in
-//!   first-parameter order, which the later passes assume; a move landing exactly on a
+//!   pieces) keeps the solution where upstream puts it. After a move the solutions are sorted
+//!   again on the first parameter, which the later passes assume; a move landing exactly on a
 //!   contact another solution names is dropped instead (the contact is not reported
 //!   twice).
 
@@ -177,7 +177,7 @@ impl<'a, O: SolutionObject> Named<'a, O> {
 /// end. It moves there when that end lies within `dist_tol` of the other
 /// curve and the two curves are certified to stay within `dist_tol` of each other over
 /// the whole stretch between the solution and the end ([`curves_stay_within`]; the fork
-/// samples the stretch instead). Moved solutions are put back in first-parameter order;
+/// samples the stretch instead). After a move the solutions are sorted on the first parameter;
 /// one that would land exactly on a contact another solution names (a point or a range
 /// end) is dropped instead, so the contact is not reported twice.
 fn move_contacts_to_curve_ends<O: SolutionObject>(
@@ -305,18 +305,14 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
     }
     // The later passes expect the solutions in first-parameter order (the global solver
     // adds them so, `SM_SK_BY_FIRST_PARAMETER`; phase 1 merges each with the last kept
-    // one and `cull_spurious_points` compares neighbours). A moved solution is put back
-    // in that order: taken out and inserted before the first solution whose first
-    // parameter is larger, as the solver's sorted insertion places it; the others keep
-    // their order (as refined, which need not be sorted). Solutions dropped as a
-    // contact named twice are taken out.
+    // one and `cull_spurious_points` compares neighbours). After a move the solutions
+    // are sorted again on the first parameter (stable, so equal ones keep their order).
+    // Solutions dropped as a contact named twice are taken out. Without a move nothing
+    // is reordered: the solutions stay as refined, as upstream leaves them.
     if moved_any.is_empty() && named_twice.is_empty() {
         return Ok(());
     }
-    let order = reinsert_moved(sols.as_slice(), &moved_any, &named_twice, |s| {
-        s.start.parameters[0]
-    })
-    .ok_or_else(|| SolidError::curve_failed(OP_GCI, "a moved solution is missing"))?;
+    let order = sorted_without(sols.as_slice(), &named_twice, |s| s.start.parameters[0]);
     for (i, s) in order.iter().enumerate() {
         put_at(sols, i, s)?;
     }
@@ -324,30 +320,17 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
     Ok(())
 }
 
-/// `all` without the entries at `gone`, and with the entries at `moved` taken out and
-/// each inserted again, in `moved`'s order, before the first remaining entry whose `key`
-/// is larger (after the last when none is). The other entries keep their order, so when
-/// they are sorted on `key` the result is too. `None` when an index in `moved` is out of
-/// range.
-fn reinsert_moved<T: Copy>(
-    all: &[T],
-    moved: &[usize],
-    gone: &[usize],
-    key: impl Fn(&T) -> f64,
-) -> Option<Vec<T>> {
+/// `all` without the entries at `gone`, sorted on `key` (stable: entries with equal keys
+/// keep their order; `f64::total_cmp`, so the order is total).
+fn sorted_without<T: Copy>(all: &[T], gone: &[usize], key: impl Fn(&T) -> f64) -> Vec<T> {
     let mut order: Vec<T> = all
         .iter()
         .enumerate()
-        .filter(|(i, _)| !moved.contains(i) && !gone.contains(i))
+        .filter(|(i, _)| !gone.contains(i))
         .map(|(_, s)| *s)
         .collect();
-    for &i in moved {
-        let s = *all.get(i)?;
-        let t = key(&s);
-        let at = order.iter().position(|o| key(o) > t).unwrap_or(order.len());
-        order.insert(at, s);
-    }
-    Some(order)
+    order.sort_by(|a, b| key(a).total_cmp(&key(b)));
+    order
 }
 
 /// Most path pieces [`curves_stay_within`] bounds before it gives up (no certificate).
@@ -2100,27 +2083,27 @@ mod tests {
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::nurbs_crv::allocate_nurb_curve;
 
-    /// A contact moved past a neighbour goes back into first-parameter order, so the
-    /// merge and cull passes after the move see it next to its neighbours.
+    /// After a move the solutions are in first-parameter order again, so the merge and
+    /// cull passes after the move see each next to its neighbours, whether or not the
+    /// refined solutions were sorted before.
     #[test]
     fn moved_contacts_go_back_into_first_parameter_order() {
         let key = |s: &(f64, u8)| s.0;
         // the solution at 0.2 moved to an end at 0.9, past the one at 0.5
         let all = [(0.1, 0), (0.9, 1), (0.5, 2), (1.0, 3)];
-        let order = reinsert_moved(&all, &[1], &[], key).unwrap();
+        let order = sorted_without(&all, &[], key);
         assert_eq!(order, vec![(0.1, 0), (0.5, 2), (0.9, 1), (1.0, 3)]);
-        // two moves, in order; a tie puts the moved one after the equal one
+        // equal keys keep their order
         let all = [(0.0, 0), (0.4, 1), (0.6, 2), (0.0, 3)];
-        let order = reinsert_moved(&all, &[1, 3], &[], key).unwrap();
+        let order = sorted_without(&all, &[], key);
         assert_eq!(order, vec![(0.0, 0), (0.0, 3), (0.4, 1), (0.6, 2)]);
-        // a move past the last solution
-        let all = [(0.0, 0), (2.0, 1), (0.6, 2)];
-        let order = reinsert_moved(&all, &[1], &[], key).unwrap();
-        assert_eq!(order, vec![(0.0, 0), (0.6, 2), (2.0, 1)]);
-        assert!(reinsert_moved(&all, &[7], &[], key).is_none());
-        // a contact named twice is taken out, the rest keep their places
-        let order = reinsert_moved(&all, &[1], &[0], key).unwrap();
-        assert_eq!(order, vec![(0.6, 2), (2.0, 1)]);
+        // unmoved solutions out of order (refinement can swap close ones) are sorted too
+        let all = [(0.3, 0), (0.2, 1), (2.0, 2), (0.6, 3)];
+        let order = sorted_without(&all, &[], key);
+        assert_eq!(order, vec![(0.2, 1), (0.3, 0), (0.6, 3), (2.0, 2)]);
+        // a contact named twice is taken out; an index out of range removes nothing
+        let order = sorted_without(&all, &[0, 9], key);
+        assert_eq!(order, vec![(0.2, 1), (0.6, 3), (2.0, 2)]);
     }
 
     #[derive(Debug, Clone, Copy, PartialEq)]
