@@ -6531,3 +6531,262 @@ fn rotate_member_hostile_params_never_panic() {
     let remainder = (1e300_f64.to_radians().rem_euclid(std::f64::consts::TAU)).to_degrees();
     assert!(same_box(huge, brace_turned(&format!("{remainder} deg"))), "{huge:?}");
 }
+
+// ---------------------------------------------------------------------------------------------
+// Groups: several groups of lines of one profile, each placed and named its own way
+
+/// The rectangle frame's rails (bottom and top) and posts (left and right), by line id.
+fn rails_and_posts(s: &Session) -> (Vec<String>, Vec<String>) {
+    let rails = vec![line_at_y(s, "Frame", 0.0), line_at_y(s, "Frame", 400.0)];
+    let posts = vec![line_at_x(s, "Frame", 0.0), line_at_x(s, "Frame", 600.0)];
+    (rails, posts)
+}
+
+fn grouped(rails: &[String], posts: &[String]) -> Value {
+    json!({"sketch": "Frame", "profile": {"kind": "angle", "width": 60, "height": 40, "thickness": 5}, "groups": [
+        {"lines": rails, "anchor": "bottom_left", "body_name": "Rail"},
+        {"lines": posts, "anchor": "bottom_left", "angle": "90 deg", "body_name": "Post"},
+    ]})
+}
+
+#[test]
+fn groups_place_and_name_their_members_their_own_way() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let (rails, posts) = rails_and_posts(&s);
+    run(&mut s, "frame.member", grouped(&rails, &posts));
+    let bs = boxes(&mut s);
+    assert_eq!(bs.keys().collect::<Vec<_>>(), ["Post", "Post (2)", "Rail", "Rail (2)"], "{bs:?}");
+    // Group placement is a command rule: rails keep their 40 mm leg up, while posts turn their
+    // 60 mm leg up. Command cases belong here rather than in the retired kernel-case suite.
+    let size = |name: &str| {
+        let (lo, hi) = bs[name];
+        [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]
+    };
+    for (name, want) in
+        [("Rail", [600.0, 60.0, 40.0]), ("Rail (2)", [600.0, 60.0, 40.0]), ("Post", [40.0, 400.0, 60.0]), ("Post (2)", [40.0, 400.0, 60.0])]
+    {
+        assert!(near3(size(name), want), "{name}: {:?} {bs:?}", size(name));
+    }
+    assert!(bs.values().all(|(lo, _)| lo[2].abs() < 1e-6), "the bottom-left anchor keeps every heel on z = 0: {bs:?}");
+    // The 60x40x5 angle has area 60*5 + 35*5, plus its r=5 root round and minus two r=2.5 toes.
+    let area = 475.0 + 12.5 * (1.0 - PI / 4.0);
+    let volume = total_volume(&mut s);
+    assert!(rel(volume, area * 2000.0) < MEASURED, "{volume} vs {}", area * 2000.0);
+}
+
+#[test]
+fn rotate_member_uses_its_groups_placement_and_preserves_other_members() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Posts path"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    for x in [0, 100, 200] {
+        run(&mut s, "sketch.line3d", json!({"points": [[x, 0, 0], [x, 0, 300]]}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    let sketch = s.doc.find_feature("Posts path").unwrap().id;
+    let lines: Vec<String> = s.model.state().sketch(sketch).unwrap().sketch.wires.iter().map(|w| w.id.clone()).collect();
+    assert_eq!(lines.len(), 3);
+    run(
+        &mut s,
+        "frame.member",
+        json!({
+            "sketch": "Posts path", "name": "Posts",
+            "profile": {"kind": "rect_tube", "width": 60, "height": 40, "wall": 2, "outer_radius": 0},
+            "groups": [
+                {"lines": [&lines[0]], "body_name": "Flat"},
+                {"lines": [&lines[1], &lines[2]], "anchor": "bottom_left", "angle": "90 deg", "mirror": true, "body_name": "Turned"}
+            ]
+        }),
+    );
+    let before = boxes(&mut s);
+    let side = face_pick(&s, "Turned", [60.0, 30.0, 150.0], [-1.0, 0.0, 0.0]);
+    run(&mut s, "frame.rotate_member", json!({"face": side, "angle": "90 deg"}));
+    let check = |s: &mut Session| {
+        let after = boxes(s);
+        for name in ["Flat", "Turned (2)"] {
+            assert!(same_box(after[name], before[name]), "{name} must stay put: {after:?}");
+        }
+        // The group's corner anchor puts its centre at (80, 30). The extra quarter
+        // turn exchanges its 40 x 60 bounds for 60 x 40 about that same centre.
+        assert!(same_box(after["Turned"], ([50.0, 10.0, 0.0], [110.0, 50.0, 300.0])), "{after:?}");
+        let solidcraft_doc::FeatureKind::FrameMemberTurn { member, .. } = &turn_step(s).kind else { panic!("not a turn") };
+        let pivot = solidcraft_doc::end_cap::member_pivot(&s.doc, &s.model.state(), member).unwrap();
+        assert!(near3([pivot.x, pivot.y, pivot.z], [80.0, 30.0, 150.0]), "{pivot:?}");
+    };
+    check(&mut s);
+    // End caps use member_section as well: the cap must follow the turned group,
+    // rather than either the flat group's section or the original corner anchor.
+    let top = face_pick(&s, "Turned", [109.0, 30.0, 300.0], [0.0, 0.0, 1.0]);
+    run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 4}));
+    let check_cap = |s: &mut Session| {
+        let cap = measured(s, "Turned End Cap");
+        assert!(same_box((cap.2, cap.3), ([50.0, 10.0, 300.0], [110.0, 50.0, 304.0])), "{cap:?}");
+    };
+    check_cap(&mut s);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    check(&mut reopened);
+    check_cap(&mut reopened);
+}
+
+#[test]
+fn end_caps_use_each_member_groups_section_placement() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Posts path"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    for x in [0, 100] {
+        run(&mut s, "sketch.line3d", json!({"points": [[x, 0, 0], [x, 0, 300]]}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    let sketch = s.doc.find_feature("Posts path").unwrap().id;
+    let lines: Vec<String> = s.model.state().sketch(sketch).unwrap().sketch.wires.iter().map(|w| w.id.clone()).collect();
+    assert_eq!(lines.len(), 2);
+    run(
+        &mut s,
+        "frame.member",
+        json!({
+            "sketch": "Posts path", "profile": {"kind": "rect_tube", "width": 60, "height": 40, "wall": 2, "outer_radius": 0},
+            "groups": [
+                {"lines": [&lines[0]], "body_name": "Flat"},
+                {"lines": [&lines[1]], "anchor": "bottom_left", "angle": "90 deg", "mirror": true, "body_name": "Turned"}
+            ]
+        }),
+    );
+    let flat = face_pick(&s, "Flat", [29.0, 0.0, 300.0], [0.0, 0.0, 1.0]);
+    let turned = face_pick(&s, "Turned", [61.0, 30.0, 300.0], [0.0, 0.0, 1.0]);
+    run(&mut s, "frame.end_cap", json!({"faces": [flat, turned], "thickness": 4}));
+    let check = |s: &mut Session| {
+        for (name, lo, hi) in
+            [("Flat End Cap", [-30.0, -20.0, 300.0], [30.0, 20.0, 304.0]), ("Turned End Cap", [60.0, 0.0, 300.0], [100.0, 60.0, 304.0])]
+        {
+            let cap = measured(s, name);
+            assert!(near3(cap.2, lo) && near3(cap.3, hi), "{cap:?}");
+            assert!(rel(cap.1, 60.0 * 40.0 * 4.0) < 1e-9, "{cap:?}");
+        }
+    };
+    check(&mut s);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    check(&mut reopened);
+}
+
+/// Each group keeps its own located profile point (`locate`), also after saving and reopening.
+#[test]
+fn each_group_locates_its_members_by_its_own_profile_point() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rails"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [1000, 0]]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 500], [1000, 500]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "frame.member",
+        json!({
+            "sketch": "Rails", "profile": {"kind": "angle", "width": 60, "height": 40, "thickness": 5},
+            "groups": [{"lines": ["l1"], "locate": [0, 0], "body_name": "Heel"}, {"lines": ["l2"], "locate": [10, 5], "body_name": "Offset"}]
+        }),
+    );
+    let check = |s: &mut Session| {
+        let bs = boxes(s);
+        // [0, 0] puts the angle's heel on its line; [10, 5] moves the profile back 10 across, 5 down.
+        assert!(near3(bs["Heel"].0, [0.0, 0.0, 0.0]) && near3(bs["Heel"].1, [1000.0, 60.0, 40.0]), "{bs:?}");
+        assert!(near3(bs["Offset"].0, [0.0, 490.0, -5.0]) && near3(bs["Offset"].1, [1000.0, 550.0, 35.0]), "{bs:?}");
+    };
+    check(&mut s);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    check(&mut reopened);
+}
+
+#[test]
+fn one_group_is_saved_as_the_flat_form() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let (rails, _) = rails_and_posts(&s);
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube(), "groups": [{"lines": rails, "mirror": true, "body_name": "Rail"}]}));
+    let saved = serde_json::to_value(&s.doc.features.last().unwrap().kind).unwrap();
+    assert!(saved.get("groups").is_none(), "{saved}");
+    assert_eq!((&saved["lines"], &saved["mirror"], &saved["body_name"]), (&json!(rails), &json!(true), &json!("Rail")));
+    assert_eq!(boxes(&mut s).keys().collect::<Vec<_>>(), ["Rail", "Rail (2)"]);
+}
+
+#[test]
+fn bad_groups_are_refused() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let (rails, posts) = rails_and_posts(&s);
+    let with = |groups: Value| json!({"sketch": "Frame", "profile": tube(), "groups": groups});
+    for (p, why) in [
+        (with(json!([])), "`groups`"),
+        (with(json!("all")), "`groups`"),
+        (with(json!([1, 2])), "`groups`"),
+        (with(json!([{"lines": rails}, {}])), "group 2: `lines`"),
+        (with(json!([{"lines": rails}, {"lines": []}])), "group 2: `lines`"),
+        (with(json!([{"lines": rails}, {"lines": [&posts[0], &posts[0]]}])), "listed twice"),
+        (with(json!([{"lines": rails}, {"lines": [&rails[0]]}])), "in two groups"),
+        (with(json!([{"lines": rails}, {"lines": posts, "anchor": "middle"}])), "group 2: `anchor`"),
+        (with(json!([{"lines": rails}, {"lines": posts, "angle": "a lot"}])), "angle"),
+        (with(json!([{"lines": rails}, {"lines": posts, "mirror": "yes"}])), "group 2: `mirror`"),
+        (with(json!([{"lines": rails}, {"lines": posts, "body_name": ""}])), "group 2: `body_name`"),
+        (with(json!([{"lines": rails}, {"lines": ["nope"]}])), "nope"),
+        (json!({"sketch": "Frame", "profile": tube(), "lines": rails, "groups": [{"lines": posts}]}), "not beside"),
+        (json!({"sketch": "Frame", "profile": tube(), "mirror": true, "groups": [{"lines": posts}]}), "not beside"),
+        (json!({"sketch": "Frame", "profile": tube(), "locate": [0, 0], "groups": [{"lines": posts}]}), "not beside"),
+        (with(json!([{"lines": rails}, {"lines": posts, "locate": [1]}])), "group 2: `locate`"),
+        (with(json!([{"lines": rails}, {"lines": posts, "locate": [0, 1e9]}])), "group 2: `locate`"),
+    ] {
+        let err = s.execute("frame.member", &p).unwrap_err().to_string();
+        assert!(err.contains(why), "{p}: {err}");
+    }
+    assert!(bodies(&mut s).is_empty(), "nothing was made");
+}
+
+/// A design's groups survive saving and reopening; an edit keeps every member's name but those of
+/// a group given another name, and a member renamed by hand keeps its new name.
+#[test]
+fn groups_survive_reopening_and_edits_keep_their_names() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let (rails, posts) = rails_and_posts(&s);
+    run(&mut s, "frame.member", grouped(&rails, &posts));
+    let fid = s.doc.features.last().unwrap().id;
+    let before = boxes(&mut s);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(boxes(&mut reopened), before);
+    run(&mut s, "body.rename", json!({"body": "Post (2)", "name": "Right post"}));
+    // Turn the posts back: same names, the rails untouched.
+    let mut p = grouped(&rails, &posts);
+    p["groups"][1]["angle"] = json!("0 deg");
+    run(&mut s, "timeline.redefine", json!({"feature": fid, "command": "frame.member", "params": p.clone()}));
+    let after = boxes(&mut s);
+    assert_eq!(after.keys().collect::<Vec<_>>(), ["Post", "Rail", "Rail (2)", "Right post"], "{after:?}");
+    assert_eq!((after["Rail"], after["Rail (2)"]), (before["Rail"], before["Rail (2)"]));
+    assert_ne!(after["Post"], before["Post"], "the post turned");
+    // The rails' group renamed: its members take the new name, the posts keep theirs.
+    p["groups"][0]["body_name"] = json!("Beam");
+    run(&mut s, "timeline.redefine", json!({"feature": fid, "command": "frame.member", "params": p}));
+    assert_eq!(boxes(&mut s).keys().collect::<Vec<_>>(), ["Beam", "Beam (2)", "Post", "Right post"]);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(boxes(&mut s).keys().collect::<Vec<_>>(), ["Post", "Rail", "Rail (2)", "Right post"]);
+}
+
+/// A flat feature turned into groups keeps its members' names (no group renamed them).
+#[test]
+fn a_flat_feature_split_into_groups_keeps_its_names() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let (rails, posts) = rails_and_posts(&s);
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube()}));
+    let fid = s.doc.features.last().unwrap().id;
+    let before = boxes(&mut s);
+    let p = json!({"sketch": "Frame", "profile": tube(), "groups": [{"lines": rails}, {"lines": posts, "anchor": "bottom"}]});
+    run(&mut s, "timeline.redefine", json!({"feature": fid, "command": "frame.member", "params": p}));
+    let after = boxes(&mut s);
+    assert_eq!(after.keys().collect::<Vec<_>>(), before.keys().collect::<Vec<_>>());
+    for line in &rails {
+        let name = &s.doc.feature(fid).map(|f| f.kind.clone()).and_then(|k| match k {
+            solidcraft_doc::FeatureKind::FrameMember { names, .. } => names.get(line).cloned(),
+            _ => None,
+        });
+        let name = name.as_ref().unwrap();
+        assert_eq!(after[name], before[name], "the rail {name} stayed put");
+    }
+}
