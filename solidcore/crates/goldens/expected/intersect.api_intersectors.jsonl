@@ -412,7 +412,6 @@
 {"case":"ssi0045","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[56136.134632054614,56613.88289865939,2053389.2211094976]],"n":93},"status":[1000.0]}}
 {"case":"ssi0046","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14034.256300682033,14035.041483611049,28068.106196089284]],"n":24},"status":[1000.0]}}
 {"case":"ssi0047","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[56132.11707773432,100779926.99932702,977809960.4505105]],"n":93},"status":[1000.0]}}
-{"case":"ssi0048","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14038.636793854585,14041.23494483274,28124.50156677702]],"n":24},"status":[1000.0]}}
 {"case":"ssi0049","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14015.65605615692,14019.679911982163,28043.765879756214]],"n":24},"status":[1000.0]}}
 {"case":"ssi0050","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[54039.31468706956,60931.54744852047,1990660.8435620826]],"n":93},"status":[1000.0]}}
 {"case":"ssi0051","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[13951.711291569995,14948.681197837908,30276.326768970204]],"n":24},"status":[1000.0]}}
