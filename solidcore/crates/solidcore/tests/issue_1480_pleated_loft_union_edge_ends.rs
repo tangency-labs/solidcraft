@@ -301,8 +301,14 @@ fn wr469_union_flag_alone_grows_eight_vertex_tolerances() {
     for (name, u) in [("off", &off), ("on", &on)] {
         assert_eq!((u.faces, u.edges, u.vertices), (388, 1096, 712), "{name}");
         assert!(u.manifold, "{name}");
+        // 7.4750471556652e-6 until the end extension (WR-453) became the only path
+        // (#14246): it continues an intersection curve that stopped short of its proto
+        // vertex to it, and the worst edge end is now nearer its vertex; topology, check,
+        // vertex tolerances and volume (4.5e-15 relative) are unchanged (MEASURED). The
+        // gap is the curve's point at each interval end against its vertex, exactly as
+        // `union_with_only_the_new_edge_flag` evaluates it.
         assert!(
-            close(u.worst_end_gap, 7.4750471556652e-6),
+            close(u.worst_end_gap, 7.034859535377774e-6),
             "{name} worst end gap {:e}",
             u.worst_end_gap
         );
