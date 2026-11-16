@@ -900,7 +900,6 @@ fn save_selects_container_or_json_and_reopens_by_contents() {
     for (name, format, is_json) in [
         ("default.solidcraft", None, false),
         ("explicit.solidcraft", Some("json"), true),
-        ("legacy.solvecraft", None, false),
         ("inferred.json", None, true),
         ("container.json", Some("container"), false),
     ] {
@@ -2089,10 +2088,10 @@ fn list_commands_narrows_by_prefix_panel_fields_and_page() {
     }
 }
 
-/// Compatibility shims (docs/compatibility.md): a design saved before the rename (legacy
-/// extension and format tag) opens through MCP, and the legacy resource URIs still read.
+/// Compatibility shim (docs/compatibility.md): a design saved before the rename (old extension
+/// and format tag) still opens through MCP, by its contents.
 #[test]
-fn legacy_design_files_and_resource_uris() {
+fn legacy_design_files_open_by_contents() {
     let mut s = server();
     let saved = String::from_utf8(solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::default())).unwrap();
     assert!(saved.contains("\"solidcraft/"), "{saved}");
@@ -2101,7 +2100,7 @@ fn legacy_design_files_and_resource_uris() {
     std::fs::write(&path, legacy).unwrap();
     tool(&mut s, "open", json!({"path": path.to_string_lossy()}));
     let _ = std::fs::remove_file(&path);
-    let d = call(&mut s, 1, "resources/read", json!({"uri": "solvecraft://design"}));
+    let d = call(&mut s, 1, "resources/read", json!({"uri": "solidcraft://design"}));
     assert!(d["result"]["contents"][0]["text"].as_str().unwrap().contains("timeline"));
 
     // `.sc` is what new designs are saved as; a `.solidcraft` file opens and `save {}` writes it

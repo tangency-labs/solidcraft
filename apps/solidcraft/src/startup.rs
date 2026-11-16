@@ -968,7 +968,7 @@ mod tests {
 
     #[test]
     fn settings_that_do_not_read_are_moved_aside_and_good_ones_stay() {
-        let keys = ["solidcraft.prefs", "solvecraft.prefs"];
+        let keys = ["solidcraft.prefs"];
         let d = scratch("check");
         // Good files (and an empty one) stay where they are.
         std::fs::write(d.join("app.ron"), r#"{"solidcraft.prefs": "{\"grid\":true}", "egui": "(anything)"}"#).unwrap();
@@ -978,7 +978,7 @@ mod tests {
         // Damaged RON, preferences that aren't JSON, a truncated graphics.json, non-UTF-8 bytes.
         for (name, text) in [
             ("app.ron", b"{\"solidcraft.prefs\": \"{\\\"gr".as_slice()),
-            ("app.ron", br#"{"solvecraft.prefs": "not json"}"#.as_slice()),
+            ("app.ron", br#"{"solidcraft.prefs": "not json"}"#.as_slice()),
             ("graphics.json", br#"{"msaa":"#.as_slice()),
             ("graphics.json", b"\xff\xfe\x00".as_slice()),
         ] {
