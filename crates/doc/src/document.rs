@@ -3479,6 +3479,15 @@ pub struct SpurGear {
     /// Diameter of the axle hole through an external gear (mm); 0 for none.
     #[serde(default, skip_serializing_if = "is_zero_f64")]
     pub bore_diameter: f64,
+    /// How far the axle hole's centre is from the gear's along +X (mm).
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub bore_offset: f64,
+    /// Helix angle on the pitch circle (degrees); 0 for straight teeth, positive for right-hand.
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub helix_angle: f64,
+    /// Two mirrored helical halves.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub double_helical: bool,
 }
 
 fn is_zero_f64(v: &f64) -> bool {

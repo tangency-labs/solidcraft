@@ -182,3 +182,81 @@ fn hostile_internal_and_bore_values_are_refused_and_leave_the_design_alone() {
     }
     assert_eq!(volume(&mut s), 0.0);
 }
+
+fn bodies(s: &mut Session) -> Vec<Value> {
+    run(s, "inspect.measure", json!({}))["bodies"].as_array().cloned().unwrap_or_default()
+}
+
+#[test]
+fn a_helical_gear_has_the_volume_of_its_straight_twin_and_the_same_height() {
+    let mut s = Session::default();
+    run(&mut s, "gear.insert", json!({"module": 2, "teeth": 20, "face_width": 10, "name": "Straight"}));
+    let straight = volume(&mut s);
+    run(&mut s, "gear.edit", json!({"component": "Straight", "helix_angle": 20}));
+    let b = bodies(&mut s);
+    assert_eq!(b.len(), 1);
+    // Turning the outline as it goes up keeps every slice's area.
+    assert!((volume(&mut s) - straight).abs() < 0.005 * straight, "{straight}");
+    assert!((b[0]["bbox"]["max"][2].as_f64().unwrap_or(0.0) - 10.0).abs() < 1e-6);
+    // And back to straight teeth.
+    run(&mut s, "gear.edit", json!({"component": "Straight", "helix_angle": 0}));
+    assert!((volume(&mut s) - straight).abs() < 1e-6);
+}
+
+#[test]
+fn a_double_helical_gear_is_one_body_of_two_mirrored_halves() {
+    let mut s = Session::default();
+    run(&mut s, "gear.insert", json!({"module": 2, "teeth": 20, "face_width": 10, "name": "Straight"}));
+    let straight = volume(&mut s);
+    run(&mut s, "gear.edit", json!({"component": "Straight", "helix_angle": 25, "double_helical": true}));
+    let b = bodies(&mut s);
+    assert_eq!(b.len(), 1, "{b:?}");
+    assert!((volume(&mut s) - straight).abs() < 0.005 * straight);
+    assert!((b[0]["bbox"]["max"][2].as_f64().unwrap_or(0.0) - 10.0).abs() < 1e-6);
+    assert!(b[0]["bbox"]["min"][2].as_f64().unwrap_or(1.0).abs() < 1e-6);
+}
+
+#[test]
+fn an_internal_gear_can_be_helical_and_an_axle_hole_can_sit_off_centre() {
+    let mut s = Session::default();
+    let flat = run(&mut s, "gear.insert", json!({"module": 2, "teeth": 40, "face_width": 8, "internal": true, "name": "Ring"}));
+    assert!(flat["component"].is_u64());
+    let ring = volume(&mut s);
+    run(&mut s, "gear.edit", json!({"component": "Ring", "helix_angle": 15}));
+    assert!((volume(&mut s) - ring).abs() < 0.01 * ring, "{ring}");
+
+    let mut s = Session::default();
+    run(&mut s, "gear.insert", json!({"module": 2, "teeth": 20, "face_width": 10}));
+    let solid = volume(&mut s);
+    run(&mut s, "gear.edit", json!({"component": "Spur Gear M2 Z20", "bore_diameter": 6, "bore_offset": 6}));
+    assert!((solid - volume(&mut s) - PI * 3.0 * 3.0 * 10.0).abs() < 1.0);
+    // The hole is on +X, so what is left is heavier on -X.
+    let b = bodies(&mut s);
+    assert!(b[0]["center_of_mass"][0].as_f64().unwrap_or(0.0) < -0.1, "{b:?}");
+}
+
+#[test]
+fn helical_and_offset_values_are_kept_through_save_and_refused_when_hostile() {
+    let mut s = Session::default();
+    run(&mut s, "gear.insert", json!({"module": 2, "teeth": 20, "helix_angle": -15, "double_helical": true, "bore_diameter": 5, "bore_offset": 2}));
+    let saved = s.doc.gears.clone();
+    let text = serde_json::to_string(&saved).unwrap_or_default();
+    let back: std::collections::BTreeMap<u64, solidcraft_doc::SpurGear> = serde_json::from_str(&text).unwrap_or_default();
+    assert_eq!(back, saved);
+    assert!(saved.values().any(|g| g.helix_angle == -15.0 && g.double_helical && g.bore_offset == 2.0));
+
+    let mut s = Session::default();
+    for p in [
+        json!({"module": 2, "teeth": 20, "helix_angle": 60}),
+        json!({"module": 2, "teeth": 20, "helix_angle": "x"}),
+        json!({"module": 2, "teeth": 20, "double_helical": true}),
+        json!({"module": 2, "teeth": 20, "double_helical": 1, "helix_angle": 10}),
+        json!({"module": 2, "teeth": 40, "internal": true, "helix_angle": 10, "double_helical": true}),
+        json!({"module": 2, "teeth": 20, "bore_offset": 3}),
+        json!({"module": 2, "teeth": 20, "bore_diameter": 4, "bore_offset": 20}),
+        json!({"module": 2, "teeth": 20, "face_width": 1e6, "helix_angle": 45}),
+    ] {
+        assert!(s.execute("gear.insert", &p).is_err(), "{p}");
+    }
+    assert_eq!(volume(&mut s), 0.0);
+}

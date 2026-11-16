@@ -37,6 +37,17 @@ pub struct GearInsertParams {
     /// External gears only: diameter of an axle hole through the centre in millimetres (default: none).
     #[serde(default)]
     pub bore_diameter: Option<f64>,
+    /// External gears only: how far the axle hole's centre is from the gear's centre along +X, in
+    /// millimetres (default 0). The hole, with this offset, must stay inside 90% of the root circle.
+    #[serde(default)]
+    pub bore_offset: Option<f64>,
+    /// Helix angle on the pitch circle in degrees, from -45 to 45 (default 0: straight teeth).
+    /// The teeth turn over the face width; a positive angle is a right-hand helix.
+    #[serde(default)]
+    pub helix_angle: Option<f64>,
+    /// External helical gears only: two mirrored halves, each half the face width (default false).
+    #[serde(default)]
+    pub double_helical: Option<bool>,
     /// The component's name (default: `Spur Gear M2 Z20`, or `Internal Gear M2 Z40`).
     #[serde(default)]
     pub name: Option<String>,
@@ -79,6 +90,15 @@ pub struct GearEditParams {
     /// New diameter of the axle hole through an external gear in millimetres; 0 removes it.
     #[serde(default)]
     pub bore_diameter: Option<f64>,
+    /// New offset of the axle hole along +X in millimetres.
+    #[serde(default)]
+    pub bore_offset: Option<f64>,
+    /// New helix angle in degrees; 0 makes the teeth straight.
+    #[serde(default)]
+    pub helix_angle: Option<f64>,
+    /// Make it a double helical gear (true) or not (false).
+    #[serde(default)]
+    pub double_helical: Option<bool>,
 }
 
 /// What `gear.insert` and `gear.edit` return.

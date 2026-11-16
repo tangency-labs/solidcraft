@@ -21,13 +21,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("fastener")
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<InsertedGear>)
-        .params("component: id|name of an inserted gear; module?, teeth?, pressure_angle?, face_width?, profile_shift?, backlash?, flank_points?, internal?, rim_thickness?, bore_diameter? (the values given replace the saved ones) → rebuilds the teeth in place; component, occurrence, name, diameters"),
+        .params("component: id|name of an inserted gear; module?, teeth?, pressure_angle?, face_width?, profile_shift?, backlash?, flank_points?, internal?, rim_thickness?, bore_diameter?, bore_offset?, helix_angle?, double_helical? (the values given replace the saved ones) → rebuilds the teeth in place; component, occurrence, name, diameters"),
     CommandSpec::new("gear.insert", "Insert Gear", crate::checked!("gear.insert", insert_atomic))
         .at("SOLID", "INSERT")
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<InsertedGear>)
-        .params("module (mm), teeth (6..1000), pressure_angle? (deg, default 20), face_width? (mm), profile_shift?, backlash? (mm), flank_points? (2..64, default 8), internal? (bool: a ring with its teeth inward; no profile shift), rim_thickness? (mm, internal only, default 2 × module), bore_diameter? (mm, external only: an axle hole), name? → component, occurrence, name, pitch/base/tip/root diameters"),
+        .params("module (mm), teeth (6..1000), pressure_angle? (deg, default 20), face_width? (mm), profile_shift?, backlash? (mm), flank_points? (2..64, default 8), internal? (bool: a ring with its teeth inward; no profile shift), rim_thickness? (mm, internal only, default 2 × module), bore_diameter? (mm, external only: an axle hole), bore_offset? (mm: the hole's centre along +X), helix_angle? (deg, -45..45, default 0: teeth twisted over the face width, positive right-hand), double_helical? (bool, external only: two mirrored halves), name? → component, occurrence, name, pitch/base/tip/root diameters"),
 ];
 
 /// A number parameter that may be left out; one that is present but not a usable number is refused.
@@ -39,12 +39,24 @@ fn optional(p: &Value, k: &str, cmd: &str) -> Result<Option<f64>> {
 }
 
 /// What a gear needs besides its tooth outline.
+#[derive(Clone, Copy)]
 struct Extent {
     width: f64,
     /// Internal gears: ring thickness outside the tooth roots.
     rim: f64,
     /// External gears: diameter of the axle hole, 0 for none.
     bore: f64,
+    /// External gears: how far the axle hole's centre is from the gear's along +X.
+    bore_offset: f64,
+    /// Helix angle on the pitch circle (degrees): 0 for straight teeth, positive for a right-hand helix.
+    helix: f64,
+    /// Two mirrored helical halves, so the thrust of one cancels the other.
+    double: bool,
+}
+
+/// How far a helical gear's profile turns over `length` along its axis (degrees).
+fn twist_over(g: &GearSpec, helix_deg: f64, length: f64) -> f64 {
+    (length * helix_deg.to_radians().tan() / g.pitch_radius()).to_degrees()
 }
 
 fn spec(p: &Value, cmd: &str) -> Result<(GearSpec, Extent)> {
@@ -83,11 +95,35 @@ fn spec(p: &Value, cmd: &str) -> Result<(GearSpec, Extent)> {
         return Err(bad(cmd, "`rim_thickness` must be above 0"));
     }
     let bore = bore.unwrap_or(0.0);
+    let bore_offset = optional(p, "bore_offset", cmd)?.unwrap_or(0.0);
     // The hole must leave a rim of material inside the root circle.
-    if bore < 0.0 || (bore > 0.0 && bore >= 1.8 * g.root_radius().min(g.base_radius())) {
-        return Err(bad(cmd, "`bore_diameter` must be from 0 up to 90% of the gear's root circle"));
+    let room = 0.9 * g.root_radius().min(g.base_radius());
+    if bore < 0.0 || (bore > 0.0 && bore / 2.0 + bore_offset.abs() >= room) {
+        return Err(bad(cmd, "the axle hole, with its offset, must stay inside 90% of the gear's root circle"));
     }
-    Ok((g, Extent { width, rim, bore }))
+    if bore == 0.0 && bore_offset != 0.0 {
+        return Err(bad(cmd, "`bore_offset` needs a `bore_diameter`"));
+    }
+    let helix = optional(p, "helix_angle", cmd)?.unwrap_or(0.0);
+    if helix.abs() > 45.0 {
+        return Err(bad(cmd, "`helix_angle` must be from -45 to 45 degrees"));
+    }
+    let double = match p.get("double_helical") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(bad(cmd, "`double_helical` must be true or false")),
+    };
+    if double && helix == 0.0 {
+        return Err(bad(cmd, "`double_helical` needs a `helix_angle`"));
+    }
+    if double && g.internal {
+        return Err(bad(cmd, "`double_helical` is for external gears"));
+    }
+    // The sweep that twists the teeth turns at most four times.
+    if twist_over(&g, helix, width).abs() > 1440.0 {
+        return Err(bad(cmd, "the teeth would turn more than four times over the face width: use a smaller helix angle or a thinner gear"));
+    }
+    Ok((g, Extent { width, rim, bore, bore_offset, helix, double }))
 }
 
 fn insert_atomic(s: &mut Session, p: &Value) -> Result<Value> {
@@ -102,8 +138,8 @@ fn insert_atomic(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// A sketch on the XY plane holding the tooth outline (`teeth`), a circle round the centre, or both.
-fn sketch_profile(s: &mut Session, g: &GearSpec, teeth: bool, circle: Option<f64>, cmd: &str) -> Result<()> {
-    s.execute("sketch.create", &json!({"plane": "XY"}))?;
+fn sketch_profile(s: &mut Session, g: &GearSpec, teeth: bool, circle: Option<(f64, f64)>, cmd: &str) -> Result<u64> {
+    let sketch = s.execute("sketch.create", &json!({"plane": "XY"}))?["sketch"].as_u64().unwrap_or(0);
     // Each flank is one spline through its points, each tip and root one line: 4 edges a tooth.
     // All go in with one sketch edit: a command per curve would copy the design for each.
     let points = if teeth { outline(g).map_err(|e| bad(cmd, e))? } else { Vec::new() };
@@ -121,30 +157,56 @@ fn sketch_profile(s: &mut Session, g: &GearSpec, teeth: bool, circle: Option<f64
             let (from, to) = (chunk[chunk.len() - 1], chunks[(i + 1) % chunks.len()][0]);
             sk.add_line_pts(from, to, None).map_err(|e| bad(cmd, e.to_string()))?;
         }
-        if let Some(r) = circle {
-            sk.add_circle(Vec2::new(0.0, 0.0), r, None, None).map_err(|e| bad(cmd, e.to_string()))?;
+        if let Some((r, x)) = circle {
+            sk.add_circle(Vec2::new(x, 0.0), r, None, None).map_err(|e| bad(cmd, e.to_string()))?;
         }
         Ok(())
     })?;
-    s.execute("sketch.finish", &json!({})).map(|_| ())
+    s.execute("sketch.finish", &json!({}))?;
+    Ok(sketch)
+}
+
+/// Turn a profile sketch into material: straight for a spur gear; for a helical one, a sweep along
+/// the gear's axis that turns the profile. A double helical gear is one half and its mirror.
+fn solidify(s: &mut Session, g: &GearSpec, e: &Extent, profile: u64, operation: &str) -> Result<()> {
+    if e.helix == 0.0 {
+        let distance = format!("{} mm", e.width);
+        s.execute("solid.extrude", &json!({"sketch": profile, "distance": distance, "direction": "positive", "operation": operation}))?;
+        return Ok(());
+    }
+    let length = if e.double { e.width / 2.0 } else { e.width };
+    // The path runs up +Z from the middle of the profile.
+    let path = s.execute("sketch.create", &json!({"plane": "YZ"}))?["sketch"].as_u64().unwrap_or(0);
+    let line = s.execute("sketch.line", &json!({"points": [[0, 0], [0, length]]}))?;
+    let curve = line["created"]["curves"][0].clone();
+    s.execute("sketch.finish", &json!({}))?;
+    let twist = format!("{} deg", twist_over(g, e.helix, length));
+    let swept =
+        s.execute("solid.sweep", &json!({"sketch": profile, "path_sketch": path, "path": [curve], "twist": twist, "operation": operation}))?;
+    if e.double {
+        let body = swept["bodies"][0].clone();
+        let plane = json!({"origin": [0, 0, length], "normal": [0, 0, 1]});
+        s.execute("solid.mirror", &json!({"bodies": [body], "plane": plane, "combine": true}))?;
+    }
+    Ok(())
 }
 
 /// The gear's teeth as sketch and extrusion in the active component. An external gear is its tooth
-/// outline, with an axle hole cut through it. An internal gear is the ring's disc
-/// with the tooth outline cut through it.
+/// outline, with an axle hole cut through it. An internal gear is the ring's disc with the tooth
+/// outline cut through it. Helical teeth are a twisted sweep in place of the extrusion.
 fn build(s: &mut Session, g: &GearSpec, e: &Extent, cmd: &str) -> Result<()> {
-    let distance = format!("{} mm", e.width);
+    let straight = Extent { helix: 0.0, double: false, ..*e };
     if g.internal {
-        sketch_profile(s, g, false, Some(g.root_radius() + e.rim), cmd)?;
-        s.execute("solid.extrude", &json!({"distance": distance, "direction": "positive", "operation": "new"}))?;
-        sketch_profile(s, g, true, None, cmd)?;
-        s.execute("solid.extrude", &json!({"distance": distance, "direction": "positive", "operation": "cut"}))?;
+        let disc = sketch_profile(s, g, false, Some((g.root_radius() + e.rim, 0.0)), cmd)?;
+        solidify(s, g, &straight, disc, "new")?;
+        let teeth = sketch_profile(s, g, true, None, cmd)?;
+        solidify(s, g, e, teeth, "cut")?;
     } else {
-        sketch_profile(s, g, true, None, cmd)?;
-        s.execute("solid.extrude", &json!({"distance": distance, "direction": "positive", "operation": "new"}))?;
+        let teeth = sketch_profile(s, g, true, None, cmd)?;
+        solidify(s, g, e, teeth, "new")?;
         if e.bore > 0.0 {
-            sketch_profile(s, g, false, Some(e.bore / 2.0), cmd)?;
-            s.execute("solid.extrude", &json!({"distance": distance, "direction": "positive", "operation": "cut"}))?;
+            let hole = sketch_profile(s, g, false, Some((e.bore / 2.0, e.bore_offset)), cmd)?;
+            solidify(s, g, &straight, hole, "cut")?;
         }
     }
     Ok(())
@@ -162,6 +224,9 @@ fn record(g: &GearSpec, e: &Extent) -> SpurGear {
         internal: g.internal,
         rim_thickness: e.rim,
         bore_diameter: e.bore,
+        bore_offset: e.bore_offset,
+        helix_angle: e.helix,
+        double_helical: e.double,
     }
 }
 
@@ -223,10 +288,23 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         "module": was.module, "teeth": was.teeth, "pressure_angle": was.pressure_angle, "face_width": was.face_width,
         "profile_shift": was.profile_shift, "backlash": was.backlash, "flank_points": was.flank_points,
         "internal": was.internal, "rim_thickness": was.rim_thickness, "bore_diameter": was.bore_diameter,
+        "bore_offset": was.bore_offset, "helix_angle": was.helix_angle, "double_helical": was.double_helical,
     });
-    for k in
-        ["module", "teeth", "pressure_angle", "face_width", "profile_shift", "backlash", "flank_points", "internal", "rim_thickness", "bore_diameter"]
-    {
+    for k in [
+        "module",
+        "teeth",
+        "pressure_angle",
+        "face_width",
+        "profile_shift",
+        "backlash",
+        "flank_points",
+        "internal",
+        "rim_thickness",
+        "bore_diameter",
+        "bore_offset",
+        "helix_angle",
+        "double_helical",
+    ] {
         if let Some(v) = p.get(k).filter(|v| !v.is_null()) {
             merged[k] = v.clone();
         }
