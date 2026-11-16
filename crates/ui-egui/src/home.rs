@@ -778,6 +778,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             document: app.session.doc.name.as_str().into(),
             shortcut: "Esc".into(),
             chosen: FileAction::Back,
+            // The File view handles Escape above, after its own windows and questions.
+            escape: false,
         }),
         rail: rail(app),
         title: match app.home.section {

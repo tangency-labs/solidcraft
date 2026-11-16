@@ -34,14 +34,16 @@ pub struct Page<'a, A> {
     pub body: Body<'a, A>,
 }
 
-/// The rail's first row, back to the open document. Escape chooses it too, while none of the
-/// page's own menus is open.
+/// The rail's first row, back to the open document.
 pub struct Back<'a, A> {
     /// The label, with `{name}` for the document's name.
     pub template: Label<'a>,
     pub document: Label<'a>,
     pub shortcut: Label<'a>,
     pub chosen: A,
+    /// Escape chooses the row too, while none of the page's own menus is open. Off for a host
+    /// that handles Escape itself, for example to close its own windows over the page first.
+    pub escape: bool,
 }
 
 pub enum RailItem<'a, A> {
@@ -154,7 +156,7 @@ pub fn show<A>(ui: &mut egui::Ui, page: Page<'_, A>) -> Option<A> {
     let Page { id, name, interactive, back, rail, title, hint, error, body } = page;
     let mut chosen = None;
     let escape = interactive
-        && back.is_some()
+        && back.as_ref().is_some_and(|back| back.escape)
         && !egui::Popup::is_any_open(ui.ctx())
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
     let mut rail = Some((back, rail));
@@ -424,7 +426,13 @@ mod tests {
             id: "start",
             name: "Start page".into(),
             interactive: true,
-            back: back.then(|| Back { template: "Back to {name}".into(), document: "Plate".into(), shortcut: "Esc".into(), chosen: Picked::Back }),
+            back: back.then(|| Back {
+                template: "Back to {name}".into(),
+                document: "Plate".into(),
+                shortcut: "Esc".into(),
+                chosen: Picked::Back,
+                escape: true,
+            }),
             rail: vec![
                 RailItem::Entry(entry("start:home", true, true)),
                 RailItem::Entry(entry("start:save", false, false)),
@@ -612,5 +620,26 @@ mod tests {
         assert!(egui::Popup::is_any_open(&drive.ctx), "the recent row's menu is open");
         drive.escape();
         assert_eq!(drive.chosen, [], "Escape closes the menu, not the page");
+    }
+
+    #[test]
+    fn start_page_escape_is_left_to_a_host_that_handles_it_itself() {
+        let ctx = crate::test_support::context();
+        let key = |pressed| egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed, repeat: false, modifiers: Default::default() };
+        let mut chosen = Vec::new();
+        for events in [Vec::new(), vec![key(true), key(false)]] {
+            solidcraft_ui_registry::clear_handles();
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0));
+            let input = egui::RawInput { screen_rect: Some(screen), focused: true, events, ..Default::default() };
+            crate::test_support::raw_frame(&ctx, input, |ui| {
+                let mut page = page(0, true);
+                if let Some(back) = page.back.as_mut() {
+                    back.escape = false;
+                }
+                chosen.extend(show(ui, page));
+            });
+        }
+        assert!(solidcraft_ui_registry::handle_at("start:back").is_some(), "the Back row is still drawn");
+        assert_eq!(chosen, [], "Escape is the host's when Back's escape is off");
     }
 }
