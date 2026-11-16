@@ -1189,6 +1189,8 @@ pub(crate) struct Actions {
     pub(crate) hovered: bool,
     /// The plane whose row is under the pointer, lit in the view (#6975).
     pub(crate) hover_plane: Option<String>,
+    /// The Origin item whose row is under the pointer, shown in the view (#15658).
+    pub(crate) hover_origin: Option<String>,
     /// The feature or sketch whose row is under the pointer (#14263).
     pub(crate) hover_feature: Option<u64>,
     pub(crate) hover_joint: Option<u64>,
@@ -2192,8 +2194,14 @@ fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &
                 acts.menu = Some((p, target));
             }
         }
+        // A plane row lights its plane. With the preference on, any Origin row also names its
+        // item as an Origin row's, so the view shows it, hidden or not, even where a feature has
+        // the same name (#15658). The view draws it; nothing here changes visibility.
         if r.hovered && icon == "plane" {
-            acts.hover_plane = Some(name);
+            acts.hover_plane = Some(name.clone());
+        }
+        if r.hovered && app.preferences.browser_hover_shows_origin {
+            acts.hover_origin = Some(name);
         }
         if r.clicked
             && let Some(x) = sel
