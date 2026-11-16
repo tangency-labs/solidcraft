@@ -37,7 +37,6 @@ const H: f64 = 10.0;
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
     k.fixes.fillet_knife_edge_rounds = true;
-    k.fixes.fillet_trim_inside_by_best_dot = true;
     k
 }
 

@@ -235,8 +235,11 @@ rules. Its compass is 110 pt; the 48 pt Shots strip clears the docks by 8 pt.
   compose the shared `tree_header` (title, compact lens and quiet search action). Its tree policy
   caps the card at ten 28 pt rows and lets rows own their 8 pt side insets; header navigation
   retains a separate title grip. Optional header actions share the same title band.
-  `stack_first_bounds` reserves a bounded Browser above its companion;
-  `stack_next_bounds` places that companion with the shared gap. `Panel::bottom_strip`
+  `Panel::stack_bounds` places several cards down one column: a card whose content fits gets
+  exactly that height, every card keeps the minimum the host measures for it, the space left
+  goes to the cards that would scroll, and when not even the minimums fit the lowest cards fold
+  to their header without overlapping. `stack_first_bounds` reserves a bounded Browser above its
+  companion; `stack_next_bounds` places that companion with the shared gap. `Panel::bottom_strip`
   uses `Container::bottom_strip_rect`, the same placement as Design History.
   `Container::navigation_card` supplies the shared Navigation surface for anchored HUDs.
   Register measured card rectangles and reserved edges with `shell::register_panel` so

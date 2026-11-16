@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "diagnostic.stitch_open_edges": "لا تزال نتيجة الخياطة `{body}` مفتوحة (عدد حواف الحدود: {count})."
+  },
+  "de": {
+    "diagnostic.stitch_open_edges": "Das Ergebnis des Vernähens `{body}` bleibt offen (Randkanten: {count})."
+  },
+  "en": {
+    "diagnostic.stitch_open_edges": "Stitch result `{body}` remains open (boundary edges: {count})."
+  },
+  "he": {
+    "diagnostic.stitch_open_edges": "תוצאת התפירה `{body}` נשארת פתוחה (מספר מקצועות הגבול: {count})."
+  },
+  "ja": {
+    "diagnostic.stitch_open_edges": "ステッチの結果 `{body}` は開いたままです（境界エッジ数: {count}）。"
+  },
+  "ko": {
+    "diagnostic.stitch_open_edges": "재봉 결과 `{body}`가 열린 상태입니다(경계 모서리 수: {count})."
+  },
+  "vi": {
+    "diagnostic.stitch_open_edges": "Kết quả khâu `{body}` vẫn hở (số cạnh biên: {count})."
+  },
+  "zh": {
+    "diagnostic.stitch_open_edges": "缝合结果 `{body}` 仍未闭合（边界边数量：{count}）。"
+  }
+}

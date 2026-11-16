@@ -149,6 +149,117 @@ impl Curve {
     }
 }
 
+impl Curve {
+    /// Not upstream (#17098): whether `self` over `interval` and `other` over
+    /// `other_interval` are proved within `budget` of each other: every point of each within
+    /// `budget` of a point of the other (their Hausdorff distance), rounding included.
+    ///
+    /// A curve of length at most `L` whose ends are `c` apart lies in the ellipse with its
+    /// ends as foci and major axis `L` (the sum of a point's distances to the ends is at most
+    /// the length through it), every point of which is within the semi-minor axis
+    /// `b = sqrt(L^2 - c^2) / 2` of the chord between the ends; and every point of the chord
+    /// is within `b` of the curve, which crosses the chord's normal plane there inside that
+    /// ellipse. So each curve is within its `b` of its chord, and the two chords, paired end
+    /// to end either way round, within the larger end distance of each other (the triangle
+    /// inequality along both segments). `L` is [`Curve::length_bound`]'s upper end, asked as
+    /// narrow as the budget needs; an end is a line's [`Line::segment_over`](crate::curve::line::Line::segment_over)
+    /// point, or an evaluated point within its degree's rounding (module docs). `false` when
+    /// no bound fits the budget: a kind without a certified length or end, a length bracket
+    /// that cannot be that narrow, or curves farther apart.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations; cancellation and unported callees of the length bound
+    /// (its refusals and unsupported kinds are `false`).
+    pub fn proved_within(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        other: &Curve,
+        other_interval: &Extent1d,
+        budget: f64,
+    ) -> Result<bool> {
+        if !(budget.is_finite() && budget > 0.0) {
+            return Ok(false);
+        }
+        let (Some(a), Some(b)) = (
+            self.ends_with_rounding(k, interval)?,
+            other.ends_with_rounding(k, other_interval)?,
+        ) else {
+            return Ok(false);
+        };
+        let dist = |p: Vec3, q: Vec3| {
+            crate::nurbs::crv_deviation::norm_up(p.x - q.x, p.y - q.y, p.z - q.z)
+                .map(|d| d * (1.0 + gamma(2)))
+        };
+        let (Some(a0b0), Some(a1b1), Some(a0b1), Some(a1b0)) = (
+            dist(a.0, b.0),
+            dist(a.1, b.1),
+            dist(a.0, b.1),
+            dist(a.1, b.0),
+        ) else {
+            return Ok(false);
+        };
+        let ends = a0b0.max(a1b1).min(a0b1.max(a1b0)) + 2.0 * (a.2 + b.2);
+        // what is left of the budget for the two curves' distances to their chords
+        let room = (budget - ends) / (2.0 * (1.0 + gamma(4)));
+        if room.is_nan() || room <= 0.0 {
+            return Ok(false);
+        }
+        for (curve, ivl, (p, q, e)) in [(self, interval, a), (other, other_interval, b)] {
+            let Some(chord) = dist(p, q) else {
+                return Ok(false);
+            };
+            // the exact chord is at least the computed one less both ends' rounding
+            let chord = ((chord - 2.0 * e) * (1.0 - gamma(4))).max(0.0);
+            // the longest length whose semi-minor axis is `room`
+            let longest = (chord * chord + 4.0 * room * room).sqrt() * (1.0 - gamma(4));
+            let width = longest - chord;
+            if width.is_nan() || width <= 0.0 {
+                return Ok(false);
+            }
+            let upper = match curve.length_bound(k, ivl, width) {
+                Ok(bracket) => bracket.upper,
+                Err(err) if err.is_unported_or_cancelled() => return Err(err),
+                Err(_) => return Ok(false),
+            };
+            let semi_minor =
+                ((upper * upper - chord * chord).max(0.0)).sqrt() * 0.5 * (1.0 + gamma(4));
+            if semi_minor.is_nan() || semi_minor > room {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// The ends of `self` over `interval` and how far each can be from the exact one: a
+    /// line's [`Line::segment_over`](crate::curve::line::Line::segment_over), the
+    /// B-spline-based kinds' evaluated ends within their degree's rounding; `None` for
+    /// another kind or a line end without a bound.
+    fn ends_with_rounding(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+    ) -> Result<Option<(Vec3, Vec3, f64)>> {
+        let degree = match self.kind() {
+            CurveKind::Line(l) => {
+                return Ok(l
+                    .segment_over(interval)
+                    .map(|[(p, ep), (q, eq)]| (p, q, ep.max(eq))));
+            }
+            CurveKind::Ellipse(el) => el.base().degree()?,
+            CurveKind::BSpline(c) => c.degree()?,
+            CurveKind::Parabola(c) => c.base().degree()?,
+            CurveKind::Hyperbola(c) => c.base().degree()?,
+            _ => return Ok(None),
+        };
+        let p = self.evaluate_point(k, interval.min())?;
+        let q = self.evaluate_point(k, interval.max())?;
+        let e = evaluation_rounding(degree, p.max_dimension().max(q.max_dimension()));
+        Ok(e.is_finite().then_some((p, q, e)))
+    }
+}
+
 /// How far an evaluated point of a curve of degree `p` and size `size` can be from the
 /// exact one (module docs).
 fn evaluation_rounding(p: usize, size: f64) -> f64 {
