@@ -42,13 +42,18 @@ opt-in of the 2026-10-26 addendum no longer exists. Removed: the field and its d
   and 2.4e-10 relative at accuracy 1e-8. The seven `topology.proto_topology_p2` rows (gen0405, gen0531, gen0574,
   gen0620, gen0780, gen1111, gen1284) are generated manager calls that reach this branch with a vertex
   classification. They recorded the removed split, which on the unit's stand-in pool ends in the split's own errors.
-  They now record the drop or the refusal below.
-- **The drop is bounded.** The curve is dropped only when a certain hull of it over the proto edge's interval
-  (`Curve::piece_hull_points`, each point with its error bound) lies within the farther end's distance from the
-  definition plus the definition's and the proto edge's tolerances: the ends are already one place there. A curve
+  Five now record the drop (gen0574, gen0620, gen0780, gen1111, gen1284: every definition's curve stays within its
+  ends' reach) and two the refusal (gen0405, gen0531: a proto edge of two definitions whose second curve leaves it).
+- **The drop is bounded.** The proto edge is dropped only when, for every edge definition, a certain hull of its curve
+  over its own interval (`Curve::piece_hull_points`, each point with twice its per-coordinate error bound and the
+  distance's rounding) lies within the farther of that piece's ends from the definition plus the definition's and the
+  proto edge's tolerances: the ends are already one place there. A curve
   that leaves that reach, or has no certain hull, is a real intersection that neither the split nor the drop keeps,
-  and the Boolean is refused (`BooleanFailure::StageFailed`, `SM_ERR`). Unit test
+  and the Boolean is refused (`BooleanFailure::StageFailed`, `SM_ERR`): the manager keeps the refusal and
+  `resolve_intersections` returns it once every proto edge is resolved, because that loop only warns on a proto
+  edge's own error. No `boolean.api_brep` or `blend.fillet_executive_p3` case reaches the refusal. Unit test
   `resolve_self_loop_on_a_vertex_leaving_its_reach_is_refused`.
-- **Defaults:** SolidCraft's preset had the flag on, so the app's results don't change. `Kernel::default()` changes.
+- **Defaults:** SolidCraft's preset had the flag on; its results change only where a self-loop's curve leaves its
+  reach, which the flag dropped and which is now refused. `Kernel::default()` changes.
 - **Tests:** `issue_480_ring_lip_union_with_the_seam_at_the_crossing` runs on the default kernel with its assertions
   unchanged. `box_corner_inside_a_sphere_by_less_than_tolerance_unites_validly` (same file) pins tess0033's union.
