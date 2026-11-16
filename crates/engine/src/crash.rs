@@ -988,7 +988,10 @@ fn unclean_exit(dir: &Path, build: &Build, journal: &Path) {
     };
     // Another version that was up and idle, with nothing a crash handler caught: an update or an
     // installer most likely closed it, which skips the clean exit (#17890). Not a crash to offer.
-    if native.is_none() && starting.is_none() && doing.is_none() && was != "?" && was != build.version {
+    // Only when the journal shows it: a run that never recorded getting up, or whose journal
+    // stopped recording (it may have been in a command), is still reported.
+    let up = j.phase.as_ref().is_some_and(|(p, _)| p == RUNNING);
+    if up && j.complete && native.is_none() && doing.is_none() && was != "?" && was != build.version {
         solidcraft_geom::note!(
             "SolidCraft: {was} (started {when}) ended without a clean exit between commands; not reported, as this is {}",
             build.version
