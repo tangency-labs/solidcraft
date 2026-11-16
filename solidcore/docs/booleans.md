@@ -318,9 +318,12 @@ face lies there is proved, not sampled, and only for a face on a cylinder or con
 (`cone_face_gap_to_plane`): the plane's distance over the cone is linear along each generator and a
 sinusoid round the axis, so its extremes over a box of angle and height are found exactly, and the
 box holds the face because it holds the convex hulls of the face's edges (their ends for a line,
-their Bezier control points for a B-spline) and the face's one loop does not wind round the axis. Any
-other pair of kinds, and a face that leaves the plane anywhere, is only possibly a copy and goes to
-the ray. Where the operation keeps no copy of coincident faces (a
+their Bezier control points for a B-spline) and the face's one loop does not wind round the axis. The
+rounding of that calculation is bounded too (the comment on `cone_box_gap`). The face must also lie
+within the other face's edges, not only on its plane: its vertices and three points along each of its
+edges must classify to the other face (`points_in_face`). That part is sampled, not proved. Any
+other pair of kinds, and a face that leaves the plane or the other face anywhere, is only possibly a
+copy and goes to the ray. Where the operation keeps no copy of coincident faces (a
 difference of faces facing the same way), the patch goes. Where it keeps one, the copy is the other
 face's when that face is kept, so the patch goes, and the patch's when the other face is deleted.
 This replaces a ray cast from a point within the tolerance of the other boundary, whose answer there

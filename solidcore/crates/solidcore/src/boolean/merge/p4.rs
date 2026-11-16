@@ -674,12 +674,31 @@ fn cone_face_gap_to_plane(
 
 /// The bound of [`cone_face_gap_to_plane`] for a face whose boundary lies in the convex hull of
 /// `points`, within `widen` of the cone `(O, A, r, tan(a))`, against the plane `(P, n)`.
+///
+/// Rounding, with `g(m)` the bound `m u / (1 - m u)` on `m` roundings (`u` the unit roundoff)
+/// and `s` the size of every coordinate, `|O| + |P| + max |X|`:
+///
+/// - Each point's height `(X - O) . A` and radial vector take at most 8 roundings of terms
+///   below `s`, so they are within `g(8) s`. The frame `E1` (the normalised mean) and
+///   `E2 = A x E1` are within `g(8)` of an orthonormal frame, which turns each point's angle
+///   by at most `g(16) s / rho` with its components' error, `rho` the least radial distance,
+///   plus two units in the last place of `atan2`. The box is widened by those margins, so it
+///   holds the exact heights and angles.
+/// - The distance `C + D h + R(h) S(t)` is computed from `C` (5 roundings), `D` (3), `R(h)` (3),
+///   and `S(t)`, whose coefficients carry the frame's `g(16)` and whose sine and cosine are
+///   within one unit in the last place each; with the sum's own 3 roundings, each value is
+///   within `g(32)` of the sizes of its terms, at most `|O| + |P| + max |h| + max R(h)`.
+///   That is added to the bound.
+/// - A crest or trough is counted whenever it falls within `1e-9` of the box. Counting one
+///   that falls just outside only raises the bound, since `|S|` never exceeds its amplitude.
 fn cone_box_gap(
     (origin, axis, radius, tan_angle): (Vec3, Vec3, f64, f64),
     (plane_origin, normal): (Vec3, Vec3),
     points: &[Vec3],
     widen: f64,
 ) -> Option<f64> {
+    use crate::nurbs::math::gamma;
+    use std::cmp::Ordering;
     use std::f64::consts::PI;
     // each point's height and radial vector about the axis
     let about = |x: Vec3| {
@@ -693,25 +712,34 @@ fn cone_box_gap(
     if points.is_empty() || mean.length() == 0.0 {
         return None;
     }
+    let s = origin.length()
+        + plane_origin.length()
+        + points.iter().map(|x| x.length()).fold(0.0_f64, f64::max);
     let e1 = mean * (1.0 / mean.length());
     let e2 = axis.cross(e1);
     let (mut h0, mut h1, mut t0, mut t1) = (f64::MAX, f64::MIN, 0.0_f64, 0.0_f64);
+    let mut rho = f64::MAX;
     for &x in points {
         let (h, v) = about(x);
         let t = v.dot(e2).atan2(v.dot(e1));
-        if t.abs().partial_cmp(&(0.5 * PI)) != Some(std::cmp::Ordering::Less) {
+        if t.abs().partial_cmp(&(0.5 * PI)) != Some(Ordering::Less) {
             return None;
         }
         (h0, h1, t0, t1) = (h0.min(h), h1.max(h), t0.min(t), t1.max(t));
+        rho = rho.min(v.length());
     }
     let r_at = |h: f64| radius + tan_angle * h;
     let r_min = r_at(h0).min(r_at(h1));
-    if r_min.partial_cmp(&widen) != Some(std::cmp::Ordering::Greater) {
+    if r_min.partial_cmp(&widen) != Some(Ordering::Greater)
+        || rho.partial_cmp(&(gamma(16) * s)) != Some(Ordering::Greater)
+    {
         return None;
     }
     // a point within `widen` of the cone where its radius is `R` turns by at most this
     let spread = (widen / (r_min - widen)).min(1.0).asin();
-    let (h0, h1, t0, t1) = (h0 - widen, h1 + widen, t0 - spread, t1 + spread);
+    let margin_h = widen + gamma(8) * s;
+    let margin_t = spread + gamma(16) * s / rho + 4.0 * f64::EPSILON;
+    let (h0, h1, t0, t1) = (h0 - margin_h, h1 + margin_h, t0 - margin_t, t1 + margin_t);
     let (r0, r1) = (r_at(h0), r_at(h1));
     if !(r0 > 0.0 && r1 > 0.0 && t1 - t0 < PI) {
         return None;
@@ -727,7 +755,7 @@ fn cone_box_gap(
     for (peak, value) in [(crest, amplitude), (crest + PI, -amplitude)] {
         // the peak's turn nearest the box
         let at = peak + 2.0 * PI * ((0.5 * (t0 + t1) - peak) / (2.0 * PI)).round();
-        if t0 <= at && at <= t1 {
+        if t0 - 1e-9 <= at && at <= t1 + 1e-9 {
             s_min = s_min.min(value);
             s_max = s_max.max(value);
         }
@@ -738,33 +766,87 @@ fn cone_box_gap(
             .max((c + d * h + r * s_max).abs())
             .max((c + d * h + r * s_min).abs());
     }
-    // the rounding of the sums above, at the size of their terms
     let size = origin.length() + plane_origin.length() + h0.abs().max(h1.abs()) + r0.max(r1);
-    Some(gap + 64.0 * f64::EPSILON * size)
+    Some(gap + gamma(32) * size)
+}
+
+/// Not upstream (#17118): whether every one of `points` (the source face's vertices and three
+/// points along each of its edges) classifies to the partner face `f` of `b`, its inside, an
+/// edge or a vertex, within `tol`, so that the source face lies within the partner face's
+/// trimmed extent, not only on its surface. The classification builds the face's UV trim
+/// curves, so it runs on a scratch copy of `b`. A point the classification cannot place
+/// counts as outside.
+fn points_in_face(k: &Kernel, b: &Brep, f: FaceId, points: &[Vec3], tol: f64) -> Result<bool> {
+    use crate::intersect::point_class::PointClassification;
+    use crate::query::face::p1::{point_3d_classify, Point3dClassifyOptions};
+    let mut scratch = b.clone_sharing_surface_caches();
+    for &point in points {
+        let mut pc = PointClassification::new(tol);
+        match point_3d_classify(
+            k,
+            &mut scratch,
+            f,
+            point,
+            tol,
+            false,
+            &mut pc,
+            Point3dClassifyOptions::default(),
+        ) {
+            Ok(()) => {}
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => return Ok(false),
+        }
+        if !matches!(
+            pc.point_class(),
+            PointClassType::Face | PointClassType::Edge | PointClassType::Vertex
+        ) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// The points of face `f` that [`points_in_face`] classifies: its vertices and the points a
+/// quarter, half and three quarters along each edge.
+fn face_boundary_points(k: &Kernel, b: &Brep, f: FaceId) -> Result<Vec<Vec3>> {
+    let mut points = Vec::new();
+    for v in crate::topology::face::p4::vertices(b, f, None, false, None)? {
+        points.push(vertex::point(b, v)?);
+    }
+    for e in crate::topology::face::p4::edges(b, f, None, false, None)? {
+        let edge = b.edge(e)?;
+        if let Some(curve) = edge.curve.as_ref() {
+            for t in [0.25, 0.5, 0.75] {
+                points.push(curve.evaluate_point(k, edge.interval.evaluate(t))?);
+            }
+        }
+    }
+    Ok(points)
 }
 
 /// Not upstream (#17118): whether the source face of a tangent patch (`of` when `reverse`, `pf`
-/// otherwise) lies within the tolerance of its partner's surface, so that the whole face is the
-/// patch. Only a face on a cylinder or cone against a plane is bounded
-/// ([`cone_face_gap_to_plane`]); any other face, and a face that leaves the plane somewhere,
-/// is left to the ray.
+/// otherwise) is a copy of part of its partner face: it lies within the tolerance of the
+/// partner's surface everywhere, which is proved only for a face on a cylinder or cone against
+/// a plane ([`cone_face_gap_to_plane`]), and its boundary lies within the partner face's trimmed
+/// extent ([`points_in_face`]). Any other face is left to the ray.
 fn within_partner(
-    k: &Kernel,
+    kernels: &BooleanKernels<'_>,
     primary: &Brep,
     pf: FaceId,
     other: &Brep,
     of: FaceId,
     reverse: bool,
 ) -> Result<bool> {
-    let (sb, sf, pb, ppf) = if reverse {
-        (other, of, primary, pf)
+    let (sk, sb, sf, pk, pb, ppf) = if reverse {
+        (kernels.other(), other, of, &*kernels.primary, primary, pf)
     } else {
-        (primary, pf, other, of)
+        (&*kernels.primary, primary, pf, kernels.other(), other, of)
     };
-    let tol = crate::topology::face::p2::tolerance(sb, sf)?
-        .max(crate::topology::face::p2::tolerance(pb, ppf)?);
-    let gap = cone_face_gap_to_plane(k, sb, sf, pb, ppf)?;
-    Ok(gap.is_some_and(|g| g <= tol))
+    let tol = face::tolerance(sb, sf)?.max(face::tolerance(pb, ppf)?);
+    if !cone_face_gap_to_plane(sk, sb, sf, pb, ppf)?.is_some_and(|g| g <= tol) {
+        return Ok(false);
+    }
+    points_in_face(pk, pb, ppf, &face_boundary_points(sk, sb, sf)?, tol)
 }
 
 fn region_pair(b: &Brep, fu: FaceuseId) -> Result<(RegionId, RegionId)> {
@@ -1055,7 +1137,7 @@ fn classify_edge_faces(
                     | BooleanOperation::Difference
                     | BooleanOperation::Intersection
             ) && surfaces_of_other_kinds(primary, pf, other, of)?
-                && within_partner(kernels.primary, primary, pf, other, of, reverse)?;
+                && within_partner(kernels, primary, pf, other, of, reverse)?;
             let keep = coincident_keep(operation, same_side, non_solid, None);
             if if reverse {
                 state
@@ -2396,6 +2478,35 @@ mod tests {
         // a boundary that reaches a quarter turn from its mean direction is not bounded
         let wide = on(5.0, 0.0, &[-1.6, 0.0, 1.6], &[0.0, 10.0]);
         assert_eq!(cone_box_gap(cylinder, tangent, &wide, 0.0), None);
+    }
+
+    /// #17118: a face counts as a copy of part of its partner only when its boundary lies within
+    /// the partner face's edges, not only on its plane. The partner here is the top face of a
+    /// 10 mm cube; a strip whose points run 2 mm past its edge, still on its plane, is refused.
+    #[test]
+    fn a_tangent_patch_must_lie_within_its_partner_faces_edges() {
+        use crate::math::Point3;
+        use crate::primitive::api_primitives::create_box;
+        let mut k = Kernel::default();
+        let b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let top = b
+            .faces()
+            .ids()
+            .find(|&f| {
+                crate::topology::face::p4::vertices(&b, f, None, false, None)
+                    .unwrap()
+                    .iter()
+                    .all(|&v| (vertex::point(&b, v).unwrap().z - 10.0).abs() < 1e-9)
+            })
+            .unwrap();
+        let tol = face::tolerance(&b, top).unwrap();
+        let at = |x: f64, y: f64| Vec3::new(x, y, 10.0);
+        // inside, on an edge and at a corner
+        let within = [at(5.0, 5.0), at(10.0, 5.0), at(10.0, 10.0), at(1.0, 9.0)];
+        assert!(points_in_face(&k, &b, top, &within, tol).unwrap());
+        // the same strip running on past the edge at x = 10
+        let past = [at(5.0, 5.0), at(10.0, 5.0), at(12.0, 5.0)];
+        assert!(!points_in_face(&k, &b, top, &past, tol).unwrap());
     }
 
     /// #17118: a tangent patch waiting for its partner is revisited once a later patch
