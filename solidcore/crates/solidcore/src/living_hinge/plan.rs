@@ -10,7 +10,7 @@ use super::lattice::{FrameBox, Lattice};
 use super::near::{sweeps, NearEdge};
 use super::rows::plan_rows_zoned;
 use super::spans::{clean_ends, row_spans, row_zone};
-use super::{LivingHingeError, LivingHingePlan, LivingHingeSpec, CHORD};
+use super::{LivingHingeError, LivingHingePlan, LivingHingeSpec, CHORD, ON_EDGE};
 use crate::prism::profile::{Loop2, Seg2};
 
 /// The box of `loops` in the frame; an arc counts its ends and the points where it is furthest
@@ -89,6 +89,68 @@ pub fn near_loop(lp: &Loop2) -> Option<(Vec<NearEdge>, bool)> {
         }
     }
     Some((out, chorded))
+}
+
+/// The distance from `p` to `edge`.
+fn distance(p: (f64, f64), edge: &NearEdge) -> f64 {
+    match *edge {
+        NearEdge::Line(a, b) => {
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let len2 = dx * dx + dy * dy;
+            let t = if len2 > 0.0 {
+                (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / len2).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            (p.0 - a.0 - t * dx).hypot(p.1 - a.1 - t * dy)
+        }
+        NearEdge::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } => {
+            let (dx, dy) = (p.0 - center.0, p.1 - center.1);
+            if sweeps(start, sweep, dy.atan2(dx)) {
+                (dx.hypot(dy) - radius).abs()
+            } else {
+                let at = |a: f64| (center.0 + radius * a.cos(), center.1 + radius * a.sin());
+                let (e0, e1) = (at(start), at(start + sweep));
+                (p.0 - e0.0)
+                    .hypot(p.1 - e0.1)
+                    .min((p.0 - e1.0).hypot(p.1 - e1.1))
+            }
+        }
+    }
+}
+
+/// Three points of `edge`: its ends and its middle.
+fn probes(edge: &NearEdge) -> [(f64, f64); 3] {
+    match *edge {
+        NearEdge::Line(a, b) => [a, ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0), b],
+        NearEdge::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } => {
+            let at = |a: f64| (center.0 + radius * a.cos(), center.1 + radius * a.sin());
+            [at(start), at(start + sweep / 2.0), at(start + sweep)]
+        }
+    }
+}
+
+/// The area's edges inside the plate, not on its boundary (design 6.2): an edge whose ends and
+/// middle all lie within [`ON_EDGE`] of the plate's edges is the plate's edge (open), any other is
+/// closed and keeps `r + m` from the slots.
+pub fn closed_edges(field: &[Vec<NearEdge>], plate: &[Vec<NearEdge>]) -> Vec<NearEdge> {
+    let on_plate = |p: (f64, f64)| plate.iter().flatten().any(|e| distance(p, e) <= ON_EDGE);
+    field
+        .iter()
+        .flatten()
+        .filter(|edge| !probes(edge).into_iter().all(&on_plate))
+        .copied()
+        .collect()
 }
 
 /// Plans the slots of the area `field` in the plate `plate`, both closed loops in the hinge frame

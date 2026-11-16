@@ -668,3 +668,30 @@ fn a_loop_becomes_lines_arcs_and_chords() {
     assert!(!chorded);
     assert_eq!(edges, vec![NearEdge::Line((0.0, 0.0), (1.0, 2.0))]);
 }
+
+#[test]
+fn the_area_edges_inside_the_plate_are_closed() {
+    // Case A: the band's ends lie on the plate's edge (u 0 and 60), its sides v 30 and 70 inside.
+    let field = [frame_rect(0.0, 30.0, 60.0, 70.0)];
+    let plate = [frame_rect(0.0, 0.0, 60.0, 100.0)];
+    let closed = closed_edges(&field, &plate);
+    assert_eq!(
+        closed,
+        vec![
+            NearEdge::Line((0.0, 30.0), (60.0, 30.0)),
+            NearEdge::Line((60.0, 70.0), (0.0, 70.0)),
+        ]
+    );
+    // A disc of the plate's own boundary is open; one inside it is closed.
+    let disc = |r: f64| NearEdge::Arc {
+        center: (30.0, 50.0),
+        radius: r,
+        start: 0.0,
+        sweep: std::f64::consts::TAU,
+    };
+    assert!(closed_edges(&[vec![disc(5.0)]], &[vec![disc(5.0)]]).is_empty());
+    assert_eq!(
+        closed_edges(&[vec![disc(4.0)]], &[vec![disc(5.0)]]).len(),
+        1
+    );
+}
