@@ -39,9 +39,9 @@
 //! surviving edge had before the call is put back (upstream the owner is the same
 //! `SmEdge*`), so the caller's identity-keyed walks (the temporary transform's inverse
 //! `Transform`) still find the curve.
-//! Opt-in `Kernel::fixes.boolean_cleanup_removes_slits` (WR-304, #1120): after each
-//! edge removal `boolean_post_process` also checks the merged face's edges that have
-//! it on both sides (slits), skipping any a later removal deleted.
+//! Not upstream (WR-304, #1120): after each edge removal `boolean_post_process` also
+//! checks the merged face's edges that have it on both sides (slits), skipping any a
+//! later removal deleted.
 //! Opt-in `Kernel::fixes.fillet_cleanup_keeps_target_faces` (WR-459, #423): the edges in
 //! `CleanupRelations::kept_edges`, and those whose faces are all in `kept_faces`, stay.
 //! With that keep (WR-602, the fork's tangency-labs/smlib@cac11ea, the default since its
@@ -597,12 +597,7 @@ pub(crate) fn boolean_post_process_with_notifications(
     let mut endpoints = Vec::new();
     // WR-304: the edges checked so far, and those the merging below left with one face
     // on both sides (checked too, though they are no intersection edges).
-    let slits = k.fixes.boolean_cleanup_removes_slits;
-    let mut queued: BTreeSet<EdgeId> = if slits {
-        edges.iter().copied().collect()
-    } else {
-        BTreeSet::new()
-    };
+    let mut queued: BTreeSet<EdgeId> = edges.iter().copied().collect();
     let mut left_inside_face: BTreeSet<EdgeId> = BTreeSet::new();
     // WR-459: the input's faces, and each face a merge below makes of one of them: the
     // merged face is that input face continued, whichever of the two ids it keeps.
@@ -711,14 +706,12 @@ pub(crate) fn boolean_post_process_with_notifications(
             notifications.as_deref_mut(),
             keep,
         )?;
-        if slits {
-            // WR-304: an operand edge between two faces that are now one bounds the
-            // merged face on both sides (a slit); check it by the same test.
-            for face_edge in face_edges(brep, keep)? {
-                if edge::faces(brep, face_edge, None)?.len() == 1 && queued.insert(face_edge) {
-                    edges.push(face_edge);
-                    left_inside_face.insert(face_edge);
-                }
+        // WR-304: an operand edge between two faces that are now one bounds the
+        // merged face on both sides (a slit); check it by the same test.
+        for face_edge in face_edges(brep, keep)? {
+            if edge::faces(brep, face_edge, None)?.len() == 1 && queued.insert(face_edge) {
+                edges.push(face_edge);
+                left_inside_face.insert(face_edge);
             }
         }
     }

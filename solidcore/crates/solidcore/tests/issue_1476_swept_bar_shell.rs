@@ -38,8 +38,7 @@ mod offset_fixture;
 
 use offset_fixture::{planar_faces_at, volume, Notifications};
 use solidcore::curve::curve::p2::{Curve, CurveKind};
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::object::ObjectRef;
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
@@ -48,28 +47,16 @@ use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::database_io::FileType;
-use solidcore::topology::loopuse::notify_ref;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::{Brep, EntityRef, Kernel};
+use solidcore::{Brep, Kernel};
 
-/// `SmBrep::ReadFromFile` of the rig's operand. With `distinct_names` each entity is named
-/// by `notify_ref`, as `solidcore-ops` reads a file; otherwise every entity gets the same
-/// name, so no geometry owner tells its edge or face apart.
-fn operand(k: &mut Kernel, distinct_names: bool) -> Brep {
+/// `SmBrep::ReadFromFile` of the rig's operand.
+fn operand(k: &mut Kernel) -> Brep {
     let bytes = include_bytes!("data/issue_1476_swept_bar.smd").to_vec();
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = move |e: EntityRef| {
-        if distinct_names {
-            notify_ref(e)
-        } else {
-            ObjectRef {
-                key: ObjectKey(0),
-                type_code: 0,
-            }
-        }
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,
@@ -86,20 +73,14 @@ fn operand(k: &mut Kernel, distinct_names: bool) -> Brep {
 /// issue's configuration).
 fn solidcraft_fixes() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
-    f.fillet_refuse_rails_leaving_faces = true;
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_chamfer_cone_on_arc = true;
-    f.offset_excess_faces_after_merge = true;
-    f.offset_clip_right_side_out = true;
     f.offset_extended_edges_mated = true;
     f.keep_operand_uv_trims = true;
     f.geometric_g2_continuity = true;
     f.proto_vertex_miss_is_false = true;
-    f.check_loop_vertex_tolerance = true;
-    f.check_loop_projected_seam_ends = true;
     f.cylinder_rebuild_mean_radius = true;
     f.revolve_analytic_profile_faces = true;
-    f.revolve_nested_shells_as_cavities = true;
     f.join_touching_loops = true;
     f.offset_resolve_crossing_loops = true;
     f.offset_analytic_mate_edges = true;
@@ -108,16 +89,12 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.uv_trim_corner_end_points_only = true;
     f.bspline_trim_preserves_uv_spans = true;
     f.proto_edge_self_loop_on_vertex_degenerate = true;
-    f.slice_coincident_faces_sheet_side = true;
-    f.boolean_outer_shell_first = true;
     f.cover_refuses_folded_continuation = true;
     f.boolean_vertex_by_best_crossing = true;
-    f.boolean_cleanup_removes_slits = true;
     f.classify_edge_interval = true;
     f.ellipse_trim_seam_lines_span_cone_height = true;
     f.degenerate_proto_edge_in_one_vertex = true;
     f.new_edge_vertex_tolerance_covers_gap = true;
-    f.torus_signed_gen_curve_interval = true;
     f.point_solve_keeps_triangle_guess = true;
     f.imprint_extends_edge_to_proto_vertex = true;
     f.fillet_point_step_per_point = true;
@@ -127,7 +104,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.fillet_nx1_tangent_side_edge = true;
     f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
-    f.shell_empty_cavity_fails = true;
     f.ssi_tangent_contact_points = true;
     f.ssi_trace_tangent_curves_once = true;
     f.found_torus_sphere_keep_tested_nurb = true;
@@ -135,11 +111,11 @@ fn solidcraft_fixes() -> UpstreamFixes {
 }
 
 /// The shell of the operand (`SmApiShellBrepFull(b, -0.5, TRUE, TRUE, TRUE, [start
-/// cap])`), with its run time; the operand named as [`operand`] says.
-fn shell(fixes: &UpstreamFixes, distinct_names: bool) -> (Kernel, solidcore::Result<Brep>) {
+/// cap])`), with its run time.
+fn shell(fixes: &UpstreamFixes) -> (Kernel, solidcore::Result<Brep>) {
     let mut k = Kernel::default();
     k.fixes.clone_from(fixes);
-    let mut part = operand(&mut k, distinct_names);
+    let mut part = operand(&mut k);
     assert_eq!(part.face_list().len(), 14);
     let start = planar_faces_at(&k, &part, 2, 0.0);
     assert_eq!(start.len(), 1);
@@ -167,19 +143,13 @@ fn shell(fixes: &UpstreamFixes, distinct_names: bool) -> (Kernel, solidcore::Res
 
 /// Checks the shell and returns its number of line edges.
 fn check(fixes: &UpstreamFixes, want: Option<f64>) -> usize {
-    check_named(fixes, want, false, false)
+    check_validated(fixes, want, false)
 }
 
-/// [`check`] of the operand named as [`operand`] says; with `validate`, the shell also
-/// passes `check_brep` at every level (`Level2` runs every test, SolidCraft's
-/// `CheckLevel::All`; validation needs the entities named apart).
-fn check_named(
-    fixes: &UpstreamFixes,
-    want: Option<f64>,
-    distinct_names: bool,
-    validate: bool,
-) -> usize {
-    let (mut k, result) = shell(fixes, distinct_names);
+/// [`check`]; with `validate`, the shell also passes `check_brep` at every level
+/// (`Level2` runs every test, SolidCraft's `CheckLevel::All`).
+fn check_validated(fixes: &UpstreamFixes, want: Option<f64>, validate: bool) -> usize {
+    let (mut k, result) = shell(fixes);
     let mut b = result.unwrap();
     b.refresh_cached_topology();
     assert!(brep_is_manifold_solid(&b).unwrap());
@@ -218,33 +188,21 @@ fn check_named(
     kinds.iter().filter(|&&k| k == "line").count()
 }
 
-/// The default kernel, which keeps an inset's cavity regions (WR-667). The operand's
-/// entities all share one name here, so no geometry owner identifies its edge or face; the
-/// merge leaves one finite region, which `make_manifold` keeps whatever its cavity verdict,
-/// so the verdict's point solves over the operand are not run. With the former opt-in on
-/// (SolidCraft's preset) they were, and the shell failed with `Unsupported` ("point-solve geometry owners must identify one edge or
-/// face each") while building the operand's point-solve cache (#17393).
+/// The default kernel, which keeps an inset's cavity regions (WR-667). The merge leaves one
+/// finite region, which `make_manifold` keeps whatever its cavity verdict, so the verdict's
+/// point solves over the operand are not run (#17393).
 #[test]
 fn issue_1476_swept_bar_shells() {
     assert_eq!(check(&UpstreamFixes::default(), None), 16);
 }
 
-/// The operand named as `solidcore-ops` reads a file (each entity apart): the same shell.
-#[test]
-fn issue_1476_swept_bar_shells_with_distinct_names() {
-    assert_eq!(
-        check_named(&UpstreamFixes::default(), None, true, false),
-        16
-    );
-}
-
-/// SolidCraft's configuration (which also keeps cavity regions, now the default) with the
-/// operand named apart: the shell is the closed form and passes `check_brep` at every
-/// level. Slow in debug builds, as below.
+/// SolidCraft's configuration (which also keeps an inset's cavity regions, now the
+/// default): the shell is the closed form and passes `check_brep` at every level. Slow in
+/// debug builds, as below.
 #[test]
 #[ignore = "slow in debug builds (two 38 000-sample curve offsets)"]
 fn issue_1476_swept_bar_shells_with_solidcraft_fixes_validates() {
-    assert_eq!(check_named(&solidcraft_fixes(), None, true, true), 16);
+    assert_eq!(check_validated(&solidcraft_fixes(), None, true), 16);
 }
 
 /// About 6 s at opt-level 3 but over 4 min in a debug build (the two 38 000-sample

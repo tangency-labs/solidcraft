@@ -4,8 +4,10 @@
 //! apex); schema 4 keeps every loop closed in the surface's (u, v), so such a face gets a seam:
 //! a ruling line on a cylinder or cone, a meridian arc on a sphere, from a vertex of one loop to
 //! the other loop (split there when it has no vertex at that angle) or to the pole the face
-//! covers; on a surface of revolution, its profile turned to the vertex's angle. The loops merge into one: the first, the seam out, the second (or nothing at a pole),
-//! the seam back. A face on a B-spline surface that closes on itself around u (its first and
+//! covers; on a surface of revolution, its profile turned to a quarter line (a multiple of a
+//! quarter turn from the profile), where the revolution's form starts, the loops split there.
+//! The loops merge into one: the first, the seam out, the second (or nothing at a pole), the seam
+//! back. A face on a B-spline surface that closes on itself around u (its first and
 //! last control columns the same) gets a seam the same way, along the surface's own boundary
 //! column (u at the start of its knots), the loops split there where they have no vertex on it;
 //! the period is the width of its knots. One closed around v only gets it along its boundary row
@@ -21,7 +23,7 @@
 //! of the face ([`Builder::drop_inner_slits`]).
 
 use crate::vec::Vec3Geom as _;
-use std::f64::consts::{PI, TAU};
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use crate::kernel::{CurveEval, Starts, SurfaceEval};
 use solidcore::nurbs::math::gamma;
@@ -1056,6 +1058,9 @@ impl Builder<'_, '_> {
         let k = match ax.kind {
             Kind::Iso { start, .. } => self.seam_start(fi, li, start, ax, eval)?,
             Kind::Ruled | Kind::Sphere(_) => self.once_start(fi, li, ax, eval)?,
+            // A revolution's seam lies on a quarter line, where its form starts ([`Self::band_seam`]):
+            // the one at its profile.
+            Kind::Revolved(_) => self.seam_start(fi, li, 0.0, ax, eval)?,
             _ => k,
         };
         let ring = self.rotated(fi, li, k)?;
@@ -1197,6 +1202,24 @@ impl Builder<'_, '_> {
         // The surface's parameter `d` at an angle about the axis: offset from the frame's angle
         // by that of A's first vertex (both measured right-handed about the axis).
         let offset = angle(self, first)? - frame.angle(self.vpoint(first)?);
+        if let Kind::Revolved(_) = ax.kind {
+            // A revolution's form starts on the quarter line its seam lies in (`brep::form`: a
+            // whole turn is the four quarters from the one it starts in), and its frame cannot
+            // be turned to start at a seam elsewhere (`frames`): a seam off a quarter line leaves
+            // its second use past the form's end. Its seam is the meridian on the first quarter
+            // line no other loop reaches, both loops starting there, split where they don't.
+            let start = (0..4u8)
+                .map(|q| f64::from(q) * FRAC_PI_2)
+                .find(|u| blocked.as_ref().is_none_or(|b| b.clear(u - offset)))
+                .ok_or_else(|| unsupported("a band round a revolved surface whose other loops reach each of its quarter lines"))?;
+            let i = self.seam_start(fi, la, start, ax, eval)?;
+            let j = self.seam_start(fi, lb, start, ax, eval)?;
+            *splits += 2;
+            if *splits > MAX_SPLITS {
+                return Err(format!("more than {MAX_SPLITS} edges split for seams"));
+            }
+            return self.join_by_seam(fi, la, lb, i, j, ax, eval);
+        }
         let clear = |s: &Self, v: u32| -> R<bool> {
             let a = frame.angle(s.vpoint(v)?);
             Ok(blocked.as_ref().is_none_or(|b| b.clear(a)))
@@ -1443,7 +1466,8 @@ impl Builder<'_, '_> {
     }
 
     /// The parameter inside edge `e`'s interval where its curve reaches the value `target` of
-    /// the surface's parameter `d` (0: u, an angle about the axis; 1: v), if it does.
+    /// the surface's parameter `d` (0: u, an angle about the axis; 1: v), if it does, further
+    /// than the tolerance from both of its ends.
     fn crossing(&self, e: u32, d: usize, target: f64, period: f64, eval: &SurfaceEval) -> R<Option<f64>> {
         let edge = self.edges.get(e as usize).ok_or("edge reference")?;
         let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
@@ -1476,8 +1500,11 @@ impl Builder<'_, '_> {
                     }
                 }
                 let t = 0.5 * (a + b);
-                let eps = 1e-9 * (hi - lo);
-                return Ok((t > lo + eps && t < hi - eps).then_some(t));
+                // Inside the edge by more than the tolerance along it, measured in length: a split
+                // nearer an end would leave an edge no longer than its tolerance (the end vertex
+                // is then the one on the line, within the tolerance).
+                let clear = |end: f64| c.point(t).zip(c.point(end)).is_some_and(|(p, q)| p.dist(q) > self.tol);
+                return Ok((t > lo && t < hi && clear(lo) && clear(hi)).then_some(t));
             }
             prev = Some((t, x));
         }
@@ -1572,8 +1599,9 @@ impl Builder<'_, '_> {
     }
 
     /// The use of loop `li` of face `fi` that starts on the closed spline's boundary line at
-    /// `start` (the column at u = `start`, or the row at v = `start` for one closed in v): a vertex there
-    /// within the tolerance, else one made by splitting the loop's edge that crosses it.
+    /// `start` (the column at u = `start`, or the row at v = `start` for one closed in v), or on a
+    /// revolution's meridian at angle `start`: a vertex there within the tolerance, else one made
+    /// by splitting the loop's edge that crosses it.
     fn seam_start(&mut self, fi: usize, li: usize, start: f64, ax: &Axis, eval: &SurfaceEval) -> R<usize> {
         let Some(LoopB::Edges(es)) = self.faces.get(fi).and_then(|f| f.loops.get(li)) else { return Err("loop reference".into()) };
         let es = es.clone();
@@ -1601,7 +1629,7 @@ impl Builder<'_, '_> {
                 return Err("the split vertex is not on its loop".into());
             }
         }
-        Err(unsupported("a loop around a closed spline that never reaches its boundary line"))
+        Err(unsupported("a loop around a closed surface that never reaches the line its seam runs on"))
     }
 
     /// Split edge `e` at `t` inside its interval: it keeps [min, t], a new edge takes
