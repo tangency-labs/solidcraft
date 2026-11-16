@@ -603,6 +603,9 @@ pub(super) fn run_op(
                 st,
                 skip,
             )?;
+            // a definition split across the split point (WR-533) adds a proto edge, a
+            // proto vertex and edge definitions
+            sync_counts(r);
         }
         q::MGR_UPDATE_FACES => {
             let w = rd.idx();
