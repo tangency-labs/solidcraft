@@ -379,21 +379,51 @@ fn case_e_runs_out_into_a_hole() {
     }
 }
 
-/// Case J: `margin: 2`. The band's sides keep 2.1 from the rows: `n = floor(35.8 / 1.5) + 1 = 24`,
-/// even, rows at v = 50 +- 0.75 +- 1.5i with slot phases +-P/4 (centres 35.75 + 23j or 24.25 + 23j).
-/// `rho` = 2.1. Each row has one run-out (its centre 1.25 from the edge it runs out at; its
-/// neighbours hold no slot there) and two whole slots: 72 slots, 48 whole, 24 run-outs.
+/// Case J: `margin: 2`. `n = floor(35.8 / 1.5) + 1 = 24`, even: rows at v = 50 +- 0.75 +- 1.5i,
+/// slot phases +-P/4 (centres 35.75 + 23j or 24.25 + 23j). Every row strictly inside the band is
+/// tried (design 5.1): 26 rows, 31.25 ..= 68.75. The band's sides are closed edges with reach
+/// `r + m` = 2.1; the rows at 31.25 and 68.75 lie 1.25 from a side, so the side's near set covers
+/// the whole row (to 60 + sqrt(2.1^2 - 1.25^2) past each end) and their crossings are not clean
+/// (the caller plays clean_crossing and drops the open tags): their 3 slots each are left out.
+/// The other 24 rows hold one run-out (its centre 1.25 from the edge it runs out at; its
+/// neighbours hold no slot there) and two whole slots: 72 slots, 48 whole, 24 run-outs, 6 left
+/// out, cut 24 x (2 x 19.8 + 11.15) = 1218 (python3 hand count; design 17.1 table row J).
 #[test]
 fn case_j_margin() {
     let mut s = spec(HingeClip::RunOut, 3.0);
     s.margin = 2.0;
-    assert!(close(s.edge_reach(), 2.1));
-    let (lattice, plan) = plan_band(&s);
-    assert_eq!(lattice.rows.1 - lattice.rows.0 + 1, 24);
+    let reach = s.radius() + s.margin;
+    assert!(close(s.edge_reach(), 2.1) && close(reach, 2.1));
+    let lattice = Lattice::centred(&s, &BAND).unwrap();
+    assert_eq!(lattice.rows.1 - lattice.rows.0 + 1, 26);
+    let side_gap = |v: f64| (v - 30.0).min(70.0 - v);
+    let plan = plan_rows_zoned(
+        &s,
+        &lattice,
+        |_, v| {
+            let clean = side_gap(v) >= reach;
+            vec![RowSpan {
+                lo: 0.0,
+                hi: 60.0,
+                lo_open: clean,
+                hi_open: clean,
+            }]
+        },
+        |_, v| {
+            let d = side_gap(v);
+            if d < reach {
+                let past = (reach * reach - d * d).sqrt();
+                vec![(-past, 60.0 + past)]
+            } else {
+                Vec::new()
+            }
+        },
+    );
     assert_eq!(plan.rows, 24);
     assert_eq!(plan.slots.len(), 72);
-    let count = |k: SlotKind| plan.slots.iter().filter(|x| x.kind == k).count();
-    assert_eq!(count(SlotKind::Whole), 48);
-    assert_eq!(count(SlotKind::RunOut), 24);
-    assert_eq!(count(SlotKind::Shortened), 0);
+    assert_eq!(plan.count(SlotKind::Whole), 48);
+    assert_eq!(plan.count(SlotKind::RunOut), 24);
+    assert_eq!(plan.count(SlotKind::Shortened), 0);
+    assert_eq!(plan.left_out, 6);
+    assert!(close(plan.cut_length(), 1218.0), "{}", plan.cut_length());
 }

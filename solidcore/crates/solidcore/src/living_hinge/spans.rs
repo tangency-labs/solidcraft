@@ -213,7 +213,7 @@ mod tests {
             NearEdge::Line((0.0, 1.0), (-1.0, 0.0)),
         ];
         let big = [rect(-5.0, -5.0, 5.0, 5.0)];
-        let spans = row_spans(&[diamond.clone()], &big, 0.0);
+        let spans = row_spans(std::slice::from_ref(&diamond), &big, 0.0);
         assert_eq!(ends(&spans), vec![(-1.0, 1.0)]);
         // Touching the row at a corner only (the row through the top corner): no span.
         assert!(row_spans(&[diamond], &big, 1.0).is_empty());
@@ -238,7 +238,7 @@ mod tests {
                 sweep: PI,
             },
         ];
-        let at = |v: f64| row_spans(&[disc.clone()], &plate, v);
+        let at = |v: f64| row_spans(std::slice::from_ref(&disc), &plate, v);
         let s = at(3.0);
         assert!(near(&s, &[(-4.0, 4.0)]), "{s:?}");
         // The row through both arcs' ends: the one chord, closed at both ends.
