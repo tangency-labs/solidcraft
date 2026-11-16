@@ -832,6 +832,44 @@ fn a_records_procedural_blend_is_certified_once_on_a_kernel() {
             "memo {memo}: the two reads build different bodies"
         );
     }
+    // A hit needs every input of the certificate to match. A net with one control point moved,
+    // or the same record on a kernel of other tolerances, is certified again (whether or not it
+    // certifies), however often the record was read before.
+    let mut moved = record.clone();
+    let face = moved
+        .faces
+        .iter_mut()
+        .find(|f| matches!(f.surface, solidcore_record::brep::Surface::Blend { .. }))
+        .unwrap();
+    match face.nurbs.as_mut() {
+        Some(solidcore_record::brep::Surface::Spline { points, .. }) => points[1][1][0] += 1e-9,
+        Some(solidcore_record::brep::Surface::RationalSpline { homogeneous, .. }) => {
+            homogeneous[1][1][0] += 1e-9;
+        }
+        other => panic!("the blend's net is {other:?}"),
+    }
+    let mut k = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        memoize_curve_caches: true,
+        ..Kernel::default()
+    };
+    let certified = |k: &mut Kernel, r: &Record| {
+        let before = k.work_counters.blends_recertified();
+        let _ = solidcore_convert::brep::to_kernel(k, r, true);
+        k.work_counters.blends_recertified() - before
+    };
+    assert_eq!(certified(&mut k, &record), blends);
+    assert_eq!(certified(&mut k, &record), 0);
+    assert!(
+        certified(&mut k, &moved) >= 1,
+        "a moved net was taken as certified"
+    );
+    k.tolerances.model_size_estimate *= 2.0;
+    assert_eq!(
+        certified(&mut k, &record),
+        blends,
+        "other tolerances were taken as the same"
+    );
 }
 
 /// A law with a corner rounds its edge as the union of its balls (`docs/generic-blend.md` §3.2,

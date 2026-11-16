@@ -739,8 +739,10 @@ pub fn definition_surface(
     })
 }
 
-/// [`RecertifyMemo`]'s cap on the bytes its keys hold: past it the memo starts again empty.
-const RECERTIFY_MEMO_BYTES: usize = 64 << 20;
+/// [`RecertifyMemo`]'s cap on the bytes its keys hold, the loop area memo's 8 MiB: past it the
+/// memo starts again empty. A round's key is about 45 KB (its definition's supports and its net
+/// as text), so the cap holds about 180 of them.
+const RECERTIFY_MEMO_BYTES: usize = 8 << 20;
 
 /// The memo of the procedural blends a kernel recertified as it gave a record's faces their
 /// definitions back (not upstream): the bound [`ProceduralBlend::recertify`] proved for each,
@@ -753,7 +755,7 @@ const RECERTIFY_MEMO_BYTES: usize = 64 << 20;
 /// [`Kernel::memoize_curve_caches`] turns it off, with the curve cache memo.
 #[derive(Debug, Default)]
 pub struct RecertifyMemo {
-    bounds: std::collections::HashMap<String, f64>,
+    bounds: std::collections::HashMap<Box<str>, f64>,
     bytes: usize,
 }
 
@@ -790,7 +792,7 @@ fn recertify_remembered(
     }
     // (writing to a `String` never fails)
     let _ = write!(key, "\n{record:?}");
-    if let Some(&hit) = k.recertify_memo.borrow().bounds.get(&key) {
+    if let Some(&hit) = k.recertify_memo.borrow().bounds.get(key.as_str()) {
         return Ok(hit);
     }
     k.work_counters.add_blend_recertified();
@@ -800,8 +802,9 @@ fn recertify_remembered(
         memo.bounds.clear();
         memo.bytes = 0;
     }
+    // (a boxed key holds its length exactly, not a grown string's spare room)
     memo.bytes += key.len();
-    memo.bounds.insert(key, bound);
+    memo.bounds.insert(key.into_boxed_str(), bound);
     Ok(bound)
 }
 

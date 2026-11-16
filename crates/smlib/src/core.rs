@@ -238,7 +238,9 @@ fn put_kernel(k: Option<Kernel>) {
 /// What a call must not find from the calls before it: the same operation on the same bodies
 /// answers the same on any kernel, however much that kernel did first. (Its draws of random rays,
 /// the stations it remembers; marks, identities and what is only kept to reuse memory change no
-/// answer. Tolerances and fixes are the same on every kernel.)
+/// answer. The certificates it finished, kept by the exact content of their inputs
+/// (`recertify_memo`, the curve analyses), are the answers running them again gives, so they
+/// stay. Tolerances and fixes are the same on every kernel.)
 fn start_clean(k: &mut Kernel) {
     k.rng = Rng::new(KernelOptions::default().seed);
     *k.blend_station_memo.borrow_mut() = Default::default();
