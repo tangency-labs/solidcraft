@@ -1648,6 +1648,63 @@ fn join_onto_a_finely_faceted_import() {
     assert!(rel(volume(&mut d), prism + 10.0 * 10.0 * 15.0) < 1e-6, "{}", volume(&mut d));
 }
 
+/// #8192: `file.insert_step`'s `matrix` translation takes length expressions. The import keeps the
+/// ones that name parameters and follows them, through undo, a save and an open; numbers keep
+/// working; a bad expression, or one outside the translation column, is refused before the file is
+/// read and leaves the design as it was.
+#[test]
+fn step_insert_matrix_translation_follows_its_parameters() {
+    let p = step_box_file("insert-expr");
+    let mut d = Session::default();
+    run(&mut d, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0]}));
+    run(&mut d, "parameters.add", json!({"name": "station", "expression": "10 mm"}));
+    let r = run(&mut d, "file.insert_step", json!({"path": p.to_string_lossy(), "matrix": [1, 0, 0, "station", 0, 1, 0, "2 mm", 0, 0, 1, 0]}));
+    let occ = r["occurrence"].as_u64().unwrap();
+    // A grounded occurrence stays put (its expressions keep up), so the import is let go.
+    run(&mut d, "occurrence.ground", json!({"occurrence": occ, "grounded": false}));
+    let x = |d: &Session| d.doc.occurrences.iter().find(|o| o.id == occ).unwrap().transform[3];
+    assert_eq!(x(&d)[..3], [10.0, 2.0, 0.0], "{r}");
+    assert_eq!(r["transform"][3][0], 10.0, "{r}");
+    let o = d.doc.occurrences.iter().find(|o| o.id == occ).unwrap();
+    assert_eq!(o.expressed_moves.len(), 1);
+    assert_eq!(o.expressed_moves[0].translate, [Some("station".to_string()), None, None], "text that names no parameter is a number");
+
+    run(&mut d, "parameters.change", json!({"name": "station", "expression": "25 mm"}));
+    assert_eq!(x(&d)[..3], [25.0, 2.0, 0.0]);
+    run(&mut d, "edit.undo", json!({}));
+    assert_eq!(x(&d)[..3], [10.0, 2.0, 0.0]);
+    run(&mut d, "edit.redo", json!({}));
+    assert_eq!(x(&d)[..3], [25.0, 2.0, 0.0]);
+
+    // Saved and opened, it still follows.
+    let saved = p.with_file_name("placed.sc");
+    run(&mut d, "file.save", json!({"path": saved.to_string_lossy()}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": saved.to_string_lossy()}));
+    run(&mut opened, "parameters.change", json!({"name": "station", "expression": "40 mm"}));
+    let o = opened.doc.occurrences.iter().find(|o| o.id == occ).unwrap();
+    assert_eq!(o.transform[3][..3], [40.0, 2.0, 0.0]);
+
+    // Numbers work as they did and keep nothing.
+    let mut n = Session::default();
+    run(&mut n, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0]}));
+    let r = run(&mut n, "file.insert_step", json!({"path": p.to_string_lossy(), "matrix": [1, 0, 0, 10, 0, 1, 0, 2, 0, 0, 1, 0]}));
+    assert_eq!(r["transform"][3][0], 10.0, "{r}");
+    assert!(n.doc.occurrences.iter().all(|o| o.expressed_moves.is_empty()));
+
+    // Refused: the design is as it was, and the file is not read for a bad matrix.
+    let before = d.doc.clone();
+    for (matrix, expected) in [
+        (json!([1, 0, 0, "nope", 0, 1, 0, 0, 0, 0, 1, 0]), "matrix translation `nope`"),
+        (json!([1, 0, 0, "30 deg", 0, 1, 0, 0, 0, 0, 1, 0]), "matrix translation `30 deg`"),
+        (json!([1, 0, 0, 0, 0, "station", 0, 0, 0, 0, 1, 0]), "only its translation column"),
+    ] {
+        let e = d.execute("file.insert_step", &json!({"path": p.to_string_lossy(), "matrix": matrix})).unwrap_err().to_string();
+        assert!(e.contains(expected), "{e}");
+        assert_eq!(d.doc, before);
+    }
+}
+
 /// Shell an imported body; insert STEP into an existing design; extension case; bad files.
 #[test]
 fn step_insert_shell_and_errors() {

@@ -493,6 +493,15 @@ impl Transform {
             v.x * tx.z + v.y * ty.z + v.z * tz.z,
         )
     }
+
+    /// Not upstream: how far the linear part of this map (its rows 0 to 2, no translation) takes
+    /// the point `pivot` from where it was, as the move it adds to the map's turn about `pivot`:
+    /// `pivot - transform_vector(pivot)`. A turn about the origin followed by this move is the
+    /// same turn about `pivot`.
+    #[must_use]
+    pub fn pivot_displacement(&self, pivot: Vec3) -> Vec3 {
+        pivot - self.transform_vector(pivot)
+    }
 }
 
 /// The operation name of the refusals of the maps built from their numbers.
@@ -919,6 +928,20 @@ mod tests {
         assert_eq!(both.transform_vector(p), Vec3::new(0.0, 1.0, 0.0));
         assert_eq!(Transform::IDENTITY.concat(&both), both);
         assert_eq!(Transform::default(), Transform::IDENTITY);
+    }
+
+    #[test]
+    fn pivot_displacement_makes_a_turn_about_the_origin_a_turn_about_the_pivot() {
+        let rot_z = Transform::from_axes(Vec3::Y, -Vec3::X, Vec3::Z, Vec3::ZERO);
+        let pivot = Vec3::new(0.0, 10.0, 0.0);
+        let d = rot_z.pivot_displacement(pivot);
+        assert_eq!(d, Vec3::new(10.0, 10.0, 0.0));
+        // The pivot stays where it is under the turn followed by the displacement.
+        assert_eq!(rot_z.transform_vector(pivot) + d, pivot);
+        // No turn, no displacement; a translation in the map is not read as a turn.
+        assert_eq!(Transform::IDENTITY.pivot_displacement(pivot), Vec3::ZERO);
+        let tr = Transform::translation(Vec3::new(1.0, 2.0, 3.0));
+        assert_eq!(tr.pivot_displacement(pivot), Vec3::ZERO);
     }
 
     #[test]
