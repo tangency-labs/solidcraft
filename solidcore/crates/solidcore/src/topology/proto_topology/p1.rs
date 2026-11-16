@@ -868,12 +868,14 @@ mod tests {
             .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, v2)
             .unwrap());
         assert!(m.proto_vertices().is_empty());
-        // off the curve: no solution, and upstream's SM_SUCCESS reads as TRUE
+        // off the curve: (1, 5, 0) is 5 from the line y = z = 0, far past the 1e-5
+        // tolerance, so the point solve misses and the answer is `false` (WR-73: upstream's
+        // SM_SUCCESS read as TRUE); the vertex stays listed either way
         let v3 = m
             .new_proto_vertex(Point3::new(1.0, 5.0, 0.0), 1e-5)
             .unwrap();
         m.add_proto_vertex(v3);
-        assert!(m
+        assert!(!m
             .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, v3)
             .unwrap());
         assert_eq!(m.proto_vertices(), &[v3]);
