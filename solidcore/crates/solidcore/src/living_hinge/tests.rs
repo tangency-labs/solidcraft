@@ -378,3 +378,22 @@ fn case_e_runs_out_into_a_hole() {
         assert!(middle(row).is_empty(), "{:?}", middle(row));
     }
 }
+
+/// Case J: `margin: 2`. The band's sides keep 2.1 from the rows: `n = floor(35.8 / 1.5) + 1 = 24`,
+/// even, rows at v = 50 +- 0.75 +- 1.5i with slot phases +-P/4 (centres 35.75 + 23j or 24.25 + 23j).
+/// `rho` = 2.1. Each row has one run-out (its centre 1.25 from the edge it runs out at; its
+/// neighbours hold no slot there) and two whole slots: 72 slots, 48 whole, 24 run-outs.
+#[test]
+fn case_j_margin() {
+    let mut s = spec(HingeClip::RunOut, 3.0);
+    s.margin = 2.0;
+    assert!(close(s.edge_reach(), 2.1));
+    let (lattice, plan) = plan_band(&s);
+    assert_eq!(lattice.rows.1 - lattice.rows.0 + 1, 24);
+    assert_eq!(plan.rows, 24);
+    assert_eq!(plan.slots.len(), 72);
+    let count = |k: SlotKind| plan.slots.iter().filter(|x| x.kind == k).count();
+    assert_eq!(count(SlotKind::Whole), 48);
+    assert_eq!(count(SlotKind::RunOut), 24);
+    assert_eq!(count(SlotKind::Shortened), 0);
+}
