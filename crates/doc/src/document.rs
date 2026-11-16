@@ -1301,6 +1301,11 @@ pub enum FeatureKind {
         #[serde(default = "zero_expr")]
         #[walk(length = "Margin")]
         margin: Expr,
+        /// A margin for each side instead of `margin`: -X, +X, -Y, +Y, -Z, +Z. A negative one sets
+        /// that side into the bodies.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = ["-X margin", "+X margin", "-Y margin", "+Y margin", "-Z margin", "+Z margin"])]
+        margins: Option<[Expr; 6]>,
     },
     /// A tube along a chain of sketch curves (solid, or hollow with a wall thickness).
     Pipe {

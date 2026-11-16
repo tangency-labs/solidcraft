@@ -2896,6 +2896,11 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             frame = doc.feature(sp.sketch.0).map(|s| doc.component_transform(s.component));
             reads.drawn_targets(st, f);
         }
+        // And a rib, which is built against the bodies where its sketch is drawn (#17655).
+        FeatureKind::Rib { sketch, .. } => {
+            frame = doc.feature(sketch.0).map(|s| doc.component_transform(s.component));
+            reads.drawn_targets(st, f);
+        }
         FeatureKind::Sketch { plane, sketch } => {
             match crate::face_anchor::plane_face_anchor(plane) {
                 // Read in the frame of the placement it was drawn in, its face through the
@@ -10763,8 +10768,10 @@ fn eval_feature(
         }
         FeatureKind::FrameEndCap { .. } => crate::end_cap::evaluate(doc, vals, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
-        FeatureKind::BoundingSolid { bodies, margin } => {
+        FeatureKind::BoundingSolid { bodies, margin, margins } => {
             let m = val(vals, margin, Kind::Length)?;
+            let side = |i: usize| margins.as_ref().and_then(|ms| ms.get(i)).map_or(Ok(m), |e| val(vals, e, Kind::Length));
+            let (lo, hi) = (Vec3::new(side(0)?, side(2)?, side(4)?), Vec3::new(side(1)?, side(3)?, side(5)?));
             let mut bb = solidcraft_geom::Aabb3::EMPTY;
             for b in st.bodies.iter().filter(|b| bodies.is_empty() || bodies.iter().any(|t| *t == b.name)) {
                 bb = bb.union(&b.mesh().bounds());
@@ -10772,8 +10779,11 @@ fn eval_feature(
             if bb.is_empty() {
                 return Err(DocError::Invalid("no bodies to bound".into()));
             }
-            let pad = Vec3::new(m, m, m);
-            let b = crate::lineage::numbered_tool(kernel::box_solid(bb.min - pad, bb.max + pad)?);
+            let (min, max) = (bb.min - lo, bb.max + hi);
+            if !(min.x < max.x && min.y < max.y && min.z < max.z) {
+                return Err(DocError::Invalid("a side's margin reaches past the opposite side of the bodies".into()));
+            }
+            let b = crate::lineage::numbered_tool(kernel::box_solid(min, max)?);
             let name = unique_body_name(st, f.body_names.first().map(String::as_str).unwrap_or("Bounding"));
             st.bodies.push(ModelBody::traced_new(name, b, f.id));
             Ok(())
@@ -11198,11 +11208,12 @@ fn drawn_tools_change_bodies(kind: &FeatureKind) -> bool {
 
 /// The component whose frame a feature's drawn tools are made in: its own for a feature with
 /// drawn tools (see [`drawn_tools_change_bodies`]), and its sketch's for a hole at sketch points,
-/// whose points are kept in that sketch's frame (#17623). `None` for every other feature: a hole
+/// whose points are kept in that sketch's frame (#17623), and for a rib (#17655). `None` for every other feature: a hole
 /// at a picked position is kept in the frame of the body it was picked on.
 fn tools_component(doc: &Document, f: &Feature) -> Option<u64> {
     match &f.kind {
         FeatureKind::Hole { points: Some(sp), .. } => doc.feature(sp.sketch.0).map(|s| s.component),
+        FeatureKind::Rib { sketch, .. } => doc.feature(sketch.0).map(|s| s.component),
         kind if drawn_tools_change_bodies(kind) => Some(f.component),
         _ => None,
     }
