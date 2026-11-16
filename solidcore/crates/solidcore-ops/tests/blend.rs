@@ -1946,14 +1946,18 @@ fn ledge_rolled_change(r: f64) -> f64 {
 /// Roll-over: the concave round's End at the cliff spans the bore's round bottom and its flat
 /// wall across their tangent seam, its rib in two pieces through the seam's line. The result
 /// is valid at Level 2, one closed manifold solid facing out, and its volume is the operand's
-/// closed form plus [`ledge_rolled_change`], which the kernel's certified enclosure holds.
+/// closed form plus [`ledge_rolled_change`] within 1e-11 relative (the End cut on the
+/// cylinder continued instead of the wall would move it 7.2e-6, 1.6e-10 relative), which the
+/// kernel's certified enclosure holds; the cap's two faces meet along the seam's line from W
+/// to S, at its closed-form point, where the rib's two pieces meet.
 ///
 /// The enclosures are asked 1e-3 wide, not the 1e-5 of the stair twin: two of the operand's
 /// own edges, far from the corner (the radius-18 cylinder's at y = -16.36, z = 6, x from -7.5
 /// to 7.5, and the radius-12 bore's at y = 27, z = 25.06, x from -9 to 9), leave gaps between
 /// their faces whose strips settle the operand's enclosure at 7.4e-4 before any blend
-/// (measured; the blend's two rib pieces add 8e-7). 1e-3 still decides the Roll-over: the
-/// torus's material alone adds 0.032.
+/// (measured; the blend's two rib pieces add 8e-7). 1e-3 still decides the Roll-over (the
+/// torus's material alone adds 0.032); the split at the seam is decided by the volume to
+/// 1e-11 and the seam edge, not by the enclosure.
 #[test]
 fn the_ledge_corner_rolls_over_across_the_bores_tangent_seam() {
     rig_fixes();
@@ -1978,8 +1982,46 @@ fn the_ledge_corner_rolls_over_across_the_bores_tangent_seam() {
     b.check_solid().unwrap();
     let want = v0 + ledge_rolled_change(0.5);
     let v = b.volume(1e-12).unwrap();
-    assert!(rel(v, want) < 1e-9, "{v} {want}");
+    assert!(rel(v, want) < 1e-11, "{v} {want}");
     enclosure_holds(&b, want, 1e-3);
+    // the cap's two faces meet along the seam's line from W to S, where the rib's two pieces
+    // meet: S on that line (x = 12, z = 33) at the torus's height h = sqrt((rho - r)(3r - rho))
+    // over its centre plane y = 30 - r, rho = sqrt(ua^2 + r^2) W's distance from A1
+    let r: f64 = 0.5;
+    let ua = ((12.0 + r) * (12.0 + r) - r * r).sqrt() - 12.0;
+    let rho = (ua * ua + r * r).sqrt();
+    let h = ((rho - r) * (3.0 * r - rho)).sqrt();
+    let (w, s) = ([12.0, 30.0, 33.0], [12.0, 30.0 - r + h, 33.0]);
+    let (_, brep) = kernel_copy(&b);
+    let near = |p: Vec3, q: [f64; 3]| (p - Vec3::new(q[0], q[1], q[2])).length() <= 1e-9;
+    let ends = |e: EdgeId| {
+        let v0 = edge::start_vertex(&brep, e).unwrap().unwrap();
+        let v1 = edge::end_vertex(&brep, e).unwrap().unwrap();
+        (
+            brep.vertex(v0).unwrap().point,
+            brep.vertex(v1).unwrap().point,
+        )
+    };
+    let seam: Vec<EdgeId> = brep
+        .edges()
+        .ids()
+        .filter(|&e| {
+            let (p, q) = ends(e);
+            (near(p, w) && near(q, s)) || (near(p, s) && near(q, w))
+        })
+        .collect();
+    assert_eq!(seam.len(), 1, "the cap's seam edge from W to S");
+    let faces = edge::faces(&brep, seam[0], None).unwrap();
+    assert!(faces.len() == 2 && faces[0] != faces[1], "{faces:?}");
+    let at_s = brep
+        .edges()
+        .ids()
+        .filter(|&e| {
+            let (p, q) = ends(e);
+            near(p, s) || near(q, s)
+        })
+        .count();
+    assert_eq!(at_s, 3, "S: the seam edge and the rib's two pieces");
 }
 
 /// The ledge's planar twin (#10876): the slab [0, 10] x [-10, 10] x [-10, 0] with the riser

@@ -2328,8 +2328,31 @@ impl FilletCorner {
                 return Err(SolidError::invalid_input(OP_END_PATCH, NULL_DEREF));
             };
             let (end_surface, wall_surface) = (end_surface.clone(), wall_surface.clone());
-            return env
+            let made = env
                 .with_patch_env(|env| self.make_seam_cap_faces(env, &end_surface, &wall_surface));
+            return match made {
+                Err(e) if e.is_unported_or_cancelled() => Err(e),
+                Err(e @ SolidError::InvalidInput { .. }) => Err(e),
+                Err(_) => {
+                    // as a failed MakeFaceBrep() below: noted as a vertex-problem corner error
+                    env.exec.error.note_corner_error(
+                        FilletErrorType::VertexProblem,
+                        self.corner_type(),
+                        FilStatus::Failure,
+                        Some(self.kind.name()),
+                        self.filleted_vertex()
+                            .map(ExecutiveErrorObject::TargetVertex),
+                        [None, None],
+                        [None, None],
+                        Some("Fillet Corner Error: Corner End Face Creation Error"),
+                    );
+                    Err(SolidError::blend_failed(
+                        OP_END_PATCH,
+                        "the corner's end face could not be made",
+                    ))
+                }
+                Ok(()) => Ok(()),
+            };
         }
         // for every filletCorner->FilletEdge
         for curr_edge in self.edges.clone() {
@@ -2824,6 +2847,9 @@ impl FilletCorner {
         } else {
             (second, first)
         };
+        // both parts are prepared before either face is made, so a part that cannot be
+        // oriented leaves no half cap in the fillet brep
+        let mut parts = Vec::new();
         for (curves, surface) in [(end_part, end_surface), (wall_part, wall_surface)] {
             let mut net = surface.copy_and_add_analytics(env.k)?;
             keep_end_definition_of(env.k, &curves, surface, &mut net)?;
@@ -2852,6 +2878,9 @@ impl FilletCorner {
                 uv_curves: None,
                 loop_points: Vec::new(),
             };
+            parts.push((input, net, loop_orient));
+        }
+        for (input, net, loop_orient) in parts {
             let face = make_face(env, input, net.clone(), loop_orient, OP)?;
             if face.is_none() {
                 return Err(fail("a part of the seam cap is not made"));

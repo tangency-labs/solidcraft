@@ -1053,28 +1053,26 @@ impl FilletCorner {
             ) {
                 new_extend_face = Some(face);
             }
-            // Not upstream (#10876): across the cliff's tangent seam the wall is continued as
-            // itself too, so that it holds the rib's piece and the cap's past its own boundary
-            if let Some(se) = seam {
-                let surface = need(
-                    target.face(se.wall)?.surface.as_ref(),
-                    "the wall without surface",
-                )?;
-                let new_surface = surface
-                    .extended_sides(
-                        k,
-                        &crate::surface::side::BoxSide::ALL,
-                        crate::surface::extend::Continuity::Natural,
-                        ext_dist,
-                    )?
-                    .surface
-                    .copy_and_add_analytics(k)?;
-                Self::add_extended_original_surface_with_map(
-                    extended_surfaces,
-                    se.wall,
-                    new_surface,
-                );
-            }
+        }
+
+        // Not upstream (#10876): across the cliff's tangent seam the wall is continued as
+        // itself, whether or not the end face is, so that it holds the rib's piece and the
+        // cap's past its own boundary (S is on its continuation, r2 - h past W)
+        if let Some(se) = seam {
+            let surface = need(
+                target.face(se.wall)?.surface.as_ref(),
+                "the wall without surface",
+            )?;
+            let new_surface = surface
+                .extended_sides(
+                    k,
+                    &crate::surface::side::BoxSide::ALL,
+                    crate::surface::extend::Continuity::Natural,
+                    ext_dist,
+                )?
+                .surface
+                .copy_and_add_analytics(k)?;
+            Self::add_extended_original_surface_with_map(extended_surfaces, se.wall, new_surface);
         }
 
         // When adding an endSurface to fill the 'hole',
@@ -1224,7 +1222,9 @@ impl FilletCorner {
             // check for gaps
             // Not upstream (#10876): the End across the cliff's tangent seam keeps S, and
             // its cap is split there
-            if let (Some(se), Some(fs), Some(end_face)) = (seam, split_vertex, end_face) {
+            if let Some(se) = seam {
+                let fs = need(split_vertex, "the seam's split vertex")?;
+                let end_face = need(end_face, "the seam cap's end face")?;
                 self.vertices.push(fs);
                 let tangent_at_end = tangent_side[1];
                 self.seam_cap = Some(crate::blend::fillet_corner::p3::SeamCap {

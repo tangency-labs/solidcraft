@@ -157,7 +157,8 @@ pub struct SeamEnd {
 /// A1, the torus's centre on A1 at `r2` from E on B1's side, major radius `R = r1 + r2`,
 /// minor `r2`. F must be a cylinder along A1 and the wall a plane parallel to A1, meeting F
 /// tangentially at W along the seam (their profiles square to A1 meet G1 at W's profile
-/// point). The torus's rail on E crosses E's rim, not F's edge, exactly where W's distance
+/// point), the seam running on from W away from B1, so that S, on B1's side of W, lies on
+/// the wall's continuation over the seam's line. The torus's rail on E crosses E's rim, not F's edge, exactly where W's distance
 /// `rho` from A1 is less than `R` (the seam inside the rail's circle on E, as
 /// [`geometry::Profile::pieces`] takes it); then S is on the seam's line at the torus's
 /// height `h = sqrt((rho - r1) (R + r2 - rho))` over its centre plane, on E's side. The
@@ -186,8 +187,13 @@ pub fn seam_end(
     }
     // B1: the face across the tangent seam from F, a cylinder
     let seam_faces = edge::faces(b, tangent_seam, None)?;
-    let Some(&b1) = seam_faces.iter().find(|&&f| f != end_face) else {
+    let [f, g] = seam_faces.as_slice() else {
         return Ok(None);
+    };
+    let b1 = match (*f == end_face, *g == end_face) {
+        (true, false) => *g,
+        (false, true) => *f,
+        _ => return Ok(None),
     };
     let cylinder = |f: FaceId| -> Result<Option<(Point3, Vec3, f64)>> {
         Ok(match b.face(f)?.surface.as_ref().map(Surface::kind) {
@@ -250,17 +256,22 @@ pub fn seam_end(
             None => false,
         };
         if parallel && tangential_at(k, b, x, w, tol_deg)? {
-            wall = Some(other);
+            wall = Some((other, x));
             break;
         }
     }
-    let Some(wall) = wall else {
+    let Some((wall, seam)) = wall else {
         return Ok(None);
     };
     // the torus: towards E is against the tangent seam's direction leaving V (B1 runs away
     // from E along A1)
     let away = leaving(k, b, tangent_seam, corner_vertex, OP_SEAM)?;
     let towards_e = if away.dot(axis) > 0.0 { -axis } else { axis };
+    // the seam runs on from W past E, away from B1: S, on B1's side of W, is then on the
+    // wall's continuation over the seam's line (the extension the End's rib lies on)
+    if leaving(k, b, seam, w, OP_SEAM)?.dot(towards_e) <= 0.0 {
+        return Ok(None);
+    }
     let at = b.vertex(w)?.point;
     let on_e = origin + axis * (at - origin).dot(axis);
     let centre = on_e - towards_e * r2;
@@ -268,17 +279,18 @@ pub fn seam_end(
     let Ok(frame) = geometry::TorusFrame::new(centre, towards_e, at - centre, radii) else {
         return Ok(None);
     };
-    let h_w = frame.height(at);
+    // W is at height r2 over the centre plane by construction (the centre is W's foot on A1
+    // moved r2 off E, which holds W)
     let q = frame.local(at);
     let rho = (q[0] * q[0] + q[1] * q[1]).sqrt();
     let big_r = r1 + r2;
-    let inside = (h_w - r2).abs() <= tol && rho > r1 + tol && rho < big_r - tol;
+    let inside = rho > r1 + tol && rho < big_r - tol;
     if !inside {
         return Ok(None);
     }
     let h = ((rho - r1) * (big_r + r2 - rho)).sqrt();
     // on the seam's line through W (parallel to A1), at the torus's height
-    let split = at - towards_e * (h_w - h);
+    let split = at - towards_e * (r2 - h);
     let finite = split.x.is_finite() && split.y.is_finite() && split.z.is_finite();
     if !finite {
         return Ok(None);
