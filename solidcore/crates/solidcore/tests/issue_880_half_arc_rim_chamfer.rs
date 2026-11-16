@@ -15,8 +15,9 @@
 //!
 //! One half edge alone (the issue's pick: offsets from setbacks 1 on the cut face and 2
 //! down the wall, as the fork's `sides_offsets` derives them) builds a closed solid with a
-//! clean check (4 faces to 7), since the generic blend's sections and checks are the
-//! default (WR-685 addendum 2026-11-06); main's default kernel refused it with 1001. The
+//! clean check (4 faces to 8: the chamfer is two faces, split at its crease), since the
+//! generic blend's sections and checks are the default (WR-685 addendum 2026-11-06);
+//! main's default kernel refused it with 1001. The
 //! whole chain, both halves in one session, builds a closed solid (4 faces to 6).
 #![allow(
     clippy::unwrap_used,
@@ -162,7 +163,8 @@ fn issue_880_whole_rim_chamfers() {
 }
 
 /// The issue's own pick: one rim half chamfered by the offsets of setbacks 1 on the cut face
-/// and 2 down the wall builds a closed solid (4 faces to 7) that SMLib's check passes.
+/// and 2 down the wall builds a closed solid (4 faces to 8, the chamfer split at its crease
+/// where its wall foot crosses the wall's G1 boundary) that SMLib's check passes.
 #[test]
 fn issue_880_one_half_chamfers() {
     let mut k = Kernel::default();
@@ -171,7 +173,7 @@ fn issue_880_one_half_chamfers() {
     let e = rims(&k, &b)[0];
     let u = edge::blend_edgeuse(&k, &mut b, e).unwrap().unwrap();
     chamfer(&mut k, &mut b, &[(e, u)], (1.0, 2.0)).unwrap();
-    assert_eq!(finish(&mut k, &mut b, before), (4, 7, true));
+    assert_eq!(finish(&mut k, &mut b, before), (4, 8, true));
     let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
         .unwrap()
         .lines();
@@ -192,7 +194,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 
 /// The first rim half chamfered by the equal offsets the setbacks 1 and 1 give
 /// (1.4437..., the goldens' `issue-880-half-arc-rim-0-setbacks-1-1`) builds a closed solid
-/// (4 faces to 7) that the check passes, as the setbacks 1 and 2 do. It was refused with
+/// (4 faces to 8) that the check passes, as the setbacks 1 and 2 do. It was refused with
 /// 1001: at the half's End on the seam line through (6.78, 4.09, 10), the rail on the wall
 /// crossed the End's plane off the wall by more than its zone and less than the rail's
 /// tolerance, so the rail end read as off its face (#15906). The End is capped there; at
@@ -232,7 +234,7 @@ fn issue_880_one_half_chamfers_at_equal_setbacks() {
         .unwrap();
     let u = edge::blend_edgeuse(&k, &mut b, e).unwrap().unwrap();
     chamfer(&mut k, &mut b, &[(e, u)], (d, d)).unwrap();
-    assert_eq!(finish(&mut k, &mut b, originals.len()), (4, 7, true));
+    assert_eq!(finish(&mut k, &mut b, originals.len()), (4, 8, true));
     let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
         .unwrap()
         .lines();
