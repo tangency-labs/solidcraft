@@ -23,7 +23,7 @@ fn above(p: (f64, f64), v: f64) -> bool {
 /// The crossings of one edge with the row `v`, by the half-open rule, pushed to `out`.
 fn edge_crossings(edge: &NearEdge, v: f64, out: &mut Vec<f64>) {
     match *edge {
-        NearEdge::Line(a, b) => {
+        NearEdge::Line(a, b) | NearEdge::Chord(a, b) => {
             if above(a, v) != above(b, v) {
                 let t = (v - a.1) / (b.1 - a.1);
                 out.push(a.0 + t * (b.0 - a.0));
@@ -94,7 +94,7 @@ pub fn row_crossings(loops: &[Vec<NearEdge>], v: f64) -> Vec<f64> {
 /// of travel.
 fn tangent(edge: &NearEdge, at_end: bool) -> (f64, f64) {
     match *edge {
-        NearEdge::Line(a, b) => {
+        NearEdge::Line(a, b) | NearEdge::Chord(a, b) => {
             let (dx, dy) = (b.0 - a.0, b.1 - a.1);
             let n = dx.hypot(dy);
             (dx / n, dy / n)

@@ -306,15 +306,13 @@ fn case_d_closed_keep_out_splits_and_shortens() {
 /// hole from both sides: [8.6, 21.4] and [38.6, 51.4]. Rows v 45.5 and 54.5, 1.0 outside, are
 /// shortened by the hole's corner discs to 20 - sqrt(1.4^2 - 1) and 40 + sqrt(1.4^2 - 1). The
 /// middle slots of rows 47, 50 and 53 lie in the hole: 95 - 3 = 92.
-#[test]
-fn case_e_runs_out_into_a_hole() {
-    let s = spec(HingeClip::RunOut, 3.0);
-    let lattice = Lattice::centred(&s, &BAND).unwrap();
+fn case_e_by_hand(s: &LivingHingeSpec) -> LivingHingePlan {
+    let lattice = Lattice::centred(s, &BAND).unwrap();
     let rho = s.edge_reach();
     let in_hole = |v: f64| 46.5 < v && v < 53.5;
     let side_gap = |v: f64| (v - 46.5).abs().min((v - 53.5).abs());
-    let plan = plan_rows_zoned(
-        &s,
+    plan_rows_zoned(
+        s,
         &lattice,
         |_, v| {
             if in_hole(v) {
@@ -362,7 +360,13 @@ fn case_e_runs_out_into_a_hole() {
                 Vec::new()
             }
         },
-    );
+    )
+}
+
+#[test]
+fn case_e_runs_out_into_a_hole() {
+    let s = spec(HingeClip::RunOut, 3.0);
+    let plan = case_e_by_hand(&s);
     assert_eq!(plan.slots.len(), 92);
     let middle = |row: i64| -> Vec<(f64, f64, SlotKind)> {
         row_ends(&plan, row)
@@ -404,17 +408,19 @@ fn case_e_runs_out_into_a_hole() {
 /// The other 24 rows hold one run-out (its centre 1.25 from the edge it runs out at; its
 /// neighbours hold no slot there) and two whole slots: 72 slots, 48 whole, 24 run-outs, 6 left
 /// out, cut 24 x (2 x 19.8 + 11.15) = 1218 (python3 hand count; design 17.1 table row J).
-#[test]
-fn case_j_margin() {
+fn case_j_spec() -> LivingHingeSpec {
     let mut s = spec(HingeClip::RunOut, 3.0);
     s.margin = 2.0;
+    s
+}
+
+fn case_j_by_hand(s: &LivingHingeSpec) -> LivingHingePlan {
     let reach = s.radius() + s.margin;
-    assert!(close(s.edge_reach(), 2.1) && close(reach, 2.1));
-    let lattice = Lattice::centred(&s, &BAND).unwrap();
+    let lattice = Lattice::centred(s, &BAND).unwrap();
     assert_eq!(lattice.rows.1 - lattice.rows.0 + 1, 26);
     let side_gap = |v: f64| (v - 30.0).min(70.0 - v);
-    let plan = plan_rows_zoned(
-        &s,
+    plan_rows_zoned(
+        s,
         &lattice,
         |_, v| {
             let clean = side_gap(v) >= reach;
@@ -436,7 +442,14 @@ fn case_j_margin() {
                 Vec::new()
             }
         },
-    );
+    )
+}
+
+#[test]
+fn case_j_margin() {
+    let s = case_j_spec();
+    assert!(close(s.edge_reach(), 2.1) && close(s.radius() + s.margin, 2.1));
+    let plan = case_j_by_hand(&s);
     assert_eq!(plan.rows, 24);
     assert_eq!(plan.slots.len(), 72);
     assert_eq!(plan.count(SlotKind::Whole), 48);
@@ -465,7 +478,7 @@ fn case_a_through_the_entry_matches_the_hand_numbers() {
         NearEdge::Line((60.0, 70.0), (0.0, 70.0)),
     ];
     let s = spec(HingeClip::RunOut, 3.0);
-    let got = plan(&field, &plate, &closed, &s, None).unwrap();
+    let got = plan(&field, &plate, Some(&closed), &s, None).unwrap();
     let (_, want) = plan_band(&s);
     assert_eq!(got.rows, 27);
     assert_eq!(got.slots.len(), 95);
@@ -489,12 +502,12 @@ fn the_entry_refuses_an_empty_area_and_an_empty_plate() {
     let s = spec(HingeClip::RunOut, 3.0);
     let plate = [frame_rect(0.0, 0.0, 60.0, 100.0)];
     assert!(matches!(
-        plan(&[], &plate, &[], &s, None),
+        plan(&[], &plate, None, &s, None),
         Err(LivingHingeError::Field(_))
     ));
     let field = [frame_rect(0.0, 30.0, 60.0, 70.0)];
     assert!(matches!(
-        plan(&field, &[], &[], &s, None),
+        plan(&field, &[], None, &s, None),
         Err(LivingHingeError::Plate(_))
     ));
 }
@@ -647,15 +660,14 @@ fn a_loop_becomes_lines_arcs_and_chords() {
             },
         ],
     };
-    let (edges, chorded) = near_loop(&lp).unwrap();
-    assert!(chorded);
+    let edges = near_loop(&lp).unwrap();
     let (last, chords) = edges.split_last().unwrap();
     assert!(chords.len() >= 2);
     assert!(
-        matches!(chords.first(), Some(NearEdge::Line((x, y), _)) if close(*x, 0.0) && close(*y, 0.0))
+        matches!(chords.first(), Some(NearEdge::Chord((x, y), _)) if close(*x, 0.0) && close(*y, 0.0))
     );
     assert!(
-        matches!(chords.last(), Some(NearEdge::Line(_, (x, y))) if close(*x, 3.0) && close(*y, 0.0))
+        matches!(chords.last(), Some(NearEdge::Chord(_, (x, y))) if close(*x, 3.0) && close(*y, 0.0))
     );
     assert!(matches!(last, NearEdge::Arc { radius, .. } if close(*radius, 1.5)));
     let line = Loop2 {
@@ -664,8 +676,7 @@ fn a_loop_becomes_lines_arcs_and_chords() {
             b: Vec2::new(1.0, 2.0),
         }],
     };
-    let (edges, chorded) = near_loop(&line).unwrap();
-    assert!(!chorded);
+    let edges = near_loop(&line).unwrap();
     assert_eq!(edges, vec![NearEdge::Line((0.0, 0.0), (1.0, 2.0))]);
 }
 
@@ -694,4 +705,97 @@ fn the_area_edges_inside_the_plate_are_closed() {
         closed_edges(&[vec![disc(4.0)]], &[vec![disc(5.0)]]).len(),
         1
     );
+}
+
+/// Two plans agree slot by slot.
+fn assert_same(got: &LivingHingePlan, want: &LivingHingePlan) {
+    assert_eq!((got.rows, got.left_out), (want.rows, want.left_out));
+    assert_eq!(got.slots.len(), want.slots.len());
+    for (g, w) in got.slots.iter().zip(&want.slots) {
+        assert!(
+            g.row == w.row && close(g.a0, w.a0) && close(g.a1, w.a1) && g.kind == w.kind,
+            "{g:?} against {w:?}"
+        );
+    }
+}
+
+/// Case E through the entry: the hole u 20..40 by v 46.5..53.5 is a loop of the plate; the
+/// band's sides come from `closed_edges`. Spans, clean ends and zones match the hand-played test.
+#[test]
+fn case_e_through_the_entry_matches_the_hand_test() {
+    let s = spec(HingeClip::RunOut, 3.0);
+    let field = [frame_rect(0.0, 30.0, 60.0, 70.0)];
+    let plate = [
+        frame_rect(0.0, 0.0, 60.0, 100.0),
+        frame_rect(20.0, 46.5, 40.0, 53.5),
+    ];
+    let got = plan(&field, &plate, None, &s, None).unwrap();
+    assert_eq!(got.slots.len(), 92);
+    assert_same(&got, &case_e_by_hand(&s));
+}
+
+/// Case J through the entry: the sides (closed, reach 2.1) leave the outer rows no clean crossing.
+#[test]
+fn case_j_through_the_entry_matches_the_hand_test() {
+    let s = case_j_spec();
+    let field = [frame_rect(0.0, 30.0, 60.0, 70.0)];
+    let plate = [frame_rect(0.0, 0.0, 60.0, 100.0)];
+    let got = plan(&field, &plate, None, &s, None).unwrap();
+    assert_eq!((got.slots.len(), got.left_out), (72, 6));
+    assert_same(&got, &case_j_by_hand(&s));
+}
+
+#[test]
+fn a_chord_reaches_further_by_its_tolerance() {
+    let line = NearEdge::Line((0.0, 0.0), (10.0, 0.0));
+    let chord = NearEdge::Chord((0.0, 0.0), (10.0, 0.0));
+    let (l, c) = (near_set(&line, 1.0, 2.0), near_set(&chord, 1.0, 2.0));
+    let reach = |q: f64| (q * q - 1.0).sqrt();
+    assert!(
+        matches!(l.as_slice(), [(a, b)] if close(*a, -reach(2.0)) && close(*b, 10.0 + reach(2.0)))
+    );
+    assert!(
+        matches!(c.as_slice(), [(a, b)] if close(*a, -reach(2.0 + CHORD)) && close(*b, 10.0 + reach(2.0 + CHORD)))
+    );
+}
+
+#[test]
+fn line_ends_are_snapped_onto_an_arcs_ends() {
+    use crate::math::Vec2;
+    use crate::prism::profile::{Loop2, Seg2};
+    // A half disc of radius 2 whose closing line misses the arc's ends by a rounding.
+    let e = 1e-8;
+    let arc = Seg2::Arc {
+        center: Vec2::new(0.0, 0.0),
+        radius: 2.0,
+        start: 0.0,
+        sweep: std::f64::consts::PI,
+    };
+    let lp = Loop2 {
+        segs: vec![
+            arc,
+            Seg2::Line {
+                a: Vec2::new(-2.0 + e, e),
+                b: Vec2::new(2.0 - e, -e),
+            },
+        ],
+    };
+    let edges = near_loop(&lp).unwrap();
+    let end = (
+        2.0 * std::f64::consts::PI.cos(),
+        2.0 * std::f64::consts::PI.sin(),
+    );
+    assert_eq!(edges.get(1), Some(&NearEdge::Line(end, (2.0, 0.0))));
+    // A line further than ON_EDGE stays where it is.
+    let far = Loop2 {
+        segs: vec![
+            arc,
+            Seg2::Line {
+                a: Vec2::new(-2.0, 0.5),
+                b: Vec2::new(2.0, 0.0),
+            },
+        ],
+    };
+    let edges = near_loop(&far).unwrap();
+    assert_eq!(edges.get(1), Some(&NearEdge::Line((-2.0, 0.5), (2.0, 0.0))));
 }

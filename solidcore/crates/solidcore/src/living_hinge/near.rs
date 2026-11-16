@@ -2,18 +2,21 @@
 //!
 //! For an edge `e` and a reach `q`, its near set on the row line `v = v_k` is the open set
 //! `{u : dist((u, v_k), e) < q}`, worked out in closed form for lines and arcs. A conic or a Bézier
-//! comes here as its chords, each a line with reach `q + CHORD` (the caller widens the reach).
+//! comes here as its chords ([`NearEdge::Chord`]), each a line whose reach is widened by `CHORD`.
 //! Sets are returned as sorted, disjoint open intervals `(lo, hi)`.
 
 use std::f64::consts::TAU;
 
-use super::{GRAZE, MIN_CROSSING};
+use super::{CHORD, GRAZE, MIN_CROSSING};
 
 /// An edge in the hinge frame, `(u, v)` coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum NearEdge {
     /// The segment from the first point to the second.
     Line((f64, f64), (f64, f64)),
+    /// A chord standing for a piece of a conic or a Bézier, within [`CHORD`] of it: a line whose
+    /// near sets reach [`CHORD`] further.
+    Chord((f64, f64), (f64, f64)),
     /// An arc of the circle `center`, `radius`, from the angle `start` sweeping `sweep` (radians,
     /// counter-clockwise when positive).
     Arc {
@@ -158,10 +161,11 @@ pub(crate) fn merge(mut ivs: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
     out
 }
 
-/// The near set of `edge` with reach `q` on the row `v`.
+/// The near set of `edge` with reach `q` on the row `v` (`q + CHORD` for a chord).
 pub fn near_set(edge: &NearEdge, v: f64, q: f64) -> Vec<(f64, f64)> {
     match *edge {
         NearEdge::Line(a, b) => near_line(a, b, v, q).into_iter().collect(),
+        NearEdge::Chord(a, b) => near_line(a, b, v, q + CHORD).into_iter().collect(),
         NearEdge::Arc {
             center,
             radius,

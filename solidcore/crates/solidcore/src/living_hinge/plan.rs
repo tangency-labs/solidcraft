@@ -30,7 +30,7 @@ pub fn frame_box(loops: &[Vec<NearEdge>]) -> FrameBox {
     };
     for edge in loops.iter().flatten() {
         match *edge {
-            NearEdge::Line(a, c) => {
+            NearEdge::Line(a, c) | NearEdge::Chord(a, c) => {
                 add(a);
                 add(c);
             }
@@ -56,12 +56,14 @@ pub fn frame_box(loops: &[Vec<NearEdge>]) -> FrameBox {
 }
 
 /// A loop of the plate's or the area's outline as near edges (design 6.4): lines and arcs as they
-/// are, a conic or a Bézier as its chords, each within [`CHORD`] of the curve. `None` when a curve
-/// cannot be followed that closely. The flag tells whether any chord stands for a curve: its
-/// reaches are then to be widened by [`CHORD`].
-pub fn near_loop(lp: &Loop2) -> Option<(Vec<NearEdge>, bool)> {
+/// are, a conic or a Bézier as its chords ([`NearEdge::Chord`]), each within [`CHORD`] of the
+/// curve. `None` when a curve cannot be followed that closely.
+///
+/// An arc's ends are worked out from its angles, so they can miss the neighbours' points by a
+/// rounding: a line or chord end within [`ON_EDGE`] of the arc end it meets is moved onto it, so
+/// both edges agree on which side of a row their common point lies.
+pub fn near_loop(lp: &Loop2) -> Option<Vec<NearEdge>> {
     let mut out = Vec::with_capacity(lp.segs.len());
-    let mut chorded = false;
     for seg in &lp.segs {
         match *seg {
             Seg2::Line { a, b } => out.push(NearEdge::Line((a.x, a.y), (b.x, b.y))),
@@ -78,23 +80,65 @@ pub fn near_loop(lp: &Loop2) -> Option<(Vec<NearEdge>, bool)> {
             }),
             Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => {
                 let points = crate::cell_grid::flatten(seg, CHORD)?;
-                chorded = true;
                 out.extend(
                     points
                         .iter()
                         .zip(points.iter().skip(1))
-                        .map(|(p, q)| NearEdge::Line((p.x, p.y), (q.x, q.y))),
+                        .map(|(p, q)| NearEdge::Chord((p.x, p.y), (q.x, q.y))),
                 );
             }
         }
     }
-    Some((out, chorded))
+    snap_arc_ends(&mut out);
+    Some(out)
+}
+
+/// The two ends of an arc, `None` for a line or a chord.
+fn arc_ends(edge: &NearEdge) -> Option<((f64, f64), (f64, f64))> {
+    match *edge {
+        NearEdge::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } => {
+            let at = |a: f64| (center.0 + radius * a.cos(), center.1 + radius * a.sin());
+            Some((at(start), at(start + sweep)))
+        }
+        NearEdge::Line(..) | NearEdge::Chord(..) => None,
+    }
+}
+
+/// Moves the end of a line or chord (its last end when `last`) onto `to` when within [`ON_EDGE`].
+fn snap_end(edge: &mut NearEdge, last: bool, to: (f64, f64)) {
+    if let NearEdge::Line(a, b) | NearEdge::Chord(a, b) = edge {
+        let p = if last { b } else { a };
+        if (p.0 - to.0).hypot(p.1 - to.1) <= ON_EDGE {
+            *p = to;
+        }
+    }
+}
+
+/// Snaps the neighbours of every arc of the closed loop `edges` onto the arc's ends.
+fn snap_arc_ends(edges: &mut [NearEdge]) {
+    let n = edges.len();
+    for i in 0..n {
+        let Some((first, last)) = edges.get(i).and_then(arc_ends) else {
+            continue;
+        };
+        if let Some(prev) = edges.get_mut((i + n - 1) % n) {
+            snap_end(prev, true, first);
+        }
+        if let Some(next) = edges.get_mut((i + 1) % n) {
+            snap_end(next, false, last);
+        }
+    }
 }
 
 /// The distance from `p` to `edge`.
 fn distance(p: (f64, f64), edge: &NearEdge) -> f64 {
     match *edge {
-        NearEdge::Line(a, b) => {
+        NearEdge::Line(a, b) | NearEdge::Chord(a, b) => {
             let (dx, dy) = (b.0 - a.0, b.1 - a.1);
             let len2 = dx * dx + dy * dy;
             let t = if len2 > 0.0 {
@@ -127,7 +171,9 @@ fn distance(p: (f64, f64), edge: &NearEdge) -> f64 {
 /// Three points of `edge`: its ends and its middle.
 fn probes(edge: &NearEdge) -> [(f64, f64); 3] {
     match *edge {
-        NearEdge::Line(a, b) => [a, ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0), b],
+        NearEdge::Line(a, b) | NearEdge::Chord(a, b) => {
+            [a, ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0), b]
+        }
         NearEdge::Arc {
             center,
             radius,
@@ -155,14 +201,14 @@ pub fn closed_edges(field: &[Vec<NearEdge>], plate: &[Vec<NearEdge>]) -> Vec<Nea
 
 /// Plans the slots of the area `field` in the plate `plate`, both closed loops in the hinge frame
 /// (a conic or a Bézier as its chords). `closed` are the area's edges that lie inside the plate
-/// (not on its boundary): slots keep `r + m` from them. The lattice is centred on the area's box,
+/// (not on its boundary): slots keep `r + m` from them; `None` takes [`closed_edges`]. The lattice is centred on the area's box,
 /// or anchored at `anchor`. Each row: its spans (design 6.3), the open tags of crossings that are
 /// not clean dropped (6.6 rule 1), its zone `Z_c ∪ Z_o` (6.5), then runners, pieces and short
 /// pieces (6.6 to 6.9).
 pub fn plan(
     field: &[Vec<NearEdge>],
     plate: &[Vec<NearEdge>],
-    closed: &[NearEdge],
+    closed: Option<&[NearEdge]>,
     spec: &LivingHingeSpec,
     anchor: Option<(f64, f64)>,
 ) -> Result<LivingHingePlan, LivingHingeError> {
@@ -170,6 +216,14 @@ pub fn plan(
     if plate.iter().all(Vec::is_empty) {
         return Err(LivingHingeError::Plate("it has no edges".into()));
     }
+    let found;
+    let closed = match closed {
+        Some(c) => c,
+        None => {
+            found = closed_edges(field, plate);
+            &found
+        }
+    };
     let b = frame_box(field);
     let lattice = match anchor {
         Some(a) => Lattice::anchored(spec, &b, a)?,
