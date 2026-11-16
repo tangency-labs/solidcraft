@@ -862,3 +862,16 @@ fn loop_holds_a_point_on_an_edge_line_off_the_loop() {
     assert_eq!(loop_holds(&sq, v(5.0, 5.0)), Some(true));
     assert_eq!(loop_holds(&sq, v(5.0, 0.0)), None);
 }
+
+#[test]
+fn directed_planar_sweep_preserves_record_coordinates() {
+    let center = v(10.0, 20.0);
+    assert_eq!(
+        solidcore_ops::prism::counterclockwise_sweep(center, v(12.0, 20.0), v(10.0, 23.0)),
+        Some(FRAC_PI_2)
+    );
+    assert_eq!(
+        solidcore_ops::prism::counterclockwise_sweep(center, center, v(10.0, 23.0)),
+        None
+    );
+}

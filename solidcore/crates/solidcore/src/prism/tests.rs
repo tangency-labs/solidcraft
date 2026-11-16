@@ -745,3 +745,25 @@ fn a_tapered_flange_changes_by_half_its_length_times_the_slope_tangent() {
     // A non-finite input gives a non-finite answer, never a panic.
     assert!(tapered_flange_ends(f64::NAN, 1.0, 5.0).0.is_nan());
 }
+
+#[test]
+fn directed_planar_sweep_keeps_quadrants_and_tiny_seam_angles() {
+    let sweep = super::profile::counterclockwise_sweep;
+    let center = Point2::new(0.0, 0.0);
+    let x = Point2::new(1.0, 0.0);
+    let y = Point2::new(0.0, 1.0);
+    assert_eq!(sweep(center, x, y), Some(FRAC_PI_2));
+    assert_eq!(sweep(center, y, x), Some(3.0 * FRAC_PI_2));
+    assert_eq!(sweep(center, x, x), Some(0.0));
+    for delta in [0.5e-12_f64, 1e-12, 2e-12] {
+        let end = Point2::new(delta.cos(), delta.sin());
+        assert_eq!(sweep(center, x, end), Some(delta));
+        let start = Point2::new(-1.0, delta / 2.0);
+        let end = Point2::new(-1.0, -delta / 2.0);
+        let expected = (end.y.atan2(end.x) - start.y.atan2(start.x)).rem_euclid(TAU);
+        assert_eq!(sweep(center, start, end), Some(expected));
+        assert!(expected > 0.0 && expected < 3e-12);
+    }
+    assert_eq!(sweep(center, center, x), None);
+    assert_eq!(sweep(center, x, Point2::new(f64::NAN, 0.0)), None);
+}

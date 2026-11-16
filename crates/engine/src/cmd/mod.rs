@@ -48,6 +48,7 @@ mod drawing_note;
 mod drawing_revision;
 mod drawing_scene;
 mod drawing_sheet;
+mod drawing_sketch;
 mod drawing_symbol;
 mod drawing_table;
 mod drawing_ui;
@@ -200,6 +201,8 @@ pub type SchemaFn = fn() -> schemars::Schema;
 pub enum Part {
     Model,
     Drawing,
+    /// A shared sketch tool: model or the explicitly active sheet sketch.
+    Sketch,
     Any,
     /// Either, and what it changes is a step of the part open: a delete of what is selected.
     Open,
@@ -331,12 +334,23 @@ impl CommandSpec {
         self.part = Part::Drawing;
         self
     }
+    /// Uses the shared sketch tool on its active model or explicit sheet receiver.
+    pub const fn in_sketch_part(mut self) -> Self {
+        self.part = Part::Sketch;
+        self
+    }
     /// Whether the command can run in `s` now: on the part open, and enabled. The one check
     /// running a command, running it inside another and listing it make.
     pub fn allowed(&self, s: &Session) -> std::result::Result<(), String> {
+        if s.active_sheet_sketch.is_some() && matches!(self.id, "drawing.create" | "drawing.open" | "drawing.close" | "drawing.delete") {
+            return Err("finish or cancel the sheet sketch before switching drawings".into());
+        }
         match (self.part, s.open_drawing.is_some()) {
             (Part::Model, true) => Err("a drawing is open: close it to change the model (drawing.close)".into()),
             (Part::Drawing, false) => Err("open a drawing first (drawing.open, or drawing.create)".into()),
+            (Part::Sketch, true) if !s.active_sheet_sketch.as_ref().is_some_and(|entry| Some(entry.drawing) == s.open_drawing) => {
+                Err("a drawing is open: enter a sheet sketch first (drawing.sketch.create or drawing.sketch.edit)".into())
+            }
             _ => (self.enabled)(s),
         }
     }
@@ -394,7 +408,11 @@ pub fn always(_: &Session) -> std::result::Result<(), String> {
 }
 
 pub fn in_sketch(s: &Session) -> std::result::Result<(), String> {
-    if s.active_sketch.is_some() { Ok(()) } else { Err("no sketch is being edited (Create Sketch or Edit Sketch first)".into()) }
+    let active = match s.open_drawing {
+        Some(drawing) => s.active_sheet_sketch.as_ref().is_some_and(|entry| entry.drawing == drawing),
+        None => s.active_sketch.is_some(),
+    };
+    if active { Ok(()) } else { Err("no sketch is being edited (Create Sketch or Edit Sketch first)".into()) }
 }
 
 /// The mirror of [`in_sketch`], for a command that acts on bodies and has nothing to offer the
@@ -483,6 +501,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(drawing_table::COMMANDS.iter());
     v.extend(drawing_scene::COMMANDS.iter());
     v.extend(drawing_sheet::COMMANDS.iter());
+    v.extend(drawing_sketch::COMMANDS.iter());
     v.extend(drawing_view::COMMANDS.iter());
     v.extend(settings::COMMANDS.iter());
     v.extend(diagnostics::COMMANDS.iter());

@@ -160,6 +160,8 @@ pub enum ObjectKind {
     ViewLabel,
     /// A balloon's circle and number, with its leader to the part it numbers.
     Balloon,
+    /// A sheet-owned sketch's printable curves.
+    Sketch,
 }
 
 impl ObjectKind {
@@ -178,6 +180,7 @@ impl ObjectKind {
             ObjectKind::Note => "NOTE",
             ObjectKind::ViewLabel => "VIEW_LABEL",
             ObjectKind::Balloon => "BALLOON",
+            ObjectKind::Sketch => "SKETCH",
         }
     }
 
@@ -197,6 +200,7 @@ impl ObjectKind {
                 DrawnFor::Sheet => 5,
             },
             ObjectKind::PartsList | ObjectKind::RevisionTable => 4,
+            ObjectKind::Sketch => 5,
             ObjectKind::TitleBlock => 6,
         }
     }

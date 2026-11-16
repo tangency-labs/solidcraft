@@ -1126,16 +1126,18 @@ mod tests {
         h.frames(3);
         let before = h.app.session.doc.clone();
         let revision = h.app.session.revision;
-        h.step(&json!({"key":"S"})).unwrap();
-        assert!(h.app.ui.palette_open, "S opens the shared Drawing command search");
-        h.step(&json!({"text":"Base View"})).unwrap();
-        h.step(&json!({"key":"Enter"})).unwrap();
-        h.frames(2);
-        assert!(!h.app.ui.palette_open);
-        assert!(drawing_inspector_visible(&h), "search opens known options");
-        h.step(&json!({"key":"Escape"})).unwrap();
-        h.frames(2);
-        assert!(!drawing_inspector_visible(&h), "Escape closes options");
+        for query in ["Base View", "Projected View"] {
+            h.step(&json!({"key":"S"})).unwrap();
+            assert!(h.app.ui.palette_open, "S opens the shared Drawing command search");
+            h.step(&json!({"text":query})).unwrap();
+            h.step(&json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+            assert!(!h.app.ui.palette_open);
+            assert!(drawing_inspector_visible(&h), "search opens known options for {query}");
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+            assert!(!drawing_inspector_visible(&h), "Escape closes options for {query}");
+        }
         h.step(&json!({"click":{"handle":"drawing:sheets:settings"}})).unwrap();
         h.frames(2);
         assert!(drawing_inspector_visible(&h));

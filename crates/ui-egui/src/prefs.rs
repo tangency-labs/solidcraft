@@ -3701,8 +3701,10 @@ fn button_jobs_that_read<'de, D: serde::Deserializer<'de>>(
 fn theme_choices(app: &SolveApp) -> Vec<(String, String)> {
     let modes =
         THEMES.iter().filter(|(id, _)| *id != "system").map(|(id, label)| ((*id).to_string(), solidcraft_ui_text::tr_label(label).to_string()));
-    let files = crate::theme_files::builtin().iter().chain(&app.preferences.custom_themes).map(|t| (t.id.clone(), t.name.clone()));
-    let mut choices: Vec<_> = modes.chain(files).collect();
+    // Built-in names are UI labels; a custom theme keeps the name its author gave it.
+    let builtins = crate::theme_files::builtin().iter().map(|t| (t.id.clone(), solidcraft_ui_text::tr_label(&t.name).to_string()));
+    let custom = app.preferences.custom_themes.iter().map(|t| (t.id.clone(), t.name.clone()));
+    let mut choices: Vec<_> = modes.chain(builtins).chain(custom).collect();
     choices.sort_by_key(|(id, _)| match id.as_str() {
         "light" => 0,
         "dark" => 1,
@@ -9136,6 +9138,24 @@ mod tests {
         h.frames(2);
         assert_eq!(Tokens::get().panel, Tokens::dark().panel);
         assert_eq!((Tokens::get().control_radius, Tokens::get().radius_xl), (6, 10));
+
+        // Built-in names follow the UI language; an imported name stays as authored even when
+        // it matches a translated label. The theme file itself keeps its original name too.
+        let out = h.call(
+            "ui.prefs",
+            json!({"language": "ja", "theme_import": {"format": "solidcraft-theme/1", "name": "Blueprint", "base": "light"}, "theme_export": true}),
+        );
+        let imported = out["result"]["theme_imported"].as_str().unwrap();
+        assert_ne!(imported, "blueprint", "the built-in id remains reserved");
+        assert_eq!(out["result"]["theme_file"]["name"], "Blueprint");
+        let _language = solidcraft_ui_text::scope("ja");
+        let choices = theme_choices(&h.app);
+        let name = |id: &str| choices.iter().find(|(key, _)| key == id).unwrap().1.as_str();
+        let translated = solidcraft_ui_text::tr("ui.sheet_page.colour.blueprint");
+        assert_ne!(translated, "Blueprint");
+        assert_eq!(name("blueprint"), translated);
+        assert_eq!(name(imported), "Blueprint");
+        assert_eq!(crate::theme_files::find("blueprint", &[]).unwrap().name, "Blueprint");
     }
 
     /// A theme tile's Export… writes the theme file through `vfs`, like the other saves, so the
