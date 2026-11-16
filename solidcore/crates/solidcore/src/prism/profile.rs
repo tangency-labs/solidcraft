@@ -143,8 +143,9 @@ pub const MAX_BEZIER_DEGREE: usize = 9;
 /// Control points a [`Seg2::Bezier`] carries: its highest degree plus one (the tail unused).
 pub const MAX_BEZIER_CTRL: usize = MAX_BEZIER_DEGREE + 1;
 
-/// The most segments one call takes over all its loops.
-pub const MAX_SEGMENTS: usize = 8192;
+/// The most segments one call takes over all its loops (a plate with tens of thousands of
+/// round holes, each one arc).
+pub const MAX_SEGMENTS: usize = 131_072;
 
 /// One boundary segment, in a frame's coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
