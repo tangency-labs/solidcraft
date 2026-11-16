@@ -7,17 +7,30 @@ use solidcore_record::Vec2;
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
-use crate::tool_modifiers::{Audit, Scope, ToolModifiers};
+use crate::tool_modifiers::{Audit, Binding, Match, ModAction, ModifierCombo, Scope, ToolModifiers, Trigger};
 use crate::viewport::{Hit, Proj, pick_for_tool as pick, sketch_point_at};
 use solidcraft_ui_text::tr;
 
 const DRAW_SCOPES: &[Scope] = &[Scope::SketchDraw, Scope::SketchDrag];
 
+/// Rectangles: Shift forces a square (`SquareRectangle`). Shift does not snap to a midpoint here
+/// (an empty binding overrides the sketch scopes' one).
+const SQUARE_BINDINGS: &[Binding] = &[
+    Binding {
+        action: ModAction::SquareRectangle,
+        defaults: &[ModifierCombo::SHIFT],
+        matching: Match::AtLeast,
+        trigger: Trigger::Live,
+        rebindable: true,
+    },
+    Binding { action: ModAction::TargetMidpoint, defaults: &[], matching: Match::AtLeast, trigger: Trigger::Live, rebindable: true },
+];
+
 /// Per-tool modifier descriptors owned by this host file (coordinator seeds / audits these).
 pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "sketch.line", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
-    ToolModifiers { tool: "sketch.rectangle.two_point", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
-    ToolModifiers { tool: "sketch.rectangle.center", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
+    ToolModifiers { tool: "sketch.rectangle.two_point", scopes: DRAW_SCOPES, bindings: SQUARE_BINDINGS, audit: Audit::Implemented },
+    ToolModifiers { tool: "sketch.rectangle.center", scopes: DRAW_SCOPES, bindings: SQUARE_BINDINGS, audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.rectangle.rounded", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.rectangle.three_point", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.circle.center", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
@@ -215,6 +228,24 @@ fn midpoint_at(app: &SolveApp, proj: &Proj, pos: Pos2, radius: f32) -> Option<(V
     })
 }
 
+/// The corner of a rectangle (two-point or centre) held to a square while the square chord is
+/// down: the side is the larger of the two distances from the first point, in the direction the
+/// cursor went. A snap on the corner no longer applies once it has moved.
+/// Whether the rectangle `t` is about to be drawn is held to a square.
+fn squared_rectangle(t: &Tool) -> bool {
+    crate::tool_modifiers::square_rectangle() && matches!(t.cmd, "sketch.rectangle.two_point" | "sketch.rectangle.center")
+}
+
+fn squared(t: &Tool, p: (Vec2, Option<String>)) -> (Vec2, Option<String>) {
+    let rectangle = matches!(t.cmd, "sketch.rectangle.two_point" | "sketch.rectangle.center");
+    let (true, true, [first]) = (rectangle, crate::tool_modifiers::square_rectangle(), t.pts.as_slice()) else { return p };
+    let d = p.0 - first.0;
+    let side = d.x.abs().max(d.y.abs());
+    let corner =
+        Vec2::new(first.0.x + side.copysign(if d.x == 0.0 { 1.0 } else { d.x }), first.0.y + side.copysign(if d.y == 0.0 { 1.0 } else { d.y }));
+    if corner == p.0 { p } else { (corner, None) }
+}
+
 pub fn on_hover(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
     crate::sketch3d::on_hover(app, proj, pos);
     if let Some(mut tool) = app.tool.take() {
@@ -233,7 +264,7 @@ pub fn on_hover(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
     };
     let follow = app.preferences.center_arc_follows_cursor;
     if let Some(t) = app.tool.as_mut() {
-        t.hover = h;
+        t.hover = h.map(|h| squared(t, h));
         if follow {
             follow_arc_turn(t);
         } else {
@@ -289,7 +320,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
         Kind::Draw(n) => {
             if let Some(p) = sketch_point_at(app, proj, pos) {
                 // Typed values win over the cursor; lines snap to horizontal/vertical.
-                let p = crate::sketch_dims::placed(app, &tool, &p);
+                let p = crate::sketch_dims::placed(app, &tool, &squared(&tool, p));
                 // A repeated initial point supplies no extent. Keep waiting rather than
                 // attempting a degenerate shape; explicit typed values still validate.
                 if n != 1 && tool.pts.len() == 1 && tool.pts.first().is_some_and(|first| first.0 == p.0) && !tool.dims.iter().any(|b| b.locked) {
@@ -572,8 +603,18 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
             }
         }
     } else if n > 0 && tool.pts.len() >= n {
+        let square = squared_rectangle(&tool);
         match run_shape(app, &tool) {
-            Ok(_) => {
+            Ok(curves) => {
+                // One side equal to the next: a single dimension then defines the square.
+                if square && let [a, b, ..] = curves.as_slice() {
+                    let history = std::mem::take(&mut app.session.undo);
+                    let made = app.run("sketch.constraint.equal", json!({"curves": [a, b]}));
+                    app.session.undo = history;
+                    if let Err(error) = made {
+                        app.set_status(error, true);
+                    }
+                }
                 let placed: Vec<Vec2> = tool.pts.iter().map(|p| p.0).collect();
                 crate::sketch_tools::constrain_lined(app, &mut tool, &placed, &before);
                 tool.pts.clear();

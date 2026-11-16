@@ -6069,6 +6069,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             false
         };
         crate::tool_modifiers::set_target_midpoint(mid);
+        let square = app.tool.as_ref().map(|t| t.cmd).is_some_and(|cmd| {
+            crate::tool_modifiers::resolve(
+                &[crate::tool_modifiers::Scope::SketchDraw, crate::tool_modifiers::Scope::SketchDrag],
+                crate::tool_modifiers::descriptor(cmd),
+                held,
+                crate::tool_modifiers::Trigger::Live,
+            )
+            .contains(crate::tool_modifiers::ModAction::SquareRectangle)
+        });
+        crate::tool_modifiers::set_square_rectangle(square);
         let busy_dragging = manipulator_dragging || crate::ui_kit::is_scrubbing(ui.ctx());
         app.preview.rolled_back = preview_should_roll_back(app, held, busy_dragging);
     }
