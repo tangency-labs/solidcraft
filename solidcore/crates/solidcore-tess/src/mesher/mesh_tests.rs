@@ -229,7 +229,9 @@ fn a_plate_a_ball_sinks_into_has_no_needles_on_the_mesh_path() {
 fn chords_moved_by_the_shaping_rounds_are_untangled_on_the_mesh_path() {
     let b = crate::fixtures::fixture("rig_rivet_flush_heads_sheet");
     // SolidCraft's size of the body (`Body::size`): the box diagonal of its vertices and of each
-    // edge's points at a quarter, a half and three quarters of its interval.
+    // edge's points at a quarter, a half and three quarters of its interval. It only picks the
+    // spec SolidCraft exports at (and the size the mesher is given), so the face is meshed as
+    // SolidCraft meshes it.
     let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
     let mut add = |p: [f64; 3]| {
         for k in 0..3 {

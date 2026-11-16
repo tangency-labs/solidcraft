@@ -407,9 +407,23 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
         // every face was before planning ([`untangle`]), and every face of an edge that takes
         // nodes doing so is planned again; a face that still crosses itself is left out, named.
         if !moved.is_empty() {
+            // Left out: faces left out before planning, and faces whose slot holds an error that
+            // stands (not planned again this round: an edge that could not take its nodes, a
+            // boundary that could not be read). A face planned again is untangled with the rest.
+            let mut replanned = vec![false; faces.len()];
+            for &fi in &again {
+                if let Some(r) = replanned.get_mut(fi) {
+                    *r = true;
+                }
+            }
+            for &fi in &lost {
+                if let Some(r) = replanned.get_mut(fi) {
+                    *r = false;
+                }
+            }
             let mut left: Vec<Option<TessError>> = (0..faces.len())
                 .map(|fi| match slots.get(fi) {
-                    Some(Some(Err(e))) => Some(e.clone()),
+                    Some(Some(Err(e))) if !replanned.get(fi).copied().unwrap_or(false) => Some(e.clone()),
                     _ => why.get(fi).cloned().flatten(),
                 })
                 .collect();
@@ -422,7 +436,8 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
             let still = untangle(b, &evals, &edge_faces, rules.tol, &mut nodes, &mut boundaries, &face_boundary, &mut left, Some(&moved))?;
             for (e, n) in nodes.iter().enumerate() {
                 if counts.get(e) != Some(&n.points.len()) {
-                    for &fi in edge_faces.get(e).map_or(&[][..], Vec::as_slice) {
+                    // A face left out stays out: its boundary was not built again.
+                    for &fi in edge_faces.get(e).map_or(&[][..], Vec::as_slice).iter().filter(|fi| left.get(**fi).is_some_and(Option::is_none)) {
                         if let Some(k) = kept.get_mut(fi) {
                             *k = false;
                         }
@@ -446,7 +461,9 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
             }
         }
         // A face whose edge could not take its nodes stays left out.
-        again.retain(|fi| !lost.contains(fi));
+        lost.sort_unstable();
+        lost.dedup();
+        again.retain(|fi| lost.binary_search(fi).is_err());
         again.sort_unstable();
         again.dedup();
         if again.is_empty() {
