@@ -48,7 +48,12 @@
 //!   identities of the geometry copies (their attributes are listed under them in
 //!   [`TopologyEnv::attributes`]). Each B-rep data curve or surface gets its copy as
 //!   owner, as upstream; the copy is found again through a local table (a data
-//!   object owned by anything else is [`SolidError::InvalidInput`]).
+//!   object owned by anything else is [`SolidError::InvalidInput`]). An address is
+//!   distinct and its object's type is known, so identities that do not name each
+//!   built object distinctly under its own type code are refused with
+//!   [`SolidError::InvalidInput`] before healing: the geometry owners would name no
+//!   edge, face or edge use, and every later owner lookup (a solve's `GetEdge`,
+//!   `GetFace`) would find nothing.
 //! - **Notifications.** The `SM_NO_COPY` of an analytic edge curve and the
 //!   `SM_NO_CHANGE_OWNER` of `SetOwner` go to the kernel's context; the
 //!   construction and destruction notifications of new and deleted temporary objects
@@ -188,7 +193,10 @@ pub struct TopologyEnv<'a> {
     /// The attribute lists of the B-rep data's curves and surfaces (by their
     /// [`crate::topology::brep_data::Keyed::key`]) and of the copies made from them.
     pub attributes: &'a mut AttributeStore,
-    /// The identity (an upstream address) of each topology entity of the B-rep.
+    /// The identity (an upstream address) of each topology entity of the B-rep: distinct
+    /// per entity and carrying the entity's own type code (`SmEdge_TYPE` for an edge, ...),
+    /// as [`crate::topology::loopuse::notify_ref`] makes them. [`make_topology_from_data`]
+    /// refuses identities that are not.
     pub key_of: &'a dyn Fn(EntityRef) -> ObjectRef,
     /// The `SmTopology` records (flags, user values) of the topology objects, by
     /// identity; one is added for each object built.
@@ -505,6 +513,7 @@ fn make_topology(
     fill_shells(b, env, data, &built, &shell_map)?;
     link_loops(b, data, &built)?;
     set_primary_edgeuses(b, data, &built)?;
+    check_identities(b, env.key_of)?;
 
     // Set isManifold after all objects are created and connected to one another
     if calculate_is_manifold {
@@ -528,13 +537,17 @@ fn make_topology(
 ///
 /// # Errors
 ///
-/// Those of the healer and of binding the UV trims it makes.
+/// [`SolidError::InvalidInput`] for identities that do not name each object of `b`
+/// distinctly under its own type code (as [`make_topology_from_data`] refuses them);
+/// those of the healer and of binding the UV trims it makes.
 pub fn heal_made(
     k: &mut Kernel,
     b: &mut Brep,
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
     make_uv_trim_curves: bool,
 ) -> Result<()> {
+    // the healer resolves geometry owners through these identities
+    check_identities(b, key_of)?;
     // Run the Assert/Heal sequences as needed (status ignored upstream)
     p1::heal_brep(
         k,
@@ -549,6 +562,87 @@ pub fn heal_made(
     // ClassifyLoops' snapshot write-back) have no caller owner yet; bind them to
     // their edge uses as upstream's SetUVTrimCurve(this) does.
     bind_uv_trim_owners(b, key_of)
+}
+
+/// Refuses identities that cannot stand for upstream's addresses: every topology object
+/// of `b` must be named distinctly and under its own type code. The geometry owners the
+/// build recorded are these identities, and `GetEdge` / `GetFace` resolve an owner by its
+/// type code and then by identity; a curve owned by a non-edge identity names no edge, so
+/// every point-edge solve on it (the healer's ray fires among them) has no edge to solve
+/// on, and a key two objects share resolves to the wrong one.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an identity whose type code is not its object's or
+/// one two objects share.
+fn check_identities(b: &Brep, key_of: &dyn Fn(EntityRef) -> ObjectRef) -> Result<()> {
+    use crate::geom::assert_array::labels as l;
+    let entities = b
+        .regions()
+        .ids()
+        .map(|id| (EntityRef::Region(id), l::REGION_TYPE))
+        .chain(
+            b.shells()
+                .ids()
+                .map(|id| (EntityRef::Shell(id), l::SHELL_TYPE)),
+        )
+        .chain(
+            b.faceuses()
+                .ids()
+                .map(|id| (EntityRef::Faceuse(id), l::FACEUSE_TYPE)),
+        )
+        .chain(
+            b.faces()
+                .ids()
+                .map(|id| (EntityRef::Face(id), l::FACE_TYPE)),
+        )
+        .chain(
+            b.loopuses()
+                .ids()
+                .map(|id| (EntityRef::Loopuse(id), l::LOOPUSE_TYPE)),
+        )
+        .chain(
+            b.loops()
+                .ids()
+                .map(|id| (EntityRef::Loop(id), l::LOOP_TYPE)),
+        )
+        .chain(
+            b.edgeuses()
+                .ids()
+                .map(|id| (EntityRef::Edgeuse(id), l::EDGEUSE_TYPE)),
+        )
+        .chain(
+            b.edges()
+                .ids()
+                .map(|id| (EntityRef::Edge(id), l::EDGE_TYPE)),
+        )
+        .chain(
+            b.vertexuses()
+                .ids()
+                .map(|id| (EntityRef::Vertexuse(id), l::VERTEXUSE_TYPE)),
+        )
+        .chain(
+            b.vertices()
+                .ids()
+                .map(|id| (EntityRef::Vertex(id), l::VERTEX_TYPE)),
+        );
+    let mut seen = std::collections::BTreeSet::new();
+    for (entity, type_code) in entities {
+        let identity = key_of(entity);
+        if identity.type_code != type_code {
+            return Err(SolidError::invalid_input(
+                OP_MAKE,
+                "an object identity does not carry its object's type code",
+            ));
+        }
+        if !seen.insert(identity) {
+            return Err(SolidError::invalid_input(
+                OP_MAKE,
+                "two objects share one identity",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Takes the data's zone tolerance or computes one relative to the vertex box.
@@ -2641,7 +2735,44 @@ pub fn subdivide_face_at_discontinuities(
     // enable Brep editing during this method
     let editing = b.editing_enabled();
     b.set_editing_enabled(true);
-    let result = subdivide_face_body(k, b, env, curve_ref, face, continuity);
+    let result = surface_of_face(b, face)
+        .and_then(|s| s.find_knots_by_max_continuity(k, continuity, false))
+        .and_then(|(u, v)| subdivide_face_body(k, b, env, curve_ref, face, &u, &v));
+    b.set_editing_enabled(editing);
+    result
+}
+
+/// Not upstream (#16651): [`subdivide_face_at_discontinuities`] along the iso lines at
+/// the given knots of the face's surface, `u_knots` and `v_knots`, instead of those its
+/// knot search finds (a chamfer's creases, [`crate::surface::procedural_blend::ProceduralBlend::chord_creases`]).
+/// Only the knots strictly inside the surface's natural domain are taken, as the knot
+/// search finds only interior knots.
+///
+/// # Errors
+///
+/// Those of [`subdivide_face_at_discontinuities`].
+pub fn subdivide_face_at_knots(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
+    face: FaceId,
+    u_knots: &[f64],
+    v_knots: &[f64],
+) -> Result<Vec<FaceId>> {
+    let domain = surface_of_face(b, face)?.natural_uv_domain_with_nurb(k)?;
+    let inside = |knots: &[f64], lo: f64, hi: f64| -> Vec<f64> {
+        knots
+            .iter()
+            .copied()
+            .filter(|&t| lo < t && t < hi)
+            .collect()
+    };
+    let u_knots = inside(u_knots, domain.min().x, domain.max().x);
+    let v_knots = inside(v_knots, domain.min().y, domain.max().y);
+    let editing = b.editing_enabled();
+    b.set_editing_enabled(true);
+    let result = subdivide_face_body(k, b, env, curve_ref, face, &u_knots, &v_knots);
     b.set_editing_enabled(editing);
     result
 }
@@ -2652,14 +2783,12 @@ fn subdivide_face_body(
     env: &mut NotifyEnv<'_>,
     curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
     face: FaceId,
-    continuity: ContinuityType,
+    u_knots: &[f64],
+    v_knots: &[f64],
 ) -> Result<Vec<FaceId>> {
     // locals
     let surface = surface_of_face(b, face)?;
     let domain = surface.natural_uv_domain_with_nurb(k)?;
-
-    // get all surface Knot discontinuties
-    let (u_knots, v_knots) = surface.find_knots_by_max_continuity(k, continuity, false)?;
 
     // no work - no discontinuities
     if u_knots.is_empty() && v_knots.is_empty() {

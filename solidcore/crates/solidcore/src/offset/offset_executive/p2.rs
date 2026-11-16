@@ -177,8 +177,8 @@ pub struct ShellOptions {
     /// (`create_offset_solid` on a non-manifold input), consecutive side walls that lie
     /// on one plane come back as one face, as the SolidCraft fork does
     /// (tangency-labs/solidcore#978): the edges between two walls are removed after the
-    /// stitch, each planar wall first going onto an exact plane. The sheet's own splits
-    /// and their offsets stay.
+    /// stitch (every planar wall goes onto an exact plane whatever this says, WR-564).
+    /// The sheet's own splits and their offsets stay.
     pub merge_sheet_side_walls: bool,
 }
 
@@ -274,6 +274,50 @@ fn refuse_singular_offset(
         .into_error()),
         _ => Ok(()),
     }
+}
+
+/// Not upstream (WR-346): a radius of curvature that collapsed face `face` attains on the
+/// side the offset moves it to, for [`OffsetFailure::Collapses`]: the one
+/// [`crate::offset::construction::sheets::proved_singular`] finds over the face's parameter
+/// box, on the face's own surface displaced by `displacement` along its NURB normal (the
+/// signed distance its collapse test offset it by, recorded with the collapsed face). That
+/// radius is attained but sampled (a grid and a pattern search), not a certified minimum,
+/// and it is only reported: the refusal itself rests on the collapse test. A face without a
+/// recorded displacement, or that the proof finds nothing on or fails on (no surface, no
+/// NURB, a radius it does not reach, an error), reports `|distance|`: its collapse test
+/// (`Surface::offset_collapses`) found the radius left below the tolerance, so the face's
+/// least radius is at most `|distance|` plus the tolerance; that is an upper bound, not a
+/// radius the face is known to attain. Never fails, so the typed refusal is never
+/// replaced by another error.
+fn collapsed_face_radius(
+    kernel: &Kernel,
+    original: &Brep,
+    face: FaceId,
+    distance: f64,
+    displacement: Option<f64>,
+) -> f64 {
+    use crate::offset::construction::sheets::proved_singular;
+    let proved = || -> Result<Option<f64>> {
+        let Some(displacement) = displacement else {
+            return Ok(None);
+        };
+        let Some(surface) = original.face(face)?.surface.as_ref() else {
+            return Ok(None);
+        };
+        let Some(nurb) = crate::topology::brep::p3::with_nurb(kernel, surface)? else {
+            return Ok(None);
+        };
+        let Some(base) = nurb.gw_nurb() else {
+            return Ok(None);
+        };
+        let domain = crate::topology::face::p2::uv_domain(original, face)?;
+        let uv_box = [domain.min.x, domain.max.x, domain.min.y, domain.max.y];
+        Ok(
+            proved_singular(base, displacement, Some(uv_box), original.tolerance())?
+                .map(|singular| singular.radius),
+        )
+    };
+    proved().ok().flatten().unwrap_or_else(|| distance.abs())
 }
 
 /// Not upstream (WR-718, #2350 S1): refuses the offset of `face` (whose implicit offset
@@ -400,15 +444,11 @@ impl OffsetExecutive {
             // cpp:217–251: the helper's scope drops any separately retained
             // executive temporary before querying the result's manifold status.
             let mut shell = run_shell_offset(kernel, original, options, faces, notifications)?;
-            // Opt-in (WR-454, #380; tangency-labs/smlib@fbe43bb): an inset of a solid whose
-            // offset leaves nothing has no cavity to take away (the difference would hand
-            // the input back unhollowed). Its non-empty non-manifold case is the shell
+            // Not upstream (WR-454, #380; tangency-labs/smlib@fbe43bb): an inset of a solid
+            // whose offset leaves nothing has no cavity to take away (the difference would
+            // hand the input back unhollowed). Its non-empty non-manifold case is the shell
             // guard below.
-            if kernel.fixes.shell_empty_cavity_fails
-                && options.offset.distance < 0.0
-                && input_is_manifold
-                && bp1::num_faces(&shell) == 0
-            {
+            if options.offset.distance < 0.0 && input_is_manifold && bp1::num_faces(&shell) == 0 {
                 return Err(invalid_input(OP_SHELL));
             }
             // WR-578: keep the conservative manifold-solid gate. A closed one-region
@@ -439,9 +479,8 @@ impl OffsetExecutive {
                 // stop when no lamina edges remain or the next tolerance exceeds
                 // abs(distance) / 2.0. Preserve retained input on MergeBrep error,
                 // but report ownership transferred on a later stitch error.
-                // the sheet's faces as copied into the shell (#978, #1599; only with an opt-in)
-                let side_walls =
-                    options.merge_sheet_side_walls || kernel.fixes.thicken_planar_side_walls;
+                // the sheet's faces as copied into the shell (#978, #1599: every wall goes
+                // onto its plane, WR-564)
                 let mut sheet_faces: Vec<FaceId> = Vec::new();
                 {
                     let source = required(input.as_ref(), OP_SHELL)?;
@@ -452,10 +491,10 @@ impl OffsetExecutive {
                         key_of: notifications.result_key_of,
                     };
                     // SER(pBrepShell->MergeBrep(*pBrepToShell)): default maps (NULL)
-                    // and bAddAnalytics = TRUE; the opt-in keeps the sheet-to-copy map
+                    // and bAddAnalytics = TRUE; not upstream, the sheet-to-copy map is kept
                     // (the fork's MergeBrep(*pBrepToShell, NULL, &sSheetToCopy): original to copy)
                     let mut sheet_to_copy = CopyBrepMap::new();
-                    let reverse_map = side_walls.then_some(&mut sheet_to_copy);
+                    let reverse_map = Some(&mut sheet_to_copy);
                     NotifyState::from_kernel_stores(&mut stores).with_kernel_env(
                         kernel,
                         |kernel, env| {
@@ -471,13 +510,11 @@ impl OffsetExecutive {
                             )
                         },
                     )?;
-                    if side_walls {
-                        for f in bp1::faces(source, None)? {
-                            match sheet_to_copy.get_at(Some(EntityRef::Face(f)))? {
-                                Some(EntityRef::Face(copy)) => sheet_faces.push(copy),
-                                _ => {
-                                    return Err(SolidError::null_pointer(OP_SHELL));
-                                }
+                    for f in bp1::faces(source, None)? {
+                        match sheet_to_copy.get_at(Some(EntityRef::Face(f)))? {
+                            Some(EntityRef::Face(copy)) => sheet_faces.push(copy),
+                            _ => {
+                                return Err(SolidError::null_pointer(OP_SHELL));
                             }
                         }
                     }
@@ -530,16 +567,14 @@ impl OffsetExecutive {
                     }
                     ii += 1;
                 }
-                if side_walls {
-                    // SER_DELETE: an error drops the shell
-                    merge_sheet_side_walls(
-                        kernel,
-                        &mut shell,
-                        &sheet_faces,
-                        options.merge_sheet_side_walls,
-                        notifications,
-                    )?;
-                }
+                // SER_DELETE: an error drops the shell
+                merge_sheet_side_walls(
+                    kernel,
+                    &mut shell,
+                    &sheet_faces,
+                    options.merge_sheet_side_walls,
+                    notifications,
+                )?;
                 make_shell_edges_exact(kernel, &mut shell, notifications)?;
                 return Ok(shell);
             }
@@ -787,7 +822,8 @@ impl OffsetExecutive {
             // Not upstream (WR-346): mate the faces beside each collapsed face across it,
             // the round's rails becoming one sharp edge (their ends are trimmed by
             // TrimExtendedEdge, which also looks across collapsed faces).
-            let mut unbridged = 0_usize;
+            // the first collapsed face the mating could not bridge
+            let mut unbridged: Option<FaceId> = None;
             if !self.collapsed_faces.is_empty() {
                 for &edgeuse in &mapped {
                     kernel.check_cancelled(OP_EXTENDED)?;
@@ -815,7 +851,8 @@ impl OffsetExecutive {
                     let (Some(across), Some(offset_edgeuse), Some(offset_across)) =
                         (across, offset_edgeuse, offset_across)
                     else {
-                        unbridged += 1;
+                        unbridged =
+                            unbridged.or(Some(required(eu::face(original, radial)?, OP_EXTENDED)?));
                         continue;
                     };
                     let mut stores = NotificationStores {
@@ -836,7 +873,8 @@ impl OffsetExecutive {
                         notifications.result_key_of,
                     ))?;
                     if mated.is_none() {
-                        unbridged += 1;
+                        unbridged =
+                            unbridged.or(Some(required(eu::face(original, radial)?, OP_EXTENDED)?));
                         continue;
                     }
                     marked.insert(edgeuse);
@@ -984,15 +1022,28 @@ impl OffsetExecutive {
                         continue;
                     }
                     if !self.squeeze_collapsed_end_edge(kernel, edgeuse, notifications)? {
-                        unbridged += 1;
+                        unbridged =
+                            unbridged.or(Some(required(eu::face(original, radial)?, OP_EXTENDED)?));
                     }
                 }
-                if unbridged > 0 {
-                    return Err(SolidError::Upstream {
-                        operation: OP_EXTENDED,
-                        code: crate::intersect::surface_drop_lib::p3::SM_ERR_DEGENERATE_SURFACE,
-                        entity: None,
-                    });
+                if let Some(face) = unbridged {
+                    let distance = self.offset_distance();
+                    let displacement = self
+                        .collapsed_displacements
+                        .iter()
+                        .find(|&&(f, _)| f == face)
+                        .map(|&(_, d)| d);
+                    let radius =
+                        collapsed_face_radius(kernel, original, face, distance, displacement);
+                    return Err(Failure::new(
+                        OP_EXTENDED,
+                        OffsetFailure::Collapses {
+                            face,
+                            distance,
+                            radius,
+                        },
+                    )
+                    .into_error());
                 }
             }
 
@@ -1004,39 +1055,43 @@ impl OffsetExecutive {
             // fork's order)
             self.close_loop_gaps(kernel, original, notifications)?;
 
-            // Not upstream (WR-531), opt-in `Kernel::fixes.offset_point_vertex_caps` (the
-            // fork's tangency-labs/smlib@d5dadaa): a vertex where one face closes on itself to
-            // a point (a cone's apex, the tip of a drilled hole: the seam is its only edge) has
-            // no edges whose offsets could meet there, and its face's offset ends short of the
-            // point, on the circle the point's normals sweep out. The point's offset is the
-            // sphere about it through that circle, as the unextended offset builds it
-            // (BuildOffsetOfVertex: a strut vertex with one arc to blend), a face of its whole
-            // surface the merge joins to the offset face along the circle.
-            if kernel.fixes.offset_point_vertex_caps {
-                for vertex in bp1::vertices(original, None)? {
-                    kernel.check_cancelled(OP_EXTENDED)?;
-                    if crate::topology::vertex::edges(original, vertex, None)?.len() != 1 {
-                        continue;
-                    }
-                    let cap = self.build_offset_of_vertex(kernel, original, Some(vertex))?;
-                    let Some(surface) = cap.surface else {
-                        continue;
-                    };
-                    let mut stores = NotificationStores {
-                        records: &mut *notifications.records,
-                        attributes: &mut *notifications.attributes,
-                        key_of: notifications.result_key_of,
-                    };
-                    let new_face = self.make_cap_face(
-                        kernel,
-                        surface,
-                        Vec::new(),
-                        Vec::new(),
-                        &[],
-                        &mut NotifyState::from_kernel_stores(&mut stores),
-                    )?;
-                    self.relate_vertex_face(vertex, new_face);
+            // Not upstream (WR-531; the fork's tangency-labs/smlib@d5dadaa): a vertex where
+            // one face closes on itself to a point (a cone's apex, the tip of a drilled hole:
+            // the seam is its only edge) has no edges whose offsets could meet there, and its
+            // face's offset ends short of the point, on the circle the point's normals sweep
+            // out. The point's offset is the sphere about it through that circle, as the
+            // unextended offset builds it (BuildOffsetOfVertex: a strut vertex with one arc
+            // to blend), a face of its whole surface the merge joins to the offset face along
+            // the circle. (A local operation moves faces onto new surfaces and builds no
+            // vertex offsets: there is no offset distance about a point to cap.)
+            let capped = if self.operation() == OffsetOperation::LocalOperation {
+                Vec::new()
+            } else {
+                bp1::vertices(original, None)?
+            };
+            for vertex in capped {
+                kernel.check_cancelled(OP_EXTENDED)?;
+                if crate::topology::vertex::edges(original, vertex, None)?.len() != 1 {
+                    continue;
                 }
+                let cap = self.build_offset_of_vertex(kernel, original, Some(vertex))?;
+                let Some(surface) = cap.surface else {
+                    continue;
+                };
+                let mut stores = NotificationStores {
+                    records: &mut *notifications.records,
+                    attributes: &mut *notifications.attributes,
+                    key_of: notifications.result_key_of,
+                };
+                let new_face = self.make_cap_face(
+                    kernel,
+                    surface,
+                    Vec::new(),
+                    Vec::new(),
+                    &[],
+                    &mut NotifyState::from_kernel_stores(&mut stores),
+                )?;
+                self.relate_vertex_face(vertex, new_face);
             }
 
             if kernel.fixes.local_operation_step_walls
@@ -1045,19 +1100,11 @@ impl OffsetExecutive {
                 self.split_edges_at_step_corners(kernel, notifications)?;
             }
 
-            // Not upstream (WR-341, tangency-labs/solidcore#977), opt-in
-            // `Kernel::fixes.offset_excess_faces_after_merge`: the excess faces are found after
-            // the merge only, where each merged face lies wholly on the offset or wholly in
-            // the excess. Here an offset face is not trimmed yet, so one that bounds the
-            // offset can have an edge inside the excess and be taken.
-            let excess_after_merge = kernel.fixes.offset_excess_faces_after_merge;
-            if !excess_after_merge {
-                // cpp:1580: retain the same temporary on both success and failure.
-                let mut temporary = required(self.take_offset_brep(), OP_EXTENDED)?;
-                let status = self.remove_excess_faces(kernel, original, &mut temporary);
-                self.set_offset_brep(temporary);
-                status?;
-            }
+            // Not upstream (WR-341, tangency-labs/solidcore#977): the excess faces are found
+            // after the merge only, where each merged face lies wholly on the offset or
+            // wholly in the excess. Upstream also removes them here (cpp:1580), where an
+            // offset face is not trimmed yet, so one that bounds the offset can have an edge
+            // inside the excess and be taken.
 
             if self.create_offset_solid() {
                 for &edgeuse in &mapped {
@@ -1085,23 +1132,20 @@ impl OffsetExecutive {
             // trim bounds; restore the original before reporting an out-of-domain error.
             self.extend_result_faces_prefix(kernel, mark_type, notifications)?;
 
-            // Not upstream (WR-345, tangency-labs/solidcore#854), opt-in
-            // `Kernel::fixes.offset_resolve_crossing_loops`: an offset face whose loops cross
-            // (an inner loop's offset grown past the outer loop's) is rebuilt from the
+            // Not upstream (WR-345, tangency-labs/solidcore#854): an offset face whose loops
+            // cross (an inner loop's offset grown past the outer loop's) is rebuilt from the
             // stretches of its loops that bound it, before the merge sees it.
-            if kernel.fixes.offset_resolve_crossing_loops {
-                self.resolve_crossing_loops(kernel, original, notifications)?;
-            }
+            self.resolve_crossing_loops(kernel, original, notifications)?;
 
             // (not upstream) each kept edge is the original edge on both its faces
             self.restore_kept_edges(kernel, original, notifications)?;
 
             let mut result = self.piecewise_merge(kernel, original, Some(&mut *notifications))?;
-            // (WR-341: with the opt-in this also runs for a solid input whatever
-            // `m_bCreateOffsetSolid` says: a sheet's side walls, built for an offset solid,
-            // run from the sheet itself and would be taken for excess; a solid has none)
-            let remove_after_merge = !self.create_offset_solid()
-                || (excess_after_merge && brep_is_manifold_solid(original)?);
+            // (WR-341: this also runs for a solid input whatever `m_bCreateOffsetSolid`
+            // says: a sheet's side walls, built for an offset solid, run from the sheet
+            // itself and would be taken for excess; a solid has none)
+            let remove_after_merge =
+                !self.create_offset_solid() || brep_is_manifold_solid(original)?;
             if remove_after_merge {
                 self.remove_excess_faces(kernel, original, &mut result)?;
             }
@@ -1484,17 +1528,19 @@ impl OffsetExecutive {
                 refuse_folding_offset(kernel, original, id, offset, operation)?;
             }
         }
-        // Not upstream (WR-346, tangency-labs/solidcore#397), opt-in
-        // `Kernel::fixes.offset_collapsed_rounds_mated`: an inset face whose offset collapses (a
-        // convex round thinner than the wall) gets no offset face; the faces beside it are
-        // mated across it in `do_extended_offset`, as at a sharp edge.
-        if extended
-            && surface.is_none()
-            && kernel.fixes.offset_collapsed_rounds_mated
-            && self.inset()
-            && self.extend_convex_edges()
-        {
+        // Not upstream (WR-346, tangency-labs/solidcore#397): an inset face whose offset
+        // collapses (a convex round thinner than the wall) gets no offset face; the faces
+        // beside it are mated across it in `do_extended_offset`, as at a sharp edge.
+        if extended && surface.is_none() && self.inset() && self.extend_convex_edges() {
             self.collapsed_faces.push(id);
+            // the sign `OffsetGeometryCreation` offsets the surface with
+            let sense = if eu::faceuse_orientation(original, faceuse)? == OrientType::Opposite {
+                -1.0
+            } else {
+                1.0
+            };
+            self.collapsed_displacements
+                .push((id, sense * self.offset_distance()));
             return Ok(());
         }
         if self.skip_offset_face_geometry(extended, surface.is_some(), ssi.curves_3d.len())? {
@@ -2192,10 +2238,9 @@ fn collapse_offset_status<T>(result: Result<T>) -> Result<T> {
 /// and every topological vertex, are kept), each wall it bounds first going onto its plane
 /// ([`put_planar_face_on_its_plane`]). Editing is enabled meanwhile.
 ///
-/// With [`crate::kernel::UpstreamFixes::thicken_planar_side_walls`] (WR-564, #1599; the
-/// fork's tangency-labs/smlib#62) every wall goes onto its plane first, in the shell's
-/// face order, and its old surface's seams are deleted; the walls are then merged only
-/// with `merge` (the #978 opt-in).
+/// Not upstream (WR-564, #1599; the fork's tangency-labs/smlib#62): every wall goes onto
+/// its plane first, in the shell's face order, and its old surface's seams are deleted;
+/// the walls are then merged only with `merge` (the #978 opt-in).
 ///
 /// # Errors
 ///
@@ -2239,25 +2284,14 @@ fn merge_sheet_side_walls(
             }
         }
     }
-    let every_wall = kernel.fixes.thicken_planar_side_walls;
-    if merging.is_empty() && !every_wall {
-        return Ok(());
-    }
-
     // SmTemporaryChangeValue<SmBoolean> sEditing(pBrepShell->m_bEditingEnabled, TRUE)
     let editing = shell.editing_enabled();
     shell.set_editing_enabled(true);
     let result = (|| {
-        if every_wall {
-            // every wall onto its plane, in GetFaces order (#1599)
-            for f in bp1::faces(shell, None)? {
-                if walls.contains(&f) {
-                    put_planar_face_on_its_plane(kernel, shell, f, true, notifications)?;
-                }
-            }
-        } else {
-            for &f in &merging {
-                put_planar_face_on_its_plane(kernel, shell, f, false, notifications)?;
+        // every wall onto its plane, in GetFaces order (#1599)
+        for f in bp1::faces(shell, None)? {
+            if walls.contains(&f) {
+                put_planar_face_on_its_plane(kernel, shell, f, notifications)?;
             }
         }
         if !merge || merging.is_empty() {
@@ -2281,7 +2315,7 @@ fn merge_sheet_side_walls(
 /// with as much again round them; `ReplaceSurface(.., FALSE, NULL, TRUE)` remakes its
 /// UV trim curves. A face on a plane, or on a surface that is not planar, is left.
 ///
-/// With `delete_seams` (WR-564, #1599; the fork's tangency-labs/smlib#62) the face's
+/// Then (WR-564, #1599; the fork's tangency-labs/smlib#62) the face's
 /// edges that are seams of its old surface (`SmEdge::IsSeam`, found before the
 /// replacement) are deleted after it: a surface closed round on itself (the wall
 /// between a circle and its offset about one axis, a flat ring) bounds the face along
@@ -2296,7 +2330,6 @@ fn put_planar_face_on_its_plane(
     kernel: &mut Kernel,
     b: &mut Brep,
     f: FaceId,
-    delete_seams: bool,
     notifications: &mut OffsetNotifications<'_>,
 ) -> Result<()> {
     use crate::nurbs::knots::Side;
@@ -2355,13 +2388,11 @@ fn put_planar_face_on_its_plane(
         crate::math::Point2::new(u_max + margin, v_max + margin),
     );
 
-    // the old surface's seams (#1599; only with the opt-in)
+    // the old surface's seams (#1599)
     let mut seams: Vec<EdgeId> = Vec::new();
-    if delete_seams {
-        for e in crate::topology::face::p4::edges(&*b, f, None, false, None)? {
-            if crate::topology::edge::is_seam_of_surface(kernel, b, e, f)? {
-                seams.push(e);
-            }
+    for e in crate::topology::face::p4::edges(&*b, f, None, false, None)? {
+        if crate::topology::edge::is_seam_of_surface(kernel, b, e, f)? {
+            seams.push(e);
         }
     }
 
@@ -4405,10 +4436,10 @@ mod tests {
         };
         // the empty offset merges into an empty result
         assert!(result.unwrap().faces().is_empty());
-        // RemoveFaces ran with the temporary's real editing flag before the
-        // piecewise merge, and again in RemoveExcessFaces on the merged result
-        // (cpp:1772), releasing its nested mark each time.
-        assert_eq!(kernel.context.current_mark(MarkType::Mark2), 5);
+        // RemoveFaces ran in RemoveExcessFaces on the merged result (cpp:1772),
+        // releasing its nested mark; the pass before the piecewise merge is gone
+        // (WR-341), so the counter is two below upstream's 5.
+        assert_eq!(kernel.context.current_mark(MarkType::Mark2), 3);
         assert!(!kernel.context.is_mark_locked(MarkType::Mark2));
         assert_eq!(kernel.context.current_mark(MarkType::Mark), 3);
         assert!(!kernel.context.is_mark_locked(MarkType::Mark));
@@ -5065,16 +5096,14 @@ mod tests {
     /// tangency-labs/solidcore#977: for a closed shell (no open face) `RemoveExcessFaces`
     /// ran before the merge, while the offset faces were untrimmed, and took faces that
     /// bound the offset (each with an edge inside the excess); the merged offset then
-    /// enclosed no region. With the opt-in the excess is found after the merge only, and
-    /// the closed shell of a plate whose hole offset crosses a side is a solid. (The
-    /// hole's offset crosses the side's, so both runs also resolve the offset faces'
-    /// crossing loops, #854, as the fork did before this fix.)
+    /// enclosed no region. The excess is now found after the merge only, and the closed
+    /// shell of a plate whose hole offset crosses a side is a solid. (The hole's offset
+    /// crosses the side's, so the run also resolves the offset faces' crossing loops,
+    /// #854, as the fork did before this fix.)
     #[test]
     fn issue_977_closed_shell_excess_faces_after_merge() {
-        let shell = |after_merge: bool| -> Result<Brep> {
+        let shell = || -> Result<Brep> {
             let mut kernel = Kernel::default();
-            kernel.fixes.offset_excess_faces_after_merge = after_merge;
-            kernel.fixes.offset_resolve_crossing_loops = true;
             let part = plate_with_hole_near_side(&mut kernel);
             let mut notifications = NotificationFixture::new(&part);
             OffsetExecutive::shell_brep(
@@ -5094,13 +5123,8 @@ mod tests {
             )
             .result
         };
-        let fixed = shell(true).unwrap();
+        let fixed = shell().unwrap();
         assert!(brep_is_manifold_solid(&fixed).unwrap());
-        // upstream's order (the default) loses the faces round the hole
-        match shell(false) {
-            Err(_) => {}
-            Ok(b) => assert!(!brep_is_manifold_solid(&b).unwrap()),
-        }
     }
 
     /// A frustum (r 20 at z = 0 to r 30 at z = 60, drafted about 9.46 degrees) built as
@@ -5134,12 +5158,11 @@ mod tests {
     /// faces are mated along it (`EdgeuseOffset`), but `PiecewiseMerge`'s `sNoSSI` lists
     /// only cap-face and tangent pairs, so the merge intersects them again; on a frustum
     /// built as two half faces, shelled 2 inward open at the top, the plane/offset-cone
-    /// curve stops short of the inner seam and splits the rim. With the opt-in the mated
-    /// pairs are related too: 7 faces, 12 edges and 8 vertices.
+    /// curve stops short of the inner seam and splits the rim. The mated pairs are related
+    /// too: 7 faces, 12 edges and 8 vertices.
     #[test]
     fn issue_469_extended_offset_mated_edges_not_intersected_again() {
         let mut kernel = Kernel::default();
-        kernel.fixes.offset_extended_edges_mated = true;
         let (part, top) = two_half_frustum(&mut kernel);
         assert!(!top.is_empty());
         let mut notifications = NotificationFixture::new(&part);
@@ -5253,7 +5276,6 @@ mod tests {
     #[test]
     fn issue_854_offset_face_crossing_loops_resolved() {
         let mut kernel = Kernel::default();
-        kernel.fixes.offset_resolve_crossing_loops = true;
         let (part, top) = plate_with_hole_by_side(&mut kernel);
         assert_eq!(top.len(), 1);
         let mut notifications = NotificationFixture::new(&part);
@@ -5332,7 +5354,7 @@ mod tests {
 
     /// tangency-labs/solidcore#397: the inward offset of a convex round thinner than the
     /// wall is degenerate, so the face gets no offset surface and `DoExtendedOffset`
-    /// fails (1001). With the opt-in such a face collapses: the faces beside it are mated
+    /// failed (1001). Now such a face collapses: the faces beside it are mated
     /// across it at a sharp edge, and the block with r1 vertical rounds shelled closed 2
     /// inward is a solid whose cavity is the block shrunk by the wall: volume
     /// 6000 - 40 (1 - pi/4) - 26 x 16 x 6.
@@ -5342,7 +5364,6 @@ mod tests {
                 fixture with analytic cylinder rounds"]
     fn issue_397_inset_rounds_thinner_than_wall_collapse() {
         let mut kernel = Kernel::default();
-        kernel.fixes.offset_collapsed_rounds_mated = true;
         let part = block_with_vertical_rounds(&mut kernel, 1.0);
         let mut notifications = NotificationFixture::new(&part);
         let mut shell = OffsetExecutive::shell_brep(
@@ -5383,6 +5404,69 @@ mod tests {
         );
     }
 
+    /// WR-346: an r 1, h 4 cylinder's extended inset by 1 or 1.5 collapses its side wall
+    /// (offset radius `1 - d` is 0 or negative), and with nothing beside it to mate across
+    /// the offset is refused as [`OffsetFailure::Collapses`], naming the wall, the distance
+    /// and the wall's radius 1, the inset that still builds being under it. (Not an empty
+    /// success: the inset set is empty here, but a collapsed face left unbridged does not
+    /// prove the whole offset empty in general, only that this face cannot be built.)
+    #[test]
+    fn wr346_unbridged_collapsed_wall_is_refused_as_collapses() {
+        use crate::error::Reason;
+        for d in [1.0, 1.5] {
+            let mut kernel = Kernel::default();
+            let mut part = crate::primitive::api_primitives::create_cylinder(
+                &mut kernel,
+                Vec3::new(0.0, 0.0, 0.0),
+                1.0,
+                4.0,
+            )
+            .unwrap();
+            part.set_key(original_key(EntityRef::Brep(BrepId::from_index(0))).key);
+            let wall: Vec<FaceId> = part
+                .face_list()
+                .iter()
+                .copied()
+                .filter(|&f| {
+                    !part
+                        .face(f)
+                        .unwrap()
+                        .surface
+                        .as_ref()
+                        .unwrap()
+                        .is_kind_of(Plane::TYPE)
+                        .unwrap()
+                })
+                .collect();
+            assert_eq!(wall.len(), 1, "the side wall");
+            let mut notifications = NotificationFixture::new(&part);
+            let mut exec = OffsetExecutive::new(OffsetOperation::SolidOffset, d, 1e-6);
+            exec.set_inset(true);
+            exec.set_extend_convex_edges(true);
+            exec.set_merge_results(false);
+            let e = exec
+                .do_solid_offset(
+                    &mut kernel,
+                    Some(&mut part),
+                    SolidOffsetOptions::default(),
+                    &mut notifications.context(),
+                )
+                .unwrap_err();
+            let Some(Reason::Offset(OffsetFailure::Collapses {
+                face,
+                distance,
+                radius,
+            })) = e.failure().map(|f| &f.reason)
+            else {
+                panic!("d {d}: not a collapse: {e}");
+            };
+            assert_eq!(*face, wall[0], "d {d}");
+            assert_eq!(*distance, d, "d {d}: the distance as asked");
+            assert!((radius - 1.0).abs() <= 1e-9, "d {d}: radius {radius}");
+            assert_eq!(e.sm_status(), Some(SM_ERR), "d {d}");
+        }
+    }
+
     /// tangency-labs/solidcore#855: a 40 x 40 x 10 plate with a 4 mm hole at (4.99, 20)
     /// shelled 1.5 inward open at the top: the hole's offset (r 3.5) crosses the offset
     /// side x = 1.5 only 0.01 mm deep. Upstream's `StitchIntoSolid` doubles its tolerance
@@ -5396,7 +5480,6 @@ mod tests {
         let shell = |stitch: bool, contacts_at_ends: bool| -> Result<Option<f64>> {
             use crate::primitive::api_primitives::{create_box, create_cylinder};
             let mut kernel = Kernel::default();
-            kernel.fixes.offset_resolve_crossing_loops = true;
             kernel.fixes.offset_stitch_at_body_tolerance = stitch;
             kernel.fixes.curve_contacts_at_curve_ends = contacts_at_ends;
             let plate =
@@ -5459,16 +5542,14 @@ mod tests {
     }
 
     /// tangency-labs/solidcore#380: a closed inward shell of a box whose wall is as thick
-    /// as (or thicker than) the inradius leaves no cavity. The default path (the split
-    /// flags are the only path since #2981) refuses it as no closed solid (1001); with
-    /// WR-454's own opt-in the typed empty-cavity refusal (1007) takes precedence; a
+    /// as (or thicker than) the inradius leaves no cavity. WR-454's typed empty-cavity
+    /// refusal (1007) takes precedence over the shell's no-closed-solid guard (1001); a
     /// thinner wall still shells.
     #[test]
     fn issue_380_shell_with_no_cavity_fails_with_the_fix() {
-        let shell = |fix: bool, wall: f64| -> Result<Brep> {
+        let shell = |wall: f64| -> Result<Brep> {
             use crate::primitive::api_primitives::create_box;
             let mut kernel = Kernel::default();
-            kernel.fixes.shell_empty_cavity_fails = fix;
             let mut part =
                 create_box(&mut kernel, Vec3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
             part.set_key(original_key(EntityRef::Brep(BrepId::from_index(0))).key);
@@ -5491,12 +5572,10 @@ mod tests {
             .result
         };
         for wall in [5.0, 6.0] {
-            // the default path: an offset that is no closed solid is refused (1001)
-            assert_status(shell(false, wall), 1001);
-            // WR-454's opt-in keeps its own typed refusal (1007)
-            assert_status(shell(true, wall), 1007);
+            // WR-454's typed refusal (1007)
+            assert_status(shell(wall), 1007);
         }
-        let thin = shell(true, 1.0).unwrap();
+        let thin = shell(1.0).unwrap();
         assert!(brep_is_manifold_solid(&thin).unwrap());
     }
 }

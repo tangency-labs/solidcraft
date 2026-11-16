@@ -9,8 +9,8 @@
 //! continuation; upstream's `CoverCoincidentSurface` merged wall B's top onto that folded
 //! continuation and the join lost 5573 mm3. WR-407's frame on the path plane's normal is
 //! the default now, and without `cover_refuses_folded_continuation` the join is still
-//! wrong: with the drop pieces of the walls' trims joined (WR-543) it is 7744 mm3 too
-//! large. With `cover_refuses_folded_continuation` the cover across the
+//! wrong: the cover still merges onto the folded continuation, and the level-2 check
+//! reports its B-spline net doubling back. With `cover_refuses_folded_continuation` the cover across the
 //! fold is refused and the join has the closed-form volume
 //! `V_A + V_B - overlap = 60 (pi/2)(56^2 - 44^2) + 60 (pi/2)(64^2 - 52^2) - 60 (pi/4)(56^2 - 52^2)`.
 //! The walls' radial faces are the sweep's approximation of the arcs, so the volume is
@@ -31,6 +31,7 @@ use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::primitive::primitive_creation::SweepOptions;
 use solidcore::query::api_queries::brep_is_manifold_solid;
 use solidcore::sweep::api_brep::create_curve_sweep;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
 use solidcore::{Brep, Kernel};
 
@@ -112,8 +113,12 @@ fn closed_form() -> f64 {
 
 #[test]
 fn wr_407_walls_join_to_the_closed_form_with_the_fix() {
-    let (k, mut b) = joined(true);
+    let (mut k, mut b) = joined(true);
     assert!(brep_is_manifold_solid(&b).unwrap());
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
     let v = volume(&k, &mut b);
     assert!(
         (v - closed_form()).abs() < 1.0,
@@ -122,12 +127,23 @@ fn wr_407_walls_join_to_the_closed_form_with_the_fix() {
     );
 }
 
-/// Without the fold rule the cover merges onto the folded continuation: the join is too
-/// large by more than 1000 mm3 (7744 mm3; it was short by 5573 mm3 with upstream's sweep
-/// frame, and by 14596 mm3 with a drop piece stretched onto each trim's edge).
+/// Without the fold rule the cover merges wall B's top onto wall A's folded
+/// continuation: the level-2 check reports the merged face's B-spline net doubling back.
+/// (Its volume missed the closed form by 7744 mm3 while the queries dropped their
+/// statuses, by 5573 mm3 with upstream's sweep frame, and by 14596 mm3 with a drop piece
+/// stretched onto each trim's edge; with the statuses passed on (WR-663) it no longer
+/// does, but the fold remains.) Pinned until the fold rule is the default
+/// (tangency-labs/solidcraft#17215).
 #[test]
-fn wr_407_default_join_loses_the_folded_cover() {
-    let (k, mut b) = joined(false);
-    let v = volume(&k, &mut b);
-    assert!(v - closed_form() > 1000.0, "{v} against {}", closed_form());
+fn wr_407_default_join_covers_a_folded_continuation() {
+    let (mut k, mut b) = joined(false);
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("Test #5 Bad NonMonotonic CPts")),
+        "{lines:?}"
+    );
 }

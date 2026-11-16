@@ -85,13 +85,31 @@ impl crate::Document {
     /// A canvas's plane in the world: resolved in its component's frame, then placed where the
     /// component's occurrence puts it. Use the evaluated state so planes built from sketch
     /// points, paths or other model geometry resolve as they do when the canvas is inserted.
+    /// Face attachments follow the current face in the same frame as attached sketches.
     pub fn canvas_plane(
         &self,
         vals: &std::collections::BTreeMap<String, crate::expr::Value>,
         c: &Canvas,
         state: &crate::ModelState,
     ) -> crate::Result<Plane> {
-        let p = self.resolve_plane_in(vals, &c.plane, 0, c.component, Some(state))?;
+        let p = if let Some(anchor) = crate::face_anchor::plane_face_anchor(&c.plane) {
+            // These wrappers need only the resolved face, so avoid copying the model every frame.
+            let mut base = &c.plane;
+            while let PlaneRef::Offset { base: next, .. }
+            | PlaneRef::Flipped { base: next, .. }
+            | PlaneRef::AtAngle { base: next, line: None, pivot: None, .. } = base
+            {
+                base = next;
+            }
+            let framed = if matches!(base, PlaneRef::Face { .. }) {
+                std::borrow::Cow::Borrowed(state)
+            } else {
+                crate::state_in_face_anchor_frame(self, state, anchor, c.component)?
+            };
+            self.resolve_attached_plane(vals, &c.plane, c.component, state, &framed)?
+        } else {
+            self.resolve_plane_in(vals, &c.plane, 0, c.component, Some(state))?
+        };
         let m = self.component_transform(c.component);
         if crate::is_identity(&m) {
             return Ok(p);

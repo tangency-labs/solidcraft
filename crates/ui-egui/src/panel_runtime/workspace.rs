@@ -2539,7 +2539,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                                 drag: matches!(target, HostPointerTarget::Header { .. } | HostPointerTarget::Tab { .. }),
                                 title: matches!(target, HostPointerTarget::Header { .. }),
                                 grip_only: matches!(target, HostPointerTarget::Header { .. })
-                                    && (tab_drop.is_some() || section.tabs.len() + section.hidden_tabs.len() > 1),
+                                    && (paint_section.side_strip || tab_drop.is_some() || section.tabs.len() + section.hidden_tabs.len() > 1),
                                 rtl: self.layout.direction == Direction::Rtl,
                             },
                             if matches!(target, HostPointerTarget::Header { instance } | HostPointerTarget::Tab { instance }
@@ -2650,7 +2650,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                 let t = solidcraft_theme::Tokens::get();
                 // The title and its controls share the card background. One
                 // kit separator spans the header, rather than per-control tiles.
-                if !section.inline {
+                if !section.inline && !paint_section.side_strip {
                     let header = egui_rect(paint_section.header);
                     if !section.collapsed {
                         t.secondary_hline(ui.painter(), header.x_range(), header.bottom(), t.dialog_rule);
@@ -2982,6 +2982,9 @@ fn paint_drop_tabs(
 }
 
 fn content_header_bounds(section: &HostSection) -> Option<LogicalRect> {
+    if section.side_strip {
+        return None;
+    }
     let body = section.body?;
     let y = super::layout::bottom(section.action_bar.unwrap_or(section.header));
     let height = body.origin.y - y;
@@ -3086,7 +3089,9 @@ impl WorkspacePanelHost {
                 if runtime.layout().interaction().focused.as_ref() != Some(instance) || section.collapsed {
                     presentation.push(HostSharedAction::Focus);
                 }
-                if section_collapsible(layout, runtime.layout().registry(), section).unwrap_or(false) {
+                if !frame.layout.sections.iter().any(|card| card.section == section.id && card.side_strip)
+                    && section_collapsible(layout, runtime.layout().registry(), section).unwrap_or(false)
+                {
                     presentation.push(HostSharedAction::Collapse);
                 }
                 if section.preferred_extent.is_some()

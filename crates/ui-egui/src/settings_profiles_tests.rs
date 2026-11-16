@@ -37,7 +37,11 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 104, "include the live panel drag and browser scroll wheel preferences among the current portable settings");
+    assert_eq!(
+        keys.len(),
+        105,
+        "include the live panel drag preference, the selected bodies' hidden edges and the browser scroll wheel preferences among the current portable settings"
+    );
     for key in [
         "nav",
         "maya_horizontal_zoom",
@@ -866,6 +870,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "select_other_hidden",
         "selection_shift_add_only",
         "shortcut_cycles_modes",
+        "show_selected_hidden_edges",
         "sketch_align_points",
         "sketch_auto_dimensions",
         "sketch_auto_locate",

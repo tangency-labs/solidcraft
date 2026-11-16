@@ -1,0 +1,222 @@
+{
+  "en": {
+    "parts.family.dowel_pin_gost": "Parallel pin, unhardened",
+    "parts.family.hex_bolt_gost": "Hex head bolt",
+    "parts.family.hex_nut_gost": "Hex nut",
+    "parts.family.hex_nut_thin_gost": "Thin hex nut",
+    "parts.family.set_screw_gost": "Hex socket set screw, flat point",
+    "parts.family.socket_head_cap_screw_gost": "Socket head cap screw",
+    "parts.family.washer_gost": "Plain washer, product grade A",
+    "parts.family.washer_large_gost": "Large plain washer, product grade A"
+  },
+  "ar": {
+    "parts.family.dowel_pin_gost": "مسمار توجيه أسطواني، غير مقسّى",
+    "parts.family.hex_bolt_gost": "برغي سداسي الرأس",
+    "parts.family.hex_nut_gost": "صامولة سداسية",
+    "parts.family.hex_nut_thin_gost": "صامولة سداسية رفيعة",
+    "parts.family.set_screw_gost": "برغي تثبيت بتجويف سداسي، طرف مسطح",
+    "parts.family.socket_head_cap_screw_gost": "برغي برأس أسطواني بتجويف سداسي",
+    "parts.family.washer_gost": "حلقة مسطحة، درجة المنتج A",
+    "parts.family.washer_large_gost": "حلقة مسطحة كبيرة، درجة المنتج A"
+  },
+  "bs": {
+    "parts.family.hex_nut_gost": "Šestougaona matica",
+    "parts.family.set_screw_gost": "Bezglavi vijak s imbusom, ravni vrh",
+    "parts.family.socket_head_cap_screw_gost": "Vijak s cilindričnom glavom i imbusom"
+  },
+  "ca": {
+    "parts.family.hex_nut_gost": "Femella hexagonal",
+    "parts.family.set_screw_gost": "Cargol de pressió amb hexàgon interior, punta plana",
+    "parts.family.socket_head_cap_screw_gost": "Cargol cilíndric amb hexàgon interior"
+  },
+  "cs": {
+    "parts.family.hex_nut_gost": "Šestihranná matice",
+    "parts.family.set_screw_gost": "Stavěcí šroub s vnitřním šestihranem, s plochým koncem",
+    "parts.family.socket_head_cap_screw_gost": "Šroub s válcovou hlavou a vnitřním šestihranem"
+  },
+  "da": {
+    "parts.family.hex_nut_gost": "Sekskantmøtrik",
+    "parts.family.set_screw_gost": "Stilleskrue med indvendig sekskant, flad spids",
+    "parts.family.socket_head_cap_screw_gost": "Cylinderskrue med indvendig sekskant"
+  },
+  "de": {
+    "parts.family.dowel_pin_gost": "Zylinderstift, ungehärtet",
+    "parts.family.hex_bolt_gost": "Sechskantschraube",
+    "parts.family.hex_nut_gost": "Sechskantmutter",
+    "parts.family.hex_nut_thin_gost": "Sechskantmutter, niedrig",
+    "parts.family.set_screw_gost": "Gewindestift mit Innensechskant und Kegelstumpf",
+    "parts.family.socket_head_cap_screw_gost": "Zylinderschraube mit Innensechskant",
+    "parts.family.washer_gost": "Unterlegscheibe, Produktklasse A",
+    "parts.family.washer_large_gost": "Unterlegscheibe, große Reihe, Produktklasse A"
+  },
+  "es": {
+    "parts.family.hex_nut_gost": "Tuerca hexagonal",
+    "parts.family.set_screw_gost": "Prisionero con hexágono interior, punta plana",
+    "parts.family.socket_head_cap_screw_gost": "Tornillo cilíndrico con hexágono interior"
+  },
+  "fi": {
+    "parts.family.hex_nut_gost": "Kuusiomutteri",
+    "parts.family.set_screw_gost": "Kuusiokolostoppiruuvi, tasapää",
+    "parts.family.socket_head_cap_screw_gost": "Kuusiokoloruuvi"
+  },
+  "fr": {
+    "parts.family.hex_nut_gost": "Écrou hexagonal",
+    "parts.family.set_screw_gost": "Vis sans tête à six pans creux, bout plat",
+    "parts.family.socket_head_cap_screw_gost": "Vis à tête cylindrique à six pans creux"
+  },
+  "gl": {
+    "parts.family.hex_nut_gost": "Porca hexagonal",
+    "parts.family.set_screw_gost": "Parafuso sen cabeza de hexágono interior, punta plana",
+    "parts.family.socket_head_cap_screw_gost": "Parafuso de cabeza cilíndrica con hexágono interior"
+  },
+  "he": {
+    "parts.family.dowel_pin_gost": "פין גלילי, לא מוקשה",
+    "parts.family.hex_bolt_gost": "בורג ראש משושה",
+    "parts.family.hex_nut_gost": "אום משושה",
+    "parts.family.hex_nut_thin_gost": "אום משושה נמוך",
+    "parts.family.set_screw_gost": "בורג אלן ללא ראש, קצה שטוח",
+    "parts.family.socket_head_cap_screw_gost": "בורג ראש גלילי עם משושה פנימי",
+    "parts.family.washer_gost": "דסקית שטוחה, דרגת מוצר A",
+    "parts.family.washer_large_gost": "דסקית שטוחה גדולה, דרגת מוצר A"
+  },
+  "hr": {
+    "parts.family.hex_nut_gost": "Šesterokutna matica",
+    "parts.family.set_screw_gost": "Bezglavi vijak s unutarnjim šesterokutom, ravni vrh",
+    "parts.family.socket_head_cap_screw_gost": "Vijak s cilindričnom glavom i unutarnjim šesterokutom"
+  },
+  "hu": {
+    "parts.family.hex_nut_gost": "Hatlapú anya",
+    "parts.family.set_screw_gost": "Belső kulcsnyílású szárnélküli csavar, lapos végű",
+    "parts.family.socket_head_cap_screw_gost": "Belső kulcsnyílású hengeresfejű csavar"
+  },
+  "id": {
+    "parts.family.hex_nut_gost": "Mur segi enam",
+    "parts.family.set_screw_gost": "Sekrup set soket segi enam, ujung datar",
+    "parts.family.socket_head_cap_screw_gost": "Sekrup kepala soket (cap screw)"
+  },
+  "it": {
+    "parts.family.hex_nut_gost": "Dado esagonale",
+    "parts.family.set_screw_gost": "Grano a esagono incassato, punta piana",
+    "parts.family.socket_head_cap_screw_gost": "Vite a testa cilindrica con esagono incassato"
+  },
+  "ja": {
+    "parts.family.dowel_pin_gost": "平行ピン、焼入れなし",
+    "parts.family.hex_bolt_gost": "六角ボルト",
+    "parts.family.hex_nut_gost": "六角ナット",
+    "parts.family.hex_nut_thin_gost": "六角低ナット",
+    "parts.family.set_screw_gost": "六角穴付き止めねじ 平先",
+    "parts.family.socket_head_cap_screw_gost": "六角穴付きボルト",
+    "parts.family.washer_gost": "平座金、部品等級 A",
+    "parts.family.washer_large_gost": "大形平座金、部品等級 A"
+  },
+  "ka": {
+    "parts.family.hex_nut_gost": "ექვსწახნაგა ქანჩი",
+    "parts.family.set_screw_gost": "საყრდენი ხრახნი შიდა ექვსწახნაგით, ბრტყელი ბოლოთი",
+    "parts.family.socket_head_cap_screw_gost": "ცილინდრულთავიანი ხრახნი შიდა ექვსწახნაგით"
+  },
+  "ko": {
+    "parts.family.dowel_pin_gost": "평행 핀, 비열처리",
+    "parts.family.hex_bolt_gost": "육각 볼트",
+    "parts.family.hex_nut_gost": "육각 너트",
+    "parts.family.hex_nut_thin_gost": "육각 낮은 너트",
+    "parts.family.set_screw_gost": "육각 구멍붙이 멈춤나사, 평형 끝",
+    "parts.family.socket_head_cap_screw_gost": "육각 구멍붙이 볼트",
+    "parts.family.washer_gost": "평와셔, 부품 등급 A",
+    "parts.family.washer_large_gost": "대형 평와셔, 부품 등급 A"
+  },
+  "lv": {
+    "parts.family.hex_nut_gost": "Sešstūra uzgrieznis",
+    "parts.family.set_screw_gost": "Bezgalvas skrūve ar iekšējo sešstūri, plakans gals",
+    "parts.family.socket_head_cap_screw_gost": "Cilindriskgalvas skrūve ar iekšējo sešstūri"
+  },
+  "ms": {
+    "parts.family.hex_nut_gost": "Nat heks",
+    "parts.family.set_screw_gost": "Skru penetap soket heks, hujung rata",
+    "parts.family.socket_head_cap_screw_gost": "Skru kepala soket"
+  },
+  "nb": {
+    "parts.family.hex_nut_gost": "Sekskantmutter",
+    "parts.family.set_screw_gost": "Settskrue med innvendig sekskant, flat ende",
+    "parts.family.socket_head_cap_screw_gost": "Sylinderskrue med innvendig sekskant"
+  },
+  "nl": {
+    "parts.family.hex_nut_gost": "Zeskantmoer",
+    "parts.family.set_screw_gost": "Stelschroef met inbus, vlakke punt",
+    "parts.family.socket_head_cap_screw_gost": "Cilinderkopschroef met inbus"
+  },
+  "pl": {
+    "parts.family.hex_nut_gost": "Nakrętka sześciokątna",
+    "parts.family.set_screw_gost": "Wkręt dociskowy z gniazdem sześciokątnym z końcem płaskim",
+    "parts.family.socket_head_cap_screw_gost": "Śruba z łbem walcowym z gniazdem sześciokątnym"
+  },
+  "pt-BR": {
+    "parts.family.hex_nut_gost": "Porca sextavada",
+    "parts.family.set_screw_gost": "Parafuso sem cabeça com sextavado interno, ponta plana",
+    "parts.family.socket_head_cap_screw_gost": "Parafuso de cabeça cilíndrica com sextavado interno"
+  },
+  "ro": {
+    "parts.family.hex_nut_gost": "Piuliță hexagonală",
+    "parts.family.set_screw_gost": "Șurub de fixare cu locaș hexagonal, vârf plat",
+    "parts.family.socket_head_cap_screw_gost": "Șurub cu cap cilindric și locaș hexagonal"
+  },
+  "ru": {
+    "parts.family.dowel_pin_gost": "Цилиндрический штифт, незакалённый",
+    "parts.family.hex_bolt_gost": "Болт с шестигранной головкой",
+    "parts.family.hex_nut_gost": "Шестигранная гайка",
+    "parts.family.hex_nut_thin_gost": "Шестигранная гайка низкая",
+    "parts.family.set_screw_gost": "Установочный винт с внутренним шестигранником и плоским концом",
+    "parts.family.socket_head_cap_screw_gost": "Винт с цилиндрической головкой и внутренним шестигранником",
+    "parts.family.washer_gost": "Плоская шайба, класс точности А",
+    "parts.family.washer_large_gost": "Увеличенная шайба, класс точности А"
+  },
+  "sr": {
+    "parts.family.hex_nut_gost": "Шестоугаона навртка",
+    "parts.family.set_screw_gost": "Завртањ без главе са унутрашњим шестоугаоником, равног врха",
+    "parts.family.socket_head_cap_screw_gost": "Завртањ са цилиндричном главом и унутрашњим шестоугаоником"
+  },
+  "sv": {
+    "parts.family.hex_nut_gost": "Sexkantsmutter",
+    "parts.family.set_screw_gost": "Stoppskruv med insex, plan ände",
+    "parts.family.socket_head_cap_screw_gost": "Cylinderskruv med insex"
+  },
+  "tr": {
+    "parts.family.hex_nut_gost": "Altıgen somun",
+    "parts.family.set_screw_gost": "Alyan tespit vidası, düz uçlu",
+    "parts.family.socket_head_cap_screw_gost": "Alyan başlı cıvata"
+  },
+  "uk": {
+    "parts.family.dowel_pin_gost": "Циліндричний штифт, незагартований",
+    "parts.family.hex_bolt_gost": "Болт із шестигранною головкою",
+    "parts.family.hex_nut_gost": "Шестигранна гайка",
+    "parts.family.hex_nut_thin_gost": "Шестигранна гайка низька",
+    "parts.family.set_screw_gost": "Установчий гвинт із шестигранним гніздом, плоский кінець",
+    "parts.family.socket_head_cap_screw_gost": "Гвинт із циліндричною головкою та шестигранним гніздом",
+    "parts.family.washer_gost": "Плоска шайба, клас точності А",
+    "parts.family.washer_large_gost": "Збільшена шайба, клас точності А"
+  },
+  "vi": {
+    "parts.family.dowel_pin_gost": "Chốt trụ, không tôi",
+    "parts.family.hex_bolt_gost": "Bu lông đầu lục giác",
+    "parts.family.hex_nut_gost": "Đai ốc lục giác",
+    "parts.family.hex_nut_thin_gost": "Đai ốc lục giác mỏng",
+    "parts.family.set_screw_gost": "Vít trí lục giác chìm, đầu bằng",
+    "parts.family.socket_head_cap_screw_gost": "Bu lông lục giác chìm đầu trụ",
+    "parts.family.washer_gost": "Vòng đệm phẳng, cấp sản phẩm A",
+    "parts.family.washer_large_gost": "Vòng đệm phẳng lớn, cấp sản phẩm A"
+  },
+  "zh": {
+    "parts.family.dowel_pin_gost": "圆柱销，不淬硬",
+    "parts.family.hex_bolt_gost": "六角头螺栓",
+    "parts.family.hex_nut_gost": "六角螺母",
+    "parts.family.hex_nut_thin_gost": "六角薄螺母",
+    "parts.family.set_screw_gost": "内六角平端紧定螺钉",
+    "parts.family.socket_head_cap_screw_gost": "内六角圆柱头螺钉",
+    "parts.family.washer_gost": "平垫圈，A 级",
+    "parts.family.washer_large_gost": "大垫圈，A 级"
+  },
+  "zh-TW": {
+    "parts.family.hex_nut_gost": "六角螺母",
+    "parts.family.set_screw_gost": "內六角平端緊定螺釘",
+    "parts.family.socket_head_cap_screw_gost": "內六角圓柱頭螺釘"
+  }
+}
