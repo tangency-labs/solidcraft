@@ -2111,10 +2111,6 @@ fn remove_old_loop_vertices(b: &mut Brep, vu: VertexuseId) -> Result<()> {
     crate::topology::brep::p1::rm_and_del_old_loop_vertices(b, vu)
 }
 
-/// `seam` (from `IsDomainBoundary` on `domain`, the face surface's natural domain) where
-/// the face's surface is closed across that boundary (`IsClosed` in its direction), else
-/// [`SurfParamType::Neither`]: only a closed direction has another side to carry the
-/// second edge use's trim to (WR-361; upstream takes any boundary for a seam).
 /// Not upstream (WR-361): drops the UV trim curves of every edge use of `face`'s loops
 /// (the lazy caches of their edges' curves on the face, rebuilt when next asked for),
 /// for a face whose surface is no longer in the parameterisation they were made in.
@@ -2138,6 +2134,10 @@ fn drop_face_trims(b: &mut Brep, face: FaceId) -> Result<()> {
     Ok(())
 }
 
+/// `seam` (from `IsDomainBoundary` on `domain`, the face surface's natural domain) where
+/// the face's surface is closed across that boundary (`IsClosed` in its direction), else
+/// [`SurfParamType::Neither`]: only a closed direction has another side to carry the
+/// second edge use's trim to (WR-361; upstream takes any boundary for a seam).
 fn seam_if_closed(
     k: &Kernel,
     b: &Brep,

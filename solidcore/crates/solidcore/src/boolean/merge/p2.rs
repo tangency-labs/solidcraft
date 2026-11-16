@@ -21,11 +21,12 @@
 //!   other edge uses' UV trims where the new edge runs on `MergeEdge`'s copy of the
 //!   other edge's curve over the same interval (the fork's
 //!   `sm_CopyUVTrimCurvesOfOtherFace`). Curves have no mates here, so "a copy of its
-//!   curve" is checked as the same points and first derivatives at the interval's ends
-//!   and middle: the points alone cannot tell a closed curve from the same curve run
-//!   the other way round (a circle's ends and middle are the same points either way),
-//!   and a trim copied onto the reversed curve runs backwards along its edge use
-//!   (#17285). Upstream builds the face without them.
+//!   curve" is checked as the same definition ([`Curve::same_definition`](crate::curve::curve::Curve::same_definition):
+//!   the same kind and equal defining data), which is the same curve at every
+//!   parameter. Points compared at some parameters cannot tell a closed curve from the
+//!   same curve run the other way round (a circle's ends and middle are the same points
+//!   either way), and a trim copied onto the reversed curve runs backwards along its
+//!   edge use (#17285). Upstream builds the face without them.
 //! - Operands, mates and notification storage are borrowed explicitly, as in
 //!   [`p1`] and [`p5`](super::p5); arena ids replace pointers.
 //!   `MergeEdge` and `MakeFaceuse` work on concrete [`Brep`] operands and the
@@ -1006,9 +1007,9 @@ pub fn make_faceuse_attempt_with(
 /// `other_fu`, the UV trim curves of the other edge uses they stand for. A trim is
 /// parameterised by its edge's curve on its face's surface, so it stays exact where
 /// the new edge is the primary mate of the other edge, runs on a copy of its curve
-/// (the same points and first derivatives at its interval's ends and middle: a closed
-/// curve run the other way round has the same points there, its derivatives reversed)
-/// over the same interval, has at least the other edge's tolerance, and the
+/// (the same definition, [`Curve::same_definition`](crate::curve::curve::Curve::same_definition):
+/// a closed curve run the other way round, or a re-fit, is not one) over the same
+/// interval, has at least the other edge's tolerance, and the
 /// new face lies on the copy `MakeFaceuse` made of the other face's surface. The caller
 /// calls it only when that copy keeps the other surface's parameterisation (not for a
 /// B-spline recognised as an analytic in its own parameterisation). The new face's
@@ -1079,20 +1080,10 @@ fn copy_uv_trim_curves_of_other_face(
         else {
             continue;
         };
-        // (MergeEdge's copy of the other edge's curve: the same points and first
-        // derivatives; the points alone take a closed curve run the other way round, whose
-        // ends and middle are the same points, for a copy)
-        let mut same = other_curve.dim() == new_curve.dim()
-            && other_curve.natural_interval() == new_curve.natural_interval();
-        for t in [interval.min(), interval.mid(), interval.max()] {
-            if !same {
-                break;
-            }
-            let from_left = interval.t_left_eval(t);
-            same = other_curve.evaluate(k, t, 1, from_left, false)?
-                == new_curve.evaluate(k, t, 1, from_left, false)?;
-        }
-        if !same {
+        // MergeEdge's copy of the other edge's curve, by definition: the same kind and
+        // equal defining data, so the same point at every parameter (a closed curve run
+        // the other way round, or a re-fit, has other data and keeps MakeFace's trim)
+        if !other_curve.same_definition(new_curve) {
             continue;
         }
         let copy = trim.copy(k)?;
@@ -1980,6 +1971,93 @@ mod tests {
 
     const B: H = H(9, 0);
     const OTHER: H = H(9, 1);
+
+    /// The operand-trim copy takes an edge's curve for `MergeEdge`'s copy of the other
+    /// edge's curve only by definition (`Curve::same_definition`), never on samples:
+    /// a curve that agrees with the other one in points and first derivatives at its
+    /// interval's ends and middle, but not between, is refused, as is the same circle
+    /// run the other way round (#17285) and a NaN definition. `MergeEdge`'s own copy
+    /// (`Curve::copy`) of a B-spline, line and circle is accepted.
+    #[test]
+    fn operand_trim_copy_accepts_only_the_same_curve_by_definition() {
+        use crate::curve::curve::Curve;
+        use crate::curve::ellipse::{Ellipse, EllipseOptions};
+        use crate::curve::line::Line;
+        use crate::geom::extent1d::Extent1d;
+        use crate::math::{Point3, Vec3};
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::CPoint;
+
+        let k = Kernel::default();
+        // a clamped cubic over [0, 1] with knots every 0.1: P3's basis function lives on
+        // (0, 0.4), so moving P3 changes nothing at 0, 0.5 or 1, not even the first
+        // derivatives (those at 0 depend on P0 and P1 only)
+        let knots = [
+            0.0, 0.0, 0.0, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.0, 1.0, 1.0,
+        ];
+        let cpts = |lift: f64| -> Vec<CPoint> {
+            (0..13)
+                .map(|i| {
+                    let x = f64::from(i);
+                    let z = if i == 3 { lift } else { 0.0 };
+                    CPoint::from_point(Vec3::new(x, (x * 0.7).sin(), z))
+                })
+                .collect()
+        };
+        let spline = |lift: f64| {
+            let nurb = NurbCurve::new(cpts(lift), 3, knots.to_vec()).unwrap();
+            Curve::from(BSplineCurve::from_nurb(nurb, 3, false))
+        };
+        let (a, b) = (spline(0.0), spline(1.0e-3));
+        for t in [0.0, 0.5, 1.0] {
+            assert_eq!(
+                a.evaluate(&k, t, 1, t > 0.0, false).unwrap(),
+                b.evaluate(&k, t, 1, t > 0.0, false).unwrap(),
+                "the two splines must agree at the samples a sampled check would read"
+            );
+        }
+        assert_ne!(
+            a.evaluate(&k, 0.2, 0, false, false).unwrap(),
+            b.evaluate(&k, 0.2, 0, false, false).unwrap()
+        );
+        assert!(
+            !a.same_definition(&b),
+            "a curve equal only at samples is refused"
+        );
+        assert!(a.same_definition(&a.copy(&k).unwrap()));
+        let nan = spline(f64::NAN);
+        assert!(!nan.same_definition(&nan.copy(&k).unwrap()), "NaN refuses");
+
+        // the same circle either way round: the same points at 0, 180 and 360 degrees
+        let circle = |y: Vec3| {
+            let e = Ellipse::new_circle(
+                &k,
+                Point3::ZERO,
+                Vec3::X,
+                y,
+                Extent1d::from_raw(0.0, 360.0),
+                2.0,
+                &EllipseOptions::default(),
+            )
+            .unwrap();
+            Curve::from(e)
+        };
+        let (fwd, rev) = (circle(Vec3::Y), circle(Vec3::new(0.0, -1.0, 0.0)));
+        assert!(
+            !fwd.same_definition(&rev),
+            "a circle run backwards is refused"
+        );
+        assert!(fwd.same_definition(&fwd.copy(&k).unwrap()));
+
+        let line = Curve::from(Line::from_points(
+            Point3::ZERO,
+            Point3::new(5.0, 0.0, 0.0),
+            3,
+        ));
+        assert!(line.same_definition(&line.copy(&k).unwrap()));
+        assert!(!line.same_definition(&a), "different kinds are refused");
+    }
 
     #[test]
     fn reverse_orientation_maps_unknown_to_same_as_the_macro() {
