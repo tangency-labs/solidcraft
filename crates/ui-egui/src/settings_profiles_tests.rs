@@ -914,7 +914,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 104);
+    assert_eq!(expected.len(), 105);
     assert_eq!(actual, expected);
 }
 
