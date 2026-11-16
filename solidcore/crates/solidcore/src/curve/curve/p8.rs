@@ -453,9 +453,10 @@ impl Curve {
     /// before the body reaches it, and a `None` tolerance builds as that method does.
     /// A populated slot must also match its supplied owner tolerance. These hints
     /// govern the two intersection-tree slots only; nested coincidence and drop
-    /// routines retain their existing curve-owner context. Coplanar circles
-    /// overlapping past touching by less than `contact_tol` touch at one point
-    /// (WR-787, #15429; [`analytic_curve_intersect`]); zero keeps upstream's crossings.
+    /// routines retain their existing curve-owner context. Coplanar circles, or a circle
+    /// and a line in its plane, overlapping past touching by less than `contact_tol` touch
+    /// at one point (WR-787, #15429, #14599; [`analytic_curve_intersect`]); zero keeps
+    /// upstream's crossings.
     ///
     /// # Errors
     ///

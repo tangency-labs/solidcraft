@@ -47,7 +47,6 @@ use solidcore::Kernel;
 const SOLIDCRAFT_C494A18: &[&str] = &[
     "analytic_copy_keeps_parameterization",
     "analytic_inversion_answers_apart",
-    "boolean_splits_definition_across_split",
     "boolean_union_refuses_solid_leak",
     "boolean_vertex_by_best_crossing",
     "box_face_failures_propagate",
@@ -63,8 +62,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "cylinder_rebuild_mean_radius",
     "degenerate_proto_edge_in_one_vertex",
     "degen_param_tiebreak_uses_actual_param",
-    "delete_vertex_joins_seam_iso_curve",
-    "edge_check_orders_tangent_faces",
     "edgeuse_convexity_propagates_step_off_failure",
     "ellipse_step_interval_checks",
     "ellipse_trim_seam_lines_span_cone_height",
@@ -107,7 +104,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "offset_open_edge_second_trim_point",
     "offset_resolve_crossing_loops",
     "offset_stitch_at_body_tolerance",
-    "offset_swap_uv_extended_distance",
     "point_class_gap_3d_propagates_no_drop_error",
     "point_on_start_point_squared_tolerance",
     "point_solve_keeps_triangle_guess",
@@ -135,10 +131,7 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "transform_model_size_from_body_box",
     "transform_scales_each_tolerance",
     "uv_trim_corner_end_points_only",
-    "validate_tolerances_fixes_reported_gaps",
     "validation_does_not_make_uv_trims",
-    "volume_lift_third_derivative_terms",
-    "volume_representational_end_continuities",
 ];
 
 /// The volume 729f893 gives the rounded body at accuracy 1e-7.

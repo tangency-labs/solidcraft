@@ -557,14 +557,6 @@ pub struct UpstreamFixes {
     pub offset_edges_keep_source_tolerance: bool,
     /// With extended convex edges, `piecewise_merge` relates the mated offsets of a manifold edge instead of intersecting them again (WR-344, #469; the fork's tangency-labs/smlib@9c21c9a (was 85bbfaf)), except an edge whose mate failed in `EdgeuseOffset`, which is intersected even where it is a tangent sector (#1795; the fork's tangency-labs/smlib@9d8ace9). The merge then no longer refuses some broken offsets, and the difference hands back a wall that bounds nothing (#1818; the fork's `ShellBrep` returns it, its C API refuses it as `SMLIB_ERR_NOT_SOLID`); the shell's refusal of a result that is no closed manifold solid is unconditional, whatever this flag says. Needs no other flag.
     pub offset_extended_edges_mated: bool,
-    /// `SmOffsetSurface::SwapUV` negates the distance once for the extended surface and
-    /// again for the base, so an owning offset that has a stored extension comes back
-    /// with its distance unchanged and lies on the wrong side of its base; with this
-    /// fix the base's successful swap keeps the single negation the extended surface's
-    /// swap made, and `Offset(uv)` after the swap is the pre-swap `Offset(vu)` (WR-164).
-    /// An offset without an extension still negates once. Off by default for pinned C++
-    /// parity.
-    pub offset_swap_uv_extended_distance: bool,
     /// Thickening a sheet (`ShellBrep` with `bCreateOffsetSolid` on a non-manifold input) puts every planar side wall onto its plane (the fork's `sm_PutPlanarFaceOnItsPlane`) and deletes the old surface's seam it leaves as a slit, where upstream keeps each wall as the ruled surface between the lamina edge and its offset: a tube's end rings are `SmPlane`s with two loops, not `SmSurfOfRevolution`s (WR-564, #1599; the fork's tangency-labs/smlib#62).
     pub thicken_planar_side_walls: bool,
     /// A face a Boolean takes over from its second operand keeps that operand's exact UV trims (WR-361, #488).
@@ -583,20 +575,10 @@ pub struct UpstreamFixes {
     pub degen_param_tiebreak_uses_actual_param: bool,
     /// `RemoveCoincidentNoEdgeProtoVertex` reports a miss as `false` (WR-73, #848).
     pub proto_vertex_miss_is_false: bool,
-    /// `SmEdge::AssertValid` test 9 orders the faces round an edge by the direction to each face's point 20 edge tolerances into it (square to the edge) where two of them leave the edge within `SM_ANG_TOL_DEG` of each other, instead of by the binormals alone, which tie for faces tangent along the edge (a cylinder resting on a plane, kept by a boolean as a four-face edge) and fail the valid order (WR-540, #383; the fork's tangency-labs/smlib@5533bbb).
-    pub edge_check_orders_tangent_faces: bool,
     /// `SmEllipse::AdjustSTEPInterval` rejects inverted STEP edits and collapsed or non-finite converted NURBS intervals before mutation, and revolution edits install their domain only after their generator accepts it (WR-211, #428).
     pub ellipse_step_interval_checks: bool,
     /// `SmSurfaceCache::GetSurfaceContinuity` checks the last internal V knot (`iv + 1 < rVConts.GetSize()`) rather than skipping it (`iv + 1 < rVConts.GetSize() - 1`) (WR-42).
     pub surface_continuity_checks_last_v_knot: bool,
-    /// `smvol_LiftThirdDerivative` (surface and volume forms) uses `Dxzz` instead of
-    /// `Dxxz` for the `x z^2` outer-derivative term in `Duuv`, `Duvv`, `Duuw`, `Duww`,
-    /// `Dvvw`, and `Dvww`, and builds the volume form's `Duww` and `Dvww` from
-    /// `Fuw`/`Fw` and `Fvw`/`Fw` instead of `Fuv`/`Fv` and `Fvv`/`Fv` (WR-45, #2165;
-    /// see `plan/upstream-issues/WR-45--addendum-2026-10-31-lift-third-derivative-terms.md`).
-    /// Propagated through `EvalOptions::fixes` across compound volume and
-    /// `SrfInVolume` / `CrvInVolume` evaluations. Off by default for pinned C++ parity.
-    pub volume_lift_third_derivative_terms: bool,
     /// `SmSurface::LocalSurfaceIntersect`'s out-of-bounds boundary retries guard both
     /// the minimum and maximum boundary tests of the second through fourth parameter
     /// branches (`v` of `this`, `u` of `other`, `v` of `other`) with `!bFoundSolution`,
@@ -631,12 +613,6 @@ pub struct UpstreamFixes {
     /// Off by default for pinned C++ parity. This is not the WR-406 trim-reversal check:
     /// validation still repairs existing trims as before.
     pub validation_does_not_make_uv_trims: bool,
-    /// `SmBrep::ValidateAndUpdateTolerances` grows a vertex's tolerance when one of its
-    /// edge use's vertex/edge or vertex/face gaps is over half the tolerance, the test its
-    /// report applies. Upstream grows it only past the whole tolerance, so the update
-    /// mode reports a gap between the two as bad and never fixes it (WR-679, #2111; the
-    /// fork's tangency-labs/smlib@8c4bda5 by bherbruck).
-    pub validate_tolerances_fixes_reported_gaps: bool,
     /// Before the piecewise merge, `do_extended_offset` rebuilds every offset face whose loops cross from the stretches of its loops that bound it (WR-345, #854).
     pub offset_resolve_crossing_loops: bool,
     /// [`crate::topology::edgeuse::p2::is_convex_radial_sector`]
@@ -749,8 +725,6 @@ pub struct UpstreamFixes {
     pub cover_refuses_folded_continuation: bool,
     /// A boolean vertex takes its position from the intersection curve that crosses its edge most steeply (WR-410, #1059).
     pub boolean_vertex_by_best_crossing: bool,
-    /// `SmProtoTopologyManager::UpdateEdges` splits a coincident edge definition on a split edge that runs across the split point (away from both its ends, on its curve) there, with its proto edge (`SmProtoEdge::Split`), and classifies each part to the piece it lies on; upstream re-points the whole definition to the piece under its midpoint, whose vertices are not its ends, and the imprint finds no vertex for them (`SM_ERR_NULL_POINTER`, 1006) (WR-533; the fork's tangency-labs/smlib@f11d0ac).
-    pub boolean_splits_definition_across_split: bool,
     /// `SmProtoEdge::Resolve` splits a proto edge from a proto vertex back to itself whose curve ends find two of its vertex definitions at each other definition of that proto vertex lying on the curve (`DropPoint` within the larger of the two tolerances, farther than twice it from both ends), then resolves the proto vertex; upstream keeps the edge whole past that third vertex, a vertex of its own face, and the merge fails (`SM_ERR`; two equal tubes a hair apart end to end) (WR-579, #1517; the fork's tangency-labs/smlib@9eec159).
     pub proto_edge_splits_at_captured_vertices: bool,
     /// `SmProtoEdge::Split` gives the new upper child proto edge the split parameter to this
@@ -773,20 +747,6 @@ pub struct UpstreamFixes {
     pub transform_model_size_from_body_box: bool,
     /// `SmTorus::IsNurbSurfaceTorus` and `SmSphere::IsNurbSurfaceSphere` keep the NURB they tested (rebuilding the analytic data from it, as `SetFromGwNurb` does), not the one made from the fitted circles (~1e-11 off), and the sphere test takes a half meridian within `180 + 360 * SM_EFF_ZERO` degrees, not `180 + SM_EFF_ZERO` (WR-493, #1433; tangency-labs/smlib@7ea6a96). The sphere's sweep interval is its polar curve's, so a small corner sphere passes `SmSurfOfRevolution` tests #6 and #7 (#2073; not in the fork).
     pub found_torus_sphere_keep_tested_nurb: bool,
-    /// `SmBSplineVolume::CalculateContinuitiesSimple` with `bCalcGeometric == FALSE`
-    /// sets both end knots (`0` and `knot_cnt - 1`) to `SM_CT_DISCONTINUOUS` (matching
-    /// its `SmBSplineVolume.h` contract, the `bCalcGeometric == TRUE` branch, and
-    /// `SmSurface::CalculateContinuities`) and evaluates representational knot
-    /// continuity (`degree - mult`) and `reMinContinuity` over interior knots
-    /// `1..knot_cnt - 1` only (leaving `reMinContinuity = SM_CT_CINFINITY` on a
-    /// single-span volume), instead of filling `0..knot_cnt - 1` into a zero-cleared
-    /// (`SM_CT_UNDEFINED`) array — which left the last knot `SM_CT_UNDEFINED`, set
-    /// knot `0` to `SM_CT_C0` on every clamped volume, lowered `reMinContinuity` to
-    /// `SM_CT_C0`, and made `HasDiscontinuitiesSimple(..., FALSE)` report
-    /// discontinuities on smooth single-span and `C1`/`C2` volumes (WR-49, #2151; see
-    /// `plan/upstream-issues/WR-49--addendum-2026-10-31-representational-end-continuities.md`).
-    /// Off by default for pinned C++ parity.
-    pub volume_representational_end_continuities: bool,
     /// `FindPolygonGuess` keeps a suspicious control-net triangle guess as a candidate against the nearest control point's, and returns the nearer one on the surface, so a rational surface whose control points are farther apart than its neighbouring parts does not lose a good guess (WR-444, #1164).
     pub point_solve_keeps_triangle_guess: bool,
     /// `SmEdgeDefinition::Imprint` continues an intersection edge's 3d and UV curves, each by the polynomial of its own end span, to a proto vertex that lies a few tolerances past the curve's end, so the edge reaches its vertex (internal thread cuts; WR-453, #410; tangency-labs/smlib bf5d3ae (was a8caccd)). The end goes to its proto vertex's position only when that proto vertex is one vertex in each B-rep, else to its own final vertex (WR-498, #1480; tangency-labs/smlib 0b1b945 (was ffaf4e8)).
@@ -851,8 +811,6 @@ pub struct UpstreamFixes {
     pub fillet_variable_span_follows_fillet: bool,
     /// `SmFace::CalculateTightBoundingBox` searches a trimmed face's own extreme inside its trim (subdividing the UV domain from the vertex and edge extremes, bounded at depth 16 / 4096 cells, an undecided cell divided at the surface's knot inside it nearest its middle, else at its middle), not only the surface's global extreme, so a face whose surface peaks outside the trim is not boxed too small (WR-588, #1799; tangency-labs/smlib@beb6061 (was 9d44c1b)), nor one whose rational surface has knots off the domain's dyadic points too large (WR-651; tangency-labs/smlib@326de73); only points classified inside the face (`SM_PC_FACE`), not on its edges or vertices, count as the face's, so a rounded box corner's sphere octant is not boxed past its arcs (1.0000243 for 1; tangency-labs/smlib@95bf434).
     pub face_tight_box_searches_trim: bool,
-    /// `SmBrep::DeleteTopologicalVertex` joins an edge whose curve is a curve on a B-spline-kind surface along a UV line of constant u or v (the seam an extrusion leaves on its wall) as that surface's iso curve over the edge, the same curve exactly, so the seam of a full-turn face that a union runs on through a covered face is one edge (WR-598; the fork's tangency-labs/smlib@829b982). Upstream casts the curve's copy to `SmBSplineCurve` and dereferences the null; without the flag the port leaves the vertex in place (the routine's silent `SM_ERR`).
-    pub delete_vertex_joins_seam_iso_curve: bool,
     /// `SmPrimitiveCreation::CreateBox` returns the status of each face it makes (a plane that cannot be made, a face whose making fails even after the face was made, such as a box far smaller than the tolerance whose top face closes up on its bottom one) and of its `StitchAndOrient`, and makes no face on a side of zero extent. Upstream drops every one of those statuses and returns success with whatever faces were made (WR-596; the fork's tangency-labs/smlib@0df62c8, 35008b1 and 449c81c, `AddBoxFace`).
     pub box_face_failures_propagate: bool,
     /// `SmBrep::DeleteFilletFace` removes a ring fillet (a round all the way round a boss's foot or rim: two closed tangent rails, one vertex each, and at most one seam) with the fork's `SmRingFilletRemoval`: the sharp edge is the intersection of the two tangent faces' surfaces within their natural domains (an exact circle for a boss), the tangent face's seam runs on to it along its line, and the rails become it; a removal that would need a surface or a curved edge continued past its domain is refused before the B-rep changes. Upstream takes four-sided fillets only, and fails on a ring (WR-605; SolidCraft change, tangency-labs/smlib 52bfef0, with 661f79c).

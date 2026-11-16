@@ -1657,6 +1657,35 @@ fn a_traced_cut_meeting_an_earlier_cut_removes_its_tool() {
     one_valid_solid_of_volume(&r, [46, 132, 88], want, 1e-9);
 }
 
+/// #14599's cut as SolidCraft passed it: a 0.3 x 6 x 5 rib less a tool as long as the rib, whose
+/// profile is the rib's top, its side x = -19.1 down to z = 2.5 and a round of radius 10.5667
+/// tangent to that side at z = 2.5. The rib's side runs along the round's tangent line at the
+/// front and lies 5.8e-10 inside the round at the back, where the two crossed 2.2e-4 apart; the
+/// cut was not a solid. The tool lies inside the rib, so the cut removes exactly its volume and
+/// leaves the rib's six faces with the round in place of its top.
+#[test]
+fn a_traced_cut_whose_round_is_tangent_to_a_thin_ribs_side_removes_its_tool() {
+    all_fixes();
+    let body = traced_operands("issue_14599_cut_flush_with_a_thin_rib");
+    let want = body("target").volume(1e-11).unwrap() - body("tool").volume(1e-11).unwrap();
+    let r = boolean(body("target"), body("tool"), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(&r, [6, 12, 8], want, 1e-9);
+    // the vertices are the rib's bottom corners, its top corners on the far side and the
+    // round's tangent points at z = 2.5, none at the second crossing 1.1e-4 above them
+    let (_, brep) = common::kernel_copy(&r);
+    for &v in brep.vertex_list() {
+        let z = solidcore::query::api_queries::vertex_get_point(&brep, v)
+            .unwrap()
+            .z;
+        assert!(
+            [0.0, 2.5, 5.0].iter().any(|h| (z - h).abs() < 1e-6),
+            "a vertex at z = {z}"
+        );
+    }
+}
+
 /// #16935's intersect as SolidCraft passed it. Both bodies are a decagon of side 10, 10 tall, with
 /// a 6 tall top tapered at 45°. The target has a 6 mm groove down the middle of each slope, its
 /// edges rounded at 1 mm; the tool has the ten edges between the slopes rounded at 5 mm. Near the
