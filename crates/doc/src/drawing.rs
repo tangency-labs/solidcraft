@@ -6,9 +6,9 @@
 //!
 //! - Each drawing has an **id**, unique among its design's drawings, and a design lists its
 //!   drawings by name, then id ([`in_design`]): nothing to merge when two people add drawings.
-//! - **Sources** are the designs it draws. For now a drawing draws the design it is in: at most one
-//!   source, an id and nothing else. What the design was when the drawing last saw it is not saved
-//!   here.
+//! - **Sources** are the designs it draws, by id: the design it is in (at most one source, with no
+//!   path) and other design files, each by its path ([`Source::path`]), at most [`MAX_SOURCES`] in
+//!   all. What a design was when the drawing last saw it is not saved here.
 //! - **Sheets**: the paper, a copy of its drawing border and of its title block with the text typed
 //!   over its cells' values, the resolution its pictures are rendered at, the component it
 //!   documents, and whether it is left out of the sheet count or of printing. The border and the
@@ -39,9 +39,9 @@
 //!   damaged and refused, never patched.
 //! - 1 to [`MAX_SHEETS`] sheets; names of 1 to [`MAX_NAME_BYTES`] bytes.
 //! - Nothing derived is saved, and a drawing always saves as the same bytes: fields in their
-//!   order, maps sorted, and lists of records in a fixed order (sheets as arranged; later
-//!   records by id), never the order they were added in. Records listed by id read in that order
-//!   whatever order a file lists them in: the order means nothing, so it is never damage.
+//!   order, maps sorted, and lists of records in a fixed order (sheets as arranged; sources and
+//!   later records by id), never the order they were added in. Records listed by id read in that
+//!   order whatever order a file lists them in: the order means nothing, so it is never damage.
 //! - A later change to the record is one file in `src/drawing/format/pending/` (its README).
 //!
 //! [`Drawing::from_json`] reads a drawing in this order: at most [`MAX_DRAWING_BYTES`] of text,
@@ -72,8 +72,10 @@ pub mod by_id;
 pub mod centre_line;
 pub mod centre_mark;
 pub mod coverage;
+pub mod cutting_line;
 pub mod dimension;
 pub mod fields;
+pub mod fold;
 pub mod image;
 pub mod note;
 pub mod symbol;
@@ -94,6 +96,8 @@ use view::{View, ViewLetters};
 
 /// The most drawings a design may hold.
 pub const MAX_DRAWINGS: usize = 1000;
+/// The most designs a drawing may draw.
+pub const MAX_SOURCES: usize = 64;
 /// The most sheets a drawing may have.
 pub const MAX_SHEETS: usize = 1000;
 /// The longest name of a drawing or a sheet, in bytes.
@@ -136,7 +140,7 @@ pub struct Drawing {
     #[serde(with = "crate::ids")]
     pub id: u64,
     pub name: String,
-    /// The designs the drawing draws: for now at most one, the design it is in.
+    /// The designs the drawing draws, by id ([`Source`]).
     pub sources: Vec<Source>,
     /// The drawing's properties and other tools' data, kept as they are, behind an `Arc` as the
     /// sheets are, so an undo step shares them while they don't change.
@@ -283,13 +287,26 @@ impl NewerDrawing {
     }
 }
 
-/// A design the drawing draws: the design the drawing is in. Views and sheets name it by its id,
-/// so a drawing of other designs can add sources of another kind later.
+/// A design the drawing draws: the design the drawing is in (no `path`), or another design file.
+/// Views, sheets and tables name it by its id.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Source {
     #[serde(with = "crate::ids")]
     pub id: u64,
+    /// The design file: whole in memory; in a file relative to the folder of the design the
+    /// drawing is in, with `/` (whole when the two share no root), as a component link keeps its
+    /// file. `None`: the design the drawing is in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+/// A source's path: not empty, not only spaces, without control characters. Its length is
+/// bounded by the drawing's only, as a component link's is: a design deep in folders makes it long.
+pub fn check_source_path(path: &str) -> Result<()> {
+    require(!path.trim().is_empty() && !path.chars().any(char::is_control), || {
+        "a source's path is not empty, not only spaces, without control characters".into()
+    })
 }
 
 /// The length unit a drawing gives its measurements in.
@@ -516,6 +533,7 @@ impl Drawing {
         DRAWING.check_numbers(&v, "properties")?;
         DRAWING.upgrade(&mut v, version, applied)?;
         let mut d: Drawing = serde_json::from_value(v).map_err(damaged)?;
+        d.sources.sort_by_key(|s| s.id);
         let (views, dimensions) = (std::mem::take(&mut d.views), std::mem::take(&mut d.dimensions));
         d.add_views(views);
         d.add_dimensions(dimensions);
@@ -705,7 +723,7 @@ impl Drawing {
     /// keeps.
     pub fn validate(&self) -> Result<()> {
         require((1..=MAX_SHEETS).contains(&self.sheets.len()), || format!("a drawing has 1 to {MAX_SHEETS} sheets"))?;
-        require(self.sources.len() <= 1, || "a drawing draws only the design it is in".into())?;
+        self.check_sources()?;
         check_name(&self.name, "the drawing's")?;
         require(is_language_tag(&self.language), || {
             format!("the language is not a BCP 47 tag of 2 to {MAX_LANGUAGE_CHARS} characters (such as `en` or `en-GB`)")
@@ -739,6 +757,23 @@ impl Drawing {
         self.check_images()?;
         self.check_notes()?;
         self.check_symbols()
+    }
+
+    /// The sources' rules: at most [`MAX_SOURCES`], by id, the design the drawing is in at most once,
+    /// and each path keeping [`check_source_path`]. Whether two paths name one file is not judged
+    /// here: only the file system can say (`a/../p.sc` and `p.sc`), so the engine refuses one file
+    /// twice when a source is added, and a record holding it still opens and can be edited.
+    fn check_sources(&self) -> Result<()> {
+        require(self.sources.len() <= MAX_SOURCES, || format!("a drawing draws at most {MAX_SOURCES} designs"))?;
+        require(self.sources.is_sorted_by_key(|s| s.id), || "a drawing lists its sources by id".into())?;
+        let own = self.sources.iter().filter(|s| s.path.is_none()).count();
+        require(own <= 1, || "a drawing draws the design it is in at most once".into())?;
+        self.sources.iter().filter_map(|s| s.path.as_deref()).try_for_each(check_source_path)
+    }
+
+    /// The source that is the design the drawing is in, if it draws it.
+    pub fn own_source(&self) -> Option<u64> {
+        self.sources.iter().find(|s| s.path.is_none()).map(|s| s.id)
     }
 
     /// A sheet's own rules, and that the source it documents is one of the drawing's.

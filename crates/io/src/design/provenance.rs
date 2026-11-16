@@ -1287,7 +1287,7 @@ mod tests {
         let a3 = drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape);
         let mut drawing = Drawing::new("Assembly", "en-GB", "Sheet 1", a3, Some(DrawingBorderProfile::iso()), &Default::default(), &mut ids).unwrap();
         let id = drawing.allocate_id(&mut ids).unwrap();
-        drawing.sources.push(Source { id });
+        drawing.sources.push(Source { id, path: None });
         doc.drawings.push(std::sync::Arc::new(drawing));
         doc.plugin_data.insert("demo/state.bin".into(), solidcraft_doc::canvas::base64_encode(b"state"));
         let bytes = signed(&doc, &TestSigner::new(7), &ProvenanceChain::default());

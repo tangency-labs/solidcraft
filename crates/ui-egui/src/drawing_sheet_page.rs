@@ -536,6 +536,7 @@ fn kind_name(kind: ObjectKind) -> &'static str {
         ObjectKind::CentreMark => "centre_mark",
         ObjectKind::CentreLine => "centre_line",
         ObjectKind::ViewLabel => "view_label",
+        ObjectKind::Balloon => "balloon",
         ObjectKind::TitleBlock => "title_block",
         ObjectKind::PartsList => "parts_list",
         ObjectKind::RevisionTable => "revision_table",

@@ -636,7 +636,11 @@ fn layout_on_sheet(s: &Session, d: &Drawing, dimension: &Dimension, r: &Resolved
     let copy = (!s.pending_moves.is_empty()).then(|| designed(s));
     let s = copy.as_ref().unwrap_or(s);
     let Ok(view) = d.resolve_view(id) else { return not_drawn() };
+    if d.view(id).and_then(crate::drawing_view::no_model_edges).is_some() {
+        return (None, Some(NO_PLACE.to_string()));
+    }
     let unstyled = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value);
+    let unstyled = unstyled.or_else(|| crate::drawing_view::not_cut_yet(&view));
     if unstyled.or_else(|| crate::drawing_view::not_drawable_apart(&view)).is_some() {
         return not_drawn();
     }

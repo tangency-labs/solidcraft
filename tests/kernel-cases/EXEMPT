@@ -129,18 +129,22 @@ drawing.symbol.edit               a drawing: its tests in crates/engine/src/cmd/
 drawing.table.add                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.table.delete              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.table.edit                a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.table.inspect             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.template.apply            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.template.list             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.template.save             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.title_block.logo          a drawing: its tests in crates/engine/src/drawing_pictures_tests.rs
 drawing.update                    a drawing: its tests in crates/engine/src/drawing_scene_tests.rs
+drawing.view.auxiliary            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.base                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.copy_to_sheet        a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.edit                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.view.flat                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.inspect              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.move                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.move_to_sheet        a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.projected            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.view.projection_for       a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.snapshot             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 edit.checkpoint                   undo, redo and checkpoints: an earlier state restored, no new geometry
 edit.redo                         undo, redo and checkpoints: an earlier state restored, no new geometry

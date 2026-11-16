@@ -203,7 +203,7 @@ fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
     let state = s.model.state();
     let read = |values: &Values| (values.text(&note.content), fields(values, &note.content));
     let at = d.sheet_of(&note.anchor).ok_or_else(|| bad(cmd, format!("note {} is on no sheet", ids::encode(id))))?;
-    let (text, fields) = crate::title_block_text::with_values(&s.doc, &mut Tree::new(&s.doc, &state), d, at, std::iter::once(&note.content), read);
+    let (text, fields) = crate::title_block_text::with_values(s, &mut Tree::new(&s.doc, &state), d, at, std::iter::once(&note.content), read);
     let reply = NoteResult {
         note: ids::encode(id),
         record: serde_json::to_value(note).map_err(|e| EngineError::Other(e.to_string()))?,

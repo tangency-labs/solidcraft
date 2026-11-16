@@ -29,6 +29,22 @@ pub(crate) fn front_and_top() -> (Session, u64, [u64; 2]) {
     front_and_top_of(s)
 }
 
+/// The flat pattern view's plate (#13030): rule `T2` (2 mm thick, K-factor 0.5, inner radius 1 mm),
+/// a 100 x 60 mm base flange named `Plate` on XY, a 20 mm flange bent up along its edge y = 0, and a
+/// drawing of it, open.
+pub(crate) fn plate() -> Session {
+    let mut s = Session::default();
+    let rule = json!({"name": "T2", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "gap": "0.5 mm", "active": true});
+    run(&mut s, "sheet.manage_rules", rule);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base", "body_name": "Plate"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20}));
+    run(&mut s, "drawing.create", json!({}));
+    s
+}
+
 /// [`front_and_top`]'s drawing of the design `s`.
 fn front_and_top_of(mut s: Session) -> (Session, u64, [u64; 2]) {
     run(&mut s, "drawing.create", json!({}));
@@ -1972,6 +1988,8 @@ fn a_replys_text_and_fonts_keep_to_its_schema() {
         dimensions: Vec::new(),
         notes: Vec::new(),
         annotation_failures: Vec::new(),
+        balloons: Vec::new(),
+        tables: Vec::new(),
         out_of_date: Vec::new(),
         param_warnings: Vec::new(),
     };
@@ -2137,7 +2155,7 @@ fn a_views_box_is_what_it_draws() {
             owners: None,
             why: None,
         };
-        let (_, _, objects, _, _) =
+        let (_, _, objects, _, _, _) =
             assemble(&record, Projection::Third, &labels(&record), &[], &[], &[], [(7, centre, &drawn)].into_iter()).unwrap().finish().unwrap();
         let object = objects.iter().find(|o| o.object == 7).unwrap();
         assert!(near(&object.bounds_mm, min, max), "{object:?}");
@@ -2674,6 +2692,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
         dimension: id,
         view: front,
         kind: ObjectKind::Dimension,
+        row: None,
         status: solidcraft_doc::drawing::dimension::Status::Ok,
         group: Some(Arc::new(Group { object: id, kind: ObjectKind::Dimension, items })),
         fonts: Vec::new(),
@@ -2685,7 +2704,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
     let off_paper = dimension(2, vec![stroke(Vec2::new(1e9, 0.0))]);
     let fits = dimension(3, vec![stroke(Vec2::X)]);
     assembly.add_dimensions([&too_many, &off_paper, &fits].into_iter());
-    let (scene, _, objects, states, _) = assembly.finish().unwrap();
+    let (scene, _, objects, states, _, _) = assembly.finish().unwrap();
     assert!(!states[0].drawn && states[0].why.as_deref().is_some_and(|w| w.contains("records")), "{:?}", states[0]);
     assert!(!states[1].drawn && states[1].why.is_some(), "{:?}", states[1]);
     assert!(states[2].drawn && states[2].why.is_none(), "{:?}", states[2]);
@@ -2720,6 +2739,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
             dimension: id,
             view: front,
             kind: ObjectKind::Dimension,
+            row: None,
             status: solidcraft_doc::drawing::dimension::Status::Ok,
             group: Some(Arc::new(Group { object: id, kind: ObjectKind::Dimension, items })),
             fonts,
@@ -2734,7 +2754,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
     let mut assembly =
         assemble(record, Projection::Third, &labels(record), &[], &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view.clone()))).unwrap();
     assembly.add_dimensions([&a, &too_big, &b].into_iter());
-    let (scene, _, objects, states, _) = assembly.finish().unwrap();
+    let (scene, _, objects, states, _, _) = assembly.finish().unwrap();
     assert!(states[0].drawn && !states[1].drawn && states[2].drawn, "{states:?}");
     assert_eq!(scene.fonts.len(), 1);
     assert_eq!(scene.fonts[0].glyphs.len(), shared, "its 7 stays out");
@@ -2753,7 +2773,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
     let fits = text(5, "8", (room - records(&bare) - fonts) / per_line);
     assert!(records(&over) <= room);
     assembly.add_dimensions([&over, &fits].into_iter());
-    let (_, _, _, states, _) = assembly.finish().unwrap();
+    let (_, _, _, states, _, _) = assembly.finish().unwrap();
     assert!(!states[0].drawn && states[0].why.as_deref().is_some_and(|why| why.contains("records")), "{:?}", states[0]);
     assert!(states[1].drawn, "{:?}", states[1]);
 }
@@ -4241,7 +4261,7 @@ fn centre_annotations_respect_the_cumulative_paper_budget() {
     let failure = &assembly.annotation_failures[0];
     assert_eq!((failure.object, failure.view, failure.kind), (1, front, ObjectKind::CentreMark));
     assert!(failure.reason.contains("record budget"));
-    let (scene, _, objects, _, _) = assembly.finish().unwrap();
+    let (scene, _, objects, _, _, _) = assembly.finish().unwrap();
     assert!(!scene.groups.iter().any(|g| g.object == 1));
     assert!(scene.groups.iter().any(|g| g.object == 2));
     assert!(objects.iter().any(|o| o.object == 2));
@@ -4371,6 +4391,32 @@ fn a_views_label_sits_above_it_and_moves_with_it() {
     edit(&mut s, json!({"label": {"shown": false}}));
     let hidden = built(&s, sheet);
     assert_eq!((label_box(&hidden), state(&hidden, top)), (None, None));
+}
+
+/// A rule's K-factor changes the flat pattern: after the change, the plate's flat view is out of date
+/// and draws again, beside its base view. A change the flat doesn't show (a sketch: a new world state
+/// that adds no body) keeps it, as it keeps every view.
+#[test]
+fn a_rule_change_draws_the_flat_view_again() {
+    let mut s = plate();
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let made = |s: &mut Session, command: &str, p: Value| ids::decode(run(s, command, p)["view"].as_str().unwrap()).unwrap();
+    let flat = made(&mut s, "drawing.view.flat", json!({"sheet": "Sheet 1", "scale": "1:2", "position_mm": [300, 150]}));
+    made(&mut s, "drawing.view.base", json!({"sheet": "Sheet 1", "scale": "1:2", "position_mm": [100, 150]}));
+    settled(&mut s, sheet);
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Note"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "drawing.open", drawing.clone());
+    assert!(extract(&mut s, sheet).unwrap().stale.is_empty());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "sheet.manage_rules", json!({"name": "T2", "k_factor": 0.3}));
+    run(&mut s, "drawing.open", drawing);
+    let stale = extract(&mut s, sheet).unwrap().stale;
+    assert!(stale.contains(&flat), "{stale:?}");
+    settled(&mut s, sheet);
+    assert!(extract(&mut s, sheet).unwrap().stale.is_empty());
 }
 
 #[test]
@@ -4513,4 +4559,52 @@ fn an_arrow_tip_without_a_painted_dimension_line_does_not_cut_a_centre_line() {
     let with_dimension = settled(&mut s, sheet);
     assert_eq!(group_of(&with_dimension.scene, line), &original, "the unpainted arrow-tip span is not a dimension-line crossing");
     assert_eq!(bytes(&with_dimension.scene), bytes(&built(&s, sheet).scene));
+}
+
+/// A saved view changed to a flat pattern must not reuse its old model-edge annotations.
+#[test]
+fn saved_centres_do_not_reuse_model_edges_on_a_flat_view() {
+    let mut s = plate();
+    let drawing_id = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.cylinder", json!({"radius":6,"height":20,"base":[150,0,10],"axis":"Y","operation":"new","body_name":"Pin"}));
+    run(&mut s, "solid.box", json!({"length":20,"width":10,"height":10,"corner":[200,0,0],"operation":"new","body_name":"ReferenceBox"}));
+    run(&mut s, "drawing.open", json!({"drawing":drawing_id}));
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let flat = ids::decode(
+        run(&mut s, "drawing.view.flat", json!({"sheet":"Sheet 1","body":"Plate","scale":"1:2","position_mm":[300,150]}))["view"].as_str().unwrap(),
+    )
+    .unwrap();
+    let base =
+        ids::decode(run(&mut s, "drawing.view.base", json!({"sheet":"Sheet 1","scale":"1:2","position_mm":[100,150]}))["view"].as_str().unwrap())
+            .unwrap();
+    let mark = ids::decode(
+        run(&mut s, "drawing.center_mark.add", json!({"view":ids::encode(base),"edge":[156,0,10],"overshoot_mm":2.0}))["mark"].as_str().unwrap(),
+    )
+    .unwrap();
+    let line = ids::decode(
+        run(&mut s, "drawing.center_line.add", json!({"view":ids::encode(base),"a":[200,0,0],"b":[220,0,0],"overshoot_mm":2.0}))["line"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    let shown = settled(&mut s, sheet);
+    for id in [mark, line] {
+        assert!(shown.scene.groups.iter().any(|g| g.object == id));
+    }
+    let mut drawing = (**s.drawing("test").unwrap()).clone();
+    let flat_kind = drawing.view(flat).unwrap().kind.clone();
+    let view = drawing.views.iter_mut().find(|v| v.id == base).unwrap();
+    Arc::make_mut(view).kind = flat_kind;
+    drawing.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(drawing));
+    let once = built(&s, sheet);
+    let kept = extract(&mut s, sheet).unwrap();
+    for (path, scene, failures) in [("one-shot", &once.scene, &once.annotation_failures), ("cached", kept.scene.as_ref(), &kept.annotation_failures)]
+    {
+        for id in [mark, line] {
+            assert!(!scene.groups.iter().any(|g| g.object == id), "{path} retained model geometry");
+            assert!(failures.iter().any(|f| f.object == id && f.reason.contains("flat pattern")), "{path}: {failures:?}");
+        }
+    }
 }

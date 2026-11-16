@@ -13,7 +13,7 @@ fn marked() -> (Drawing, u64) {
     let sheet = Sheet::standard(PaperSize::A3, Orientation::Landscape);
     let mut d = Drawing::new("Part", "en", "Sheet 1", sheet, None, &BTreeSet::new(), &mut ids).unwrap();
     let source = d.allocate_id(&mut ids).unwrap();
-    d.sources.push(Source { id: source });
+    d.sources.push(Source { id: source, path: None });
     let view = d.allocate_id(&mut ids).unwrap();
     d.add_views([Arc::new(View {
         id: view,

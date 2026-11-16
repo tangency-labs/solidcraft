@@ -1,6 +1,8 @@
 //! `drawing.table.add`, `.edit` and `.delete` (#3874): a parts list or a revision table saved on a
 //! sheet of the open drawing. Its definition is the record's ([`solidcraft_doc::drawing::table`]).
-//! Each is one undo step of the drawing, and none evaluates the model.
+//! Each is one undo step of the drawing, and none evaluates the model. `drawing.table.inspect` says
+//! where a table sits and what it shows, laid out as the sheet draws it
+//! ([`crate::drawing_table_paper`]), or why it can't be.
 //!
 //! Placing a parts list saves the item numbers its view shows, once for each view, so what is
 //! printed doesn't move. Numbers are the design's, not the drawing's: undoing the placing puts back
@@ -13,11 +15,19 @@ use serde_json::Value;
 use solidcraft_doc::drawing::table::{Kind, MassFormat, PartsList, SheetTable};
 use solidcraft_doc::drawing::{Drawing, OnSheet, SheetComponent};
 use solidcraft_doc::ids;
+use solidcraft_geom::Aabb2;
+use solidcraft_geom::cell::Warning;
+use solidcraft_geom::table::BALLOONED;
+use solidcraft_sketch::PaperFonts;
 
 use super::CommandSpec;
 use crate::drawing_scene::sheet_id;
+use crate::drawing_table_paper::{Unplaced, drawing_space, place};
 use crate::params::bad;
-use crate::schema::drawing_table::{AddParams, DeleteParams, DeleteResult, EditParams, KindParam, ListSet, TableResult, TableSet};
+use crate::schema::drawing_table::{
+    AddParams, DeleteParams, DeleteResult, EditParams, InspectOverride, InspectParams, InspectResult, InspectRow, InspectWarning, KindParam, ListSet,
+    TableResult, TableSet,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
@@ -27,6 +37,8 @@ const EDIT: &str = "drawing.table.edit";
 const EDIT_CONTRACT: TypedContract<EditParams> = TypedContract::new();
 const DELETE: &str = "drawing.table.delete";
 const DELETE_CONTRACT: TypedContract<DeleteParams> = TypedContract::new();
+const INSPECT: &str = "drawing.table.inspect";
+const INSPECT_CONTRACT: TypedContract<InspectParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new(ADD, "Add Table", crate::checked!("drawing.table.add", add))
@@ -51,7 +63,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "table: its id; set: {sheet?, list?: {component?, levels?, group_by?, group_children?, show_purchased_contents?, mass?: \
              {unit: g|kg|lb, decimals}}, columns?, heading?: top|bottom, row_height_mm?, cap_mm?, filter?, overrides?, place?: \
-             {anchor: {corner, offset_mm?}} or {at: [x, y]}}, columns, filter and overrides as a drawing saves them → as \
+             {anchor: {corner, offset_mm?}} or {at: [x, y]}}, columns, filter ({only?, ballooned?: sheet|drawing: only the rows \
+             a balloon there reads, text?}) and overrides as a drawing saves them → as \
              drawing.table.add. One undo step, none when nothing changes.",
         ),
     CommandSpec::new(DELETE, "Delete Table", crate::checked!("drawing.table.delete", delete))
@@ -61,6 +74,19 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&DELETE_CONTRACT)
         .output(output_schema_for::<DeleteResult>)
         .params("table: its id → {table, balloons?: those that named it, which name no list now}. A sheet's delete counts the tables on it and takes them with `contents: delete`. One undo step."),
+    CommandSpec::new(INSPECT, "Inspect Table", crate::checked!("drawing.table.inspect", inspect))
+        .icon("inspect")
+        .in_drawing()
+        .noundo()
+        .doc_only()
+        .contract(&INSPECT_CONTRACT)
+        .output(output_schema_for::<InspectResult>)
+        .params(
+            "table: its id → {table, sheet, status: ok|failed, why?, outline_mm?: [x0, y0, x1, y1] on the sheet, rows?: [{key, \
+             rect_mm, balloons?: how many point at it}] those it shows, listed: how many before its filter, overrides?: [{row, column, text, replaced}], warnings?: \
+             [{row?, column, warning: width|height|chars}]}, laid out in the drawing's font as the sheet draws it. Read-only; a parts \
+             list showing a mass weighs the design.",
+        ),
 ];
 
 fn add(s: &mut Session, p: &Value) -> Result<Value> {
@@ -69,7 +95,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let sheet = sheet_id(&record, &request.sheet, ADD)?;
     let kind = match request.kind {
         KindParam::Revision => Kind::Revision,
-        KindParam::PartsList => Kind::PartsList(new_list(&record, sheet)?),
+        KindParam::PartsList => Kind::PartsList(new_list(s, &record, sheet)?),
     };
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
     let mut table = SheetTable { id, sheet, table: kind.default_table(), place: kind.default_place(), kind };
@@ -112,11 +138,73 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(DeleteResult { table: ids::encode(id), balloons }).map_err(|e| EngineError::Other(e.to_string()))
 }
 
-/// The list a parts list on `sheet` starts with: what its sheet documents, else the design.
-fn new_list(d: &Drawing, sheet: u64) -> Result<PartsList> {
+fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: InspectParams = crate::schema::read(INSPECT, p)?;
+    let id = request.table.0;
+    let d = s.drawing(INSPECT)?.clone();
+    let table = d.tables.by_id(id).ok_or_else(|| bad(INSPECT, format!("the drawing has no table {}", ids::encode(id))))?;
+    let sheet = d.sheets.iter().find(|one| one.id == table.sheet).ok_or_else(|| bad(INSPECT, "its sheet is gone"))?;
+    let mut reply = InspectResult {
+        table: ids::encode(id),
+        sheet: ids::encode(table.sheet),
+        status: "ok",
+        why: None,
+        outline_mm: None,
+        rows: Vec::new(),
+        listed: 0,
+        overrides: Vec::new(),
+        warnings: Vec::new(),
+    };
+    // A command waits for a font search, as an export does, so the answer is final.
+    match place(s, &d, table, drawing_space(sheet), &PaperFonts::new(&d.font, &d.language, true)) {
+        Err(Unplaced::Failed(why)) => (reply.status, reply.why) = ("failed", Some(why)),
+        Err(Unplaced::Pending) => (reply.status, reply.why) = ("failed", Some("its font is still being looked for".into())),
+        Ok(placed) => {
+            // A row's cells are its printed columns', in order.
+            let printed: Vec<&str> = table.table.columns.iter().filter(|c| c.printed).map(|c| c.name.as_str()).collect();
+            let column = |at: usize| printed.get(at).map_or_else(String::new, |name| (*name).to_string());
+            reply.outline_mm = Some(corners(placed.layout.outline));
+            reply.listed = placed.rows.len();
+            for row in std::iter::once(&placed.layout.heading).chain(&placed.layout.rows) {
+                for (at, cell) in row.cells.iter().enumerate() {
+                    if let Some(warning) = cell.warning {
+                        reply.warnings.push(InspectWarning { row: row.key.clone(), column: column(at), warning: warning_word(warning) });
+                    }
+                    if let (Some(replaced), Some(key)) = (&cell.replaced, &row.key) {
+                        let text = cell.lines.iter().map(|line| line.text.as_str()).collect::<Vec<_>>().join("\n");
+                        reply.overrides.push(InspectOverride { row: key.clone(), column: column(at), text, replaced: replaced.clone() });
+                    }
+                }
+                if let Some(key) = &row.key {
+                    let read = placed.rows.iter().find(|one| one.key == *key);
+                    let balloons = read.and_then(|one| one.fields.get(BALLOONED)).and_then(|count| count.parse().ok());
+                    reply.rows.push(InspectRow { key: key.clone(), rect_mm: corners(row.rect), balloons });
+                }
+            }
+        }
+    }
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+fn corners(rect: Aabb2) -> [f64; 4] {
+    [rect.min.x, rect.min.y, rect.max.x, rect.max.y]
+}
+
+fn warning_word(warning: Warning) -> &'static str {
+    match warning {
+        Warning::Chars { .. } => "chars",
+        Warning::Height => "height",
+        Warning::Width => "width",
+    }
+}
+
+/// The list a parts list on `sheet` starts with: what its sheet documents, else the design the
+/// drawing is in, else the first it draws; a design `s` can read ([`Session::drawn`]).
+fn new_list(s: &Session, d: &Drawing, sheet: u64) -> Result<PartsList> {
     let documents = d.sheets.iter().find(|s| s.id == sheet).and_then(|s| s.documents);
-    let design = || d.sources.first().map(|source| SheetComponent { source: source.id, component: 0 });
+    let design = || d.own_source().or_else(|| d.sources.first().map(|source| source.id)).map(|source| SheetComponent { source, component: 0 });
     let of = documents.or_else(design).ok_or_else(|| bad(ADD, "the drawing draws no design to list"))?;
+    s.drawn(d, of.source).map_err(|why| bad(ADD, why.to_string()))?;
     Ok(PartsList { of, view: Default::default(), group: Default::default(), fold: false, purchased_contents: false, mass: MassFormat::default() })
 }
 
@@ -134,7 +222,7 @@ fn apply(s: &Session, d: &Drawing, table: &mut SheetTable, set: TableSet, cmd: &
     }
     if let Some(list) = set.list {
         let Kind::PartsList(old) = &mut table.kind else { return Err(bad(cmd, "`list` is for a parts list")) };
-        apply_list(s, old, list, cmd)?;
+        apply_list(s, d, old, list, cmd)?;
     }
     if let Some(place) = set.place {
         table.place = serde_json::from_value(place).map_err(|e| bad(cmd, format!("`place`: {e}")))?;
@@ -154,15 +242,17 @@ fn apply(s: &Session, d: &Drawing, table: &mut SheetTable, set: TableSet, cmd: &
     Ok(())
 }
 
-/// `set` on a parts list, in the words it saves them in.
-fn apply_list(s: &Session, list: &mut PartsList, set: ListSet, cmd: &str) -> Result<()> {
+/// `set` on a parts list of `d`, in the words it saves them in: a component found in the design it
+/// lists ([`Session::drawn`]).
+fn apply_list(s: &Session, d: &Drawing, list: &mut PartsList, set: ListSet, cmd: &str) -> Result<()> {
     if let Some(component) = set.component {
         let key = match &component {
             Value::String(key) => key.clone(),
             Value::Number(id) => id.to_string(),
             _ => return Err(bad(cmd, "`component` must be a component id or name")),
         };
-        list.of.component = s.doc.find_component(&key).ok_or_else(|| bad(cmd, format!("no component `{key}`")))?;
+        let design = s.drawn(d, list.of.source).map_err(|why| bad(cmd, why.to_string()))?;
+        list.of.component = design.doc.find_component(&key).ok_or_else(|| bad(cmd, format!("no component `{key}`")))?;
     }
     *list = merged(
         list,
