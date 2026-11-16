@@ -91,6 +91,8 @@ pub(super) struct Cache {
     model: Weak<ModelState>,
     sketch: Option<u64>,
     colors: [Color32; 2],
+    /// The interface language the defect tips are worded in.
+    language: &'static str,
     components: BTreeMap<u64, Component>,
     ids: BTreeMap<u64, usize>,
     scheduled: usize,
@@ -106,10 +108,12 @@ impl Cache {
         let state = app.session.model.state();
         let t = Tokens::get();
         let colors = [t.error, t.sketch_accent];
+        let language = solidcraft_ui_text::locale().catalog().id;
         if std::ptr::eq(self.doc.as_ptr(), Arc::as_ptr(&app.session.doc))
             && std::ptr::eq(self.model.as_ptr(), Arc::as_ptr(&state))
             && self.sketch == app.session.active_sketch
             && self.colors == colors
+            && self.language == language
         {
             // A Save As can move the design to a new file without changing the document;
             // the top row follows the file's name (#7267).
@@ -143,6 +147,7 @@ impl Cache {
         self.model = Arc::downgrade(&state);
         self.sketch = app.session.active_sketch;
         self.colors = colors;
+        self.language = language;
     }
 
     fn children(&self, app: &SolveApp, component: u64, path: &[u64], remaining: usize) -> Vec<Vec<u64>> {

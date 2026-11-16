@@ -51,7 +51,7 @@ mod tests {
             kind: IssueKind::OpenBody,
             item: Some(7),
             part: "Bracket".into(),
-            path: Vec::new(),
+            paths: Vec::new(),
             faces: 0,
             times: 1,
             detail: "solid 'Bracket': imported as an open body (the shell is not closed)".into(),

@@ -141,11 +141,11 @@ pub struct ImportIssue {
     /// The part's name in the file (empty: it has none).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub part: String,
-    /// Product names from the root to the product that holds the part, at its first placement,
-    /// as [`ImportedBody::path`]: where a part that was not imported would have been (empty: the
-    /// file as a whole, or a solid outside any product).
+    /// For each place the file puts the part, the product names from the root to the product
+    /// that holds it, as [`ImportedBody::path`]: where a part that was not imported would have
+    /// been (empty: the file as a whole, or a solid outside any product).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub path: Vec<String>,
+    pub paths: Vec<Vec<String>>,
     /// Faces it concerns: one for a face left out, the count for faces not shown, else 0.
     #[serde(default)]
     pub faces: usize,
@@ -164,6 +164,10 @@ pub struct ImportReport {
     pub solids: usize,
     /// In the order of [`StepImport::warnings`].
     pub issues: Vec<ImportIssue>,
+    /// The file has one root product (the import's own component): the first name of every
+    /// [`ImportIssue::paths`] entry is that root. Otherwise each root is a product below it.
+    #[serde(default)]
+    pub single_root: bool,
 }
 
 /// A warning kept by [`Reader::note`]: what it is about and how often it came.
@@ -1044,14 +1048,17 @@ impl Reader {
 
     /// The warnings (worded as `warnings`, in their order) by kind and part, and how many of the
     /// file's parts came in as closed solids.
-    fn report(&self, warnings: &[String]) -> ImportReport {
+    fn report(&self, warnings: &[String], single_root: bool) -> ImportReport {
         let parts = self.plan.iter().map(|p| p.item).collect::<HashSet<_>>().len();
         let solids = self.bodies.iter().filter(|b| b.closed && b.refused.is_none()).map(|b| b.source_item).collect::<HashSet<_>>().len();
-        // The products holding each part, at the first place the file puts it.
-        let mut paths: HashMap<u64, &[String]> = HashMap::new();
+        // The products holding each part, at every place the file puts it (each once, in order).
+        let mut paths: HashMap<u64, Vec<&[String]>> = HashMap::new();
         for p in &self.plan {
             if let Some(batch) = self.batches.get(p.batch) {
-                paths.entry(p.item).or_insert(&batch.path);
+                let at = paths.entry(p.item).or_default();
+                if !at.contains(&batch.path.as_slice()) {
+                    at.push(&batch.path);
+                }
             }
         }
         let issues = self
@@ -1062,13 +1069,17 @@ impl Reader {
                 kind: n.kind,
                 item: n.item,
                 part: n.item.map(|i| self.part_name(i)).unwrap_or_default(),
-                path: n.item.and_then(|i| paths.get(&i)).map(|p| p.to_vec()).unwrap_or_default(),
+                paths: n
+                    .item
+                    .and_then(|i| paths.get(&i))
+                    .map(|p| p.iter().filter(|p| !p.is_empty()).map(|p| p.to_vec()).collect())
+                    .unwrap_or_default(),
                 faces: n.faces,
                 times: n.times,
                 detail: detail.clone(),
             })
             .collect();
-        ImportReport { parts, solids, issues }
+        ImportReport { parts, solids, issues, single_root }
     }
 
     /// Planned-solid indices (a node's `bodies` after the walk) as body indices, leaving out
@@ -1461,7 +1472,7 @@ impl StepReading {
             rd.warn(warning);
         }
         let warnings: Vec<String> = rd.warnings.iter().map(|(m, n)| if n.times > 1 { format!("{m} (×{})", n.times) } else { m.clone() }).collect();
-        let report = rd.report(&warnings);
+        let report = rd.report(&warnings, tree.len() == 1);
         if rd.bodies.is_empty() {
             let why = warnings.first().cloned().unwrap_or_else(|| "the file has no solids".into());
             return Err(KernelError::Failed(format!("STEP import: no bodies ({why})")));

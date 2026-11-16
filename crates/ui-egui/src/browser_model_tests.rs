@@ -22,6 +22,25 @@ fn navigating_and_selecting_reuse_placements_but_rows_read_live_view_state() {
     assert!(Arc::ptr_eq(&after, &super::model_placement(&mut h.app, &[occurrence]).unwrap()));
 }
 
+/// The component rows' defect tips are worded in the interface language: changing it alone
+/// words them again.
+#[test]
+fn a_language_change_words_the_cached_defect_tips_again() {
+    let (h, _, _) = fixture();
+    let mut cache = super::cache::Cache::default();
+    let sentinel = crate::ui_kit::StatusTip { head: "stale".into(), error: None, warning: None, tail: String::new() };
+    {
+        let _en = solidcraft_ui_text::scope("en");
+        cache.prepare(&h.app);
+        cache.defects.insert(u64::MAX, sentinel);
+        cache.prepare(&h.app);
+        assert!(cache.defects.contains_key(&u64::MAX), "nothing changed: the cache is kept");
+    }
+    let _ja = solidcraft_ui_text::scope("ja");
+    cache.prepare(&h.app);
+    assert!(!cache.defects.contains_key(&u64::MAX), "a new language words the tips again");
+}
+
 #[test]
 fn pending_and_reverted_moves_replace_cached_transforms() {
     let (mut h, _, occurrence) = fixture();

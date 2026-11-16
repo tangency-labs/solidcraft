@@ -1562,7 +1562,7 @@ mod tests {
             kind,
             item,
             part: String::new(),
-            path: Vec::new(),
+            paths: Vec::new(),
             faces,
             times: 1,
             detail: detail.into(),
@@ -1591,6 +1591,7 @@ mod tests {
                 issue(IssueKind::Repaired, Some(4), 0, "solid #4: 1 faces turned over: their loops disagree with their same_sense"),
                 issue(IssueKind::File, None, 0, "component placement #77: … (placed at the origin)"),
             ],
+            single_root: true,
         };
         let summary = super::import_summary(&report);
         assert_eq!(
@@ -1602,7 +1603,7 @@ mod tests {
         );
         assert!(!summary.contains('#') && !summary.contains("SMLib"), "{summary}");
         // Only repairs: no advice, and a part alone has no "of" count.
-        let repaired = ImportReport { parts: 1, solids: 1, issues: vec![issue(IssueKind::Repaired, Some(3), 0, "solid #3: …")] };
+        let repaired = ImportReport { parts: 1, solids: 1, issues: vec![issue(IssueKind::Repaired, Some(3), 0, "solid #3: …")], single_root: true };
         assert_eq!(super::import_summary(&repaired), "Small flaws were repaired in 1 part.");
     }
 
@@ -3918,12 +3919,12 @@ mod tests {
             kind: IssueKind::Repaired,
             item: Some(3),
             part: String::new(),
-            path: Vec::new(),
+            paths: Vec::new(),
             faces: 0,
             times: 1,
             detail: "solid #3: …".into(),
         };
-        let report = |issues: Vec<ImportIssue>| Some(std::sync::Arc::new(ImportReport { parts: 1, solids: 1, issues }));
+        let report = |issues: Vec<ImportIssue>| Some(std::sync::Arc::new(ImportReport { parts: 1, solids: 1, issues, single_root: true }));
         let with = |warning: Option<&str>, import_report| {
             let mut result = plain.clone();
             result.warning = warning.map(str::to_string);

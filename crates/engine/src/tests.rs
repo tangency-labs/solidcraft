@@ -1763,6 +1763,11 @@ fn step_insert_tells_which_body_and_component_its_problems_are_in() {
     for (name, x) in [("Kept", 20), ("Lost", 40)] {
         run(&mut source, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0], "operation": "new", "body_name": name}));
     }
+    // Pin, whose only part is lost, is placed in Left and again in Right.
+    run(&mut source, "component.create", json!({"name": "Pin", "parent": "Left"}));
+    run(&mut source, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [60, 0, 0], "operation": "new", "body_name": "Gone"}));
+    run(&mut source, "component.activate", json!({"component": "root"}));
+    run(&mut source, "occurrence.copy", json!({"component": "Pin", "parent": "Right", "translate": [0, 20, 0]}));
     run(&mut source, "file.export", json!({"path": path.to_string_lossy()}));
     let text = std::fs::read_to_string(&path).unwrap();
     // The solid `name` and its shell's entity line.
@@ -1778,7 +1783,9 @@ fn step_insert_tells_which_body_and_component_its_problems_are_in() {
     let torn_shell = format!("{head}{}", &faces[faces.find(')').unwrap()..]);
     let (lost, _) = solid("Lost");
     let lost_line = format!("{},#999999);", lost.rsplit_once(",#").unwrap().0);
-    let text = text.replacen(shell, &torn_shell, 1).replacen(&lost, &lost_line, 1);
+    let (gone, _) = solid("Gone");
+    let gone_line = format!("{},#999998);", gone.rsplit_once(",#").unwrap().0);
+    let text = text.replacen(shell, &torn_shell, 1).replacen(&lost, &lost_line, 1).replacen(&gone, &gone_line, 1);
     std::fs::write(&path, &text).unwrap();
 
     let mut s = Session::default();
@@ -1793,6 +1800,12 @@ fn step_insert_tells_which_body_and_component_its_problems_are_in() {
     let right = s.doc.components.iter().find(|c| c.name == "Right").unwrap().id;
     let lost = defects.iter().find(|d| d["component"] == right && d["body"].is_null());
     assert!(lost.is_some_and(|d| d["kind"] == "not_imported" || d["kind"] == "refused"), "{defects:#?}");
+    // Pin was not made: each component it is placed in is told, not only the first.
+    let left = s.doc.components.iter().find(|c| c.name == "Left").unwrap().id;
+    assert!(!s.doc.components.iter().any(|c| c.name == "Pin"), "{:?}", s.doc.components);
+    for at in [left, right] {
+        assert!(defects.iter().any(|d| d["component"] == at && d["detail"].as_str().is_some_and(|t| t.contains("Gone"))), "{at}: {defects:#?}");
+    }
     // Kept read cleanly: nothing is said of it.
     assert!(!defects.iter().any(|d| d["body"] == "Kept"), "{defects:#?}");
     let _ = std::fs::remove_dir_all(&dir);
