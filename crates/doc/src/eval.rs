@@ -9822,7 +9822,11 @@ fn trim_to_curved_face(
 /// far: the outer loop alone, drafted when the taper grows it (only the holes narrow) and
 /// straight when the taper narrows it. Run right through the target (past the far side of its
 /// exact box by the margin the straight path takes) and cut back to the face, its far end is the
-/// farthest the tool meets the face; the tool runs a hair past that, and at least `len`.
+/// farthest the tool meets the face; the tool runs a hair past that, and at least `len`. The
+/// envelope only shortens the tool: when its cut fails for a narrowing taper (a straight envelope
+/// wider than the target passes beside it where the tool meets it), the tool runs a hair past the
+/// far side of the target's box, beyond which it meets nothing of it, and its own cut says
+/// whether it ends on the face. A tool that closes before that is refused when it is built.
 #[allow(clippy::too_many_arguments)]
 fn tapered_reach(
     ss: &SolvedSketch,
@@ -9834,13 +9838,14 @@ fn tapered_reach(
     taper: f64,
     corner: Option<kernel::DraftCorner>,
 ) -> Result<f64> {
-    let n = ss.plane.normal();
     let far_side = |body: &Body| -> Result<f64> {
         let bb = body.exact_bounds().map_err(|e| DocError::Invalid(e.to_string()))?;
-        let (c, half) = (bb.center(), bb.size() * 0.5);
-        Ok(sign * (ss.plane.height(c) - base) + half.x * n.x.abs() + half.y * n.y.abs() + half.z * n.z.abs())
+        let [lo, hi] = solidcore_ops::affine::span_along(bb.min.into(), bb.max.into(), ss.plane.origin.into(), ss.plane.normal().into())
+            .map_err(|e| DocError::Invalid(e.to_string()))?;
+        Ok(if sign > 0.0 { hi - base } else { base - lo })
     };
-    let through = far_side(&target.body)?.max(len) + target.body.size() * 0.05 + 1.0 + to_offset.abs();
+    let target_far = far_side(&target.body)?.max(len) + to_offset.abs();
+    let through = target_far + target.body.size() * 0.05 + 1.0;
     extrude_within_reach([base, base + sign * through])?;
     let start_plane = ss.plane.offset(base);
     let mut envelopes = Vec::new();
@@ -9857,7 +9862,10 @@ fn tapered_reach(
             envelopes.extend(centered_extrude(&ss.plane, &outer, lo, hi, None, None, false)?);
         }
     }
-    let cut = trim_to_curved_face(envelopes, target, face, to, to_offset, &ss.plane, base, base + sign * through)?;
+    let cut = match trim_to_curved_face(envelopes, target, face, to, to_offset, &ss.plane, base, base + sign * through) {
+        Err(_) if taper < 0.0 => return Ok(target_far + target.body.size() * 1e-3),
+        cut => cut?,
+    };
     let reach = cut.iter().map(|t| far_side(&t.body)).collect::<Result<Vec<_>>>()?.into_iter().fold(len, f64::max);
     Ok(reach + target.body.size() * 1e-3)
 }
