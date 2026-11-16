@@ -10,7 +10,8 @@
 //!   the rounds' definitions on.
 //! - A box, and the same box with its material outside (every face's material side
 //!   swapped), decide positive and negative with enclosures holding +120 and -120; a
-//!   sphere (seam and poles) holds `4/3 pi r^3`.
+//!   sphere (seam and poles) holds `4/3 pi r^3`. Their area, centroid, inertia and
+//!   products enclosures hold the closed forms too.
 //! - The same box with one side's surface moved out by 1e-3 and its trims kept: the faces
 //!   no longer meet, and the closed surface the enclosure bounds (the faces and the strips
 //!   across their gaps) holds 120 + 30e-3, which the faces alone do not.
@@ -36,7 +37,8 @@ use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
 use solidcore::mass::enclosure::EnclosureStop;
 use solidcore::mass::enclosure::{
-    enclose_volume, volume_sign, VolumeEnclosure, VolumeSign, CELL_BUDGET,
+    enclose_mass_properties, enclose_volume, volume_sign, Bounds, VolumeEnclosure, VolumeSign,
+    CELL_BUDGET,
 };
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylindrical_box, create_sphere};
@@ -199,6 +201,67 @@ fn a_sphere_is_enclosed_across_its_seam_and_poles() {
     let v = 4.0 / 3.0 * PI * 8.0;
     let e = enclose_volume(&k, &mut b, 1e-6).unwrap();
     assert!(holds(&e, v) && e.width() <= 1e-6, "{e:?} misses {v}");
+}
+
+/// `enclose_mass_properties` holds the closed forms of a box off the origin (area 148,
+/// centroid (3, 4.5, 6), every axial inertia and product about the origin from
+/// `int x^i = (b^(i+1) - a^(i+1)) / (i+1)` per side) and of a sphere r 2 at the origin (area
+/// `16 pi`, centroid 0, inertia `2/5 m r^2`, products 0: its seam and poles, where the
+/// area's root is not analytic). The box's enclosures reach their widths, each at most
+/// `1e-5` of its scale wide; the sphere's area spends its cell budget near the poles
+/// (MEASURED: 1.8e-3 wide, 3.7e-5 of the area), so its bands are asked to hold the closed
+/// forms at most `1e-4` of their scales wide.
+#[test]
+fn mass_properties_are_enclosed_around_their_closed_forms() {
+    let check = |b: &mut Brep,
+                 wide: f64,
+                 area: f64,
+                 centroid: [f64; 3],
+                 inertia: [f64; 3],
+                 products: [f64; 3]| {
+        let k = Kernel::default();
+        let e = enclose_mass_properties(&k, b, 1e-6).unwrap();
+        if wide <= 1e-5 {
+            assert_eq!(e.short, None, "{e:?}");
+        }
+        let near = |x: &Bounds, v: f64, scale: f64| {
+            assert!(x.contains(v), "{x:?} misses {v} ({e:?})");
+            assert!(
+                x.width() <= wide * scale,
+                "{x:?} wider than {wide:e} of {scale:e}"
+            );
+        };
+        near(&e.area, area, area);
+        let scale = |v: [f64; 3]| v.iter().fold(1.0_f64, |m, x| m.max(x.abs()));
+        for (x, v) in e.centroid.iter().zip(centroid) {
+            near(x, v, scale(centroid));
+        }
+        for (x, v) in e.inertia.iter().zip(inertia) {
+            near(x, v, scale(inertia));
+        }
+        for (x, v) in e.products.iter().zip(products) {
+            near(x, v, scale(inertia));
+        }
+    };
+    let mut k = Kernel::default();
+    // the box [1, 5] x [2, 7] x [3, 9]
+    let mut b = create_box(&mut k, Point3::new(1.0, 2.0, 3.0), 4.0, 5.0, 6.0).unwrap();
+    let (lo, hi): ([f64; 3], [f64; 3]) = ([1.0, 2.0, 3.0], [5.0, 7.0, 9.0]);
+    let int = |i: usize, p: i32| (hi[i].powi(p + 1) - lo[i].powi(p + 1)) / f64::from(p + 1);
+    // int x_i^pi x_j^pj over the box (the third side's length)
+    let m = |p: [i32; 3]| int(0, p[0]) * int(1, p[1]) * int(2, p[2]);
+    let (xx, yy, zz) = (m([2, 0, 0]), m([0, 2, 0]), m([0, 0, 2]));
+    check(
+        &mut b,
+        1e-5,
+        148.0,
+        [3.0, 4.5, 6.0],
+        [yy + zz, zz + xx, xx + yy],
+        [m([0, 1, 1]), m([1, 0, 1]), m([1, 1, 0])],
+    );
+    let mut s = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 2.0).unwrap();
+    let i = 0.4 * (4.0 / 3.0 * PI * 8.0) * 4.0;
+    check(&mut s, 1e-4, 16.0 * PI, [0.0; 3], [i; 3], [0.0; 3]);
 }
 
 #[test]

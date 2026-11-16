@@ -3441,7 +3441,9 @@ impl super::p1::LinearCrossSectionFsg {
         use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
         use crate::surface::surface::SurfaceKind;
         let [rail1, rail2] = rails;
-        // a centre line or a rail of no length: the stations along it are one
+        // a centre line or a rail of no length: the stations along it are one (a
+        // cylinder's rim chamfered by its radius, a cone to its apex: built as before, a
+        // traced net the blend definition ledger lists, #17875)
         if center_line.is_degenerate(k, approx_tol_3d, None)?
             || rail1.is_degenerate(k, approx_tol_3d, None)?
             || rail2.is_degenerate(k, approx_tol_3d, None)?

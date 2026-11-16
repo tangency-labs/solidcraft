@@ -445,7 +445,9 @@ fn run(k: &mut Kernel, input: &TwoOffsetChamfer) -> SolidResult<Vec<f64>> {
 #[cfg(test)]
 mod round_definition_rows {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-    use super::super::end_to_end::round_definition_proof::{certified_blends, volume_band};
+    use super::super::end_to_end::round_definition_proof::{
+        certified_blends, mass_bands, volume_band,
+    };
     use super::super::end_to_end::round_definition_rows::no_bare_blend_face;
     use solidcore::blend::definition_check::BlendFaceLog;
     use super::*;
@@ -514,8 +516,9 @@ mod round_definition_rows {
                     assert!(blend.chamfer().is_some(), "{name}: {f:?} is not a chamfer");
                 }
             }
-            let spread = certified_blends(&k, &mut done.body, name);
-            volume_band(&k, &mut done.body, spread, old, name);
+            let d_max = certified_blends(&k, &mut done.body, name);
+            volume_band(&k, &mut done.body, d_max, old, name);
+            mass_bands(&k, &mut done.body, name);
         }
     }
 }

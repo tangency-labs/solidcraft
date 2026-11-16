@@ -506,7 +506,11 @@ pub(crate) fn certificate_faces<'a>(
     let mut nurbs = Vec::new();
     // a face that is a blend by its definition: its definition enclosed over the
     // certificate's boxes (definition_partials_over_box), on the faces under it and its
-    // leader, whatever its net (c5b6bb7, WR-714, #2570)
+    // leader, whatever its net (c5b6bb7, WR-714, #2570). A face that keeps an exact round's
+    // definition (`Surface::set_exact_round`, #2485) is not one of these: its kind is its
+    // net's, and that net is S at bound 0, re-certified as lying on the class's surface
+    // derived from its supports (`ExactRound::recertify`), so enclosing its NURBS form
+    // encloses its definition
     let mut defs = GnDefs::default();
     for (f, face) in faces.into_iter().enumerate() {
         let Some(bs) = super::station::as_b_spline(k, face)? else {

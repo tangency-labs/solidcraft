@@ -1118,3 +1118,48 @@ fn the_chamfered_box_offsets_with_every_fix_on() {
     }
     assert_eq!(faces[0], faces[1], "{faces:?}");
 }
+
+/// §7 invariant 8 on the database path (#16580): a body's surface read from a `.smb`
+/// record (`read_surface_from_db`) that is a blend by its definition is re-certified as it
+/// is read. The box's G^n round reads back; the same round with its net moved three
+/// bounds off its definition at one control point is refused.
+#[test]
+fn a_blend_read_from_the_database_is_certified_again() {
+    use solidcore::geom::attribute::AttributeStore;
+    use solidcore::surface::procedural_blend::convert::{from_record, to_record};
+    use solidcore::topology::brep_data::{read_surface_from_db, AttributeSink};
+    use solidcore::topology::database_io::{DatabaseReader, DatabaseWriter, FileType};
+    use solidcore::topology::geometry_write::write_surface;
+    const VERSION: u64 = 33;
+    let read = |k: &Kernel, s: &Surface| {
+        let mut db = DatabaseWriter::open_for_write(FileType::Binary);
+        db.write_type(PROCEDURAL_BLEND_TYPE, None);
+        write_surface(s, &mut db, VERSION).unwrap();
+        let mut r = DatabaseReader::new();
+        r.open_for_read(db.into_bytes(), FileType::Binary);
+        let mut store = AttributeStore::default();
+        let mut all = Vec::new();
+        let mut attrs = AttributeSink::new(&mut store, &mut all, 0);
+        read_surface_from_db(k, VERSION, &mut attrs, &mut r, false)
+    };
+    let mut k = kernel();
+    let b = chamfered_box(&mut k);
+    let pb = b
+        .face_list()
+        .iter()
+        .find_map(
+            |&f| match b.face(f).unwrap().surface.as_ref().map(Surface::kind) {
+                Some(SurfaceKind::ProceduralBlend(pb)) => Some((**pb).clone()),
+                _ => None,
+            },
+        )
+        .expect("the box has a G^n round");
+    assert!(read(&k, &Surface::from(pb.clone())).is_ok());
+    let mut bad = to_record(&k, &pb).unwrap();
+    let i = bad.net.points.len() / 2;
+    let w = bad.net.weights.as_ref().map_or(1.0, |w| w[i]);
+    bad.net.points[i][0] += 3.0 * bad.definition.bound * w;
+    let moved = Surface::from(from_record(&k, &bad).unwrap());
+    let e = read(&k, &moved).unwrap_err();
+    assert!(e.to_string().contains("not proved within its bound"), "{e}");
+}

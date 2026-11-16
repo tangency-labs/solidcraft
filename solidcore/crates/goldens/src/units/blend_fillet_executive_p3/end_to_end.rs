@@ -1837,19 +1837,22 @@ mod tests {
 /// closed result, the volume. [`solidcore::mass::enclosure::enclose_volume`] encloses the
 /// volume of the body as stored (the nets) with a certified `[lo, hi]`; the body bounded by
 /// the definitions differs from it by at most `sum A_f d_f` (each face within `d_f` of its
-/// net, `A_f` its area). The volume the integrator converges to (its finest accuracy) lies
-/// in that band. The golden's mass values are the integrator's estimates at the requested
-/// relative accuracy `1e-4` (`brep_mass_properties`, not a proved bound), recorded beside
-/// it; every operation's logged blend faces are definitions (`blend::definition_check`).
+/// net, `A_f` its area), bounded above by the certified area times the largest `d_f`. The
+/// volume the integrator converges to (its finest accuracy) lies in that band. The area,
+/// centroid, inertias and products are enclosed likewise
+/// ([`solidcore::mass::enclosure::enclose_mass_properties`], the body as stored), and the
+/// golden's estimates (`brep_mass_properties` at the requested relative accuracy `1e-4`)
+/// lie within that accuracy of their bands; every operation's logged blend faces are
+/// definitions (`blend::definition_check`).
 ///
 /// [`NetScope`]: solidcore::surface::procedural_blend::NetScope
 #[cfg(test)]
 pub(super) mod round_definition_proof {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use solidcore::kernel::Kernel;
-    use solidcore::mass::enclosure::enclose_volume;
+    use solidcore::mass::enclosure::{enclose_quantity, enclose_volume, Quantity};
     use solidcore::mass::integrator::properties::{
-        brep_mass_properties, face_area, PropertyAttributes, ESTIMATE_ACCURACY_FINEST,
+        brep_mass_properties, PropertyAttributes, ESTIMATE_ACCURACY_FINEST,
     };
     use solidcore::math::Vec3;
     use solidcore::surface::surface::Surface;
@@ -1859,11 +1862,12 @@ pub(super) mod round_definition_proof {
     /// The golden's requested relative accuracy of the mass properties.
     pub(in super::super) const MASS_ACCURACY: f64 = 1e-4;
 
-    /// `sum A_f d_f` over the faces of `b` whose surface is a blend by its definition, each
-    /// net re-certified (`d_f`, at most its bound); asserts there is at least one.
+    /// The largest proved distance `d_f` between a net and its definition over the faces
+    /// of `b` whose surface is a blend by its definition, each net re-certified (`d_f`, at
+    /// most its bound); asserts there is at least one.
     pub(in super::super) fn certified_blends(k: &Kernel, b: &mut Brep, name: &str) -> f64 {
         let mut count = 0;
-        let mut spread = 0.0;
+        let mut d_max: f64 = 0.0;
         for f in p1::faces(b, None).unwrap() {
             let surface = b.face(f).unwrap().surface.clone();
             let Some(blend) = surface.as_ref().and_then(Surface::procedural_blend) else {
@@ -1877,26 +1881,31 @@ pub(super) mod round_definition_proof {
                 d <= bound,
                 "{name}: {f:?} proved {d:e} past its bound {bound:e}"
             );
-            spread += face_area(k, b, f, 1e-9).unwrap() * d;
+            d_max = d_max.max(d);
             count += 1;
         }
         assert!(count > 0, "{name}: no blend face is a definition");
-        spread
+        d_max
     }
 
     /// The certified volume band of the closed body `b`: its enclosure (asked 1e-6 wide
     /// relative; refinement stops earlier where the gaps between faces, which no cut
-    /// narrows, are wider) widened by `spread`. Asserts that the volume the integrator
+    /// narrows, are wider) widened by `spread = A d_max`, an upper bound of `sum A_f d_f`:
+    /// `A` the upper end of the body's certified area enclosure (every face, so at least
+    /// the blend faces' area) and `d_max` the largest proved net distance
+    /// ([`certified_blends`]), the product rounded up. Asserts that the volume the integrator
     /// converges to (its estimate at its finest accuracy, 1e-8 relative) lies in it. The
     /// golden's own estimate (at 1e-4) and the row before (`old`, the old body's) are
     /// printed beside the band for the record only: an estimate is not a bound.
     pub(in super::super) fn volume_band(
         k: &Kernel,
         b: &mut Brep,
-        spread: f64,
+        d_max: f64,
         old: f64,
         name: &str,
     ) {
+        let area = enclose_quantity(k, b, Quantity::Area, f64::MAX).unwrap();
+        let spread = (area.hi * d_max).next_up();
         let store = solidcore::geom::attribute::AttributeStore::default();
         let attributes = PropertyAttributes {
             store: &store,
@@ -1922,12 +1931,109 @@ pub(super) mod round_definition_proof {
             hi - lo
         );
     }
+
+    /// The certified bands of the closed body `b`'s other mass values, as the golden
+    /// records them (density 1, about the origin): its area, centroid, axial inertias and
+    /// products (`enclose_mass_properties`, each asked 1e-5 of its scale wide: the area's,
+    /// the volume's times the box's half diagonal `R` to the moment's degree; one that
+    /// spends its cell budget first stays a valid, wider band). The golden's requested
+    /// accuracy is `1e-4` of the value's
+    /// scale (the area, `R` for a centroid, `V R^2` for an inertia or product, or the value
+    /// where it is larger). Asserts, for each value, that the value the integrator
+    /// converges to (1e-8) lies in its band and that the golden's own estimate (1e-4) lies
+    /// within that accuracy of it; prints `PROVEN` where the band is at most that accuracy
+    /// wide (the golden's value is then within twice its accuracy of the true one) and
+    /// `WIDE` where it is not. The bands are of the body as stored (its nets), which is the
+    /// body the golden measures.
+    pub(in super::super) fn mass_bands(k: &Kernel, b: &mut Brep, name: &str) {
+        use solidcore::mass::enclosure::{enclose_mass_properties, Bounds};
+        let store = solidcore::geom::attribute::AttributeStore::default();
+        let attributes = PropertyAttributes {
+            store: &store,
+            key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
+        };
+        let mut at = |accuracy: f64| {
+            let m = brep_mass_properties(k, b, accuracy, 1.0, Vec3::ZERO, &attributes).unwrap();
+            let v = |p: Vec3| [p.x, p.y, p.z];
+            (m.properties.area, v(m.centroid), v(m.inertia), v(m.products))
+        };
+        let golden = at(MASS_ACCURACY);
+        let converged = at(ESTIMATE_ACCURACY_FINEST);
+        let e = enclose_mass_properties(k, b, 1e-5).unwrap();
+        if let Some((q, stop)) = e.short {
+            eprintln!("{name}: the {q:?} enclosure stopped at {stop:?}, its band wider");
+        }
+        let r = {
+            let bbox = solidcore::query::brep::calculate_bounding_box(
+                k,
+                &mut *b,
+                solidcore::query::brep::BoundingBoxOptions::default(),
+            )
+            .unwrap();
+            0.5 * bbox.size().length()
+        };
+        let vr2 = e.volume.hi * r * r;
+        let check = |what: &str, band: &Bounds, conv: f64, gold: f64, scale: f64| {
+            let scale = scale.max(conv.abs());
+            let accuracy = MASS_ACCURACY * scale;
+            assert!(
+                band.contains(conv),
+                "{name}: the converged {what} {conv} is off the certified {band:?}"
+            );
+            let off = (band.lo - gold).max(gold - band.hi).max(0.0);
+            assert!(
+                off <= accuracy,
+                "{name}: the golden's {what} {gold} is {off:e} off the certified {band:?}, \
+                 past its accuracy {accuracy:e}"
+            );
+            // PROVEN: the band is at most the accuracy wide, so the golden's value is within
+            // twice its accuracy of the true one; WIDE: the band holds the converged and
+            // golden values but is wider than the accuracy
+            let label = if band.width() <= accuracy {
+                "PROVEN"
+            } else {
+                "WIDE"
+            };
+            eprintln!(
+                "MASSBAND {label} {name}: {what} converged {conv}, golden {gold}, certified \
+                 [{}, {}], width {:e} (accuracy {accuracy:e})",
+                band.lo,
+                band.hi,
+                band.width()
+            );
+        };
+        check("area", &e.area, converged.0, golden.0, converged.0);
+        let axes = ["x", "y", "z"];
+        for i in 0..3 {
+            check(
+                &format!("centroid {}", axes[i]),
+                &e.centroid[i],
+                converged.1[i],
+                golden.1[i],
+                r,
+            );
+            check(
+                &format!("inertia {}", axes[i]),
+                &e.inertia[i],
+                converged.2[i],
+                golden.2[i],
+                vr2,
+            );
+            check(
+                &format!("product {}", ["yz", "zx", "xy"][i]),
+                &e.products[i],
+                converged.3[i],
+                golden.3[i],
+                vr2,
+            );
+        }
+    }
 }
 
 #[cfg(test)]
 pub(super) mod round_definition_rows {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-    use super::round_definition_proof::{certified_blends, volume_band};
+    use super::round_definition_proof::{certified_blends, mass_bands, volume_band};
     use super::*;
     use solidcore::blend::definition_check::{
         bare_blend_faces, BlendFaceKind, BlendFaceLog, CornerKind,
@@ -2043,9 +2149,10 @@ pub(super) mod round_definition_rows {
             if name == "stubs4-delete-edge-bottle-e8-r0.1" {
                 rail_splits_at_a_c1_knot(&k, &body);
             }
-            let spread = certified_blends(&k, &mut body, name);
+            let d_max = certified_blends(&k, &mut body, name);
             if let Some(old) = old_volume {
-                volume_band(&k, &mut body, spread, old, name);
+                volume_band(&k, &mut body, d_max, old, name);
+                mass_bands(&k, &mut body, name);
             }
         }
     }
