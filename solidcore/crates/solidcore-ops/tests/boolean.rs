@@ -9,7 +9,7 @@ use std::io::Read as _;
 use serde_json::Value;
 use solidcore::topology::vertex::corner;
 use solidcore_ops::boolean::{boolean, imprint, union_all};
-use solidcore_ops::sweep::{extrude, revolve, Curve, DraftCorner};
+use solidcore_ops::sweep::{extrude, join_arcs, revolve, zone_tolerance, Curve, DraftCorner, Join};
 use solidcore_ops::{
     blend, make_box, make_cone, make_sphere, session, Blend, Body, BooleanOp, CheckLevel, Corners,
     Error,
@@ -1798,4 +1798,93 @@ slab_past_spring_cases! {
     issue_16532_intersect_slab_on_the_spring: 0.0, Intersect;
     issue_16532_intersect_slab_2e5_past_the_spring: 2e-5, Intersect;
     issue_16532_intersect_slab_2_5e5_past_the_spring: 2.5e-5, Intersect;
+}
+
+/// A rectangle `size` from the origin at height `z`, as four lines.
+fn rectangle_at(z: f64, size: [f64; 2]) -> Vec<Curve> {
+    let [w, h] = size;
+    let corners = [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]];
+    (0..4)
+        .map(|i| {
+            let (a, b) = (corners[i], corners[(i + 1) % 4]);
+            Curve::Line {
+                start: [a[0], a[1], z],
+                end: [b[0], b[1], z],
+            }
+        })
+        .collect()
+}
+
+/// #17285: a 40 x 30 x 6 plate with a 4 mm hole at (10, 10) cut through it, joined to a 10 mm
+/// plate on its top whose outline is the same rectangle and the same hole, drawn as two half
+/// arcs split at `split` degrees and joined into one circle clockwise from +X, as SolidCraft
+/// sweeps a circle drawn in pieces. The two bores' rims at z = 6 are one circle run opposite
+/// ways. The join's face of the top bore took the trim of its rim from the top plate's own
+/// rim, which the points at its ends and middle (the same either way round) took for a copy of
+/// the bottom bore's rim: the trim ran backwards along the use, the loop jumped a period on the
+/// cylinder (SMLib's UVEdge/UVEdge gap) and the two bores stayed two faces. The join is the 40 x
+/// 30 x 16 block less the hole, its bores one face: 7 faces, 15 edges, 10 vertices.
+fn join_on_a_holed_plate(split: f64) -> Body {
+    let hole = extrude(
+        &[Curve::Arc {
+            center: [10.0, 10.0, 0.0],
+            axis: [0.0, 0.0, 1.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: 2.0,
+            start: 0.0,
+            end: TAU,
+        }],
+        [0.0, 0.0, 1.0],
+        6.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let plate = extrude(
+        &rectangle_at(0.0, [40.0, 30.0]),
+        [0.0, 0.0, 1.0],
+        6.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let holed = boolean(plate, hole, BooleanOp::Subtract).unwrap().unwrap();
+    let a = split * PI / 180.0;
+    let half = |start: f64| Curve::Arc {
+        center: [10.0, 10.0, 6.0],
+        axis: [0.0, 0.0, -1.0],
+        reference: [1.0, 0.0, 0.0],
+        radius: 2.0,
+        start,
+        end: start + PI,
+    };
+    let circle = join_arcs(
+        &[half(-a), half(-a - PI)],
+        Join::ClosedAtFrameStart,
+        zone_tolerance().unwrap(),
+    )
+    .unwrap();
+    let mut outline = rectangle_at(6.0, [40.0, 30.0]);
+    outline.push(circle);
+    let top = extrude(
+        &outline,
+        [0.0, 0.0, 1.0],
+        10.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    boolean(holed, top, BooleanOp::Union).unwrap().unwrap()
+}
+
+#[test]
+fn a_join_whose_hole_lines_up_with_a_bore_run_the_other_way_is_one_bore() {
+    all_fixes();
+    let want = 40.0 * 30.0 * 16.0 - PI * 4.0 * 16.0;
+    for split in [0.0, 60.0, 135.0] {
+        one_valid_solid_of_volume(&join_on_a_holed_plate(split), [7, 15, 10], want, 1e-9);
+    }
 }
