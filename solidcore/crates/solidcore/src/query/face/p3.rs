@@ -1239,9 +1239,9 @@ fn loose_top(
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] when the loose box is not finite either: then no bound on
-/// the cell exists to name, and a box that may not hold the face is refused rather than
-/// returned; those of [`loose_top`].
+/// [`SolidError::InvalidInput`] when the loose box is not finite either, or the base's net
+/// holds a NaN: then no bound on the cell exists to name, and a box that may not hold the
+/// face is refused rather than returned; those of [`loose_top`].
 fn unsolved_cell_top(
     k: &Kernel,
     lb: &LazyBrep<'_>,
@@ -1268,8 +1268,19 @@ fn unsolved_cell_top(
     if let Some(top) = rounded {
         return Ok(top);
     }
+    // A NaN in the base's net is no point anywhere: the surface is NaN wherever its basis
+    // function is not zero, which the loose box's min and max pass over, so a finite
+    // loose box would be a box of the other control points, not of the surface.
+    let nan_net = patch_base(k, surface)?
+        .and_then(|base| base.control_point_net().ok())
+        .is_some_and(|net| {
+            net.points
+                .iter()
+                .any(|p| p.x.is_nan() || p.y.is_nan() || p.z.is_nan())
+                || net.weights.iter().any(|w| w.is_nan())
+        });
     let loose = loose_top(k, lb, f, surface, cell, dir)?;
-    if loose.is_finite() {
+    if loose.is_finite() && !nan_net {
         Ok(loose)
     } else {
         Err(SolidError::invalid_input(
@@ -3837,6 +3848,151 @@ mod tests {
     #[test]
     fn tight_box_of_a_face_without_edges_is_its_surfaces_box() {
         edgeless_face_box_holds_its_surface(&crowned_height_field(0.0));
+    }
+
+    /// (#17685) An edgeless face whose surface has an infinite or a NaN control point has
+    /// no finite bound to name: the box is a typed refusal. Main returned Ok with the
+    /// empty box's inverted bounds (+-1e20) for the infinite one, and a NaN one passed the
+    /// loose box's min and max to a box of the other control points.
+    #[test]
+    fn edgeless_face_on_a_non_finite_net_is_refused() {
+        use crate::topology::brep::p2::ArenaNotifyState;
+        use crate::topology::brep::p8::{create_face_from_surface, FaceBuildEnv};
+        for bad in [f64::INFINITY, f64::NAN] {
+            let knots = vec![0.0, 0.0, 1.0, 1.0];
+            let mut net = vec![
+                vec![
+                    CPoint::new(0.0, 0.0, 0.0, NOW),
+                    CPoint::new(0.0, 1.0, 0.0, NOW),
+                ],
+                vec![
+                    CPoint::new(1.0, 0.0, 0.0, NOW),
+                    CPoint::new(1.0, 1.0, 0.0, NOW),
+                ],
+            ];
+            let good = NurbSurface::new(net.clone(), 1, 1, knots.clone(), knots.clone()).unwrap();
+            net[1][1] = CPoint::new(1.0, 1.0, bad, NOW);
+            let nurb = NurbSurface::new(net, 1, 1, knots.clone(), knots).unwrap();
+            let mut k = Kernel::default();
+            let mut b = crate::topology::brep::p3::new_brep(
+                &mut k,
+                crate::geom::tol::USE_DEFAULT,
+                crate::geom::tol::USE_DEFAULT,
+            )
+            .unwrap();
+            let domain = Extent2d::from_bounds(0.5, 0.5, 0.500_001, 0.500_001);
+            let f = {
+                let mut state = ArenaNotifyState::new(&b);
+                let mut env = state.env(None);
+                let mut marks = crate::topology::topology_traverser::Marks::default();
+                let this_face = |f: FaceId| loopuse::notify_ref(EntityRef::Face(f));
+                let mut fenv = FaceBuildEnv {
+                    env: &mut env,
+                    marks: &mut marks,
+                    this_face: &this_face,
+                };
+                let surface = Surface::from(BSplineSurface::from_nurb(good, false));
+                create_face_from_surface(&mut k, &mut b, Some(surface), &domain, &mut fenv).unwrap()
+            };
+            assert!(face_edges(&b, f).unwrap().is_empty(), "no edges");
+            // made on the finite patch (a non-finite one is refused when its face is made),
+            // then given the non-finite one over the same domain
+            b.face_mut(f).unwrap().surface =
+                Some(Surface::from(BSplineSurface::from_nurb(nurb, false)));
+            let got = calculate_tight_bounding_box(&k, &b, f);
+            assert!(
+                matches!(got, Err(SolidError::InvalidInput { .. })),
+                "{bad}: {got:?}"
+            );
+        }
+    }
+
+    /// (#17685) `query.brep` gen0128: a biquadratic patch whose u = 0 row of control
+    /// points lies on the z axis, so that side of the face is a curve that runs up the
+    /// axis, stops and turns back down. The face is highest there, at the peak of that
+    /// curve, 0.4367128727741329 (exact rational arithmetic on the net, to 6e-22). The
+    /// search counts only points inside the face; the side's extreme comes from its
+    /// edge's tight box, which ended at 0.43534 before the curve's tight box took the
+    /// points where it stops. The box holds the peak to the speed minimisation's accuracy
+    /// and no more than rounding above it.
+    #[test]
+    fn tight_box_holds_a_face_side_that_turns_back() {
+        use crate::topology::brep::p2::ArenaNotifyState;
+        use crate::topology::brep::p8::{create_face_from_surface, FaceBuildEnv};
+        let rows: [[[f64; 3]; 5]; 3] = [
+            [
+                [0.0, 0.0, 0.336_409_316_230_782_1],
+                [0.0, 0.0, 0.448_428_932_357_200_6],
+                [0.0, 0.0, 0.412_240_069_159_368_5],
+                [0.0, 0.0, -0.128_554_999_916_893],
+                [0.0, 0.0, -0.388_250_346_477_554_63],
+            ],
+            [
+                [1.0, 0.0, -0.464_284_290_957_214],
+                [1.0, 1.0, 0.263_688_656_688_936_7],
+                [1.0, 2.0, 0.294_186_553_657_282_3],
+                [1.0, 3.0, -0.419_737_902_943_591_15],
+                [1.0, 4.0, 0.065_511_759_192_359_3],
+            ],
+            [
+                [2.0, 0.0, 0.056_174_992_418_487_78],
+                [2.0, 1.0, -0.497_924_535_172_539_54],
+                [2.0, 2.0, 0.161_691_281_757_247_23],
+                [2.0, 3.0, 0.341_229_374_113_694_9],
+                [2.0, 4.0, -0.463_918_657_057_931],
+            ],
+        ];
+        let net: Vec<Vec<CPoint>> = rows
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|p| CPoint::new(p[0], p[1], p[2], NOW))
+                    .collect()
+            })
+            .collect();
+        let knots_v = vec![
+            0.0,
+            0.0,
+            0.0,
+            0.324_471_410_413_183_8,
+            0.897_412_383_425_158_5,
+            1.0,
+            1.0,
+            1.0,
+        ];
+        let nurb =
+            NurbSurface::new(net, 2, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], knots_v).unwrap();
+        let surface = Surface::from(BSplineSurface::from_nurb(nurb, false));
+        let mut k = Kernel::default();
+        let mut b = crate::topology::brep::p3::new_brep(
+            &mut k,
+            crate::geom::tol::USE_DEFAULT,
+            crate::geom::tol::USE_DEFAULT,
+        )
+        .unwrap();
+        let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let f = {
+            let mut state = ArenaNotifyState::new(&b);
+            let mut env = state.env(None);
+            let mut marks = crate::topology::topology_traverser::Marks::default();
+            let this_face = |f: FaceId| loopuse::notify_ref(EntityRef::Face(f));
+            let mut fenv = FaceBuildEnv {
+                env: &mut env,
+                marks: &mut marks,
+                this_face: &this_face,
+            };
+            create_face_from_surface(&mut k, &mut b, Some(surface), &domain, &mut fenv).unwrap()
+        };
+        let top = calculate_tight_bounding_box(&k, &b, f).unwrap().max().z;
+        let (peak_lo, peak_hi) = (0.436_712_872_774_132_9, 0.436_712_872_774_132_95);
+        assert!(
+            top >= peak_lo - 1e-12,
+            "box top {top} below the peak {peak_lo}"
+        );
+        assert!(
+            top <= peak_hi + 4.0 * f64::EPSILON,
+            "box top {top} above the peak"
+        );
     }
 
     /// The same for a plane, which the box's planar early return used to leave empty.
