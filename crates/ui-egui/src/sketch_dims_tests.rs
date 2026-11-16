@@ -586,6 +586,20 @@ fn a_palette_linetype_click_leaves_the_dimension_box_focused() {
     assert_eq!(crate::sketch_palette::mode(&h.app), 1, "the click still switched the drawing line type");
 }
 
+/// A box moved into the free region keeps its margin on every side (#17992): the region's
+/// placement already sets the box in by the margin at its own size.
+#[test]
+fn a_box_moved_into_the_free_region_keeps_its_margin() {
+    let domain = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+    let free = crate::panel_runtime::resolve_usable_region(crate::panel_runtime::logical_rect(domain), &[]).unwrap();
+    let room = Room::new(domain, Some(&free)).inset(4.0);
+    let moved = room.clamp(egui::Rect::from_min_size(egui::pos2(740.0, 300.0), egui::vec2(100.0, 24.0)));
+    assert_eq!(moved, egui::Rect::from_min_size(egui::pos2(696.0, 300.0), egui::vec2(100.0, 24.0)));
+    // One already clear of the edges stays where it is.
+    let clear = egui::Rect::from_min_size(egui::pos2(200.0, 300.0), egui::vec2(100.0, 24.0));
+    assert_eq!(room.clamp(clear), clear);
+}
+
 /// A value box set off the cursor stays in the drawing area (#2201): past an edge it goes to the
 /// cursor's other side, still clear of it; with no room either side it is pushed inside.
 #[test]

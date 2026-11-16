@@ -1060,7 +1060,8 @@ impl<'a> Room<'a> {
         let size = solidcraft_engine::panels::Size { width: r.width(), height: r.height() };
         let centre = solidcraft_engine::panels::Point { x: r.center().x, y: r.center().y };
         if let Some(placed) = self.free.and_then(|free| free.place_footprint(size, centre, self.margin)) {
-            return crate::panel_runtime::egui_rect(placed).shrink(self.margin);
+            // Already set in by the margin, at the box's own size.
+            return crate::panel_runtime::egui_rect(placed);
         }
         let inner = self.view.shrink(self.margin);
         egui::Rect::from_min_size(r.min.clamp(inner.min, (inner.max - r.size()).max(inner.min)), r.size())
