@@ -1,0 +1,2 @@
+| crates/look/icons/design/svg/model/bend_slots.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/small/bend_slots.svg | SolidCraft contributors | optical small-size icon variant, original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |

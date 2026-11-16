@@ -78,6 +78,13 @@ impl FeatureKind {
             }
             Ref::Body(_) => {}
         });
+        if let Self::SheetBendSlots { bends, .. } = self {
+            for bend in bends {
+                if let Some(certificate) = &mut bend.source_certificate {
+                    certificate.remap_names(ids, &BTreeMap::new());
+                }
+            }
+        }
     }
 
     /// Point references to bodies (by name) at their copies.
@@ -89,6 +96,13 @@ impl FeatureKind {
                 *name = BodyName(n.clone());
             }
         });
+        if let Self::SheetBendSlots { bends, .. } = self {
+            for bend in bends {
+                if let Some(certificate) = &mut bend.source_certificate {
+                    certificate.remap_names(&BTreeMap::new(), bodies);
+                }
+            }
+        }
     }
 }
 

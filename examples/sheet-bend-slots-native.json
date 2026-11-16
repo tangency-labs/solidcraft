@@ -1,0 +1,87 @@
+{
+  "commands": [
+    {
+      "command": "parameters.add",
+      "params": {"name": "demo_width", "expression": "80 mm"}
+    },
+    {
+      "command": "parameters.add",
+      "params": {"name": "demo_depth", "expression": "100 mm"}
+    },
+    {
+      "command": "parameters.add",
+      "params": {"name": "demo_flange_height", "expression": "20 mm"}
+    },
+    {
+      "command": "parameters.add",
+      "params": {"name": "demo_slot_length", "expression": "7 mm", "favorite": true}
+    },
+    {
+      "command": "parameters.add",
+      "params": {"name": "demo_slot_width", "expression": "1 mm", "favorite": true}
+    },
+    {
+      "command": "parameters.add",
+      "params": {"name": "demo_bridge", "expression": "3 mm", "favorite": true}
+    },
+    {
+      "command": "parameters.add",
+      "params": {"name": "demo_end_margin", "expression": "2 mm", "favorite": true}
+    },
+    {
+      "command": "parameters.add",
+      "params": {"name": "demo_corner_radius", "expression": "3 mm", "favorite": true}
+    },
+    {
+      "command": "sheet.manage_rules",
+      "params": {
+        "name": "Native bend-slot demo",
+        "thickness": "1.5 mm",
+        "bend_radius": "1.5 mm",
+        "k_factor": 0.5,
+        "active": true
+      }
+    },
+    {
+      "command": "sketch.create",
+      "params": {"plane": "XY", "name": "Demo panel"}
+    },
+    {
+      "command": "sketch.rectangle.two_point",
+      "params": {"p0": [0, 0], "p1": ["demo_width", "demo_depth"]}
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "sheet.flange",
+      "params": {"sketch": "Demo panel", "body_name": "Slotted sheet", "name": "Demo base sheet"}
+    },
+    {
+      "command": "sheet.flange",
+      "params": {
+        "type": "edge",
+        "body": "Slotted sheet",
+        "edges": [[40, 0, 1.5], [40, 100, 1.5]],
+        "height": "demo_flange_height",
+        "angle": "90 deg",
+        "name": "Demo end flanges"
+      }
+    },
+    {
+      "command": "sheet.bend_slots",
+      "params": {
+        "body": "Slotted sheet",
+        "slot_length": "demo_slot_length",
+        "slot_width": "demo_slot_width",
+        "bridge": "demo_bridge",
+        "end_margin": "demo_end_margin",
+        "corner_radius": "demo_corner_radius",
+        "profile": "rounded",
+        "reliefs": true,
+        "name": "Parametric bend slots and end reliefs"
+      }
+    }
+  ]
+}

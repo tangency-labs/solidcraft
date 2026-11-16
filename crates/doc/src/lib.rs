@@ -8,6 +8,8 @@
 pub mod appearance;
 pub mod appearance_pack;
 mod assembly;
+pub mod bend_slots;
+pub use bend_slots::{BendSlotSourceCertificate, SheetBendRef, SheetBendSlotProfile};
 mod body_transfer;
 mod body_transfer_sheet;
 mod browser_tree;

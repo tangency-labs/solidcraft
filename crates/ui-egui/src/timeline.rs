@@ -294,6 +294,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::ReplaceFace { .. } => "replace_face",
         FeatureKind::Align { .. } => "align",
         FeatureKind::Coil { .. } => "coil",
+        FeatureKind::SheetBendSlots { .. } => "bend_slots",
         FeatureKind::SheetPerforate { .. } => "perforate",
         FeatureKind::CellGrid { .. } => "perforate",
         FeatureKind::BoundaryFill { .. } => "boundary_fill",

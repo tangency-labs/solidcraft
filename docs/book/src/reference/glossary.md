@@ -70,6 +70,16 @@ An appearance sets colour and surface finish only. It has no effect on mass or s
 - **Elsewhere:** appearance, visual material, colour.
 - **For translators:** not the physical material.
 
+### bend slots
+
+A row of through-cuts along a sheet-metal bend, separated by material bridges.
+
+- **In SolidCraft:** `sheet.bend_slots` ("Bend Slots"); the native `sheet_bend_slots` feature.
+  Optional end reliefs open at the sheet boundary and share the slot height. The feature saves
+  its selected bends and dimensional expressions.
+- **Don't use:** perforation field (an area pattern that avoids bends), dashed line (a display mark).
+- **For translators:** the slots remove material; they are not drawn bend lines or scored grooves.
+
 ### bill of materials
 
 The list of the components placed in a design or in one component, with the quantity of each.

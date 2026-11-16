@@ -2114,6 +2114,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         || matches!(
             spec.id,
             "sheet.flange"
+                | "sheet.bend_slots"
                 | "sheet.hem"
                 | "sheet.perforate"
                 | "sheet.fold"

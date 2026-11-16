@@ -981,6 +981,7 @@ pub fn convert_body(
         panels.insert(g, wall);
     }
     let mut sh = base_flange(&mb.name, rule, &RuleValues { thickness: t, ..rv }, frame, Region2::default());
+    sh.source_root = crate::naming::face_names(mb).get(f0).cloned().unwrap_or_default();
     // How far behind a face of the sheet the body's face `g` starts and ends: a hole's wall
     // reaches through the sheet, a pocket's ends on its floor, an island's starts at the face.
     let mut points: BTreeMap<usize, Vec<Vec3>> = BTreeMap::new();
@@ -1165,6 +1166,16 @@ pub fn convert_body(
                 exact: None,
                 zone_shape: None,
                 tag: String::new(),
+                source_path: picks
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, (_, (x, y)))| {
+                        ((*x == pf && *y == g)
+                            || (*y == pf && *x == g)
+                            || backs.get(index).copied().flatten().is_some_and(|(x, y)| (x == pf && y == g) || (y == pf && x == g)))
+                        .then_some(index as u32)
+                    })
+                    .collect(),
                 tear: (false, false),
                 tear_curved: (false, false),
                 tear_ease: (0.0, 0.0),

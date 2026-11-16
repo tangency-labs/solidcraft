@@ -1662,6 +1662,32 @@ pub enum FeatureKind {
         #[walk(profiles_of = sketch)]
         profiles: Option<ProfileSel>,
     },
+    /// Real through-cuts following the current upstream bend lines. An empty selection means
+    /// all current bends. The feature preserves whether the sheet is folded or unfolded.
+    SheetBendSlots {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<BodyName>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        bends: Vec<crate::SheetBendRef>,
+        #[walk(length = "Slot length")]
+        slot_length: Expr,
+        #[walk(length = "Slot width")]
+        slot_width: Expr,
+        #[walk(length = "Bridge")]
+        bridge: Expr,
+        #[walk(length = "End margin")]
+        end_margin: Expr,
+        #[walk(length = "Corner radius")]
+        corner_radius: Expr,
+        /// Absent: the throat setback follows the entry corner radius.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Relief depth")]
+        relief_depth: Option<Expr>,
+        #[serde(default)]
+        profile: crate::SheetBendSlotProfile,
+        #[serde(default = "yes")]
+        reliefs: bool,
+    },
     /// Fold a sheet along a line on its base face: a sketch line (followed when the sketch
     /// changes), else the points `a`, `b`.
     SheetFold {
@@ -2933,6 +2959,7 @@ impl FeatureKind {
                 | FeatureKind::SheetFlange { .. }
                 | FeatureKind::SheetHem { .. }
                 | FeatureKind::SheetPerforate { .. }
+                | FeatureKind::SheetBendSlots { .. }
                 | FeatureKind::SheetFold { .. }
                 | FeatureKind::SheetPath { .. }
                 | FeatureKind::SheetUnfold { .. }
@@ -2992,6 +3019,7 @@ impl FeatureKind {
             FeatureKind::SheetFlange { .. } => "EdgeFlangeFeature",
             FeatureKind::SheetHem { .. } => "HemFeature",
             FeatureKind::SheetPerforate { .. } => "PerforateFeature",
+            FeatureKind::SheetBendSlots { .. } => "BendSlotsFeature",
             FeatureKind::SheetFold { .. } => "FoldFeature",
             FeatureKind::SheetPath { .. } => "PathFlangeFeature",
             FeatureKind::SheetUnfold { refold: false, .. } => "UnfoldFeature",
@@ -3075,6 +3103,7 @@ impl FeatureKind {
             FeatureKind::SheetFlange { .. } => "sheet_flange",
             FeatureKind::SheetHem { .. } => "sheet_hem",
             FeatureKind::SheetPerforate { .. } => "sheet_perforate",
+            FeatureKind::SheetBendSlots { .. } => "sheet_bend_slots",
             FeatureKind::SheetFold { .. } => "sheet_fold",
             FeatureKind::SheetPath { .. } => "sheet_path",
             FeatureKind::SheetUnfold { .. } => "sheet_unfold",
@@ -3165,6 +3194,7 @@ impl FeatureKind {
             "PathFlangeFeature" => "sheet_path",
             "UnfoldFeature" | "RefoldFeature" => "sheet_unfold",
             "ConvertToSheetMetalFeature" => "sheet_convert",
+            "BendSlotsFeature" => "sheet_bend_slots",
             "CoilFeature" => "coil",
             "CellGridFeature" => "cell_grid",
             "RibFeature" | "WebFeature" => "rib",
@@ -3247,6 +3277,7 @@ impl FeatureKind {
             FeatureKind::SheetFlange { .. } => "EdgeFlange",
             FeatureKind::SheetHem { .. } => "Hem",
             FeatureKind::SheetPerforate { .. } => "Perforate",
+            FeatureKind::SheetBendSlots { .. } => "BendSlots",
             FeatureKind::SheetFold { .. } => "Fold",
             FeatureKind::SheetPath { .. } => "PathFlange",
             FeatureKind::SheetUnfold { refold: false, .. } => "Unfold",

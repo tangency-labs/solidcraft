@@ -19,6 +19,7 @@ axis_normal_to_face	false
 axis_through_cylinder	false
 axis_two_planes	false
 axis_two_points	false
+bend_slots	false
 bendtable	false
 blend	false
 body	false

@@ -54,6 +54,51 @@ An `edges` entry is `[x,y,z]` on a top or bottom edge, `{x,y,z}`, or
 - `sheet.fold`: `line` (sketch + curve) or `points` (`[[x,y,z],[x,y,z]]`), `angle?`, `radius?`,
   `position?` (`centerline`|`start`|`end`|`mould`), `fixed?`, `flip?`, `body?`.
 
+### `sheet.bend_slots`
+
+```json
+{"command":"sheet.bend_slots","params":{"body":"Panel","slot_length":"7 mm",
+ "slot_width":"1 mm","bridge":"3 mm","end_margin":"2 mm","corner_radius":"3 mm",
+ "profile":"rounded","reliefs":true,"name":"Bend slots and end reliefs"}}
+```
+
+One retained native feature cuts exact slots on the current upstream bends and preserves the
+input's folded or unfolded state. Use it instead of a captured-coordinate unfold/sketch/cut
+recipe when slots must follow upstream sheet changes. Edit the existing feature or its model
+parameters for later changes; do not rerun creation or add transforms.
+
+- `body?` defaults to the newest sheet. `bends?` lists current tags, `F<feature>.<index>`;
+  omitted or empty captures the currently untreated bends once. Get the actual tags from
+  `sheet.flat_pattern {"body":"Panel"}` → `bends[].tag`. Split span rows can repeat one tag;
+  select each tag once. Missing, duplicate or already-treated references are refused.
+  `edges?` is an alternative list of current exact B-rep indices on `body`; those indices are
+  resolved to persistent tags once. New defaults and later parameter edits never add bends
+  freed by an earlier feature. The desktop uses Chamfer's standard Edges picker.
+  Each saved reference also carries a structural source certificate. Changed or missing
+  certificates require explicit reselection; a reused ordinal must not retarget another bend.
+  Conversion frame changes can renumber current tags; the saved physical source resolves to
+  its current tag without renaming existing CAD edges.
+- Length expressions: `slot_length?` (overall, 7 mm), `slot_width?` (1 mm), `bridge?` (3 mm),
+  `end_margin?` (2 mm), `corner_radius?` (3 mm), `relief_depth?` (omit to follow corner radius).
+- `profile?`: `rounded` (default) or `rectangular`, shared by the slots and relief-throat ends.
+  `reliefs?` defaults true. Throat height equals slot width and their centrelines coincide;
+  rounded closed ends have radius `slot_width/2`. Entry corners use their separate radius.
+- At most 64 bends and 512 generated cut loops, counting slots and end reliefs together.
+  Slot width and bridge must be at least 0.001 mm; slot length must exceed width by 0.001 mm.
+  All lengths are finite, nonnegative and below 100000000 mm. With reliefs enabled, depth is
+  at least 0.001 mm and at least the entry radius. The row must fit its end margins.
+- The first implementation requires one connected flat region and straight exterior edges
+  across the relief mouths. Material boundaries must contain lines and circular arcs; free-form
+  segments are refused. Existing openings must clear the full slot-width band of each selected
+  bend, including its bridges, and the reliefs. Generated cuts touching each other are refused.
+  Place bend slots before retained pocket, edge-bore and perforation features; those records
+  are conservatively unsupported as inputs. Unsupported or lost bend geometry fails clearly.
+
+After changes, verify the flat pattern's exact `cutout_shapes`, bend alignment, closed solid,
+integer counts and end bridges. Native save/reopen and undo/redo must retain the one feature.
+See the [native guide](../../docs/bend-slots-native.md) and generic example for the development
+status and full restrictions.
+
 ### `sheet.unfold`, `sheet.refold`, `sheet.convert`, `sheet.perforate`
 - `sheet.unfold {"body":"..."}` unfolds every bend; `sheet.refold` folds it back.
 - `sheet.convert`: `body`, `face` (a point on the large flat face or its name), `rule?`, `bends?`.
@@ -63,7 +108,7 @@ An `edges` entry is `[x,y,z]` on a top or bottom edge, `{x,y,z}`, or
 ### `sheet.flat_pattern`, `sheet.export_dxf`, `sheet.export_bend_table`
 - `sheet.flat_pattern {"body":"..."}` answers `flat_size_mm` (`[x,y,thickness]`), `outline`,
   `cutouts`, `cutout_shapes`, `pockets`, `bends` (`bend`, `angle_deg`, `included_angle_deg`,
-  `radius`, `direction`, `allowance`, `length`, `start`, `end` in flat coordinates),
+  `tag`, `radius`, `direction`, `allowance`, `length`, `start`, `end` in flat coordinates),
   `bend_zones`, `perforations`, `bores` (holes drilled along a panel into its rim) and the unfolded
   body.
 - `sheet.export_dxf`: `body?`, `path?`, `curves?` (`exact`|`arcs`), `text?` (`cut`|`etch`),

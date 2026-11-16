@@ -22,6 +22,8 @@ use solidcraft_theme::Tokens;
 
 const PERFORATION_PATTERNS: [&str; 2] = ["staggered", "square"];
 const PERFORATION_LABELS: [&str; 2] = ["ui.perforate_staggered", "ui.perforate_square"];
+const BEND_SLOT_PROFILES: [&str; 2] = ["rounded", "rectangular"];
+const BEND_SLOT_PROFILE_LABELS: [&str; 2] = ["ui.bend_slots_rounded", "ui.bend_slots_rectangular"];
 
 const FOLD_POSITIONS: [&str; 4] = ["centerline", "start", "end", "mould"];
 const FOLD_POSITION_LABELS: [&str; 4] = ["Centerline", "Start of Bend", "End of Bend", "Outside Mould Line"];
@@ -77,6 +79,23 @@ pub struct SegmentRow {
 crate::dialog_descriptor::dialog_descriptors! {
     #[derive(Clone, Debug)]
     pub enum Sm {
+        BendSlots("sheet.bend_slots", "ui.bend_slots_title", [("Edges", EDGES | FACES, true)],
+            FeatureKind::SheetBendSlots { body, slot_length, slot_width, bridge, end_margin, corner_radius, relief_depth, profile, reliefs, bends, .. }) {
+            slot_length: String = "7 mm".into() => slot_length.to_string(),
+            slot_width: String = "1 mm".into() => slot_width.to_string(),
+            bridge: String = "3 mm".into() => bridge.to_string(),
+            end_margin: String = "2 mm".into() => end_margin.to_string(),
+            corner_radius: String = "3 mm".into() => corner_radius.to_string(),
+            relief_depth: String = String::new() => relief_depth.as_deref().map(str::to_string).unwrap_or_default(),
+            profile: usize = 0 => usize::from(matches!(profile, solidcraft_engine::doc::SheetBendSlotProfile::Rectangular)),
+            reliefs: bool = true => *reliefs,
+            body: Option<String> = None => body.as_ref().map(ToString::to_string),
+            unresolved: Vec<String> = Vec::new() => bends.iter().map(solidcraft_engine::doc::SheetBendRef::tag).collect(),
+            restored_refs: std::sync::Arc<Vec<solidcraft_engine::doc::SheetBendRef>> = std::sync::Arc::new(Vec::new()) => std::sync::Arc::new(bends.clone()),
+            note: Option<&'static str> = None => None,
+            source: std::cell::RefCell<Option<std::rc::Rc<BendSlotSource>>> = Default::default() => Default::default(),
+        } => json!({"slot_length": slot_length, "slot_width": slot_width, "bridge": bridge, "end_margin": end_margin,
+            "corner_radius": corner_radius, "profile": BEND_SLOT_PROFILES.get(*profile).copied().unwrap_or("rounded"), "reliefs": reliefs});
         Perforate("sheet.perforate", "ui.perforate_title", [("Body (last if none)", BODIES | FACES, false)],
             FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, .. }) {
             diameter: String = "3 mm".into() => diameter.to_string(),
@@ -212,7 +231,7 @@ fn new_flange(app: &SolveApp, ty: usize) -> Sm {
 
 /// The dialog for a sheet metal command.
 pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
-    let (sm, inputs) = match id {
+    let (mut sm, mut inputs) = match id {
         "sheet.flange" => (new_flange(app, 0), vec![SelInput::new("Profile / Edges", PROFILES | EDGES | CURVES, true)]),
         "sheet.unfold" => (Sm::Unfold { refold: false }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
         "sheet.refold" => (Sm::Unfold { refold: true }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
@@ -228,6 +247,34 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "sheet.flat_pattern" => (Sm::FlatPattern { data: None, key: None, status: None }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
         _ => Sm::simple_start(id)?,
     };
+    if let Sm::BendSlots { body, unresolved, restored_refs, note, source: cache, .. } = &mut sm {
+        let target = app.session.selection.iter().find_map(|pick| match pick {
+            Sel::Body { name } | Sel::Edge { body: name, .. } | Sel::Face { body: name, .. } => Some(name.as_str()),
+            _ => None,
+        });
+        if let Ok(source) = cached_bend_slot_source(&app.session, target, cache) {
+            *body = Some(source.world.clone());
+            *note = if source.flat {
+                Some("ui.bend_slots_refold")
+            } else if source.available.is_empty() {
+                Some("ui.bend_slots_no_remaining")
+            } else {
+                None
+            };
+            if let Some(input) = inputs.first_mut() {
+                input.items = source.representatives(&app.session, &source.available);
+                if !source.flat {
+                    *unresolved = source.unrepresented(&source.available, &input.items);
+                }
+            }
+            if let Ok((captured, unavailable)) = capture_bend_slot_selection(&app.session, &inputs, cache) {
+                *restored_refs = std::sync::Arc::new(captured);
+                unresolved.extend(unavailable);
+                unresolved.sort();
+                unresolved.dedup();
+            }
+        }
+    }
     Some((crate::length_input::defaults(&app.session.doc, Kind::Sheet(sm)), inputs))
 }
 
@@ -271,6 +318,24 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
     let t = Tokens::get();
     let mut enter = false;
     match k {
+        Sm::BendSlots { slot_length, slot_width, bridge, end_margin, corner_radius, relief_depth, profile, reliefs, unresolved, note, .. } => {
+            enter |= expr_row(ui, "ui.bend_slots_length", slot_length);
+            enter |= expr_row(ui, "ui.bend_slots_width", slot_width);
+            enter |= expr_row(ui, "ui.bend_slots_bridge", bridge);
+            enter |= expr_row(ui, "ui.bend_slots_margin", end_margin);
+            choice_row(ui, "ui.bend_slots_profile", "sm_bend_slots_profile", profile, &BEND_SLOT_PROFILE_LABELS);
+            crate::ui_kit::options(ui, "sheet_bend_slots_options", &mut [("ui.bend_slots_reliefs", reliefs)]);
+            ui.add_enabled_ui(*reliefs, |ui| {
+                enter |= expr_row(ui, "ui.bend_slots_corner_radius", corner_radius);
+                enter |= hint_row(ui, "ui.bend_slots_depth", relief_depth, solidcraft_ui_text::tr("ui.bend_slots_depth_default"));
+            });
+            if !unresolved.is_empty() {
+                ui.label(RichText::new(solidcraft_ui_text::tr("ui.bend_slots_unavailable")).color(t.warning));
+            }
+            if let Some(note) = note {
+                ui.label(solidcraft_ui_text::tr(note));
+            }
+        }
         Sm::Flange { ty, height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then, segments } => {
             *ty = flange_type(inputs);
             form_row(ui, "Type", |ui| {
@@ -569,6 +634,267 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
     enter
 }
 
+/// The exact current edge-to-bend map. Mesh edge points below are only selection markers;
+/// ownership is certified from the source B-rep by `bend_slot_edge_tags`.
+/// This cache is shared only by UI-thread dialog clones; preview workers receive commands.
+#[derive(Debug)]
+pub struct BendSlotSource {
+    state: std::sync::Weak<solidcraft_engine::doc::ModelState>,
+    world: String,
+    own: String,
+    edges: Vec<(usize, String)>,
+    available: Vec<String>,
+    flat: bool,
+    validation: std::cell::RefCell<Option<BendSlotValidation>>,
+}
+
+/// Validation is shared by inexpensive dialog clones. A geometry cache alone cannot guard
+/// a metadata-only producer edit, so the document identity and revision are also required.
+#[derive(Debug)]
+struct BendSlotValidation {
+    doc: std::sync::Weak<solidcraft_engine::doc::Document>,
+    revision: u64,
+    state: std::sync::Weak<solidcraft_engine::doc::ModelState>,
+    selection: std::sync::Weak<Vec<solidcraft_engine::doc::SheetBendRef>>,
+    resolved: std::sync::Arc<Vec<Option<String>>>,
+}
+
+impl BendSlotSource {
+    fn representatives(&self, session: &solidcraft_engine::Session, tags: &[String]) -> Vec<Sel> {
+        let state = crate::open_meshing::session_world(session);
+        let Some(body) = state.body(&self.world) else { return Vec::new() };
+        let mesh = body.mesh();
+        tags.iter()
+            .filter_map(|tag| {
+                let index = self.edges.iter().find(|(_, source)| source == tag)?.0;
+                let points = mesh.edges.get(index)?;
+                Some(Sel::Edge { body: self.world.clone(), index, point: crate::selection::polyline_mid(points) })
+            })
+            .collect()
+    }
+
+    fn unrepresented(&self, tags: &[String], picks: &[Sel]) -> Vec<String> {
+        tags.iter()
+            .filter(|tag| {
+                !picks
+                    .iter()
+                    .any(|pick| matches!(pick, Sel::Edge { index, .. } if self.edges.iter().any(|(edge, source)| edge == index && source == *tag)))
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn resolved_selection(
+        &self,
+        session: &solidcraft_engine::Session,
+        references: &std::sync::Arc<Vec<solidcraft_engine::doc::SheetBendRef>>,
+    ) -> std::sync::Arc<Vec<Option<String>>> {
+        let current = session.model.state();
+        let doc = std::sync::Arc::downgrade(&session.doc);
+        let state = std::sync::Arc::downgrade(&current);
+        let selection = std::sync::Arc::downgrade(references);
+        if let Ok(cached) = self.validation.try_borrow()
+            && let Some(cached) = cached.as_ref()
+            && cached.doc.ptr_eq(&doc)
+            && cached.revision == session.revision
+            && cached.state.ptr_eq(&state)
+            && cached.selection.ptr_eq(&selection)
+        {
+            return cached.resolved.clone();
+        }
+        let sheet = current.sheets.iter().find(|sheet| sheet.body == self.own);
+        // Match the command's selection budget without allocating a result for an unbounded
+        // saved list. A length mismatch below fails closed, including during restoration.
+        let resolved = std::sync::Arc::new(if references.len() > 64 {
+            Vec::new()
+        } else {
+            references.iter().map(|reference| sheet.and_then(|sheet| session.doc.resolve_bend_slot_reference(sheet, reference).ok())).collect()
+        });
+        if let Ok(mut cached) = self.validation.try_borrow_mut() {
+            *cached = Some(BendSlotValidation { doc, revision: session.revision, state, selection, resolved: resolved.clone() });
+        }
+        resolved
+    }
+}
+
+fn cached_bend_slot_source(
+    session: &solidcraft_engine::Session,
+    picked: Option<&str>,
+    cache: &std::cell::RefCell<Option<std::rc::Rc<BendSlotSource>>>,
+) -> Result<std::rc::Rc<BendSlotSource>, String> {
+    let state = session.model.state();
+    if let Ok(cached) = cache.try_borrow()
+        && let Some(source) = cached.as_ref()
+        && source.state.ptr_eq(&std::sync::Arc::downgrade(&state))
+        && match picked {
+            Some(name) => source.world == name || source.own == name,
+            None => state.sheets.last().is_some_and(|sheet| sheet.body == source.own),
+        }
+    {
+        return Ok(source.clone());
+    }
+    let source = std::rc::Rc::new(bend_slot_source(session, picked)?);
+    if let Ok(mut cached) = cache.try_borrow_mut() {
+        *cached = Some(source.clone());
+    }
+    Ok(source)
+}
+
+fn bend_slot_source(session: &solidcraft_engine::Session, picked: Option<&str>) -> Result<BendSlotSource, String> {
+    let state = session.model.state();
+    let frames = session.placed_document().body_frames_with_source(&state);
+    let own =
+        picked.map(|picked| frames.iter().find(|(world, own, ..)| world == picked || own == picked).map_or(picked, |(_, own, ..)| own.as_str()));
+    let sheet = match own {
+        Some(name) => state.sheets.iter().find(|sheet| sheet.body == name),
+        None => state.sheets.last(),
+    }
+    .ok_or_else(|| solidcraft_ui_text::tr("ui.bend_slots_no_bends").to_string())?;
+    let body = state.body(&sheet.body).ok_or_else(|| solidcraft_ui_text::tr("ui.bend_slots_no_bends").to_string())?;
+    let world = frames
+        .iter()
+        .find(|(world, own, ..)| own == &sheet.body && picked.is_none_or(|pick| world == pick || own == pick))
+        .map(|(world, ..)| world.clone())
+        .unwrap_or_else(|| sheet.body.clone());
+    let mut edges = if sheet.flat { Vec::new() } else { sheet.bend_slot_edge_tags(&body.body).map_err(|error| error.to_string())? };
+    // Presentation only: the exact resolver already certified ownership. Start the standard
+    // edge highlight on a long seam rather than the bend's small circular end boundary.
+    edges.sort_by_key(|(index, _)| {
+        !matches!(body.body.record().edges.get(*index).map(|edge| &edge.curve), Some(solidcore_record::brep::Curve::Line { .. }))
+    });
+    Ok(BendSlotSource {
+        state: std::sync::Arc::downgrade(&state),
+        world,
+        own: sheet.body.clone(),
+        edges,
+        available: sheet.available_bend_slot_tags(),
+        flat: sheet.flat,
+        validation: Default::default(),
+    })
+}
+
+/// Unavailable stored bends have no invented edge pick. The standard selection chip offers
+/// Clear and a replacement pick explicitly reviews the selection.
+pub(crate) fn bend_slots_unresolved(dialog: &Dialog, input: usize) -> usize {
+    match &dialog.kind {
+        Kind::Sheet(Sm::BendSlots { unresolved, .. }) if input == 0 => unresolved.len(),
+        _ => 0,
+    }
+}
+
+pub(crate) fn bend_slots_selection_changed(session: &solidcraft_engine::Session, dialog: &mut Dialog) {
+    if let Kind::Sheet(Sm::BendSlots { unresolved, restored_refs, note, .. }) = &mut dialog.kind {
+        unresolved.clear();
+        *restored_refs = std::sync::Arc::new(Vec::new());
+        *note = None;
+    }
+    if let Kind::Sheet(Sm::BendSlots { unresolved, restored_refs, source, .. }) = &mut dialog.kind
+        && let Ok((captured, unavailable)) = capture_bend_slot_selection(session, &dialog.inputs, source)
+    {
+        *restored_refs = std::sync::Arc::new(captured);
+        *unresolved = unavailable;
+    }
+}
+
+/// Capture only when the user chooses a new selection, including the new tool's opening
+/// snapshot. Preview and Apply validate these references without refreshing their identity.
+fn capture_bend_slot_selection(
+    session: &solidcraft_engine::Session,
+    inputs: &[SelInput],
+    cache: &std::cell::RefCell<Option<std::rc::Rc<BendSlotSource>>>,
+) -> Result<(Vec<solidcraft_engine::doc::SheetBendRef>, Vec<String>), String> {
+    if items(inputs, 0).is_empty() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let (_, tags) = bend_slot_edge_params(session, inputs, cache, &std::sync::Arc::new(Vec::new()))?;
+    let target = items(inputs, 0).iter().find_map(|pick| match pick {
+        Sel::Edge { body, .. } | Sel::Face { body, .. } => Some(body.as_str()),
+        _ => None,
+    });
+    let source = cached_bend_slot_source(session, target, cache)?;
+    let state = session.model.state();
+    let sheet =
+        state.sheets.iter().find(|sheet| sheet.body == source.own).ok_or_else(|| solidcraft_ui_text::tr("ui.bend_slots_no_bends").to_string())?;
+    let mut captured = Vec::new();
+    let mut unavailable = Vec::new();
+    for tag in tags {
+        match session.doc.capture_bend_slot_reference(sheet, &tag) {
+            Ok(reference) => captured.push(reference),
+            Err(_) => unavailable.push(tag),
+        }
+    }
+    Ok((captured, unavailable))
+}
+
+fn bend_slot_edge_params(
+    session: &solidcraft_engine::Session,
+    inputs: &[SelInput],
+    cache: &std::cell::RefCell<Option<std::rc::Rc<BendSlotSource>>>,
+    restored_refs: &std::sync::Arc<Vec<solidcraft_engine::doc::SheetBendRef>>,
+) -> Result<(Value, Vec<String>), String> {
+    let picks = items(inputs, 0);
+    if picks.is_empty() && cache.try_borrow().is_ok_and(|cached| cached.as_ref().is_some_and(|source| source.flat)) {
+        return Err(solidcraft_ui_text::tr("ui.bend_slots_refold").to_string());
+    }
+    let mut target: Option<&str> = None;
+    for pick in picks {
+        let body = match pick {
+            Sel::Edge { body, .. } | Sel::Face { body, .. } => body.as_str(),
+            _ => return Err(solidcraft_ui_text::tr("ui.bend_slots_select_edges").to_string()),
+        };
+        if target.is_some_and(|previous| previous != body) {
+            return Err(solidcraft_ui_text::tr("ui.bend_slots_one_body").to_string());
+        }
+        target = Some(body);
+    }
+    let target = target.ok_or_else(|| solidcraft_ui_text::tr("ui.bend_slots_select_edges").to_string())?;
+    let source = cached_bend_slot_source(session, Some(target), cache)?;
+    if source.flat {
+        return Err(solidcraft_ui_text::tr("ui.bend_slots_refold").to_string());
+    }
+    // An untouched editor must not silently recapture a different source if the upstream
+    // model changes while this dialog is open. Only an explicit selection change reviews it.
+    let resolved = source.resolved_selection(session, restored_refs);
+    if resolved.len() != restored_refs.len() || resolved.iter().any(Option::is_none) {
+        return Err(solidcraft_ui_text::tr("ui.bend_slots_unavailable").to_string());
+    }
+    let state = session.model.state();
+    let body = state.body(&source.own).ok_or_else(|| solidcraft_ui_text::tr("ui.bend_slots_no_bends").to_string())?;
+    let mut edges = Vec::new();
+    let mut tags = Vec::new();
+    for pick in picks {
+        let candidates = match pick {
+            Sel::Edge { index, .. } => vec![*index],
+            Sel::Face { index, .. } => solidcraft_engine::kernel::face_edge_indices(&body.body, *index)
+                .into_iter()
+                .filter(|edge| source.edges.iter().any(|(index, _)| index == edge))
+                .collect(),
+            _ => Vec::new(),
+        };
+        if candidates.is_empty() {
+            return Err(solidcraft_ui_text::tr("ui.bend_slots_unrelated_edge").to_string());
+        }
+        for edge in candidates {
+            let Some((_, tag)) = source.edges.iter().find(|(index, _)| *index == edge) else {
+                return Err(solidcraft_ui_text::tr("ui.bend_slots_unrelated_edge").to_string());
+            };
+            if !source.available.contains(tag) {
+                return Err(solidcraft_ui_text::tr("ui.bend_slots_already_treated").to_string());
+            }
+            if !edges.contains(&edge) {
+                edges.push(edge);
+            }
+            if !tags.contains(tag) {
+                tags.push(tag.clone());
+            }
+        }
+    }
+    if !restored_refs.is_empty() && (resolved.len() != tags.len() || resolved.iter().flatten().any(|tag| !tags.contains(tag))) {
+        return Err(solidcraft_ui_text::tr("ui.bend_slots_unavailable").to_string());
+    }
+    Ok((json!({ "body": target, "edges": edges }), tags))
+}
+
 /// The ribbon exports use the same save picker as the flat-pattern panel. Keep the
 /// commands' default target (the last sheet body) and leave programmatic calls headless.
 pub fn start_export(app: &mut SolveApp, id: &str) -> bool {
@@ -837,6 +1163,17 @@ fn remove_segment(list: &mut Vec<SegmentRow>, m: usize) {
 pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let s = &app.session;
     let (cmd, mut p): (&str, Value) = match k {
+        Sm::BendSlots { relief_depth, unresolved, restored_refs, source, .. } => {
+            if !unresolved.is_empty() {
+                return Err(solidcraft_ui_text::tr("ui.bend_slots_unavailable").to_string());
+            }
+            let (mut p, _) = bend_slot_edge_params(s, inputs, source, restored_refs)?;
+            if restored_refs.is_empty() {
+                return Err(solidcraft_ui_text::tr("ui.bend_slots_unavailable").to_string());
+            }
+            put(&mut p, &[("relief_depth", relief_depth)]);
+            ("sheet.bend_slots", p)
+        }
         Sm::Flange {
             height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then, segments, ..
         } => {
@@ -1129,6 +1466,33 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             return Some((Kind::Sheet(k), ins, extra));
         }
+        FeatureKind::SheetBendSlots { body, bends, .. } => {
+            let mut restored = Sm::simple_restore(kind)?;
+            let Sm::BendSlots { body: target, unresolved, restored_refs, note, source: cache, .. } = &mut restored else { return None };
+            let tags = std::mem::take(unresolved);
+            let mut picks = Vec::new();
+            if let Ok(source) = cached_bend_slot_source(s, body.as_deref(), cache) {
+                *target = Some(source.world.clone());
+                let resolved = source.resolved_selection(s, restored_refs);
+                let restorable: Vec<_> = resolved.iter().flatten().cloned().collect();
+                picks = source.representatives(s, &restorable);
+                let missing = source.unrepresented(&restorable, &picks);
+                *unresolved = bends
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| resolved.get(*index).and_then(Option::as_ref).is_none_or(|tag| missing.contains(tag)))
+                    .map(|(_, reference)| reference.tag())
+                    .collect();
+                *note = source.flat.then_some("ui.bend_slots_refold");
+            } else {
+                *unresolved = tags;
+            }
+            let mut inputs = restored.simple_inputs();
+            if let Some(input) = inputs.first_mut() {
+                input.items = picks;
+            }
+            return Some((Kind::Sheet(restored), inputs, extra));
+        }
         FeatureKind::SheetPerforate { body, .. } => (Sm::simple_restore(kind)?, body.iter().map(|n| Sel::Body { name: n.to_string() }).collect()),
         FeatureKind::SheetUnfold { body, refold } => {
             (Sm::Unfold { refold: *refold }, body.iter().map(|n| Sel::Body { name: n.to_string() }).collect())
@@ -1146,6 +1510,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         _ => return None,
     };
     let id = match &k {
+        Sm::BendSlots { .. } => "sheet.bend_slots",
         Sm::Flange { .. } => "sheet.flange",
         Sm::Hem { .. } => "sheet.hem",
         Sm::Perforate { .. } => "sheet.perforate",

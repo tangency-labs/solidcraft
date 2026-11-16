@@ -477,6 +477,97 @@ pub struct PerforateParams {
     pub common: FeatureCommon,
 }
 
+/// The closed ends of bend slots and relief throats.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BendSlotProfile {
+    Rounded,
+    Rectangular,
+}
+
+/// A bounded set of canonical persistent bend tags. Empty captures currently untreated bends.
+#[derive(Debug, Default)]
+pub struct BendSlotSelection(pub Vec<solidcraft_doc::SheetBendRef>);
+
+impl<'de> Deserialize<'de> for BendSlotSelection {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::cmd::bend_slot_refs(Some(&Value::deserialize(deserializer)?)).map(Self).map_err(D::Error::custom)
+    }
+}
+
+impl JsonSchema for BendSlotSelection {
+    fn schema_name() -> Cow<'static, str> {
+        "BendSlotSelection".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"type": "array", "maxItems": 64, "uniqueItems": true,
+            "items": {"type": "string", "maxLength": 32, "pattern": "^F[1-9][0-9]*\\.(0|[1-9][0-9]*)$"}})
+    }
+}
+
+/// A bounded set of current exact B-rep edge indices, resolved once to persistent bends.
+#[derive(Debug)]
+pub struct BendSlotEdges(pub Vec<usize>);
+
+impl<'de> Deserialize<'de> for BendSlotEdges {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::cmd::bend_slot_edges(&Value::deserialize(deserializer)?).map(Self).map_err(D::Error::custom)
+    }
+}
+
+impl JsonSchema for BendSlotEdges {
+    fn schema_name() -> Cow<'static, str> {
+        "BendSlotEdges".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"type": "array", "minItems": 1, "maxItems": 1000,
+            "items": {"type": "integer", "minimum": 0, "maximum": u32::MAX}})
+    }
+}
+
+/// Cut repeated slots along the current bend centres of a sheet. Omitted/empty bend
+/// references capture the current untreated bends; saved references never expand later.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BendSlotsParams {
+    /// The sheet metal body. Default: the newest sheet.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// Persistent bend tags, such as `F12.0`. Default: capture current untreated bends once.
+    #[serde(default)]
+    pub bends: BendSlotSelection,
+    /// Current exact B-rep edge indices, instead of `bends`. Several edges may name one bend.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "BendSlotEdges")]
+    pub edges: Option<BendSlotEdges>,
+    /// Overall slot length, including rounded end caps. Default: 7 mm.
+    #[serde(default)]
+    pub slot_length: Option<LengthExpr>,
+    /// Slot height and relief-throat height. Default: 1 mm.
+    #[serde(default)]
+    pub slot_width: Option<LengthExpr>,
+    /// Material between consecutive slots. Default: 3 mm.
+    #[serde(default)]
+    pub bridge: Option<LengthExpr>,
+    /// Minimum material between the slot row and its end reliefs. Default: 2 mm.
+    #[serde(default)]
+    pub end_margin: Option<LengthExpr>,
+    /// Radius of each relief's rounded entry corners. Default: 3 mm.
+    #[serde(default)]
+    pub corner_radius: Option<LengthExpr>,
+    /// Relief-throat setback from the bend end. Default: follows the entry corner radius.
+    #[serde(default)]
+    pub relief_depth: Option<LengthExpr>,
+    /// Rounded or rectangular closed ends for both slots and relief throats. Default: rounded.
+    #[serde(default)]
+    pub profile: Option<BendSlotProfile>,
+    /// Add aligned reliefs at both ends of each bend. Default: true.
+    #[serde(default)]
+    pub reliefs: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
 /// Add hems: the sheet folded back on itself along edges. `participants` changes nothing.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -1130,6 +1221,10 @@ pub struct FlatBend {
     /// The bend's number, from 1. The stretches that cut-outs leave of one bend each have a row,
     /// with the same number.
     pub bend: usize,
+    /// Current bend tag, `F<producing feature>.<local index>`. Split material stretches
+    /// of one bend repeat it. Bend Slots captures a structural source certificate from the
+    /// current tag; converted-sheet ordinals alone do not identify a physical bend forever.
+    pub tag: String,
     /// The bend angle, in degrees.
     pub angle_deg: f64,
     /// The angle left between the bend's sides, in degrees: 180 less `angle_deg`.

@@ -6109,6 +6109,451 @@ fn perforated_sheet_takes_a_thousand_round_holes() {
     assert!((removed - expected).abs() / expected < 0.05, "removed {removed:.1} mm³, 1000 holes are {expected:.1} mm³");
 }
 
+// ---- Native bend slots: current sheet geometry, one retained and editable feature ---------------------------
+
+fn bend_slots_blank(s: &mut Session) {
+    // K=.5 makes flat cut area times thickness equal the ideal annular bend volume.
+    run(s, "sheet.manage_rules", json!({"name": "Bend slot test", "thickness": 2.5, "bend_radius": 2.5, "k_factor": 0.5, "active": true}));
+    base(s, 60.0, 100.0);
+    run(s, "sheet.flange", json!({"edges": [[30, 0, 2.5], [30, 100, 2.5]], "height": 20, "angle": 45, "position": "outside"}));
+}
+
+#[test]
+fn bend_slots_are_one_feature_with_exact_volume_selection_undo_and_reopen() {
+    let mut s = Session::default();
+    bend_slots_blank(&mut s);
+    let before = volume(&mut s);
+    let count = s.doc.features.len();
+    let tag = flat(&mut s)["bends"][0]["tag"].as_str().unwrap().to_string();
+    assert!(tag.starts_with('F') && tag.contains('.'));
+    let made = run(&mut s, "sheet.bend_slots", json!({"bends": [tag], "reliefs": false}));
+    assert_eq!(run(&mut s, "timeline.inspect", json!({"feature": made["feature"]}))["definition"]["bends"][0]["producer_bend_count"], 2);
+    assert_eq!(s.doc.features.len(), count + 1);
+    let after = volume(&mut s);
+    // Five overall 7 x 1 slots: two half-discs of radius .5 plus a 6 x 1 rectangle.
+    let removed = 5.0 * (6.0 + PI / 4.0) * 2.5;
+    assert!((before - after - removed).abs() < 1e-3, "{before} - {after}, expected {removed}");
+    assert_eq!(flat(&mut s)["cutouts"].as_array().unwrap().len(), 5);
+    assert!(!s.model.state().sheets[0].flat, "the feature retains the folded state");
+    assert_eq!(run(&mut s, "inspect.measure", json!({}))["bodies"][0]["closed"], true);
+    run(&mut s, "edit.undo", json!({}));
+    assert!((volume(&mut s) - before).abs() < 1e-3);
+    assert_eq!(s.doc.features.len(), count);
+    run(&mut s, "edit.redo", json!({}));
+    assert!((volume(&mut s) - after).abs() < 1e-3);
+    run(&mut s, "timeline.suppress", json!({"feature": made["feature"], "suppressed": true}));
+    assert!((volume(&mut s) - before).abs() < 1e-3);
+    run(&mut s, "timeline.suppress", json!({"feature": made["feature"], "suppressed": false}));
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!((volume(&mut reopened) - after).abs() < 1e-3);
+    assert_eq!(flat(&mut reopened)["cutouts"].as_array().unwrap().len(), 5);
+    assert!(matches!(&reopened.doc.features.last().unwrap().kind, solidcraft_doc::FeatureKind::SheetBendSlots { .. }));
+}
+
+#[test]
+fn bend_slots_follow_upstream_width_and_their_own_parameters_without_new_features() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "Bend slot test", "thickness": 2.5, "bend_radius": 2.5, "k_factor": 0.5, "active": true}));
+    run(&mut s, "parameters.add", json!({"name": "width", "expression": "60 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "slot_height", "expression": "1 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": ["width", 100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[30, 0, 2.5], [30, 100, 2.5]], "height": 20, "angle": 45, "position": "outside"}));
+    let made = run(&mut s, "sheet.bend_slots", json!({"slot_width": "slot_height", "reliefs": false}));
+    let count = s.doc.features.len();
+    assert_eq!(flat(&mut s)["cutouts"].as_array().unwrap().len(), 10);
+    run(&mut s, "parameters.change", json!({"changes": {"width": "80 mm", "slot_height": "1.5 mm"}}));
+    assert_eq!(s.doc.features.len(), count);
+    assert_eq!(flat(&mut s)["cutouts"].as_array().unwrap().len(), 14);
+    let rounded = volume(&mut s);
+    run(&mut s, "timeline.edit", json!({"feature": made["feature"], "set": {"profile": "rectangular"}}));
+    let rectangular = volume(&mut s);
+    let per_slot_difference = 1.5 * 1.5 * (1.0 - PI / 4.0);
+    assert!((rounded - rectangular - 14.0 * per_slot_difference * 2.5).abs() < 1e-3);
+    assert_eq!(s.doc.features.len(), count);
+    assert_eq!(flat(&mut s)["cutouts"].as_array().unwrap().len(), 14);
+}
+
+#[test]
+fn bend_slots_capture_remaining_bends_once_without_adopting_later_released_bends() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "Bend selection test", "thickness": 2.5, "bend_radius": 2.5, "k_factor": 0.5, "active": true}));
+    base(&mut s, 60.0, 100.0);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"edges": [[30, 0, 2.5]], "height": 20, "angle": 45, "position": "outside", "then": [{"height": 20, "angle": 45}, {"height": 20, "angle": 45}]}),
+    );
+    let tags: Vec<_> = flat(&mut s)["bends"].as_array().unwrap().iter().map(|bend| bend["tag"].as_str().unwrap().to_string()).collect();
+    assert_eq!(tags.len(), 3);
+    let first = run(&mut s, "sheet.bend_slots", json!({"bends": &tags[..2], "reliefs": false}));
+    let second = run(&mut s, "sheet.bend_slots", json!({"reliefs": false}));
+    let saved = run(&mut s, "timeline.inspect", json!({"feature": second["feature"]}))["definition"].clone();
+    assert_eq!(saved["bends"].as_array().unwrap().len(), 1);
+    let selected = &saved["bends"][0];
+    assert_eq!(format!("F{}.{}", selected["feature"], selected["index"]), tags[2]);
+    assert_eq!(flat(&mut s)["cutouts"].as_array().unwrap().len(), 15);
+    let count = s.doc.features.len();
+    let first_definition = run(&mut s, "timeline.inspect", json!({"feature": first["feature"]}))["definition"].clone();
+    run(&mut s, "timeline.edit", json!({"feature": first["feature"], "set": {"bends": [first_definition["bends"][0].clone()]}}));
+    assert_eq!(s.doc.features.len(), count);
+    assert_eq!(run(&mut s, "timeline.inspect", json!({"feature": second["feature"]}))["definition"], saved);
+    assert_eq!(flat(&mut s)["cutouts"].as_array().unwrap().len(), 10);
+    assert_eq!(s.model.state().sheets[0].available_bend_slot_tags(), vec![tags[1].clone()]);
+    let third = run(&mut s, "sheet.bend_slots", json!({"reliefs": false}));
+    assert_eq!(run(&mut s, "timeline.inspect", json!({"feature": third["feature"]}))["definition"]["bends"].as_array().unwrap().len(), 1);
+    assert_eq!(flat(&mut s)["cutouts"].as_array().unwrap().len(), 15);
+    let before = s.doc.to_json();
+    let error = s.execute("sheet.bend_slots", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("no remaining"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn bend_slots_resolve_exact_edges_once_and_deduplicate_edges_of_the_same_bend() {
+    let mut s = Session::default();
+    bend_slots_blank(&mut s);
+    let sheet = s.model.state().sheets[0].clone();
+    let body = s.model.state().bodies[0].body.clone();
+    let mapped = sheet.bend_slot_edge_tags(&body).unwrap();
+    let tag = mapped[0].1.clone();
+    let edges: Vec<_> = mapped.iter().filter(|(_, bend)| *bend == tag).take(2).map(|(edge, _)| *edge).collect();
+    assert_eq!(edges.len(), 2);
+    let unrelated = (0..body.record().edges.len()).find(|edge| !mapped.iter().any(|(candidate, _)| candidate == edge)).unwrap();
+    let before = s.doc.to_json();
+    for params in [json!({"edges": [unrelated]}), json!({"edges": &edges, "bends": [tag.clone()]}), json!({"edges": []})] {
+        assert!(s.execute("sheet.bend_slots", &params).is_err(), "{params}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+    let made = run(&mut s, "sheet.bend_slots", json!({"edges": edges, "reliefs": false}));
+    let definition = run(&mut s, "timeline.inspect", json!({"feature": made["feature"]}))["definition"].clone();
+    assert!(definition.get("edges").is_none(), "transient indices are never saved as feature identity");
+    assert_eq!(definition["bends"].as_array().unwrap().len(), 1);
+    assert_eq!(flat(&mut s)["cutouts"].as_array().unwrap().len(), 5);
+    let before = s.doc.to_json();
+    let error = s.execute("sheet.bend_slots", &json!({"bends": [tag]})).unwrap_err().to_string();
+    assert!(error.contains("already"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "sheet.bend_slots", json!({"reliefs": false}));
+    assert_eq!(flat(&mut s)["cutouts"].as_array().unwrap().len(), 10);
+    assert_eq!(run(&mut s, "inspect.measure", json!({}))["bodies"][0]["closed"], true);
+}
+
+#[test]
+fn bend_slots_refuse_invalid_dimensions_and_lost_bends_without_changes() {
+    let mut s = Session::default();
+    bend_slots_blank(&mut s);
+    let tag = flat(&mut s)["bends"][0]["tag"].as_str().unwrap().to_string();
+    for params in [
+        json!({"slot_length": -1}),
+        json!({"slot_width": 0}),
+        json!({"slot_width": 8}),
+        json!({"bridge": 0}),
+        json!({"end_margin": -1}),
+        json!({"profile": "ellipse"}),
+        json!({"bends": ["F999999.0"]}),
+        json!({"bends": ["0"]}),
+        json!({"bends": [tag.clone(), tag]}),
+        json!({"relief_depth": 1, "corner_radius": 3}),
+    ] {
+        let before = s.doc.to_json();
+        assert!(s.execute("sheet.bend_slots", &params).is_err(), "{params} must be refused");
+        assert_eq!(s.doc.to_json(), before, "refusal must retain the design");
+    }
+}
+
+#[test]
+fn bend_slots_report_a_disappeared_selected_bend_and_recover_when_it_returns() {
+    let mut s = Session::default();
+    bend_slots_blank(&mut s);
+    let upstream = s.doc.features.last().unwrap().id;
+    let tag = flat(&mut s)["bends"][1]["tag"].as_str().unwrap().to_string();
+    let made = run(&mut s, "sheet.bend_slots", json!({"bends": [tag], "reliefs": false}));
+    assert_eq!(flat(&mut s)["cutouts"].as_array().unwrap().len(), 5);
+    run(&mut s, "timeline.suppress", json!({"feature": upstream, "suppressed": true}));
+    let inspect = run(&mut s, "timeline.inspect", json!({"feature": made["feature"]}));
+    let error = inspect["error"].as_str().unwrap_or_default();
+    assert!(error.contains("bend"), "a vanished reference must be an explicit error: {inspect}");
+    assert!(flat(&mut s)["cutouts"].as_array().unwrap().is_empty(), "never retarget another bend");
+    run(&mut s, "timeline.suppress", json!({"feature": upstream, "suppressed": false}));
+    assert!(run(&mut s, "timeline.inspect", json!({"feature": made["feature"]}))["error"].is_null());
+    assert_eq!(flat(&mut s)["cutouts"].as_array().unwrap().len(), 5);
+}
+
+#[test]
+fn bend_slots_require_selection_review_when_a_producer_changes_its_bend_count() {
+    let mut s = Session::default();
+    bend_slots_blank(&mut s);
+    let producer = s.doc.features.last().unwrap().id;
+    let original_edges = run(&mut s, "timeline.inspect", json!({"feature": producer}))["definition"]["edges"].clone();
+    let tag = flat(&mut s)["bends"][0]["tag"].as_str().unwrap().to_string();
+    let made = run(&mut s, "sheet.bend_slots", json!({"bends": [tag], "reliefs": false}));
+    run(&mut s, "timeline.edit", json!({"feature": producer, "set": {"edges": [{"point": [30, 0, 2.5]}]}}));
+    let inspect = run(&mut s, "timeline.inspect", json!({"feature": made["feature"]}));
+    assert!(inspect["error"].as_str().unwrap_or_default().contains("reselect"), "{inspect}");
+    assert!(flat(&mut s)["cutouts"].as_array().unwrap().is_empty());
+    run(&mut s, "timeline.edit", json!({"feature": producer, "set": {"edges": original_edges}}));
+    assert!(run(&mut s, "timeline.inspect", json!({"feature": made["feature"]}))["error"].is_null());
+    assert_eq!(flat(&mut s)["cutouts"].as_array().unwrap().len(), 5);
+}
+
+#[test]
+fn bend_slots_refuse_same_count_producer_reorder_and_replacement_without_machining() {
+    for edges in [json!([[30, 100, 2.5], [30, 0, 2.5]]), json!([[0, 50, 2.5], [60, 50, 2.5]])] {
+        let mut s = Session::default();
+        bend_slots_blank(&mut s);
+        let producer = s.doc.features.last().unwrap().id;
+        let original = run(&mut s, "timeline.inspect", json!({"feature": producer}))["definition"]["edges"].clone();
+        let tag = format!("F{producer}.0");
+        let made = run(&mut s, "sheet.bend_slots", json!({"bends": [tag], "reliefs": false}));
+        let saved = run(&mut s, "timeline.inspect", json!({"feature": made["feature"]}))["definition"]["bends"].clone();
+        assert_eq!(flat(&mut s)["cutouts"].as_array().unwrap().len(), 5);
+        run(&mut s, "timeline.edit", json!({"feature": producer, "set": {"edges": edges}}));
+        assert!(run(&mut s, "timeline.inspect", json!({"feature": producer}))["error"].is_null());
+        assert_eq!(s.model.state().sheets[0].flanges.len(), 2, "the topology count is deliberately unchanged");
+        let inspect = run(&mut s, "timeline.inspect", json!({"feature": made["feature"]}));
+        assert!(inspect["error"].as_str().unwrap_or_default().contains("reselect"), "{inspect}");
+        assert_eq!(inspect["definition"]["bends"], saved, "an edit must not capture a replacement source");
+        assert!(s.model.state().sheets[0].slotted_bends.is_empty());
+        assert!(flat(&mut s)["cutouts"].as_array().unwrap().is_empty(), "no other bend is machined");
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert!(
+            run(&mut reopened, "timeline.inspect", json!({"feature": made["feature"]}))["error"].as_str().unwrap_or_default().contains("reselect")
+        );
+        assert!(flat(&mut reopened)["cutouts"].as_array().unwrap().is_empty());
+        run(&mut reopened, "timeline.edit", json!({"feature": producer, "set": {"edges": original}}));
+        assert!(run(&mut reopened, "timeline.inspect", json!({"feature": made["feature"]}))["error"].is_null());
+        assert_eq!(flat(&mut reopened)["cutouts"].as_array().unwrap().len(), 5, "the original physical source recovers");
+    }
+}
+
+#[test]
+fn bend_slots_missing_source_certificate_does_not_adopt_the_present_ordinal() {
+    let mut s = Session::default();
+    bend_slots_blank(&mut s);
+    let tag = s.model.state().sheets[0].flanges[0].tag.clone();
+    run(&mut s, "parameters.add", json!({"name": "legacy_slot_length", "expression": "7 mm"}));
+    let made = run(&mut s, "sheet.bend_slots", json!({"bends": [tag], "slot_length": "legacy_slot_length", "reliefs": false}));
+    let solidcraft_doc::FeatureKind::SheetBendSlots { bends, .. } = &mut std::sync::Arc::make_mut(&mut s.doc).features.last_mut().unwrap().kind
+    else {
+        panic!("native feature")
+    };
+    assert!(bends[0].source_certificate.take().is_some());
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let inspect = run(&mut reopened, "timeline.inspect", json!({"feature": made["feature"]}));
+    assert!(inspect["error"].as_str().unwrap_or_default().contains("reselect"), "{inspect}");
+    assert!(flat(&mut reopened)["cutouts"].as_array().unwrap().is_empty());
+    let before = reopened.doc.to_json();
+    let original_definition = inspect["definition"].clone();
+    let error = reopened.execute("timeline.edit", &json!({"feature": made["feature"], "set": {"slot_length": "8 mm"}})).unwrap_err().to_string();
+    assert!(error.contains("reselect"), "a direct edit of an uncertified feature is refused: {error}");
+    assert_eq!(reopened.doc.to_json(), before, "refusal is atomic and preserves the missing identity");
+    assert_eq!(run(&mut reopened, "timeline.inspect", json!({"feature": made["feature"]}))["definition"], original_definition);
+    run(&mut reopened, "parameters.change", json!({"name": "legacy_slot_length", "expression": "8 mm"}));
+    let inspect = run(&mut reopened, "timeline.inspect", json!({"feature": made["feature"]}));
+    assert!(inspect["error"].as_str().unwrap_or_default().contains("reselect"), "editing a dimension does not approve a new source");
+    assert!(inspect["definition"]["bends"][0].get("source_certificate").is_none());
+    assert!(reopened.model.state().sheets[0].slotted_bends.is_empty());
+    let mut saved_again = Session::new(solidcraft_doc::Document::from_json(&reopened.doc.to_json()).unwrap());
+    let inspect = run(&mut saved_again, "timeline.inspect", json!({"feature": made["feature"]}));
+    assert!(inspect["error"].as_str().unwrap_or_default().contains("reselect"));
+    assert_eq!(inspect["definition"], original_definition);
+    assert!(flat(&mut saved_again)["cutouts"].as_array().unwrap().is_empty(), "save/reopen cannot approve a missing certificate");
+}
+
+#[test]
+fn bend_slots_refuse_uncertified_segment_regrouping_even_when_the_count_stays_equal() {
+    let mut s = Session::default();
+    bend_slots_blank(&mut s);
+    let producer = s.doc.features.last().unwrap().id;
+    let made = run(&mut s, "sheet.bend_slots", json!({"bends": [format!("F{producer}.0")], "reliefs": false}));
+    run(
+        &mut s,
+        "timeline.edit",
+        json!({"feature": producer, "set": {"edges": [
+            {"point": [30,0,2.5], "segments": [{"from": 0, "to": 1}]},
+            {"point": [30,100,2.5], "segments": [{"from": 0, "to": 1}]}
+        ]}}),
+    );
+    assert!(run(&mut s, "timeline.inspect", json!({"feature": producer}))["error"].is_null());
+    assert_eq!(s.model.state().sheets[0].flanges.len(), 2);
+    let inspect = run(&mut s, "timeline.inspect", json!({"feature": made["feature"]}));
+    assert!(inspect["error"].as_str().unwrap_or_default().contains("reselect"), "{inspect}");
+    assert!(flat(&mut s)["cutouts"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn bend_slots_never_certify_a_lenient_source_profile_substitution() {
+    let mut s = Session::default();
+    bend_slots_blank(&mut s);
+    let source = std::sync::Arc::make_mut(&mut s.doc)
+        .features
+        .iter_mut()
+        .find(|feature| matches!(feature.kind, solidcraft_doc::FeatureKind::SheetBase { .. }))
+        .unwrap();
+    let solidcraft_doc::FeatureKind::SheetBase { sketch, profiles, .. } = &mut source.kind else { panic!("base") };
+    let sketch_id = sketch.0;
+    let solved = s.model.state().sketch(sketch_id).unwrap().clone();
+    // Half the former loop survives: legacy evaluation best-matches the same rectangle,
+    // while exact selection deliberately refuses the missing two source curves.
+    let selection = solidcraft_doc::ProfileSel::Curves {
+        loops: vec![vec![solved.sketch.curves[0].id.clone(), solved.sketch.curves[1].id.clone(), "absent-a".into(), "absent-b".into()]],
+    };
+    assert!(solidcraft_doc::profile_selection_indices(&solved, &selection).is_err());
+    assert!(solidcraft_doc::profile_selection_indices_lenient(&solved, &selection).is_ok());
+    *profiles = selection;
+    let source_id = source.id;
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(run(&mut reopened, "timeline.inspect", json!({"feature": source_id}))["error"].is_null());
+    assert_eq!(reopened.model.state().sheets[0].flanges.len(), 2);
+    let before = reopened.doc.to_json();
+    let error = reopened.execute("sheet.bend_slots", &json!({"reliefs": false})).unwrap_err().to_string();
+    assert!(error.contains("all-profile"), "{error}");
+    assert_eq!(reopened.doc.to_json(), before, "refusal never adopts the legacy best match");
+}
+
+fn bend_slot_counts(pattern: &Value) -> std::collections::BTreeMap<String, usize> {
+    let mut rows = std::collections::BTreeMap::<String, (solidcore_record::Vec2, solidcore_record::Vec2, usize)>::new();
+    for bend in pattern["bends"].as_array().unwrap() {
+        let point = |key: &str| solidcore_record::Vec2::new(bend[key][0].as_f64().unwrap(), bend[key][1].as_f64().unwrap());
+        rows.entry(bend["tag"].as_str().unwrap().to_string()).or_insert((point("start"), point("end"), 0));
+    }
+    for shape in pattern["cutout_shapes"].as_array().unwrap() {
+        let segments = shape["segments"].as_array().unwrap();
+        let arcs: Vec<_> = segments.iter().filter_map(|segment| segment.get("arc")).collect();
+        let centre = if arcs.len() == 2 {
+            solidcore_record::Vec2::new(
+                (arcs[0]["center"][0].as_f64().unwrap() + arcs[1]["center"][0].as_f64().unwrap()) / 2.0,
+                (arcs[0]["center"][1].as_f64().unwrap() + arcs[1]["center"][1].as_f64().unwrap()) / 2.0,
+            )
+        } else {
+            let points: Vec<_> = segments.iter().flat_map(|segment| segment["line"].as_array().unwrap()).collect();
+            let bounds = |axis: usize, combine: fn(f64, f64) -> f64, initial: f64| {
+                points.iter().map(|point| point[axis].as_f64().unwrap()).fold(initial, combine)
+            };
+            solidcore_record::Vec2::new(
+                (bounds(0, f64::min, f64::INFINITY) + bounds(0, f64::max, f64::NEG_INFINITY)) / 2.0,
+                (bounds(1, f64::min, f64::INFINITY) + bounds(1, f64::max, f64::NEG_INFINITY)) / 2.0,
+            )
+        };
+        let nearest = rows
+            .iter()
+            .map(|(tag, (start, end, _))| {
+                let direction = *end - *start;
+                let delta = centre - *start;
+                (tag.clone(), (direction.x * delta.y - direction.y * delta.x).abs() / direction.len())
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .unwrap();
+        assert!(nearest.1 < 1e-6, "slot centre {centre:?} is {} off the current bend", nearest.1);
+        rows.get_mut(&nearest.0).unwrap().2 += 1;
+    }
+    rows.into_iter().map(|(tag, (_, _, count))| (tag, count)).collect()
+}
+
+fn bend_slot_alignment(pattern: &Value, per_bend: usize) {
+    let rows = bend_slot_counts(pattern);
+    assert_eq!(rows.len(), 2);
+    assert!(rows.values().all(|count| *count == per_bend), "{rows:?}");
+}
+
+#[test]
+fn bend_slots_follow_a_converted_sheet_when_its_longest_edge_turns_the_flat_frame() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "span", "expression": "80 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "U section"}));
+    run(&mut s, "sketch.line", json!({"points": [[0,0],[75,0],[75,20],[73,20],[73,2],[2,2],[2,20],[0,20]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "span", "body_name": "Folded blank"}));
+    run(&mut s, "sheet.convert", json!({"body": "Folded blank", "face": [40,37.5,0], "bends": [[40,0,0],[40,75,0]]}));
+    let old = flat(&mut s);
+    let old_direction = solidcore_record::Vec2::new(
+        old["bends"][0]["end"][0].as_f64().unwrap() - old["bends"][0]["start"][0].as_f64().unwrap(),
+        old["bends"][0]["end"][1].as_f64().unwrap() - old["bends"][0]["start"][1].as_f64().unwrap(),
+    );
+    let made = run(&mut s, "sheet.bend_slots", json!({}));
+    let count = s.doc.features.len();
+    bend_slot_alignment(&flat(&mut s), 7);
+    run(&mut s, "parameters.change", json!({"name": "span", "expression": "70 mm"}));
+    let changed = flat(&mut s);
+    let new_direction = solidcore_record::Vec2::new(
+        changed["bends"][0]["end"][0].as_f64().unwrap() - changed["bends"][0]["start"][0].as_f64().unwrap(),
+        changed["bends"][0]["end"][1].as_f64().unwrap() - changed["bends"][0]["start"][1].as_f64().unwrap(),
+    );
+    assert!(
+        (old_direction.dot(new_direction) / (old_direction.len() * new_direction.len())).abs() < 1e-6,
+        "this fixture must turn the converter's flat frame by 90 degrees"
+    );
+    bend_slot_alignment(&changed, 6);
+    assert_eq!(s.doc.features.len(), count);
+    assert_eq!(run(&mut s, "inspect.measure", json!({}))["bodies"][0]["closed"], true);
+    run(&mut s, "timeline.edit", json!({"feature": made["feature"], "set": {"profile": "rectangular"}}));
+    bend_slot_alignment(&flat(&mut s), 6);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    bend_slot_alignment(&flat(&mut reopened), 6);
+}
+
+#[test]
+fn bend_slots_keep_one_converted_physical_bend_when_the_flat_frame_turns() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "span", "expression": "80 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Channel section"}));
+    run(&mut s, "sketch.line", json!({"points": [[0,0],[75,0],[75,20],[73,20],[73,2],[2,2],[2,20],[0,20]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "span", "body_name": "Channel blank"}));
+    run(&mut s, "sheet.convert", json!({"body": "Channel blank", "face": [40,37.5,0], "bends": [[40,0,0],[40,75,0]]}));
+    let producer = s.doc.features.last().unwrap().id;
+    let selected = s.model.state().sheets[0].flanges.iter().find(|flange| flange.source_path == [0]).unwrap().tag.clone();
+    let original_axis = |s: &Session| {
+        let sheet = &s.model.state().sheets[0];
+        for (index, flange) in sheet.flanges.iter().enumerate() {
+            assert_eq!(flange.tag, format!("F{producer}.{index}"), "legacy public conversion tags retain BFS semantics");
+        }
+        let flange = sheet.flanges.iter().find(|flange| flange.source_path == [0]).unwrap();
+        solidcraft_doc::apply_point(&sheet.world(flange.parent), solidcore_record::Vec3::new(flange.p.x, flange.p.y, 0.0))
+    };
+    let before = original_axis(&s);
+    let old = flat(&mut s);
+    let before_direction = solidcore_record::Vec2::new(
+        old["bends"][0]["end"][0].as_f64().unwrap() - old["bends"][0]["start"][0].as_f64().unwrap(),
+        old["bends"][0]["end"][1].as_f64().unwrap() - old["bends"][0]["start"][1].as_f64().unwrap(),
+    );
+    let made = run(&mut s, "sheet.bend_slots", json!({"bends": [selected.clone()], "reliefs": false}));
+    let saved = run(&mut s, "timeline.inspect", json!({"feature": made["feature"]}))["definition"]["bends"].clone();
+    assert_eq!(bend_slot_counts(&flat(&mut s)).get(&selected), Some(&7));
+    run(&mut s, "parameters.change", json!({"name": "span", "expression": "70 mm"}));
+    let after = original_axis(&s);
+    assert!(
+        (before.y - after.y).abs() < 1e-6 && (before.z - after.z).abs() < 1e-6,
+        "the selected physical axis must stay put: {before:?} -> {after:?}"
+    );
+    assert!(run(&mut s, "timeline.inspect", json!({"feature": made["feature"]}))["error"].is_null());
+    assert_eq!(run(&mut s, "timeline.inspect", json!({"feature": made["feature"]}))["definition"]["bends"], saved);
+    let changed = flat(&mut s);
+    let after_direction = solidcore_record::Vec2::new(
+        changed["bends"][0]["end"][0].as_f64().unwrap() - changed["bends"][0]["start"][0].as_f64().unwrap(),
+        changed["bends"][0]["end"][1].as_f64().unwrap() - changed["bends"][0]["start"][1].as_f64().unwrap(),
+    );
+    assert!((before_direction.dot(after_direction) / (before_direction.len() * after_direction.len())).abs() < 1e-6);
+    let rows = bend_slot_counts(&changed);
+    let sheet = &s.model.state().sheets[0];
+    let current_tag = sheet.flanges.iter().find(|flange| flange.source_path == [0]).unwrap().tag.clone();
+    let solidcraft_doc::FeatureKind::SheetBendSlots { bends, .. } = &s.doc.features.last().unwrap().kind else { panic!("native feature") };
+    assert_eq!(s.doc.resolve_bend_slot_reference(sheet, &bends[0]).unwrap(), current_tag);
+    let mut tampered = bends[0].clone();
+    tampered.feature = solidcraft_doc::FeatureId(producer + 1);
+    assert!(s.doc.resolve_bend_slot_reference(sheet, &tampered).is_err());
+    tampered = bends[0].clone();
+    tampered.index = 2;
+    assert!(s.doc.resolve_bend_slot_reference(sheet, &tampered).is_err(), "a historical index outside the captured count is invalid");
+    assert_eq!(rows.get(&current_tag), Some(&6));
+    assert!(rows.iter().all(|(tag, count)| tag == &current_tag || *count == 0), "the other physical bend remains uncut: {rows:?}");
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(bend_slot_counts(&flat(&mut reopened)), rows);
+}
+
 // ---- #732 sheet.perforate: a perforation field stored on the sheet, not cut into the B-rep ----------------------
 
 /// Hole centres of a staggered (60 deg) perforation over a w x h rectangle at z 0, as `sheet.perforate` places them:

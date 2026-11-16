@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::sheet::{self, SheetBody, SheetRule};
-use solidcraft_doc::{BodyName, SketchId};
+use solidcraft_doc::{BodyName, SheetBendRef, SheetBendSlotProfile, SketchId};
 use solidcraft_doc::{FacePick, Position};
 use solidcraft_doc::{FeatureKind, FlangeEdge, FlangeSegment};
 use solidcraft_geom::prelude::*;
@@ -16,15 +16,16 @@ use super::features::{add_feature, check_expr, feature_sketch, profiles, sketch_
 use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list, vec3};
 use crate::schema::features::FeatureResult;
 use crate::schema::sheet::{
-    BendDirection, BendTableFormat, BendTableParams, BendTableResult, ConvertParams, DxfFile, ExportDxfParams, ExportDxfResult, FlangeParams,
-    FlatBend, FlatBore, FlatCircle, FlatPatternParams, FlatPatternResult, FlatPerforation, FlatPerforationPattern, FlatPocket, FlatSegment,
-    FlatShape, FoldParams, HemParams, ListedRule, ManageRulesParams, ManageRulesResult, PathFlangeParams, PerforateParams, PocketSide,
+    BendDirection, BendSlotsParams, BendTableFormat, BendTableParams, BendTableResult, ConvertParams, DxfFile, ExportDxfParams, ExportDxfResult,
+    FlangeParams, FlatBend, FlatBore, FlatCircle, FlatPatternParams, FlatPatternResult, FlatPerforation, FlatPerforationPattern, FlatPocket,
+    FlatSegment, FlatShape, FoldParams, HemParams, ListedRule, ManageRulesParams, ManageRulesResult, PathFlangeParams, PerforateParams, PocketSide,
     RuleFeatureError, RuleReply, RulesParams, RulesResult, UnfoldParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const FLANGE_CONTRACT: TypedContract<FlangeParams> = TypedContract::new();
+const BEND_SLOTS_CONTRACT: TypedContract<BendSlotsParams> = TypedContract::new();
 const PERFORATE_CONTRACT: TypedContract<PerforateParams> = TypedContract::new();
 const HEM_CONTRACT: TypedContract<HemParams> = TypedContract::new();
 const FOLD_CONTRACT: TypedContract<FoldParams> = TypedContract::new();
@@ -40,6 +41,20 @@ const BEND_TABLE_CONTRACT: TypedContract<BendTableParams> = TypedContract::new()
 const EXPORT_DXF_CONTRACT: TypedContract<ExportDxfParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("sheet.bend_slots", "Bend Slots", crate::checked!("sheet.bend_slots", bend_slots))
+        .at("SHEET METAL", "CREATE")
+        .icon("bend_slots")
+        .contract(&BEND_SLOTS_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
+        "body?: sheet body (default newest); edges?: current exact edge indices, or bends?: current bend tags F<feature>.<index> captured with structural source identities; \
+         omitted or empty bends: capture the currently untreated bends once; saved selections never expand when earlier features change; \
+         slot_length?: expr (overall, default 7 mm), slot_width?: expr (also the relief throat height, default 1 mm), \
+         bridge?: expr (material between slots, default 3 mm), end_margin?: expr (minimum end bridge, default 2 mm), \
+         corner_radius?: expr (relief entry corners, default 3 mm), relief_depth?: expr (throat setback, default follows corner_radius); \
+         profile?: rounded|rectangular (both slots and throat ends, default rounded), reliefs?: bool (default true). \
+         One persistent feature reads the current sheet bends and cuts exact flat geometry on every rebuild, preserving its folded state",
+    ),
     CommandSpec::new("sheet.flange", "Flange", crate::checked!("sheet.flange", flange))
         .at("SHEET METAL", "CREATE")
         .icon("flange")
@@ -595,6 +610,113 @@ fn perforate(s: &mut Session, p: &Value) -> Result<Value> {
     add_feature(s, p, FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body: str_(p, "body").map(BodyName::from), sketch, profiles })
 }
 
+/// The bounded, unique retained bend identities accepted by the command and its schema.
+pub(crate) fn bend_slot_refs(value: Option<&Value>) -> std::result::Result<Vec<SheetBendRef>, String> {
+    let tags = match value {
+        None => return Ok(Vec::new()),
+        Some(Value::Array(values)) if values.len() <= 64 => values,
+        _ => return Err("bends must contain at most 64 persistent bend tags".into()),
+    };
+    let mut bends = Vec::new();
+    let mut unique = std::collections::BTreeSet::new();
+    for value in tags {
+        let tag = value.as_str().ok_or("bends must contain persistent bend tags")?;
+        let bend = tag.parse::<SheetBendRef>().map_err(|why| why.to_string())?;
+        if bend.tag() != tag {
+            return Err("bend references must use their canonical F<feature>.<index> tags".into());
+        }
+        if !unique.insert(tag) {
+            return Err("the bend selection contains a duplicate".into());
+        }
+        bends.push(bend);
+    }
+    Ok(bends)
+}
+
+/// Exact current B-rep edge indices, before resolving them to persistent bend identities.
+pub(crate) fn bend_slot_edges(value: &Value) -> std::result::Result<Vec<usize>, &'static str> {
+    const INVALID: &str = "edges must contain 1…1000 current edge indices";
+    let values = value.as_array().filter(|values| !values.is_empty() && values.len() <= 1000).ok_or(INVALID)?;
+    values
+        .iter()
+        .map(|value| value.as_u64().and_then(|value| u32::try_from(value).ok()).and_then(|value| usize::try_from(value).ok()).ok_or(INVALID))
+        .collect()
+}
+
+fn bend_slots(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sheet.bend_slots";
+    let source = sheet_of(s, p, cmd)?;
+    let body = Some(BodyName::from(source.body.clone()));
+    let field = |key, default: &str| -> Result<solidcraft_doc::Expr> {
+        let value = expr(p, key).unwrap_or_else(|| default.into());
+        check_expr(s, &value, Kind::Length, cmd, key)?;
+        Ok(value)
+    };
+    let slot_length = field("slot_length", "7 mm")?;
+    let slot_width = field("slot_width", "1 mm")?;
+    let bridge = field("bridge", "3 mm")?;
+    let end_margin = field("end_margin", "2 mm")?;
+    let corner_radius = field("corner_radius", "3 mm")?;
+    let relief_depth = expr(p, "relief_depth");
+    if let Some(value) = &relief_depth {
+        check_expr(s, value, Kind::Length, cmd, "relief_depth")?;
+    }
+    let profile = match str_(p, "profile").unwrap_or("rounded") {
+        "rounded" => SheetBendSlotProfile::Rounded,
+        "rectangular" => SheetBendSlotProfile::Rectangular,
+        _ => return Err(bad(cmd, "profile must be rounded or rectangular")),
+    };
+    if p.get("edges").is_some() && p.get("bends").is_some() {
+        return Err(bad(cmd, "select edges or persistent bends, not both"));
+    }
+    let mut bends = if let Some(edges) = p.get("edges") {
+        let edges = bend_slot_edges(edges).map_err(|why| bad(cmd, why))?;
+        let state = s.model.state();
+        let model_body = state.bodies.iter().find(|body| body.name == source.body).ok_or_else(|| no_sheet_body(cmd))?;
+        let edge_tags = source.bend_slot_edge_tags(&model_body.body).map_err(|why| bad(cmd, why.to_string()))?;
+        let mut tags = std::collections::BTreeSet::new();
+        for edge in edges {
+            let tag = edge_tags
+                .iter()
+                .find(|(index, _)| *index == edge)
+                .map(|(_, tag)| tag)
+                .ok_or_else(|| bad(cmd, format!("edge {edge} is not a selectable bend edge; select a bend edge on the folded sheet")))?;
+            tags.insert(tag.clone());
+        }
+        bend_slot_refs(Some(&json!(tags))).map_err(|why| bad(cmd, why))?
+    } else {
+        let selected = bend_slot_refs(p.get("bends")).map_err(|why| bad(cmd, why))?;
+        if selected.is_empty() {
+            let tags = source.available_bend_slot_tags();
+            if tags.is_empty() {
+                return Err(bad(cmd, "there are no remaining bend edges to select"));
+            }
+            bend_slot_refs(Some(&json!(tags))).map_err(|why| bad(cmd, why))?
+        } else {
+            selected
+        }
+    };
+    for bend in &mut bends {
+        *bend = s.doc.capture_bend_slot_reference(&source, &bend.tag()).map_err(|why| bad(cmd, why.to_string()))?;
+    }
+    add_feature(
+        s,
+        p,
+        FeatureKind::SheetBendSlots {
+            body,
+            bends,
+            slot_length,
+            slot_width,
+            bridge,
+            end_margin,
+            corner_radius,
+            relief_depth,
+            profile,
+            reliefs: bool_(p, "reliefs").unwrap_or(true),
+        },
+    )
+}
+
 fn hem(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sheet.hem";
     let edges = points(p, "edges", cmd)?;
@@ -887,6 +1009,7 @@ fn flat_json(sh: &SheetBody) -> Result<Value> {
         .iter()
         .map(|b| FlatBend {
             bend: b.index,
+            tag: b.tag.clone(),
             angle_deg: b.angle_deg,
             included_angle_deg: b.included_angle_deg(),
             radius: b.radius,

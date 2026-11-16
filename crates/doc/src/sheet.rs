@@ -1065,6 +1065,9 @@ pub struct SheetFlange {
     /// Which feature made it: `F<feature>.<k>` (persistent edge names).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub tag: String,
+    /// Structural child path assigned by the producing feature; empty is uncertified.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_path: Vec<u32>,
 }
 
 /// One edge flange to make: a pick on the sheet's edge, that flange's height (measured as `from`
@@ -1175,6 +1178,11 @@ pub const MAX_PATH_LINES: usize = 64;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SheetBody {
     pub body: String,
+    /// Producing base/conversion feature, required in cached sheet states.
+    pub source_feature: u64,
+    /// Exact named fixed face of a conversion, empty for a native base.
+    #[serde(default)]
+    pub source_root: String,
     pub rule: String,
     pub t: f64,
     pub k: f64,
@@ -1184,6 +1192,10 @@ pub struct SheetBody {
     pub flanges: Vec<SheetFlange>,
     /// Cut-outs (flat coordinates) through the sheet.
     pub holes: Vec<Region2>,
+    /// Source bend tags treated successfully by native bend-slot features. Derived from
+    /// replay, not inferred from cut-out shapes. Required in cached sheet states: an older
+    /// cache without provenance must rebuild rather than treating existing slots twice.
+    pub slotted_bends: std::collections::BTreeSet<String>,
     /// Planar machining in flat coordinates, with depths measured from the flat bottom.
     /// Derived from feature history; these records are not a document schema change.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1354,6 +1366,8 @@ fn zone_edge_kind(f: &SheetFlange, e: &Seg2) -> ZoneEdge {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct BendInfo {
     pub index: usize,
+    /// Persistent identity of the feature's bend, shared by every surviving stretch.
+    pub tag: String,
     pub angle_deg: f64,
     pub radius: f64,
     pub up: bool,
@@ -1985,6 +1999,117 @@ struct ReturnCorner {
 }
 
 impl SheetBody {
+    /// Current source bend tags not treated by an earlier native bend-slot feature.
+    /// A creating command snapshots these as explicit references in the new feature.
+    pub fn available_bend_slot_tags(&self) -> Vec<String> {
+        self.flanges.iter().filter(|f| !self.slotted_bends.contains(&f.tag)).map(|f| f.tag.clone()).collect()
+    }
+
+    /// Real folded B-rep edges that map uniquely to a source bend. All mappings are
+    /// returned, including treated bends, so an editor can restore its original picks
+    /// against the state immediately before its feature. Persist the tags, not indices.
+    pub fn bend_slot_edge_tags(&self, body: &Body) -> Result<Vec<(usize, String)>> {
+        use solidcore_ops::bend_slots::{self, FoldedBend};
+        self.flat_matches_body()?;
+        if self.flat || body.is_mesh() {
+            return Err(DocError::Invalid("bend-slot edge selection requires the folded B-rep sheet; unfold after selecting its bends".into()));
+        }
+        if self.flanges.len() > bend_slots::MAX_SOURCE_BENDS {
+            return Err(DocError::Invalid("bend-slot edge discovery exceeds the 256-source-bend budget".into()));
+        }
+        let mut tags = std::collections::BTreeSet::new();
+        let mut bends = Vec::new();
+        for flange in &self.flanges {
+            if flange.tag.is_empty() || flange.tag.len() > 256 || !tags.insert(flange.tag.as_str()) {
+                return Err(DocError::Invalid("bend-slot edge selection requires distinct native source bend tags".into()));
+            }
+            let (world, origin, axis, start, toward) =
+                self.bend_frame(flange).ok_or_else(|| DocError::Invalid("invalid source bend frame".into()))?;
+            let (lo, hi) = self.zone_reach(flange);
+            bends.push(FoldedBend {
+                origin: apply_point(&world, origin).into(),
+                axis: apply_vector(&world, axis).into(),
+                start: apply_vector(&world, start).into(),
+                toward: apply_vector(&world, toward).into(),
+                span: [lo, hi],
+                radius: flange.radius,
+                thickness: self.t,
+                angle: flange.angle.abs(),
+            });
+        }
+        bend_slots::edge_bends(body.record(), &bends)
+            .map_err(|e| DocError::Invalid(e.to_string()))?
+            .into_iter()
+            .map(|(edge, bend)| {
+                self.flanges.get(bend).map(|f| (edge, f.tag.clone())).ok_or_else(|| DocError::Invalid("invalid resolved source bend".into()))
+            })
+            .collect()
+    }
+
+    /// Cut a bounded pattern on the current bends, preserving the sheet's folded state.
+    ///
+    /// Empty selection means every current bend; a recorded tag must still name exactly one
+    /// bend. Interrupted bends and cuts that meet existing openings are refused, not remapped
+    /// to a nearby bend or clipped silently. Planning uses the exact current flat material.
+    pub fn add_bend_slots(&mut self, selected_tags: &[String], options: &solidcore_ops::bend_slots::BendSlotOptions) -> Result<()> {
+        use solidcore_ops::bend_slots::{self, BendSpan};
+        self.flat_matches_body()?;
+        if !self.pockets.is_empty() || !self.bores.is_empty() || !self.perforations.is_empty() {
+            return Err(DocError::Invalid("not supported yet: place bend slots before pocket, edge-bore and perforation features".into()));
+        }
+        if selected_tags.len() > bend_slots::MAX_BENDS {
+            return Err(DocError::Invalid("bend slots select at most 64 bends".into()));
+        }
+        let mut selection = std::collections::BTreeSet::new();
+        for tag in selected_tags {
+            if tag.is_empty() || tag.len() > 256 || !selection.insert(tag.as_str()) {
+                return Err(DocError::Invalid("bend slots require distinct nonempty bend tags".into()));
+            }
+            if self.flanges.iter().filter(|flange| flange.tag == *tag).count() != 1 {
+                return Err(DocError::Invalid(format!("bend slots: selected bend `{tag}` no longer names exactly one bend")));
+            }
+            if self.slotted_bends.contains(tag) {
+                return Err(DocError::Invalid(format!(
+                    "bend slots: bend `{tag}` is already treated by an earlier bend-slot feature; edit that feature"
+                )));
+            }
+        }
+        let current = self.uncut_bends();
+        let mut spans = Vec::new();
+        let mut treated = Vec::new();
+        for (index, flange) in self.flanges.iter().enumerate() {
+            if !selection.is_empty() && !selection.contains(flange.tag.as_str()) {
+                continue;
+            }
+            if self.slotted_bends.contains(&flange.tag) {
+                return Err(DocError::Invalid(format!(
+                    "bend slots: bend `{}` is already treated by an earlier bend-slot feature; edit that feature",
+                    flange.tag
+                )));
+            }
+            if spans.len() >= bend_slots::MAX_BENDS {
+                return Err(DocError::Invalid("bend slots select at most 64 bends".into()));
+            }
+            let span = current
+                .iter()
+                .find(|bend| bend.index == index.saturating_add(1))
+                .ok_or_else(|| DocError::Invalid(format!("bend slots: bend `{}` has no material span", flange.tag)))?;
+            spans.push(BendSpan { start: span.start, end: span.end });
+            treated.push(flange.tag.clone());
+        }
+        let material = self.flat_regions()?;
+        let plan = bend_slots::plan(&material, &spans, options).map_err(|error| DocError::Invalid(error.to_string()))?;
+        let mut candidate = self.clone();
+        candidate.holes.extend(plan.slots);
+        candidate.holes.extend(plan.reliefs);
+        if candidate.flat_regions()?.len() != material.len() {
+            return Err(DocError::Invalid("bend slots would separate the flat material into additional pieces".into()));
+        }
+        candidate.slotted_bends.extend(treated);
+        *self = candidate;
+        Ok(())
+    }
+
     /// Whether the flat pattern still describes the body: refused, naming the feature, once a
     /// feature that is not sheet metal changed the body's material (see `altered_by`). The flat
     /// pattern, its DXF and the bend table all check it, so none of them makes a part other than
@@ -3295,26 +3420,42 @@ impl SheetBody {
         cuts
     }
 
+    /// Current original bend spans, before openings split their displayed bend-table rows.
+    /// Features requiring complete material certify these against the exact flat regions.
+    fn uncut_bends(&self) -> Vec<BendInfo> {
+        let mut out = Vec::new();
+        for (i, f) in self.flanges.iter().enumerate() {
+            let ba = self.allowance(f);
+            let (u0, u1) = self.centre_line(f);
+            let a = f.p + f.n * (ba / 2.0) + f.d * u0;
+            out.push(BendInfo {
+                index: i + 1,
+                tag: f.tag.clone(),
+                angle_deg: f.angle.abs().to_degrees(),
+                radius: f.radius,
+                up: f.angle >= 0.0,
+                allowance: ba,
+                length: u1 - u0,
+                start: a,
+                end: a + f.d * (u1 - u0),
+            });
+        }
+        out
+    }
+
     /// The bends: angle, radius, direction, allowance and centre line (flat coordinates). A
     /// bend is listed where its centre line has material: one entry for every stretch that the
     /// cut-outs leave of it, all with the bend's `index`, and none for a bend they take whole.
     pub fn bends(&self) -> Vec<BendInfo> {
         let cuts = self.cut_outs();
         let mut out = Vec::new();
-        for (i, f) in self.flanges.iter().enumerate() {
-            let ba = self.allowance(f);
-            let (u0, u1) = self.centre_line(f);
-            let a = f.p + f.n * (ba / 2.0) + f.d * u0;
-            for (s0, s1) in clear_of(a, f.d, u1 - u0, &cuts) {
+        for (full, f) in self.uncut_bends().into_iter().zip(&self.flanges) {
+            for (s0, s1) in clear_of(full.start, f.d, full.length, &cuts) {
                 out.push(BendInfo {
-                    index: i + 1,
-                    angle_deg: f.angle.abs().to_degrees(),
-                    radius: f.radius,
-                    up: f.angle >= 0.0,
-                    allowance: ba,
                     length: s1 - s0,
-                    start: if s0 > 0.0 { a + f.d * s0 } else { a },
-                    end: a + f.d * s1,
+                    start: if s0 > 0.0 { full.start + f.d * s0 } else { full.start },
+                    end: full.start + f.d * s1,
+                    ..full.clone()
                 });
             }
         }
@@ -4312,6 +4453,7 @@ impl SheetBody {
                     exact: None,
                     zone_shape: None,
                     tag: String::new(),
+                    source_path: Vec::new(),
                     ext: (0.0, 0.0),
                     slope: (0.0, 0.0),
                     tear: (false, false),
@@ -4410,6 +4552,7 @@ impl SheetBody {
                 exact: None,
                 zone_shape: None,
                 tag: String::new(),
+                source_path: Vec::new(),
                 ext: (0.0, 0.0),
                 slope: (0.0, 0.0),
                 tear: (false, false),
@@ -5638,6 +5781,7 @@ impl SheetBody {
             exact: None,
             zone_shape: None,
             tag: String::new(),
+            source_path: Vec::new(),
         });
         Ok(self.flanges.len() - 1)
     }
@@ -5768,6 +5912,7 @@ impl SheetBody {
             exact: None,
             zone_shape: None,
             tag: String::new(),
+            source_path: Vec::new(),
         };
         let ba = self.allowance(&probe);
         let s0 = match position {
@@ -5876,6 +6021,7 @@ impl SheetBody {
             exact: moving_exact,
             zone_shape,
             tag: String::new(),
+            source_path: Vec::new(),
         });
         let i = self.flanges.len() - 1;
         // Flanges on the moving part's edges now hang off the fold and move with it.
@@ -6074,6 +6220,7 @@ impl SheetBody {
                 exact,
                 zone_shape: None,
                 tag: String::new(),
+                source_path: Vec::new(),
             });
         }
         for (k, j) in moves {
@@ -6124,6 +6271,34 @@ impl SheetBody {
         }
         let (panel, a, b, top, _) = self.edge_at(pick)?;
         self.edge_name_of(panel, a, b, top)
+    }
+
+    /// Whether a bend producer selected one complete, uniquely named straight boundary.
+    /// The legacy pick resolver also accepts unnamed notch picks and nearest surviving
+    /// fragments. Those compatibility fallbacks cannot certify a retained bend identity.
+    pub(crate) fn bend_slot_named_edge_is_unique(&self, name: &str, near: Vec3) -> bool {
+        if !self.holes.is_empty() || !self.pockets.is_empty() || !self.bores.is_empty() || !self.perforations.is_empty() {
+            return false;
+        }
+        let Some(resolved) = self.edge_by_name(name, near) else { return false };
+        if self.edge_name(resolved).as_deref() != Some(name) {
+            return false;
+        }
+        let mut count = 0usize;
+        for (panel, region) in self.panels() {
+            for segment in region.outer.ccw().segs {
+                let Seg2::Line { a, b } = segment else { continue };
+                for top in [false, true] {
+                    if self.edge_name_of(panel, a, b, top).as_deref() == Some(name) {
+                        count += 1;
+                        if count > 1 {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        count == 1
     }
 
     /// A world point on the sheet edge with this name (the one nearest `near` if several): the
@@ -6875,6 +7050,8 @@ pub fn base_flange(body: &str, rule: &str, rv: &RuleValues, plane: Plane, region
     let holes = region.holes.into_iter().map(|h| Region2 { outer: h.ccw(), holes: Vec::new() }).collect();
     SheetBody {
         body: body.into(),
+        source_feature: 0,
+        source_root: String::new(),
         rule: rule.into(),
         t: rv.thickness,
         k: rv.k_factor,
@@ -6882,6 +7059,7 @@ pub fn base_flange(body: &str, rule: &str, rv: &RuleValues, plane: Plane, region
         base: Region2 { outer: region.outer, holes: Vec::new() },
         flanges: Vec::new(),
         holes,
+        slotted_bends: std::collections::BTreeSet::new(),
         pockets: Vec::new(),
         bores: Vec::new(),
         perforations: Vec::new(),
@@ -7014,6 +7192,8 @@ pub fn contour_flange_path(body: &str, rule: &str, rv: &RuleValues, plane: &Plan
     }
     let mut sheet = SheetBody {
         body: body.into(),
+        source_feature: 0,
+        source_root: String::new(),
         rule: rule.into(),
         t,
         k: rv.k_factor,
@@ -7021,6 +7201,7 @@ pub fn contour_flange_path(body: &str, rule: &str, rv: &RuleValues, plane: &Plan
         base: Region2 { outer: Loop2 { segs: Vec::new() }, holes: Vec::new() },
         flanges: Vec::new(),
         holes: Vec::new(),
+        slotted_bends: std::collections::BTreeSet::new(),
         pockets: Vec::new(),
         bores: Vec::new(),
         perforations: Vec::new(),
@@ -7075,6 +7256,7 @@ pub fn contour_flange_path(body: &str, rule: &str, rv: &RuleValues, plane: &Plan
                     exact: None,
                     zone_shape: None,
                     tag: String::new(),
+                    source_path: Vec::new(),
                 };
                 at += sheet.allowance(&f);
                 sheet.flanges.push(f);
@@ -7185,6 +7367,177 @@ mod tests {
 
     fn vol(b: &Body) -> f64 {
         kernel::measure(b).map(|m| m.volume).unwrap_or(f64::NAN)
+    }
+
+    fn bend_slot_channel(width: f64) -> SheetBody {
+        let mut sheet = plate(width, 112.0);
+        sheet
+            .add_flanges(
+                &[Vec3::new(width / 2.0, 0.0, 2.5), Vec3::new(width / 2.0, 112.0, 2.5)],
+                24.0,
+                std::f64::consts::FRAC_PI_4,
+                2.5,
+                "inside",
+                false,
+            )
+            .unwrap();
+        for (index, flange) in sheet.flanges.iter_mut().enumerate() {
+            flange.tag = format!("F18.{index}");
+        }
+        sheet
+    }
+
+    fn bend_slot_options() -> solidcore_ops::bend_slots::BendSlotOptions {
+        solidcore_ops::bend_slots::BendSlotOptions {
+            slot_length: 8.0,
+            slot_width: 1.2,
+            bridge: 4.0,
+            end_margin: 3.0,
+            relief_depth: 4.0,
+            corner_radius: 2.0,
+            rounded: true,
+            reliefs: true,
+        }
+    }
+
+    #[test]
+    fn bend_slot_names_never_certify_legacy_notch_or_fragment_fallbacks() {
+        let mut sheet = plate(200.0, 100.0);
+        sheet.base_curves.push(("l1".into(), Vec2::new(0.0, 0.0), Vec2::new(200.0, 0.0)));
+        let name = "base:l1:top";
+        let old_pick = Vec3::new(100.0, 0.0, sheet.t);
+        assert!(sheet.bend_slot_named_edge_is_unique(name, old_pick));
+        sheet.holes.push(block(80.0, 120.0, -10.0, 30.0));
+        let notch_pick = Vec3::new(100.0, 30.0, sheet.t);
+        assert_eq!(sheet.edge_by_name(name, notch_pick), Some(notch_pick), "the legacy resolver accepts a saved name on an unnamed notch");
+        assert!(sheet.edge_name(notch_pick).is_none());
+        assert!(!sheet.bend_slot_named_edge_is_unique(name, notch_pick), "that compatibility fallback is never physical identity proof");
+        let surviving_fragment = Vec3::new(40.0, 0.0, sheet.t);
+        assert!(sheet.edge_by_name(name, surviving_fragment).is_some());
+        assert!(!sheet.bend_slot_named_edge_is_unique(name, surviving_fragment), "a cut fragment is not a complete named source edge");
+    }
+
+    #[test]
+    fn bend_slots_keep_fold_state_and_existing_material_records() {
+        for flat in [false, true] {
+            let mut sheet = bend_slot_channel(88.0);
+            sheet.flat = flat;
+            let opening = Region2 { outer: Loop2::circle(Vec2::new(44.0, 56.0), 2.0), holes: Vec::new() };
+            sheet.holes.push(opening.clone());
+            sheet.add_bend_slots(&[], &bend_slot_options()).unwrap();
+            assert_eq!(sheet.flat, flat);
+            assert_eq!(sheet.holes.first(), Some(&opening));
+            assert_eq!(sheet.holes.len(), 1 + 12 + 4);
+            let material = sheet.flat_regions().unwrap();
+            assert_eq!(material.len(), 1);
+            assert_eq!(material[0].holes.len(), 13);
+            assert_eq!(sheet.flanges[0].tag, "F18.0");
+        }
+    }
+
+    #[test]
+    fn bend_slot_selection_uses_persistent_tags_and_rejects_lost_or_duplicate_tags() {
+        let mut sheet = bend_slot_channel(88.0);
+        let before = sheet.clone();
+        for selection in [vec!["F99.0".into()], vec!["F18.0".into(), "F18.0".into()]] {
+            assert!(sheet.add_bend_slots(&selection, &bend_slot_options()).is_err());
+            assert_eq!(sheet, before);
+        }
+        sheet.add_bend_slots(&["F18.1".into()], &bend_slot_options()).unwrap();
+        assert_eq!(sheet.holes.len(), 6 + 2);
+        assert_eq!(sheet.flat_regions().unwrap()[0].holes.len(), 6);
+        assert!(sheet.bends().iter().all(|bend| bend.tag == "F18.0" || bend.tag == "F18.1"));
+    }
+
+    #[test]
+    fn bend_slot_remaining_tags_are_creation_snapshots_and_occupied_tags_refuse() {
+        let source = bend_slot_channel(88.0);
+        let mut upstream = source.clone();
+        upstream.add_bend_slots(&["F18.0".into()], &bend_slot_options()).unwrap();
+        let snapshot = upstream.available_bend_slot_tags();
+        assert_eq!(snapshot, ["F18.1"]);
+        let before = upstream.clone();
+        assert!(upstream.add_bend_slots(&["F18.0".into()], &bend_slot_options()).unwrap_err().to_string().contains("already treated"));
+        assert_eq!(upstream, before);
+        upstream.add_bend_slots(&snapshot, &bend_slot_options()).unwrap();
+        assert!(upstream.available_bend_slot_tags().is_empty());
+        // Replaying after deletion/suppression of the first treatment restores the source.
+        // The later feature retains its creation selection instead of acquiring the freed bend.
+        let mut replay = source;
+        replay.add_bend_slots(&snapshot, &bend_slot_options()).unwrap();
+        assert_eq!(replay.available_bend_slot_tags(), ["F18.0"]);
+    }
+
+    #[test]
+    fn bend_slot_cache_requires_provenance_and_keeps_it_on_round_trip() {
+        let mut sheet = bend_slot_channel(88.0);
+        sheet.add_bend_slots(&["F18.1".into()], &bend_slot_options()).unwrap();
+        let mut cached = serde_json::to_value(&sheet).unwrap();
+        assert_eq!(serde_json::from_value::<SheetBody>(cached.clone()).unwrap(), sheet);
+        cached.as_object_mut().unwrap().remove("slotted_bends");
+        assert!(serde_json::from_value::<SheetBody>(cached).is_err());
+    }
+
+    #[test]
+    fn bend_slot_edge_tags_are_exact_folded_topology_and_follow_placements() {
+        for sheet in [bend_slot_channel(88.0), bend_slot_channel(104.0).copied("Copy", &rot_about(Vec3::new(17.0, 4.0, -9.0), Vec3::Z, 0.7)).unwrap()]
+        {
+            let body = sheet.solid().unwrap();
+            let mapping = sheet.bend_slot_edge_tags(&body).unwrap();
+            for tag in ["F18.0", "F18.1"] {
+                let mapped: Vec<_> = mapping.iter().filter(|(_, t)| t == tag).collect();
+                assert!(mapped.len() >= 4, "missing exact tangent/end edges for {tag}: {mapping:?}");
+                assert!(mapped.iter().any(|(edge, _)| matches!(body.record().edges[*edge].curve, solidcore_record::brep::Curve::Line { .. })));
+                assert!(mapped.iter().any(|(edge, _)| matches!(body.record().edges[*edge].curve, solidcore_record::brep::Curve::Circle { .. })));
+            }
+            assert!(mapping.len() < body.edge_count());
+            let mut unfolded = sheet;
+            unfolded.flat = true;
+            assert!(unfolded.bend_slot_edge_tags(&body).is_err());
+        }
+    }
+
+    #[test]
+    fn bend_slots_use_each_current_width_and_refuse_interrupted_bends_without_mutation() {
+        let mut narrower = bend_slot_channel(88.0);
+        let mut wider = bend_slot_channel(104.0);
+        narrower.add_bend_slots(&[], &bend_slot_options()).unwrap();
+        wider.add_bend_slots(&[], &bend_slot_options()).unwrap();
+        assert_eq!(narrower.flat_regions().unwrap()[0].holes.len(), 12);
+        assert_eq!(wider.flat_regions().unwrap()[0].holes.len(), 14);
+
+        let mut interrupted = bend_slot_channel(88.0);
+        let bend = interrupted.bends()[0].clone();
+        interrupted.holes.push(Region2 { outer: Loop2::circle((bend.start + bend.end) * 0.5, 2.0), holes: Vec::new() });
+        let before = interrupted.clone();
+        assert!(interrupted.add_bend_slots(&[], &bend_slot_options()).unwrap_err().to_string().contains("interrupted"));
+        assert_eq!(interrupted, before);
+    }
+
+    #[test]
+    fn bend_slots_refuse_retained_machining_records_without_mutation() {
+        let mut sheet = bend_slot_channel(88.0);
+        sheet.pockets.push(SheetPocket {
+            region: rect(Vec2::new(35.0, 40.0), Vec2::new(45.0, 40.0), Vec2::new(45.0, 50.0), Vec2::new(35.0, 50.0)),
+            z0: 0.0,
+            z1: 1.0,
+        });
+        let before = sheet.clone();
+        assert!(sheet.add_bend_slots(&[], &bend_slot_options()).unwrap_err().to_string().contains("before pocket, edge-bore and perforation"));
+        assert_eq!(sheet, before);
+        sheet.pockets.clear();
+        sheet.perforations.push(SheetPerforation {
+            feature: 27,
+            diameter: 1.0,
+            pitch: 4.0,
+            margin: 2.0,
+            square: false,
+            from_right: false,
+            outline: None,
+        });
+        let before = sheet.clone();
+        assert!(sheet.add_bend_slots(&[], &bend_slot_options()).is_err());
+        assert_eq!(sheet, before);
     }
 
     #[test]

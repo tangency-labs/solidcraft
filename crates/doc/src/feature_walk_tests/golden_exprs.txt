@@ -306,6 +306,15 @@ sheet_hem
     Length = hem.length (Length)
     Gap = hem.gap (Length)
   expressions: hem.length, hem.gap
+sheet_bend_slots
+  inputs:
+    Slot length = slots.length (Length)
+    Slot width = slots.width (Length)
+    Bridge = slots.bridge (Length)
+    End margin = slots.margin (Length)
+    Corner radius = slots.corner (Length)
+    Relief depth = slots.depth (Length)
+  expressions: slots.length, slots.width, slots.bridge, slots.margin, slots.corner, slots.depth
 sheet_perforate
   inputs:
     Diameter = perforate.diameter (Length)
