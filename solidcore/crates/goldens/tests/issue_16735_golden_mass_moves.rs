@@ -27,7 +27,9 @@
 //!
 //! # The leak, per component (the bound checked; the gaps sampled: MEASURED)
 //!
-//! `brep_properties` integrates about the bounding box's middle `m`. Every volume integral
+//! The measure integrates about its box's middle `m` (the exact box for `brep_mass_properties`
+//! since #17362, the loose box for `brep_volume`; the old path takes the same box). Every
+//! volume integral
 //! `∫ f dV` of the record is the flux of the field `F_f(x) = e_z ∫_{m_z}^{z} f(x, y, ζ) dζ`
 //! (`closure_integrands`: volume `z`, first moments `x z`, `y z`, `z²/2`, second moments
 //! `y² z + z³/3` and so on, all relative to `m`). The reported components are linear in these
@@ -94,13 +96,16 @@ use std::path::Path;
 use goldens::case::repo_root;
 use goldens::{golden, registry, CaseContext, Output};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::extent3d::Extent3d;
 use solidcore::mass::integrator::properties::{
-    brep_mass_properties, brep_properties, brep_volume, edge_length, face_properties,
+    brep_mass_properties, brep_properties_in_box, brep_volume, edge_length, face_properties,
     MassPropertyBehavior, PreciseProperties, PropertyAttributes,
 };
 use solidcore::math::{Point2, Point3, Vec3, PI};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
-use solidcore::query::brep::{calculate_bounding_box, BoundingBoxOptions};
+use solidcore::query::brep::{
+    calculate_bounding_box, calculate_tight_bounding_box, BoundingBoxOptions,
+};
 use solidcore::topology::brep::p1;
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::face::p2::{upward_faceuse, PPF_ALL};
@@ -227,11 +232,32 @@ fn accuracy(kind: Kind) -> f64 {
     }
 }
 
-fn mid_and_estimated(k: &Kernel, b: &mut Brep) -> (Point3, f64, f64) {
-    let bbox = calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default()).unwrap();
+/// The box the measure of `kind` integrates in: `brep_mass_properties` (`estimate`) takes
+/// the body's exact box (#17362), `brep_volume` the loose one. Its middle, the faces' error
+/// scale (`brep_properties_in_box`'s `estimated`), its diagonal and the box.
+fn mid_and_estimated(k: &Kernel, b: &mut Brep, kind: Kind) -> (Point3, f64, f64, Extent3d) {
+    let bbox = if kind == Kind::Volume {
+        calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default()).unwrap()
+    } else {
+        calculate_tight_bounding_box(k, &mut *b).unwrap()
+    };
     let size = bbox.size();
+    // fail closed: a NaN middle or size would make every `d > floor` test false
+    assert!(
+        [
+            bbox.mid().x,
+            bbox.mid().y,
+            bbox.mid().z,
+            size.x,
+            size.y,
+            size.z
+        ]
+        .iter()
+        .all(|v| v.is_finite()),
+        "the measure's box is not finite: {bbox:?}"
+    );
     let e = size.z.max(size.x.max(size.y));
-    (bbox.mid(), e * e / 100.0, size.length())
+    (bbox.mid(), e * e / 100.0, size.length(), bbox)
 }
 
 /// The region on `fu`'s side is material (upstream's reading: `IsVoid` FALSE).
@@ -296,20 +322,24 @@ fn old_raw(
     total
 }
 
+/// The new `brep_properties_in_box` about `origin`, in the measure's own box `bbox`
+/// ([`mid_and_estimated`]).
 fn new_raw(
     k: &Kernel,
     b: &mut Brep,
     acc: f64,
     origin: Point3,
+    bbox: &Extent3d,
 ) -> solidcore::Result<PreciseProperties> {
     let store = AttributeStore::default();
-    brep_properties(
+    brep_properties_in_box(
         k,
         b,
         acc,
         origin,
         MassPropertyBehavior::default(),
         &attributes(&store),
+        bbox,
     )
 }
 
@@ -321,10 +351,15 @@ fn about_origins(
     kind: Kind,
     m: Point3,
     o3: Point3,
+    bbox: &Extent3d,
 ) -> Option<(f64, f64, [Vec<f64>; 3])> {
     ORIGIN_ACCURACY.iter().find_map(|&acc| {
-        let area = new_raw(k, b, acc, m).ok()?.area;
-        let mut at = |o: Point3| new_raw(k, b, acc, o).ok().map(|r| record(kind, &r, o));
+        let area = new_raw(k, b, acc, m, bbox).ok()?.area;
+        let mut at = |o: Point3| {
+            new_raw(k, b, acc, o, bbox)
+                .ok()
+                .map(|r| record(kind, &r, o))
+        };
         Some((acc, area, [at(m)?, at(Point3::ZERO)?, at(o3)?]))
     })
 }
@@ -912,7 +947,7 @@ fn moved_golden_mass_rows_are_the_old_leak() {
                         // the old integrator on a fresh copy
                         let mut b_old = copy();
                         sum.missing_trims += usize::from(missing_trims(&b_old) > 0);
-                        let (m, estimated, diag) = mid_and_estimated(&k, &mut b_old);
+                        let (m, estimated, diag, bbox) = mid_and_estimated(&k, &mut b_old, kind);
                         let old = record(
                             kind,
                             &old_raw(&k, &mut b_old, accuracy(kind), m, estimated),
@@ -1070,7 +1105,7 @@ fn moved_golden_mass_rows_are_the_old_leak() {
                         }
                         // origin independence
                         let o3 = m + Vec3::new(0.37, -0.21, 0.55) * diag;
-                        match about_origins(&k, &mut b_s, kind, m, o3) {
+                        match about_origins(&k, &mut b_s, kind, m, o3, &bbox) {
                         None => failures.push(format!(
                             "{tag}: no accuracy of {ORIGIN_ACCURACY:?} converges about all three origins"
                         )),
