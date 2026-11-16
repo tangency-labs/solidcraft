@@ -1021,6 +1021,7 @@ mod tests {
             starting: Some(d.clone()),
             backend_attempt: Some((path.clone(), attempt)),
             frames: 0,
+            up: false,
             take_focus_unwanted: true,
             come_forward: crate::come_forward::ComeForward::default(),
             gpu: None,
