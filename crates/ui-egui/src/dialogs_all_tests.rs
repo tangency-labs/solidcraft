@@ -583,7 +583,7 @@ fn check_form(command: &str, labels: &[&str]) {
         "joint.cam" => &["Other side"],
         "frame.member" => &["All Lines", "Mirror"],
         "construct.plane.at_angle" => &["Use axis direction only"],
-        "solid.pattern.face" => &["Flip side", "Group copies"],
+        "solid.pattern.face" => &["Flip", "Group Instances"],
         _ => &[],
     };
     for label in checks {
@@ -624,7 +624,8 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
     Some(match label {
         "Type" if matches!(command, "sheet.flange" | "sheet.hem" | "solid.revolve" | "solid.emboss" | "solid.scale") => return None,
         "Direction" => return None,                                 // segmented buttons, labelled by each choice
-        "Layout" if command == "solid.pattern.face" => return None, // Grid | Staggered
+        "Layout" if command == "solid.pattern.face" => return None, // Grid | Staggered | Random
+        "Noise" if command == "solid.pattern.face" => return None,  // white | blue | pink | brown
         "ui.fair_strength" | "ui.fair_iterations" => return None,
         "Size" if matches!(command, "solid.cylinder" | "solid.sphere") => return None, // Diameter | Radius
         "Continuity" | "Corners" | "Cells" | "Profile" => return None,
@@ -917,7 +918,7 @@ fn align_components_mode_switches_and_aligns_only_selected_instance() {
 }
 form_case!(remove, "solid.remove", []);
 form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing"]);
-form_case!(face_pattern, "solid.pattern.face", ["Type", "Across", "Along", "Layout", "Grid angle", "Margin"]);
+form_case!(face_pattern, "solid.pattern.face", ["Type", "Layout", "Quantity", "Quantity 2", "Grid angle", "Margin"]);
 
 /// Pattern on Face's attractors sit behind Advanced: off, the dialog sends a plain pattern and has
 /// no attractor picks; on, it has Attractors and Far attractors, which take points, edges, faces
@@ -973,6 +974,31 @@ fn face_pattern_attractors_come_from_the_advanced_option() {
     assert_eq!(a["bodies"], json!(["Body2"]), "{again}");
     assert!(a["geometry"][0]["edge"].is_array() && a["far_geometry"][0]["edge"].is_array(), "{again}");
     h.app.run(&redefine, again).unwrap();
+}
+
+/// Pattern on Face's Random layout sends a count, a seed and a noise colour in place of the grid,
+/// and an edit brings them back.
+#[test]
+fn face_pattern_random_layout_sends_and_restores_its_noise() {
+    let mut h = fixture();
+    let mut d = representative(&h, "solid.pattern.face");
+    if let Kind::FacePattern(f) = &mut d.kind {
+        f.layout = 2;
+        f.random_count = "7".into();
+        f.seed = "42".into();
+        f.noise = 3;
+    }
+    let (command, params) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(params["random"], json!({"count": "7", "seed": 42, "noise": "brown"}), "{params}");
+    assert!(params.get("count1").is_none() && params.get("angle").is_none(), "{params}");
+    let reply = h.app.run(&command, params).unwrap();
+    assert_eq!(reply["created_bodies"].as_array().map(Vec::len), Some(7), "{reply}");
+    let feature = reply["feature"].as_u64().unwrap();
+    let edit = super::for_feature(&h.app, feature, None).expect("the pattern opens for editing");
+    let Kind::FacePattern(f) = &edit.kind else { panic!("{:?}", edit.kind) };
+    assert_eq!((f.layout, f.random_count.as_str(), f.seed.as_str(), f.noise), (2, "7", "42", 3));
+    let (_, again) = apply_commands(&h.app, &edit).unwrap().remove(0);
+    assert_eq!(again["params"]["random"], json!({"count": "7", "seed": 42, "noise": "brown"}), "{again}");
 }
 form_case!(pipe, "solid.pipe", ["Diameter", "Wall", "Operation"]);
 form_case!(stock, "solid.bounding_solid", ["Margin"]);

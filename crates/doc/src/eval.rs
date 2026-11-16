@@ -4504,7 +4504,9 @@ impl Model {
                     Ok(()) => {
                         // Copies are named after their sources through the instance transforms.
                         let mats = match &f.kind {
-                            FeatureKind::Pattern { pattern, .. } => pattern_transforms(doc, &vals, &state, f.component, pattern).unwrap_or_default(),
+                            FeatureKind::Pattern { pattern, bodies, .. } => {
+                                pattern_transforms(doc, &vals, &state, f.component, pattern, bodies).unwrap_or_default()
+                            }
                             FeatureKind::Mirror { plane, .. } => doc
                                 .resolve_plane_in(&vals, plane, 0, f.component, Some(&state))
                                 .map(|pl| vec![mirror_matrix(&pl)])
@@ -10057,10 +10059,17 @@ fn occurrences_from(doc: &Document, from: u64, ids: &[u64]) -> Option<Mat> {
 /// The placements (column-major matrices) of a pattern's copies, the original excluded.
 pub fn pattern_matrices(doc: &Document, st: &ModelState, p: &crate::PatternKind) -> Result<Vec<[[f64; 4]; 4]>> {
     let (vals, _) = doc.param_values();
-    pattern_transforms(doc, &vals, st, 0, p)
+    pattern_transforms(doc, &vals, st, 0, p, &[])
 }
 
-fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, component: u64, p: &crate::PatternKind) -> Result<Vec<Mat>> {
+fn pattern_transforms(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    component: u64,
+    p: &crate::PatternKind,
+    sources: &[crate::BodyName],
+) -> Result<Vec<Mat>> {
     let count = |e: &str| -> Result<usize> {
         let n = expr::eval_count(e, vals)?;
         if !(1.0..=MAX_INSTANCES as f64).contains(&n) {
@@ -10154,13 +10163,13 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
                 out.push(rotation(origin, axis, step * alignment.multiplier(i, *reversed)));
             }
         }
-        crate::PatternKind::Face { face, count1, count2, staggered, angle, margin, flip, anchor, attract } => {
+        crate::PatternKind::Face { face, count1, count2, staggered, random, angle, margin, flip, anchor, attract } => {
             out = face_pattern(
                 doc,
                 vals,
                 st,
                 component,
-                FaceGrid { face, count1, count2, staggered: *staggered, angle, margin, flip: *flip, anchor, attract },
+                FaceGrid { face, count1, count2, staggered: *staggered, random, angle, margin, flip: *flip, anchor, attract, sources },
                 count,
             )?;
         }
@@ -10174,11 +10183,14 @@ struct FaceGrid<'a> {
     count1: &'a crate::Expr,
     count2: &'a crate::Expr,
     staggered: bool,
+    random: &'a Option<crate::RandomPlacement>,
     angle: &'a Option<crate::Expr>,
     margin: &'a Option<crate::Expr>,
     flip: bool,
     anchor: &'a Option<crate::PointExpr>,
     attract: &'a Option<Box<crate::Attract>>,
+    /// The bodies the pattern copies, for the default anchor.
+    sources: &'a [crate::BodyName],
 }
 
 /// Where a face pattern puts each copy: a placement at each grid point on the face, the copied
@@ -10193,7 +10205,10 @@ fn face_pattern(
     g: FaceGrid,
     count: impl Fn(&str) -> Result<usize>,
 ) -> Result<Vec<Mat>> {
-    let (n1, n2) = (count(g.count1)?, count(g.count2)?);
+    let (n1, n2) = match g.random {
+        Some(_) => (1, 1),
+        None => (count(g.count1)?, count(g.count2)?),
+    };
     if n1 * n2 > MAX_INSTANCES * 4 {
         return Err(DocError::Invalid(format!("a face pattern's grid has at most {} cells", MAX_INSTANCES * 4)));
     }
@@ -10206,10 +10221,41 @@ fn face_pattern(
     let cst = construction_state(doc, st, component)?;
     let crate::construct::GeoRef::Face { at, name } = g.face else { return Err(DocError::Invalid("a face pattern needs a face".into())) };
     let (body, index, _) = crate::construct::face_of(&cst, *at, name)?;
-    let stations = kernel::face_stations(&body.body, index, n1, n2, turn, g.staggered, margin)?;
+    let stations = match g.random {
+        Some(r) => {
+            let noise = match r.noise {
+                crate::Noise::White => kernel::Noise::White,
+                crate::Noise::Blue => kernel::Noise::Blue,
+                crate::Noise::Pink => kernel::Noise::Pink,
+                crate::Noise::Brown => kernel::Noise::Brown,
+            };
+            kernel::face_random_stations(&body.body, index, count(&r.count)?, u64::from(r.seed), noise, margin)?
+        }
+        None => kernel::face_stations(&body.body, index, n1, n2, turn, g.staggered, margin)?,
+    };
     let anchor = match g.anchor {
         Some([x, y, z]) => Vec3::new(val(vals, x, Kind::Length)?, val(vals, y, Kind::Length)?, val(vals, z, Kind::Length)?),
-        None => Vec3::ZERO,
+        // The centre of the bottom of the copied bodies' exact bounding box: they stand on the
+        // face wherever they were modelled.
+        None => {
+            let mut b: Option<solidcraft_geom::Aabb3> = None;
+            for n in g.sources {
+                let body = st.body(n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
+                let bb = body.body.exact_bounds()?;
+                b = Some(match b {
+                    Some(mut a) => {
+                        a.add(bb.min);
+                        a.add(bb.max);
+                        a
+                    }
+                    None => bb,
+                });
+            }
+            match b {
+                Some(b) => Vec3::new((b.min.x + b.max.x) / 2.0, (b.min.y + b.max.y) / 2.0, b.min.z),
+                None => Vec3::ZERO,
+            }
+        }
     };
     // Each station's distance to the nearest near attractor, and to the nearest far one when
     // there are far attractors.
@@ -10784,7 +10830,7 @@ fn source_label(doc: &Document, id: FeatureId) -> String {
 fn copied_features(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, src: &Feature) -> Result<Option<(Vec<FeatureId>, Vec<Mat>)>> {
     match &src.kind {
         FeatureKind::Pattern { features, pattern, bodies, .. } if bodies.is_empty() => {
-            Ok(Some((features.clone(), pattern_transforms(doc, vals, st, src.component, pattern)?)))
+            Ok(Some((features.clone(), pattern_transforms(doc, vals, st, src.component, pattern, &[])?)))
         }
         FeatureKind::Mirror { features, plane, bodies, .. } if bodies.is_empty() => {
             let pl = doc.resolve_plane_in(vals, plane, 0, src.component, Some(st))?;
@@ -12978,7 +13024,7 @@ fn eval_feature_kind(
             Ok(())
         }
         FeatureKind::Pattern { features, pattern, bodies, placements } => {
-            let mats = pattern_transforms(doc, vals, st, f.component, pattern)?;
+            let mats = pattern_transforms(doc, vals, st, f.component, pattern, bodies)?;
             if bodies.is_empty() {
                 return replay(doc, vals, f, st, features, &mats, warning);
             }

@@ -3104,6 +3104,10 @@ pub enum PatternKind {
         /// Every other column moves half a cell along.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         staggered: bool,
+        /// Instances at random places instead of on the grid (`count1` and `count2` are then
+        /// unused).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        random: Option<RandomPlacement>,
         /// The grid's turn on the face.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Grid angle")]
@@ -3115,7 +3119,8 @@ pub enum PatternKind {
         /// The copies stand on the other side of the face.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         flip: bool,
-        /// The point of the copied bodies that goes onto the face (default: the origin).
+        /// The point of the copied bodies that goes onto the face (default: the centre of the
+        /// bottom of their bounding box, so they stand on the face wherever they were modelled).
         #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_point_expr")]
         #[walk(placement)]
         anchor: Option<PointExpr>,
@@ -3182,6 +3187,33 @@ pub struct Attract {
     /// How the values change between the near and far distances.
     #[serde(default, skip_serializing_if = "is_default_falloff")]
     pub falloff: Falloff,
+}
+
+/// A face pattern's random placement: how many instances, the seed that fixes where they go,
+/// and how they spread.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct RandomPlacement {
+    #[walk(unitless = "Quantity")]
+    pub count: Expr,
+    #[serde(default)]
+    pub seed: u32,
+    #[serde(default)]
+    pub noise: Noise,
+}
+
+/// How a random placement spreads its instances: the colour of the noise that places them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Noise {
+    /// Independent places, equally likely over the face's area.
+    #[default]
+    White,
+    /// Random but evenly spread: no clumps, no gaps.
+    Blue,
+    /// Loose clusters.
+    Pink,
+    /// Large clusters and bare patches.
+    Brown,
 }
 
 /// How an attractor's effect changes between its near and far distances.

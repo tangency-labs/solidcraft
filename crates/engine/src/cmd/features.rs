@@ -144,7 +144,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("pattern_rect")
         .contract(&PATTERN_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("bodies: [names]; face: {face: [x,y,z]} (any face; followed as the model changes); count1, count2 (grid cells across and along the face: round and along a cylinder); staggered?: bool (every other column half a cell along); angle?: expr (turns the grid); margin?: expr (no copy nearer the face's edges); flip?: bool (the other side of the face); anchor?: [x,y,z] (the point of the bodies that lands on the face, default the origin; their +Z stands along the face's normal, their X along the grid); group?: bool (default true: the copies go into a group in the browser's Bodies folder, named after the feature); attract?: {geometry?: [refs: points, vertices, edges, faces], bodies?: [names], far_geometry?, far_bodies?, near?, far?, scale_near?, scale_far?, offset_near?, offset_far?, turn_near?, turn_far?, cutoff?, falloff?: linear|smooth} (advanced: each copy changes with its exact distance to the nearest attractor, from the near values at the near distance to the far values at the far one, default distances the nearest and farthest copies'; with far attractors, by its place between the two sets instead: near values on the near set, far values on the far set, near and far then hold zones round each set, default 0)"),
+        .params("bodies: [names]; face: {face: [x,y,z]} (any face; followed as the model changes); count1, count2 (grid cells across and along the face: round and along a cylinder) | random: {count, seed?: whole number, noise?: white|blue|pink|brown} (instances at random places, even over the face's area: white independent, blue evenly spread, pink loose clusters, brown large clusters); staggered?: bool (every other column half a cell along); angle?: expr (turns the grid); margin?: expr (no copy nearer the face's edges); flip?: bool (the other side of the face); anchor?: [x,y,z] (the point of the bodies that lands on the face, default the centre of the bottom of their bounding box; their +Z stands along the face's normal, their X along the grid); group?: bool (default true: the copies go into a group in the browser's Bodies folder, named after the feature); attract?: {geometry?: [refs: points, vertices, edges, faces], bodies?: [names], far_geometry?, far_bodies?, near?, far?, scale_near?, scale_far?, offset_near?, offset_far?, turn_near?, turn_far?, cutoff?, falloff?: linear|smooth} (advanced: each copy changes with its exact distance to the nearest attractor, from the near values at the near distance to the far values at the far one, default distances the nearest and farthest copies'; with far attractors, by its place between the two sets instead: near values on the near set, far values on the far set, near and far then hold zones round each set, default 0)"),
     CommandSpec::new("solid.pattern.path", "Pattern on Path", crate::checked!("solid.pattern.path", pattern_path))
         .at("SOLID", "CREATE")
         .icon("pattern_path")
@@ -3081,10 +3081,42 @@ fn pattern_face(s: &mut Session, p: &Value) -> Result<Value> {
     if !matches!(face, solidcraft_doc::construct::GeoRef::Face { .. }) {
         return Err(bad(cmd, "`face` must be a face: {\"face\": [x, y, z]} on it"));
     }
-    let count1 = req_expr(cmd, p, "count1")?;
-    let count2 = req_expr(cmd, p, "count2")?;
-    check_count(s, &count1, cmd, "count1")?;
-    check_count(s, &count2, cmd, "count2")?;
+    // A random placement: how many, the seed, and the noise that spreads them. The grid's
+    // counts are then not needed.
+    let random = match p.get("random") {
+        None | Some(Value::Null) => None,
+        Some(r) => {
+            let count = req_expr(cmd, r, "count").map_err(|_| bad(cmd, "`random.count` is required"))?;
+            check_count(s, &count, cmd, "random.count")?;
+            let seed = match r.get("seed") {
+                None | Some(Value::Null) => 0,
+                Some(v) => v
+                    .as_u64()
+                    .and_then(|n| u32::try_from(n).ok())
+                    .ok_or_else(|| bad(cmd, "`random.seed` must be a whole number from 0 to 4294967295"))?,
+            };
+            let noise = match str_(r, "noise") {
+                None | Some("white") => solidcraft_doc::Noise::White,
+                Some("blue") => solidcraft_doc::Noise::Blue,
+                Some("pink") => solidcraft_doc::Noise::Pink,
+                Some("brown") => solidcraft_doc::Noise::Brown,
+                Some(other) => return Err(bad(cmd, format!("unknown noise `{other}` (white, blue, pink or brown)"))),
+            };
+            Some(solidcraft_doc::RandomPlacement { count, seed, noise })
+        }
+    };
+    let grid_count = |key: &str| -> Result<solidcraft_doc::Expr> {
+        match (expr(p, key), &random) {
+            (Some(c), _) => {
+                check_count(s, &c, cmd, key)?;
+                Ok(c)
+            }
+            (None, Some(_)) => Ok("1".into()),
+            (None, None) => Err(bad(cmd, format!("`{key}` is required (or give `random`)"))),
+        }
+    };
+    let count1 = grid_count("count1")?;
+    let count2 = grid_count("count2")?;
     let angle = expr(p, "angle");
     if let Some(a) = &angle {
         check_expr(s, a, Kind::Angle, cmd, "angle")?;
@@ -3103,6 +3135,7 @@ fn pattern_face(s: &mut Session, p: &Value) -> Result<Value> {
         count1,
         count2,
         staggered: bool_(p, "staggered").unwrap_or(false),
+        random,
         angle,
         margin,
         flip: bool_(p, "flip").unwrap_or(false),

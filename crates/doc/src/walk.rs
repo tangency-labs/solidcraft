@@ -81,6 +81,7 @@ impl Walk for crate::thread_forms::SteepFlank {}
 // An Align frame's joint origin: picks in its component's coordinates, found by their names.
 impl Walk for Box<crate::joints::JointOrigin> {}
 impl Walk for crate::document::Falloff {}
+impl Walk for crate::document::Noise {}
 
 /// A face pattern's attractors, boxed to keep the pattern small: walked as the value inside.
 impl Walk for Box<crate::document::Attract> {
