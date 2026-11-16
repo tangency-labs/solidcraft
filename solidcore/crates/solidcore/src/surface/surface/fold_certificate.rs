@@ -30,9 +30,9 @@
 //! not). A piece not proved is quartered, at most [`MAX_SPLITS`] times, each quarter
 //! with its own `d`; past that the certificate refuses
 //! ([`FoldCertificate::NotProved`]), as it does for a surface kind with no certificate
-//! here. The only zeros of `N` not excluded lie in the last split's pieces along the
-//! natural domain's sides (`1 / 16` of a cell wide), where `N` is still shown not to
-//! turn back.
+//! here. On the last split's pieces along the natural domain's sides (`1 / 16` of a
+//! cell wide) only `N . d >= -E` is shown: a zero of `N` there, or a reversal smaller
+//! than the arithmetic's bound `E`, is not excluded.
 //!
 //! **How (B-spline nets).** The evaluated surface is its NURBS form, continued past its
 //! knot range by its end spans' polynomials (NLib's span search clamps to the end span).
@@ -89,6 +89,14 @@ pub const MAX_SPLITS: usize = 4;
 /// The most pieces one certificate computes (bounded work; past it, nothing is proved).
 pub const MAX_PIECES: usize = 1 << 16;
 
+/// The work of one piece of a bicubic polynomial net, `((p + 1) (q + 1))^2`: a piece of
+/// a net of higher degree counts for more, so [`MAX_PIECES`] such pieces bound the
+/// work at every degree (a net of very high degree is refused for it).
+const UNIT_WORK: usize = 256;
+
+/// The operation path of the certificate's cancel polls.
+const OP: &str = "surface::fold_certificate::certify_no_fold";
+
 /// The answer of [`certify_no_fold`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FoldCertificate {
@@ -131,8 +139,8 @@ pub fn certify_no_fold(
     match s.kind() {
         // `O + u sx X + v sy Y`: a constant normal
         SurfaceKind::Plane(_) => Ok(FoldCertificate::Proved),
-        SurfaceKind::BSpline(b) => polynomial(b, natural, domain),
-        SurfaceKind::BallPatch(bp) => polynomial(bp.net(), natural, domain),
+        SurfaceKind::BSpline(b) => polynomial(k, b, natural, domain),
+        SurfaceKind::BallPatch(bp) => polynomial(k, bp.net(), natural, domain),
         SurfaceKind::Sphere(_) | SurfaceKind::Cone(_) | SurfaceKind::Torus(_) => {
             analytic::certify(k, s, natural, domain)
         }
@@ -404,10 +412,13 @@ struct Form {
     e0: f64,
     /// The rounding levels of a piece's `N . d`.
     levels: usize,
+    /// The most pieces computed ([`MAX_PIECES`] scaled by the degrees' work).
+    max_pieces: usize,
 }
 
 /// The certificate of a B-spline net's continuation.
 fn polynomial(
+    k: &Kernel,
     b: &BSplineSurface,
     natural: &Extent2d,
     domain: &Extent2d,
@@ -523,6 +534,17 @@ fn polynomial(
     if patches.first().is_none_or(Vec::is_empty) {
         return Ok(not("no Bezier patches"));
     }
+    // NLib's span search skips an end span narrower than `1e-12` (it continues the next
+    // one past the knot range), which the patches here would not: refused
+    let narrow = |a: Option<[f64; 2]>| a.is_none_or(|s| !above(s[1] - s[0], 1e-12));
+    let column = patches.first().map(Vec::as_slice).unwrap_or_default();
+    if narrow(patches.first().and_then(|c| c.first()).map(|x| x.u))
+        || narrow(patches.last().and_then(|c| c.first()).map(|x| x.u))
+        || narrow(column.first().map(|x| x.v))
+        || narrow(column.last().map(|x| x.v))
+    {
+        return Ok(not("an end span narrower than the span search's cut-off"));
+    }
     // rounding levels: restriction, derivative, products and differences, the dot
     let product = |a: (usize, usize)| (a.0 + 1) * (a.1 + 1) + 7;
     let mut levels = 3 * (p + q) + 2;
@@ -532,14 +554,17 @@ fn polynomial(
         levels += product((p, q)) + 1;
     }
     levels += 3 + 4;
+    let (ep, eq) = if rational { (2 * p, 2 * q) } else { (p, q) };
+    let cost = ((ep + 1) * (eq + 1)).saturating_pow(2).max(1);
     let form = Form {
         patches,
         rational,
         degrees: (p, q),
         e0,
         levels,
+        max_pieces: MAX_PIECES.saturating_mul(UNIT_WORK) / cost,
     };
-    certify_pieces(&form, natural, domain)
+    certify_pieces(k, &form, natural, domain)
 }
 
 /// A rectangle `[x0, x1] x [y0, y1]` of STEP parameters.
@@ -692,7 +717,12 @@ fn holds(f: &Net, levels: usize, strict: bool) -> bool {
 }
 
 /// The pieces of the continuation (see the module header).
-fn certify_pieces(form: &Form, natural: &Extent2d, domain: &Extent2d) -> Result<FoldCertificate> {
+fn certify_pieces(
+    k: &Kernel,
+    form: &Form,
+    natural: &Extent2d,
+    domain: &Extent2d,
+) -> Result<FoldCertificate> {
     let b = Binomials::new();
     let uspans: Vec<[f64; 2]> = form
         .patches
@@ -771,8 +801,9 @@ fn certify_pieces(form: &Form, natural: &Extent2d, domain: &Extent2d) -> Result<
     }
     let mut work = 0_usize;
     while let Some((r, depth)) = stack.pop() {
+        k.check_cancelled(OP)?;
         work += 1;
-        if work > MAX_PIECES {
+        if work > form.max_pieces {
             return Ok(FoldCertificate::NotProved {
                 uv: r.centre(),
                 reason: "the certificate's work bound",
@@ -804,7 +835,8 @@ fn certify_pieces(form: &Form, natural: &Extent2d, domain: &Extent2d) -> Result<
                 // reversal across the natural domain's side.
                 let own = check(&r, d, !touching || !last)?;
                 let across = if touching && own == Some(true) {
-                    let mut ok = Some(true);
+                    // no mirror (a natural domain without width): nothing proved
+                    let mut ok = None;
                     if let Some(m) = mirror(&r) {
                         'pieces: for x in cuts(m.x[0], m.x[1], &ubreaks) {
                             for y in cuts(m.y[0], m.y[1], &vbreaks) {
@@ -945,6 +977,12 @@ pub mod analytic {
     fn cos_extremes(v0: f64, v1: f64) -> Vec<(f64, f64)> {
         let cos = |v: f64| (v * core::f64::consts::PI / 180.0).cos();
         let mut out = vec![(v0, cos(v0)), (v1, cos(v1))];
+        let turns = (v1 - v0) / 180.0;
+        if turns.is_nan() || turns > 64.0 {
+            // too many turns (or no width): an undecided entry off the natural domain
+            out.push((f64::NAN, 0.0));
+            return out;
+        }
         let first = (v0 / 180.0).ceil();
         let mut m = first;
         while m * 180.0 < v1 && out.len() < 66 {

@@ -2580,6 +2580,78 @@ mod tests {
         Ok(())
     }
 
+    /// The bilinear shortcut of `CoverCoincidentSurface` runs the fold rule
+    /// (tangency-labs/solidcraft#17453 review): the planar bilinear sheet
+    /// `(u, v (1 - u / 2))` on `[0, 1]^2`, covering the bilinear patch that is the same
+    /// sheet over `[0, 2.5] x [0, 1]`, folds at u = 2 (its normal `(1 - u / 2) z`
+    /// reverses), so the cover is refused; the patch over `[0, 1.9] x [0, 1]` is covered.
+    #[test]
+    fn wr_407_bilinear_shortcut_runs_the_fold_rule() -> Result<()> {
+        let k = Kernel::default();
+        let sheet = || wr_407_bezier_sheet(&[&[[0.0, 0.0], [0.0, 1.0]], &[[1.0, 0.0], [1.0, 0.5]]]);
+        let over = |u: f64| {
+            wr_407_bezier_sheet(&[&[[0.0, 0.0], [0.0, 1.0]], &[[u, 0.0], [u, 1.0 - u / 2.0]]])
+        };
+        let mut this = sheet()?;
+        let other = over(2.5)?;
+        assert!(this.is_bilinear(&k) && other.is_bilinear(&k));
+        let covered = this.cover_coincident_surface_deferring_trims(&k, &other, 1.0e-6, None)?;
+        assert!(!covered.success && covered.fold.is_some(), "{covered:?}");
+        assert_eq!(
+            this.step_uv_domain(),
+            Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0)
+        );
+        let mut this = sheet()?;
+        let covered =
+            this.cover_coincident_surface_deferring_trims(&k, &over(1.9)?, 1.0e-6, None)?;
+        assert!(covered.success && covered.fold.is_none(), "{covered:?}");
+        Ok(())
+    }
+
+    /// The certificate's rational branch: a quarter cylinder (the rational quadratic
+    /// arc `(1, 0)`, `(1, 1)` weight `sqrt(2) / 2`, `(0, 1)`, extruded along z) continues
+    /// along its circle past both arc ends (the weight stays positive on
+    /// `[-0.25, 1.25]`; the normal is radial), and past its two knot spans' joint.
+    #[test]
+    fn wr_407_fold_certificate_proves_a_rational_cylinder() -> Result<()> {
+        use super::super::fold_certificate::{certify_no_fold, FoldCertificate};
+        use crate::nurbs::b_spline_surface::p1::BSplineSurface as Bss;
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+        let k = Kernel::default();
+        let w = core::f64::consts::FRAC_1_SQRT_2;
+        let row = |x: f64, y: f64, wt: f64| {
+            vec![
+                CPoint::new(x * wt, y * wt, 0.0, wt),
+                CPoint::new(x * wt, y * wt, wt, wt),
+            ]
+        };
+        // two quadratic spans in u, a quarter circle each, joined at the double knot 0.5
+        let net = vec![
+            row(1.0, 0.0, 1.0),
+            row(1.0, 1.0, w),
+            row(0.0, 1.0, 1.0),
+            row(-1.0, 1.0, w),
+            row(-1.0, 0.0, 1.0),
+        ];
+        let nl = NlSurface::new(
+            net,
+            2,
+            1,
+            vec![0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )?;
+        let mut s = Surface::from(Bss::from_nurb(nl, false));
+        set_out_of_bounds_enabled(&mut s, true);
+        let natural = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let wider = Extent2d::from_bounds(-0.1, -0.5, 1.1, 1.5);
+        assert_eq!(
+            certify_no_fold(&k, &s, &natural, &wider)?,
+            FoldCertificate::Proved
+        );
+        Ok(())
+    }
+
     /// A revolution of a line continues past its rim but not through its pole: the cone
     /// swept by `C(v) = v (1, 0, 1)` about the z axis has `M(v) = v (1, 0, -1)` (module
     /// `fold_certificate`, `swept`), zero at the apex v = 0 (the face's own pole, on its
