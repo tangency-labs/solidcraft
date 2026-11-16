@@ -4486,11 +4486,17 @@ fn z_span_and_volume(s: &mut Session, body: &str) -> (f64, f64, f64) {
 /// From Object on a slanted flat face starts on the face, so a disc of radius 4 at x 20,
 /// extruded 5 mm From the slope, runs from z 22 - 4 / 2 = 18 at x 24 up to 22 + 5 = 27 at x 16.
 /// A design saved before keeps its flat start at the slope's level under the disc's centre,
-/// z 20 to 25 (#17639).
+/// z 20 to 25 (#17639). It keeps that start through an edit that keeps its From face, and an
+/// edit that picks another face, the top of a ramp z = 15 + x / 2 over the wedge, starts on that
+/// face: z 25 - 2 = 23 at x 16 up to 25 + 2 + 6 = 33 at x 24 for a 6 mm post.
 #[test]
 fn extrude_from_a_slanted_face_starts_on_the_face() {
     let mut s = Session::default();
     slanted_wedge(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "RampSide"}));
+    run(&mut s, "sketch.line", json!({"closed": true, "points": [[0, 0], [40, 0], [40, -35], [0, -15]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "RampSide", "distance": 20, "direction": "negative", "operation": "new", "body_name": "Ramp"}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Disc"}));
     run(&mut s, "sketch.circle.center", json!({"center": [20, -10], "radius": 4}));
     run(&mut s, "sketch.finish", json!({}));
@@ -4513,6 +4519,28 @@ fn extrude_from_a_slanted_face_starts_on_the_face() {
     run(&mut old, "doc.open", json!({"path": design.to_string_lossy()}));
     let (lo, hi, v) = z_span_and_volume(&mut old, "Post");
     assert!((lo - 20.0).abs() < 1e-6 && (hi - 25.0).abs() < 1e-6 && rel(v, disc) < 1e-6, "{lo} {hi} {v}");
+    let post = s.doc.features.last().map(|f| f.name.to_string()).unwrap_or_default();
+    let six = PI * 16.0 * 6.0;
+    run(&mut old, "timeline.edit", json!({"feature": post, "set": {"extent": {"distance": "6"}}}));
+    let (lo, hi, v) = z_span_and_volume(&mut old, "Post");
+    assert!((lo - 20.0).abs() < 1e-6 && (hi - 26.0).abs() < 1e-6 && rel(v, six) < 1e-6, "{lo} {hi} {v}");
+    run(&mut old, "timeline.edit", json!({"feature": post, "set": {"extent": {"from": [22, -12, 19]}}}));
+    let (lo, hi, v) = z_span_and_volume(&mut old, "Post");
+    assert!((lo - 20.0).abs() < 1e-6 && (hi - 26.0).abs() < 1e-6 && rel(v, six) < 1e-6, "{lo} {hi} {v}");
+    run(&mut old, "timeline.edit", json!({"feature": post, "set": {"extent": {"from": [20, -10, 25]}}}));
+    let (lo, hi, v) = z_span_and_volume(&mut old, "Post");
+    assert!((lo - 23.0).abs() < 1e-6 && (hi - 33.0).abs() < 1e-6 && rel(v, six) < 1e-6, "{lo} {hi} {v}");
+    // The same through a redefine, which builds the extrude again from the command's inputs.
+    run(&mut old, "edit.undo", json!({}));
+    let redefine = |s: &mut Session, from: [f64; 3]| {
+        let params = json!({"sketch": "Disc", "from": from, "distance": 6, "operation": "new"});
+        run(s, "timeline.redefine", json!({"feature": post, "command": "solid.extrude", "params": params}));
+        z_span_and_volume(s, "Post")
+    };
+    let (lo, hi, v) = redefine(&mut old, [18.0, -8.0, 21.0]);
+    assert!((lo - 20.0).abs() < 1e-6 && (hi - 26.0).abs() < 1e-6 && rel(v, six) < 1e-6, "{lo} {hi} {v}");
+    let (lo, hi, v) = redefine(&mut old, [20.0, -10.0, 25.0]);
+    assert!((lo - 23.0).abs() < 1e-6 && (hi - 33.0).abs() < 1e-6 && rel(v, six) < 1e-6, "{lo} {hi} {v}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
