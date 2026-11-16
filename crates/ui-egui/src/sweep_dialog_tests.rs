@@ -302,6 +302,50 @@ fn tangent_chain_keeps_each_hand_picked_edge() {
     assert_eq!(top(&h), vec![back]);
 }
 
+/// A marquee that adds an edge already listed through another pick's chain still makes it a pick:
+/// unticking Tangent Chain brings back both picks, not only the first. A marquee over a whole
+/// smooth loop walks the chain once (the other picks lie in it), and removing one row of it still
+/// takes every pick whose chain held that row.
+#[test]
+fn tangent_chain_marquee_over_a_listed_edge_keeps_it_as_a_pick() {
+    let mut h = Harness::new();
+    let (index, at) = rounded_block(&mut h);
+    h.step(&json!({"call":"ui.start","params":{"command":"solid.sweep"}})).unwrap();
+    h.frames(3);
+    let top = |h: &Harness| -> Vec<Sel> { h.app.dialog.as_ref().unwrap().inputs[1].items.clone() };
+    h.app.dialog.as_mut().unwrap().active = 1;
+    let front = Sel::Edge { body: "B".into(), index, point: at };
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, front.clone());
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    let chain = top(&h);
+    assert_eq!(chain.len(), 8, "{chain:?}");
+    // An additive marquee over an edge the chain already lists changes no row but is a pick.
+    let other = chain[3].clone();
+    h.app.dialog.as_mut().unwrap().take_box(&h.app.session, vec![other.clone()], true);
+    h.frames(2);
+    assert_eq!(top(&h), chain);
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    assert_eq!(top(&h), vec![front.clone(), other.clone()], "both picks come back");
+    // Ticked, a replacing marquee over the whole loop: the same eight rows, one walk.
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    h.app.dialog.as_mut().unwrap().take_box(&h.app.session, chain.clone(), false);
+    h.frames(2);
+    assert_eq!(top(&h), chain);
+    let seeds = &h.app.dialog.as_ref().unwrap().inputs[1].chain_seeds;
+    assert_eq!(seeds.len(), 8);
+    assert_eq!(seeds.iter().filter(|(_, c)| c.is_some()).count(), 1, "one walk for the loop");
+    // Removing a row takes out every pick, each of whose chain is the whole loop.
+    h.app.dialog.as_mut().unwrap().remove_listed(&h.app.session, 1, &other);
+    h.frames(2);
+    assert!(top(&h).is_empty(), "{:?}", top(&h));
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    assert!(top(&h).is_empty(), "{:?}", top(&h));
+}
+
 /// Every input that takes a chain of edges offers Tangent Chain, off: both Sweeps' Path, the
 /// Surface Loft's sections, Blend's two edge sets, Boundary's curves, Patch's boundary and
 /// Ruled's edges.

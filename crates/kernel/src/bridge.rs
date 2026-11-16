@@ -85,31 +85,11 @@ pub fn chain(body: &Body, at: &[Vec3]) -> Result<Chain> {
     Ok(chain)
 }
 
-/// The edges of `body` a path, rail or boundary pick at points `at` stands for with its curve
-/// chain: the edges the points pick (each once, in order), then every edge that continues one of
-/// them within `angle` radians at a shared vertex, and so on, stopping at a branch
-/// (`solidcore_ops::tangent::curve_chain_ordered`). Unlike a blend's chain
-/// ([`crate::tangent_chain_edges`]) the faces play no part. The record's edge indices, which
-/// are the display's.
-pub fn curve_chain_edges(body: &Body, at: &[Vec3], angle: f64) -> Result<Vec<usize>> {
-    body.require_brep("an edge chain")?;
-    if at.is_empty() || at.len() > 10_000 || at.iter().any(|p| !p.is_finite()) {
-        return Err(KernelError::Invalid("pick 1 to 10000 points on edges".into()));
-    }
-    let mut picked: Vec<usize> = Vec::new();
-    for p in at {
-        let e = crate::surfaces::edge_near(body, *p).ok_or_else(|| KernelError::Invalid("no edge near a picked point".to_string()))?;
-        if !picked.contains(&e) {
-            picked.push(e);
-        }
-    }
-    curve_chain_of_edges(body, &picked, angle)
-}
-
 /// The edges of `body` a path, rail or boundary pick of edges `edges` (the record's edge indices,
-/// which are the display's) stands for with its curve chain, as [`curve_chain_edges`] for edges
-/// already known: the picked edges themselves, never one a point near a shared vertex might
-/// resolve to instead.
+/// which are the display's) stands for with its curve chain: the picked edges (each once, in
+/// order), then every edge that continues one of them within `angle` radians at a shared vertex,
+/// and so on, stopping at a branch (`solidcore_ops::tangent::curve_chain_ordered`). Unlike a
+/// blend's chain ([`crate::tangent_chain_edges`]) the faces play no part.
 pub fn curve_chain_of_edges(body: &Body, edges: &[usize], angle: f64) -> Result<Vec<usize>> {
     body.require_brep("an edge chain")?;
     let count = body.record().edges.len();
