@@ -906,6 +906,9 @@ fn flat_chord(c: &[H2], tol: f64) -> Option<(Point2, Point2)> {
         .then_some((s, e))
 }
 
+/// Two points: a box `(lo, hi)` or a chord `(start, end)`.
+type Segment2 = (Point2, Point2);
+
 /// A region's boundary halved until each piece lies within `tol` of its chord, or after
 /// [`MAX_OVERLAP_DEPTH`] halvings: the pieces' boxes (all of them, so together they cover the
 /// boundary) and the chords of the flat ones, each within `tol` of the boundary.
@@ -913,7 +916,7 @@ fn flat_chord(c: &[H2], tol: f64) -> Option<(Point2, Point2)> {
 /// Cost: halving a span shrinks how far its control points stray from its chord about four
 /// times a level, so a span whose control points stray `d` from its chord gives about
 /// `sqrt(d / tol)` pieces (a quarter circle of radius 0.5 at 2.5e-7: about 2^10).
-fn flat_pieces(r: &Region2, tol: f64) -> Option<(Vec<(Point2, Point2)>, Vec<(Point2, Point2)>)> {
+fn flat_pieces(r: &Region2, tol: f64) -> Option<(Vec<Segment2>, Vec<Segment2>)> {
     let (mut boxes, mut chords) = (Vec::new(), Vec::new());
     let mut todo: Vec<(Vec<H2>, u32)> = boundary_spans(r)?.into_iter().map(|c| (c, 0)).collect();
     while let Some((c, depth)) = todo.pop() {
