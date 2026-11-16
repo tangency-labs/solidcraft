@@ -112,7 +112,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.shell_edges_on_analytics_exact = true;
     f.ssi_pole_point_keeps_its_tangent = true;
     f.fillet_patch_keeps_fillet_edges = true;
-    f.boolean_splits_definition_across_split = true;
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;
     f.local_operation_step_walls = true;
@@ -518,6 +517,18 @@ mod tests {
         for name in HELD_BACK {
             assert!(flags.contains(&(*name, false)), "{name} is on or gone: drop it from HELD_BACK");
         }
+    }
+
+    /// solidcore's tests and kernel rig read this preset from `kernel_cases/fixes.json`: the file
+    /// names exactly the flags `fixes()` turns on.
+    #[test]
+    fn the_kernel_corpus_fix_list_is_this_preset() {
+        let listed: Vec<String> = serde_json::from_str(include_str!("../../../solidcore/crates/solidcore/tests/kernel_cases/fixes.json")).unwrap();
+        let mut listed: Vec<&str> = listed.iter().map(String::as_str).collect();
+        listed.sort_unstable();
+        let mut on: Vec<&str> = fixes().flags().filter(|(_, on)| *on).map(|(name, _)| name).collect();
+        on.sort_unstable();
+        assert_eq!(listed, on, "kernel_cases/fixes.json must list exactly the flags fixes() turns on");
     }
 
     #[test]

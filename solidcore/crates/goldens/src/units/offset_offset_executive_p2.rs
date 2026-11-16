@@ -2034,6 +2034,81 @@ mod tests {
     fn moved_cases_results_measured() {
         crate::soundness::probe(&Runner);
     }
+
+    /// WR-533's moved rows here (batch topology-1, `boolean_splits_definition_across_split`
+    /// removed): the rounded outward offsets of `extrudeHoles1` at k 0.36, with the result
+    /// bodies the soundness probe measures. `None` for a case that builds no body.
+    fn wr533_overlap_offsets() -> Vec<(String, i64, Option<crate::soundness::Soundness>, i64)> {
+        let ctx = CaseContext {
+            root: repo_root(),
+            seeds: 0,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        [0, 2, 3, 4, 5]
+            .into_iter()
+            .map(|f| {
+                let name = format!("overlap_pc_extrudeHoles1_f{f}_k0.36_out_rnd");
+                let case = cases.iter().find(|c| c.name == name).unwrap();
+                crate::soundness::start();
+                let out = Runner.run_rust(case).unwrap();
+                let mut found = crate::soundness::take();
+                assert!(found.len() <= 1, "{name}: at most one result body, got {}", found.len());
+                let (status, present) = (out.ints["status"][0], out.ints["result.present"][0]);
+                (name, status, found.pop(), present)
+            })
+            .collect()
+    }
+
+    /// With the fix each of WR-533's five moved offsets is refused (1001) and builds no
+    /// result body.
+    #[test]
+    fn wr533_overlap_offsets_are_refused() {
+        for (name, status, body, present) in wr533_overlap_offsets() {
+            assert_eq!(status, 1001, "{name}");
+            assert!(body.is_none(), "{name}: a refused case builds no result body");
+            assert_eq!(present, 0, "{name}");
+        }
+    }
+
+    /// Main's side of the same five offsets, run on main (before WR-533's retirement) to
+    /// show what the refusals replace: each builds a body that `check_brep` refuses on an
+    /// edge/edge gap far past its tolerance, and that is not manifold.
+    /// `SmTrimmingTools::CheckLoop` derives that tolerance from the two edges' zone
+    /// tolerances (`xsect_tol_3d_from_zones`: `xsect_tol3d(zone_prev + zone_cur)`) and
+    /// measures the gap between the evaluated end of one edge's 3D curve and the start of
+    /// the next, both at the trims' end parameters; no sampling enters either value, and
+    /// the factor of a thousand leaves no verdict to rounding. It fails with the fix, which
+    /// refuses them.
+    #[test]
+    #[ignore = "main's side, run on main before WR-533's retirement; the fix refuses these"]
+    fn wr533_overlap_offsets_fail_the_gap_check_on_main() {
+        for (name, status, body, _) in wr533_overlap_offsets() {
+            assert_eq!(status, i64::from(NATIVE_SUCCESS), "{name}");
+            let Some(body) = body else {
+                panic!("{name}: no result body")
+            };
+            let lines = body.check.as_ref().unwrap();
+            let gap = lines
+                .iter()
+                .find(|l| l.contains("Edge/Edge Gap"))
+                .unwrap_or_else(|| panic!("{name}: no edge/edge gap line in {lines:?}"));
+            let num = |key: &str| -> f64 {
+                let at = gap.find(key).unwrap() + key.len();
+                gap[at..]
+                    .split([',', ')'])
+                    .next()
+                    .unwrap()
+                    .trim()
+                    .parse()
+                    .unwrap()
+            };
+            let (offset, tolerance) = (num("offset="), num("tolerance="));
+            eprintln!("{name}: built, gap {offset} against {tolerance}");
+            assert!(offset > 1000.0 * tolerance, "{name}: {gap}");
+            assert_eq!(body.manifold, Some(false), "{name}");
+        }
+    }
+
     use std::collections::BTreeSet;
 
     use crate::case::repo_root;
