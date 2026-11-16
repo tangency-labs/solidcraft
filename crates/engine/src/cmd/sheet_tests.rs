@@ -4584,6 +4584,79 @@ fn fold_by_a_hole_in_its_zone_keeps_the_zones_ends() {
     assert!(ys.len() == 4 && at(ys[2], -40.0) && at(ys[3], 40.0), "{zone}");
 }
 
+/// The flat of #11903's collar: a 200 x 150 plate of 0.8 mm GI (T 0.8, R 0.5, K 0.44) with a
+/// 70 x 50 opening and four 0.5 mm slits running diagonally from its corners to the corners of
+/// the 100 x 80 bend-line rectangle, and `past` mm on beyond them. Its top face is z = 0.8.
+fn collar_plate(s: &mut Session, past: f64) {
+    run(s, "sheet.manage_rules", json!({"name": "GI_0.8T", "thickness": "0.8", "bend_radius": "0.5", "k_factor": "0.44", "active": true}));
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(s, "sketch.line", json!({"points": [[-100, -75], [100, -75], [100, 75], [-100, 75]], "closed": true}));
+    // One loop: the opening, each corner running out along its slit and back.
+    let mut opening = Vec::new();
+    for (cx, cy) in [(-35.0_f64, -25.0_f64), (35.0, -25.0), (35.0, 25.0), (-35.0, 25.0)] {
+        let (sx, sy) = (cx.signum(), cy.signum());
+        let (dx, dy) = (sx / 2f64.sqrt(), sy / 2f64.sqrt());
+        let (px, py) = (-dy * 0.25, dx * 0.25);
+        let reach = 15.0 * 2f64.sqrt() + past;
+        let (ex, ey) = (cx + dx * reach, cy + dy * reach);
+        opening.extend([[cx - px, cy - py], [ex - px, ey - py], [ex + px, ey + py], [cx + px, cy + py]]);
+    }
+    run(s, "sketch.line", json!({"points": opening, "closed": true}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "sheet.flange", json!({"sketch": "Base", "profiles": [0]}));
+}
+
+/// #11903's Fold route: with its slits running on past the bend lines, each of the four tabs
+/// round the opening folds up alone on its own line, the fixed point on the plate beside it, and
+/// the four make the collar while the plate stays flat.
+#[test]
+fn fold_raises_a_collar_round_an_opening_tab_by_tab() {
+    let mut s = Session::default();
+    collar_plate(&mut s, 2.0);
+    let before = volume(&mut s);
+    for points in [
+        json!([[-50, -40, 0.8], [50, -40, 0.8]]),
+        json!([[-50, 40, 0.8], [50, 40, 0.8]]),
+        json!([[-50, -40, 0.8], [-50, 40, 0.8]]),
+        json!([[50, -40, 0.8], [50, 40, 0.8]]),
+    ] {
+        run(&mut s, "sheet.fold", json!({"points": points, "angle": "90 deg", "fixed": [-80, 0, 0.8]}));
+    }
+    // Each 90° bend holds π/4 ((R + T)² − R²) = 1.131 mm³ per mm of its length where the flat
+    // strip it came from, (R + K T) π/2 long, held 1.071: 0.060 mm³ more per mm, over the four
+    // lines' 2 x 100 + 2 x 80 mm (each a slit's width less, inside the 3 %).
+    let (r, t, k) = (0.5, 0.8, 0.44);
+    let quarter = std::f64::consts::FRAC_PI_2;
+    let per_mm = quarter / 2.0 * ((r + t) * (r + t) - r * r) - (r + k * t) * quarter * t;
+    let grown = volume(&mut s) - before;
+    assert!(rel(grown, per_mm * 360.0) < 0.03, "the folds keep the material: {grown} mm³ more");
+    let bb = bbox(&mut s);
+    // The plate flat to its edges; each tab about 15 mm (its flat width) up.
+    assert!(at(coord(&bb, "min", 0), -100.0) && at(coord(&bb, "max", 0), 100.0), "{bb}");
+    assert!(at(coord(&bb, "min", 1), -75.0) && at(coord(&bb, "max", 1), 75.0), "{bb}");
+    assert!(coord(&bb, "max", 2) > 14.0 && coord(&bb, "max", 2) < 17.0, "{bb}");
+    assert_eq!(flat(&mut s)["bends"].as_array().map_or(0, Vec::len), 4);
+}
+
+/// The collar as #11903 draws it, each slit ending on the bend line: the slit's end lies in the
+/// bend zone, so the fold is refused naming that corner and how far to move the line, whichever
+/// side the fixed point lies on (on the tab's side, the other side's own reason, not that the
+/// fixed side falls apart), and the sheet is unchanged.
+#[test]
+fn fold_of_a_collar_tab_whose_slits_end_on_its_line_names_the_slits_end() {
+    for fixed in [json!([-80, 0, 0.8]), json!([0, -60, 0.8])] {
+        let mut s = Session::default();
+        collar_plate(&mut s, 0.0);
+        let before = s.doc.to_json();
+        let e = s
+            .execute("sheet.fold", &json!({"points": [[-50, -40, 0.8], [50, -40, 0.8]], "angle": "90 deg", "fixed": fixed}))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("reaches a corner of a cut-out") && e.contains("move the fold line"), "{fixed}: {e}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+}
+
 /// A 45° fold on an AL2 plate drawn as `al2_plate` takes it: the material is kept, and the
 /// part's bounding box and its flat's bend count are returned.
 fn al2_fold(outline: Value, slots: &[Value], holes: &[([f64; 2], f64)], points: Value, fixed: Value) -> (Value, usize) {

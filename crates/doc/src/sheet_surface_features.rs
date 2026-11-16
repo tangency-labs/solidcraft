@@ -905,7 +905,11 @@ impl SurfaceSheet {
                 // Only the side the fixed point lies on frees anything (it lies on a tongue the
                 // line frees): the fold can't keep it still.
                 Ok(Ok(_)) => return err(FOLD_FIXED_ON_FREED),
-                _ => return err(why),
+                // The other side would free a piece but can't fold it (a slit's end in its zone,
+                // #11903's collar tabs): its own reason says what to change, the first side's
+                // only that it can't be the one that moves.
+                Err(e) => return Err(e),
+                Ok(Err(_)) => return err(why),
             },
         };
         // The side that stays lies against `n`; the line's left, seen from the surface (against
