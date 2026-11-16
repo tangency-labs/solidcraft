@@ -39,6 +39,7 @@ use solidcore::boolean::api_brep::{boolean, boolean_union};
 use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
+use solidcore::mass::enclosure::enclose_volume;
 use solidcore::mass::integrator::properties::{brep_volume, face_area, PropertyAttributes};
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::create_cylinder;
@@ -257,8 +258,9 @@ fn union_enclosure() -> ((f64, f64), [(f64, f64); 6]) {
     (volume, areas)
 }
 
-/// The union's volume and face areas lie in their closed-form enclosures
-/// ([`union_enclosure`]), widened by the integrators' requested accuracies (the goldens'
+/// The union's volume lies in a certified enclosure (`enclose_volume`) at most `5e-6` of
+/// it wide that holds the golden row's volume, and its volume and face areas lie in their
+/// closed-form enclosures ([`union_enclosure`]), widened by the integrators' requested accuracies (the goldens'
 /// `1e-6` for volume, `1e-4` for areas, relative) and `1e-12` relative for rounding in the
 /// enclosures themselves. Six faces: both walls, both far caps and both cut caps.
 #[test]
@@ -281,6 +283,29 @@ fn wr533_tube_ends_union_measures_lie_in_their_closed_forms() {
     assert!(
         within(v, v_lo, v_hi, 1e-6),
         "volume {v} outside [{v_lo}, {v_hi}]"
+    );
+    // the certified volume (`enclose_volume`, rounding counted) at most 5e-6 of it wide
+    // holds the `boolean.api_brep` row `issue1517_tube_ends_union_measured`'s volume, and
+    // meets the closed-form window. 5e-6 rather than 1e-7: this body's enclosure has a floor
+    // of 2.84 (2.8e-6 of the volume; the strip cells along its trims that no cut narrows),
+    // so 1e-7 is out of its reach; the closed-form window, 2.9e-7 wide, is the tighter one.
+    let golden = 1_032_433.151_040_827_5;
+    let e = enclose_volume(&k, &mut r, 5e-6 * golden).unwrap();
+    println!(
+        "enclosure [{}, {}] width {} ({:?})",
+        e.lo,
+        e.hi,
+        e.width(),
+        e.stop
+    );
+    assert!(e.width() <= 5e-6 * golden, "enclosure {e:?}");
+    assert!(
+        e.lo <= golden && golden <= e.hi,
+        "golden {golden} outside {e:?}"
+    );
+    assert!(
+        e.lo <= v_hi && v_lo <= e.hi,
+        "enclosure {e:?} misses [{v_lo}, {v_hi}]"
     );
     let mut areas: Vec<f64> = faces(&r, None)
         .unwrap()

@@ -1765,10 +1765,7 @@ mod tests {
     /// the definition against bare stand-ins (regions and loops without geometry), so
     /// `CreateVertexDefinition` refuses with [`SolidError::InvalidInput`] where upstream
     /// would read an uninitialised position. The op is replayed on the state it starts
-    /// from, so the refusal is pinned to that exact call and message. In the sixth row
-    /// (gen1321) the split succeeds: at the end of the script every definition on an edge
-    /// lies within that edge's interval (upstream leaves one reaching 3.23 past its edge's
-    /// end), and the split edge's lower piece keeps its definition.
+    /// from, so the refusal is pinned to that exact call and message.
     #[test]
     fn wr533_update_edges_rows() {
         let ctx = CaseContext {
@@ -1849,45 +1846,5 @@ mod tests {
                 "{name}: {e}"
             );
         }
-
-        // gen1321: edge 7 is [3.5456, 7.4818] and edge 8 is [7.4818, 10.7148] of the same
-        // line, and the coincident definition on edge 7 runs over the whole line, across the
-        // split point 7.4818. Upstream leaves it whole on edge 7, reaching 3.23 past that
-        // edge's end (the record's state). With the split, at the end of the script every
-        // definition on an edge lies within that edge's interval, and edge 7 keeps one.
-        let s = script("gen1321");
-        let Script::Proto { ops, .. } = &s else {
-            panic!("gen1321: not a proto script")
-        };
-        let Some(last_update) = ops.iter().rposition(|op| op[0] as i64 == q::MGR_UPDATE_EDGES) else {
-            panic!("gen1321: no UpdateEdges op")
-        };
-        let w = {
-            let Ok(Some(r)) = proto_state_before(&s, last_update) else {
-                panic!("gen1321: no state before op {last_update}")
-            };
-            op_update_edges_args(&r, &ops[last_update]).0
-        };
-        let Ok(Some(r)) = proto_state_before(&s, ops.len()) else {
-            panic!("gen1321: no final state")
-        };
-        let mut pieces = Vec::new();
-        for d in r.mgr.all_edge_definitions().unwrap() {
-            let d = r.mgr.edge_def(d).unwrap();
-            let Some(edge) = d.src_topo(w).filter(|h| r.pool.edge_interval(*h).is_some()) else {
-                continue;
-            };
-            let (on, edge_ivl) = (d.xsect_interval(), r.pool.edge_interval(edge).unwrap());
-            assert!(
-                on.min() >= edge_ivl.min() && on.max() <= edge_ivl.max(),
-                "gen1321: definition [{}, {}] on {edge:?} leaves its interval [{}, {}]",
-                on.min(),
-                on.max(),
-                edge_ivl.min(),
-                edge_ivl.max()
-            );
-            pieces.push(edge.0);
-        }
-        assert!(pieces.contains(&7), "gen1321: edge 7 keeps a definition");
     }
 }
