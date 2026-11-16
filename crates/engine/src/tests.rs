@@ -5324,7 +5324,7 @@ fn a_round_as_large_as_the_round_it_runs_along_is_refused_not_failed() {
 /// ball touching the cylinder on the seam (x = 15, z = 10.1) and the sphere inside has radius
 /// (297.99 - y^2) / 80, at most 3.725: a larger round's contact line never reaches the seam, and
 /// it failed there with "Unable to Compute Geometry". It is refused naming the largest radius
-/// that fits (297.99 / 80 less the fit margin; 3.724 mm builds); 2 mm builds as before.
+/// that fits (297.99 / 80 less the fit margin, 3.724 mm, which builds); 2 mm builds as before.
 fn sphere_with_a_cylindrical_cut() -> Session {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XZ", "flip": true}));
@@ -5364,6 +5364,13 @@ fn a_round_whose_contact_line_misses_the_seam_it_joins_across_names_the_radius_t
         .unwrap_or_else(|| panic!("no radius named: {e}"));
     let bound = 297.99 / 80.0;
     assert!(named < bound && bound - named < 0.02, "named {named}, bound {bound}: {e}");
+    // The size named builds: its contact line crosses the seam just inside the bound.
+    let mut s = sphere_with_a_cylindrical_cut();
+    if let Err(e) = s.execute("solid.fillet", &json!({"edges": loop_edges, "radius": named})) {
+        panic!("the named radius {named} does not build: {e}");
+    }
+    let v = volume(&mut s);
+    assert!(v > 0.0 && v < 36554.03, "{v}");
 }
 
 #[test]
