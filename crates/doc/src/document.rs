@@ -1237,6 +1237,10 @@ pub enum FeatureKind {
         #[walk(picks_faces)]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tool: Option<FaceAt>,
+        /// Use only the tool face's infinite plane, preserving the plane split's side order
+        /// and section names. Otherwise use the face's extended surface and its sheet.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        tool_plane: bool,
         /// A straight line of this sketch as the tool (#1552): the plane through it along the
         /// sketch's normal, which follows the sketch.
         #[serde(default, skip_serializing_if = "Option::is_none")]
