@@ -28,8 +28,8 @@
 //! Deviations:
 //! - **WR-305 (#1057).** `CurveOnClassify` runs the fork's `ClassifyEdgeInterval` on each
 //!   interval before `ClassifyFaceInterval` (`CurveClassification::classify_edge_interval`):
-//!   for a straight interval along a straight edge always, certified by its ends; for
-//!   curves only with `Kernel::fixes.classify_edge_interval` (a midpoint sample).
+//!   a straight interval along a straight edge is certified by its ends, a curved one on
+//!   control points over the whole piece (the fork reads its midpoint only).
 //! - **Classification B-rep (temporary).** [`curve_on_classify_mut`] runs on the face's own
 //!   B-rep through [`CurveOnClassifyBrep`] and makes upstream's lazy edits (UV trim curves,
 //!   gap caches, the trimmed cache's tolerance growth) on it in place, in upstream order.

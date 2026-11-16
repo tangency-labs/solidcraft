@@ -159,7 +159,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.box_face_failures_propagate = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
-    k.fixes.classify_edge_interval = true;
     k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.curve_loop_normal_from_area = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;

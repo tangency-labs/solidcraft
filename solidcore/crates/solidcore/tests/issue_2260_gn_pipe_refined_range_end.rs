@@ -51,7 +51,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "boolean_vertex_by_best_crossing",
     "box_face_failures_propagate",
     "bspline_trim_preserves_uv_spans",
-    "classify_edge_interval",
     "cone_create_canonical_preserves_inside_out_and_checks_height",
     "corner_patch_face_side_twist",
     "curve_contacts_at_curve_ends",
