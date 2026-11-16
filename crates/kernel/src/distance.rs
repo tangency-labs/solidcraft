@@ -21,7 +21,7 @@ use solidcraft_geom::{Aabb3, Mesh};
 
 use crate::body::Body;
 use crate::surface_kind::{FaceSurface, surface_of};
-use crate::{Result, guard};
+use crate::{KernelError, Result, guard};
 
 /// The minimum distance between two bodies and the points where it is reached.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -246,4 +246,64 @@ pub fn body_distance(a: &DistanceShape, b: &DistanceShape, limit: f64) -> Result
         Some(e) if e.distance <= m.distance + chords && e.distance >= m.distance - chords => e,
         _ => mesh,
     }))
+}
+
+/// Faces or edges of a body, by their index in the body's face or edge order: what one item of a
+/// measurement is on the body's exact B-rep ([`edges_closest`], [`point_closest`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Members<'a> {
+    Faces(&'a [usize]),
+    Edges(&'a [usize]),
+}
+
+/// The closest points of edges `edges` of `a` (over each edge's own interval) and the faces (as
+/// they are trimmed) or edges `to` of `b`, on the exact curves and surfaces: the kernel's
+/// minimum-distance solve of each edge's curve against `to`, never a tessellation. Between two
+/// arcs that is the curve/curve minimum over both arcs, so a witness point lies on each arc, at
+/// one of its ends where the curves come nearest past it. `None` when either body is a mesh body,
+/// whose triangles are its geometry.
+///
+/// # Errors
+///
+/// [`KernelError::Failed`] when the kernel finds no closest points or refuses the solve.
+pub fn edges_closest(a: &Body, edges: &[usize], b: &Body, to: Members) -> Result<Option<BodyDistance>> {
+    let (Some((ops_a, order_a)), Some((ops_b, order_b))) = (a.ops_body(), b.ops_body()) else { return Ok(None) };
+    let (faces, to_edges) = members(to);
+    let mut best: Option<BodyDistance> = None;
+    for &edge in edges {
+        let curve = ops_a.edge_curve(order_a, edge).map_err(|e| failed(&e))?;
+        let c = ops_b.closest_to_curve(order_b, faces, to_edges, &curve).map_err(|e| failed(&e))?;
+        let c = c.ok_or_else(|| KernelError::Failed("measure: the kernel found no closest points".into()))?;
+        let found = BodyDistance { distance: c.distance, from: Vec3::from(c.from), to: Vec3::from(c.to), exact: true };
+        if best.is_none_or(|bd| found.distance < bd.distance) {
+            best = Some(found);
+        }
+    }
+    Ok(best)
+}
+
+/// The closest points of `p` and the faces or edges `to` of `b`, as [`edges_closest`] measures
+/// them; `from` is `p`. `None` for a mesh body.
+///
+/// # Errors
+///
+/// [`KernelError::Failed`] when the kernel finds no closest point or refuses the solve.
+pub fn point_closest(p: Vec3, b: &Body, to: Members) -> Result<Option<BodyDistance>> {
+    let Some((ops_b, order_b)) = b.ops_body() else { return Ok(None) };
+    let (faces, edges) = members(to);
+    let c = ops_b.closest_to_point(order_b, faces, edges, [p.x, p.y, p.z]).map_err(|e| failed(&e))?;
+    let c = c.ok_or_else(|| KernelError::Failed("measure: the kernel found no closest point".into()))?;
+    Ok(Some(BodyDistance { distance: c.distance, from: Vec3::from(c.from), to: Vec3::from(c.to), exact: true }))
+}
+
+/// The face and edge lists of `to`.
+fn members<'a>(to: Members<'a>) -> (&'a [usize], &'a [usize]) {
+    match to {
+        Members::Faces(faces) => (faces, &[]),
+        Members::Edges(edges) => (&[], edges),
+    }
+}
+
+fn failed(e: &solidcore_ops::Error) -> KernelError {
+    KernelError::Failed(format!("measure: {e}"))
 }
