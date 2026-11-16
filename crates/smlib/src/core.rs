@@ -88,8 +88,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_analytic_mate_edges = true;
     f.nurb_cylinder_inside_out_frame = true;
     f.local_operation_refuses_loose_tangent_edges = true;
-    f.torus_major_radius_from_origin = true;
-    f.torus_iso_circle_axis_from_midpoint = true;
     f.internal_pole_row_through_knot = true;
     f.extrusion_origin_scaled_zero = true;
     f.transform_scales_each_tolerance = true;
@@ -104,7 +102,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ellipse_trim_seam_lines_span_cone_height = true;
     f.degenerate_proto_edge_in_one_vertex = true;
     f.new_edge_vertex_tolerance_covers_gap = true;
-    f.torus_signed_gen_curve_interval = true;
     f.point_solve_keeps_triangle_guess = true;
     f.imprint_extends_edge_to_proto_vertex = true;
     f.fillet_point_step_per_point = true;
@@ -144,7 +141,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     // The fork's commits in `SMLIB_REV` 2fc375f, ported to solidcore since.
     f.offset_extension_as_itself = true;
     f.fillet_mitre_concave_face_corners = true;
-    f.fillet_mitre_gap_patch = true;
     f.good_drop_result_distances_in_order = true;
     f.face_tight_box_searches_trim = true;
     f.ssi_low_angle_start_on_probation = true;
@@ -158,7 +154,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ssi_proto_topology_statuses_pass_on = true;
     f.analytic_inversion_answers_apart = true;
     f.fillet_statuses_pass_on = true;
-    f.fillet_corner_per_vertex_fan = true;
     f.fillet_rail_trim_at_near_knot = true;
     f.offset_keep_cavity_regions = true;
     f.ellipse_step_interval_checks = true;
