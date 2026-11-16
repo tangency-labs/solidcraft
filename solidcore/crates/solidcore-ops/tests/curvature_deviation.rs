@@ -12,7 +12,7 @@
 
 use solidcore_ops::continuity::principal_curvatures;
 use solidcore_ops::curve::{curve_deviation, curve_surface_deviation};
-use solidcore_ops::surface::ruled;
+use solidcore_ops::surface::{reverse_sheet, ruled};
 use solidcore_ops::{make_cylinder, make_sphere, Error};
 use solidcore_record::brep::Curve;
 
@@ -39,6 +39,24 @@ fn a_sphere_reads_its_inverse_radius_twice() {
         (p.k1 - 0.25).abs() < 1e-9 && (p.k2 - 0.25).abs() < 1e-9,
         "{p:?}"
     );
+    assert!((p.gaussian - 1.0 / 16.0).abs() < 1e-9, "{p:?}");
+    assert!((p.mean - 0.25).abs() < 1e-9, "{p:?}");
+}
+
+#[test]
+fn a_sphere_has_no_curvature_value_at_its_poles() {
+    let (sphere, _) = make_sphere([0.0; 3], 4.0).unwrap().to_record().unwrap();
+    let got = principal_curvatures(
+        &sphere,
+        &[
+            [0.0, 0.0, 4.0],
+            [0.0, 0.0, -4.0],
+            [0.0, 0.0, 6.0],
+            [0.0, 0.0, -6.0],
+        ],
+    )
+    .unwrap();
+    assert_eq!(got, vec![None; 4]);
 }
 
 #[test]
@@ -51,6 +69,8 @@ fn a_cylinder_reads_its_inverse_radius_round_and_nothing_along() {
     let p = got[0].unwrap();
     assert!((p.k1 - 1.0 / 3.0).abs() < 1e-9, "{p:?}");
     assert!(p.k2.abs() < 1e-9, "{p:?}");
+    assert!(p.gaussian.abs() < 1e-9, "{p:?}");
+    assert!((p.mean - 1.0 / 6.0).abs() < 1e-9, "{p:?}");
 }
 
 /// The saddle z = x y (the ruled sheet between two crossed lines) bends up one way and down the
@@ -70,10 +90,46 @@ fn a_saddle_reads_one_curvature_up_and_one_down() {
         (p.k1 - 1.0).abs() < 1e-9 && (p.k2 + 1.0).abs() < 1e-9,
         "{p:?}"
     );
+    assert!((p.gaussian + 1.0).abs() < 1e-9, "{p:?}");
+    assert!(p.mean.abs() < 1e-9, "{p:?}");
+
+    // At x = y = 1/4, K = -64/81 and |H| = sqrt(2)/27; reversal changes only H's sign.
+    let points = [[0.25, 0.25, 0.0625]];
+    let before = principal_curvatures(&saddle, &points).unwrap()[0].unwrap();
+    assert!((before.gaussian + 64.0 / 81.0).abs() < 1e-9, "{before:?}");
+    assert!(
+        (before.mean.abs() - std::f64::consts::SQRT_2 / 27.0).abs() < 1e-9,
+        "{before:?}"
+    );
+    let (reversed, _) = reverse_sheet(&saddle).unwrap();
+    let after = principal_curvatures(&reversed, &points).unwrap()[0].unwrap();
+    assert!(
+        (after.gaussian - before.gaussian).abs() < 1e-9,
+        "{before:?} {after:?}"
+    );
+    assert!(
+        (after.mean + before.mean).abs() < 1e-9,
+        "{before:?} {after:?}"
+    );
+    assert!((after.k1 + before.k2).abs() < 1e-9, "{before:?} {after:?}");
+    assert!((after.k2 + before.k1).abs() < 1e-9, "{before:?} {after:?}");
     assert_eq!(
         principal_curvatures(&saddle, &[[f64::NAN, 0.0, 0.0]]).err(),
         Some(Error::Argument)
     );
+}
+
+#[test]
+fn a_plane_has_zero_curvature_instead_of_no_value() {
+    let plane = ruled(
+        &line([0.0, 0.0, 0.0], [10.0, 0.0, 0.0]),
+        &line([0.0, 10.0, 0.0], [10.0, 10.0, 0.0]),
+        false,
+    )
+    .unwrap();
+    let p = principal_curvatures(&plane, &[[5.0, 5.0, 1.0]]).unwrap()[0].unwrap();
+    assert!(p.k1.abs() < 1e-9 && p.k2.abs() < 1e-9, "{p:?}");
+    assert!(p.gaussian.abs() < 1e-9 && p.mean.abs() < 1e-9, "{p:?}");
 }
 
 #[test]

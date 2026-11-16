@@ -2476,7 +2476,9 @@ fn two_caps_leaving_one_line_along_its_direction_each_close_a_profile() {
 /// the circle, and the circle above the ring, must close.
 #[test]
 fn circle_touching_two_caps_corner_closes_the_regions_there() {
-    for (e, tilt) in [(0.0, 0.0), (8e-5, 0.0), (8e-5, 5.5e-6)] {
+    // `above`: the circle's area above the ring's top line, half its disc of radius 9 - e and
+    // the strip e high under its centre (precomputed).
+    for (e, tilt, above) in [(0.0, 0.0, 127.23450247038662), (8e-5, 0.0, 127.2336805209291), (8e-5, 5.5e-6, 127.2336805209291)] {
         let mut sk = Sketch::new();
         let p = |sk: &mut Sketch, x: f64, y: f64| sk.add_point(v(x, y), None).unwrap();
         let (bl, left, left_top) = (p(&mut sk, 0.0, -50.0), p(&mut sk, 0.0, 0.0), p(&mut sk, 6.0, 6.0));
@@ -2506,7 +2508,6 @@ fn circle_touching_two_caps_corner_closes_the_regions_there() {
             .map(|p| p.area)
             .collect();
         assert_eq!(halves.len(), 2, "e {e} tilt {tilt}: {:?}", all());
-        let above = r * r * (-e / r).acos() + e * (r * r - e * e).sqrt();
         assert!(halves.iter().any(|a| (a - above).abs() < 1e-3), "e {e} tilt {tilt}: {halves:?} vs {above}");
         // The ring less the circle, the circle's two halves, the regions left and right of it.
         assert_eq!(ps.len(), 5, "e {e} tilt {tilt}: {:?}", all());

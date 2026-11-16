@@ -289,7 +289,7 @@ fn wr533_tube_ends_union_measures_lie_in_their_closed_forms() {
     // meets the closed-form window. 5e-6 rather than 1e-7: this body's enclosure has a floor
     // of 2.84 (2.8e-6 of the volume; the strip cells along its trims that no cut narrows),
     // so 1e-7 is out of its reach; the closed-form window, 2.9e-7 wide, is the tighter one.
-    let golden = 1_032_433.151_040_827_5;
+    let golden = 1_032_433.136_484_584_2;
     let e = enclose_volume(&k, &mut r, 5e-6 * golden).unwrap();
     println!(
         "enclosure [{}, {}] width {} ({:?})",
@@ -332,15 +332,13 @@ fn labels(lines: &[String]) -> Vec<String> {
 }
 
 /// #1529's union (tangency-labs/solidcore#2424): the seat tube stops `gap` short of the
-/// top tube's start. The fixes are the default kernel's, or every one when `all`, with
-/// WR-575's `bspline_trim_keeps_rational_end_spans` set to `keeps`; returns the check's
-/// labels.
-fn join_with_gap(gap: f64, all: bool, keeps: bool) -> Vec<String> {
+/// top tube's start. The fixes are the default kernel's, or every one when `all`;
+/// returns the check's labels.
+fn join_with_gap(gap: f64, all: bool) -> Vec<String> {
     let mut k = Kernel::default();
     if all {
         k.fixes = UpstreamFixes::all();
     }
-    k.fixes.bspline_trim_keeps_rational_end_spans = keeps;
     let full = (150.0_f64 * 150.0 + 520.0 * 520.0).sqrt();
     let t = top(&mut k);
     let s = tube(
@@ -390,60 +388,64 @@ fn report(gaps: usize, ellipses: usize, seams: usize) -> Vec<String> {
     v
 }
 
-/// Joins #1529's tubes at `gap` with every fix on when `all`, with WR-575's flag off and
-/// on: the flag-off report must be `expected_off`, the flag-on one may report no test the
-/// flag-off one doesn't, and at 1e-5 it must drop the circle's `SmEllipse` #1/#2 (WR-575's
-/// own case). Returns what went wrong.
-fn flag_row(gap: f64, all: bool, expected_off: &[String]) -> Vec<String> {
+/// Joins #1529's tubes at `gap` with every fix on when `all`. Every test the check
+/// reports must also be in `off`, upstream's pinned report (WR-575's span removal,
+/// measured with the retired flag off), and at 1e-5 the circle's `SmEllipse` #1/#2 must
+/// be gone (WR-575's own case). The report must also be exactly `expected` (pinned from
+/// the run that retired the flag). Returns what went wrong.
+fn flag_row(gap: f64, all: bool, off: &[String], expected: &[String]) -> Vec<String> {
     let mut failures = Vec::new();
-    let off = join_with_gap(gap, all, false);
-    let on = join_with_gap(gap, all, true);
-    println!("gap {gap} all {all}: off {off:?}, on {on:?}");
-    if off != expected_off {
-        failures.push(format!("gap {gap} all {all}: flag off {off:?}"));
-    }
-    if !is_sub_multiset(&on, &off) {
+    let now = join_with_gap(gap, all);
+    println!("gap {gap} all {all}: upstream {off:?}, now {now:?}");
+    if now != expected {
         failures.push(format!(
-            "gap {gap} all {all}: flag on {on:?} adds to {off:?}"
+            "gap {gap} all {all}: now {now:?}, expected {expected:?}"
         ));
     }
-    if gap == 1e-5 && on.iter().any(|x| x.starts_with("SmEllipse")) {
+    if !is_sub_multiset(&now, off) {
         failures.push(format!(
-            "gap {gap} all {all}: flag on {on:?} keeps the ellipse"
+            "gap {gap} all {all}: now {now:?} adds to upstream's {off:?}"
+        ));
+    }
+    if gap == 1e-5 && now.iter().any(|x| x.starts_with("SmEllipse")) {
+        failures.push(format!(
+            "gap {gap} all {all}: now {now:?} keeps the ellipse"
         ));
     }
     failures
 }
 
-/// tangency-labs/solidcore#2424: WR-575's flag keeps a conic's short end span, and where
-/// that span is a pole (#2090) the trim ends at the interior knot. When the edge is split
+/// tangency-labs/solidcore#2424: WR-575 keeps a conic's short end span, and where that
+/// span is a pole (#2090) the trim ends at the interior knot. When the edge is split
 /// there, both pieces must end at the same parameter, and the edge's UV trims with them.
-/// Expected: at every gap the flag-on check reports no test the flag-off one doesn't (no
-/// `SmEdgeuse` #25/#26), and at 1e-5 it still drops the circle's `SmEllipse` #1/#2. The
-/// flag-off reports are pinned as controls. Every fix on at 1e-6 is
+/// Expected: at every gap the check reports no test upstream's doesn't (no `SmEdgeuse`
+/// #25/#26), and at 1e-5 it still drops the circle's `SmEllipse` #1/#2. Upstream's
+/// reports (measured with the retired flag off) are pinned. Every fix on at 1e-6 is
 /// [`wr575_every_fix_at_1e_6_adds_no_check_failure`].
 #[test]
 fn wr575_tube_ends_join_adds_no_check_failure_at_any_gap() {
-    // (gap, every fix on, the flag-off report). At 1e-5 the flag-off controls changed with
+    // (gap, every fix on, upstream's report). At 1e-5 upstream's reports changed with
     // WR-751 (#2621), `MergeIntoObject` splitting the two end circles where they pass
     // nearest their points (3.1e-6 -> 2.3e-6 and 2.8e-6 -> 2.2e-6 off): one gap pair
     // (7.77e-6 against 7.5e-6) goes, and each split now falls a few micrometres from the
     // circle's half-turn knot, so both pieces' short end spans fail `SmEllipse` #1/#2
-    // (1.8e-6 and 1.2e-6; one piece, 1.5e-6, before): WR-575's defect, which its flag
-    // clears, as the flag-on rows show.
+    // (1.8e-6 and 1.2e-6; one piece, 1.5e-6, before): WR-575's defect, which its fix
+    // clears.
     // Face test 36 is gone from every row since #13295: it named the joined tube's seam
     // edge ending at a vertex a few micrometres across the seam, inside the vertex's own
     // tolerance, with no edge beside the seam there: a corner, not a sliver.
+    // (gap, every fix on, upstream's report, the report now: only the two gap pairs of
+    // the default kernel at 1e-5 stay, which WR-575 does not address)
     let rows = [
-        (1e-5, false, report(2, 2, 0)),
-        (1e-6, false, report(0, 1, 0)),
-        (1e-7, false, report(0, 0, 0)),
-        (1e-5, true, report(0, 2, 0)),
-        (1e-7, true, report(0, 0, 0)),
+        (1e-5, false, report(2, 2, 0), report(2, 0, 0)),
+        (1e-6, false, report(0, 1, 0), report(0, 0, 0)),
+        (1e-7, false, report(0, 0, 0), report(0, 0, 0)),
+        (1e-5, true, report(0, 2, 0), report(0, 0, 0)),
+        (1e-7, true, report(0, 0, 0), report(0, 0, 0)),
     ];
     let failures: Vec<String> = rows
         .iter()
-        .flat_map(|(gap, all, off)| flag_row(*gap, *all, off))
+        .flat_map(|(gap, all, off, now)| flag_row(*gap, *all, off, now))
         .collect();
     assert!(failures.is_empty(), "{failures:#?}");
 }
@@ -456,7 +458,7 @@ fn wr575_tube_ends_join_adds_no_check_failure_at_any_gap() {
 #[test]
 fn wr575_every_fix_at_1e_6_adds_no_check_failure() {
     // (face test 36 gone since #13295, as in the rows above)
-    let failures = flag_row(1e-6, true, &report(0, 1, 0));
+    let failures = flag_row(1e-6, true, &report(0, 1, 0), &report(0, 0, 0));
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
