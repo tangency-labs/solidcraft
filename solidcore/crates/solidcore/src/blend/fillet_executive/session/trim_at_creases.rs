@@ -243,9 +243,10 @@ fn replace_edge_curve(
         drop_on(k, curve, &natural, from)?,
         drop_on(k, curve, &natural, to)?,
     ) else {
-        return Err(SolidError::blend_failed(
+        // an end that does not drop onto the curve it was found on
+        return Err(SolidError::blend(
             OP,
-            "a crease edge's end does not drop onto it",
+            crate::error::blend::BlendFailure::StageFailed,
         ));
     };
     let mut piece = curve.copy(k)?;
