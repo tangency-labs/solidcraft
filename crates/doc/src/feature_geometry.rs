@@ -88,6 +88,7 @@ impl FeatureKind {
             FeatureKind::Hole { .. } => &["position", "to"],
             FeatureKind::Boss { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. } => &["position"],
             FeatureKind::Thread { .. } => &["face", "up_to"],
+            FeatureKind::ShaftSpline { .. } => &["shaft", "shaft_start", "bore", "bore_start"],
             FeatureKind::SheetConvert { .. } | FeatureKind::Lip { .. } | FeatureKind::SurfaceUntrim { .. } | FeatureKind::SurfaceRuled { .. } => {
                 &["face"]
             }
@@ -120,6 +121,15 @@ impl FeatureKind {
             FeatureKind::SurfaceUntrim { face, .. } | FeatureKind::Split { tool: Some(face), .. } => Some(face.body.as_ref()),
             _ => None,
         }
+    }
+
+    /// Whether face point `slot` of a Shaft Spline, in the order the geometry walk gives its points, is a face
+    /// the teeth start from (`shaft_start`, `bore_start`). Such a face only says which end of the round face the
+    /// teeth start at, and the point saved for it says so as well.
+    pub fn spline_start_slot(&self, slot: usize) -> bool {
+        let FeatureKind::ShaftSpline { shaft, shaft_start, bore, bore_start, .. } = self else { return false };
+        let points = [(shaft.is_some(), false), (shaft_start.is_some(), true), (bore.is_some(), false), (bore_start.is_some(), true)];
+        points.into_iter().filter(|(given, _)| *given).nth(slot).is_some_and(|(_, start)| start)
     }
 
     /// The recorded body for a Thread target face slot; its optional Up To face has no target body.

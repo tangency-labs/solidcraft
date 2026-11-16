@@ -87,6 +87,7 @@ pub mod render_resources;
 pub mod render_settings;
 pub mod render_surface;
 pub mod render_texture_resources;
+pub mod shaft_spline;
 pub mod sheet;
 pub mod sketch_equation;
 pub mod text_params;
@@ -104,9 +105,9 @@ pub use eval::{
     EdgeRef, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PlacedBodies, RevolveExtent, SavedModel, SolvedSketch, ThreadInfo,
     blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names, face_point_state, hole_direction_at,
     hole_on_surface, hole_start, import_body_names, join_pieces_added, map_wire, metric_thread_sizes, object_height, parse_metric_thread,
-    pattern_matrices, revolve_extent, revolve_extent_for_handle, revolve_extent_with_convention, select_profiles, sketch_hole_direction,
-    sketch_line_plane, state_in_frame, state_in_frame_at, suggested_thread, suggested_thread_in, tangent_face_chain, through_all_distance,
-    with_placed_copies, world_state, world_state_reusing,
+    pattern_matrices, revolve_extent, revolve_extent_for_handle, revolve_extent_with_convention, select_profiles, shaft_radius_at,
+    sketch_hole_direction, sketch_line_plane, spline_start_at, state_in_frame, state_in_frame_at, suggested_thread, suggested_thread_in,
+    tangent_face_chain, through_all_distance, with_placed_copies, world_state, world_state_reusing,
 };
 pub use eval::{EvalCache, KeptResults};
 pub use expr::Expr;
@@ -114,6 +115,7 @@ pub use feature_geometry::restored_thread_pick;
 pub use names::{BodyName, FeatureId, FeatureName, SketchId, copy_name};
 pub use params::{ParamRow, ParamUser, cycles, name_words_match};
 pub use points::{Dir, FacePick, Position, plain};
+pub use shaft_spline::{SplineCorner, SplineForm, SplineMade, SplineMake, SplineMaster, SplineNumbers, SplinePlan, SplineRefusal};
 pub use solidcraft_kernel as kernel;
 pub use solidcraft_sketch as sketch;
 

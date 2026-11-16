@@ -803,6 +803,9 @@ impl AlignFrame {
 }
 
 /// Feature definitions.
+// A Shaft Spline keeps every number of its teeth as an expression (28 of them), so it is larger than the
+// other variants. Boxing them would cost an allocation each, and a design holds one value per feature.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FeatureKind {
@@ -1526,6 +1529,130 @@ pub enum FeatureKind {
         /// Target body names (empty = the feature's participants, else all bodies of its component).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<BodyName>,
+    },
+    /// A spline on a shaft, in a bore, or both (#17693): tooth spaces cut into the picked round faces, or, with
+    /// no face picked, a new splined shaft and hub at the origin. The teeth come from the kernel's tooth outlines
+    /// (`solidcore_ops::shaft_spline`), so every number here is one of their inputs and stays a parameter.
+    ShaftSpline {
+        /// A point on the outside of the shaft the tooth spaces are cut into.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shaft: Option<FacePick>,
+        /// A point on the face the shaft's teeth start from (its end, a shoulder, a chamfer): they start at the
+        /// end of the shaft's round face nearest it and run into the face. None: the end nearest `shaft`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shaft_start: Option<FacePick>,
+        /// A point on the bore the hub's tooth spaces are cut into.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bore: Option<FacePick>,
+        /// A point on the face the hub's teeth start from, as `shaft_start` is for the shaft. None: the end
+        /// of the bore nearest `bore`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bore_start: Option<FacePick>,
+        /// The kind of teeth.
+        form: crate::shaft_spline::SplineForm,
+        /// With no face picked: which new part is made.
+        #[serde(default)]
+        make: crate::shaft_spline::SplineMake,
+        #[walk(unitless = "Teeth")]
+        teeth: Expr,
+        #[walk(length = "Length")]
+        length: Expr,
+        // involute teeth
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Module")]
+        module: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Pressure angle")]
+        pressure_angle: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Addendum")]
+        addendum: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Dedendum")]
+        dedendum: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Root fillet")]
+        root_fillet: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Profile shift")]
+        profile_shift: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Thinning")]
+        thinning: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Hub addendum")]
+        hub_addendum: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Tip clearance")]
+        tip_clearance: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Form clearance")]
+        form_clearance: Option<Expr>,
+        // straight-sided teeth and serrations
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Major diameter")]
+        major_diameter: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Minor diameter")]
+        minor_diameter: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Tooth width")]
+        tooth_width: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Flank angle")]
+        flank_angle: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Root round")]
+        root_round: Option<Expr>,
+        #[serde(default)]
+        tip_corner: crate::shaft_spline::SplineCorner,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Tip size")]
+        tip_size: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Major clearance")]
+        major_clearance: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Minor clearance")]
+        minor_clearance: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Hub tip round")]
+        hub_tip_round: Option<Expr>,
+        // every kind
+        #[walk(length = "Side clearance")]
+        side_clearance: Expr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Hub root round")]
+        hub_root_round: Option<Expr>,
+        /// The outside of a new hub's body (only with no bore picked).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Hub diameter")]
+        hub_diameter: Option<Expr>,
+        #[serde(default)]
+        master: crate::shaft_spline::SplineMaster,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Master angle")]
+        master_angle: Option<Expr>,
+        /// The cutter's diameter: each tooth space cut into a picked shaft ends in the cutter's curve. Without it
+        /// the spaces end square.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Cutter diameter")]
+        cutter_diameter: Option<Expr>,
+        /// The chamfer on the ends of the shaft's teeth: how far it runs down the shaft, and as far in from the
+        /// major diameter (45 degrees). On a picked shaft it goes on the end the teeth start from, and on the far
+        /// end where the teeth run the whole face; on a new shaft, on both ends. Cut by the spline itself, so it
+        /// is made again at the shaft's size and tooth count whenever they change. Without it the teeth end
+        /// square.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "End chamfer")]
+        end_chamfer: Option<Expr>,
+        /// The chamfer where the teeth run out of the hub's bore: how far it runs into the bore, and as far out
+        /// from the tops of the hub's teeth (45 degrees). In a picked bore it goes at the entry the teeth start
+        /// from, and at the far end where the teeth run the whole bore; in a new hub, at both ends. Without it
+        /// the hub's teeth end square.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Entry chamfer")]
+        entry_chamfer: Option<Expr>,
     },
     /// A helical coil: a circular or square section swept `turns` times about `axis`, rising
     /// `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or outside).
@@ -3011,6 +3138,7 @@ impl FeatureKind {
             FeatureKind::SheetConvert { .. } => "ConvertToSheetMetalFeature",
             FeatureKind::Coil { .. } => "CoilFeature",
             FeatureKind::CellGrid { .. } => "CellGridFeature",
+            FeatureKind::ShaftSpline { .. } => "ShaftSplineFeature",
             FeatureKind::Rib { web: false, .. } => "RibFeature",
             FeatureKind::Rib { .. } => "WebFeature",
             FeatureKind::ReplaceFace { .. } => "ReplaceFaceFeature",
@@ -3082,6 +3210,7 @@ impl FeatureKind {
             FeatureKind::Align { .. } => "align",
             FeatureKind::Coil { .. } => "coil",
             FeatureKind::CellGrid { .. } => "cell_grid",
+            FeatureKind::ShaftSpline { .. } => "shaft_spline",
             FeatureKind::SheetBase { .. } => "sheet_base",
             FeatureKind::SheetContour { .. } => "sheet_contour",
             FeatureKind::SheetFlange { .. } => "sheet_flange",
@@ -3179,6 +3308,7 @@ impl FeatureKind {
             "ConvertToSheetMetalFeature" => "sheet_convert",
             "CoilFeature" => "coil",
             "CellGridFeature" => "cell_grid",
+            "ShaftSplineFeature" => "shaft_spline",
             "RibFeature" | "WebFeature" => "rib",
             "ReplaceFaceFeature" => "replace_face",
             "AlignFeature" => "align",
@@ -3266,6 +3396,7 @@ impl FeatureKind {
             FeatureKind::SheetConvert { .. } => "ConvertToSheetMetal",
             FeatureKind::Coil { .. } => "Coil",
             FeatureKind::CellGrid { .. } => "CellGrid",
+            FeatureKind::ShaftSpline { .. } => "Shaft Spline",
             FeatureKind::Rib { web: false, .. } => "Rib",
             FeatureKind::Rib { .. } => "Web",
             FeatureKind::ReplaceFace { .. } => "ReplaceFace",

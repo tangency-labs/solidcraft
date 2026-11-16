@@ -75,6 +75,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.scale" => &[("origin", Make), ("bodies", Body)],
         "solid.offset_face" | "solid.shell" => &[("faces", Picks), ("body", Body)],
         "solid.thread" => &[("face", Pick), ("faces", Picks), ("from", Pick), ("up_to", Plane)],
+        "shaft_spline.insert" => &[("shaft_face", Pick), ("shaft_start", Pick), ("bore_face", Pick), ("bore_start", Pick)],
         "solid.emboss" => &[("face", Make)],
         "solid.draft" => &[("faces", Picks), ("neutral", Plane), ("pull", Dir), ("body", Body)],
         "solid.press_pull" => &[("face", Pick), ("edges", Picks), ("body", Body), ("face_body", Body)],

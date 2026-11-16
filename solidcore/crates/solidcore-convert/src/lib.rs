@@ -31,7 +31,7 @@
 //! | [`BlendDefinition`](solidcore_record::brep::blend::BlendDefinition) (a face's blend) | `FaceDefinition` | [`blend::blend`] | [`blend::record_blend`] |
 //!
 //! [`brep`] converts the record's B-rep to the kernel's body and back; [`cell_grid`] the cell
-//! grid's spec and plan.
+//! grid's spec and plan; [`shaft_spline`] a shaft spline's numbers, plan and outlines.
 
 #![forbid(unsafe_code)]
 #![deny(clippy::disallowed_methods)]
@@ -39,6 +39,7 @@
 pub mod blend;
 pub mod brep;
 pub mod cell_grid;
+pub mod shaft_spline;
 
 use solidcore::eval as k;
 use solidcore::prism::profile as kp;

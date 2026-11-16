@@ -9166,6 +9166,11 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
                     _ => *p = hit.pick_point(input, *p),
                 }
             }
+            // The face a Shaft Spline's teeth start from only says which end of the round face they start at:
+            // where it is gone (a chamfer picked as the start, then removed), the place saved for it still says.
+            None if f.kind.spline_start_slot(k) => {
+                notes.push(format!("the face the teeth start from, `{n}`, was not found again: they start at the end nearest where it was"))
+            }
             None => return Err(DocError::reselect(n.as_str())),
         }
     }
@@ -9563,6 +9568,9 @@ pub use model_cache::SavedModel;
 pub mod cell_grid;
 #[path = "eval_frame.rs"]
 pub(crate) mod frame_member;
+#[path = "eval_shaft_spline.rs"]
+mod shaft_spline;
+pub use shaft_spline::{shaft_radius_at, spline_start_at};
 #[path = "eval_surface.rs"]
 mod surface;
 #[path = "eval_thread.rs"]
@@ -10483,6 +10491,7 @@ fn eval_feature_kind(
             Ok(())
         }
         FeatureKind::Thread { .. } => thread::eval(doc, vals, f, st, warning),
+        FeatureKind::ShaftSpline { .. } => shaft_spline::eval(vals, f, st, warning),
         FeatureKind::Shell { faces, thickness, body, direction, tangent_chain } => {
             let t = val(vals, thickness, Kind::Length)?;
             // No face opened (a closed hollow body) picks no body: the one there is, or the named one.
@@ -11726,8 +11735,31 @@ fn extrude_normal(doc: &Document, st: &ModelState, kind: &FeatureKind, comp: u64
 /// A feature that names the body whose faces it picks ([`FeatureKind::face_body`]) names each
 /// point on that body first: another body with a face a hair from the pick (#16871) would
 /// otherwise take the name, and evaluation would move the pick onto that body's face.
+/// A Shaft Spline names each pick on the body whose round face of the pick's own kind lies there
+/// (the outside of a shaft, the inside of a bore): a hub that sits on its shaft with no play has
+/// its bore on the shaft's own surface, and the bore's pick would otherwise take the shaft's name.
 pub fn face_point_names(doc: &Document, st: &ModelState, kind: &FeatureKind, comp: u64) -> Result<Vec<String>> {
     let pts = kind.face_points();
+    if let FeatureKind::ShaftSpline { shaft, shaft_start, bore, bore_start, .. } = kind {
+        // In the order the geometry walk gives the points: each round face, then the face its teeth start from.
+        let mut names = Vec::with_capacity(pts.len());
+        let at = |st: &ModelState, p: &Vec3| crate::naming::face_names_at(st, std::slice::from_ref(p)).pop().unwrap_or_default();
+        for (pick, start, inside) in [(shaft, shaft_start, false), (bore, bore_start, true)] {
+            let scoped = pick
+                .as_ref()
+                .and_then(|pick| shaft_spline::seat_body(st, comp, pick.0, inside))
+                .map(|name| ModelState { bodies: st.bodies.iter().filter(|b| b.name == name).cloned().collect(), ..ModelState::default() });
+            if let Some(pick) = pick {
+                names.push(at(scoped.as_ref().unwrap_or(st), &pick.0));
+            }
+            // The start face is the part's own where it has one there; a face of another body may say the end too.
+            if let Some(start) = start {
+                let own = scoped.as_ref().map(|own| at(own, &start.0)).filter(|name| !name.is_empty());
+                names.push(own.unwrap_or_else(|| at(st, &start.0)));
+            }
+        }
+        return Ok(names);
+    }
     if thread_target_bodies(doc, st, kind)?.is_some() {
         let mut names = Vec::with_capacity(pts.len());
         for (slot, point) in pts.iter().enumerate() {

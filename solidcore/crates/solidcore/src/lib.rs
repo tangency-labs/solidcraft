@@ -62,6 +62,7 @@ pub mod profile;
 pub mod query;
 pub mod surface;
 pub mod sweep;
+pub mod teeth;
 
 pub use error::{EntityRef, Result, SolidError};
 pub use heal::face_props::Tri;

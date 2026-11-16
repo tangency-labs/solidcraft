@@ -1,0 +1,1868 @@
+//! Shaft Spline (#17693): the rebuild of a `shaft_spline` feature. Its numbers are worked out and handed to
+//! [`crate::shaft_spline::plan`], and the kernel's tooth outlines become bodies or cuts:
+//!
+//! - Nothing picked: a new splined shaft and/or hub at the origin along +Z, from z = 0 to the length, each one
+//!   extruded region (the shaft's outline; the hub a ring with the opening as its hole).
+//! - A shaft picked: its cylinder is found from the stored pick, and the end nearest the pick is the free end. A
+//!   spline whose major diameter is not the shaft's own makes the shaft follow it first: the whole round face is
+//!   built up or turned down to the major diameter, so more teeth of one size make a larger shaft. Then the tooth
+//!   spaces are cut from the free end for the length: with a cutter diameter each space is one tool that ends in
+//!   the curve the cutter leaves (the space's own section turned a quarter turn about the cutter's axis), else
+//!   one ring tool whose hole is the whole outline.
+//! - A bore picked: one plug whose outline is the hub's opening is cut from the bore's end nearest the pick.
+//! - The ends of a picked face: what the body has past each end is read off the exact body first ([`End`]). The
+//!   cuts run out through a chamfer or a round the part already has there, as a cutter runs out of the work, at
+//!   the far end too where the teeth run the whole face (no space then ends in the cutter's curve). A plain
+//!   chamfer the part had keeps its size where the spline resizes the part. The spline's own chamfers (the end of
+//!   a shaft's teeth, the entry of a bore) are cut on the round face before the spaces, so each is made again at
+//!   every size and tooth count, on each open end the teeth run out of.
+//!
+//! Angle 0 comes from the world axes: the world axis the cylinder's axis is closest to decides, and its reference
+//! direction (+X for Z, +Y for X, +Z for Y) is projected onto the section. Decisions about the model use the
+//! cylinder the kernel reads off the picked face and the exact bounds of the tools; the outlines are exact.
+
+use std::collections::HashSet;
+use std::f64::consts::{FRAC_PI_2, TAU};
+use std::sync::Arc;
+
+use solidcore_record::shaft_spline::{OutlinePiece as Piece, SpaceSection, ToothOutline as Outline, ToothRole as Role};
+use solidcore_record::{Loop2, MAX_BEZIER_CTRL, Seg2};
+
+use super::*;
+use crate::Expr;
+use crate::shaft_spline::{SplineMake, SplineMaster, SplineNumbers, SplinePlan, cutter_radius, same_size, tool_margin};
+
+/// The most tooth spaces one Shaft Spline ends in the cutter's curve. Each is a tool of its own that the kernel's
+/// boolean and its check meet, so the cap stays as low as a cell grid's.
+pub const MAX_ROUNDED_SPACES: usize = 250;
+
+/// The names of the new bodies.
+const SHAFT_NAME: &str = "Spline Shaft";
+const HUB_NAME: &str = "Spline Hub";
+
+/// Evaluate a Shaft Spline feature.
+pub(super) fn eval(vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
+    let FeatureKind::ShaftSpline {
+        shaft,
+        shaft_start,
+        bore,
+        bore_start,
+        form,
+        make,
+        teeth,
+        length,
+        module,
+        pressure_angle,
+        addendum,
+        dedendum,
+        root_fillet,
+        profile_shift,
+        thinning,
+        hub_addendum,
+        tip_clearance,
+        form_clearance,
+        major_diameter,
+        minor_diameter,
+        tooth_width,
+        flank_angle,
+        root_round,
+        tip_corner,
+        tip_size,
+        major_clearance,
+        minor_clearance,
+        hub_tip_round,
+        side_clearance,
+        hub_root_round,
+        hub_diameter,
+        master,
+        master_angle,
+        cutter_diameter,
+        end_chamfer,
+        entry_chamfer,
+    } = &f.kind
+    else {
+        return Err(DocError::Invalid("not a shaft spline".into()));
+    };
+    let opt = |e: &Option<Expr>, k: Kind| -> Result<Option<f64>> { e.as_deref().map(|e| val(vals, e, k)).transpose() };
+    // Angles go to the kernel's plan in degrees.
+    let degrees = |e: &Option<Expr>| -> Result<Option<f64>> { Ok(opt(e, Kind::Angle)?.map(f64::to_degrees)) };
+    let z = val(vals, teeth, Kind::Unitless)?;
+    if !(z.is_finite() && z.fract() == 0.0 && z >= 0.0 && z <= f64::from(u32::MAX)) {
+        return Err(DocError::Invalid("`teeth` must be a whole number".into()));
+    }
+    let picked = shaft.is_some() || bore.is_some();
+    // Both faces are found on the model as it was before the feature.
+    let shaft_seat = shaft.as_ref().map(|p| seat_at(st, f.component, p.0, shaft_start.as_ref().map(|s| s.0), false)).transpose()?;
+    let bore_seat = bore.as_ref().map(|p| seat_at(st, f.component, p.0, bore_start.as_ref().map(|s| s.0), true)).transpose()?;
+    let mut n = SplineNumbers {
+        form: *form,
+        // With a face picked, what is cut follows the picks; no new part is made.
+        make: if picked { SplineMake::Shaft } else { *make },
+        teeth: z as u32, // whole and within u32, checked above
+        length: val(vals, length, Kind::Length)?,
+        module: opt(module, Kind::Length)?,
+        pressure_angle: degrees(pressure_angle)?,
+        addendum: opt(addendum, Kind::Unitless)?,
+        dedendum: opt(dedendum, Kind::Unitless)?,
+        root_fillet: opt(root_fillet, Kind::Unitless)?,
+        profile_shift: opt(profile_shift, Kind::Unitless)?,
+        thinning: opt(thinning, Kind::Length)?,
+        hub_addendum: opt(hub_addendum, Kind::Unitless)?,
+        tip_clearance: opt(tip_clearance, Kind::Length)?,
+        form_clearance: opt(form_clearance, Kind::Length)?,
+        major_diameter: opt(major_diameter, Kind::Length)?,
+        minor_diameter: opt(minor_diameter, Kind::Length)?,
+        tooth_width: opt(tooth_width, Kind::Length)?,
+        flank_angle: degrees(flank_angle)?,
+        root_round: opt(root_round, Kind::Length)?,
+        tip_corner: *tip_corner,
+        tip_size: opt(tip_size, Kind::Length)?,
+        major_clearance: opt(major_clearance, Kind::Length)?,
+        minor_clearance: opt(minor_clearance, Kind::Length)?,
+        hub_tip_round: opt(hub_tip_round, Kind::Length)?,
+        side_clearance: Some(val(vals, side_clearance, Kind::Length)?),
+        hub_root_round: opt(hub_root_round, Kind::Length)?,
+        // The outside of a new hub: a picked bore has its own.
+        hub_diameter: if picked { None } else { opt(hub_diameter, Kind::Length)? },
+        master: *master,
+        master_angle: degrees(master_angle)?,
+        // The cutter ends the tooth spaces of a picked shaft; nothing else is cut with it.
+        cutter_diameter: if shaft.is_some() { opt(cutter_diameter, Kind::Length)? } else { None },
+        // A chamfer belongs to the part it is cut on: a shaft's teeth (a picked shaft's, a new shaft's), a hub's.
+        end_chamfer: if shaft.is_some() || (!picked && *make != SplineMake::Hub) { opt(end_chamfer, Kind::Length)? } else { None },
+        entry_chamfer: if bore.is_some() || (!picked && *make != SplineMake::Shaft) { opt(entry_chamfer, Kind::Length)? } else { None },
+        with_hub: if picked { bore.is_some() } else { *make != SplineMake::Shaft },
+        with_shaft: if picked { shaft.is_some() } else { *make != SplineMake::Hub },
+    };
+    // A size left out with a shaft picked is the shaft's own, so the shaft keeps its diameter; so is a size
+    // given that is the shaft's own but for its last places. Any other size given wins, and the shaft follows it.
+    if let Some(seat) = &shaft_seat {
+        crate::shaft_spline::fit_to_shaft_within(&mut n, seat.radius);
+    }
+    let plan = crate::shaft_spline::plan(&n).map_err(|r| DocError::Invalid(r.words))?;
+    if !picked {
+        return new_parts(f, st, &n, &plan);
+    }
+    if let Some(seat) = &shaft_seat {
+        cut_shaft(st, &n, &plan, seat, warning)?;
+    }
+    if let Some(seat) = &bore_seat {
+        cut_bore(st, &n, &plan, seat, warning)?;
+    }
+    Ok(())
+}
+
+/// Whether `at` lies nearer along the axis to the round face's `start` end than to its `end` (a tie is the
+/// start's).
+fn nearer_start(cyl: &kernel::CylinderFace, at: Vec3) -> bool {
+    let along = (at - cyl.axis_point).dot(*cyl.axis);
+    (along - cyl.start).abs() <= (cyl.end - along).abs()
+}
+
+/// The start a Shaft Spline takes when none is given with the round face picked at `p` (a `bore`'s wall, else the
+/// outside of a shaft): a point in the plane of the end of the round face nearest the pick, on the side of the
+/// rim the part's end face lies (inside the rim of a shaft, outside the rim of a bore) and well clear of the rim,
+/// where the body has a face. On a plain end that is a point of the end face, so stored as the start it follows
+/// that face when the part changes. Where the body has no face in that plane (a shoulder stands there, a thin
+/// wall), the point on the axis: the end's place as it is now. None where no round face of the kind asked for
+/// lies.
+pub fn spline_start_at(st: &ModelState, p: Vec3, bore: bool) -> Option<Vec3> {
+    let off = |c: &kernel::CylinderFace| {
+        let k = *c.axis;
+        let d = p - c.axis_point;
+        ((d - k * d.dot(k)).len() - c.radius).abs()
+    };
+    let (body, cyl) = st
+        .bodies
+        .iter()
+        .filter_map(|b| kernel::cylinder_face_at(&b.body, p).map(|c| (b, c)))
+        .filter(|(_, c)| c.internal == bore)
+        .min_by(|a, b| off(&a.1).total_cmp(&off(&b.1)))?;
+    let k = *cyl.axis;
+    let end = cyl.axis_point + k * if nearer_start(&cyl, p) { cyl.start } else { cyl.end };
+    let (x, _) = angle_zero(k)?;
+    // Half, a quarter and a tenth of the radius off the rim: the first of these the body has a face at.
+    let beside = |share: f64| end + x * (cyl.radius * if bore { 1.0 + share } else { 1.0 - share });
+    let on_a_face = |at: &Vec3| body.body.nearest_face(*at).is_some_and(|(far, _)| far <= 1e-9 * (1.0 + cyl.radius));
+    let at = [0.5, 0.25, 0.1].into_iter().map(beside).find(on_a_face).unwrap_or(end);
+    (at.x.is_finite() && at.y.is_finite() && at.z.is_finite()).then_some(at)
+}
+
+/// The radius of the outside of the round shaft at `p` on the model `st`: what a Shaft Spline with its size left
+/// out takes as the spline's major radius. None where no shaft's round face lies.
+pub fn shaft_radius_at(st: &ModelState, p: Vec3) -> Option<f64> {
+    let off = |c: &kernel::CylinderFace| {
+        let k = *c.axis;
+        let d = p - c.axis_point;
+        ((d - k * d.dot(k)).len() - c.radius).abs()
+    };
+    st.bodies
+        .iter()
+        .filter_map(|b| kernel::cylinder_face_at(&b.body, p))
+        .filter(|c| !c.internal)
+        .min_by(|a, b| off(a).total_cmp(&off(b)))
+        .map(|c| c.radius)
+        .filter(|r| r.is_finite() && *r > 0.0)
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Outlines as profiles
+// ---------------------------------------------------------------------------------------------------------------
+
+/// A point of a tooth outline as a profile point.
+fn v2(p: [f64; 2]) -> Vec2 {
+    Vec2::new(p[0], p[1])
+}
+
+/// Why an outline cannot be made into a profile.
+fn not_a_profile(why: impl std::fmt::Display) -> DocError {
+    DocError::Invalid(format!("the spline's outline cannot be made into a profile: {why}"))
+}
+
+/// One Bezier piece, given by its control points, as a profile segment.
+fn bezier_seg(points: &[[f64; 2]]) -> Result<Seg2> {
+    Ok(match points {
+        [a, b] => Seg2::Line { a: v2(*a), b: v2(*b) },
+        [a, apex, b] => Seg2::Conic { a: v2(*a), apex: v2(*apex), b: v2(*b), w: 1.0 },
+        [p0, p1, p2, p3] => Seg2::Cubic { p0: v2(*p0), p1: v2(*p1), p2: v2(*p2), p3: v2(*p3) },
+        _ if (5..=MAX_BEZIER_CTRL).contains(&points.len()) => {
+            let mut p = [Vec2::ZERO; MAX_BEZIER_CTRL];
+            for (slot, q) in p.iter_mut().zip(points) {
+                *slot = v2(*q);
+            }
+            let n = u8::try_from(points.len() - 1).map_err(|_| not_a_profile("a curve of too high a degree"))?;
+            Seg2::Bezier { n, p }
+        }
+        _ => return Err(not_a_profile("a curve of too high a degree")),
+    })
+}
+
+/// The profile segments of a piece of an outline, with the points where two segments of one curve meet (so that
+/// a wall along a whole curve can be one face). A piece too short to draw gives none.
+fn piece_segs(piece: &Piece, out: &mut Vec<Seg2>, joints: &mut Vec<[f64; 2]>) -> Result<()> {
+    match piece {
+        Piece::Line { from, to, .. } => {
+            if (from[0] - to[0]).hypot(from[1] - to[1]) > 1e-12 * (1.0 + from[0].abs() + from[1].abs()) {
+                out.push(Seg2::Line { a: v2(*from), b: v2(*to) });
+            }
+        }
+        Piece::Arc { centre, radius, start, sweep, .. } => {
+            if *radius > 1e-9 && sweep.abs() > 1e-12 {
+                out.push(Seg2::Arc { center: v2(*centre), radius: *radius, start: *start, sweep: *sweep });
+            }
+        }
+        Piece::Spline { degree, knots, control, .. } => {
+            let pieces = crate::shaft_spline::bezier_pieces(*degree, knots, control).map_err(not_a_profile)?;
+            for (k, points) in pieces.iter().enumerate() {
+                if k > 0
+                    && let Some(&joint) = points.first()
+                {
+                    joints.push(joint);
+                }
+                out.push(bezier_seg(points)?);
+            }
+        }
+        Piece::Curve { .. } => return Err(not_a_profile("a curve of the outline was not fitted")),
+    }
+    Ok(())
+}
+
+/// A profile segment turned about the origin by the angle whose sine and cosine are `s` and `c`.
+fn turned_seg(seg: &Seg2, s: f64, c: f64) -> Seg2 {
+    let t = |p: Vec2| Vec2::new(p.x * c - p.y * s, p.x * s + p.y * c);
+    match *seg {
+        Seg2::Line { a, b } => Seg2::Line { a: t(a), b: t(b) },
+        Seg2::Arc { center, radius, start, sweep } => Seg2::Arc { center: t(center), radius, start: start + s.atan2(c), sweep },
+        Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic { p0: t(p0), p1: t(p1), p2: t(p2), p3: t(p3) },
+        Seg2::Conic { a, apex, b, w } => Seg2::Conic { a: t(a), apex: t(apex), b: t(b), w },
+        Seg2::Bezier { n, p } => Seg2::Bezier { n, p: p.map(t) },
+    }
+}
+
+/// The points where two segments of one curve of a profile meet, by their exact bits: a wall swept from a run of
+/// such segments is one face.
+#[derive(Default)]
+struct Joints(HashSet<(u64, u64)>);
+
+impl Joints {
+    fn add(&mut self, p: Vec2) {
+        self.0.insert((p.x.to_bits(), p.y.to_bits()));
+    }
+
+    /// Whether `t` carries on the curve `s` is a piece of: two free-form segments meeting at one of the points.
+    fn joins(&self, s: &Seg2, t: &Seg2) -> bool {
+        match (seg_end(s), seg_start(t)) {
+            (Some(a), Some(b)) => a == b && self.0.contains(&(b.x.to_bits(), b.y.to_bits())),
+            _ => false,
+        }
+    }
+}
+
+/// The first point of a free-form segment.
+fn seg_start(s: &Seg2) -> Option<Vec2> {
+    match *s {
+        Seg2::Cubic { p0, .. } => Some(p0),
+        Seg2::Conic { a, .. } => Some(a),
+        Seg2::Bezier { p, .. } => p.first().copied(),
+        Seg2::Line { .. } | Seg2::Arc { .. } => None,
+    }
+}
+
+/// The last point of a free-form segment.
+fn seg_end(s: &Seg2) -> Option<Vec2> {
+    match *s {
+        Seg2::Cubic { p3, .. } => Some(p3),
+        Seg2::Conic { b, .. } => Some(b),
+        Seg2::Bezier { n, p } => p.get(usize::from(n)).copied(),
+        Seg2::Line { .. } | Seg2::Arc { .. } => None,
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Names
+// ---------------------------------------------------------------------------------------------------------------
+//
+// Every face this feature makes is named by what it is, not by a running number, so that what is built on a
+// spline afterwards (a chamfer on a flank, a sketch on a root) finds its face again when the spline is edited:
+// `space<k>:flank:0`, `space<k>:root`, `space<k>:end:flank:0` (the rounded end), `tip<k>`, `side` (the shaft's
+// surface where the spline made it). `k` is the tooth's number counted round from angle 0: the space after tooth
+// `k` is space `k`. The names are read off the kernel's own record of which profile segment each face was swept
+// from; nothing is found by place.
+
+/// What a piece of an outline is called in the name of the face swept from it.
+fn role_word(role: Role) -> &'static str {
+    match role {
+        Role::Flank => "flank",
+        Role::Fillet => "fillet",
+        Role::Tip => "tip",
+        Role::Root => "root",
+    }
+}
+
+/// The names of the pieces of the floor of a tooth space, in the floor's order (from the corner of the tooth after
+/// the space down its side, along the bottom and up the side of the tooth before): what each is on the part, and,
+/// where there are several of a kind, which of them on the way. So `flank:0` is the side of the tooth after the
+/// space, `flank:1` that of the tooth before, and a space's one bottom is `root`.
+fn floor_names(floor: &[Role]) -> Vec<String> {
+    let several = |word: &str| floor.iter().filter(|r| role_word(**r) == word).count() > 1;
+    let mut met: Vec<(&'static str, usize)> = Vec::new();
+    floor
+        .iter()
+        .map(|role| {
+            let word = role_word(*role);
+            let nth = match met.iter_mut().find(|(w, _)| *w == word) {
+                Some((_, n)) => {
+                    *n += 1;
+                    *n - 1
+                }
+                None => {
+                    met.push((word, 1));
+                    0
+                }
+            };
+            if several(word) { format!("{word}:{nth}") } else { word.to_string() }
+        })
+        .collect()
+}
+
+/// The name of span `span` of a piece called `name`: the piece's own for its first span, `name.<span>` for the
+/// others. A piece swept as one face answers to all of them and is called by the first; a piece the kernel sweeps
+/// span by span (an arc in a cutter's section) has a name for each of its faces.
+fn span_name(name: &str, span: usize) -> String {
+    if span == 0 { name.to_string() } else { format!("{name}.{span}") }
+}
+
+/// A tool this feature built from a profile, its faces named as its building records them: a face swept from
+/// profile segments has the names `segment` gives them (a wall along a whole curve is swept from several spans, and
+/// is called by the first of their names), a cap the name `caps` gives its end (the start, then the end). A face
+/// with an origin that has no name is left without one: never a partial guess.
+fn built(body: Body, segment: &dyn Fn(usize) -> Option<String>, caps: [&str; 2]) -> Traced {
+    let roles = body.history().filter(|h| h.operands == 0).map(|h| {
+        h.faces
+            .iter()
+            .map(|face| {
+                let mut roles: Vec<String> = Vec::new();
+                for origin in &face.origins {
+                    let role = match *origin {
+                        kernel::history::FaceOrigin::Profile { segment: k } => segment(k),
+                        kernel::history::FaceOrigin::Cap { end } => caps.get(usize::from(end)).map(|cap| (*cap).to_string()),
+                        _ => None,
+                    };
+                    match role {
+                        Some(role) if !roles.contains(&role) => roles.push(role),
+                        Some(_) => {}
+                        None => return Vec::new(),
+                    }
+                }
+                roles.sort();
+                roles
+            })
+            .collect()
+    });
+    Traced::made(body, roles)
+}
+
+/// A plain round tool (a sleeve, a ring) swept from `region`, whose outer loop is one circle and whose hole, if
+/// any, another: the wall swept from the outer circle is called `outer`, that from the hole `inner`, the caps
+/// `start` and `end`.
+fn built_round(body: Body, region: &Region2, outer: &str, inner: &str) -> Traced {
+    let first = region.outer.segs.len();
+    built(body, &|s| Some(if s < first { outer } else { inner }.to_string()), ["start", "end"])
+}
+
+/// `tool` (a tooth space's tool as first made, or a copy moved from it) as the tool of tooth space `k`: the names
+/// of the faces this feature built take the space's number after their first word, so `space:flank:0` is
+/// `space<k>:flank:0`. The tool first made stands for every equal space, so its own names carry no number.
+fn for_space(tool: &Traced, k: u32) -> Traced {
+    let numbered = |role: &String| match role.split_once(':') {
+        Some((part, rest)) => format!("{part}{k}:{rest}"),
+        None => format!("{role}{k}"),
+    };
+    let lineage = tool.lineage.as_ref().map(|l| crate::lineage::Lineage {
+        history: l.history.clone(),
+        operands: l
+            .operands
+            .iter()
+            .map(|op| match op.as_ref() {
+                crate::lineage::Operand::Made(roles) => {
+                    Arc::new(crate::lineage::Operand::Made(roles.iter().map(|names| names.iter().map(numbered).collect()).collect()))
+                }
+                _ => op.clone(),
+            })
+            .collect(),
+    });
+    Traced { body: tool.body.clone(), lineage, recipe: None }
+}
+
+/// Where the teeth of an outline are counted from, for the names of its faces: `teeth` teeth as the spline's
+/// numbers give them (a master spline's outline has one fewer top or space), tooth 0's top at angle `zero`.
+#[derive(Clone, Copy)]
+struct Count {
+    teeth: u32,
+    zero: f64,
+}
+
+impl Count {
+    /// The number of the tooth whose top is nearest the angle `at`.
+    fn tooth_at(&self, at: f64) -> u32 {
+        if self.teeth == 0 {
+            return 0;
+        }
+        let pitch = TAU / f64::from(self.teeth);
+        let k = ((at - self.zero) / pitch).round().rem_euclid(f64::from(self.teeth));
+        // Whole, and within the count.
+        if k.is_finite() { (k as u32).min(self.teeth - 1) } else { 0 }
+    }
+}
+
+/// A piece of an outline as it lies in the whole loop: whether it is a top (an arc about the axis on the outline's
+/// largest circle), what it is, the angle of its middle where it is a top, the angle of its start where that
+/// point lies on the largest circle (the point of a tooth that has no top), and which of the loop's segments are
+/// its.
+struct LoopPiece {
+    top: bool,
+    role: Role,
+    middle: f64,
+    corner: Option<f64>,
+    first: usize,
+    segs: usize,
+}
+
+/// The name of each segment of a whole outline's loop, whose pieces in order are `pieces`: a top is
+/// `<what it is><k>` (`tip3` on a shaft, where the tops are the tips of the teeth); the pieces between the top of
+/// tooth `k` and the next top are `<between><k>:<name>` with the names [`floor_names`] gives them in a tooth
+/// space's own order (`space3:flank:1`, `space3:root`, `space3:flank:0`), so that a face has one name whether its
+/// space was cut as a whole outline or by a tool of its own. An outline with no tops (teeth that come to a point)
+/// numbers the pieces between one point of the largest circle and the next. A name met again is told apart by a
+/// number after it.
+fn outline_names(pieces: &[LoopPiece], segments: usize, between: &str, count: Count) -> Vec<String> {
+    let mut piece_names: Vec<String> = vec![String::new(); pieces.len()];
+    let tops: Vec<usize> = pieces.iter().enumerate().filter(|(_, p)| p.top).map(|(i, _)| i).collect();
+    for &i in &tops {
+        if let (Some(p), Some(name)) = (pieces.get(i), piece_names.get_mut(i)) {
+            *name = format!("{}{}", role_word(p.role), count.tooth_at(p.middle));
+        }
+    }
+    // Where each run starts and which tooth it follows: after a top, or, on an outline with no tops, at the piece
+    // that starts on a point of the largest circle.
+    let starts: Vec<(usize, u32, bool)> = if tops.is_empty() {
+        pieces.iter().enumerate().filter_map(|(i, p)| p.corner.map(|at| (i, count.tooth_at(at), false))).collect()
+    } else {
+        tops.iter().filter_map(|&i| pieces.get(i).map(|p| (i, count.tooth_at(p.middle), true))).collect()
+    };
+    // Each run of pieces from one start round to the next, in the loop's order; the last run goes round the end.
+    let runs: Vec<(u32, Vec<usize>)> = if starts.is_empty() {
+        vec![(0, (0..pieces.len()).collect())]
+    } else {
+        starts
+            .iter()
+            .enumerate()
+            .map(|(t, &(from, k, after_a_top))| {
+                let to = starts.get(t + 1).map_or_else(|| starts.first().map_or(0, |s| s.0) + pieces.len(), |s| s.0);
+                let first = if after_a_top { from + 1 } else { from };
+                (k, (first..to).map(|i| i % pieces.len().max(1)).collect())
+            })
+            .collect()
+    };
+    for (k, run) in runs {
+        // A tooth space's own order runs the other way round the axis.
+        let roles: Vec<Role> = run.iter().rev().filter_map(|&i| pieces.get(i).map(|p| p.role)).collect();
+        for (&i, name) in run.iter().rev().zip(floor_names(&roles)) {
+            if let Some(slot) = piece_names.get_mut(i) {
+                *slot = format!("{between}{k}:{name}");
+            }
+        }
+    }
+    // A name met again (two tops within one tooth's pitch, as on a master spline's wide tooth).
+    let mut met: Vec<(String, usize)> = Vec::new();
+    for name in &mut piece_names {
+        match met.iter_mut().find(|(n, _)| n == name) {
+            Some((_, n)) => {
+                *name = format!("{name}:{n}");
+                *n += 1;
+            }
+            None => met.push((name.clone(), 1)),
+        }
+    }
+    let mut names = vec![String::new(); segments];
+    for (p, name) in pieces.iter().zip(&piece_names) {
+        for span in 0..p.segs {
+            let Some(slot) = names.get_mut(p.first + span) else { continue };
+            *slot = span_name(name, span);
+        }
+    }
+    names
+}
+
+/// The whole outline as one closed loop, every tooth turned to its place and the whole turned by `turn`, with the
+/// joints of its curves added to `joints`, and the name of each of its segments ([`outline_names`]; the pieces
+/// between two tops are called `between`, numbered as `count` counts the teeth once the loop is turned).
+fn outline_loop(outline: &Outline, turn: f64, joints: &mut Joints, between: &str, count: Count) -> Result<(Loop2, Vec<String>)> {
+    let top = outline.most_radius;
+    let mut template = Vec::new();
+    let mut points = Vec::new();
+    // For each piece of one tooth: whether it is a top, what it is, the angle of its middle, its segments.
+    let mut one: Vec<LoopPiece> = Vec::new();
+    for piece in &outline.tooth {
+        let first = template.len();
+        let arc_on_top = match piece {
+            Piece::Arc { centre, radius, start, sweep, .. }
+                if centre[0].hypot(centre[1]) <= 1e-9 * (1.0 + top) && (radius - top).abs() <= 1e-6 * (1.0 + top) && sweep.abs() > 1e-12 =>
+            {
+                Some((*start, *sweep))
+            }
+            _ => None,
+        };
+        piece_segs(piece, &mut template, &mut points)?;
+        // Where the piece starts, when that is a point of the largest circle.
+        let corner = template.get(first).and_then(seg_start).filter(|p| (p.x.hypot(p.y) - top).abs() <= 1e-6 * (1.0 + top)).map(|p| p.y.atan2(p.x));
+        one.push(LoopPiece {
+            top: arc_on_top.is_some(),
+            role: piece.role(),
+            middle: arc_on_top.map_or(0.0, |(start, sweep)| start + sweep / 2.0),
+            corner,
+            first,
+            segs: template.len() - first,
+        });
+    }
+    let pitch = outline.pitch_angle;
+    let mut segs = Vec::with_capacity(template.len().saturating_mul(outline.teeth as usize));
+    let mut pieces: Vec<LoopPiece> = Vec::with_capacity(one.len().saturating_mul(outline.teeth as usize));
+    for k in 0..outline.teeth {
+        let by = turn + pitch * f64::from(k);
+        let (s, c) = by.sin_cos();
+        let start = segs.len();
+        segs.extend(template.iter().map(|g| turned_seg(g, s, c)));
+        pieces.extend(one.iter().map(|p| LoopPiece {
+            top: p.top,
+            role: p.role,
+            middle: p.middle + by,
+            corner: p.corner.map(|at| at + by),
+            first: start + p.first,
+            segs: p.segs,
+        }));
+        for p in &points {
+            let q = v2(*p);
+            joints.add(Vec2::new(q.x * c - q.y * s, q.x * s + q.y * c));
+        }
+    }
+    let names = outline_names(&pieces, segs.len(), between, count);
+    Ok((Loop2 { segs }, names))
+}
+
+/// One body: `region` on `plane` extruded from `from` to `to` along its normal, each run of segments of one curve
+/// swept into one wall.
+fn extruded(plane: &Plane, region: &Region2, from: f64, to: f64, joints: &Joints, what: &str) -> Result<Body> {
+    let one_curve = |s: &Seg2, t: &Seg2| joints.joins(s, t);
+    let mut bodies = kernel::extrude_whole_sides(plane, std::slice::from_ref(region), from, to, &one_curve)?;
+    match (bodies.pop(), bodies.is_empty()) {
+        (Some(body), true) => Ok(body),
+        _ => Err(DocError::Invalid(format!("the {what} is not one solid"))),
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// New parts
+// ---------------------------------------------------------------------------------------------------------------
+
+/// The new shaft and/or hub at the origin along +Z, from z = 0 to the length: the bodies the command made as a
+/// sketch and an extrude.
+fn new_parts(f: &Feature, st: &mut ModelState, n: &SplineNumbers, plan: &SplinePlan) -> Result<()> {
+    let mut made = 0usize;
+    let mut add = |st: &mut ModelState, body: Traced, base: &str| {
+        let base = f.body_names.get(made).map(String::as_str).filter(|name| !name.trim().is_empty()).unwrap_or(base);
+        let name = unique_body_name(st, base);
+        st.bodies.push(ModelBody::traced_new(name, body, f.id));
+        made += 1;
+    };
+    let count = count_of(n, plan);
+    if n.make != SplineMake::Hub {
+        let mut joints = Joints::default();
+        let (outer, names) = outline_loop(&plan.shaft, 0.0, &mut joints, "space", count)?;
+        let region = Region2 { outer, holes: Vec::new() };
+        let body = extruded(&Plane::XY, &region, 0.0, n.length, &joints, "splined shaft")?;
+        let mut part = built(body, &|s| names.get(s).cloned(), ["bottom", "top"]);
+        if let Some(size) = n.end_chamfer.filter(|size| *size > 0.0) {
+            let (root, top) = (plan.shaft.least_radius, plan.shaft.most_radius);
+            let margin = tool_margin(top - root);
+            part = chamfered_ends(part, top, size, margin, n.length, seam_angle(n, plan, false), true, "end_chamfer")?;
+        }
+        add(st, part, SHAFT_NAME);
+    }
+    if n.make != SplineMake::Shaft {
+        let od = n.hub_diameter.ok_or_else(|| DocError::Invalid("`hub_diameter` is required to make the hub (mm, its outside diameter)".into()))?;
+        let mut joints = Joints::default();
+        let (opening, names) = outline_loop(&plan.hub, plan.hub_start, &mut joints, "tooth", count)?;
+        let outer = Loop2::circle(Vec2::ZERO, od / 2.0);
+        let first = outer.segs.len();
+        let region = Region2 { outer, holes: vec![opening] };
+        let body = extruded(&Plane::XY, &region, 0.0, n.length, &joints, "hub")?;
+        let mut part = built(body, &|s| if s < first { Some("side".to_string()) } else { names.get(s - first).cloned() }, ["bottom", "top"]);
+        if let Some(size) = n.entry_chamfer.filter(|size| *size > 0.0) {
+            let (minor, major) = (plan.hub.least_radius, plan.hub.most_radius);
+            let margin = tool_margin(major - minor);
+            part = chamfered_ends(part, minor, size, margin, n.length, seam_angle(n, plan, true), false, "entry_chamfer")?;
+        }
+        add(st, part, HUB_NAME);
+    }
+    Ok(())
+}
+
+/// A new part with the spline's own chamfer on both its ends (the teeth run out of both): on the ends of a
+/// shaft's teeth (`outside`), at the two entries of a hub's bore. The part stands on the XY plane and runs up for
+/// `length`; `radius` is that of the tops of its teeth.
+#[allow(clippy::too_many_arguments)]
+fn chamfered_ends(part: Traced, radius: f64, size: f64, margin: f64, length: f64, seam: f64, outside: bool, key: &str) -> Result<Traced> {
+    let seat = Seat { body: String::new(), plane: Plane::XY, inward: 1.0, radius, room: length, face: None };
+    let chamfer = Chamfer { radius, radial: size, axial: size, past: 0.0, flush: None };
+    let section = chamfer_section(&chamfer, margin, outside).ok_or_else(|| {
+        DocError::Invalid(if outside {
+            format!("`{key}` must be less than {} mm: the chamfer would reach the axis", show_mm(radius - margin))
+        } else {
+            format!("`{key}` cannot be cut in a bore of {} mm", show_mm(2.0 * radius))
+        })
+    })?;
+    let mut part = part;
+    for (at, name) in [(seat.clone(), "chamfer"), (other_end(&seat), "chamfer:far")] {
+        let tool = chamfer_tool(&at, &section, seam, name)?;
+        let body = kernel::boolean(&part.body, &tool.body, BoolOp::Cut)?
+            .ok_or_else(|| DocError::Invalid(format!("`{key}`: the chamfer removed everything")))?;
+        part = Traced::step(body, &[&part, &tool]);
+    }
+    Ok(part)
+}
+
+/// How the teeth are counted for the names of the faces: the spline's own number of teeth, tooth 0's top at angle
+/// 0, or where a master spline puts it.
+fn count_of(n: &SplineNumbers, plan: &SplinePlan) -> Count {
+    let zero = match (&plan.master, n.master) {
+        (Some(m), SplineMaster::ToothOut | SplineMaster::WideTooth) => m.turn,
+        _ => 0.0,
+    };
+    Count { teeth: plan.made.teeth, zero }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Picked faces
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Where a spline is cut: the body, and the round face's free end.
+#[derive(Clone)]
+struct Seat {
+    body: String,
+    /// The plane square to the axis at the free end: its x is angle 0, its normal the axis as the world axes
+    /// orient it, so that angles turn counter-clockwise seen from the positive end of that world axis.
+    plane: Plane,
+    /// 1 when the face runs on from the free end along the plane's normal, -1 when against it.
+    inward: f64,
+    /// The radius of the face.
+    radius: f64,
+    /// The length of the face along its axis.
+    room: f64,
+    /// Which face of the body, as it was before the feature, the round face is (None where that is not known
+    /// exactly): the face a surface the spline rebuilds over it stands for.
+    face: Option<usize>,
+}
+
+impl Seat {
+    /// The distances along the plane's normal of the stretch from `from` to `to` measured into the face from its
+    /// free end.
+    fn span(&self, from: f64, to: f64) -> (f64, f64) {
+        if self.inward > 0.0 { (from, to) } else { (-to, -from) }
+    }
+
+    /// The direction along the axis from the face's free end into the face.
+    fn direction_in(&self) -> Vec3 {
+        self.plane.normal() * self.inward
+    }
+}
+
+/// Angle 0 about an axis and the axis as the world axes orient it: the world axis the axis is closest to decides
+/// (Z, then X, then Y on a tie), the axis is turned to point to that world axis's positive side, and the world
+/// axis's reference direction (+X for Z, +Y for X, +Z for Y) is projected onto the plane square to it.
+fn angle_zero(axis: Vec3) -> Option<(Vec3, Vec3)> {
+    let (ax, ay, az) = (axis.x.abs(), axis.y.abs(), axis.z.abs());
+    let (world, reference) = if az >= ax && az >= ay {
+        (Vec3::Z, Vec3::X)
+    } else if ax >= ay {
+        (Vec3::X, Vec3::Y)
+    } else {
+        (Vec3::Y, Vec3::Z)
+    };
+    let axis = if axis.dot(world) < 0.0 { axis * -1.0 } else { axis };
+    let x = (reference - axis * reference.dot(axis)).normalized()?;
+    Some((x, axis))
+}
+
+/// The round face the stored pick `p` means and the body it is on (its place in `st.bodies`): a bore (`bore`) or
+/// the outside of a shaft, on the body nearest the pick, the feature's own component's bodies first, as a thread
+/// finds its face.
+///
+/// A hub that sits on its shaft with no play has its bore on the shaft's own surface, so the pick lies on both
+/// faces: the one of the kind asked for is the one meant. A face of the other kind is given (for [`seat_at`] to
+/// refuse in words) only where no face of the kind asked for lies.
+fn round_face_at(st: &ModelState, component: u64, p: Vec3, bore: bool) -> Option<(usize, kernel::CylinderFace)> {
+    let (asked, other): (Vec<(usize, kernel::CylinderFace)>, Vec<(usize, kernel::CylinderFace)>) = st
+        .bodies
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| !super::more::beyond_cylinder_reach(b, p))
+        .filter_map(|(i, b)| kernel::cylinder_face_at(&b.body, p).map(|c| (i, c)))
+        .partition(|(_, c)| c.internal == bore);
+    let found = if asked.is_empty() { other } else { asked };
+    let own = |i: &usize| st.bodies.get(*i).is_some_and(|b| b.component == component);
+    let any_own = found.iter().any(|(i, _)| own(i));
+    let off = |c: &kernel::CylinderFace| {
+        let k = *c.axis;
+        let d = p - c.axis_point;
+        ((d - k * d.dot(k)).len() - c.radius).abs()
+    };
+    found.into_iter().filter(|(i, _)| !any_own || own(i)).min_by(|a, b| off(&a.1).total_cmp(&off(&b.1)))
+}
+
+/// The name of the body a Shaft Spline's pick `p` means ([`round_face_at`]): the body the pick's lasting face
+/// name is taken on, so the name is that of the face the rebuild cuts into. None where no round face of the kind
+/// asked for lies.
+pub(crate) fn seat_body(st: &ModelState, component: u64, p: Vec3, bore: bool) -> Option<String> {
+    let (i, cyl) = round_face_at(st, component, p, bore)?;
+    if cyl.internal != bore {
+        return None;
+    }
+    st.bodies.get(i).map(|b| b.name.clone())
+}
+
+/// The round face at the stored pick `p` ([`round_face_at`]), with the end the teeth start from as the free end:
+/// the end nearest along the axis to `start`, a point on the face they start from, or with none stored the end
+/// nearest the pick.
+fn seat_at(st: &ModelState, component: u64, p: Vec3, start: Option<Vec3>, bore: bool) -> Result<Seat> {
+    let what = if bore { "bore" } else { "shaft" };
+    let (i, cyl) = round_face_at(st, component, p, bore).ok_or_else(|| {
+        DocError::Invalid(format!(
+            "no round face where the {what} was picked: pick the {}",
+            if bore { "inside of a round bore" } else { "outside of a round shaft" }
+        ))
+    })?;
+    if cyl.internal != bore {
+        return Err(DocError::Invalid(if bore {
+            "the face picked as the bore is the outside of a shaft: pick the inside of a bore".into()
+        } else {
+            "the face picked as the shaft is the inside of a bore: pick the outside of a shaft".into()
+        }));
+    }
+    let body = st.bodies.get(i).map(|b| b.name.clone()).ok_or_else(|| DocError::Invalid(format!("the {what}'s body")))?;
+    let k = *cyl.axis;
+    // The teeth start at the end the start face lies at; the round face runs on from it into the part.
+    let at_start = nearer_start(&cyl, start.unwrap_or(p));
+    let end_at = if at_start { cyl.start } else { cyl.end };
+    let end = cyl.axis_point + k * end_at;
+    let into = if at_start { k } else { k * -1.0 };
+    let (x, normal) = angle_zero(k).ok_or_else(|| DocError::Invalid(format!("the {what}'s axis has no direction")))?;
+    let plane = Plane::new(end, x, normal.cross(x)).ok_or_else(|| DocError::Invalid(format!("no plane square to the {what}'s axis")))?;
+    let inward = if into.dot(plane.normal()) > 0.0 { 1.0 } else { -1.0 };
+    let room = cyl.end - cyl.start;
+    if !(room.is_finite() && room > 0.0 && cyl.radius.is_finite() && cyl.radius > 0.0) {
+        return Err(DocError::Invalid(format!("the {what}'s round face has no size")));
+    }
+    // The face itself, by the exact distance of the pick from each face: the nearest, when it lies on this cylinder
+    // (the same radius about the same axis, not another round face of that size beside it).
+    let face = st.bodies.get(i).and_then(|b| {
+        let (_, face) = b.body.nearest_face(p)?;
+        let on_it = match kernel::face_surface(&b.body, face) {
+            Some(kernel::FaceSurface::Cylinder { origin, axis, radius }) => {
+                let off = origin - cyl.axis_point;
+                (radius - cyl.radius).abs() <= 1e-9 * (1.0 + cyl.radius)
+                    && (*axis).cross(k).len() <= 1e-9
+                    && (off - k * off.dot(k)).len() <= 1e-6 * (1.0 + cyl.radius)
+            }
+            _ => false,
+        };
+        on_it.then_some(face)
+    });
+    Ok(Seat { body, plane, inward, radius: cyl.radius, room, face })
+}
+
+/// Says that the faces the tools' face called `role` left on the body called `body` stand for the body's own
+/// face `face` too (its face before this feature): a shaft's surface built up or turned down is still the shaft's
+/// surface, a bore filled in is still the bore. They are then called by that face's own name, and the tool's name
+/// is another name for them, so what a later feature picked on the surface is found again whether or not the
+/// spline resized the part this time.
+fn also_from(st: &mut ModelState, body: &str, role: &str, face: Option<usize>) {
+    let Some(face) = face else { return };
+    let Some(i) = st.bodies.iter().position(|b| b.name == body) else { return };
+    let Some(mb) = st.bodies.get(i).cloned() else { return };
+    let traced = mb.traced();
+    let Some(mut lineage) = traced.lineage else { return };
+    // The body as it was before the feature, among what the body now comes from.
+    let Some(own) = lineage.operands.iter().position(|op| matches!(op.as_ref(), crate::lineage::Operand::Body(name) if name == body)) else {
+        return;
+    };
+    let origin = kernel::history::FaceOrigin::Face { operand: own, face };
+    let crate::lineage::Lineage { history, operands } = &mut lineage;
+    let of_role = |operand: usize, tool_face: usize| {
+        operands.get(operand).is_some_and(|op| {
+            matches!(op.as_ref(), crate::lineage::Operand::Made(roles) if roles.get(tool_face).and_then(|names| names.first()).is_some_and(|name| name == role))
+        })
+    };
+    let mut changed = false;
+    for prov in history.faces.iter_mut() {
+        let from_tool =
+            prov.origins.iter().any(|o| matches!(*o, kernel::history::FaceOrigin::Face { operand, face: tool_face } if of_role(operand, tool_face)));
+        if from_tool && !prov.origins.contains(&origin) {
+            prov.origins.push(origin);
+            changed = true;
+        }
+    }
+    if changed && let Some(slot) = st.bodies.get_mut(i) {
+        *slot = mb.remade(Traced { body: traced.body, lineage: Some(lineage), recipe: traced.recipe });
+    }
+}
+
+/// Joins or cuts `tool` into the body called `body`, which keeps its name. The body's own faces keep their names,
+/// and the faces the tool leaves are called by the tool's.
+fn change(st: &mut ModelState, body: &str, tool: &Traced, op: BoolOp, what: &str) -> Result<()> {
+    let i = st.bodies.iter().position(|b| b.name == body).ok_or_else(|| DocError::Invalid(format!("the body `{body}` is gone")))?;
+    let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid(format!("the body `{body}` is gone"))) };
+    let input = mb.traced();
+    let nb = kernel::boolean(&input.body, &tool.body, op)?.ok_or_else(|| DocError::Invalid(format!("{what} removed everything")))?;
+    if let Some(slot) = st.bodies.get_mut(i) {
+        *slot = mb.remade(Traced::step(nb, &[&input, tool]));
+    }
+    Ok(())
+}
+
+/// A change kept from the last rebuilds: the body it was made on, what the tool was made from, the body it gave
+/// and what the tool's faces came from (their names). An edit through the History rebuilds a feature twice with
+/// the same numbers (once to try them, once for real): the second time the very same body meets the very same
+/// tool, and the cut is not made again.
+struct KeptChange {
+    input: Body,
+    key: String,
+    output: Body,
+    tool: Option<crate::lineage::Lineage>,
+}
+
+/// The changes of the spline rebuilt last ([`KeptChange`]), oldest first. Another spline (other numbers, another
+/// face) starts the list again, so it holds one feature's steps and no more than [`MOST_KEPT`].
+static KEPT_CHANGES: std::sync::Mutex<Vec<KeptChange>> = std::sync::Mutex::new(Vec::new());
+
+/// The most changes kept: more than the steps of the largest spline (its rounded ends are cut [`END_GROUP`] at a
+/// time, [`MAX_ROUNDED_SPACES`] at most, after a few steps on the round shaft).
+const MOST_KEPT: usize = 64;
+
+/// What ends the part of a step's key that says which spline it belongs to ([`tool_key`]).
+const KEY_END: &str = "|#";
+
+/// The part of a step's key that says which spline it belongs to.
+fn spline_of(key: &str) -> &str {
+    key.split_once(KEY_END).map_or(key, |(spline, _)| spline)
+}
+
+/// [`change`] with a tool that is made only when this change is not one of the last few kept. `key` says all the
+/// tool is made from; `tool` gives the tool.
+fn change_kept(st: &mut ModelState, body: &str, key: &str, op: BoolOp, what: &str, tool: impl FnOnce() -> Result<Traced>) -> Result<()> {
+    let i = st.bodies.iter().position(|b| b.name == body).ok_or_else(|| DocError::Invalid(format!("the body `{body}` is gone")))?;
+    let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid(format!("the body `{body}` is gone"))) };
+    let input = mb.traced();
+    let kept = {
+        let all = KEPT_CHANGES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        all.iter().find(|k| k.key == key && k.input.same(&input.body)).map(|k| (k.output.clone(), k.tool.clone()))
+    };
+    let (nb, tool) = match kept {
+        Some(found) => found,
+        None => {
+            let tool = tool()?;
+            let nb = kernel::boolean(&input.body, &tool.body, op)?.ok_or_else(|| DocError::Invalid(format!("{what} removed everything")))?;
+            let mut all = KEPT_CHANGES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if all.first().is_some_and(|k| spline_of(&k.key) != spline_of(key)) {
+                all.clear();
+            }
+            if all.len() >= MOST_KEPT {
+                drop(all.remove(0));
+            }
+            all.push(KeptChange { input: input.body.clone(), key: key.to_string(), output: nb.clone(), tool: tool.lineage.clone() });
+            (nb, tool.lineage)
+        }
+    };
+    // The body's own faces keep their names, and the faces the tool leaves are called by the tool's: the kept
+    // output is the very body this tool gave on this input, so the same record of where its faces came from holds.
+    let lineage = match (input.lineage.as_ref(), tool.as_ref()) {
+        (Some(body), Some(tool)) => crate::lineage::Lineage::step(&nb, &[body, tool]),
+        _ => None,
+    };
+    if let Some(slot) = st.bodies.get_mut(i) {
+        *slot = mb.remade(Traced { body: nb, lineage, recipe: None });
+    }
+    Ok(())
+}
+
+/// All a tool of this feature is made from, but for what each tool adds: the numbers and where the face is.
+fn tool_key(n: &SplineNumbers, seat: &Seat) -> String {
+    format!("{n:?}|{:?}|{}|{}{KEY_END}", seat.plane, seat.inward, seat.radius)
+}
+
+/// Refused when the splined length is longer than the picked face.
+fn check_room(seat: &Seat, length: f64, what: &str) -> Result<()> {
+    if length > seat.room + same_size(seat.radius) {
+        return Err(DocError::Invalid(format!("`length` is longer than the {what}'s round face ({} mm): make it at most that", show_mm(seat.room))));
+    }
+    Ok(())
+}
+
+/// A body measured in the seat's own frame, exactly: how far it reaches from the free end into the face (the
+/// least, below zero where it runs on past the free end, and the most), and the most it reaches from the axis
+/// along the frame's two cross directions (a round body's radius). The body is turned into the frame first (a
+/// rigid motion, which keeps it exact), so a shaft that lies askew to the world axes is measured as truly as one
+/// along them.
+fn extent_in(body: &Body, seat: &Seat) -> Option<(f64, f64, f64)> {
+    let (x, y, n, o) = (seat.plane.x, seat.plane.y, seat.plane.normal(), seat.plane.origin);
+    // World to frame, column by column: the images of the world axes, then of the origin.
+    let m = [[x.x, y.x, n.x, 0.0], [x.y, y.y, n.y, 0.0], [x.z, y.z, n.z, 0.0], [-o.dot(x), -o.dot(y), -o.dot(n), 1.0]];
+    let bb = kernel::transform_matrix(body, m).ok()?.exact_bounds().ok()?;
+    let (a, b) = (bb.min.z * seat.inward, bb.max.z * seat.inward);
+    let across = bb.min.x.abs().max(bb.max.x.abs()).max(bb.min.y.abs()).max(bb.max.y.abs());
+    (a.is_finite() && b.is_finite() && across.is_finite()).then_some((a.min(b), a.max(b), across))
+}
+
+/// The seat seen from the other end of its round face: the far end as the free end, with angle 0 where it was.
+fn other_end(seat: &Seat) -> Seat {
+    Seat { plane: seat.plane.offset(seat.inward * seat.room), inward: -seat.inward, ..seat.clone() }
+}
+
+/// One end of a round face, as the body has it before the spline: what lies past it. A shaft's end may carry a
+/// chamfer or a round, or step down to a neck; a bore's entry may carry a chamfer, or open into a counterbore. All
+/// of it is asked of the exact body: what plain rings and discs over the stretch past the end meet, and the exact
+/// bounds of what they meet.
+#[derive(Clone, Copy, Debug)]
+struct End {
+    /// The body ends where the face ends: nothing of it lies past the end.
+    free: bool,
+    /// Nothing stands in the way past the end: no shoulder larger than a shaft, no narrowing of a bore. A free
+    /// end is open.
+    open: bool,
+    /// The cuts come out of the body past this end, as a cutter runs out of the work: the end is open, and what
+    /// the body has past it at the radius the cuts reach ends within the face's radius of the end (a journal
+    /// that runs on further is not cut into).
+    out: bool,
+    /// How far the cuts must run on past the end to come out: as far as the body has anything at the radius the
+    /// cuts reach (the bottoms of the tooth spaces). A chamfer on the end is cut right through; what lies deeper
+    /// than the spaces is not reached, and is left alone.
+    through: f64,
+    /// The face stops at a step: past the end the body is smaller from the very end on (a shaft's neck) or wider
+    /// (a bore's counterbore).
+    step: bool,
+    /// At a shaft's step, the radius of the body just past the end.
+    neck: f64,
+    /// How far past the face's end the body's own end lies, where what lies between belongs to the face's end: no
+    /// longer than the face's radius and no more than twice as far across as it is long (a chamfer, a round).
+    /// Zero otherwise.
+    end: f64,
+    /// The radius at the body's own end: the rim of a shaft's end face, the mouth of a bore.
+    rim: f64,
+    /// What lies between is a plain chamfer: straight from the rim to the face.
+    cone: bool,
+}
+
+impl End {
+    /// An end nothing is known to be past, or that something stands in the way of: the tools stop at it.
+    fn shut(radius: f64) -> End {
+        End { free: false, open: false, out: false, through: 0.0, step: false, neck: radius, end: 0.0, rim: radius, cone: false }
+    }
+
+    /// How far past the end the cuts run to come out of the body.
+    fn run(&self) -> f64 {
+        if self.out { self.through.max(self.end) } else { 0.0 }
+    }
+}
+
+/// [`End`] for the seat's free end on the model as it is (for the far end, the seat seen from there:
+/// [`other_end`]); `reach` is the radius the cuts reach (the bottoms of a shaft's tooth spaces, of a hub's in a
+/// `bore`).
+fn past_end(st: &ModelState, seat: &Seat, bore: bool, reach: f64) -> End {
+    let radius = seat.radius;
+    let shut = End::shut(radius);
+    let Some(mb) = st.bodies.iter().find(|b| b.name == seat.body) else { return shut };
+    let Some((low, _, across)) = extent_in(&mb.body, seat) else { return shut };
+    let zone = -low;
+    let same = same_size(radius);
+    if !zone.is_finite() {
+        return shut;
+    }
+    if zone <= same {
+        return End { free: true, open: true, out: true, ..shut };
+    }
+    let clear = 1e-6 * (1.0 + radius);
+    let far = radius + across + 1.0;
+    let ring = |inner: f64, outer: f64| Region2 {
+        outer: Loop2::circle(Vec2::ZERO, outer),
+        holes: if inner > 0.0 { vec![Loop2::circle(Vec2::ZERO, inner)] } else { Vec::new() },
+    };
+    // What of the body lies within `region` over the stretch `from`..`to` (measured into the face, so below zero
+    // past the end): nothing, a piece, or not known.
+    let piece = |region: &Region2, from: f64, to: f64| -> Option<Option<Body>> {
+        let (a, b) = seat.span(from, to);
+        let tool = extruded(&seat.plane, region, a, b, &Joints::default(), "probe past the end of the face").ok()?;
+        kernel::boolean(&mb.body, &tool, BoolOp::Intersect).ok()
+    };
+    // Anything in the way: a shoulder larger than the shaft, a bore that narrows.
+    let blocked = if bore { ring(0.0, radius - clear) } else { ring(radius + clear, far) };
+    if !matches!(piece(&blocked, -(zone + clear), -clear), Some(None)) {
+        return shut;
+    }
+    // As far as the body has anything at the radius the cuts reach.
+    let cut = if bore { ring(0.0, reach + clear) } else { ring((reach - clear).max(clear), far) };
+    let stands = match piece(&cut, -(zone + clear), -clear) {
+        Some(Some(part)) => extent_in(&part, seat).map(|(low, _, _)| -low),
+        Some(None) => Some(0.0),
+        None => None,
+    };
+    let (out, through) = match stands {
+        Some(stands) if stands.is_finite() && stands <= radius => (true, stands.clamp(0.0, zone)),
+        _ => (false, 0.0),
+    };
+    let open = End { open: true, out, through, ..shut };
+    // The slope of a straight chamfer is told from a round by where it is at two places along it.
+    let near = |a: f64, b: f64| (a - b).abs() <= 1e-3 * zone + 10.0 * clear;
+    if bore {
+        // How far towards the body's end what the body has within `rho` of the axis reaches (0: nothing).
+        let reaches = |rho: f64| -> Option<f64> {
+            match piece(&ring(0.0, rho), -(zone + clear), -clear)? {
+                Some(part) => extent_in(&part, seat).map(|(low, _, _)| (-low).clamp(0.0, zone)),
+                None => Some(0.0),
+            }
+        };
+        let wider = zone / 16.0;
+        let Some(first) = reaches(radius + wider) else { return open };
+        if first <= 10.0 * clear {
+            // Wider from the very end on: a counterbore.
+            return End { step: true, ..open };
+        }
+        if zone > radius || first >= zone - 10.0 * clear {
+            // A long stretch, or one hardly wider at the body's end than the bore: not an entry to carry.
+            return open;
+        }
+        // A straight chamfer that is `wider` across where it is `first` long is this far across at the end.
+        let across = wider * zone / first;
+        if across > 2.0 * zone + same {
+            return open;
+        }
+        let cone = [0.5, 0.9].iter().all(|k| reaches(radius + k * across).is_some_and(|at| near(at, k * zone)));
+        return End { end: zone, rim: if cone { radius + across } else { radius }, cone, ..open };
+    }
+    let thin = (0.05 * zone).min(1e3 * clear).max(clear);
+    // The largest radius of the body between `from` and `to` past the end (0: nothing there).
+    let radius_in = |from: f64, to: f64| -> Option<f64> {
+        match piece(&ring(0.0, far), from, to)? {
+            Some(part) => extent_in(&part, seat).map(|(_, _, across)| across),
+            None => Some(0.0),
+        }
+    };
+    let Some(beside) = radius_in(-(thin + clear), -clear) else { return open };
+    if beside < radius - 10.0 * clear {
+        // Smaller from the very end on: a neck.
+        return End { step: true, neck: beside, ..open };
+    }
+    if zone > radius {
+        return open;
+    }
+    // The body in the last of its length: where a straight chamfer comes to, its rim lies this far in.
+    let Some(last) = radius_in(-(zone + clear), -zone + thin) else { return open };
+    let across = (radius - last) * zone / (zone - thin);
+    if !(across >= -same && across <= 2.0 * zone + same) {
+        return open;
+    }
+    let cone =
+        across > 10.0 * clear && [0.5, 0.1].iter().all(|k| radius_in(-(k * zone + thin), -k * zone).is_some_and(|at| near(at, radius - k * across)));
+    End { end: zone, rim: if cone { radius - across } else { last }, cone, ..open }
+}
+
+/// The largest radius the seat's body reaches in the stretch `from`..`to` (measured from the free end into the
+/// face) outside the radius `above`; `above` itself where it has nothing there. From the exact body: what a ring
+/// over the stretch meets, and that piece's exact bounds. None where it cannot be told.
+fn stands_over(st: &ModelState, seat: &Seat, above: f64, from: f64, to: f64) -> Option<f64> {
+    let mb = st.bodies.iter().find(|b| b.name == seat.body)?;
+    let (_, _, across) = extent_in(&mb.body, seat)?;
+    let clear = 1e-6 * (1.0 + seat.radius);
+    if !(to > from) || across <= above + clear {
+        return Some(above);
+    }
+    let ring = Region2 { outer: Loop2::circle(Vec2::ZERO, across + 1.0), holes: vec![Loop2::circle(Vec2::ZERO, above + clear)] };
+    let (a, b) = seat.span(from, to);
+    let probe = extruded(&seat.plane, &ring, a, b, &Joints::default(), "probe over the cutter's way out").ok()?;
+    match kernel::boolean(&mb.body, &probe, BoolOp::Intersect).ok()? {
+        Some(part) => extent_in(&part, seat).map(|(_, _, across)| across.max(above)),
+        None => Some(above),
+    }
+}
+
+/// Whether the body leaves the stretch just past the seat's end empty within `radius` of the axis: a chamfer
+/// that wide at a bore's step cuts into no wall there.
+fn beside_clear(st: &ModelState, seat: &Seat, radius: f64) -> bool {
+    let Some(mb) = st.bodies.iter().find(|b| b.name == seat.body) else { return false };
+    let clear = 1e-6 * (1.0 + seat.radius);
+    let (a, b) = seat.span(-(1e3 * clear + clear), -clear);
+    let disc = Region2 { outer: Loop2::circle(Vec2::ZERO, radius), holes: Vec::new() };
+    let Ok(tool) = extruded(&seat.plane, &disc, a, b, &Joints::default(), "probe beside the bore's entry") else { return false };
+    matches!(kernel::boolean(&mb.body, &tool, BoolOp::Intersect), Ok(None))
+}
+
+/// An angle about the axis that lies in a tooth space of the shaft (`hub`: of the hub), for the seam of a tool
+/// turned once about the axis: a seam there is cut away with the space, so no tooth's chamfer is in two faces.
+fn seam_angle(n: &SplineNumbers, plan: &SplinePlan, hub: bool) -> f64 {
+    let teeth = plan.made.teeth.max(1);
+    let pitch = TAU / f64::from(teeth);
+    let (turn, skip) = match (&plan.master, n.master) {
+        (Some(m), SplineMaster::ToothOut | SplineMaster::WideTooth) => (m.turn, Some(m.tooth)),
+        _ => (0.0, None),
+    };
+    // A tooth of the shaft that stands, with a space of its own after it.
+    let k = (0..teeth).find(|k| Some(*k) != skip).unwrap_or(0);
+    // The shaft's spaces lie half a pitch on from its teeth; the hub's spaces lie over the shaft's teeth.
+    turn + pitch * (f64::from(k) + if hub { 0.0 } else { 0.5 })
+}
+
+/// A chamfer at an end of a round face: the corner it takes off lies at `radius`, `past` beyond the face's own end
+/// (the body's own end, where that lies further out).
+#[derive(Clone, Copy, Debug)]
+struct Chamfer {
+    /// The radius of the round face: the tops of a shaft's teeth, of a hub's.
+    radius: f64,
+    /// How far the chamfer runs across the end, and how far along the face.
+    radial: f64,
+    axial: f64,
+    past: f64,
+    /// At a step, where the body runs on past the end: the tool stops at the end, and at this radius (a shaft's
+    /// neck) where the chamfer would run deeper than the step.
+    flush: Option<f64>,
+}
+
+/// The spline's own chamfer of `size` at 45 degrees on the end `e` of a round face that is now `radius`, where
+/// one can be cut: at an end the body ends at, or at a step. None at a shoulder, and at an end that runs on with
+/// no corner.
+fn own_chamfer(e: &End, radius: f64, size: f64, outside: bool) -> Option<Chamfer> {
+    if !e.open {
+        return None;
+    }
+    if e.free || e.end > 0.0 {
+        return Some(Chamfer { radius, radial: size, axial: size, past: e.end, flush: None });
+    }
+    if !e.step {
+        return None;
+    }
+    if outside {
+        // A neck as large as the shaft leaves no corner.
+        (e.neck < radius - 1e-6 * (1.0 + radius)).then_some(Chamfer { radius, radial: size, axial: size, past: 0.0, flush: Some(e.neck) })
+    } else {
+        Some(Chamfer { radius, radial: size, axial: size, past: 0.0, flush: Some(f64::INFINITY) })
+    }
+}
+
+/// The section of a chamfer's tool in a plane through the axis (x across from the axis, y along the face from its
+/// end), counter-clockwise, and which of its sides is the slope. On a shaft (`outside`) the tool takes the corner
+/// off the end, in from the radius; in a bore it widens the entry, out from the radius. It reaches `margin` past
+/// the end and past the face, but for a step, where it stops at the end. None where no such section lies clear of
+/// the axis.
+fn chamfer_section(c: &Chamfer, margin: f64, outside: bool) -> Option<(Vec<Vec2>, usize)> {
+    if !(c.radial > 0.0 && c.axial > 0.0 && c.radius > 0.0 && c.radial.is_finite() && c.axial.is_finite() && c.past.is_finite()) {
+        return None;
+    }
+    let more = margin / c.radial.min(c.axial);
+    let sign = if outside { 1.0 } else { -1.0 };
+    // The slope's two ends: on the end's plane, and on the face.
+    let on_end = Vec2::new(c.radius - sign * c.radial, -c.past);
+    let on_face = Vec2::new(c.radius, -c.past + c.axial);
+    let along = on_face - on_end;
+    let top = on_face + along * more;
+    let low = if c.flush.is_some() { on_end } else { on_end - along * more };
+    let corner = Vec2::new(top.x, low.y);
+    // Where the body runs on past the end nearer than the slope comes to, the tool stops at its surface.
+    let stop = c.flush.filter(|neck| if outside { *neck > low.x } else { *neck < low.x });
+    let (points, slope) = match (stop, outside) {
+        (None, true) => (vec![low, corner, top], 2),
+        (None, false) => (vec![corner, low, top], 1),
+        (Some(neck), true) => {
+            if neck >= c.radius {
+                return None;
+            }
+            (vec![Vec2::new(neck, low.y), corner, top, Vec2::new(neck, low.y + c.axial * (neck - low.x) / c.radial)], 2)
+        }
+        (Some(neck), false) => {
+            if neck <= c.radius {
+                return None;
+            }
+            (vec![corner, Vec2::new(neck, low.y), Vec2::new(neck, low.y + c.axial * (low.x - neck) / c.radial), top], 2)
+        }
+    };
+    points.iter().all(|p| p.x > 0.0 && p.x.is_finite() && p.y.is_finite()).then_some((points, slope))
+}
+
+/// The tool of a chamfer at the seat's end: its `section` ([`chamfer_section`]) turned once about the face's axis,
+/// from the angle `seam`. Its sloping face is called `name`.
+fn chamfer_tool(seat: &Seat, section: &(Vec<Vec2>, usize), seam: f64, name: &str) -> Result<Traced> {
+    let (points, slope) = section;
+    let (s, c) = seam.sin_cos();
+    // A plane through the axis: across the shaft at the seam's angle, and along it into the face.
+    let through = Plane { origin: seat.plane.origin, x: seat.plane.x * c + seat.plane.y * s, y: seat.direction_in() };
+    let segs = points.iter().zip(points.iter().cycle().skip(1)).map(|(a, b)| Seg2::Line { a: *a, b: *b }).collect();
+    let region = Region2 { outer: Loop2 { segs }, holes: Vec::new() };
+    let mut bodies = kernel::revolve(&through, std::slice::from_ref(&region), Vec2::ZERO, Vec2::new(0.0, 1.0), TAU)?;
+    let body = match (bodies.pop(), bodies.is_empty()) {
+        (Some(body), true) => body,
+        _ => return Err(DocError::Invalid("the chamfer's tool is not one solid".into())),
+    };
+    Ok(built(body, &|k| Some(if k == *slope { name.to_string() } else { format!("{name}:tool:{k}") }), ["chamfer:tool:start", "chamfer:tool:end"]))
+}
+
+/// The spline cut into a picked shaft. Where the spline's major diameter is not the shaft's own, the shaft follows
+/// the spline first: the whole of its round face is built up or turned down to the major diameter, so the tops of
+/// the teeth are the shaft's surface whatever the numbers (more teeth of one size make a larger shaft). Then the
+/// tooth spaces are cut: each as one tool with its rounded end when a cutter diameter is given, else one ring tool
+/// for the straight part.
+fn cut_shaft(st: &mut ModelState, n: &SplineNumbers, plan: &SplinePlan, seat: &Seat, warning: &mut Option<String>) -> Result<()> {
+    let outline = &plan.shaft;
+    let (root, top) = (outline.least_radius, outline.most_radius);
+    let length = n.length;
+    check_room(seat, length, "shaft")?;
+    let tol = same_size(seat.radius);
+    let depth = (top - root).max(0.0);
+    // How far the tools reach past the faces they would otherwise only touch.
+    let margin = tool_margin(depth);
+    let key = tool_key(n, seat);
+    let resized = (top - seat.radius).abs() > tol;
+    // The two ends of the round face, as the shaft has them before this feature: a chamfer or a round the shaft
+    // already has on an end is cut through, as a cutter runs out of the work, and follows the shaft to its new size.
+    // The far end matters where the shaft is resized (the whole face is) and where the teeth run to it.
+    let old_radius = seat.radius;
+    let teeth_end = length >= seat.room - tol;
+    let beyond = other_end(seat);
+    let near = past_end(st, seat, false, root);
+    let far = if resized || teeth_end { past_end(st, &beyond, false, root) } else { End::shut(old_radius) };
+    let seam = seam_angle(n, plan, false);
+    if resized && top > seat.radius {
+        // A sleeve over the whole face, from its one end to its other, reaching a little into the shaft: what
+        // lies inside the shaft (a bore, a hole across) stays as it is.
+        let (from, to) = seat.span(0.0, seat.room);
+        change_kept(st, &seat.body, &format!("{key}|built"), BoolOp::Union, "building the shaft up", || {
+            let inner = seat.radius - margin;
+            let holes = if inner > 0.0 { vec![Loop2::circle(Vec2::ZERO, inner)] } else { Vec::new() };
+            let sleeve = Region2 { outer: Loop2::circle(Vec2::ZERO, top), holes };
+            let body = extruded(&seat.plane, &sleeve, from, to, &Joints::default(), "sleeve that builds the shaft up")?;
+            // Its outside is the shaft's surface from now on: `side`, as a cylinder's wall is called.
+            Ok(built_round(body, &sleeve, "side", "inner"))
+        })?;
+        for (e, at, which) in [(&near, seat, "near"), (&far, &beyond, "far")] {
+            if e.end > 0.0 {
+                // The shaft's own end (its chamfer or round, made at the old size) is built up with it, square, to
+                // the end of the body: a ring from just inside the rim of the shaft's end face. A plain chamfer
+                // is cut again below, at the new size.
+                let (from, to) = at.span(-e.end, 0.0);
+                let rim = e.rim;
+                change_kept(
+                    st,
+                    &seat.body,
+                    &format!("{key}|built {which} end|{}|{rim}", e.end),
+                    BoolOp::Union,
+                    "building the shaft's end up",
+                    || {
+                        let inner = rim - margin;
+                        let holes = if inner > 0.0 { vec![Loop2::circle(Vec2::ZERO, inner)] } else { Vec::new() };
+                        let ring = Region2 { outer: Loop2::circle(Vec2::ZERO, top), holes };
+                        let body = extruded(&at.plane, &ring, from, to, &Joints::default(), "ring that builds the shaft's end up")?;
+                        Ok(built_round(body, &ring, "side", "inner"))
+                    },
+                )?;
+            }
+        }
+    } else if resized {
+        // A plain ring over the whole face, running on past an end the body ends at, and through what the shaft
+        // has on its end. At a shoulder and at a neck it stops with the face.
+        let past = |e: &End| {
+            if e.end > 0.0 {
+                e.end + margin
+            } else if e.free {
+                margin
+            } else {
+                0.0
+            }
+        };
+        let (from, to) = seat.span(-past(&near), seat.room + past(&far));
+        change_kept(st, &seat.body, &format!("{key}|turned|{from}|{to}"), BoolOp::Cut, "turning the shaft down", || {
+            let ring = Region2 { outer: Loop2::circle(Vec2::ZERO, seat.radius + depth + margin), holes: vec![Loop2::circle(Vec2::ZERO, top)] };
+            let body = extruded(&seat.plane, &ring, from, to, &Joints::default(), "ring that turns the shaft down")?;
+            // Its hole leaves the shaft's surface: `side`, as a cylinder's wall is called.
+            Ok(built_round(body, &ring, "outside", "side"))
+        })?;
+    }
+    if resized {
+        // The new surface is still the shaft's surface: it keeps the name the shaft's own face had.
+        also_from(st, &seat.body, "side", seat.face);
+    }
+    // From here the shaft's round face is the spline's major diameter, and the spaces are cut as into a shaft that
+    // had it from the start.
+    let made;
+    let seat = if resized {
+        made = Seat { radius: top, ..seat.clone() };
+        &made
+    } else {
+        seat
+    };
+    let beyond = other_end(seat);
+    // A plain chamfer the shaft had on an end keeps its size on the resized shaft: cut again at the new diameter.
+    if resized {
+        for (e, at, name) in [(&near, seat, "blank:chamfer"), (&far, &beyond, "blank:chamfer:far")] {
+            if !(e.end > 0.0 && e.cone) {
+                continue;
+            }
+            let chamfer = Chamfer { radius: top, radial: old_radius - e.rim, axial: e.end, past: e.end, flush: None };
+            let Some(section) = chamfer_section(&chamfer, margin, true) else { continue };
+            change_kept(st, &seat.body, &format!("{key}|{name}|{chamfer:?}"), BoolOp::Cut, "the chamfer the shaft had on its end", || {
+                chamfer_tool(at, &section, seam, name)
+            })?;
+        }
+    }
+    // The spline's own chamfer on the ends of the teeth, cut on the round shaft before the spaces, as a blank is
+    // turned before its spline is cut: made again at whatever size the shaft now has. It goes on each end the
+    // teeth run out of: the free end, and the far end where the teeth run the whole face.
+    if let Some(size) = n.end_chamfer.filter(|size| *size > 0.0) {
+        let mut cut = false;
+        for (e, at, name, at_far) in [(&near, seat, "chamfer", false), (&far, &beyond, "chamfer:far", true)] {
+            if at_far && !teeth_end {
+                continue;
+            }
+            let Some(chamfer) = own_chamfer(e, top, size, true) else { continue };
+            let section = chamfer_section(&chamfer, margin, true).ok_or_else(|| {
+                DocError::Invalid(format!("`end_chamfer` must be less than {} mm: the chamfer would reach the axis", show_mm(top - margin)))
+            })?;
+            change_kept(st, &seat.body, &format!("{key}|{name}|{chamfer:?}"), BoolOp::Cut, "the chamfer on the end of the teeth", || {
+                chamfer_tool(at, &section, seam, name)
+            })?;
+            cut = true;
+        }
+        if !cut {
+            append_warning(
+                warning,
+                "the end chamfer was not cut: the teeth run out at no open end of the shaft (a shoulder stands at the end they start from)".into(),
+            );
+        }
+    }
+    // The cuts start past the face's free end, and run out through what the shaft has on its end. Where the teeth
+    // run the whole face and out of an open far end, the cutter runs right through the shaft: the cuts run out
+    // there too, and no space ends in the cutter's curve.
+    // At a shoulder the cuts start with the face: nothing past it is cut into.
+    let before = if near.open { -(near.run() + margin) } else { 0.0 };
+    let through_far = teeth_end && far.out;
+    let stop = if through_far { seat.room + far.run() + margin } else { length };
+    // A cutter's diameter is checked whether or not this rebuild rounds an end with it, so the same number is
+    // taken or refused whatever the length.
+    if let Some(diameter) = n.cutter_diameter {
+        cutter_radius(diameter, root, top.max(seat.radius) + margin, margin).map_err(DocError::Invalid)?;
+    }
+    let cutter = n.cutter_diameter.filter(|_| !through_far);
+    if let Some(diameter) = cutter {
+        // The cutter's curve runs on past the length, as far as the cutter's radius, through whatever stands above
+        // the teeth there: a shoulder, a larger step. The tools reach out past it as the cutter does, so the space
+        // comes out as an open slot; a tool that reached only past the teeth would bore under the step and leave a
+        // ring of it over the spaces.
+        let above = top.max(seat.radius);
+        let over = stands_over(st, seat, above, length, length + diameter / 2.0).unwrap_or(above);
+        let out_to = over + margin;
+        if over > above {
+            // The cutter's section must lie on one side of its axis: a step higher than the cutter's centre is
+            // more than this cutter can run out through.
+            let least = out_to - root + margin;
+            if !(diameter / 2.0 > least) {
+                return Err(DocError::Invalid(format!(
+                    "`cutter_diameter` must be more than {} mm to run out through the step past the end of the teeth, which stands {} mm above them: use a larger cutter, end the teeth further from the step, or leave `cutter_diameter` out (the spaces then end square)",
+                    show_mm(2.0 * least),
+                    show_mm(over - top)
+                )));
+            }
+        }
+        // Each tooth space is one tool: its straight part and its rounded end together.
+        let straight = seat.span(before, length);
+        return rounded_ends(st, n, plan, seat, diameter, margin, out_to, straight, &format!("{key}|spaces|{diameter}|{before}|{out_to}"));
+    }
+    // The straight part: everything outside the outline, from just past the free end for the length.
+    let (from, to) = seat.span(before, stop);
+    change_kept(st, &seat.body, &format!("{key}|ring|{from}|{to}"), BoolOp::Cut, "the spline", || {
+        let mut joints = Joints::default();
+        let (hole, names) = outline_loop(outline, 0.0, &mut joints, "space", count_of(n, plan))?;
+        let outer = Loop2::circle(Vec2::ZERO, top.max(seat.radius) + depth + margin);
+        let first = outer.segs.len();
+        let ring = Region2 { outer, holes: vec![hole] };
+        let body = extruded(&seat.plane, &ring, from, to, &joints, "ring that cuts the spline")?;
+        Ok(built(body, &|s| if s < first { Some("outside".to_string()) } else { names.get(s - first).cloned() }, ["start", "end"]))
+    })
+}
+
+/// Each tooth space of a picked shaft ends in the cutter's curve: the cutter's section in the space (see
+/// [`cutter_section`]) turned a quarter turn about the cutter's axis. That axis lies in the plane where the full
+/// depth ends, square to the space's middle line, at the root radius plus the cutter's radius from the shaft's
+/// axis. The quarter turn goes into the shaft, away from its free end, so the cut rises to the shaft's surface,
+/// and through a shoulder where the shaft was turned down. Equal spaces are made once and copied round the axis.
+#[allow(clippy::too_many_arguments)]
+fn rounded_ends(
+    st: &mut ModelState,
+    n: &SplineNumbers,
+    plan: &SplinePlan,
+    seat: &Seat,
+    diameter: f64,
+    margin: f64,
+    out_to: f64,
+    straight: (f64, f64),
+    key: &str,
+) -> Result<()> {
+    // The tools lie apart (each within its own space), so several can be one body without any intersection work.
+    // How many tools one cut takes: the kernel's work on a tool of many pieces that lie apart grows far faster
+    // than their count, so the spaces of a spline of many teeth are cut some at a time.
+    let left_out = usize::from(n.master != SplineMaster::None && plan.master.is_some());
+    let spaces = (plan.made.teeth as usize).saturating_sub(left_out);
+    let cuts = spaces.div_ceil(END_GROUP).max(1);
+    // The tools are made when the first cut that is not one of the kept ones needs them. Tools that touch
+    // (teeth that come to a point) cannot be one body: they are cut one by one instead.
+    let mut made: Option<EndTools> = None;
+    let mut loose = false;
+    for cut in 0..cuts {
+        let done = change_kept(st, &seat.body, &format!("{key}|{cut}/{cuts}"), BoolOp::Cut, "the rounded ends of the tooth spaces", || {
+            if made.is_none() {
+                made = Some(end_tools(n, plan, seat, diameter, margin, out_to, straight)?);
+            }
+            let all = made.as_ref().ok_or_else(|| DocError::Invalid("the rounded ends were not made".into()))?;
+            let group = all.tools.chunks(END_GROUP).nth(cut).unwrap_or(&[]);
+            let joined = match group {
+                // One tool left over for the last cut is its own body.
+                [one] => Some(one.clone()),
+                _ if all.apart && !group.is_empty() => {
+                    let bodies: Vec<Body> = group.iter().map(|t| t.body.clone()).collect();
+                    kernel::join_apart(&bodies)?.map(|one| Traced::step(one, &group.iter().collect::<Vec<&Traced>>()))
+                }
+                _ => None,
+            };
+            match joined {
+                Some(one) => Ok(one),
+                None => {
+                    loose = true;
+                    Err(DocError::Invalid("the tooth spaces touch".into()))
+                }
+            }
+        });
+        if let Err(e) = done {
+            return match made.take() {
+                Some(made) if loose && cut == 0 => cut_each(st, seat, made),
+                _ => Err(e),
+            };
+        }
+    }
+    Ok(())
+}
+
+/// How many rounded ends one cut takes.
+const END_GROUP: usize = 16;
+
+/// The tools of the rounded ends, and whether they lie apart.
+struct EndTools {
+    tools: Vec<Traced>,
+    apart: bool,
+}
+
+/// The rounded ends cut one tool at a time.
+fn cut_each(st: &mut ModelState, seat: &Seat, made: EndTools) -> Result<()> {
+    for tool in &made.tools {
+        change(st, &seat.body, tool, BoolOp::Cut, "the rounded end of a tooth space")?;
+    }
+    Ok(())
+}
+
+/// The tools of [`rounded_ends`]: one for each tooth space, each the whole space: the cutter's section swept along
+/// the straight part (`straight`, its span along the normal of the shaft's end plane) and then turned out of the
+/// shaft, as one body. The section reaches from the bottom of the space out to `out_to`: past whatever stands
+/// above the teeth where the cutter runs out (the shaft's own surface where it was turned down to the teeth, a
+/// larger step past the end of the teeth).
+fn end_tools(n: &SplineNumbers, plan: &SplinePlan, seat: &Seat, diameter: f64, margin: f64, out_to: f64, straight: (f64, f64)) -> Result<EndTools> {
+    let outline = &plan.shaft;
+    let (root, top) = (outline.least_radius, outline.most_radius);
+    // The section must lie on one side of the cutter's axis, with room to spare.
+    let rc = cutter_radius(diameter, root, out_to, margin).map_err(DocError::Invalid)?;
+    let teeth = plan.made.teeth;
+    if teeth == 0 {
+        return Err(DocError::Invalid("`teeth` must be more than 0".into()));
+    }
+    let pitch = TAU / f64::from(teeth);
+    // A master spline: the tooth left out has no space after it of its own (the gap from the tooth before runs on
+    // over it), and the space after a wide tooth's first tooth is left uncut.
+    let (turn, skip) = match (&plan.master, n.master) {
+        (Some(m), SplineMaster::ToothOut | SplineMaster::WideTooth) => (m.turn, Some(m.tooth)),
+        _ => (0.0, None),
+    };
+    let count = (teeth as usize).saturating_sub(usize::from(skip.is_some()));
+    if count > MAX_ROUNDED_SPACES {
+        return Err(DocError::Invalid(format!(
+            "the spline has {count} tooth spaces to end in the cutter's curve, more than the {MAX_ROUNDED_SPACES} a Shaft Spline rounds: leave out `cutter_diameter` (the spaces then end square) or use fewer teeth"
+        )));
+    }
+    let at_end = seat.plane.offset(seat.inward * n.length);
+    let into = seat.direction_in();
+    // The sense of the quarter turn: the kernel turns a section towards its plane's normal; into the shaft is
+    // against it when the shaft runs on against the normal. Checked on the first tool by its exact bounds.
+    let mut angle = FRAC_PI_2 * seat.inward;
+    let mut checked = false;
+    let mut tools = Vec::with_capacity(count);
+    let mut apart = true;
+    // The size of the work: the largest coordinate the section and the cutter's axis reach.
+    let reach = at_end.origin.x.abs().max(at_end.origin.y.abs()).max(at_end.origin.z.abs()) + root + rc;
+    let bend = ARC_BEND * (1.0 + reach);
+    let same = 1e-9 * (1.0 + top);
+    let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]) <= same;
+    let mut made: Vec<MadeSpace> = Vec::new();
+    // Which way the kernel turns a copy about the shaft's axis: settled on the first copy by where it lies.
+    let mut sense = 1.0;
+    // The shaft's axis as the section's plane has it (its normal).
+    let about = into * seat.inward;
+    let mut sense_checked = false;
+    for k in 0..teeth {
+        if Some(k) == skip {
+            continue;
+        }
+        let tooth_at = turn + pitch * f64::from(k);
+        let section = crate::shaft_spline::space_section(outline, tooth_at, out_to)
+            .map_err(|e| DocError::Invalid(format!("the rounded end of a tooth space: {e}")))?;
+        apart &= section.apart;
+        let Section { segs, names, middle, corners, joints } = cutter_section(&section, out_to, bend)?;
+        let (s, c) = middle.sin_cos();
+        // The space's two corners as they lie with its middle line on angle 0: equal spaces are equal there.
+        let local = |p: [f64; 2]| [p[0] * c + p[1] * s, p[1] * c - p[0] * s];
+        let (from, to) = (local(corners.0), local(corners.1));
+        let pieces = segs.len();
+        let like = made.iter().find(|m| m.pieces == pieces && near(m.from, from) && near(m.to, to));
+        let copied = match like {
+            Some(m) => {
+                let by = middle - m.middle;
+                let mut body = kernel::transform(&m.tool.body, Vec3::ZERO, at_end.origin, about, sense * by)?;
+                if !sense_checked && by.sin().abs() > 1e-3 {
+                    // A copy must lie about the space's own middle line, not about that line's mirror image.
+                    let bb = body.exact_bounds()?;
+                    let centre = (bb.min + bb.max) * 0.5 - at_end.origin;
+                    let lies = centre.dot(at_end.y).atan2(centre.dot(at_end.x));
+                    let off = |a: f64| ((lies - a + std::f64::consts::PI).rem_euclid(TAU) - std::f64::consts::PI).abs();
+                    if off(m.middle - by) < off(middle) {
+                        sense = -1.0;
+                        body = kernel::transform(&m.tool.body, Vec3::ZERO, at_end.origin, about, sense * by)?;
+                    }
+                    sense_checked = true;
+                }
+                // The copy's faces are the first tool's, each with this space's number in its name.
+                Some(Traced::step(body, &[&for_space(&m.tool, k)]))
+            }
+            None => None,
+        };
+        let tool = match copied {
+            Some(tool) => tool,
+            None => {
+                let region = Region2 { outer: Loop2 { segs }, holes: Vec::new() };
+                let axis_at = Vec2::new((root + rc) * c, (root + rc) * s);
+                let axis_dir = Vec2::new(-s, c);
+                let mut body = revolved(&at_end, &region, axis_at, axis_dir, angle, &joints)?;
+                if !checked {
+                    // The tool must lie past the plane where the full depth ends, into the shaft.
+                    let bb = body.exact_bounds()?;
+                    let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
+                    for corner in 0..8 {
+                        let q = Vec3::new(
+                            if corner & 1 == 0 { bb.min.x } else { bb.max.x },
+                            if corner & 2 == 0 { bb.min.y } else { bb.max.y },
+                            if corner & 4 == 0 { bb.min.z } else { bb.max.z },
+                        );
+                        let h = (q - at_end.origin).dot(into);
+                        low = low.min(h);
+                        high = high.max(h);
+                    }
+                    if high < -low {
+                        angle = -angle;
+                        body = revolved(&at_end, &region, axis_at, axis_dir, angle, &joints)?;
+                    }
+                    checked = true;
+                }
+                // Its faces by what they are, with no number yet: the first tool stands for every equal space.
+                let end = built(body, &|s| names.get(s).map(|name| format!("space:end:{name}")), ["space:end:start", "space:end:stop"]);
+                // The same section along the straight part: its end is the rounded end's start, face on face.
+                let (low, high) = straight;
+                let prism = extruded(&seat.plane, &region, low, high, &joints, "straight part of a tooth space")?;
+                let prism = built(prism, &|s| names.get(s).map(|name| format!("space:{name}")), ["space:start", "space:stop"]);
+                let whole = kernel::boolean(&prism.body, &end.body, BoolOp::Union)?
+                    .ok_or_else(|| DocError::Invalid("the tool of a tooth space came to nothing".into()))?;
+                let tool = Traced::step(whole, &[&prism, &end]);
+                made.push(MadeSpace { pieces, from, to, middle, tool: tool.clone() });
+                for_space(&tool, k)
+            }
+        };
+        tools.push(tool);
+    }
+    Ok(EndTools { tools, apart })
+}
+
+/// A tooth space's tool as first made, kept so that equal spaces are copies of it: how many pieces its section has,
+/// its two corners as they lie with its middle line on angle 0, the angle of that line, and the tool.
+struct MadeSpace {
+    pieces: usize,
+    from: [f64; 2],
+    to: [f64; 2],
+    middle: f64,
+    tool: Traced,
+}
+
+/// The widest stretch of an arc one cubic piece stands for in a cutter's section (radians, thirty degrees): the piece
+/// is then within four ten-millionths of the arc's radius of the arc, and an arc up to that wide is one face (the kernel
+/// splits a face where pieces of a curve join with only their directions in common).
+const ARC_SPAN: f64 = std::f64::consts::PI / 6.0;
+
+/// The widest tooth space (radians, 170 degrees) that ends in the cutter's curve: the section's walls stand on the
+/// space's two corners along its middle line, which a space near half a turn wide has no room for.
+const MOST_SPACE: f64 = 170.0 * std::f64::consts::PI / 180.0;
+
+/// How far the pieces that stand for an arc in a cutter's section are bent off it, as a share of the size of the
+/// work (one and its largest coordinate): thirty times the share within which the kernel takes a turned curve for
+/// an arc (`FIT_REL` of solidcore's analytic revolution, a thousand-millionth), so the bend is seen, and far below
+/// anything a part is made to (a few millionths of a millimetre on a part of a hundred millimetres).
+const ARC_BEND: f64 = 3e-8;
+
+/// An arc as cubic pieces of at most [`ARC_SPAN`] each, each bent off the arc by `bend` (its two inner points moved
+/// along the arc's radius, one out and one in, so it runs a little outside the arc and then a little inside). A
+/// cutter's section holds no arc, and nothing the kernel takes for one: it makes a curve it takes for an arc, turned
+/// about a line, a torus, and its check then refuses the torus of a short arc (the torus's numbers are worked back
+/// out of its spline form, which a short arc does not fix closely enough).
+///
+/// The pieces of one arc carry on from one another without a corner (where one piece ends bent in, the next
+/// starts bent out by as much), and the points where they meet are added to `joints`: the arc is one curve, so
+/// one face.
+fn arc_cubics(centre: [f64; 2], radius: f64, start: f64, sweep: f64, bend: f64, out: &mut Vec<Seg2>, joints: &mut Vec<[f64; 2]>) {
+    let spans = (sweep.abs() / ARC_SPAN).ceil().clamp(1.0, 64.0) as u32; // 1 to 64
+    let step = sweep / f64::from(spans);
+    let reach = 4.0 / 3.0 * (step / 4.0).tan() * radius;
+    // A point of the arc, the direction of travel there and the direction out along the radius.
+    let at = |j: u32| {
+        let (s, c) = (start + step * f64::from(j)).sin_cos();
+        ([centre[0] + radius * c, centre[1] + radius * s], [-s, c], [c, s])
+    };
+    for j in 0..spans {
+        let ((a, da, na), (b, db, nb)) = (at(j), at(j + 1));
+        if j + 1 < spans {
+            joints.push(b);
+        }
+        out.push(Seg2::Cubic {
+            p0: v2(a),
+            p1: Vec2::new(a[0] + reach * da[0] + bend * na[0], a[1] + reach * da[1] + bend * na[1]),
+            p2: Vec2::new(b[0] - reach * db[0] - bend * nb[0], b[1] - reach * db[1] - bend * nb[1]),
+            p3: v2(b),
+        });
+    }
+}
+
+/// The section a cutter takes out of one tooth space where it leaves the shaft, on the plane where the full depth
+/// ends: the space's own sides and bottom (`floor`: from the corner of the tooth after the space, down its side,
+/// along the bottom and up to the corner of the tooth before), then from those corners two walls along the space's
+/// middle line up to `out_to` from the shaft's axis, and a top square to that line. Turned about the cutter's axis
+/// the walls are flat, the top a cylinder, straight sides cones and each curve a surface of its own; no piece is an
+/// arc (see [`arc_cubics`], which bends its pieces by `bend`). With it: the angle of the middle line, and the corners
+/// of the tooth before and of the tooth after.
+fn cutter_section(space: &SpaceSection, out_to: f64, bend: f64) -> Result<Section> {
+    let (floor, after, before) = (&space.floor, space.start, space.end);
+    let from = before[1].atan2(before[0]);
+    let wide = (after[1].atan2(after[0]) - from).rem_euclid(TAU);
+    if !(wide > 0.0 && wide < MOST_SPACE) {
+        return Err(DocError::Invalid(
+            "a tooth space is too wide to end in the cutter's curve: leave out `cutter_diameter` (the spaces then end square) or use more teeth"
+                .into(),
+        ));
+    }
+    let middle = from + 0.5 * wide;
+    let (s, c) = middle.sin_cos();
+    let mut segs = Vec::new();
+    let mut names: Vec<String> = Vec::new();
+    let mut points = Vec::new();
+    let roles: Vec<Role> = floor.iter().map(Piece::role).collect();
+    for (piece, name) in floor.iter().zip(floor_names(&roles)) {
+        match piece {
+            Piece::Arc { centre, radius, start, sweep, .. } => {
+                if *radius > 1e-9 && sweep.abs() > 1e-12 {
+                    arc_cubics(*centre, *radius, *start, *sweep, bend, &mut segs, &mut points);
+                }
+            }
+            _ => piece_segs(piece, &mut segs, &mut points)?,
+        }
+        // Each span of the piece by the piece's name.
+        let spans = segs.len() - names.len();
+        names.extend((0..spans).map(|span| span_name(&name, span)));
+    }
+    // Where two spans of one curve meet: the turned tool has one face for the whole curve.
+    let mut joints = Joints::default();
+    for q in &points {
+        joints.add(v2(*q));
+    }
+    // Up from a corner along the middle line to `out_to` from the axis.
+    let up = |p: [f64; 2]| {
+        let rise = out_to - (p[0] * c + p[1] * s);
+        Vec2::new(p[0] + rise * c, p[1] + rise * s)
+    };
+    let (high_before, high_after) = (up(before), up(after));
+    segs.push(Seg2::Line { a: v2(before), b: high_before });
+    segs.push(Seg2::Line { a: high_before, b: high_after });
+    segs.push(Seg2::Line { a: high_after, b: v2(after) });
+    // The wall above the tooth before the space, the top, the wall above the tooth after it.
+    names.extend(["wall:1", "top", "wall:0"].map(String::from));
+    Ok(Section { segs, names, middle, corners: (before, after), joints })
+}
+
+/// A cutter's section in one tooth space ([`cutter_section`]): its segments in order, the name of each (the piece
+/// of the space's floor it is a span of, then the two walls and the top), the angle of the space's middle line,
+/// the corners of the tooth before and of the tooth after, and where spans of one curve meet.
+struct Section {
+    segs: Vec<Seg2>,
+    names: Vec<String>,
+    middle: f64,
+    corners: ([f64; 2], [f64; 2]),
+    joints: Joints,
+}
+
+/// The one body of `region` on `plane` turned by `angle` about the line through `at` along `dir`, with one face
+/// for each curve whose spans meet at `joints` (where the kernel cannot make it so, a face for each span).
+fn revolved(plane: &Plane, region: &Region2, at: Vec2, dir: Vec2, angle: f64, joints: &Joints) -> Result<Body> {
+    let one_curve = |s: &Seg2, t: &Seg2| joints.joins(s, t);
+    let whole = kernel::revolve_whole_sides(plane, std::slice::from_ref(region), at, dir, angle, &one_curve).ok();
+    let mut bodies = match whole {
+        Some(bodies) => bodies,
+        None => kernel::revolve(plane, std::slice::from_ref(region), at, dir, angle)?,
+    };
+    match (bodies.pop(), bodies.is_empty()) {
+        (Some(body), true) => Ok(body),
+        _ => Err(DocError::Invalid("the rounded end of a tooth space is not one solid".into())),
+    }
+}
+
+/// The hub's opening cut into a picked bore: filled in first when the bore is wider than the hub's teeth reach,
+/// then one plug whose outline is the opening, cut from the bore's free end for the length. No rounded end.
+fn cut_bore(st: &mut ModelState, n: &SplineNumbers, plan: &SplinePlan, seat: &Seat, warning: &mut Option<String>) -> Result<()> {
+    let outline = &plan.hub;
+    // The opening's smallest radius is the circle of the tips of the hub's teeth, its largest that of its spaces.
+    let (minor, major) = (outline.least_radius, outline.most_radius);
+    let length = n.length;
+    check_room(seat, length, "bore")?;
+    let tol = same_size(seat.radius);
+    let margin = tool_margin(major - minor);
+    // The two ends of the bore, as the hub has them before this feature: a chamfer the bore already has at an
+    // entry is cut through, and follows the tops of the hub's teeth to their size. The far end matters where the
+    // teeth run to it.
+    let old_radius = seat.radius;
+    let resized = (old_radius - minor).abs() > tol;
+    let teeth_end = length >= seat.room - tol;
+    let beyond = other_end(seat);
+    let near = past_end(st, seat, true, major);
+    let far = if teeth_end { past_end(st, &beyond, true, major) } else { End::shut(old_radius) };
+    let seam = seam_angle(n, plan, true);
+    // The spline's numbers win: a bore wider than the tips of the hub's teeth is first filled in to them.
+    if seat.radius > minor + tol {
+        let sleeve = Region2 { outer: Loop2::circle(Vec2::ZERO, seat.radius + margin), holes: vec![Loop2::circle(Vec2::ZERO, minor)] };
+        let (from, to) = seat.span(0.0, length);
+        let body = extruded(&seat.plane, &sleeve, from, to, &Joints::default(), "sleeve that fills the bore")?;
+        // Its hole is the bore from now on: the tops of the hub's teeth.
+        change(st, &seat.body, &built_round(body, &sleeve, "outside", "bore"), BoolOp::Union, "filling the bore")?;
+        for (e, at) in [(&near, seat), (&far, &beyond)] {
+            if e.end > 0.0 && e.cone {
+                // The bore's own entry (a chamfer, made at the old size) is filled with it, square, to the end
+                // of the body; the chamfer is cut again below, at the new size.
+                let ring = Region2 { outer: Loop2::circle(Vec2::ZERO, e.rim + margin), holes: vec![Loop2::circle(Vec2::ZERO, minor)] };
+                let (from, to) = at.span(-e.end, 0.0);
+                let body = extruded(&at.plane, &ring, from, to, &Joints::default(), "ring that fills the bore's entry")?;
+                change(st, &seat.body, &built_round(body, &ring, "outside", "bore"), BoolOp::Union, "filling the bore's entry")?;
+            }
+        }
+        // The filled bore is still the bore: it keeps the name the bore's own face had.
+        also_from(st, &seat.body, "bore", seat.face);
+    }
+    // A plain chamfer the bore had at an entry keeps its size on the tops of the hub's teeth: cut again there.
+    if resized {
+        for (e, at, name) in [(&near, seat, "blank:chamfer"), (&far, &beyond, "blank:chamfer:far")] {
+            if !(e.end > 0.0 && e.cone) {
+                continue;
+            }
+            let chamfer = Chamfer { radius: minor, radial: e.rim - old_radius, axial: e.end, past: e.end, flush: None };
+            let Some(section) = chamfer_section(&chamfer, margin, false) else { continue };
+            change(st, &seat.body, &chamfer_tool(at, &section, seam, name)?, BoolOp::Cut, "the chamfer the bore had at its entry")?;
+        }
+    }
+    // The spline's own chamfer at the bore's entry, cut on the round bore before the spaces: out from the tops of
+    // the hub's teeth, at whatever size they now have. It goes on each end the teeth run out of: the free end,
+    // and the far end where the teeth run the whole bore.
+    if let Some(size) = n.entry_chamfer.filter(|size| *size > 0.0) {
+        let mut cut = false;
+        for (e, at, name, at_far) in [(&near, seat, "chamfer", false), (&far, &beyond, "chamfer:far", true)] {
+            if at_far && !teeth_end {
+                continue;
+            }
+            let Some(chamfer) = own_chamfer(e, minor, size, false) else { continue };
+            // At a step into a counterbore, a chamfer wider than the ledge would cut in under the wall.
+            if chamfer.flush.is_some() && !beside_clear(st, at, minor + size) {
+                continue;
+            }
+            let section = chamfer_section(&chamfer, margin, false)
+                .ok_or_else(|| DocError::Invalid(format!("`entry_chamfer` cannot be cut in a bore of {} mm", show_mm(2.0 * minor))))?;
+            change(st, &seat.body, &chamfer_tool(at, &section, seam, name)?, BoolOp::Cut, "the chamfer at the bore's entry")?;
+            cut = true;
+        }
+        if !cut {
+            append_warning(
+                warning,
+                "the entry chamfer was not cut: the teeth run out at no open end of the bore, or the chamfer is wider than the ledge there".into(),
+            );
+        }
+    }
+    let mut joints = Joints::default();
+    let (opening, names) = outline_loop(outline, plan.hub_start, &mut joints, "tooth", count_of(n, plan))?;
+    let plug = Region2 { outer: opening, holes: Vec::new() };
+    // The plug starts past the bore's free end, and runs out through what the bore has at its entry; where the
+    // teeth run the whole bore and out of an open far end, it runs out there too.
+    let stop = if teeth_end && far.out { seat.room + far.run() + margin } else { length };
+    // At the bottom of a blind bore the plug starts with the face: nothing past it is cut into.
+    let before = if near.open { -(near.run() + margin) } else { 0.0 };
+    let (from, to) = seat.span(before, stop);
+    let body = extruded(&seat.plane, &plug, from, to, &joints, "plug that cuts the hub's teeth")?;
+    change(st, &seat.body, &built(body, &|s| names.get(s).cloned(), ["start", "end"]), BoolOp::Cut, "the hub's spline")
+}

@@ -23,7 +23,8 @@
 //! The families: [`measure`] (mass properties, area, box, point class, gap samples, the picks'
 //! distances and normals), [`contact`] (whether bodies meet, their boundary distance),
 //! [`boolean`], [`stitch`], [`prism`] (planar region booleans and extrusion, prism sections),
-//! [`cell_grid`] (the cells of a grid over a profile).
+//! [`cell_grid`] (the cells of a grid over a profile), [`shaft_spline`] (the outlines of a splined
+//! shaft and its hub from plain numbers).
 //!
 //! Operations change the body they are given, as the kernel does. An application that keeps
 //! its input copies it first ([`Body::copy`]).
@@ -68,6 +69,7 @@ pub mod prism;
 pub mod provenance;
 pub mod record_check;
 pub mod session;
+pub mod shaft_spline;
 pub mod split;
 pub mod step_assembly;
 pub mod stitch;

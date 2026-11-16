@@ -64,6 +64,7 @@ pub(crate) use file::{NAMES_MESSAGE, UP_MESSAGE, names_form, up_form, usable_pat
 pub(crate) use inspect::color_param;
 pub use join_pieces::{Addition, addition};
 pub use parts::part_length_label;
+pub use shaft_spline::{SplineArc, SplineCircle, SplineMaster, SplineOutline, SplinePart, SplinePreview, SplineRefusal, shaft_spline_preview};
 pub use sketch::dimension_roles;
 pub(crate) use sketch::face::face_pick_form;
 pub use sketch_construction::{
@@ -104,6 +105,7 @@ mod script;
 mod section;
 mod selection;
 pub mod settings;
+mod shaft_spline;
 pub(crate) use clipboard::{component_path_form, copy_keys};
 pub(crate) use component::matrix::{rigid as rigid_matrix, tolerance as matrix_tolerance, with_exprs as matrix_with_exprs};
 pub(crate) use component::{base_transform, move_vector};
@@ -391,6 +393,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(panels::COMMANDS.iter());
     v.extend(config::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());
+    v.extend(shaft_spline::COMMANDS.iter());
     v.extend(bom::COMMANDS.iter());
     v.extend(mass_properties::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());

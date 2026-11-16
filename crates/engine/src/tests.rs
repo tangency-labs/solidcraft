@@ -1186,6 +1186,14 @@ fn hostile_params_never_panic() {
         "through_all",
         "depth",
         "dot_grid",
+        "teeth",
+        "module",
+        "pressure_angle",
+        "shaft_face",
+        "bore_face",
+        "make",
+        "tip_corner",
+        "master_spline",
     ];
     // Commands are independent; worker threads take them one at a time (their costs vary a lot).
     let ids: Vec<&str> = command_specs()

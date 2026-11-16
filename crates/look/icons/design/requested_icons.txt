@@ -258,6 +258,7 @@ select	false
 send	false
 settings	false
 settings_profile	false
+shaft_spline	false
 sheet	false
 sheet_rules	false
 shell	false

@@ -23,6 +23,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::ViewNavigator(_) => Some("view.navigator"),
         Kind::InsertDrawing(p) => Some(if p.command.ends_with("dxf") { "sketch.insert_dxf" } else { "sketch.insert_svg" }),
         Kind::InsertAirfoil(_) => Some("sketch.insert_airfoil"),
+        Kind::ShaftSpline(_) => Some(crate::dialogs_shaft_spline::COMMAND),
         Kind::Sketch => Some("sketch.create"),
         Kind::SketchIntersect { .. } => Some("sketch.intersect"),
         Kind::SketchProject { .. } => Some("sketch.project"),
@@ -426,6 +427,11 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         crate::dialogs_move::type_row(app, d, ui);
         let n = d.inputs.len();
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 1..n);
+    } else if matches!(d.kind, Kind::ShaftSpline(_)) {
+        // The face a part's teeth start from shows once the part's round face is picked (#17693).
+        for rows in crate::dialogs_shaft_spline::shown_picks(&d.inputs) {
+            input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, rows);
+        }
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
     }
@@ -443,6 +449,18 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::ViewNavigator(form) => crate::view_gizmo::rows(app, ui, form, &d.inputs),
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::rows(ui, p),
         Kind::InsertAirfoil(a) => crate::dialogs_insert_airfoil::rows(ui, a),
+        Kind::ShaftSpline(k) => {
+            // A face taken by a row it does not belong in goes to its own row (a bore out of Shaft, a shaft out
+            // of Bore, a start face out of a round face's row). After any change of the picks the row that
+            // waits next takes the next click: the face a picked part's teeth start from, before any other
+            // free row.
+            if crate::dialogs_shaft_spline::sort_picks(app, k, &mut d.inputs).is_some()
+                && let Some(next) = crate::dialogs_shaft_spline::next_pick(&d.inputs)
+            {
+                d.active = next;
+            }
+            enter |= crate::dialogs_shaft_spline::rows(app, ui, k, &d.inputs)
+        }
         Kind::Sketch => {
             if d.error.is_some() && matches!(d.inputs.first().and_then(|i| i.items.first()), Some(Sel::Face { .. })) {
                 ui_kit::text(

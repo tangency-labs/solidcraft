@@ -50,7 +50,7 @@ rebuilds on the taller block.
 
 | Panel | Features |
 |---|---|
-| Create | extrude (one side, two sides, symmetric, taper, start offset, to a distance or through all; new body, join, cut, intersect; thin walls along curves), revolve, sweep, loft, box, cylinder, sphere, torus, coil, pipe, rib, web, emboss, hole (simple, counterbore, countersink, tapped; on faces, at distances from edges, or at sketch points), thread, rectangular/circular/path patterns, mirror |
+| Create | extrude (one side, two sides, symmetric, taper, start offset, to a distance or through all; new body, join, cut, intersect; thin walls along curves), revolve, sweep, loft, box, cylinder, sphere, torus, coil, pipe, rib, web, emboss, hole (simple, counterbore, countersink, tapped; on faces, at distances from edges, or at sketch points), thread, shaft spline, rectangular/circular/path patterns, mirror |
 | Modify | press pull, fillet, chamfer, shell, draft, scale, combine, split body, offset face, replace face, move/copy, align, remove |
 | Construct | offset plane (at a distance or through a point), plane at angle, plane along path |
 | Inspect | measure, section analysis, interference, compare bodies, curvature comb and map, zebra, draft, minimum radius, isocurves, centre of mass |
@@ -226,6 +226,22 @@ on `solid.hole`.
 The **Thread** feature's **Hand** is **Right** (the default), **Left**, or **Both** (a right- and
 a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "left"` (or `"right"`,
 `"both"`) on `solid.thread`; omitted, a thread is right-handed. Tapped holes are right-handed.
+
+**Shaft Spline** (MODEL › CREATE, in the Create menu) is one History feature that cuts a spline into a
+picked round shaft or bore, or, with nothing picked, makes a new splined shaft, a hub or both. Pick
+the outside of a shaft to cut the spline into it, a bore to cut the hub's teeth, or both to cut a
+pair that fits. The **Type** is Involute, Straight-sided or Serration. The dialog draws the teeth as
+you change them and says in words when the numbers make no spline. By default the shaft's diameter
+follows the spline's numbers (more teeth of one size make a larger shaft); **Fixed diameter** keeps
+the shaft's own size and works the spline's size out from it. A round face has two ends, so each
+picked part takes a second pick, **Shaft start** or **Bore start**: the face the teeth start from (the
+part's end, a shoulder or a chamfer). **Length** is measured along the picked round face from that
+end. **Round the ends** makes each tooth space end in the curve a
+cutter of the given diameter leaves. **End chamfer** (shaft) and **Entry chamfer** (hub) are cut by
+the spline itself, so they follow the size and the tooth count. A **Master spline** (a tooth left
+out, or a wide tooth) lets the hub go on one way only. The **Fit** section sets the clearances, and
+**As made** shows what they come to. Scripts use `shaft_spline.insert`. How the numbers work is in the
+[shaft spline details](https://github.com/tangency-labs/solidcraft/blob/main/docs/shaft-splines.md).
 
 Fillets and chamfers handle straight edges between planar faces, whole smooth loops, runs of
 neighbouring edges with mitred or spherical corners, and closed chains of curved edges (a rolling

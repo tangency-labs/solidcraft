@@ -70,6 +70,10 @@ impl Walk for crate::document::ExtendMode {}
 impl Walk for crate::document::RuledMode {}
 impl Walk for crate::document::RuledCorners {}
 impl Walk for crate::document::ExtrudeConvention {}
+impl Walk for crate::shaft_spline::SplineForm {}
+impl Walk for crate::shaft_spline::SplineMake {}
+impl Walk for crate::shaft_spline::SplineCorner {}
+impl Walk for crate::shaft_spline::SplineMaster {}
 impl Walk for crate::thread_forms::ThreadForm {}
 impl Walk for crate::thread_forms::ThreadHand {}
 impl Walk for crate::thread_forms::ThreadTip {}

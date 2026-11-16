@@ -163,6 +163,37 @@ thread
   inputs:
     Length = thread.length (Length)
   expressions: thread.length
+shaft_spline
+  inputs:
+    Teeth = shaft_spline.teeth (Unitless)
+    Length = shaft_spline.length (Length)
+    Module = shaft_spline.module (Length)
+    Pressure angle = shaft_spline.pressure_angle (Angle)
+    Addendum = shaft_spline.addendum (Unitless)
+    Dedendum = shaft_spline.dedendum (Unitless)
+    Root fillet = shaft_spline.root_fillet (Unitless)
+    Profile shift = shaft_spline.profile_shift (Unitless)
+    Thinning = shaft_spline.thinning (Length)
+    Hub addendum = shaft_spline.hub_addendum (Unitless)
+    Tip clearance = shaft_spline.tip_clearance (Length)
+    Form clearance = shaft_spline.form_clearance (Length)
+    Major diameter = shaft_spline.major_diameter (Length)
+    Minor diameter = shaft_spline.minor_diameter (Length)
+    Tooth width = shaft_spline.tooth_width (Length)
+    Flank angle = shaft_spline.flank_angle (Angle)
+    Root round = shaft_spline.root_round (Length)
+    Tip size = shaft_spline.tip_size (Length)
+    Major clearance = shaft_spline.major_clearance (Length)
+    Minor clearance = shaft_spline.minor_clearance (Length)
+    Hub tip round = shaft_spline.hub_tip_round (Length)
+    Side clearance = shaft_spline.side_clearance (Length)
+    Hub root round = shaft_spline.hub_root_round (Length)
+    Hub diameter = shaft_spline.hub_diameter (Length)
+    Master angle = shaft_spline.master_angle (Angle)
+    Cutter diameter = shaft_spline.cutter_diameter (Length)
+    End chamfer = shaft_spline.end_chamfer (Length)
+    Entry chamfer = shaft_spline.entry_chamfer (Length)
+  expressions: shaft_spline.teeth, shaft_spline.length, shaft_spline.module, shaft_spline.pressure_angle, shaft_spline.addendum, shaft_spline.dedendum, shaft_spline.root_fillet, shaft_spline.profile_shift, shaft_spline.thinning, shaft_spline.hub_addendum, shaft_spline.tip_clearance, shaft_spline.form_clearance, shaft_spline.major_diameter, shaft_spline.minor_diameter, shaft_spline.tooth_width, shaft_spline.flank_angle, shaft_spline.root_round, shaft_spline.tip_size, shaft_spline.major_clearance, shaft_spline.minor_clearance, shaft_spline.hub_tip_round, shaft_spline.side_clearance, shaft_spline.hub_root_round, shaft_spline.hub_diameter, shaft_spline.master_angle, shaft_spline.cutter_diameter, shaft_spline.end_chamfer, shaft_spline.entry_chamfer
 loft
 sweep
 sweep_options
