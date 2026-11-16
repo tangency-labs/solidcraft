@@ -1100,9 +1100,8 @@ impl OffsetExecutive {
     /// from the open face's rim, which the step walls close); the segments are chained end to end, each end meeting exactly
     /// one other within the larger of the two segments' tolerances. A chain that does not
     /// close is closed by the straight stretch from its last end to its first only where an
-    /// offset edge runs along all of it (its ends and three points between within the
-    /// chain's tolerance, the largest of its segments', as `close_loop_gap` checks its
-    /// segment on its face). A polygon of three or more corners on one plane within the
+    /// offset edge runs along all of it: a straight edge with both its ends within the
+    /// chain's tolerance, the largest of its segments' (`along_an_edge`). A polygon of three or more corners on one plane within the
     /// chain's tolerance, twice its area more than that tolerance times its perimeter, is
     /// filled; any other chain is left as it is (the result is then judged as before). The
     /// face is kept out of the face extensions: it closes the gap exactly.
@@ -1323,21 +1322,24 @@ fn only(
     found.next().is_none().then_some(first)
 }
 
-/// Whether an edge of `b` runs along the straight stretch from `p` to `q`: both ends and
-/// the points at a quarter, half and three quarters of it within `tol` of the edge.
+/// Whether an edge of `b` runs along the straight stretch from `p` to `q`: a straight edge
+/// (its control points within `tol` of one line, so the whole curve is) with both ends of
+/// the stretch within `tol` of it. The distance to a straight segment is convex, so the
+/// whole stretch is then within `tol` of the edge.
 fn along_an_edge(k: &Kernel, b: &Brep, p: Point3, q: Point3, tol: f64) -> Result<bool> {
-    'edges: for &e in b.edge_list() {
-        if b.edge(e)?.curve.is_none() {
+    for &e in b.edge_list() {
+        let Some(curve) = b.edge(e)?.curve.as_ref() else {
+            continue;
+        };
+        if !crate::topology::brep::trim_extend::is_straight(curve, tol)? {
             continue;
         }
-        for ii in 0..5 {
-            let w = f64::from(ii) / 4.0;
-            let x = p + (q - p) * w;
-            if !closest_point(k, b, e, x)?.is_some_and(|cp| cp.distance <= tol) {
-                continue 'edges;
-            }
+        let near = |x: Point3| -> Result<bool> {
+            Ok(closest_point(k, b, e, x)?.is_some_and(|cp| cp.distance <= tol))
+        };
+        if near(p)? && near(q)? {
+            return Ok(true);
         }
-        return Ok(true);
     }
     Ok(false)
 }
