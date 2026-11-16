@@ -441,6 +441,36 @@ fn join_up_to_a_curved_face_adds_the_material_between() {
     assert!((joined - want).abs() < want * 1e-3, "joined {joined}, want {want}");
 }
 
+/// #17339: a Join To Object up to the side of a cone adds the post between the profile and that
+/// side, whether the cone widens along its axis or narrows (its record's half angle is negative,
+/// which the split at the To face's surface refused as "not supported yet").
+#[test]
+fn join_up_to_a_cone_that_narrows_or_widens_adds_the_material_between() {
+    // Each case: the taper, and the volume the post adds. The post runs from y = -30 to the
+    // cone's side y = -sqrt(r(z)^2 - x^2) with r(z) = 10 + z tan(taper), over x in [-2, 2] and z
+    // in [8, 12]. Its section at height z is 4 * 30 less the circle's segment area over x in
+    // [-2, 2], which is 2 sqrt(r^2 - 4) + r^2 asin(2 / r); the volume is that section integrated
+    // over z from 8 to 12, worked out by hand. `side_y` is r(10) = 10 + 10 tan(taper), where the
+    // cone's side meets the plane x = 0 at mid height.
+    for (taper, side_y, want) in [(5.0f64, 10.874_886_635_259, 306.987_791_698_09), (-5.0f64, 9.125_113_364_741, 335.175_842_137_3)] {
+        let mut s = Session::default();
+        // A frustum of radius 10 at z 0, 20 tall: radius 10 + z tan(taper).
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Base", "distance": 20, "taper": format!("{taper} deg"), "body_name": "Frustum"}));
+        let before = body(&mut s, "Frustum")["volume_mm3"].as_f64().unwrap_or(0.0);
+        // A 4 by 4 post from the plane y = -30 along +y, over x in [-2, 2] and z in [8, 12].
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -30, 0], "x_dir": [-1, 0, 0], "y_dir": [0, 0, 1]}, "name": "P"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-2, 8], "p1": [2, 12]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [0, -side_y, 10], "operation": "join"}));
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "taper {taper}: {:?}", s.model.results);
+        let added = body(&mut s, "Frustum")["volume_mm3"].as_f64().unwrap_or(0.0) - before;
+        assert!((added - want).abs() < want * 1e-3, "taper {taper}: added {added}, want {want}");
+    }
+}
+
 /// #16713: a profile that only partly lies over the To face is refused, not run on past it.
 #[test]
 fn cut_to_a_curved_face_the_profile_partly_misses_is_refused() {
