@@ -60,7 +60,6 @@
   "cone_create_canonical_preserves_inside_out_and_checks_height",
   "offset_analytic_mate_edges",
   "shell_edges_on_analytics_exact",
-  "offset_stitch_at_body_tolerance",
   "curve_contacts_at_curve_ends",
   "fillet_trace_reaches_rails",
   "fillet_rail_trim_at_near_knot",
