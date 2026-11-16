@@ -325,6 +325,27 @@ pub struct MembersClosest {
     pub to: [f64; 3],
 }
 
+/// The entity a ray meets first ([`Body::fire_ray`]), by its index in the body's record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RayEntity {
+    /// Record face `i`.
+    Face(usize),
+    /// Record edge `i`.
+    Edge(usize),
+    /// Record vertex `i`.
+    Vertex(usize),
+}
+
+/// Where a ray first meets a body ([`Body::fire_ray`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RayHit {
+    /// The face, edge or vertex it meets.
+    pub entity: RayEntity,
+    /// The distance from the ray's origin along its unit direction: the hit point is
+    /// `origin + distance · direction / |direction|`.
+    pub distance: f64,
+}
+
 /// A face's area and the centroid of that area ([`Body::face_centroid`]), from one
 /// integration. **Estimated, not proved** ([`MassPropertiesEstimate`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -728,6 +749,68 @@ impl Body {
             from: array(c.on_probe),
             to: array(c.on_members),
         }))
+    }
+
+    /// Where the ray from `origin` along `direction` first meets this body, on its exact faces,
+    /// edges and vertices (the kernel's ray fire, `topology::brep::p2::ray_fire`, at the body's
+    /// own zone tolerance): the entity it meets, by record index, and the distance along the
+    /// unit ray. `None` where the ray meets nothing. At a tie the lowest-dimensional entity is
+    /// the answer, so a ray through an edge names the edge, not one of its faces. The kernel's
+    /// solve may add UV trim curves to the body, as a point classification does.
+    ///
+    /// [`Body::face_hit_by_ray`] answers the first face alone, with the point and its (u, v);
+    /// this names the edge or vertex a ray passes through, as a pick needs. Both take the ray
+    /// as [`Ray::new`] makes it.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a coordinate that is not finite, a direction of no length (both
+    /// as [`Ray::new`] refuses them) or a hit the conversion's [`Order`] does not hold; the
+    /// kernel's refusal of a ray that starts on the body (its nearest hit at the start); any
+    /// other kernel error.
+    pub fn fire_ray(
+        &self,
+        order: &Order,
+        origin: [f64; 3],
+        direction: [f64; 3],
+    ) -> Result<Option<RayHit>> {
+        /// Where kernel entity `id` stands in the record's `list`.
+        fn at<T: PartialEq>(list: &[T], id: &T) -> Result<usize> {
+            list.iter().position(|x| x == id).ok_or(Error::Argument)
+        }
+        let ray = Ray::new(point(origin)?, point(direction)?).map_err(|_| Error::Argument)?;
+        let hit = with_body("fire_ray", self, |k, b| {
+            let tol = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
+            let query = BrepQuery::of_brep(b);
+            let identity = query.effective_identity();
+            let cache = query.cache(k, b)?;
+            let fired = solidcore::topology::brep::p2::ray_fire(
+                k,
+                b,
+                identity.brep_id,
+                cache,
+                identity.keys,
+                identity.owner_of,
+                ray.origin(),
+                ray.direction(),
+                tol,
+                None,
+            )?;
+            let pc = &fired.intersection;
+            Ok(match (pc.point_class(), pc.object()) {
+                (PointClassType::Unknown, _) | (_, None) => None,
+                (_, Some(entity)) => Some((entity, pc.deviation())),
+            })
+        })?;
+        let Some((entity, distance)) = hit else {
+            return Ok(None);
+        };
+        let entity = match entity {
+            EntityRef::Face(f) => RayEntity::Face(at(&order.faces, &f)?),
+            EntityRef::Edge(e) => RayEntity::Edge(at(&order.edges, &e)?),
+            EntityRef::Vertex(v) => RayEntity::Vertex(at(&order.vertices, &v)?),
+            _ => return Err(Error::Argument),
+        };
+        Ok(Some(RayHit { entity, distance }))
     }
 
     /// The distance from each of `points` to record face `face` as it is trimmed

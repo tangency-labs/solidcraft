@@ -2112,6 +2112,11 @@ pub struct FindPcExtremaEfo<'a, C: ?Sized> {
     pub have_scale: bool,
     /// `m_lNumScale`.
     pub num_scale: u64,
+    /// Whether the minimisation decides an intersection (not upstream, #17735): along a
+    /// tangent shorter than 1, `F` and `F'` are then divided by `|C'|`, so that the
+    /// solve's `|F| < SM_EFF_ZERO` stop leaves the foot within `SM_EFF_ZERO` of the point
+    /// along the curve.
+    pub intersecting: bool,
 }
 
 impl<'a, C: ?Sized> FindPcExtremaEfo<'a, C> {
@@ -2135,6 +2140,7 @@ impl<'a, C: ?Sized> FindPcExtremaEfo<'a, C> {
             solver_operation,
             have_scale: false,
             num_scale: 0,
+            intersecting: false,
         }
     }
 }

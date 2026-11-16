@@ -1101,9 +1101,7 @@ impl OffsetExecutive {
                 self.relate_vertex_face(vertex, new_face);
             }
 
-            if kernel.fixes.local_operation_step_walls
-                && self.operation() == OffsetOperation::LocalOperation
-            {
+            if self.operation() == OffsetOperation::LocalOperation {
                 self.split_edges_at_step_corners(kernel, notifications)?;
             }
 

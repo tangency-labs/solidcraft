@@ -251,7 +251,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.classify_edge_interval = true;
     k.fixes.curve_loop_normal_from_area = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
-    k.fixes.face_tight_box_searches_trim = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.fillet_knife_edge_rounds = true;
@@ -269,9 +268,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.join_touching_loops = true;
     k.fixes.keep_operand_uv_trims = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
-    k.fixes.local_operation_box_holds_new_surfaces = true;
-    k.fixes.local_operation_refuses_loose_tangent_edges = true;
-    k.fixes.local_operation_step_walls = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.offset_extension_as_itself = true;
@@ -279,7 +275,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.proto_vertex_miss_is_false = true;
     k.fixes.revolve_analytic_profile_faces = true;
-    k.fixes.revolve_holed_profile_void = true;
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.simple_coincidence_crossing_is_point = true;
     k.fixes.ssi_low_angle_start_on_probation = true;
