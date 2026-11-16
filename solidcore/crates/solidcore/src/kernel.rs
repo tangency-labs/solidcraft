@@ -634,12 +634,6 @@ pub struct UpstreamFixes {
     /// removes it, so the trim passes the check (#2129). Off by default for pinned SMLib
     /// compatibility.
     pub bspline_trim_preserves_uv_spans: bool,
-    /// The B-rep's own edits, its `StitchAndOrient`, the offset and shell stitches and the
-    /// Boolean merge, stitch and topology-intersection passes pass on the statuses SMLib
-    /// drops: a failed list edit, evaluation, trim, stitch or orientation returns its error
-    /// instead of the operation carrying on and reporting success (WR-658, #2009 group A;
-    /// tangency-labs/smlib 60a8a51, 4803d6d, e7ebc8d). Off by default for pinned parity.
-    pub brep_edit_statuses_pass_on: bool,
     /// Extrusions, revolutions, sweeps, lofts and the station sweeps (`SmPrimitiveCreation`,
     /// `SmTopologySweep`, the translational and rotational sweep geometry and `SM_API`'s
     /// primitive wrappers) pass on the statuses SMLib drops: a failed evaluation, copy,
