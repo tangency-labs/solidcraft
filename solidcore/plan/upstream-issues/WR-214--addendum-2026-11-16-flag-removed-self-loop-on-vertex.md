@@ -25,7 +25,7 @@ opt-in of the 2026-10-26 addendum no longer exists. Removed: the field and its d
   box's plus the sphere's. That sum exceeds the exact union by the corner's overlap with the ball, which lies inside the
   box spanned by the three crossings (1.11e-14 of 7.43e-10; at most 4.8e-14). Keeping the cut would need the
   crossings not to be combined with the corner, which `CanCombineVertexDefinitions` decides for every Boolean.
-- **Goldens:** four rows move. tess0033 is the case above. `wr614_strip_measured_union_d1e-05` unites two z-prisms on
+- **Goldens:** eleven rows move. tess0033 is the case above. `wr614_strip_measured_union_d1e-05` unites two z-prisms on
   [0, 4], so the exact union is symmetric under z -> 4 - z. With the split, one top vertex of the strip sits 2.3e-6
   off the bottom one (1.99979974, 19.99999525 against 1.9998, 19.9999975), so the body is not a prism. Without it the
   top and bottom sections are equal and the volume is four times the section's area (128.0000317498, to 1e-14). The
@@ -35,10 +35,20 @@ opt-in of the 2026-10-26 addendum no longer exists. Removed: the field and its d
   union is the sphere alone (volume 7.5705329e-10, the sphere's), though the box reaches outside the sphere. Without it
   the box is kept (volume 1.19167e-9, against 1.19146e-9 for the union by quadrature). That body still fails Level 2
   (test #0 gaps of 9.4e-5, test #61), as the split's did. `blend.fillet_executive_p3`
-  `stubs4-delete-edge-bottle-e8-r0.1` keeps its topology counts and its eight Level 2 gap reports. Its centroid x
-  moves by 3.1e-10 on a body about 4 wide. That is less than the row's own integration error at its accuracy of 1e-4
-  (4.7e-10 from the value converged at 1e-8). At 1e-8 the two bodies' areas agree to 4.6e-9 and volumes to 2.4e-10
-  relative.
+  `stubs4-delete-edge-bottle-e8-r0.1` keeps its topology (the one changed digest is a loop of five edges listed from
+  another start, the same cycle) and its eight Level 2 gap reports. With the split, one vertex sits 2.2e-4 from where
+  this PR puts it and three vertices and two edges carry tolerances of 2.2e-4 to cover it; without it those
+  tolerances are 1e-5 to 7.1e-5. Its mass properties move only through that vertex: area and volume agree to 4.6e-9
+  and 2.4e-10 relative at accuracy 1e-8. The seven `topology.proto_topology_p2` rows (gen0405, gen0531, gen0574,
+  gen0620, gen0780, gen1111, gen1284) are generated manager calls that reach this branch with a vertex
+  classification. They recorded the removed split, which on the unit's stand-in pool ends in the split's own errors.
+  They now record the drop or the refusal below.
+- **The drop is bounded.** The curve is dropped only when a certain hull of it over the proto edge's interval
+  (`Curve::piece_hull_points`, each point with its error bound) lies within the farther end's distance from the
+  definition plus the definition's and the proto edge's tolerances: the ends are already one place there. A curve
+  that leaves that reach, or has no certain hull, is a real intersection that neither the split nor the drop keeps,
+  and the Boolean is refused (`BooleanFailure::StageFailed`, `SM_ERR`). Unit test
+  `resolve_self_loop_on_a_vertex_leaving_its_reach_is_refused`.
 - **Defaults:** SolidCraft's preset had the flag on, so the app's results don't change. `Kernel::default()` changes.
 - **Tests:** `issue_480_ring_lip_union_with_the_seam_at_the_crossing` runs on the default kernel with its assertions
   unchanged. `box_corner_inside_a_sphere_by_less_than_tolerance_unites_validly` (same file) pins tess0033's union.
