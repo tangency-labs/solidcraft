@@ -26,6 +26,7 @@ mod api_client;
 pub mod attach;
 pub mod backend;
 pub mod context;
+pub mod dictation;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod discover;
 pub mod gate;
@@ -521,6 +522,8 @@ pub struct AgentChat {
     pub confirm_new: bool,
     /// What the panel recorded this frame, run after it is drawn (`panel::run`).
     pub actions: Vec<panel::PanelAction>,
+    /// Dictation (#10883): recording, or waiting for the transcription.
+    pub dictation: dictation::State,
     /// What the panel measured for the shared panel host this frame, handed over after it is drawn.
     pub report: panel::ContentReport,
     /// Where the panel was drawn last (for its shortcuts).
@@ -2452,6 +2455,7 @@ pub(crate) fn take_loaded(app: &mut SolveApp, ctx: &egui::Context) {
 
 pub fn poll(app: &mut SolveApp, ctx: &egui::Context) {
     settings::poll_tests(&mut app.agent_chat);
+    dictation::poll(app);
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(rx) = &app.agent_chat.detecting
         && let Ok(d) = rx.try_recv()

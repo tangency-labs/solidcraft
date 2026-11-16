@@ -586,6 +586,9 @@ pub struct Services {
     pub agent_http: Option<agent_chat::backend::HttpFn>,
     /// The system keychain, for API agents' keys; None: keys can't be stored.
     pub secrets: Option<std::sync::Arc<dyn agent_chat::backend::Secrets>>,
+    /// The microphone, for dictating a message in the Assistant (#10883); None: no microphone
+    /// button (the browser build).
+    pub recorder: Option<std::sync::Arc<dyn agent_chat::dictation::Recorder>>,
     /// Upload a model to EasyPrint (Printables' slicer in the browser) and answer with the address
     /// to open (`easyprint_ui`); None: this host can't, and the menu doesn't offer it.
     pub easyprint_upload: Option<easyprint_ui::Upload>,

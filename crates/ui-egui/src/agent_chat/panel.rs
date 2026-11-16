@@ -54,6 +54,8 @@ pub enum PanelAction {
     },
     /// Stop the agent and send the queued messages now.
     SendNow,
+    /// The microphone button or its shortcut: start recording, or stop and transcribe (#10883).
+    Dictate,
     Cancel,
     RemovePending(usize),
     /// Undo the changes of the message at this index.
@@ -117,6 +119,7 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
             }
         }
         PanelAction::SendNow => send_now(app, ctx),
+        PanelAction::Dictate => super::dictation::toggle(app, ctx),
         PanelAction::Cancel => cancel(app),
         PanelAction::RemovePending(n) => remove_pending(app, n),
         PanelAction::UndoChanges(n) => undo_changes(app, n),
@@ -227,6 +230,9 @@ pub struct PanelView {
     pub shared: bool,
     /// The composer's height the shared host measured last time, if it has.
     pub composer_height: Option<f32>,
+    /// The microphone button (#10883): None hides it (no microphone or no endpoint set);
+    /// otherwise whether it records and whether a recording is being transcribed.
+    pub dictation: Option<(bool, bool)>,
 }
 
 impl PanelView {
@@ -257,6 +263,10 @@ impl PanelView {
             rtl: crate::i18n::panel_direction(&app.preferences.language) == solidcraft_engine::panels::Direction::Rtl,
             shared: crate::panel_runtime::shared_content_measurement(ctx),
             composer_height: crate::panel_runtime::shared_content_composer_height(ctx),
+            dictation: {
+                let d = &app.agent_chat.dictation;
+                (super::dictation::available(app) || !matches!(d, super::dictation::State::Idle)).then(|| (d.recording(), d.transcribing()))
+            },
         }
     }
 }
@@ -411,6 +421,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     #[cfg(not(target_arch = "wasm32"))]
     if visible {
         new_chat_shortcut(&mut app.agent_chat, &ctx);
+        dictate_shortcut(app, &ctx);
         if app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
             refresh(app, &ctx);
         }
@@ -435,6 +446,7 @@ pub(crate) fn prepare_shared(app: &mut SolveApp, ctx: &egui::Context) {
     app.agent_chat.hovered = None;
     if shown(app) {
         new_chat_shortcut(&mut app.agent_chat, ctx);
+        dictate_shortcut(app, ctx);
         run_actions(app, ctx);
         #[cfg(not(target_arch = "wasm32"))]
         if app.agent_chat.open && app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
@@ -799,6 +811,20 @@ pub(crate) fn request_new_chat(app: &mut SolveApp) {
     }
 }
 
+/// Start or stop dictating (when the chat has focus or the pointer is on it, #10883).
+pub const DICTATE_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT), egui::Key::Space);
+
+fn dictate_shortcut(app: &mut SolveApp, ctx: &egui::Context) {
+    let chat = &app.agent_chat;
+    let in_chat = ctx.memory(|m| m.has_focus(Id::unique("sc_agent_chat_input")))
+        || ctx.pointer_hover_pos().is_some_and(|p| chat.panel_rect.is_some_and(|r| r.contains(p)));
+    let ready = super::dictation::available(app) || !matches!(chat.dictation, super::dictation::State::Idle);
+    if chat.open && in_chat && ready && ctx.input_mut(|i| i.consume_shortcut(&DICTATE_SHORTCUT)) {
+        app.agent_chat.actions.push(PanelAction::Dictate);
+    }
+}
+
 fn new_chat_shortcut(chat: &mut AgentChat, ctx: &egui::Context) {
     let in_chat = ctx.memory(|m| m.has_focus(Id::unique("sc_agent_chat_input")))
         || ctx.pointer_hover_pos().is_some_and(|p| chat.panel_rect.is_some_and(|r| r.contains(p)));
@@ -1134,6 +1160,7 @@ fn top_controls(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state
 struct ComposerOutcome {
     height: f32,
     send_clicked: bool,
+    mic_clicked: bool,
     stop_clicked: bool,
     enter: bool,
     steer: bool,
@@ -1156,7 +1183,7 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
     } else {
         (false, false)
     };
-    let (mut send_clicked, mut stop_clicked, mut enter, mut pick_clicked) = (false, false, false, false);
+    let (mut send_clicked, mut stop_clicked, mut enter, mut pick_clicked, mut mic_clicked) = (false, false, false, false, false);
     let frame = Container::new(ui.ctx(), Surface::Viewport).edge_frame(egui::Color32::TRANSPARENT);
     let composer = Container::new(ui.ctx(), Surface::Viewport).edge("sc_agent_chat_composer", Edge::Bottom);
     let composer = composer.resizable(false).show_separator_line(false).frame(frame).show(ui, |ui| {
@@ -1242,6 +1269,16 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
                                 solidcraft_ui_registry::publish_handle("agent_chat:send", action.rect.center());
                                 send_clicked = action.clicked();
                             }
+                            if let Some((recording, transcribing)) = view.dictation {
+                                let tip = format!(
+                                    "{} ({})",
+                                    tr(if recording { "ui.dictation_stop_tip" } else { "ui.dictation_tip" }),
+                                    if cfg!(target_os = "macos") { "Cmd+Shift+Space" } else { "Ctrl+Shift+Space" }
+                                );
+                                let mic = ui_kit::assistant_mic(ui, recording, transcribing, &tip);
+                                solidcraft_ui_registry::publish_handle("agent_chat:mic", mic.rect.center());
+                                mic_clicked = mic.clicked();
+                            }
                         });
                     },
                 );
@@ -1297,7 +1334,7 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
         // The pill goes where the caret is in the box.
         chat.actions.push(PanelAction::StartPick { at: caret(ui.ctx()) });
     }
-    ComposerOutcome { height: composer.inner, send_clicked, stop_clicked, enter, steer, esc }
+    ComposerOutcome { height: composer.inner, send_clicked, mic_clicked, stop_clicked, enter, steer, esc }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1324,7 +1361,10 @@ fn transcript_body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) ->
 
 #[cfg(not(target_arch = "wasm32"))]
 fn finish_composer(chat: &mut AgentChat, outcome: ComposerOutcome) {
-    let ComposerOutcome { send_clicked, stop_clicked, enter, steer, esc, .. } = outcome;
+    let ComposerOutcome { send_clicked, stop_clicked, enter, steer, esc, mic_clicked, .. } = outcome;
+    if mic_clicked {
+        chat.actions.push(PanelAction::Dictate);
+    }
     if esc || stop_clicked {
         chat.actions.push(PanelAction::Cancel);
     }
@@ -3088,6 +3128,7 @@ mod tests {
             rtl: false,
             shared,
             composer_height: None,
+            dictation: None,
         }
     }
 
