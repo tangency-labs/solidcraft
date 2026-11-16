@@ -6,6 +6,7 @@
 
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_develop::JointKind;
+use solidcraft_develop::prelude::*;
 use solidcraft_geom::prelude::*;
 
 use crate::{DocError, FoldSide, Result, SurfaceSheet};
