@@ -434,7 +434,7 @@ fn one_wall_per_circle(k: &Kernel, given: &[Profile], curves: Vec<Curve>, tol: f
 
 /// Runs a call that makes a new body: the kernel locked, its own status as the capi passes it.
 fn making(call: &'static str, f: impl FnOnce(&mut Kernel) -> solidcore::Result<Out<Brep>>) -> Result<Body> {
-    run(call, f)?.map(Body::new)
+    run(call, f)?.map(Body::from_kernel)
 }
 
 /// `smlib_planar_faces`: a sheet of planar faces bounded by the closed `loops`
