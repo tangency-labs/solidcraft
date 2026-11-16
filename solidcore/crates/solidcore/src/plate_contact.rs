@@ -581,6 +581,94 @@ pub fn footprint_across(
     Ok(out)
 }
 
+/// Whether T runs through S (design v2 5.3 [m22], skip `passes_through`): some far face of S, a
+/// planar face facing `−n` below P (the frame's plane, normal `n`), shares area with T's section
+/// by that face's plane ([`footprint_across`]). Pure 2D: the face is read as regions of the
+/// frame moved down to its level ([`prism::sheet`](crate::prism::sheet)) and compared with
+/// [`regions_overlap`](crate::prism::profile::regions_overlap) (`eps = tol`); no boolean runs and
+/// neither plate is changed. A face only touching the section along an edge or at a corner is
+/// not passed through.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for `tol` not positive and finite; `Unsupported` for a far face
+/// whose outward side is not decided, or a section and face whose overlap is not decided; those
+/// of the reads and the section.
+pub fn passes_through(
+    k: &crate::kernel::Kernel,
+    s: &crate::topology::Brep,
+    t: &crate::topology::Brep,
+    frame: &crate::eval::Frame,
+    tol: f64,
+) -> Result<bool> {
+    if !(tol.is_finite() && tol > 0.0) {
+        return Err(invalid("tol must be positive and finite"));
+    }
+    let (_, _, _, n) = crate::prism::profile::axes(frame);
+    let facing_down = -SQUARE_SLACK.cos();
+    let far = std::cell::RefCell::new(Vec::new());
+    crate::prism::sheet::planar_face_regions(k, s, frame, tol, |face, normal| {
+        let Some(normal) = normal else {
+            return Ok(false);
+        };
+        let natural =
+            crate::prism::measure::outward_is_natural(s, face).ok_or(SolidError::Unsupported {
+                operation: OP,
+                reason: "a face whose outward side is not decided",
+            })?;
+        let outward_up = if natural {
+            normal.dot(n)
+        } else {
+            -normal.dot(n)
+        };
+        if outward_up > facing_down {
+            return Ok(false);
+        }
+        let loops = crate::query::api_queries::face_get_boundary_loops(s, face)?;
+        let mut level = f64::INFINITY;
+        for &e in &loops.edges {
+            if let Some(v) = crate::topology::edge::start_vertex(s, e)? {
+                level = level.min(crate::prism::profile::height(frame, s.vertex(v)?.point));
+            }
+        }
+        if level.is_finite() && level < -tol {
+            far.borrow_mut().push((face, level));
+        }
+        Ok(false)
+    })?;
+    for (face, level) in far.into_inner() {
+        let at = crate::eval::Frame {
+            origin: [
+                frame.origin[0] + level * n.x,
+                frame.origin[1] + level * n.y,
+                frame.origin[2] + level * n.z,
+            ],
+            x_axis: frame.x_axis,
+            y_axis: frame.y_axis,
+        };
+        let section = footprint_across(k, t, &at, tol)?;
+        if section.is_empty() {
+            continue;
+        }
+        let read = crate::prism::sheet::planar_face_regions(k, s, &at, tol, |f, _| Ok(f == face))?;
+        for a in &section {
+            for b in &read.regions {
+                match crate::prism::profile::regions_overlap(a, b, tol) {
+                    Some(true) => return Ok(true),
+                    Some(false) => {}
+                    None => {
+                        return Err(SolidError::Unsupported {
+                            operation: OP,
+                            reason: "whether the tab plate runs through a far face is not decided",
+                        })
+                    }
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
 /// A face bounding the strip Σ across it (along `w`), as [`eased_edge`] reads it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum StripBound {

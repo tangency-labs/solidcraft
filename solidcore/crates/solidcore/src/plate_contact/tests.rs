@@ -476,3 +476,72 @@ fn the_footprint_across_p_is_the_section_of_t() {
     assert!(across([0.0, 0.0, 100.0], up, side).is_empty());
     assert!(footprint_across(&k, &wall, &frame_at([0.0, 0.0, 30.0], up, side), 0.0).is_err());
 }
+
+/// A box `lo`–`hi` (axis-aligned), extruded along +z.
+fn box_solid(k: &mut crate::kernel::Kernel, lo: [f64; 3], hi: [f64; 3]) -> crate::topology::Brep {
+    use crate::math::Vec2;
+    use crate::prism::profile::{Loop2, Region2, Seg2};
+    let pts = [
+        Vec2::new(lo[0], lo[1]),
+        Vec2::new(hi[0], lo[1]),
+        Vec2::new(hi[0], hi[1]),
+        Vec2::new(lo[0], hi[1]),
+    ];
+    let outer = Loop2 {
+        segs: pts
+            .iter()
+            .zip(pts.iter().cycle().skip(1))
+            .map(|(a, b)| Seg2::Line { a: *a, b: *b })
+            .collect(),
+    };
+    let frame = frame_at([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    let region = Region2 {
+        outer,
+        holes: vec![],
+    };
+    crate::prism::extrude::extrude_region(k, &frame, &region, lo[2], hi[2]).expect("box")
+}
+
+/// Design v2 16.1 [m22]: S stepped, 160 × 100, top P at z = 12: 12 thick under x ∈ [0, 80], 6
+/// thick (bottom at z = 6) under x ∈ [80, 160]. Drawn in (z, x) and extruded along +y over
+/// [0, 100]. T = Wall's footprint (x ∈ [20, 140], y ∈ [30, 36]) from z = 3 (9 below P) to 66:
+/// its section at z = 6 is x ∈ [20, 140], sharing x ∈ [80, 140] with the thin part's bottom:
+/// `passes_through`. Its section at z = 0 (the thick part's bottom) is empty. T from z = 9 (3
+/// below P) reaches no far face: no. T over the thick part only (x ∈ [10, 70]), 9 deep: no.
+/// tol 0: refused.
+#[test]
+fn a_tab_running_through_the_thin_part_passes_through() {
+    use crate::math::Vec2;
+    use crate::prism::profile::{Loop2, Region2, Seg2};
+    let mut k = crate::kernel::Kernel::default();
+    // (u, v) = (z, x); n = z × x = +y.
+    let pts = [
+        Vec2::new(0.0, 0.0),
+        Vec2::new(12.0, 0.0),
+        Vec2::new(12.0, 160.0),
+        Vec2::new(6.0, 160.0),
+        Vec2::new(6.0, 80.0),
+        Vec2::new(0.0, 80.0),
+    ];
+    let outer = Loop2 {
+        segs: pts
+            .iter()
+            .zip(pts.iter().cycle().skip(1))
+            .map(|(a, b)| Seg2::Line { a: *a, b: *b })
+            .collect(),
+    };
+    let region = Region2 {
+        outer,
+        holes: vec![],
+    };
+    let side = frame_at([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let s = crate::prism::extrude::extrude_region(&mut k, &side, &region, 0.0, 100.0).expect("s");
+    let p = frame_at([0.0, 0.0, 12.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    let deep = box_solid(&mut k, [20.0, 30.0, 3.0], [140.0, 36.0, 66.0]);
+    assert!(passes_through(&k, &s, &deep, &p, TOL).expect("deep"));
+    let shallow = box_solid(&mut k, [20.0, 30.0, 9.0], [140.0, 36.0, 66.0]);
+    assert!(!passes_through(&k, &s, &shallow, &p, TOL).expect("shallow"));
+    let thick = box_solid(&mut k, [10.0, 30.0, 3.0], [70.0, 36.0, 66.0]);
+    assert!(!passes_through(&k, &s, &thick, &p, TOL).expect("thick"));
+    assert!(passes_through(&k, &s, &deep, &p, 0.0).is_err());
+}
