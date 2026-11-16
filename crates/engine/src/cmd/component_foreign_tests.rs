@@ -95,6 +95,49 @@ fn user_parameters_come_along_renamed_where_taken() {
     assert!((volume(&mut s, part) - 4.0).abs() < 1e-6, "the copy follows w_2");
 }
 
+/// A 3D sketch point placed by a parameter whose name is taken here pastes with the renamed
+/// parameter in its expressions, and follows that one, not this design's own `w` (#10608).
+#[test]
+fn a_3d_point_placed_by_a_taken_parameter_follows_it_renamed() {
+    let mut source = design("Bracket");
+    run(&mut source, "parameters.add", json!({"name": "w", "expression": "4 mm"}));
+    let (_, at) = created(&mut source, "Part");
+    run(&mut source, "sketch.create", json!({"plane": "XY", "name": "Marks"}));
+    run(&mut source, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut source, "sketch.point3d", json!({"point": ["w", 0, "2 * w"]}));
+    run(&mut source, "sketch.finish", json!({}));
+
+    let mut s = design("Frame");
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "10 mm"}));
+    s.foreign_copy = copied(&source, vec![at]);
+    run(&mut s, "component.paste_from_design", json!({}));
+    let sketch = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Sketch { .. })).unwrap().id;
+    let exprs = s
+        .doc
+        .sketch(sketch)
+        .unwrap()
+        .wire_constraints
+        .iter()
+        .find_map(|c| match &c.kind {
+            solidcraft_sketch::WireConstraintKind::Fix { exprs: Some(e), .. } => Some(e.clone()),
+            _ => None,
+        })
+        .expect("the point's placing Fix came along");
+    assert_eq!(exprs.x.as_deref(), Some("w_2"), "{exprs:?}");
+    assert!(exprs.z.as_deref().is_some_and(|z| z.contains("w_2")), "{exprs:?}");
+    let point = |s: &Session| {
+        let world = s.world_state().unwrap();
+        world.sketch(sketch).unwrap().sketch.wires[0].fit[0]
+    };
+    let p = point(&s);
+    assert!((p.x - 4.0).abs() < 1e-6 && (p.z - 8.0).abs() < 1e-6, "{p:?}");
+    run(&mut s, "parameters.change", json!({"name": "w_2", "expression": "7 mm"}));
+    let p = point(&s);
+    assert!((p.x - 7.0).abs() < 1e-6 && (p.z - 14.0).abs() < 1e-6, "the copy follows w_2: {p:?}");
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "20 mm"}));
+    assert!((point(&s).x - 7.0).abs() < 1e-6, "not this design's own w");
+}
+
 /// A component whose features use what isn't in it (here a body outside it) isn't pasted into
 /// another design: it is refused, saying what, and the design is left as it was.
 #[test]

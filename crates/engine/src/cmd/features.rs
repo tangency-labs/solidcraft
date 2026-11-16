@@ -147,7 +147,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("bounding_solid")
         .contract(&BOUNDING_SOLID_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("bodies?: [names] (default: all); margin?: expr; name?, body_name?"),
+        .params("bodies?: [names] (default: all); margin?: expr; margins?: [-X, +X, -Y, +Y, -Z, +Z] exprs (a margin per side instead of margin; negative sets a side into the bodies); name?, body_name?"),
     CommandSpec::new("solid.scale", "Scale", crate::checked!("solid.scale", scale))
         .at("SOLID", "MODIFY")
         .icon("scale")
@@ -206,7 +206,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("presspull")
         .key("Q")
-        .params("face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]…] and distance (a fillet); body?: the body the face or edges are on (for edges, as for solid.fillet)"),
+        .params("face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]…] and distance (a fillet); body?: the body the face or edges are on (for edges, as for solid.fillet); face_body?: the body a flat face is on, used when body is omitted"),
     CommandSpec::new("solid.move", "Move/Copy", crate::checked!("solid.move", move_bodies))
         .at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch)
         .contract(&MOVE_CONTRACT).output(output_schema_for::<MoveResult>)
@@ -2150,7 +2150,16 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
         _ => Expr::new(format!("-({distance})")),
     };
     let (dist, dir, op) = if d > 0.0 { (distance, "positive", "join") } else { (flipped, "negative", "cut") };
-    extrude(s, &json!({"face": face, "distance": dist, "direction": dir, "operation": op}))
+    let mut q = json!({"face": face, "distance": dist, "direction": dir, "operation": op});
+    // Match the frame mapper's precedence so the face point and body name stay together.
+    if let Some(body) = p.get("body").or_else(|| p.get("face_body")).filter(|body| body.is_string()) {
+        q["face_body"] = body.clone();
+        q["targets"] = json!([body]);
+    }
+    extrude(s, &q).map_err(|error| match error {
+        EngineError::BadParams { msg, .. } => bad(cmd, msg),
+        other => other,
+    })
 }
 
 fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3517,7 +3526,12 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             format!("`position` [{}, {}, {}] is not on a face of a body; pick a point on the face to drill", position.x, position.y, position.z),
         ));
     }
-    let direction = match (p.get("direction").and_then(vec3), &points) {
+    let supplied_direction = p.get("direction").and_then(vec3);
+    // Ordinary sketch-point holes use the sketch normal and ignore this input.
+    if supplied_direction.is_none() && p.get("direction").is_some_and(|v| !v.is_null()) && points.as_ref().is_none_or(|(sp, _, _)| sp.single) {
+        return Err(bad(cmd, "`direction` must be a non-zero [x, y, z]"));
+    }
+    let direction = match (supplied_direction, &points) {
         (None, Some((sp, _, d))) if !sp.single => *d,
         (d, _) => match d {
             Some(d) => d.normalized().ok_or_else(|| bad(cmd, "`direction` must be non-zero"))?,
@@ -4328,7 +4342,18 @@ fn bounding_solid(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.bounding_solid";
     let margin = expr(p, "margin").unwrap_or_else(|| "0".into());
     check_expr(s, &margin, Kind::Length, cmd, "margin")?;
-    add_feature(s, p, FeatureKind::BoundingSolid { bodies: string_list(cmd, p, "bodies")?.into_iter().map(BodyName).collect(), margin })
+    let margins = match p.get("margins").and_then(Value::as_array) {
+        Some(a) if a.len() == 6 => {
+            let e: Vec<String> = a.iter().map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string())).collect();
+            for x in &e {
+                check_expr(s, x, Kind::Length, cmd, "margins")?;
+            }
+            Some([e[0].clone().into(), e[1].clone().into(), e[2].clone().into(), e[3].clone().into(), e[4].clone().into(), e[5].clone().into()])
+        }
+        Some(_) => return Err(bad(cmd, "`margins` must have six values: -X, +X, -Y, +Y, -Z, +Z")),
+        None => None,
+    };
+    add_feature(s, p, FeatureKind::BoundingSolid { bodies: string_list(cmd, p, "bodies")?.into_iter().map(BodyName).collect(), margin, margins })
 }
 
 fn scale(s: &mut Session, p: &Value) -> Result<Value> {

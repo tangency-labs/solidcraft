@@ -457,11 +457,30 @@ mod native {
         // The package changed after the dialog read it: its hash no longer matches.
         std::fs::write(root.join("boxes/plugin.json"), std::fs::read_to_string(root.join("boxes/plugin.json")).unwrap() + " ").unwrap();
         let doc = h.app.session.doc.clone();
+        h.app.home.open = true;
         run(&mut h.app).unwrap();
         settle(&mut h);
         let error = h.app.plugin_menu.dialog().and_then(|d| d.error.clone()).expect("the dialog stays with its error");
         assert!(error.contains("approval"), "{error}");
         assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
+        assert!(h.app.home.open, "a failed run leaves the Start page up");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn an_edit_from_the_start_page_closes_it_and_lands_in_the_design() {
+        let root = package("start");
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = true;
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        open_entry(&mut h.app, 0, 0);
+        let before = h.app.session.doc.clone();
+        assert!(before.features.is_empty(), "a blank design");
+        run(&mut h.app).unwrap();
+        settle(&mut h);
+        assert!(!h.app.home.open, "the Start page closes when the design changes");
+        assert!(!std::sync::Arc::ptr_eq(&before, &h.app.session.doc), "the edit replaced the document");
+        assert!(!h.app.session.doc.features.is_empty(), "the edit is in the design");
         let _ = std::fs::remove_dir_all(root);
     }
 

@@ -20,7 +20,7 @@
       }
     },
     "booleans": {
-      "cases": 131,
+      "cases": 137,
       "chain": {
         "1": 9,
         "10": 1,
@@ -41,11 +41,11 @@
         "7": 77,
         "76": 1,
         "8": 6,
-        "9": 3
+        "9": 9
       },
-      "expressible": 116,
+      "expressible": 122,
       "not_expressible": 12,
-      "operation_expressible": 119,
+      "operation_expressible": 125,
       "reasons": {
         "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 10,
         "refused or failed in SolidCraft, not in a kernel operation": 2
@@ -104,20 +104,22 @@
       "ungraded": {}
     },
     "fillets": {
-      "cases": 285,
+      "cases": 292,
       "chain": {
         "1": 11,
         "13": 4,
         "14": 1,
         "17": 1,
         "2": 6,
+        "21": 1,
         "4": 243,
+        "5": 6,
         "7": 2,
         "8": 1
       },
-      "expressible": 62,
+      "expressible": 69,
       "not_expressible": 16,
-      "operation_expressible": 269,
+      "operation_expressible": 276,
       "reasons": {
         "SolidCraft has no command for it yet": 2,
         "refused or failed in SolidCraft, not in a kernel operation": 14

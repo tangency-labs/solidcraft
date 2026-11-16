@@ -1656,6 +1656,29 @@ fn transform_scales_dimension_formulas_once_and_keeps_unselected_dimensions() {
     assert!(close(s.doc.eval(height["param"].as_str().unwrap(), length).unwrap(), 60.0), "dependent dimensions scale only once");
 }
 
+/// #17315: Transform turns, scales and moves a text as a unit, the way Move turns it, instead of
+/// refusing its outline points as projected. The text stays one editable text.
+#[test]
+fn transform_turns_scales_and_moves_a_text_as_a_unit() {
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.text", json!({"text": "I", "at": [10, 0], "height": 10}));
+    let link = r["link"].as_str().unwrap().to_string();
+    let curves = ids(&r["curves"]);
+    let before = s.doc.to_json();
+    // Twice as big and a quarter turn about the origin, then 5 along x: (10, 0) goes to (5, 20).
+    let out = run(&mut s, "sketch.transform", json!({"entities": curves, "factor": 2, "angle": 90, "center": [0, 0], "translate": [5, 0]}));
+    assert!(!ids(&out["curves"]).is_empty(), "{out}");
+    let sk = sketch(&s);
+    let Some(LinkSource::Text { at, height, angle, .. }) = sk.link(&link).map(|l| l.source.clone()) else {
+        panic!("the text keeps its link: {:?}", sk.links);
+    };
+    assert!(at.dist(Vec2::new(5.0, 20.0)) < 1e-9, "{at:?}");
+    assert!(close(height, 20.0), "{height}");
+    assert!(close(angle, std::f64::consts::FRAC_PI_2), "{angle}");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before, "one undo restores the text");
+}
+
 /// #14411: Scale takes the driving dimensions of what it scales with it, as Transform does: a
 /// 40 × 20 rectangle filleted r5, scaled 2× about the origin, is 80 × 40 with r10 corners, not a
 /// skewed shape the solver bent to keep the old radius.
@@ -4766,6 +4789,37 @@ fn sketch_inspect_names_each_curve_of_a_free_form_loop_once() {
     let volume = body_volumes(&mut s);
     assert_eq!(volume.len(), 1);
     assert!((volume[0] - 10.0 * ring).abs() < 0.02 * volume[0], "{volume:?} against {areas:?}");
+}
+
+#[test]
+fn a_frame_around_a_shape_split_in_two_by_an_inner_curve_extrudes() {
+    // An SVG drawing from #17613: a 96 mm square of cubic Béziers around a 60 mm square that
+    // a middle curve splits into two halves. Both halves are holes of the frame and share the
+    // middle curve, so the frame's pick names that curve in two holes. The pick was refused
+    // ("whole-source boundary needs canonical disjoint curve identities").
+    let svg = r#"<svg width="100mm" height="100mm" viewBox="0 0 100 100"><g fill="none" stroke="black">
+        <path d="M2 2 C34 2 66 2 98 2"/><path d="M98 2 C98 34 98 66 98 98"/>
+        <path d="M98 98 C66 98 34 98 2 98"/><path d="M2 98 C2 66 2 34 2 2"/>
+        <path d="M20 20 C30 20 40 20 50 20"/><path d="M50 20 C60 20 70 20 80 20"/>
+        <path d="M80 20 C80 40 80 60 80 80"/><path d="M80 80 C70 80 60 80 50 80"/>
+        <path d="M50 80 C40 80 30 80 20 80"/><path d="M20 80 C20 60 20 40 20 20"/>
+        <path d="M50 20 C50 40 50 60 50 80"/></g></svg>"#;
+    let mut s = new_sketch();
+    run(&mut s, "sketch.insert_svg", json!({"text": svg}));
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    let profiles = si["profiles"].as_array().unwrap();
+    assert_eq!(profiles.len(), 3, "the frame and the two halves: {si}");
+    let frame = profiles.iter().position(|p| p["holes"].as_array().is_some_and(|h| !h.is_empty())).unwrap();
+    let holes: Vec<Vec<String>> = profiles[frame]["holes"].as_array().unwrap().iter().map(ids).collect();
+    assert_eq!(holes.len(), 2, "{si}");
+    assert!(holes[0].iter().any(|c| holes[1].contains(c)), "the halves share the middle curve: {holes:?}");
+    run(&mut s, "sketch.finish", json!({}));
+    // As the Extrude dialog sends a click on the frame.
+    run(&mut s, "solid.extrude", json!({"distance": 10, "profiles": [frame], "exact_regions": true}));
+    let volume = body_volumes(&mut s);
+    let want = 10.0 * (96.0 * 96.0 - 60.0 * 60.0);
+    assert_eq!(volume.len(), 1, "{volume:?}");
+    assert!((volume[0] - want).abs() < 1e-6 * want, "{volume:?} against {want}");
 }
 
 /// The arc's counter-clockwise sweep from its stored start to its end, degrees, from `sketch.inspect`.

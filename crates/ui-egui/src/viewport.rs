@@ -8084,7 +8084,21 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let selected: std::collections::HashSet<_> = app
         .highlighted()
         .iter()
-        .filter_map(|item| crate::sketch_modify_ui::point_id(&app.session, item).and_then(|id| sk.resolve_point(id)))
+        .filter_map(|item| {
+            // A selected arc or circle keeps its centre marked even after its hover sleeps.
+            let curve = match item {
+                Sel::SketchCurve { id, sketch } if sketch.is_none_or(|owner| owner == sid) => Some(id),
+                Sel::ExternalSketchCurve { id, sketch } if *sketch == sid => Some(id),
+                _ => None,
+            };
+            if let Some(id) = curve {
+                return match sk.curves.get(sk.curve_index(id)?)?.kind {
+                    CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } => Some(c),
+                    _ => None,
+                };
+            }
+            crate::sketch_modify_ui::point_id(&app.session, item).and_then(|id| sk.resolve_point(id))
+        })
         .collect();
     let (selected_splines, selected_handles) = selected_spline_handles(sk, &app.session.selection);
     let handle_mirrors = selected_spline_handle_mirrors(sk, &app.session.selection);
@@ -8162,19 +8176,19 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     loose_end_markers(sk, &ss.ends, &ss.plane, painter, proj, &v);
     // Sketch status, unless the status bar shows it (#7243).
     if let Some(r) = app.viewport.layout.as_ref().map(|l| l.content).filter(|_| !crate::status_bar::shown(app)) {
-        let status = if !ss.report.ok() {
+        let status = if !ss.report.shown_ok() {
             solidcraft_ui_text::tr("sketch.status_conflict").to_string()
         } else if !crate::sketch_palette::has_geometry(sk) {
             solidcraft_ui_text::tr("ui.no_geometry_yet").to_string()
-        } else if ss.report.dof == 0 {
+        } else if ss.report.shown_dof() == 0 {
             solidcraft_ui_text::tr("sketch.status_fully_constrained").to_string()
-        } else if ss.report.dof == 1 {
+        } else if ss.report.shown_dof() == 1 {
             solidcraft_ui_text::tr("ui.1_degree_of_freedom").to_string()
         } else {
-            solidcraft_ui_text::format("sketch.degrees_of_freedom", &[("count", &ss.report.dof.to_string())])
+            solidcraft_ui_text::format("sketch.degrees_of_freedom", &[("count", &ss.report.shown_dof().to_string())])
         };
         let msg = format!("{} — {status}", crate::i18n::tr_name(&ss.name));
-        let c = if ss.report.ok() { v.sketch_accent } else { v.error };
+        let c = if ss.report.shown_ok() { v.sketch_accent } else { v.error };
         painter.text(pos2(r.left() + 12.0, r.top() + 12.0), Align2::LEFT_TOP, msg, FontId::proportional(t.font_button), c);
     }
 }
@@ -10409,13 +10423,29 @@ mod tests {
         app.set_origin_shown(false);
         app.ui.ground_shadow = false;
         app.fit_view();
+        // Twelve edges per placed box, each a straight run of the exported mesh's segments along
+        // a box edge (the export's mesh path puts nodes along them, so their number is the
+        // mesher's): every segment of every outline drawn once per placement.
+        let world = crate::open_meshing::session_world(&app.session);
+        let mut segments = 0;
+        for body in &world.bodies {
+            let mesh = body.mesh();
+            assert_eq!(mesh.edges.len(), 12, "twelve edges per placed box");
+            for edge in &mesh.edges {
+                let (a, b) = (edge[0], edge[edge.len() - 1]);
+                for p in edge {
+                    let t = (*p - a).dot(b - a) / (b - a).dot(b - a);
+                    assert!((a + (b - a) * t - *p).len() < 1e-4, "an outline runs straight along a box edge");
+                }
+                segments += edge.len() - 1;
+            }
+        }
+        assert_eq!(world.bodies.len(), 2);
         for style in 0..4 {
             app.ui.visual_style = style;
             let scene = build_scene(&app).merged();
-            // Twelve edges per placed box, each one segment (a flat face needs no nodes along its
-            // edges), 24 segments.
-            let lines = if style == 1 { 0 } else { 2 * 12 * crate::gpu::LINE_SIZE };
-            assert_eq!(scene.lines.len(), lines, "style {style}: twelve edges per placed box");
+            let lines = if style == 1 { 0 } else { segments * crate::gpu::LINE_SIZE };
+            assert_eq!(scene.lines.len(), lines, "style {style}: every outline segment of both placed boxes");
             assert_eq!(scene.hidden.len(), if style == 3 { lines } else { 0 });
             assert_eq!(scene.tris.is_empty(), style == 2, "wireframe draws only the edges");
         }
