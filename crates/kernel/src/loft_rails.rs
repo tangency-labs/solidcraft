@@ -518,22 +518,15 @@ fn rail(pts: &[Vec3], sections: &[Section], tol: f64) -> Result<Rail> {
         for (i, section) in sections.iter().enumerate() {
             let (hit, at) = if i + 1 == sections.len() {
                 let back: Vec<Vec3> = points.iter().rev().copied().collect();
-                let (hit, (k, u)) = crate::sweep_path::rail_crossing(
-                    &back,
-                    section.plane.origin,
-                    section.plane.normal(),
-                    (0, 0.0),
-                    tol,
-                )
-                .ok_or_else(|| not_reached(i))?;
+                let (hit, (k, u)) = crate::sweep_path::rail_crossing(&back, section.plane.origin, section.plane.normal(), (0, 0.0), tol)
+                    .ok_or_else(|| not_reached(i))?;
                 let at = (points.len().saturating_sub(2).saturating_sub(k), 1.0 - u);
                 if at < cursor {
                     return Err(not_reached(i));
                 }
                 (hit, at)
             } else {
-                crate::sweep_path::rail_crossing(points, section.plane.origin, section.plane.normal(), cursor, tol)
-                    .ok_or_else(|| not_reached(i))?
+                crate::sweep_path::rail_crossing(points, section.plane.origin, section.plane.normal(), cursor, tol).ok_or_else(|| not_reached(i))?
             };
             cursor = at;
             let (g, on, d) = nearest_on(&section.curves, hit).ok_or_else(|| KernelError::Failed("loft rails: section".into()))?;
