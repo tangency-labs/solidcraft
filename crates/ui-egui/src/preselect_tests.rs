@@ -4667,6 +4667,9 @@ fn hovering_a_body_or_feature_row_lights_it_as_the_browser_does() {
     d.inputs[0].items = vec![Sel::Body { name: "Block".into() }];
     d.inputs[1].items = vec![Sel::Body { name: "Cutter".into() }, Sel::Body { name: "Other".into() }];
     h.frames(2);
+    // The baseline is taken once the preview has come back from its worker: until then the picked
+    // bodies are lit as picked, and after it they are stood in for (#17989).
+    wait_feature_preview(&mut h);
     let label = open_list(&mut h, 1);
     let unlit = lit(&h);
     hover_handle(&mut h, &format!("dialog:list:{label}:1:remove"));
