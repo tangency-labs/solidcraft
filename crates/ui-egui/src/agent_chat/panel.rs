@@ -2417,7 +2417,8 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
 /// A new chat's short introduction and the hint to type in the message box, at the bottom of the
 /// conversation's `room` so they sit just above the message box (#11256). The space above them
 /// comes from their height the frame before; a frame that measures a new height is laid out
-/// again, so they never show in the wrong place. Taller than the room, they start at its top.
+/// again, so they never show in the wrong place. Taller than the room, the conversation keeps its
+/// bottom in view, so the hint stays just above the message box and the start scrolls up.
 #[cfg(not(target_arch = "wasm32"))]
 fn new_chat_intro(ui: &mut egui::Ui, room: f32) {
     let t = Tokens::get();
@@ -3389,15 +3390,16 @@ mod tests {
         assert!((0.0..=t.space_12 * 3.0).contains(&gap), "the hint sits just above the message box: {gap} between {intro:?} and {composer:?}");
     }
 
-    /// In a panel too short for the short introduction, it starts at the top of the conversation and
-    /// scrolls, rather than going above it.
+    /// In a panel too short for the short introduction, the hint to type stays in view just above
+    /// the message box and the start of the introduction scrolls up.
     #[test]
-    fn a_new_chat_introduction_taller_than_the_panel_starts_at_the_top() {
-        new_chat_texts(false, vec2(300.0, 330.0));
+    fn a_new_chat_introduction_taller_than_the_panel_keeps_the_hint_in_view() {
+        new_chat_texts(false, vec2(300.0, 260.0));
         let intro = solidcraft_ui_registry::rect_of("agent_chat:intro").expect("the introduction is drawn");
         let conversation = solidcraft_ui_registry::rect_of("agent_chat:conversation").expect("the conversation is drawn");
-        assert!(intro.top() >= conversation.top(), "the introduction starts inside the conversation: {intro:?} in {conversation:?}");
-        assert!(intro.top() <= conversation.top() + Tokens::get().space_12 + 1.0, "and at its top: {intro:?} in {conversation:?}");
+        assert!(intro.height() > conversation.height(), "the introduction is taller than the conversation: {intro:?} in {conversation:?}");
+        assert!(intro.bottom() <= conversation.bottom(), "the hint is not cut off: {intro:?} in {conversation:?}");
+        assert!(intro.bottom() > conversation.top(), "the hint is not scrolled out of view: {intro:?} in {conversation:?}");
     }
 
     /// Full introduction at the top keeps a new chat as it was before #11256: the long
