@@ -302,8 +302,8 @@ pub enum FilletErrorType {
     /// `SM_FILERR_NOT_EXACT` = 9 and its
     /// `SM_FILERR_CORNER_UNSUPPORTED` = 10, but this port defines no `NOT_EXACT` code. It is
     /// not the C API's `SMLIB_ERR_CORNER_UNSUPPORTED` (-1111), which is a capi status and has
-    /// no mapping here. Only `fixes.fillet_vertex_error_diagnostics` records it (#1469); with
-    /// it off the port reports pin codes only.
+    /// no mapping here. `CreateFilletCorners` records it for a vertex no corner type
+    /// handles (WR-513, #1469).
     CornerUnsupported = 9,
     /// `SM_FILERR_NOT_EXACT` (SolidCraft change, tangency-labs/smlib@8ba4667, WR-631): a cliff
     /// overflow whose removal region cannot be closed exactly (a boundary edge on no single

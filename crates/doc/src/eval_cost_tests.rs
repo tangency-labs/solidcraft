@@ -1128,6 +1128,101 @@ fn saved_states_read_back_their_sketch_keys() {
     }
 }
 
+/// Synthetic states isolate cache storage from geometry: ids run backwards as they can after
+/// reordering a timeline, and a later state changes and then removes an earlier entry.
+fn model_with_named_face_points() -> (Document, Model) {
+    let mut doc = Document::new("Face points");
+    for i in 0..12 {
+        doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(f64::from(i) + 1.0, 1.0)), None).unwrap();
+    }
+    doc.features.reverse();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let first = doc.features[0].id;
+    let mut points = BTreeMap::new();
+    for (i, result) in model.results.iter_mut().enumerate() {
+        points.insert(result.id, vec![Vec3::new(i as f64, -0.0, 2.0)]);
+        if i == 6 {
+            points.insert(first, vec![Vec3::new(20.0, 0.0, -0.0)]);
+        }
+        if i == 9 {
+            points.remove(&first);
+        }
+        Arc::make_mut(&mut result.state).named_faces = points.clone();
+    }
+    (doc, model)
+}
+
+#[test]
+fn saved_states_keep_named_face_points_once_and_restore_each_states_values() {
+    let (doc, model) = model_with_named_face_points();
+    let saved = model.saved(&doc).unwrap();
+    assert_eq!(saved.records["named_faces"].as_array().unwrap().len(), 13, "each feature's points once, plus the changed entry");
+    let states = saved.records["states"].as_array().unwrap();
+    for state in states.iter().take(6) {
+        assert_eq!(state["named_faces"].as_array().unwrap().len(), 1, "backwards feature ids still form one compact run");
+    }
+    let points = |m: &Model| {
+        m.results
+            .iter()
+            .map(|r| {
+                r.state
+                    .named_faces
+                    .iter()
+                    .map(|(f, points)| (*f, points.iter().map(|p| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]).collect::<Vec<_>>()))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
+    let reopened = Model::adopt(&doc, &saved).unwrap();
+    assert_eq!(points(&reopened), points(&model), "each state keeps its own values, including signed zero");
+    let saved_again = reopened.saved(&doc).unwrap();
+    assert_eq!(points(&Model::adopt(&doc, &saved_again).unwrap()), points(&model));
+    let (thinned, _, _) = saved.thinned(&[], 0).unwrap();
+    assert_eq!(thinned.records["states"].as_array().unwrap().len(), 1);
+    assert_eq!(thinned.final_state().unwrap().named_faces, model.state().named_faces);
+}
+
+#[test]
+fn saved_named_face_points_refuse_missing_malformed_and_excessive_records() {
+    use serde_json::json;
+    let (doc, model) = model_with_named_face_points();
+    let saved = model.saved(&doc).unwrap();
+    let last = saved.records["states"].as_array().unwrap().len() - 1;
+    let check = |edit: &dyn Fn(&mut serde_json::Value)| {
+        let mut records = saved.records.clone();
+        edit(&mut records);
+        let hostile = SavedModel { records, bodies: saved.bodies.clone() };
+        assert!(hostile.final_state().is_err());
+        assert!(Model::adopt(&doc, &hostile).is_err());
+    };
+    check(&|r| {
+        r.as_object_mut().unwrap().remove("named_faces");
+    });
+    check(&|r| {
+        r["named_faces"][0][1][0][0] = json!(null);
+    });
+    check(&|r| {
+        r["states"][last]["named_faces"] = json!([[0, u64::MAX]]);
+    });
+    check(&|r| {
+        r["states"][last]["named_faces"] = json!([[13, 1]]);
+    });
+    check(&|r| {
+        r["states"][last]["named_faces"] = json!([[0, 1], [0, 1]]);
+    });
+    // Different entries for one feature are also ambiguous within one state.
+    check(&|r| {
+        r["named_faces"][1][0] = r["named_faces"][0][0].clone();
+        r["states"][last]["named_faces"] = json!([[0, 2]]);
+    });
+    // A small run list must not expand into millions of deeply cloned points.
+    check(&|r| {
+        r["named_faces"][0][1] = json!(vec![Vec3::ZERO; 1000]);
+        r["states"][last]["named_faces"] = json!(vec![[0, 1]; 50_000]);
+    });
+}
+
 /// The dirty check and autosave compare the whole document after every edit; a scanned
 /// part's shared triangles must not be read for that. A coordinate that equals nothing (not a
 /// number) shows whether the shared arrays were read: only reading them makes a mesh differ
