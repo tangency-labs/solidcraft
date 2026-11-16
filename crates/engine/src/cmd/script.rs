@@ -399,12 +399,21 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool) -> R
         }
     };
     let mut sim_next = 1u64;
+    // The ids a replay gives the components and occurrences (deleted steps
+    // leave gaps its allocator does not cross), and the identification colour
+    // number its component creations hand out.
+    let mut comp_map: BTreeMap<u64, u64> = BTreeMap::new();
+    let mut occ_map: BTreeMap<u64, u64> = BTreeMap::new();
+    let mut color_index = 0u64;
     for (_id, event) in &events {
         match event {
             Event::Feature(f) => {
                 sim_next = sim_next.max(f.id.saturating_add(1));
                 flush(&mut pending, &mut known, &mut out);
-                let feature = serde_json::to_value(f).map_err(|e| EngineError::Other(e.to_string()))?;
+                // The feature keeps its id; its references follow the items to
+                // the ids the replay gives them.
+                let mut feature = serde_json::to_value(f).map_err(|e| EngineError::Other(e.to_string()))?;
+                remap_replay_refs(&mut feature, &comp_map, &occ_map)?;
                 let mut params = json!({"feature": feature});
                 if let (Some(list), Some(o)) = (brings.get(&f.id), params.as_object_mut()) {
                     let list: Vec<Value> = list
@@ -426,6 +435,25 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool) -> R
             Event::Create(c) => {
                 let name = replay_occurrence_name(doc, &sim_occ, c.id);
                 sim_occ.push((c.id, name.clone()));
+                // The first placement comes with the component, under the name
+                // the naming rule gives it: a design that names it otherwise
+                // (or has none) cannot come back the same.
+                let first = doc.occurrences.iter().find(|o| o.id == c.id.saturating_add(1));
+                match first {
+                    Some(o) if o.component == c.id && o.name == name => {}
+                    Some(o) if o.name != name => {
+                        return Err(not_supported(&format!(
+                            "an occurrence the replay would name differently (`{}` would become `{}`)",
+                            o.name, name
+                        )));
+                    }
+                    _ => return Err(not_supported(&format!("a component whose first placement is missing or another's (`{}`)", c.name))),
+                }
+                let predicted_color = solidcraft_doc::component_color::automatic_color(color_index);
+                color_index = color_index.saturating_add(1);
+                if doc.component_identification_color(c.id) != predicted_color {
+                    omitted.push(format!("identification colour of `{}`", c.name));
+                }
                 if let Some(part) = doc.parts.get(&c.id) {
                     // A part rebuilds its features at the ids its own steps
                     // allocate, so the counter must sit at the component's id:
@@ -444,6 +472,8 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool) -> R
                     }
                     o.insert("name".into(), json!(c.name));
                     out.push(step("parts.insert", Value::Object(o)));
+                    comp_map.insert(c.id, c.id);
+                    occ_map.insert(c.id.saturating_add(1), c.id.saturating_add(1));
                     sim_next = c.id.saturating_add(2 + built as u64);
                 } else if let Some(link) = doc.links.get(&c.id) {
                     // A linked design comes in through its own constructor,
@@ -456,6 +486,8 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool) -> R
                     o.insert("path".into(), json!(link.path));
                     o.insert("name".into(), json!(c.name));
                     out.push(step("component.insert_design", Value::Object(o)));
+                    comp_map.insert(c.id, c.id);
+                    occ_map.insert(c.id.saturating_add(1), c.id.saturating_add(1));
                     sim_next = c.id.saturating_add(3);
                     omitted.push(format!("linked design `{}`: the file `{}` must be present at replay", c.name, link.path));
                 } else {
@@ -467,6 +499,8 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool) -> R
                         o.insert("parent".into(), json!(parent));
                     }
                     out.push(step("component.create", params));
+                    comp_map.insert(c.id, sim_next);
+                    occ_map.insert(c.id.saturating_add(1), sim_next.saturating_add(1));
                     sim_next = sim_next.saturating_add(2);
                 }
                 place_occurrence(doc, c.id.saturating_add(1), &name, &mut out);
@@ -479,9 +513,13 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool) -> R
                 }
             }
             Event::Copy(o) => {
-                sim_next = sim_next.saturating_add(1);
                 let name = replay_occurrence_name(doc, &sim_occ, o.component);
                 sim_occ.push((o.component, name.clone()));
+                if o.name != name {
+                    return Err(not_supported(&format!("an occurrence the replay would name differently (`{}` would become `{}`)", o.name, name)));
+                }
+                occ_map.insert(o.id, sim_next);
+                sim_next = sim_next.saturating_add(1);
                 let source = doc
                     .occurrences
                     .iter()
@@ -782,11 +820,84 @@ fn replay_occurrence_name(doc: &Document, sim: &[(u64, String)], comp: u64) -> S
     format!("{cname}:{k}")
 }
 
+/// Rewrite the component and occurrence references one exported feature carries
+/// to the ids a replay gives them (`components`, `occurrences`: the design's id
+/// to the replay's). A feature keeps its own id. Every reference the maps do not
+/// know is an error: it would dangle at replay. A path deeper than one level is
+/// a nested occurrence path, which this export cannot predict and refuses.
+pub(crate) fn remap_replay_refs(value: &mut Value, components: &BTreeMap<u64, u64>, occurrences: &BTreeMap<u64, u64>) -> Result<()> {
+    fn mapped(map: &BTreeMap<u64, u64>, id: u64) -> Result<u64> {
+        if id == 0 {
+            return Ok(0);
+        }
+        map.get(&id).copied().ok_or_else(|| not_supported("a reference to an item this design does not have"))
+    }
+    fn path(value: &mut Value, occurrences: &BTreeMap<u64, u64>) -> Result<()> {
+        let Some(list) = value.as_array_mut() else {
+            return Ok(());
+        };
+        // An occurrence path is a list of ids; a pattern's or sweep's path of
+        // curve names is not one.
+        if !list.iter().all(|v| v.is_u64()) {
+            return Ok(());
+        }
+        if list.len() > 1 {
+            let shown = serde_json::to_string(list).unwrap_or_default();
+            return Err(not_supported(&format!("a nested occurrence path ({shown})")));
+        }
+        for slot in list.iter_mut() {
+            let id = slot.as_u64().ok_or_else(|| not_supported("a reference to an item this design does not have"))?;
+            *slot = json!(mapped(occurrences, id)?);
+        }
+        Ok(())
+    }
+    fn datum(s: &mut String, occurrences: &BTreeMap<u64, u64>) -> Result<()> {
+        let Some(mut d) = solidcraft_doc::construct::DatumRef::parse_key(s) else {
+            return Ok(());
+        };
+        if d.path.len() > 1 {
+            return Err(not_supported(&format!("a nested occurrence path (`{s}`)")));
+        }
+        for id in &mut d.path {
+            *id = mapped(occurrences, *id)?;
+        }
+        *s = d.key();
+        Ok(())
+    }
+    match value {
+        Value::Object(o) => {
+            for (key, v) in o.iter_mut() {
+                match key.as_str() {
+                    "component" => {
+                        if let Value::Number(n) = v {
+                            let id = n.as_u64().ok_or_else(|| not_supported("a reference to an item this design does not have"))?;
+                            *v = json!(mapped(components, id)?);
+                        }
+                    }
+                    "path" | "author_path" if v.is_array() => path(v, occurrences)?,
+                    _ => remap_replay_refs(v, components, occurrences)?,
+                }
+            }
+        }
+        Value::Array(a) => {
+            for v in a.iter_mut() {
+                remap_replay_refs(v, components, occurrences)?;
+            }
+        }
+        Value::String(s) => datum(s, occurrences)?,
+        _ => {}
+    }
+    Ok(())
+}
+
 /// A joint snap as the joint commands take it: world coordinates (flat
 /// assemblies make the occurrence transform the world placement), converted
 /// from the component-local snap. `None` when the snap is outside this export.
 fn joint_origin_arg(origin: &solidcraft_doc::joints::JointOrigin, doc: &Document) -> Result<Option<Value>> {
     use solidcraft_doc::joints::Snap;
+    if !origin.inside.is_empty() {
+        return Err(not_supported("a nested occurrence path (an origin on another copy of a sub-assembly)"));
+    }
     let occ = doc.occurrences.iter().find(|o| o.id == origin.occurrence).map(|o| o.name.clone()).unwrap_or_default();
     if occ.is_empty() {
         return Ok(None);

@@ -1,6 +1,8 @@
 //! `timeline.export_script` and `timeline.add` (#886): a design's script replays into the same
 //! design, and a recorded feature that does not fit the design is refused, changing nothing.
 
+use std::collections::BTreeMap;
+
 use serde_json::{Value, json};
 
 use crate::Session;
@@ -781,4 +783,164 @@ fn a_linked_design_replays_and_copies() {
     let mut t = replay(&r["script"]);
     same(&mut s, &mut t);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The same design read through the places its items sit in: a replay gives
+/// components, occurrences and joints fresh ids wherever deleted steps left
+/// gaps, so identity compares by place and every reference by the place it
+/// names. Features keep their ids and their contents.
+fn same_rebuilt(a: &mut Session, b: &mut Session) {
+    fn places(s: &Session) -> (BTreeMap<u64, u64>, BTreeMap<u64, u64>, BTreeMap<u64, u64>) {
+        let by = |ids: Vec<u64>| ids.into_iter().enumerate().map(|(i, id)| (id, i as u64)).collect();
+        (
+            by(s.doc.components.iter().map(|c| c.id).collect()),
+            by(s.doc.occurrences.iter().map(|o| o.id).collect()),
+            by(s.doc.assembly.joints.iter().map(|j| j.id).collect()),
+        )
+    }
+    let (ca, oa, ja) = places(a);
+    let (cb, ob, jb) = places(b);
+    let features = |s: &Session, c: &BTreeMap<u64, u64>, o: &BTreeMap<u64, u64>| -> Vec<Value> {
+        s.doc
+            .features
+            .iter()
+            .map(|f| {
+                let mut v = serde_json::to_value(f).unwrap();
+                super::script::remap_replay_refs(&mut v, c, o).unwrap();
+                v
+            })
+            .collect()
+    };
+    assert_eq!(features(a, &ca, &oa), features(b, &cb, &ob), "timeline");
+    assert_eq!(a.doc.components.len(), b.doc.components.len(), "components");
+    for (x, y) in a.doc.components.iter().zip(&b.doc.components) {
+        assert_eq!(x.name, y.name);
+        assert_eq!(x.metadata, y.metadata);
+        assert_eq!(x.properties, y.properties);
+    }
+    assert_eq!(a.doc.occurrences.len(), b.doc.occurrences.len(), "occurrences");
+    for (x, y) in a.doc.occurrences.iter().zip(&b.doc.occurrences) {
+        assert_eq!(x.name, y.name);
+        assert_eq!(x.transform, y.transform);
+        assert_eq!(x.grounded, y.grounded);
+        assert_eq!(ca[&x.component], cb[&y.component], "placement of {}", x.name);
+    }
+    assert_eq!(a.doc.assembly.joints.len(), b.doc.assembly.joints.len(), "joints");
+    for (x, y) in a.doc.assembly.joints.iter().zip(&b.doc.assembly.joints) {
+        assert_eq!(x.name, y.name);
+        assert_eq!(x.kind, y.kind);
+        assert_eq!(x.values, y.values);
+        assert_eq!(x.limits, y.limits);
+        assert_eq!(oa[&x.a.occurrence], ob[&y.a.occurrence], "a side of {}", x.name);
+        assert_eq!(oa[&x.b.occurrence], ob[&y.b.occurrence], "b side of {}", x.name);
+    }
+    assert_eq!(a.doc.assembly.links.len(), b.doc.assembly.links.len(), "motion links");
+    for (x, y) in a.doc.assembly.links.iter().zip(&b.doc.assembly.links) {
+        assert_eq!(ja[&x.a], jb[&y.a]);
+        assert_eq!(ja[&x.b], jb[&y.b]);
+        assert_eq!(x.ratio, y.ratio);
+    }
+    assert_eq!(volume(a), volume(b), "volume");
+}
+
+/// Deleted steps leave gaps the replay's allocator does not cross: items
+/// created after one come back under fresh ids, and ownership, placements,
+/// grounding and assembly behaviour survive the renumbering. A joint created
+/// before a later feature has an id of its own to spare.
+#[test]
+fn items_renumbered_past_a_gap_keep_ownership_and_behaviour() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "First"}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "name": "Gone"}));
+    run(&mut s, "timeline.delete", json!({"features": ["Gone"]}));
+    run(&mut s, "component.create", json!({"name": "Holder", "activate": true}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [0, 20, 0], "body_name": "Held"}));
+    run(&mut s, "component.create", json!({"name": "Tail", "parent": "root", "activate": false}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "name": "Weld",
+        "a": {"occurrence": "Holder:1", "frame": {"origin": [0, 20, 0], "z": [0, 0, 1]}},
+        "b": {"occurrence": "Tail:1", "frame": {"origin": [0, 0, 0], "z": [0, 0, 1]}}}),
+    );
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [0, 0, 20], "body_name": "Late"}));
+
+    let mut t = replay(&script(&mut s));
+    // The replay numbers past the gap differently; everything else holds.
+    assert_ne!(s.doc.components.first().unwrap().id, t.doc.components.first().unwrap().id);
+    same_rebuilt(&mut s, &mut t);
+    for (x, y) in s.doc.features.iter().zip(t.doc.features.iter()) {
+        let owners = |f: &solidcraft_doc::Feature, s: &Session| s.doc.components.iter().position(|c| c.id == f.component);
+        assert_eq!(owners(x, &s), owners(y, &t), "ownership of {}", x.name);
+    }
+}
+
+/// A sketch placed on an occurrence's datum follows the occurrence to the id
+/// the replay gives it; a path through more than one occurrence cannot be
+/// predicted and is refused with its own message, apart from the one for
+/// bodies moved between components.
+#[test]
+fn datum_paths_follow_their_place_and_nested_ones_refuse() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "First"}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "name": "Gone"}));
+    run(&mut s, "timeline.delete", json!({"features": ["Gone"]}));
+    run(&mut s, "component.create", json!({"name": "Holder", "activate": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Placed"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let holder = s.doc.occurrences.iter().find(|o| o.name == "Holder:1").unwrap().id;
+    let sketch = s.doc.features.iter().find(|f| f.name == "Placed").unwrap().id;
+    let datum = |path: Vec<u64>| solidcraft_doc::PlaneRef::Datum {
+        datum: solidcraft_doc::construct::DatumRef { path, item: solidcraft_doc::construct::DatumItem::XY },
+    };
+    let place_on = |s: &mut Session, path: Vec<u64>| {
+        if let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &mut s.doc_mut().feature_mut(sketch).unwrap().kind {
+            *plane = datum(path);
+        }
+    };
+    place_on(&mut s, vec![holder]);
+
+    // The exported step names the datum by the replay's place for it, and the
+    // rebuilt design comes back the same read through the places.
+    let r = run(&mut s, "timeline.export_script", json!({}));
+    let text = r["script"].to_string();
+    assert!(!text.contains(&format!("o:{holder}/origin/XY")), "the path is rewritten: {text}");
+    let mut t = replay(&r["script"]);
+    same_rebuilt(&mut s, &mut t);
+
+    // A nested path cannot be predicted.
+    place_on(&mut s, vec![holder, 99]);
+    let nested = s.execute("timeline.export_script", &json!({})).unwrap_err().to_string();
+    assert!(nested.contains("nested occurrence path"), "{nested}");
+
+    // Its own message, apart from the one for moved bodies.
+    let mut m = Session::default();
+    run(&mut m, "component.create", json!({"name": "From", "activate": true}));
+    run(&mut m, "solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "Mover"}));
+    run(&mut m, "component.create", json!({"name": "To", "parent": "root", "activate": true}));
+    run(&mut m, "component.move_bodies", json!({"bodies": ["Mover"], "component": "To"}));
+    let moved = m.execute("timeline.export_script", &json!({})).unwrap_err().to_string();
+    assert!(moved.contains("bodies moved between components"), "{moved}");
+    assert!(!moved.contains("nested occurrence path"), "{moved}");
+    assert!(!nested.contains("bodies moved between components"), "{nested}");
+}
+
+/// A renamed occurrence and an identification colour the palette cannot reach
+/// are said out loud: the first refuses (the script names occurrences by the
+/// naming rule), the second is listed as left out.
+#[test]
+fn renamed_occurrences_refuse_and_odd_identification_colours_are_listed() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Cap", "activate": false}));
+    let first = s.doc.occurrences[0].id;
+    s.doc_mut().occurrences.iter_mut().find(|o| o.id == first).unwrap().name = "Cap:7".to_string();
+    let e = s.execute("timeline.export_script", &json!({})).unwrap_err().to_string();
+    assert!(e.contains("name differently"), "{e}");
+    s.doc_mut().occurrences.iter_mut().find(|o| o.id == first).unwrap().name = "Cap:1".to_string();
+
+    run(&mut s, "component.cycle_color", json!({"component": "Cap"}));
+    run(&mut s, "component.cycle_color", json!({"component": "Cap"}));
+    let r = run(&mut s, "timeline.export_script", json!({}));
+    assert!(r["omitted"].to_string().contains("identification colour"), "{r}");
 }
