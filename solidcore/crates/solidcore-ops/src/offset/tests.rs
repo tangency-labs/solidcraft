@@ -1298,6 +1298,166 @@ fn an_inside_out_body_is_refused() {
     assert_eq!(b.to_smb(false).unwrap(), before);
 }
 
+/// A 90.5 x 52 x 50 box less a tunnel lofted (degree 2) from a circle r 16 about (4, -5) on its
+/// floor, through a circle r 13.5 on the plane through its edges x = 69, z = 0 and
+/// x = -21.5, z = 50, to a circle r 11.07 about y = -4.5, z = 34 on its side x = 69: the body
+/// of #14062, the sections as SolidCraft traced them. The loft face's seam runs from the
+/// floor circle's one vertex, (4, 11, 0), to the side circle's.
+fn box_with_a_lofted_tunnel() -> Body {
+    let circle =
+        |center: [f64; 3], axis: [f64; 3], reference: [f64; 3], radius: f64, start: f64| {
+            vec![crate::sweep::Curve::Arc {
+                center,
+                axis,
+                reference,
+                radius,
+                start,
+                end: start + 2.0 * PI,
+            }]
+        };
+    let tunnel = crate::sweep::loft(
+        &[
+            circle(
+                [4.0, -5.0, 0.0],
+                [0.0, 0.0, -1.0],
+                [1.0, 0.0, 0.0],
+                16.0,
+                -PI / 2.0,
+            ),
+            circle(
+                [27.538758280222268, -5.747400290549194, 22.90676338109267],
+                [-0.48358862132842667, 0.0, -0.8752954046044522],
+                [0.0, 1.0, 0.0],
+                13.503737308981044,
+                -2.0 * PI,
+            ),
+            circle(
+                [69.0, -4.5, 34.0],
+                [-1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                11.067971810589327,
+                -2.0 * PI,
+            ),
+        ],
+        2,
+        true,
+    )
+    .unwrap();
+    let block = make_box([-21.5, -30.5, 0.0], [90.5, 52.0, 50.0]).unwrap();
+    crate::boolean::boolean(block, tunnel, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// #14062: the box with a lofted tunnel shelled t inward, open at its side x = 69. The
+/// tunnel's floor edge is closed, its one vertex where the loft's seam meets the floor, and
+/// the offsets of the loft face and the floor meet on a closed curve whose seam is that
+/// vertex's offset: the inner floor's hole edge. Shelled, the body is the outer box and
+/// tunnel (6 planes, the side split into a frame and a ring round the tunnel, and the loft
+/// face) and the inner box and tunnel (5 planes and the loft's offset): 14 faces; 12 + 12
+/// box edges and 3 + 3 tunnel edges (two circles and a seam each): 30 edges; 8 + 8 corners
+/// and 2 + 2 seam ends: 20 vertices; one shell. The hole edge lies on z = t and at t from
+/// the loft face wherever the planes x = c cross it. SMLib's full check is
+/// [`a_box_with_a_lofted_tunnel_shelled_passes_the_full_check`]'s.
+#[test]
+fn a_box_with_a_lofted_tunnel_shells_open_at_its_side() {
+    use solidcore::query::api_queries::{edge_bounding_box, edge_plane_crossings, PlaneCrossing};
+    use solidcore::{Point3, Vec3};
+    all_fixes();
+    for t in [0.5, 1.0, 2.0] {
+        let b = box_with_a_lofted_tunnel();
+        let o = order(&b);
+        // the loft face, the one face not flat along an axis
+        let loft = face(&b, &o, |bx| {
+            let size = bx.max() - bx.min();
+            size.x > 1.0 && size.y > 1.0 && size.z > 1.0
+        });
+        let input = b.copy().unwrap();
+        let input_order = order(&input);
+        shell(&b, &o, &[through(&b, &o, [69.0, -25.0, 10.0])], -t).unwrap();
+        assert_eq!(b.counts().unwrap(), [14, 30, 20], "t {t}");
+        assert_eq!(b.to_record().unwrap().0.shells.len(), 1, "t {t}");
+        assert!(b.is_manifold_solid().unwrap());
+        b.check_solid().unwrap();
+
+        let k = Kernel::default();
+        let brep = b.lock();
+        let hole: Vec<_> = brep
+            .edge_list()
+            .iter()
+            .copied()
+            .filter(|&e| {
+                let bx = edge_bounding_box(&k, &brep, e, true).unwrap();
+                let size = bx.max() - bx.min();
+                size.x > 1.0 && size.y > 1.0 && (bx.min().z - t).abs() < 1e-3 && size.z < 1e-3
+            })
+            .collect();
+        assert_eq!(hole.len(), 1, "t {t}: inner floor hole edges {hole:?}");
+        let tol = brep.edge(hole[0]).unwrap().tolerance + brep.tolerance();
+        for c in [-8.0, 4.0, 16.0] {
+            let crossings = edge_plane_crossings(
+                &k,
+                &brep,
+                hole[0],
+                Point3::new(c, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+            )
+            .unwrap();
+            assert_eq!(crossings.len(), 2, "t {t}, x = {c}: {crossings:?}");
+            for crossing in crossings {
+                let PlaneCrossing::Point(at) = crossing else {
+                    panic!("t {t}, x = {c}: the edge runs along the plane");
+                };
+                let p = [at.point.x, at.point.y, at.point.z];
+                assert!((p[2] - t).abs() <= tol, "t {t}: {p:?} off z = t");
+                let d = input.face_distances(&input_order, loft, &[p]).unwrap()[0].unwrap();
+                assert!(
+                    (d - t).abs() <= tol,
+                    "t {t}: {p:?} at {d} from the loft face"
+                );
+            }
+        }
+    }
+}
+
+/// #14062: the box with a lofted tunnel shelled t inward with its floor (z = 0) or its top
+/// (z = 50) open instead of its side. The tunnel's floor edge mates as with the side open.
+/// Floor open: the side keeps its offset ring round the tunnel, 14 faces as with the side
+/// open; top open: the top has no hole to split it, 13 faces. Both 30 edges, 20 vertices,
+/// one shell.
+#[test]
+fn a_box_with_a_lofted_tunnel_shells_open_at_its_floor_or_top() {
+    all_fixes();
+    for (open, faces) in [([60.0, -25.0, 0.0], 14), ([60.0, -25.0, 50.0], 13)] {
+        for t in [1.0, 2.0] {
+            let b = box_with_a_lofted_tunnel();
+            let o = order(&b);
+            shell(&b, &o, &[through(&b, &o, open)], -t).unwrap();
+            assert_eq!(b.counts().unwrap(), [faces, 30, 20], "{open:?} t {t}");
+            assert_eq!(b.to_record().unwrap().0.shells.len(), 1, "{open:?} t {t}");
+            assert!(b.is_manifold_solid().unwrap(), "{open:?} t {t}");
+            b.check_solid().unwrap();
+        }
+    }
+}
+
+/// #17608: the shelled box with a lofted tunnel of
+/// [`a_box_with_a_lofted_tunnel_shells_open_at_its_side`] passes SMLib's full check. It
+/// fails test #36 ("Face Near missing Seam"): the offset loft face's seam edge ends 4e-9 of
+/// the loft's turn beside the seam at the floor vertex.
+#[test]
+#[ignore = "fails until #17608 is fixed"]
+fn a_box_with_a_lofted_tunnel_shelled_passes_the_full_check() {
+    all_fixes();
+    for t in [0.5, 1.0, 2.0] {
+        let b = box_with_a_lofted_tunnel();
+        let o = order(&b);
+        shell(&b, &o, &[through(&b, &o, [69.0, -25.0, 10.0])], -t).unwrap();
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert_eq!(report.failures, 0, "t {t}: {}", report.text);
+    }
+}
+
 /// Drafts against closed forms (SolidCraft's `draft_*` cases, on record face indices), the oblique
 /// neutral plane's, and the refusals.
 mod drafts {

@@ -64,7 +64,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
     k.fixes.cover_refuses_folded_continuation = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
-    k.fixes.boolean_splits_definition_across_split = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.classify_edge_interval = true;
     k.fixes.ellipse_trim_seam_lines_span_cone_height = true;
