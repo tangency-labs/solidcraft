@@ -2858,33 +2858,74 @@ fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
         add_feature(s, p, FeatureKind::Mirror { features, plane, bodies: bodies.iter().cloned().map(BodyName).collect(), combine, placements })?;
     if !combine {
         super::print_face::copies_keep_print_faces(s, &reply, &bodies);
-        copies_keep_looks(s, &reply, &bodies);
+        copies_keep_looks(s, &reply, &bodies)?;
     }
     Ok(reply)
 }
 
 /// Copies are made of what the bodies they were made from are: each takes its source's physical
-/// material and appearance, unless it has its own (kept under its name from before). The copies
+/// material and body/face appearances, unless it has its own (kept under its name from before). The copies
 /// are the bodies feature `reply` made, in the order of `sources`, as
 /// [`super::print_face::copies_keep_print_faces`] takes them.
-fn copies_keep_looks(s: &mut Session, reply: &Value, sources: &[String]) {
-    let Some(id) = reply.get("feature").and_then(Value::as_u64) else { return };
+fn copies_keep_looks(s: &mut Session, reply: &Value, sources: &[String]) -> Result<()> {
+    let Some(id) = reply.get("feature").and_then(Value::as_u64) else { return Ok(()) };
     let state = s.model.state();
     let copies: Vec<_> = state.bodies.iter().filter(|b| b.feature == id).collect();
     if copies.len() != sources.len() {
-        return;
+        return Ok(());
     }
-    let pairs: Vec<(String, String)> = sources
-        .iter()
-        .zip(copies)
-        .filter_map(|(source, copy)| state.body(source).map(|b| (copy.definition_name().to_string(), b.definition_name().to_string())))
-        .collect();
+    let mut pairs = Vec::new();
+    let mut faces = Vec::new();
+    for (source, copy) in sources.iter().zip(copies) {
+        let Some(source) = state.body(source) else { continue };
+        pairs.push((copy.definition_name().to_string(), source.definition_name().to_string()));
+        let looks = s.doc.authored_face_colors(source);
+        if looks.is_empty() {
+            continue;
+        }
+        let source_names = solidcraft_doc::naming::face_names(source);
+        let copy_names = solidcraft_doc::naming::face_names(copy);
+        let mut indices = std::collections::BTreeMap::<&str, Option<usize>>::new();
+        for (index, name) in copy_names.iter().enumerate() {
+            if solidcraft_doc::naming::face_name_exact(copy, index) {
+                indices.entry(name.as_str()).and_modify(|found| *found = None).or_insert(Some(index));
+            }
+        }
+        let assigned: std::collections::BTreeSet<_> = s.doc.authored_face_colors(copy).into_iter().map(|(index, _)| index).collect();
+        for (source_index, look) in looks {
+            if !solidcraft_doc::naming::face_name_exact(source, source_index) {
+                continue;
+            }
+            let Some(source_name) = source_names.get(source_index) else { continue };
+            // Mirror's exact history appends one instance to each source face, including
+            // the complete identity of a split face or a face from an earlier copy.
+            let name = format!("{source_name}@F{id}.1");
+            let Some(index) = indices.get(name.as_str()).copied().flatten().filter(|index| !assigned.contains(index)) else { continue };
+            if s.doc.appearances.faces.len().saturating_add(faces.len()) >= 100_000 {
+                return Err(bad("solid.mirror", "too many face appearances"));
+            }
+            // The name chooses the face; the exact trimmed face supplies its saved point.
+            let point = solidcraft_kernel::guard("mirror face appearance", || {
+                solidcraft_kernel::point_closest(Vec3::ZERO, &copy.body, solidcraft_kernel::Members::Faces(&[index]))
+            })?
+            .ok_or_else(|| bad("solid.mirror", "the copied face has no exact geometry for its appearance"))?
+            .to;
+            faces.push(solidcraft_doc::appearance::FaceLook {
+                body: copy.definition_name().to_string(),
+                point,
+                look,
+                name: Some(name),
+                strict_name: false,
+                certificate: None,
+            });
+        }
+    }
     let needs = |copy: &str, from: &str| {
         (!s.doc.materials.contains_key(copy) && s.doc.materials.contains_key(from))
             || (!s.doc.appearances.bodies.contains_key(copy) && s.doc.appearances.bodies.contains_key(from))
     };
-    if !pairs.iter().any(|(copy, from)| needs(copy, from)) {
-        return;
+    if faces.is_empty() && !pairs.iter().any(|(copy, from)| needs(copy, from)) {
+        return Ok(());
     }
     let doc = s.doc_mut();
     for (copy, from) in pairs {
@@ -2899,6 +2940,8 @@ fn copies_keep_looks(s: &mut Session, reply: &Value, sources: &[String]) {
             doc.appearances.bodies.insert(copy, look);
         }
     }
+    doc.appearances.faces.extend(faces);
+    Ok(())
 }
 
 impl Session {
