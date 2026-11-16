@@ -3851,9 +3851,12 @@ fn issue_17616_body() -> Body {
     Body::from_record(&record, true).unwrap().0
 }
 
-/// Each cylinder face of `b`: its radius, its axis (a point and the unit direction), its UV
-/// domain and its surface's natural domain.
-fn issue_17616_cylinders(b: &Body) -> Vec<(f64, [Vec3; 2], [f64; 4], [f64; 4])> {
+/// A cylinder face: its radius, its axis (a point and the unit direction), its UV domain and
+/// its surface's natural domain (u and v, each from and to).
+type Cylinder = (f64, [Vec3; 2], [f64; 4], [f64; 4]);
+
+/// Each cylinder face of `b`.
+fn issue_17616_cylinders(b: &Body) -> Vec<Cylinder> {
     use solidcore::topology::face::p2 as face;
     let (k, brep) = kernel_copy(b);
     let mut out = Vec::new();
@@ -3897,13 +3900,21 @@ fn a_round_overflowing_a_split_flange_s_tab_top_leaves_the_bends_on_their_surfac
     // the ten bends, of radius 2 inside and 5 outside, each with its UV domain its surface's
     // whole natural domain
     let bends_on_their_surfaces = |b: &Body| {
-        let bends: Vec<_> =
-            issue_17616_cylinders(b).into_iter().filter(|c| c.0 < 6.0).collect();
+        let bends: Vec<_> = issue_17616_cylinders(b)
+            .into_iter()
+            .filter(|c| c.0 < 6.0)
+            .collect();
         assert_eq!(bends.len(), 10);
         for (r, _, d, n) in &bends {
-            assert!((r - 2.0).abs() <= 1e-9 || (r - 5.0).abs() <= 1e-9, "a bend of radius {r}");
+            assert!(
+                (r - 2.0).abs() <= 1e-9 || (r - 5.0).abs() <= 1e-9,
+                "a bend of radius {r}"
+            );
             for (x, y) in d.iter().zip(n) {
-                assert!((x - y).abs() <= 1e-9, "a bend's domain {d:?} is not its surface's {n:?}");
+                assert!(
+                    (x - y).abs() <= 1e-9,
+                    "a bend's domain {d:?} is not its surface's {n:?}"
+                );
             }
         }
     };
@@ -3917,15 +3928,26 @@ fn a_round_overflowing_a_split_flange_s_tab_top_leaves_the_bends_on_their_surfac
     assert_eq!(b.counts().unwrap(), [45, 93, 50]);
     let removed = 35.0 * (30.0 - disc_strip(7.0, 10.0, 10.0));
     let after = volume(&b);
-    assert!(rel(before - after, removed) < 1e-6, "{before} - {after} vs {removed}");
+    assert!(
+        rel(before - after, removed) < 1e-6,
+        "{before} - {after} vs {removed}"
+    );
     // the round: one exact cylinder of radius 10 about the ball centres' line x = 80, z = 40
-    let rounds: Vec<_> =
-        issue_17616_cylinders(&b).into_iter().filter(|c| c.0 >= 6.0).collect();
+    let rounds: Vec<_> = issue_17616_cylinders(&b)
+        .into_iter()
+        .filter(|c| c.0 >= 6.0)
+        .collect();
     assert_eq!(rounds.len(), 1);
     let (r, [origin, axis], _, _) = rounds[0];
     assert!((r - 10.0).abs() <= 1e-9, "the round's radius {r}");
-    assert!(axis.cross(Vec3::new(0.0, 1.0, 0.0)).length() <= 1e-12, "the round's axis {axis:?}");
-    assert!((origin.x - 80.0).abs() <= 1e-9 && (origin.z - 40.0).abs() <= 1e-9, "{origin:?}");
+    assert!(
+        axis.cross(Vec3::new(0.0, 1.0, 0.0)).length() <= 1e-12,
+        "the round's axis {axis:?}"
+    );
+    assert!(
+        (origin.x - 80.0).abs() <= 1e-9 && (origin.z - 40.0).abs() <= 1e-9,
+        "{origin:?}"
+    );
     // the bends the round does not reach as they were
     bends_on_their_surfaces(&b);
 }
