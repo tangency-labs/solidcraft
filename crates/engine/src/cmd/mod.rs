@@ -91,7 +91,7 @@ pub mod mass_properties;
 mod material_properties;
 mod materials;
 mod measure_exact;
-mod measure_sel;
+pub(crate) mod measure_sel;
 mod measure_shape;
 mod mesh;
 mod metadata;

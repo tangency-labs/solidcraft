@@ -1783,11 +1783,13 @@ impl Dialog {
 
     /// With automatic To Object enabled and profiles picked, a face or vertex off their plane,
     /// or a parallel plane, is the target rather than another profile. An explicitly active
-    /// To Object input accepts parallel planes regardless of the automatic switching preference.
+    /// To Object or From Object input accepts parallel planes regardless of the automatic
+    /// switching preference. A start plane may coincide with the profiles.
     fn extrude_target(&self, s: &Session, h: &Hit) -> Option<Sel> {
         let Kind::Extrude { thin: false, smart, .. } = &self.kind else { return None };
         let to_active = self.active_input().is_some_and(|i| i.label == TO_OBJECT);
-        if !to_active && (self.active != 0 || !smart.auto_to_object || smart.profiles_chosen) {
+        let from_active = self.active_input().is_some_and(|i| i.label == FROM_OBJECT);
+        if !to_active && !from_active && (self.active != 0 || !smart.auto_to_object || smart.profiles_chosen) {
             return None;
         }
         let reference = profile_plane(s, self.inputs.first()?.items.first()?)?;
@@ -1800,12 +1802,12 @@ impl Dialog {
                 }
                 Sel::Vertex { body: String::new(), point: plane.origin }
             }
-            _ if to_active => return None,
+            _ if to_active || from_active => return None,
             Hit::Face { body, index, point } => Sel::Face { body: body.clone(), index: *index, point: *point },
             Hit::Vertex { body, point } => Sel::Vertex { body: body.clone(), point: *point },
             _ => return None,
         };
-        object_target(s, &reference, &sel).then_some(sel)
+        (from_active || object_target(s, &reference, &sel)).then_some(sel)
     }
 
     /// Take a pick as the extrude's To Object (see [`Dialog::extrude_target`]): the extent turns to

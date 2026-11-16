@@ -79,8 +79,8 @@ pub(crate) struct Draft {
 }
 
 pub(crate) use imp::{
-    body_from_record, curve, extrude, extrude_drafted_with_holes, face_section, loft, loft_rails, loft_to_point, path_curve, project_onto_face,
-    revolve, screw, screw_radial, sphere, sweep, sweep_controlled,
+    body_from_record, curve, extrude, extrude_drafted_with_holes, face_section, loft, loft_curves, loft_to_point, path_curve, project_onto_face,
+    rail_curves, revolve, screw, screw_radial, sphere, sweep, sweep_controlled,
 };
 
 /// `parts` joined in order in a balanced tree: each part with its neighbour, then each pair with
@@ -2037,12 +2037,13 @@ mod imp {
         with_history(body, &roles, &columns)
     }
 
-    /// A loft through `sections` (as [`loft`] takes them) guided by one or two `rails` (polylines
-    /// from the first section to the last, through every section's curve), by the law
-    /// [`crate::loft_rails::railed`] gives a loft's rails: between each two sections stations are
+    /// The curves of a loft through `sections` (as [`loft`] takes them) guided by one or two
+    /// `rails` (polylines from the first section to the last, through every section's curve), each
+    /// section's and each station's in loft order, for [`loft_curves`] to skin. Stations follow the
+    /// law [`crate::loft_rails::railed`] gives a loft's rails: between each two sections they are
     /// the plain loft there moved so that the points the rails guide land on the rails. The
     /// sections' curves are brought to one form there, so a line pairs with an arc (#12512).
-    pub(crate) fn loft_rails(sections: &[(Plane, Vec<Piece>)], first: usize, rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Body> {
+    pub(crate) fn rail_curves(sections: &[(Plane, Vec<Piece>)], rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Vec<Vec<Curve>>> {
         if rails.is_empty() || rails.len() > 2 {
             return Err(KernelError::Invalid("a loft takes one or two guide rails".into()));
         }
@@ -2065,7 +2066,13 @@ mod imp {
                     .collect()
             })
             .collect();
-        loft_through(sections, first, &all, 3)
+        Ok(all)
+    }
+
+    /// The railed loft through `sections` (as [`loft`] takes them) skinned through `all`
+    /// ([`rail_curves`]), cubic across them: the railed loft.
+    pub(crate) fn loft_curves(sections: &[(Plane, Vec<Piece>)], first: usize, all: &[Vec<Curve>]) -> Result<Body> {
+        loft_through(sections, first, all, 3)
     }
 
     /// A loft from the section `pieces` (lines) on `plane` to `apex`: the base is the start cap,
