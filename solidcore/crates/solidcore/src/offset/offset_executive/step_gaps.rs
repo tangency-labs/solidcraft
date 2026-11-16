@@ -804,8 +804,8 @@ impl OffsetExecutive {
         Ok(true)
     }
 
-    /// `SplitEdgesAtStepCorners` (fork 7ff0a94, opt-in
-    /// `Kernel::fixes.local_operation_step_walls`, local operations only): every edge of
+    /// `SplitEdgesAtStepCorners` (fork 7ff0a94, the WR-530 addendum's step walls, local
+    /// operations only): every edge of
     /// the offset B-rep that runs past a corner of a step wall (within ten times its
     /// tolerance or the approximation tolerance, and not at its own ends) is split there,
     /// so that each part meets its own neighbour. In a local operation the only cap faces
