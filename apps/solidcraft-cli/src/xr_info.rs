@@ -366,6 +366,31 @@ mod tests {
         );
     }
 
+    /// The other runtime in the matrix: Quest 3 through SteamVR 2.18.4, also captured on
+    /// real hardware. Every number differs from the Oculus report - 2528 x 2780 per eye
+    /// instead of 2064 x 2272, an 8192 maximum instead of 4096, a sample count of 1 with
+    /// no MSAA above it - so this pins that the summary reads what the report says rather
+    /// than carrying Oculus-shaped assumptions, and that the design note's claim about the
+    /// format list holds on both runtimes.
+    #[test]
+    fn a_report_from_steamvr_passes() {
+        let report: Value = serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/quest3-steamvr-2.18.4.json")))
+            .expect("fixture is valid JSON");
+
+        let s = summary(&report);
+        assert!(s.contains("RESULT: PASS"), "{s}");
+        assert!(s.contains("SteamVR/OpenXR 2.18.4"), "{s}");
+        assert!(s.contains("2528 x 2780 per eye"), "{s}");
+        assert!(s.contains("Vulkan support ..... yes"), "{s}");
+
+        let extensions = report["openxr"]["instance_extensions"].as_array().expect("extensions are an array");
+        assert!(extensions.iter().any(|e| e["name"] == "XR_KHR_vulkan_enable2"), "fixture should record the Vulkan adoption path Phase 1 needs");
+        assert!(
+            !extensions.iter().any(|e| e["name"] == "XR_KHR_vulkan_swapchain_format_list"),
+            "the design note says the format list is absent on SteamVR as well as Oculus"
+        );
+    }
+
     #[test]
     fn no_runtime_fails_and_says_what_to_do() {
         let s = summary(&json!({
