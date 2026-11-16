@@ -288,6 +288,11 @@ impl ModelBody {
     pub fn definition_name(&self) -> &str {
         self.source_name.as_deref().unwrap_or(&self.name)
     }
+    /// For a computed placement (a world state's body of a placed component), the geometry key
+    /// of the model body it places: placements of one body share it. 0 for any other body.
+    pub fn source_key(&self) -> u64 {
+        self.source_key
+    }
     /// Display mesh, computed once: chord tolerance 1/1000 of the body size, and no facet of a
     /// curved face or edge turning more than [`kernel::DISPLAY_ANGLE`], so that a bend or a
     /// hole that is small beside the body is still drawn round.
@@ -4523,11 +4528,15 @@ fn apply_beside_sheet_cut(
 ) -> Result<()> {
     let effective = if targets.is_empty() { &f.participants } else { targets };
     let all = effective.len() == 1 && effective.first().is_some_and(|t| t == "*");
+    // Some sheet solids have already been cut, possibly by another pattern group. Preserve
+    // automatic surfaces before passing the rest as names, which would otherwise refuse them.
+    let skip_surfaces = op == Operation::Cut && (all || effective.is_empty());
     let rest: Vec<String> = st
         .bodies
         .iter()
         .filter(|b| {
             !handled.contains(&b.name)
+                && (!skip_surfaces || !b.is_surface())
                 && (all || if effective.is_empty() { b.component == f.component || b.feature == f.id } else { effective.contains(&b.name) })
         })
         .map(|b| b.name.clone())
@@ -4697,6 +4706,28 @@ pub(crate) fn empty_intersection(bodies: &[&str]) -> DocError {
     DocError::Invalid(format!("the intersection is empty: nothing of {body} would remain; check that the profile overlaps the body"))
 }
 
+thread_local! {
+    /// What the feature being evaluated says about targets it found joined into another body
+    /// ([`joined_into`]); [`eval_feature`] adds them to its warning.
+    static JOINED_TARGETS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The body that the target `name`, gone from the model, is part of now: a Combine before `f`
+/// joined it into its target, which a later Combine may have joined on in turn (#17807). `None`
+/// when no such Combine took it (a cut or intersect consumes its tools: they are part of
+/// nothing), or the body it went into is gone too.
+fn joined_into<'d>(doc: &'d Document, state: &ModelState, f: &Feature, name: &str) -> Option<&'d str> {
+    let mut now: Option<&'d str> = None;
+    for g in doc.features.iter().take_while(|g| g.id != f.id).filter(|g| !g.suppressed) {
+        if let FeatureKind::Combine { target, tools, operation: Operation::Join | Operation::NewBody, keep_tools: false } = &g.kind
+            && tools.iter().any(|t| t.0.as_str() == now.unwrap_or(name))
+        {
+            now = Some(target.0.as_str());
+        }
+    }
+    now.filter(|b| state.body(b).is_some())
+}
+
 /// The body a feature's target name `name` picks. Body names are unique, so a body of the
 /// feature's component asked to be called a name another component's body already has (a
 /// linked component's `AS5047P_PCB`) was named otherwise (`Body1`), and the name still picks the
@@ -4855,7 +4886,20 @@ fn apply_traced_with(
     } else {
         let mut v = Vec::new();
         for t in targets {
-            v.push(named_target(doc, state, f, t)?);
+            let i = match named_target(doc, state, f, t) {
+                // A target an earlier Combine has since joined into its own target is that
+                // body now (#17807), as a Combine tool that is part of another body is.
+                Err(DocError::Unknown(_)) if let Some(base) = joined_into(doc, state, f, t) => {
+                    JOINED_TARGETS.with(|n| n.borrow_mut().push(format!("`{t}` is part of `{base}` now")));
+                    let i = named_target(doc, state, f, base)?;
+                    if v.contains(&i) {
+                        continue;
+                    }
+                    i
+                }
+                r => r?,
+            };
+            v.push(i);
         }
         v
     };
@@ -4880,10 +4924,35 @@ fn apply_traced_with(
         }
         return Ok(());
     }
-    // #9867: a named surface body is no solid to cut or intersect; say how to get one.
-    if matches!(op, Operation::Cut | Operation::Intersect) && named {
+    // A surface body is no solid to cut or intersect, including automatic targets (#17587).
+    // Automatic cuts with solid targets leave surfaces intact. Keep Thicken's sources too.
+    // Surface-only cuts leave a surface alone when exact bounds prove every tool is clear of
+    // it in its own frame. An intersect would delete even a distant surface.
+    if matches!(op, Operation::Cut | Operation::Intersect) {
+        let cuts_solids = op == Operation::Cut && !named && target_idx.iter().any(|&i| state.bodies.get(i).is_some_and(ModelBody::is_closed));
+        let mut untouched = std::collections::BTreeSet::new();
         for &i in &target_idx {
-            if let Some(b) = state.bodies.get(i).filter(|b| b.body.is_surface()) {
+            if let Some(b) = state.bodies.get(i).filter(|b| b.is_surface()) {
+                // Surface targets never block an automatic solid cut or lose faces to it.
+                // Thicken's source surfaces also stay intact for intersects (#17587).
+                if cuts_solids || (!named && matches!(&f.kind, FeatureKind::Thicken { bodies, .. } if bodies.iter().any(|n| *n == b.name))) {
+                    untouched.insert(i);
+                    continue;
+                }
+                if op == Operation::Cut && !named && !tools.is_empty() {
+                    let into = tool_frame(&b.name);
+                    let mut apart = true;
+                    for tool in &tools {
+                        if !kernel::apart(&b.body, &tool_in(tool, into)?.body)? {
+                            apart = false;
+                            break;
+                        }
+                    }
+                    if apart {
+                        untouched.insert(i);
+                        continue;
+                    }
+                }
                 let verb = if op == Operation::Cut { "a cut" } else { "an intersect" };
                 return Err(DocError::Invalid(format!(
                     "{} is a surface body, and {verb} needs a solid: cut it with Surface › Trim, or Thicken it first",
@@ -4891,6 +4960,7 @@ fn apply_traced_with(
                 )));
             }
         }
+        target_idx.retain(|i| !untouched.contains(i));
     }
     // An intersect's tools act as one body. Unioned after the refusals above, so a union that
     // fails or runs out of time never hides them and is not paid for a refused feature.
@@ -9782,7 +9852,11 @@ fn trim_to_curved_face(
 /// far: the outer loop alone, drafted when the taper grows it (only the holes narrow) and
 /// straight when the taper narrows it. Run right through the target (past the far side of its
 /// exact box by the margin the straight path takes) and cut back to the face, its far end is the
-/// farthest the tool meets the face; the tool runs a hair past that, and at least `len`.
+/// farthest the tool meets the face; the tool runs a hair past that, and at least `len`. The
+/// envelope only shortens the tool: when its cut fails for a narrowing taper (a straight envelope
+/// wider than the target passes beside it where the tool meets it), the tool runs a hair past the
+/// far side of the target's box, beyond which it meets nothing of it, and its own cut says
+/// whether it ends on the face. A tool that closes before that is refused when it is built.
 #[allow(clippy::too_many_arguments)]
 fn tapered_reach(
     ss: &SolvedSketch,
@@ -9794,13 +9868,14 @@ fn tapered_reach(
     taper: f64,
     corner: Option<kernel::DraftCorner>,
 ) -> Result<f64> {
-    let n = ss.plane.normal();
     let far_side = |body: &Body| -> Result<f64> {
         let bb = body.exact_bounds().map_err(|e| DocError::Invalid(e.to_string()))?;
-        let (c, half) = (bb.center(), bb.size() * 0.5);
-        Ok(sign * (ss.plane.height(c) - base) + half.x * n.x.abs() + half.y * n.y.abs() + half.z * n.z.abs())
+        let [lo, hi] = solidcore_ops::affine::span_along(bb.min.into(), bb.max.into(), ss.plane.origin.into(), ss.plane.normal().into())
+            .map_err(|e| DocError::Invalid(e.to_string()))?;
+        Ok(if sign > 0.0 { hi - base } else { base - lo })
     };
-    let through = far_side(&target.body)?.max(len) + target.body.size() * 0.05 + 1.0 + to_offset.abs();
+    let target_far = far_side(&target.body)?.max(len) + to_offset.abs();
+    let through = target_far + target.body.size() * 0.05 + 1.0;
     extrude_within_reach([base, base + sign * through])?;
     let start_plane = ss.plane.offset(base);
     let mut envelopes = Vec::new();
@@ -9817,7 +9892,10 @@ fn tapered_reach(
             envelopes.extend(centered_extrude(&ss.plane, &outer, lo, hi, None, None, false)?);
         }
     }
-    let cut = trim_to_curved_face(envelopes, target, face, to, to_offset, &ss.plane, base, base + sign * through)?;
+    let cut = match trim_to_curved_face(envelopes, target, face, to, to_offset, &ss.plane, base, base + sign * through) {
+        Err(_) if taper < 0.0 => return Ok(target_far + target.body.size() * 1e-3),
+        cut => cut?,
+    };
     let reach = cut.iter().map(|t| far_side(&t.body)).collect::<Result<Vec<_>>>()?.into_iter().fold(len, f64::max);
     Ok(reach + target.body.size() * 1e-3)
 }
@@ -10053,6 +10131,24 @@ fn eval_feature(
     import_report: &mut Option<Arc<kernel::ImportReport>>,
     repair: &mut Option<Arc<kernel::RepairReport>>,
 ) -> Result<()> {
+    JOINED_TARGETS.with(|n| n.borrow_mut().clear());
+    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair);
+    for note in JOINED_TARGETS.with(|n| std::mem::take(&mut *n.borrow_mut())) {
+        append_warning(warning, note);
+    }
+    r
+}
+
+/// [`eval_feature`] for one kind of feature.
+fn eval_feature_kind(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &mut ModelState,
+    warning: &mut Option<String>,
+    import_report: &mut Option<Arc<kernel::ImportReport>>,
+    repair: &mut Option<Arc<kernel::RepairReport>>,
+) -> Result<()> {
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
     refuse_ambiguous_targets(doc, st, f, &f.participants)?;
@@ -10158,6 +10254,9 @@ fn eval_feature(
             Ok(())
         }
         FeatureKind::Hole { thread, thread_depth, thread_class, diameter, hand, modeled, ease_out, depth, to, .. } => {
+            if st.bodies.is_empty() {
+                return Err(empty_boolean_targets(doc, st, f, &[], f.participants.is_empty()));
+            }
             let thread_depth = thread_depth.as_ref().map(|d| val(vals, d, Kind::Length)).transpose()?;
             if thread_depth.is_some() && thread.is_none() {
                 return Err(DocError::Invalid("thread depth requires a tapped hole".into()));

@@ -47,7 +47,10 @@
 //! See `plan/upstream-issues/WR-469--make-edge-in-face-vertex-tolerance-gap.md`.
 //! Not upstream (WR-527, #1527): on two planes, `MakeEdgeInFaceWithVU` leaves an inner loop whose
 //! test point lies outside the new face's outer loop box (at the retry tolerance)
-//! in place without classifying it, as the fork's tangency-labs/smlib@60b1c6a.
+//! in place without classifying it, as the fork's tangency-labs/smlib@60b1c6a; on a
+//! cone or cylinder too where the new face's outer loop, lifted across the seam, bounds
+//! a disk on its left (winding 0, certified positive area), which keeps the face within
+//! the box (not the fork; #14453).
 //! Each inner loop it goes on to classify adds one to
 //! [`WorkCounters::loops_classified`](crate::kernel::WorkCounters::loops_classified)
 //! (the fork's work count, tangency-labs/smlib@edf7414); it changes no result.
@@ -2332,10 +2335,11 @@ fn redistribute_inner_loops(
     let classify_to_original = !missing_original;
     let mut loops = fp2::loops(b, face, false, None)?;
 
-    // Not upstream (WR-527, #1526/#1527): on a plane the region a loop bounds lies within the
+    // Not upstream (WR-527, #1526/#1527): on a plane, or on a cone or cylinder whose outer
+    // loop lifts to a disk ([`new_face_outer_box`]), the region a loop bounds lies within the
     // loop's box, so an inner loop sampled outside the box of the new face's outer loop
     // is not in the new face and stays: only when every edge has a box.
-    let new_outer_box = new_face_outer_box(k, b, face, new_face)?;
+    let new_outer_box = new_face_outer_box(k, b, face, new_face, missing_new)?;
 
     let mut i = 1;
     while let Some(&loop_) = loops.get(i) {
@@ -2471,25 +2475,58 @@ fn redistribute_inner_loops(
     Ok(())
 }
 
-/// The box of `new_face`'s outer loop edges, each grown by its tolerance, when both
-/// faces lie on planes and every one of those edges has a curve whose box can be
-/// computed (the fork's `sNewFOuterBox`, WR-527).
+/// The box of `new_face`'s outer loop edges, each grown by its tolerance, that holds the
+/// whole face (the fork's `sNewFOuterBox`, WR-527), or `None` where that is not shown: an
+/// edge without a curve or a box, or faces on other surfaces.
+///
+/// - **Planes.** A plane region lies within the convex hull of the loop that bounds it.
+/// - **Cones and cylinders** (#14453), when [`cone_outer_loop_lifts_to_disk`] holds and the
+///   new face's outer loop is not missing a seam (`missing_new`). The surface's linear
+///   parameter is affine in the NURB one (`cone_convert_uv_from_nurbs_to_step`), and the
+///   point is affine in the height, so a line of constant sweep parameter is a straight
+///   generator segment. Lift the loop to the strip (the sweep parameter unwrapped): it is a
+///   closed curve `L` bounding a disk `D`, the face's region, on its left. For any point
+///   of the face, the generator line through its lift leaves the bounded `D` through `L` on
+///   both sides, at two points of the loop; the face point lies on the straight segment
+///   between their images, so in the convex hull of the loop. Each loop point is a trim
+///   point, within its edge's tolerance of the edge curve and so in that edge's grown box,
+///   or on the straight joint `loop_area_sign` closes between two trims at a vertex, which
+///   the vertex's point grown by its tolerance covers to first order in the joint's length
+///   (inferred; the caller's test is at 100 times the tolerance). A full turn of the sweep
+///   parameter is no obstacle: a one-turn helical strip lifts to a disk. A loop winding
+///   round the axis does not, and gets no box.
 fn new_face_outer_box(
     k: &Kernel,
     b: &Brep,
     face: FaceId,
     new_face: FaceId,
+    missing_new: bool,
 ) -> Result<Option<crate::geom::extent3d::Extent3d>> {
     use crate::nurbs::b_spline_curve::BoundingBoxRequest;
     use crate::surface::surface::SurfaceKind;
-    let on_plane = |f: FaceId| -> Result<bool> {
-        Ok(b.face(f)?
-            .surface
-            .as_ref()
-            .is_some_and(|s| matches!(s.kind(), SurfaceKind::Plane(_))))
+    // `Some(None)` on a plane; on a cone or cylinder `Some(Some((swap_uv, full_turn)))`,
+    // `full_turn` where its own (STEP) sweep is 360 degrees, the surface's period
+    let ruled = |f: FaceId| -> Result<Option<Option<(bool, bool)>>> {
+        Ok(match b.face(f)?.surface.as_ref().map(Surface::kind) {
+            Some(SurfaceKind::Plane(_)) => Some(None),
+            Some(SurfaceKind::Cone(c)) => Some(Some((
+                c.canonical().swap_uv,
+                c.rev.anal_uv_domain.u_interval().length() == 360.0,
+            ))),
+            _ => None,
+        })
     };
-    if !on_plane(face)? || !on_plane(new_face)? {
+    let kind = ruled(new_face)?;
+    let Some(kind) = kind else {
         return Ok(None);
+    };
+    if ruled(face)? != Some(kind) {
+        return Ok(None);
+    }
+    if let Some((swap_uv, full_turn)) = kind {
+        if missing_new || !cone_outer_loop_lifts_to_disk(k, b, new_face, swap_uv, full_turn)? {
+            return Ok(None);
+        }
     }
     let edges = face_outer_edges(b, new_face)?;
     if edges.is_empty() {
@@ -2516,7 +2553,238 @@ fn new_face_outer_box(
         edge_box.expand_absolute(record.tolerance);
         outer_box = outer_box.union(&edge_box);
     }
+    if kind.is_some() {
+        // the joints between trims, at the loop's vertices
+        for l in crate::topology::face::p2::outer_loops(b, new_face)? {
+            for v in crate::topology::loopuse::loop_vertices(b, l)? {
+                let vertex = b.vertex(required(v, "outer loop has null vertex")?)?;
+                let mut vertex_box =
+                    crate::geom::extent3d::Extent3d::from_points(vertex.point, vertex.point);
+                vertex_box.expand_absolute(vertex.tolerance);
+                outer_box = outer_box.union(&vertex_box);
+            }
+        }
+    }
     Ok(Some(outer_box))
+}
+
+/// Whether the outer loop of `new_face`, on a cone or cylinder whose NURB sweep (angular)
+/// parameter is u (v with `swap_uv`), lifts to a closed curve bounding the face on its
+/// left (#14453; the cover argument is at [`new_face_outer_box`]). The loop is its loop
+/// use's edge uses in turn, each UV trim (its own or its mate's) taken along the edge use's
+/// orientation, as [`crate::topology::face::p3::compute_loop_orientation`] reads them.
+///
+/// - **Period.** The surface's own: where the cone's STEP sweep is a full turn
+///   (`full_turn`, 360 degrees) and the NURB sweep interval's ends convert to the turn's
+///   ends exactly, that interval's length is the period; a full turn whose NURB interval
+///   does not convert so gets no box. A partial sweep is not periodic, and its trims are
+///   not shifted.
+/// - **Winding.** Each trim is shifted by a whole number of periods (on a full turn) so it
+///   starts nearest the previous one's end; the
+///   joints left, the last back to the first included, are the gaps. The loop winds `n`
+///   times where the last joint needs `n` periods. Every gap is a vertex's, far below
+///   half a period; with their sum below half a period, rounding the closing jump to a
+///   whole number of periods is exact (each period counted is one the loop turns). Only
+///   `n = 0` passes.
+/// - **Side.** The signed area of the lifted loop is positive: counter-clockwise, the face
+///   on its left, as `ComputeLoopOrientation` decides an outer loop. The area is an interval
+///   enclosure ([`crate::mass::loop_area::lifted_loop_area_sign`]) of the trims translated
+///   by their shifts exactly (the shift enclosed, the curves not rewritten), and only its
+///   lower bound above 0 passes.
+///
+/// `false` (no box) for anything else: not one outer loop, a missing trim, a trim with a
+/// recorded drop failure, no NURBS form or a parameter range other than its edge's, a
+/// period that is not finite and positive, gaps of half a period or more, an undecided
+/// area, or any error but a cancellation or an unported call (which are returned).
+fn cone_outer_loop_lifts_to_disk(
+    k: &Kernel,
+    b: &Brep,
+    new_face: FaceId,
+    swap_uv: bool,
+    full_turn: bool,
+) -> Result<bool> {
+    match cone_outer_loop_lifts_to_disk_or_err(k, b, new_face, swap_uv, full_turn) {
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        // a failed evaluation, closure test or area shows nothing: no box
+        Err(_) => Ok(false),
+        Ok(disk) => Ok(disk),
+    }
+}
+
+/// [`cone_outer_loop_lifts_to_disk`] with every error returned.
+fn cone_outer_loop_lifts_to_disk_or_err(
+    k: &Kernel,
+    b: &Brep,
+    new_face: FaceId,
+    swap_uv: bool,
+    full_turn: bool,
+) -> Result<bool> {
+    use crate::blend::fillet_section::certificate::NurbsCurve;
+    use crate::topology::{edgeuse::p1 as eu1, loopuse as lu};
+    let outer = crate::topology::face::p2::outer_loops(b, new_face)?;
+    let [l] = outer.as_slice() else {
+        return Ok(false);
+    };
+    let Some(surface) = b.face(new_face)?.surface.as_ref() else {
+        return Ok(false);
+    };
+    let dom = surface.natural_uv_domain_with_nurb(k)?;
+    // the sweep's NURB interval: one period where the sweep is a full turn
+    let sweep = if swap_uv {
+        dom.v_interval()
+    } else {
+        dom.u_interval()
+    };
+    let sweep = (sweep.min(), sweep.max());
+    // a full turn is periodic over this NURB interval only where its ends map onto the
+    // turn's ends (a domain trimmed inside the turn is not one period): else no box
+    if full_turn {
+        let crate::surface::surface::SurfaceKind::Cone(cone) = surface.kind() else {
+            return Ok(false);
+        };
+        if !nurb_sweep_is_the_turn(k, cone, &dom)? {
+            return Ok(false);
+        }
+    }
+
+    let (primary, _) = lu::loop_loopuses(b, *l)?;
+    let mut trims: Vec<LoopTrim> = Vec::new();
+    for eu in lu::edgeuses(b, primary, None, None)? {
+        let failed = b
+            .edgeuse(eu)?
+            .drop_curve_fail
+            .as_deref()
+            .is_some_and(|f| f.fail_status != crate::error::SM_SUCCESS);
+        let Some(edge) = eu1::edge(b, eu)? else {
+            return Ok(false);
+        };
+        let interval = b.edge(edge)?.interval;
+        let Some(trim) = eu1::uv_trim_curve(b, eu)?.0 else {
+            return Ok(false);
+        };
+        let range = trim.natural_interval();
+        let Some(bs) = trim.b_spline_base() else {
+            return Ok(false);
+        };
+        if failed || range.min() != interval.min() || range.max() != interval.max() {
+            return Ok(false);
+        }
+        let Ok(curve) = NurbsCurve::of(bs) else {
+            return Ok(false);
+        };
+        let forwards = eu1::orientation(b, eu)? == OrientType::Same;
+        let (a, z) = (
+            trim.evaluate_point(k, range.min())?,
+            trim.evaluate_point(k, range.max())?,
+        );
+        let (start, end) = if forwards { (a, z) } else { (z, a) };
+        trims.push(LoopTrim {
+            curve,
+            forwards,
+            start: if swap_uv { start.y } else { start.x },
+            end: if swap_uv { end.y } else { end.x },
+        });
+    }
+    lifted_loop_bounds_disk_on_left(k, &trims, usize::from(swap_uv), sweep, full_turn)
+}
+
+/// Whether the NURB domain `dom`'s sweep ends convert exactly to the ends of `cone`'s
+/// STEP sweep (its turn): then the NURB sweep interval is one period of the surface.
+fn nurb_sweep_is_the_turn(
+    k: &Kernel,
+    cone: &crate::surface::cone::Cone,
+    dom: &crate::geom::extent2d::Extent2d,
+) -> Result<bool> {
+    let turn = cone.rev.anal_uv_domain.u_interval();
+    let (lo, hi) = (
+        cone.convert_uv_from_nurbs_to_step(k, dom.min())?,
+        cone.convert_uv_from_nurbs_to_step(k, dom.max())?,
+    );
+    Ok(lo.x == turn.min() && hi.x == turn.max())
+}
+
+/// One UV trim of a loop: its NURBS form, its sense in the loop, and its start and end in
+/// the loop's sense along the sweep coordinate.
+struct LoopTrim {
+    curve: crate::blend::fillet_section::certificate::NurbsCurve,
+    forwards: bool,
+    start: f64,
+    end: f64,
+}
+
+/// Whether the UV loop of `trims` (in turn), each shifted along coordinate `axis` (0 for u,
+/// 1 for v) by whole periods of the sweep interval `sweep` (`(min, max)`) where the sweep
+/// is a `full_turn` (else not shifted), closes with winding 0 and certified positive
+/// signed area: the steps of [`cone_outer_loop_lifts_to_disk`]. Each shift is enclosed as
+/// `n (max - min)` in interval arithmetic for the area, so the area holds the exact lift
+/// whatever the domain. `false` for no trims, an empty or unbounded sweep, or gaps summing
+/// to half a period or more.
+fn lifted_loop_bounds_disk_on_left(
+    k: &Kernel,
+    trims: &[LoopTrim],
+    axis: usize,
+    sweep: (f64, f64),
+    full_turn: bool,
+) -> Result<bool> {
+    use crate::blend::fillet_section::interval::Ivl;
+    use crate::mass::loop_area::{lifted_loop_area_sign, LoopAreaSign};
+    let period = sweep.1 - sweep.0;
+    if !(period.is_finite() && period > 0.0) {
+        return Ok(false);
+    }
+    // the whole periods to add to `gap` to bring it nearest 0
+    let periods = |gap: f64| {
+        if full_turn {
+            -(gap / period).round()
+        } else {
+            0.0
+        }
+    };
+    // `n` periods, enclosed
+    let zero = Ivl::from(0.0);
+    let enclosed = |n: f64| {
+        if n == 0.0 {
+            zero
+        } else {
+            Ivl::from(n) * (Ivl::from(sweep.1) - Ivl::from(sweep.0))
+        }
+    };
+    let Some(first_start) = trims.first().map(|t| t.start) else {
+        return Ok(false);
+    };
+    let mut gaps = 0.0_f64;
+    let mut previous_end: Option<f64> = None;
+    let mut shifts: Vec<(Ivl, Ivl)> = Vec::new();
+    for trim in trims {
+        let n = match previous_end {
+            None => 0.0,
+            Some(end) => {
+                let n = periods(trim.start - end);
+                gaps += (trim.start + n * period - end).abs();
+                n
+            }
+        };
+        previous_end = Some(trim.end + n * period);
+        let shift = enclosed(n);
+        shifts.push(if axis == 0 {
+            (shift, zero)
+        } else {
+            (zero, shift)
+        });
+    }
+    let previous_end = previous_end.unwrap_or(first_start);
+    // the closing joint: the periods it needs are the loop's winding
+    let winding = periods(first_start - previous_end);
+    gaps += (first_start + winding * period - previous_end).abs();
+    if !(gaps.is_finite() && gaps < 0.5 * period) || winding != 0.0 {
+        return Ok(false);
+    }
+    let pairs: Vec<(&crate::blend::fillet_section::certificate::NurbsCurve, bool)> =
+        trims.iter().map(|t| (&t.curve, t.forwards)).collect();
+    Ok(matches!(
+        lifted_loop_area_sign(k, &pairs, &shifts)?,
+        LoopAreaSign::Positive(_)
+    ))
 }
 
 fn edge_sample(k: &Kernel, b: &Brep, edge: EdgeId) -> Result<(Point3, f64)> {
@@ -3711,5 +3979,261 @@ mod tests {
         assert_eq!(b.edge_list().len(), 2);
         assert_eq!(b.vertex_list().len(), 3);
         assert!(!k.context.doing_boolean());
+    }
+
+    /// A UV line trim from `a` to `b`, taken forwards, with its ends along u.
+    fn line_trim(a: (f64, f64), b: (f64, f64)) -> LoopTrim {
+        LoopTrim {
+            curve: crate::blend::fillet_section::certificate::NurbsCurve {
+                p: 1,
+                n: 2,
+                u: vec![0.0, 0.0, 1.0, 1.0],
+                pw: vec![a.0, a.1, 0.0, 1.0, b.0, b.1, 0.0, 1.0],
+            },
+            forwards: true,
+            start: a.0,
+            end: b.0,
+        }
+    }
+
+    /// The outer loop of a one-turn helical strip on a cylinder of u period 1 (#14453):
+    /// helix `(0, 0)` to `(1, 1)`, the generator up at the seam, written at its other copy
+    /// `u = 0`, helix back to `(0, 0.2)` and down. Its u span is the whole turn, but lifted
+    /// (the generator shifted by one period) it closes with winding 0 round the
+    /// parallelogram `(0,0), (1,1), (1,1.2), (0,0.2)`, of area +0.2: the face on its left.
+    fn helical_strip() -> Vec<LoopTrim> {
+        vec![
+            line_trim((0.0, 0.0), (1.0, 1.0)),
+            line_trim((0.0, 1.0), (0.0, 1.2)),
+            line_trim((1.0, 1.2), (0.0, 0.2)),
+            line_trim((0.0, 0.2), (0.0, 0.0)),
+        ]
+    }
+
+    #[test]
+    fn a_helical_strip_lifts_to_a_disk() {
+        let k = Kernel::default();
+        assert!(
+            lifted_loop_bounds_disk_on_left(&k, &helical_strip(), 0, (0.0, 1.0), true).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_strip_run_clockwise_bounds_its_complement_and_gets_no_box() {
+        // the same loop the other way round: area -0.2, the face is the rest of the
+        // cylinder, which the loop's box does not hold
+        let k = Kernel::default();
+        let mut trims = helical_strip();
+        trims.reverse();
+        for t in &mut trims {
+            t.forwards = false;
+            core::mem::swap(&mut t.start, &mut t.end);
+        }
+        assert!(!lifted_loop_bounds_disk_on_left(&k, &trims, 0, (0.0, 1.0), true).unwrap());
+    }
+
+    #[test]
+    fn a_band_winding_once_gets_no_box() {
+        // a seamless band's circle, u 0 to 1 back to its start: winding 1
+        let k = Kernel::default();
+        let band = [line_trim((0.0, 0.0), (1.0, 0.0))];
+        assert!(!lifted_loop_bounds_disk_on_left(&k, &band, 0, (0.0, 1.0), true).unwrap());
+        // on a surface not closed in u its unshifted closing joint is a whole period
+        let band = [line_trim((0.0, 0.0), (1.0, 0.0))];
+        assert!(!lifted_loop_bounds_disk_on_left(&k, &band, 0, (0.0, 1.0), false).unwrap());
+    }
+
+    #[test]
+    fn gaps_of_half_a_period_get_no_box() {
+        // a counter-clockwise loop whose two joints leave 0.3 each in u: 0.6 of the
+        // period, past the half where rounding to whole periods is certain
+        let k = Kernel::default();
+        let gapped = [
+            line_trim((0.0, 0.0), (0.2, 0.0)),
+            line_trim((0.5, 0.0), (0.5, 1.0)),
+            line_trim((0.2, 1.0), (0.0, 1.0)),
+            line_trim((0.0, 1.0), (0.0, 0.0)),
+        ];
+        assert!(!lifted_loop_bounds_disk_on_left(&k, &gapped, 0, (0.0, 1.0), true).unwrap());
+        // with one joint of 0.3 (under half) it passes
+        let one_gap = [
+            line_trim((0.0, 0.0), (0.2, 0.0)),
+            line_trim((0.5, 0.0), (0.5, 1.0)),
+            line_trim((0.5, 1.0), (0.0, 1.0)),
+            line_trim((0.0, 1.0), (0.0, 0.0)),
+        ];
+        assert!(lifted_loop_bounds_disk_on_left(&k, &one_gap, 0, (0.0, 1.0), true).unwrap());
+    }
+
+    #[test]
+    fn a_band_with_its_seam_lifts_to_a_rectangle_along_v() {
+        // swept along v (axis 1, `swap_uv`): bottom circle v 0 to 1 at u = 0, the seam
+        // across, top circle back, the seam's other copy back: winding 0, area +1
+        let k = Kernel::default();
+        let along_v = |a: (f64, f64), b: (f64, f64)| {
+            let mut t = line_trim(a, b);
+            t.start = a.1;
+            t.end = b.1;
+            t
+        };
+        let band = [
+            along_v((1.0, 0.0), (1.0, 1.0)),
+            along_v((1.0, 0.0), (0.0, 0.0)),
+            along_v((0.0, 1.0), (0.0, 0.0)),
+            along_v((0.0, 0.0), (1.0, 0.0)),
+        ];
+        assert!(lifted_loop_bounds_disk_on_left(&k, &band, 1, (0.0, 1.0), true).unwrap());
+    }
+
+    #[test]
+    fn a_band_winding_once_with_area_gets_no_box_by_its_winding() {
+        // a seamless band's bottom circle in two trims dipping in v, u 0 to 1: winding 1.
+        // Closed straight back from (1, 0) to (0, 0) it has area +0.05, so only the
+        // winding test refuses it (dropping that test makes this fail: the step's mutation)
+        let k = Kernel::default();
+        let band = [
+            line_trim((0.0, 0.0), (0.5, -0.1)),
+            line_trim((0.5, -0.1), (1.0, 0.0)),
+        ];
+        assert!(!lifted_loop_bounds_disk_on_left(&k, &band, 0, (0.0, 1.0), true).unwrap());
+    }
+
+    /// The side face of the primitive `b` on a cone kind (a cone or cylinder), its outer
+    /// loop's UV trims made as `ComputeLoopOrientation` makes them, and its box from
+    /// [`new_face_outer_box`] (the face standing for both faces of a split).
+    fn side_face_box(k: &Kernel, b: &mut Brep) -> crate::geom::extent3d::Extent3d {
+        use crate::surface::surface::SurfaceKind;
+        let side = b
+            .face_list()
+            .iter()
+            .copied()
+            .find(|&f| {
+                matches!(
+                    b.face(f).unwrap().surface.as_ref().map(Surface::kind),
+                    Some(SurfaceKind::Cone(_))
+                )
+            })
+            .unwrap();
+        let outer = crate::topology::face::p2::outer_loops(b, side).unwrap();
+        assert_eq!(outer.len(), 1);
+        let orientation =
+            crate::topology::face::p3::compute_loop_orientation(k, b, side, outer[0], None, false)
+                .unwrap();
+        assert_eq!(orientation, OrientType::Same);
+        new_face_outer_box(k, b, side, side, false)
+            .unwrap()
+            .expect("the side face's outer loop lifts to a disk")
+    }
+
+    /// Asserts that `bx` holds the frustum's end circles and its mid-height circle (at 360
+    /// points each) and is grown once, not twice: it lies within `[-r_max, r_max]^2 x [0, h]`
+    /// grown by twice the largest edge or vertex tolerance `t` of `b`. The box is the union of
+    /// the edges' curve boxes and the vertices' points, each grown by its own tolerance (at
+    /// most `t`), so it reaches `t` past the frustum plus the curve boxes' rounding, a few
+    /// ulps of the coordinates (measured: 1 ulp past 4 on the drum, 3 past 3 on the cone),
+    /// which the second `t` (1e-5 here, ~10^10 ulps) holds; a box grown twice reaches `2t`
+    /// plus that rounding and fails.
+    fn holds_frustum(b: &Brep, bx: &crate::geom::extent3d::Extent3d, rs: (f64, f64), h: f64) {
+        let mut slack = 0.0_f64;
+        for &e in b.edge_list() {
+            slack = slack.max(b.edge(e).unwrap().tolerance);
+        }
+        for &v in b.vertex_list() {
+            slack = slack.max(b.vertex(v).unwrap().tolerance);
+        }
+        let r_max = rs.0.max(rs.1);
+        for i in 0..360 {
+            let a = f64::from(i).to_radians();
+            for (r, z) in [(rs.0, 0.0), (0.5 * (rs.0 + rs.1), 0.5 * h), (rs.1, h)] {
+                let p = Point3::new(r * a.cos(), r * a.sin(), z);
+                assert!(bx.contains_point(p, 0.0), "{p:?} outside {bx:?}");
+            }
+        }
+        assert!(slack > 0.0, "the primitive's edges carry a tolerance");
+        let (lo, hi, g) = (bx.min(), bx.max(), 2.0 * slack);
+        assert!(
+            lo.x >= -r_max - g && lo.y >= -r_max - g && lo.z >= -g,
+            "{bx:?}"
+        );
+        assert!(
+            hi.x <= r_max + g && hi.y <= r_max + g && hi.z <= h + g,
+            "{bx:?}"
+        );
+    }
+
+    #[test]
+    fn a_cone_side_face_gets_the_box_of_its_frustum() {
+        // radius 2 at z 0 to radius 1 at z 3: the side lies in [-2, 2]^2 x [0, 3], and its
+        // circles and mid-height circle (radius 1.5) lie in the box
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_cone(
+            &mut k,
+            Point3::new(0.0, 0.0, 0.0),
+            2.0,
+            1.0,
+            3.0,
+        )
+        .unwrap();
+        let bx = side_face_box(&k, &mut b);
+        holds_frustum(&b, &bx, (2.0, 1.0), 3.0);
+    }
+
+    #[test]
+    fn a_cylinder_side_face_gets_the_box_of_its_drum() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_cylinder(
+            &mut k,
+            Point3::new(0.0, 0.0, 0.0),
+            4.0,
+            7.5,
+        )
+        .unwrap();
+        let bx = side_face_box(&k, &mut b);
+        holds_frustum(&b, &bx, (4.0, 4.0), 7.5);
+    }
+
+    #[test]
+    fn a_cone_whose_nurb_sweep_is_not_its_turn_gets_no_box() {
+        // the cone of the frustum test, its own STEP sweep moved to [90, 450] degrees: still
+        // 360 long (a full turn), but its NURB sweep converts to [0, 360], so that interval is
+        // not shown to be one period, and the face gets no box (it had one before)
+        use crate::surface::surface::SurfaceKind;
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_cone(
+            &mut k,
+            Point3::new(0.0, 0.0, 0.0),
+            2.0,
+            1.0,
+            3.0,
+        )
+        .unwrap();
+        let _ = side_face_box(&k, &mut b);
+        let side = b
+            .face_list()
+            .iter()
+            .copied()
+            .find(|&f| {
+                matches!(
+                    b.face(f).unwrap().surface.as_ref().map(Surface::kind),
+                    Some(SurfaceKind::Cone(_))
+                )
+            })
+            .unwrap();
+        let surface = b.face_mut(side).unwrap().surface.as_mut().unwrap();
+        let dom = surface.natural_uv_domain_with_nurb(&k).unwrap();
+        let SurfaceKind::Cone(cone) = surface.kind_mut() else {
+            panic!("the side is a cone");
+        };
+        assert!(nurb_sweep_is_the_turn(&k, cone, &dom).unwrap());
+        let turn = cone.rev.anal_uv_domain.u_interval();
+        assert_eq!((turn.min(), turn.max()), (0.0, 360.0));
+        let mut moved = cone.rev.anal_uv_domain;
+        moved.set_u_min(90.0).unwrap();
+        moved.set_u_max(450.0).unwrap();
+        cone.rev.anal_uv_domain = moved;
+        assert!(!nurb_sweep_is_the_turn(&k, cone, &dom).unwrap());
+        assert!(new_face_outer_box(&k, &b, side, side, false)
+            .unwrap()
+            .is_none());
     }
 }

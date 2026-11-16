@@ -1373,7 +1373,7 @@
 {"case":"lazy_arc_num_cpts_v","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,2.0]}}
 {"case":"lazy_arc_parallel_other","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,0.0]}}
 {"case":"lazy_arc_parallel_sweep","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,1.0]}}
-{"case":"lazy_arc_parallel_zero","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,1.0]}}
+{"case":"lazy_arc_parallel_zero","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,0.0]}}
 {"case":"lazy_arc_planar","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,0.0,0.9000000000000001,0.8500000000000003,0.7500000000000001,0.6882472016116853,0.6882472016116853,-0.22941573387056174,0.3441236008058427]}}
 {"case":"lazy_arc_planar_eff_zero","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,0.0,0.9000000000000001,0.8500000000000003,0.7500000000000001,0.6882472016116853,0.6882472016116853,-0.22941573387056174,0.3441236008058427]}}
 {"case":"lazy_arc_seam_jump","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,1.0]}}
@@ -1404,7 +1404,7 @@
 {"case":"lazy_big_num_cpts_v","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,2.0]}}
 {"case":"lazy_big_parallel_other","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,0.0]}}
 {"case":"lazy_big_parallel_sweep","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,1.0]}}
-{"case":"lazy_big_parallel_zero","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,1.0]}}
+{"case":"lazy_big_parallel_zero","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,0.0]}}
 {"case":"lazy_big_planar","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,0.0,1402.346531614487,59.73081645181091,457.4923265807243,0.12368553365630673,-0.992296557354097,0.007030720259107941,266.5918157856747]}}
 {"case":"lazy_big_planar_eff_zero","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,0.0,1402.346531614487,59.73081645181091,457.4923265807243,0.12368553365630673,-0.992296557354097,0.007030720259107941,266.5918157856747]}}
 {"case":"lazy_big_seam_jump","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,1.0]}}
@@ -1435,7 +1435,7 @@
 {"case":"lazy_cubic_num_cpts_v","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,2.0]}}
 {"case":"lazy_cubic_parallel_other","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,0.0]}}
 {"case":"lazy_cubic_parallel_sweep","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,1.0]}}
-{"case":"lazy_cubic_parallel_zero","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,1.0]}}
+{"case":"lazy_cubic_parallel_zero","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,0.0]}}
 {"case":"lazy_cubic_planar","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,0.0,1.4594594594594597,0.49324324324324326,1.25,0.1643989873053573,-0.9863939238321437,0.0,1.25]}}
 {"case":"lazy_cubic_planar_eff_zero","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,0.0,1.4594594594594597,0.49324324324324326,1.25,0.1643989873053573,-0.9863939238321437,0.0,1.25]}}
 {"case":"lazy_cubic_seam_jump","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,1.0]}}
@@ -1462,7 +1462,7 @@
 {"case":"lazy_cubic_t_num_cpts_v","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,1.0,0.0,4.0]}}
 {"case":"lazy_cubic_t_parallel_other","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,1.0,0.0,0.0]}}
 {"case":"lazy_cubic_t_parallel_sweep","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,1.0,0.0,1.0]}}
-{"case":"lazy_cubic_t_parallel_zero","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,1.0,0.0,1.0]}}
+{"case":"lazy_cubic_t_parallel_zero","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,1.0,0.0,0.0]}}
 {"case":"lazy_cubic_t_planar","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,1.0,0.0,0.0,1.4594594594594597,0.49324324324324326,1.25,-0.1643989873053573,0.9863939238321437,0.0,1.25]}}
 {"case":"lazy_cubic_t_planar_eff_zero","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,1.0,0.0,0.0,1.4594594594594597,0.49324324324324326,1.25,-0.1643989873053573,0.9863939238321437,0.0,1.25]}}
 {"case":"lazy_cubic_t_seam_jump","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,1.0,0.0,1.0]}}
@@ -1497,7 +1497,7 @@
 {"case":"lazy_flat_num_cpts_v","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,2.0]}}
 {"case":"lazy_flat_parallel_other","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,0.0]}}
 {"case":"lazy_flat_parallel_sweep","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,1.0]}}
-{"case":"lazy_flat_parallel_zero","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,1.0]}}
+{"case":"lazy_flat_parallel_zero","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,0.0]}}
 {"case":"lazy_flat_planar","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,1.0,1.75,0.75,0.0,0.0,0.0,1.0,0.0]}}
 {"case":"lazy_flat_planar_eff_zero","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,1.0,1.75,0.75,0.0,0.0,0.0,1.0,0.0]}}
 {"case":"lazy_flat_seam_jump","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,1.0]}}

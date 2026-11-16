@@ -35,8 +35,6 @@ pub(crate) const RIBBON_PREFIX: &str = "plugin_entry:";
 #[derive(Default)]
 pub(crate) struct State {
     pub(crate) open: bool,
-    /// The app bar had no room for the Plugins button this frame: Plugins is a File submenu.
-    pub(crate) in_file_menu: bool,
     /// The pass the menu opened on: that click is not a click elsewhere.
     opened_pass: u64,
     /// The left edge of the Plugins button, where the menu opens.
@@ -507,29 +505,6 @@ pub(crate) fn toggle_below(app: &mut SolveApp, ctx: &egui::Context, rect: egui::
 /// Read the installed plugins again, as the menu shows them when it opens.
 pub(crate) fn refresh(app: &mut SolveApp) {
     app.plugin_menu.listed = list(app, app.session.plugin_state.plugins_dir().as_deref());
-}
-
-/// Where the File menu holds the Plugins menu (a narrow app bar): a submenu of the same rows,
-/// their ids under `plugins:`.
-pub(crate) fn file_submenu(app: &SolveApp) -> crate::app_bar::FileRow {
-    use crate::app_bar::FileRow;
-    fn prefixed(rows: Vec<FileRow>) -> Vec<FileRow> {
-        rows.into_iter()
-            .map(|row| match row {
-                FileRow::Item(mut item) => {
-                    item.id = format!("plugins:{}", item.id);
-                    FileRow::Item(item)
-                }
-                FileRow::Button { mut item, tip } => {
-                    item.id = format!("plugins:{}", item.id);
-                    FileRow::Button { item, tip }
-                }
-                FileRow::Sub { label, rows } => FileRow::Sub { label, rows: prefixed(rows) },
-                FileRow::Separator => FileRow::Separator,
-            })
-            .collect()
-    }
-    FileRow::Sub { label: app.tr("ui.plugins").to_owned(), rows: prefixed(rows(app)) }
 }
 
 /// Run the Plugins menu's row `id` (from the menu or the File submenu).

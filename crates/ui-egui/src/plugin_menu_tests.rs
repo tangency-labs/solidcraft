@@ -274,18 +274,22 @@ fn plugin_dialog_titles_are_the_command_alone_and_plugin_text_has_no_long_dashes
     }
 }
 
-/// A narrow app bar puts the same rows in the File menu, under `plugins:`, and they act the same.
+/// File › Plugins… is one row that opens Preferences on the Plugins page, at any window width.
 #[test]
-fn the_file_submenu_holds_the_same_rows_and_opens_the_same_dialog() {
-    use crate::app_bar::FileRow;
+fn file_plugins_row_opens_preferences_on_the_plugins_page() {
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-    app.plugin_menu.listed = vec![listed("gears", vec![entry("spur", "edit", json!([]))])];
-    let FileRow::Sub { label, rows } = file_submenu(&app) else { panic!("a submenu") };
-    assert_eq!(label, app.tr("ui.plugins"));
-    let ids: Vec<&str> = rows.iter().filter_map(|r| if let FileRow::Item(i) = r { Some(i.id.as_str()) } else { None }).collect();
-    assert_eq!(ids, ["plugins:install", "plugins:entry:0:0"]);
-    choose(&mut app, "entry:0:0");
-    assert_eq!(app.plugin_menu.dialog().map(|d| d.entry.as_str()), Some("spur"));
+    let rows = crate::toolbar::file_rows(&app);
+    let item = rows
+        .iter()
+        .find_map(|r| match r {
+            crate::app_bar::FileRow::Item(i) if i.id == "plugins.preferences" => Some(i),
+            _ => None,
+        })
+        .expect("File has a Plugins… row");
+    assert_eq!(item.label, format!("{}…", app.tr("ui.plugins")));
+    assert!(!rows.iter().any(|r| matches!(r, crate::app_bar::FileRow::Sub { label, .. } if label == app.tr("ui.plugins"))), "no Plugins submenu");
+    crate::toolbar::run_file_row(&mut app, "plugins.preferences");
+    assert!(app.prefs_window.shell.open);
 }
 
 /// Each plugin entry has its own dialog: opening a second one leaves the first open with its values.
@@ -485,13 +489,15 @@ mod native {
     }
 
     #[test]
-    fn the_plugins_menu_opens_from_the_app_bar_and_its_entry_opens_the_dialog() {
+    fn the_plugins_menu_opens_from_the_ribbon_group_and_its_entry_opens_the_dialog() {
         let root = package("menu");
         let mut h = crate::scenario::Harness::new();
         h.app.session.plugin_state.packages.insert("boxes".into(), root.join("boxes").to_string_lossy().into_owned());
         h.frames(2);
-        h.step(&json!({"click":{"handle":"appbar:plugins"}})).unwrap();
-        h.frames(1);
+        // The ribbon's Plugins group label opens the menu below it.
+        let ctx = h.ctx.clone();
+        toggle_below(&mut h.app, &ctx, egui::Rect::from_min_size(egui::pos2(300.0, 100.0), egui::vec2(60.0, 20.0)));
+        h.frames(2);
         assert!(h.app.plugin_menu.open && h.app.plugin_menu.listed.len() == 1);
         h.step(&json!({"widget":"Box…"})).unwrap();
         h.frames(2);
