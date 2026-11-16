@@ -11,7 +11,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<InsertStepParams>(), &["folder", "matrix", "name", "names", "path", "tolerance", "up"]);
+    assert_keys(input_schema_for::<InsertStepParams>(), &["folder", "history", "matrix", "name", "names", "path", "tolerance", "up"]);
 }
 
 #[test]
@@ -41,6 +41,8 @@ fn strict_keeps_todays_errors() {
         // `matrix` is the handler's to read; `tolerance` only with it.
         ("file.insert_step", json!({"path": "a.step", "matrix": "turn it"})),
         ("file.insert_step", json!({"path": "a.step", "matrix": [2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0]})),
+        ("file.insert_step", json!({"path": "a.step", "matrix": [1, 0, 0, "dy", 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, "dy"]})),
+        ("file.insert_step", json!({"path": "a.step", "matrix": [1, 0, 0, "nope", 0, 1, 0, 0, 0, 0, 1, 0]})),
         ("file.insert_step", json!({"path": "a.step", "matrix": [1, 2, 3], "tolerance": "loose"})),
         ("file.insert_step", json!({"path": "a.step", "matrix": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "tolerance": 0})),
         ("file.insert_step", json!({"path": "a.step", "matrix": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "tolerance": 0.01})),
@@ -194,7 +196,7 @@ fn the_shared_shapes_are_the_ones_published() {
         assert!(shape.is_object(), "{name} is in my schema");
         assert_eq!(shape, &open["$defs"][name], "{name} is doc.open's shape");
     }
-    for name in ["MoveMatrix", "MatrixTolerance"] {
+    for name in ["MoveMatrixExprs", "MatrixTolerance"] {
         let shape = &mine["$defs"][name];
         assert!(shape.is_object(), "{name} is in my schema");
         assert_eq!(shape, &move_["$defs"][name], "{name} is occurrence.move's shape");

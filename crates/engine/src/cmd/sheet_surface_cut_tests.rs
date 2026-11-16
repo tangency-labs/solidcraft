@@ -4,6 +4,7 @@
 //! face on the sheet's surface; a cut through a pocket takes it with the material; what the
 //! sheet can't keep is refused, and the sheet stays as it was.
 
+use solidcraft_develop::prelude::*;
 use std::f64::consts::{PI, SQRT_2};
 
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
@@ -301,10 +302,12 @@ fn a_rolls_flat_has_lines_where_it_starts_and_ends_and_halfway_between() {
     let length = |l: &(String, [f64; 2], [f64; 2])| (l.2[0] - l.1[0]).hypot(l.2[1] - l.1[1]);
     assert!(lines.iter().all(|l| (length(l) - 40.0).abs() < 1e-6), "{lines:?}");
     // The middle line lies halfway across the roll's flat, which is half a turn round its neutral
-    // surface wide.
+    // surface wide. A roll's neutral surface lies at mid-thickness (K 0.5, not the rule's 0.44):
+    // 48 + 0.5 · 2 = 49 from the axis, so the flat is π · 49 = 153.938040 wide, the middle line
+    // 76.969020 from either end.
     let line = |k: &str| lines.iter().find(|l| l.0 == k).map(|l| Vec2::new(0.5 * (l.1[0] + l.2[0]), 0.5 * (l.1[1] + l.2[1]))).unwrap_or_default();
     let (a, m, b) = (line("start"), line("middle"), line("end"));
-    let wide = PI * (48.0 + 0.44 * T);
+    let wide = PI * (48.0 + 0.5 * T);
     assert!((a.dist(b) - wide).abs() < 1e-6 && (a.dist(m) - wide / 2.0).abs() < 1e-6, "{a:?} {m:?} {b:?}");
     // Its row in the report, as a bend has one: inside radius, turn, width and length.
     let row = &flat["roll_table"][0];
@@ -372,7 +375,6 @@ fn a_ball_through_a_roll_is_cut_where_it_turns_edge_on() {
 /// that face at the ball's top and bottom: there the outline is that curve and nothing else,
 /// the angle it spans at each height seen from the axis 50 away.
 #[test]
-#[ignore = "solidcore: a sphere whose pole lies on a cylinder's face leaves a trim with coincident control points at the pole since main's kernel (reproduced by crates/kernel/tests/ball_on_a_rolls_face.rs); #6748 follow-up"]
 fn a_ball_centred_on_a_rolls_face_is_cut_where_it_turns_edge_on() {
     let mut s = half_roll();
     let v0 = exact_volume(&s);
@@ -406,7 +408,6 @@ fn spread(s: f64, d: f64) -> f64 {
 /// face SMLib's own boolean refuses; 2e-4 and 1e-3 past it are read within 1.5e-5 of the cut,
 /// short of this test's 1e-5: the curve through the fold's points guesses its ends' tangents.)
 #[test]
-#[ignore = "solidcore: a sphere whose pole lies on a cylinder's face leaves a trim with coincident control points at the pole since main's kernel (reproduced by crates/kernel/tests/ball_on_a_rolls_face.rs); #6748 follow-up"]
 fn a_ball_stepped_through_a_rolls_face_is_cut_alike_either_side() {
     for off in [-2e-4, -1e-4, 0.0, 1e-2] {
         let d = 50.0 + off;

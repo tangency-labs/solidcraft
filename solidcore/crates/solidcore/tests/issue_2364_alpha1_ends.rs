@@ -50,7 +50,6 @@ const NOTCHED: &[u8] = include_bytes!("data/issue_2364_solidcraft_1080_notched_b
 fn kernel() -> Kernel {
     let mut f = UpstreamFixes::all();
     f.cone_unbounded_parameterized_as_nurb = false;
-    f.ellipse_open_arc_keeps_end_angle = false;
     f.fillet_overflow_crease_along_edge = false;
     f.fillet_refuse_rounds_breaking_through = false;
     Kernel {
@@ -148,11 +147,71 @@ fn a_round_ending_on_a_tangent_seam_ends_on_the_end_face() {
     assert!((v - 9_763.665_662_831).abs() <= 1e-9 * v, "{v}");
 }
 
+/// Simpson's rule for `f` on `[a, b]` over `n` (even) spans.
+fn simpson(f: impl Fn(f64) -> f64, a: f64, b: f64, n: u32) -> f64 {
+    let h = (b - a) / f64::from(n);
+    let mut s = f(a) + f(b);
+    for i in 1..n {
+        s += if i % 2 == 1 { 4.0 } else { 2.0 } * f(a + f64::from(i) * h);
+    }
+    s * h / 3.0
+}
+
+/// SolidCraft fillets/5158's closed form (its `expected.method`): the 30 x 31 x 2 plate less
+/// its two holes r 3.175, less the rounds r = t = 2 along its edges x = -15 (31 long) and
+/// y = 15.5 (30 long), each (1 - pi/4) r^2 per length; the two mitred rounds overlap at the
+/// corner by the integral over 0 < s < r of (r - sqrt(r^2 - s^2))^2, 40/3 - 4 pi; and the
+/// hole at (-10.8, 8.2) already took the round's part over it, x < -13: the integral over
+/// the hole's chord there of 2 - sqrt(4 - (x + 13)^2), with x = -10.8 - R cos p (smooth in
+/// p; Simpson at 10^5 spans, converged to 1e-15).
+fn plate_closed_form() -> f64 {
+    use core::f64::consts::PI;
+    let (r, hole) = (2.0_f64, 3.175_f64);
+    let p1 = (2.2 / hole).acos();
+    let taken = simpson(
+        |p: f64| {
+            let s = 2.2 - hole * p.cos();
+            2.0 * hole * hole * p.sin() * p.sin() * (2.0 - (4.0 - s * s).max(0.0).sqrt())
+        },
+        0.0,
+        p1,
+        100_000,
+    );
+    let rounds = (1.0 - PI / 4.0) * r * r * (30.0 + 31.0) - (40.0 / 3.0 - 4.0 * PI) - taken;
+    30.0 * 31.0 * 2.0 - 2.0 * PI * hole * hole * 2.0 - rounds
+}
+
+/// SolidCraft fillets/1080's closed form (its `expected.method`): the 40 x 30 x 10 block less
+/// the 5 x 5 x 3 notch, less the top outline's mitred round R8, (1 - pi/4) r^2 (140 - 8 c)
+/// with c = r (10 - 3 pi) / (3 (4 - pi)) its section's centroid off the walls, plus what of
+/// it lay in the notch (it reaches z = 2): the integral over 0 < t < 1 of the two strips'
+/// union 2 (5 g - g^2 / 2), g = 8 - sqrt(64 - t^2) (Simpson at 10^5 spans).
+fn notched_closed_form() -> f64 {
+    use core::f64::consts::PI;
+    let r = 8.0_f64;
+    let c = r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI));
+    let notch = simpson(
+        |t: f64| {
+            let g = 8.0 - (64.0 - t * t).sqrt();
+            2.0 * (5.0 * g - g * g / 2.0)
+        },
+        0.0,
+        1.0,
+        100_000,
+    );
+    12000.0 - 75.0 - (1.0 - PI / 4.0) * r * r * (140.0 - 8.0 * c) + notch
+}
+
 /// The plate's hole-side edge (-15, 0, 2) overflows and goes first; the other edge's round
 /// then meets it as one blend. The fork: 1681.903764986359 (the closed form 1681.903758348;
 /// with the cap, 1682.853610631, the shoulder 2 pi - 16/3 more). Here 1681.903764966137,
 /// 2.0e-8 less: the first pass already measures 1706.889016313 against the fork's
 /// 1706.889016333346 (that round runs into the hole, a fitted band), as before smlib#130.
+/// Both were the volume integrator's leak through the rounds' tolerant edges: since
+/// `brep_volume` closes those gaps (#16735) the body is 1681.9037583678235, the closed form
+/// ([`plate_closed_form`]) to 1.2e-11 (MEASURED), and is held to it. The capped figure is
+/// the fork's measurement, leak included, not a closed form: less the shoulder it gives
+/// 1681.9037586572, 3.1e-7 off.
 #[test]
 fn the_plate_s_second_round_meets_the_first() {
     let mut k = kernel();
@@ -161,12 +220,17 @@ fn the_plate_s_second_round_meets_the_first() {
     round(&mut k, &mut b, &[[0.0, 15.5, 2.0]], 2.0, &first);
     let (faces, v) = measured(&k, &mut b);
     assert_eq!(faces, 8);
-    assert!((v - 1_681.903_764_986).abs() <= 1e-9 * v, "{v}");
+    let want = plate_closed_form();
+    assert!((want - 1_681.903_758_348).abs() <= 1e-9, "{want}");
+    assert!((v - want).abs() <= 1e-10 * v, "{v} vs {want}");
 }
 
 /// The notched block's front and right edges (over the notch) go first, then the back and
 /// left. The fork: 10198.718249145, 13 faces (here 10198.718249145044) (the closed form 10198.718038816; with the
-/// caps, 10320.299091700, 15 faces, two shoulders 256 pi - 2048/3 more).
+/// caps, 10320.299091700, 15 faces, two shoulders 256 pi - 2048/3 more). The fork's 2.1e-8
+/// excess was the volume integrator's leak through the rounds' tolerant edges: since
+/// `brep_volume` closes those gaps (#16735) the body is 10198.718038875142, the closed form
+/// to 5.8e-12 (MEASURED), and is held to it.
 #[test]
 fn the_notched_block_s_second_rounds_meet_the_first() {
     let mut k = kernel();
@@ -187,5 +251,7 @@ fn the_notched_block_s_second_rounds_meet_the_first() {
     );
     let (faces, v) = measured(&k, &mut b);
     assert_eq!(faces, 13);
-    assert!((v - 10_198.718_249_145).abs() <= 1e-9 * v, "{v}");
+    let want = notched_closed_form();
+    assert!((want - 10_198.718_038_816).abs() <= 1e-9, "{want}");
+    assert!((v - want).abs() <= 1e-10 * v, "{v} vs {want}");
 }

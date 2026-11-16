@@ -250,6 +250,8 @@ const MAX_LEFT_OUT_ROUNDS: usize = 8;
 ///    refusal names, as one sheet whose faces share their edges as the file has them, and made
 ///    by SMLib; a refusal of that naming another face of the solid leaves it out too (up to
 ///    [`MAX_LEFT_OUT_ROUNDS`] reads). A face is only ever left out where a refusal names it.
+///    A shell the file leaves open is read this way with no face left out, when sewing its faces
+///    (step 2) does not close it.
 /// 2. Where a refusal names no face of the solid: the faces that read alone, stitched by SMLib
 ///    into one surface body (their edges sewn at ten times their tolerance).
 ///
@@ -262,6 +264,21 @@ fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std
     let of_solid: std::collections::HashSet<u64> = faces.iter().map(|f| f.face).collect();
     // The faces left out, each with the refusal that names it, in the order they were found.
     let mut left_out: Vec<(u64, String)> = faces.iter().filter_map(|f| f.record.as_ref().err().map(|m| (f.face, m.clone()))).collect();
+    // The faces that read alone, each a one-face surface body.
+    let mut notes = Vec::new();
+    let mut pieces = Vec::with_capacity(faces.len());
+    for f in &faces {
+        // A face the solid's shells use more than once (an outer shell and its voids written
+        // with one face) is one piece, once.
+        if pieces.iter().any(|(g, _)| *g == f.face) {
+            notes.push(Note::LeftOut(format!("left out: face #{}: a further use of it by another shell of the solid", f.face)));
+            continue;
+        }
+        match f.record.clone().map_err(KernelError::Failed).and_then(Body::from_record) {
+            Ok(b) => pieces.push((f.face, b)),
+            Err(e) => notes.push(Note::LeftOut(format!("left out: {}", e.to_string().trim_start_matches("the operation failed: ")))),
+        }
+    }
     let mut why = refused.msg.clone();
     let mut rounds = 0;
     loop {
@@ -272,13 +289,29 @@ fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std
             None if rounds > 0 => break,
             None => {}
         }
-        if left_out.is_empty() || left_out.len() >= faces.len() || rounds >= MAX_LEFT_OUT_ROUNDS {
+        // A shell the file leaves open (an edge only one face uses) is one sheet of all its faces,
+        // which share the edges they do: read without leaving any out.
+        let open_shell = rounds == 0 && left_out.is_empty() && refused.msg.contains("shell is not closed");
+        // Its faces are sewn first, at ten times their tolerance: where that closes the shell it is
+        // the solid, and only a shell the sewing leaves open is read as the sheet the file has.
+        if open_shell
+            && let Ok(part) = stitched_part(&pieces, faces.len(), &refused.msg)
+            && part.closed
+        {
+            return Ok((part, notes));
+        }
+        if (left_out.is_empty() && !open_shell) || left_out.len() >= faces.len() || rounds >= MAX_LEFT_OUT_ROUNDS {
             break;
         }
         rounds += 1;
         let skip: std::collections::HashSet<u64> = left_out.iter().map(|(f, _)| *f).collect();
-        let read =
-            solidcraft_profile::scope("import", "step.read_without", || solidcore_step::topology::read_solid_without(ex, item, units, trims, &skip));
+        let read = solidcraft_profile::scope("import", "step.read_without", || {
+            if open_shell {
+                solidcore_step::topology::read_solid_as_sheets(ex, item, units, trims)
+            } else {
+                solidcore_step::topology::read_solid_without(ex, item, units, trims, &skip)
+            }
+        });
         match read.map_err(|msg| Failure { read: true, msg }).and_then(|solid| {
             let part = solid_part(&solid)?;
             Ok((part, solid.notes.into_iter().map(Note::Repaired).collect::<Vec<_>>()))
@@ -293,21 +326,6 @@ fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std
                 log::debug!(target: "step", "item #{item}: read without {} faces, refused: {}", skip.len(), e.msg);
                 why = e.msg;
             }
-        }
-    }
-    // The faces that read alone, each a one-face surface body.
-    let mut notes = Vec::new();
-    let mut pieces = Vec::with_capacity(faces.len());
-    for f in &faces {
-        // A face the solid's shells use more than once (an outer shell and its voids written
-        // with one face) is one piece, once.
-        if pieces.iter().any(|(g, _)| *g == f.face) {
-            notes.push(Note::LeftOut(format!("left out: face #{}: a further use of it by another shell of the solid", f.face)));
-            continue;
-        }
-        match f.record.clone().map_err(KernelError::Failed).and_then(Body::from_record) {
-            Ok(b) => pieces.push((f.face, b)),
-            Err(e) => notes.push(Note::LeftOut(format!("left out: {}", e.to_string().trim_start_matches("the operation failed: ")))),
         }
     }
     // A solid of one face that cannot be made has nothing else to give: the refusal says it is the

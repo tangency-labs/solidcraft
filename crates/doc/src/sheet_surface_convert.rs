@@ -45,6 +45,7 @@
 //! (neither is developable), a bend on the edge of a roll, and a shell's face that meets the
 //! sheet at a sharp edge but is not a plane (it is left out).
 
+use solidcraft_develop::prelude::*;
 use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -59,7 +60,7 @@ use solidcraft_kernel::{Body, FaceSurface, face_surface};
 use crate::sheet::FlatWork;
 
 use crate::sheet::ReliefShape;
-use crate::sheet_surface::Piece;
+use crate::sheet_surface::{Piece, entry};
 use crate::{DocError, ModelBody, Result};
 
 /// Normals closer than this (radians) meet smoothly: the sheet runs on across their edge.
@@ -533,16 +534,17 @@ fn to_sharp(r: &Region2, (a, z): (Vec2, Vec2), by: f64, tol: f64) -> std::result
         let u = (x - p).dot(d);
         ((x - p - d * u).len() <= near && u >= -near && u <= p.dist(q) + near).then_some(u)
     };
-    let k = (0..n)
-        .find(|k| along(&segs[*k], a).is_some() && along(&segs[*k], z).is_some())
+    let (k, line, ua, uz) = segs
+        .iter()
+        .enumerate()
+        .find_map(|(k, s)| Some((k, s, along(s, a)?, along(s, z)?)))
         .ok_or("meets a modelled bend along an edge that is not on a line of its outline")?;
-    let (ua, uz) = (along(&segs[k], a).unwrap_or(0.0), along(&segs[k], z).unwrap_or(0.0));
     let (p, q) = if ua <= uz { (a, z) } else { (z, a) };
     let d = (q - p).normalized().ok_or("meets a modelled bend along an edge with no length")?;
     let extent = crate::sheet_surface_cuts::loop_box(&r.outer).size().len().max(1e-9);
     let out = if crate::sheet_surface_cuts::region_holds(r, p.lerp(q, 0.5) + d.perp() * (extent * 1e-4)) { -d.perp() } else { d.perp() };
     // Where the edge ends at an end of the line, the line before or after it may carry on.
-    let (p_end, q_end) = (p.dist(segs[k].start()) <= near, q.dist(segs[k].end()) <= near);
+    let (p_end, q_end) = (p.dist(line.start()) <= near, q.dist(line.end()) <= near);
     // The line `s`, from `from` to the end `at`, carried on past `at` to the sharp, where it
     // heads out across the edge.
     let carried = |s: &Seg2, at: Vec2, from: Vec2| -> Option<Vec2> {
@@ -550,7 +552,9 @@ fn to_sharp(r: &Region2, (a, z): (Vec2, Vec2), by: f64, tol: f64) -> std::result
         let w = (at - from).normalized()?;
         (w.dot(out) > 1e-6 && w.cross(d).abs() > 1e-6).then(|| at + w * (by / w.dot(out)))
     };
-    let (before, after) = (&segs[(k + n - 1) % n], &segs[(k + 1) % n]);
+    // `segs` holds `line`, at `k`, so `n` > 0.
+    let neighbour = |i: usize| entry(segs, i, "segment of the outline").map_err(|e| e.to_string());
+    let (before, after) = (neighbour((k + n - 1) % n)?, neighbour((k + 1) % n)?);
     let p_out = carried(before, p, before.start()).filter(|_| p_end).unwrap_or(p + out * by);
     let q_out = carried(after, q, after.end()).filter(|_| q_end).unwrap_or(q + out * by);
     let band = Region2 { outer: Loop2::polygon(&[p, q, q_out, p_out]).ccw(), holes: Vec::new() };
@@ -961,9 +965,10 @@ enum Role {
 /// reaches 1, the standard's line between a bend whose neutral fiber moves toward the inside and
 /// one gentle enough that it stays halfway through. Here the ratio only sorts a modeled cylinder:
 /// short of it, a bend at the planes' virtual sharp with the rule's radius, whatever radius the
-/// body has; from it on, a roll that keeps the modeled radius. Bends and rolls alike are developed
-/// with the rule's K-factor (`solidcraft_develop`'s `Bend::allowance` and `Flatten::of`), never
-/// with DIN 6935's. The thicknesses are the sheet's, the rule's, as the sheet is made at it; the
+/// body has; from it on, a roll that keeps the modeled radius. A bend is developed with the rule's
+/// K-factor (`Bend::allowance`), its press brake's; a roll with its neutral fiber at mid-thickness
+/// (K 0.5, solidcore's `ROLL_K`), where DIN 6935 puts it from this ratio on. The thicknesses are
+/// the sheet's, the rule's, as the sheet is made at it; the
 /// inside radius is read from the body as modelled (`modelled_t`, see `read_surfaces`).
 const ROLL_FROM: f64 = 5.011_872_336_272_722;
 
@@ -1549,6 +1554,73 @@ fn read_surfaces(
         let coaxial = a1.cross(a2).len() <= 1e-9 && off.len() <= tol * 10.0;
         coaxial && (r1 - r2).abs() <= tol * 10.0 && i1 == i2 && planes.len() == 2 && planes == planes_beside(h)
     };
+    // The faces that run on smoothly from face `g` at its edges.
+    let joined = |g: usize| -> BTreeSet<usize> {
+        let Ok(sg) = shape(g) else { return BTreeSet::new() };
+        (0..edge_count)
+            .filter_map(|e| {
+                let (x, y) = pair(e)?;
+                let h = if x == g && y != g {
+                    y
+                } else if y == g && x != g {
+                    x
+                } else {
+                    return None;
+                };
+                (side.contains(&h) && shape(h).is_ok_and(|sh| smooth(e, &sg, &sh))).then_some(h)
+            })
+            .collect()
+    };
+    // A modelled bend picked on its roll across the thickness from the faces picked: its outside
+    // where they are its inside, or the other way round. Converting, every face taken is a panel
+    // (see `behinds`), so that roll and the faces it runs into would be panels of the other side,
+    // their material meeting the faces picked. The bend is the roll of the same axis, of another
+    // radius, that runs smoothly into what the faces picked reach through the bends and rolls
+    // picked; the pick is its (`twins`). A roll with no such one, or with two that are not pieces
+    // of one bend, is left as picked.
+    let mut twins: BTreeMap<usize, usize> = BTreeMap::new();
+    if let Some(set) = &chosen {
+        let across = |g: usize, h: usize| -> bool {
+            let Ok(Shape::Cylinder { origin: o1, axis: a1, radius: r1, .. }) = shape(g) else { return false };
+            let Ok(Shape::Cylinder { origin: o2, axis: a2, radius: r2, .. }) = shape(h) else { return false };
+            let off = (o2 - o1) - a1 * (o2 - o1).dot(a1);
+            a1.cross(a2).len() <= 1e-9 && off.len() <= tol * 10.0 && (r1 - r2).abs() > tol * 10.0
+        };
+        let mut reached: BTreeSet<usize> = set.iter().filter_map(|g| on_side(*g)).collect();
+        loop {
+            loop {
+                let before = reached.len();
+                for &g in &rolled {
+                    let on = joined(g);
+                    if reached.contains(&g) || on.iter().any(|h| reached.contains(h)) {
+                        reached.insert(g);
+                        reached.extend(on);
+                    }
+                }
+                for (x, y) in bent.iter().filter_map(|e| pair(*e)) {
+                    if reached.contains(&x) || reached.contains(&y) {
+                        reached.extend([x, y]);
+                    }
+                }
+                if reached.len() == before {
+                    break;
+                }
+            }
+            let swap = rolled.iter().filter(|g| !reached.contains(g)).find_map(|&g| {
+                let found: Vec<usize> =
+                    side.iter().copied().filter(|h| !rolled.contains(h) && across(g, *h) && joined(*h).iter().any(|k| reached.contains(k))).collect();
+                match found.as_slice() {
+                    [h, rest @ ..] if rest.iter().all(|k| one_bend(*h, *k)) => Some((g, *h)),
+                    _ => None,
+                }
+            });
+            let Some((g, h)) = swap else { break };
+            rolled.remove(&g);
+            rolled.insert(h);
+            twins.insert(g, h);
+        }
+    }
+    let as_picked = |g: usize| twins.get(&g).copied().unwrap_or(g);
     // A pick on one piece of a bend that cut-outs across it split bends every piece.
     let more: Vec<usize> = side.iter().copied().filter(|h| is_roll(*h) && !rolled.contains(h) && rolled.iter().any(|g| one_bend(*g, *h))).collect();
     rolled.extend(more);
@@ -1808,8 +1880,8 @@ fn read_surfaces(
             .filter(|e| on_edge(*p, *e))
             .filter_map(on_side_edge)
             .filter_map(pair)
-            .any(|(x, y)| modelled.iter().any(|m| m.rolls.contains(&x) || m.rolls.contains(&y)));
-        edge || modelled_at || q.faces_at(*p, near).first().and_then(|(_, g)| on_side(*g)).is_some_and(|g| rolled.contains(&g))
+            .any(|(x, y)| modelled.iter().any(|m| m.rolls.contains(&as_picked(x)) || m.rolls.contains(&as_picked(y))));
+        edge || modelled_at || q.faces_at(*p, near).first().and_then(|(_, g)| on_side(*g)).is_some_and(|g| rolled.contains(&as_picked(g)))
     };
     if let Some(p) = bends.iter().find(|p| !between(p)) {
         // A shell's or a plate's bend onto a wall of another thickness: no sheet of one thickness.
@@ -1961,11 +2033,13 @@ fn read_surfaces(
         // Which way `a`'s material lies, looked for beside the edge's middle along its way there:
         // beside the line between its ends, a curved edge's panel can lie both ways.
         let left = {
+            // `pa` holds `n` ≥ 2 points.
+            let point = |i: usize| entry(&pa, i, "point along the edge").copied();
             let (q0, q1, at_k) = if n == 2 {
-                (pa[0], pa[1], pa[0].lerp(pa[1], 0.5))
+                (point(0)?, point(1)?, point(0)?.lerp(point(1)?, 0.5))
             } else {
                 let k = n / 2;
-                (pa[k - 1], pa[k + 1], pa[k])
+                (point(k - 1)?, point(k + 1)?, point(k)?)
             };
             let extent = crate::sheet_surface_cuts::loop_box(&ra.outer).size().len().max(1e-9);
             (q1 - q0).normalized().is_some_and(|d| crate::sheet_surface_cuts::region_holds(&ra, at_k + d.perp() * (extent * 1e-4)))

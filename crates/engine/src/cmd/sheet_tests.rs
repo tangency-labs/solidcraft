@@ -2,8 +2,17 @@ use solidcraft_geom::prelude::*;
 use std::f64::consts::{FRAC_PI_2, PI};
 
 use serde_json::{Value, json};
+use solidcraft_io::DxfShape;
 
 use crate::Session;
+
+fn dxf_has_layer(text: &str, name: &str) -> bool {
+    solidcraft_io::read_dxf_file(text).unwrap().layers().iter().any(|layer| layer.name() == name)
+}
+
+fn dxf_count(text: &str, predicate: impl Fn(&DxfShape) -> bool) -> usize {
+    solidcraft_io::read_dxf_file(text).unwrap().entities().iter().filter(|entity| predicate(entity.geometry())).count()
+}
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     match s.execute(id, &p) {
@@ -149,7 +158,7 @@ fn shallow_sheet_pocket_preserves_material_depth_export_undo_and_reopen() {
     assert_eq!(f["pockets"][0]["side"], "bottom");
     assert_eq!(f["pockets"][0]["depth_mm"], 1.0);
     let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap().to_string();
-    assert!(dxf.contains("POCKET_BOTTOM_Z0.000000_TO_1.000000_MM"));
+    assert!(dxf_has_layer(&dxf, "POCKET_BOTTOM_Z0.000000_TO_1.000000_MM"));
     assert_eq!(solidcraft_io::read_dxf(&dxf).unwrap().len(), 8);
     run(&mut s, "edit.undo", json!({}));
     assert!((volume(&mut s) - 15000.0).abs() < 1e-6);
@@ -537,7 +546,9 @@ fn base_and_edge_flange_follow_the_k_factor() {
     assert!(rel(volume(&mut s), 18972.622) < 1e-4, "{}", volume(&mut s));
     // An L run 100 along X: eight faces round its section and its two ends.
     let m = run(&mut s, "inspect.measure", json!({}));
+    // The coplanar end pieces count together, while the raw sewn faces stay available.
     assert_eq!(m["total"]["faces"], 10, "{m}");
+    assert_eq!(m["bodies"][0]["kernel"]["faces"], 14, "{m}");
     // The angle is a parameter: 45° (oracle 70 uses height 15).
     let names = s.doc.features.last().map(|f| f.param_names.clone()).unwrap_or_default();
     run(&mut s, "parameters.change", json!({"name": names[0], "expression": "15"}));
@@ -547,7 +558,8 @@ fn base_and_edge_flange_follow_the_k_factor() {
     // DXF: outline and an up bend line.
     let d = run(&mut s, "sheet.export_dxf", json!({}));
     let text = d["dxf"].as_str().unwrap_or_default();
-    assert!(text.contains("BEND_UP") && text.contains("OUTLINE"), "{text}");
+    let file = solidcraft_io::read_dxf_file(text).unwrap();
+    assert!(file.layers().iter().any(|layer| layer.name() == "BEND_UP") && file.layers().iter().any(|layer| layer.name() == "OUTLINE"), "{text}");
     assert!(s.execute("sheet.flange", &json!({"edges": [[50, 30, 40]], "height": 20})).is_err(), "not on an edge");
 }
 
@@ -784,17 +796,18 @@ fn contour_flat(s: &mut Session) -> (Value, [f64; 2]) {
 /// thick, K 0.4. The arc is a roll that keeps its own radius, joined to the lines by seams: the
 /// flat has no bend. Its material on the right of the travel (counterclockwise round the arc) lies
 /// outside the arc, so the drawn arc is the roll's inside, R 8, and its outside R 10. The develop
-/// engine lays a roll out at its neutral surface, K·T from its inside (`Flatten::Roll`: R + K·T
-/// with the material outward, R − (1 − K)·T inward), here 8 + 0.8 = 8.8: the flat is
-/// 30 + (π/2)·8.8 + 20 = 63.823008 long and 50 across. Flipped, the material lies inside the arc:
-/// the drawn arc is the roll's outside, R 8, its inside 6, its neutral surface 6.8, and the flat
-/// 30 + (π/2)·6.8 + 20 = 60.681415 long. The folded volume is the lines' 2·50·(30 + 20) = 5000 and
-/// the roll's ring sector, (π/2)(10² − 8²)/2·50 = 450π (flipped (π/2)(8² − 6²)/2·50 = 350π):
-/// 6413.716694 (6099.557429). That is the flat's area times T plus (½ − K)·T²·(π/2)·50 = 10π, as
-/// for a bend.
+/// engine lays a roll out at its neutral surface, which for a roll lies at mid-thickness, K 0.5
+/// whatever the rule's K (`ROLL_K` in `Flatten::of`: R + 0.5·T with the material outward,
+/// R − 0.5·T inward), here 8 + 1 = 9: the flat is 30 + (π/2)·9 + 20 = 64.137167 long and 50
+/// across. Flipped, the material lies inside the arc: the drawn arc is the roll's outside, R 8,
+/// its inside 6, its neutral surface 7, and the flat 30 + (π/2)·7 + 20 = 60.995574 long. The
+/// folded volume is the lines' 2·50·(30 + 20) = 5000 and the roll's ring sector,
+/// (π/2)(10² − 8²)/2·50 = 450π (flipped (π/2)(8² − 6²)/2·50 = 350π): 6413.716694 (6099.557429).
+/// With the neutral surface at mid-thickness that is the flat's area times T exactly:
+/// 2·50·(50 + 4.5π) = 5000 + 450π (flipped 2·50·(50 + 3.5π) = 5000 + 350π).
 #[test]
 fn a_contour_flange_rolls_a_tangent_arc_at_its_own_radius() {
-    for (flip, neutral, ring) in [(false, 8.8, 450.0 * PI), (true, 6.8, 350.0 * PI)] {
+    for (flip, neutral, ring) in [(false, 9.0, 450.0 * PI), (true, 7.0, 350.0 * PI)] {
         let mut s = Session::default();
         curved_contour_rule(&mut s);
         run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
@@ -805,16 +818,16 @@ fn a_contour_flange_rolls_a_tangent_arc_at_its_own_radius() {
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "sheet.flange", json!({"type": "contour", "sketch": "Profile", "curves": ["l1", arc, "l2"], "distance": 50, "flip": flip}));
         let (f, sides) = contour_flat(&mut s);
-        // 30 + (π/2)·8.8 + 20 = 63.823008 by 50 (flipped 30 + (π/2)·6.8 + 20 = 60.681415 by 50).
+        // 30 + (π/2)·9 + 20 = 64.137167 by 50 (flipped 30 + (π/2)·7 + 20 = 60.995574 by 50).
         let length = 30.0 + FRAC_PI_2 * neutral + 20.0;
         assert!((sides[0] - 50.0).abs() < 1e-6 && (sides[1] - length).abs() < 1e-6, "flip {flip}: {sides:?} vs {length}");
         assert_eq!(f["bends"].as_array().map(Vec::len), Some(0), "flip {flip}: {f}");
         assert_eq!(f["rolls"].as_u64(), Some(1), "flip {flip}: {f}");
         // 5000 + 450π = 6413.716694 (flipped 5000 + 350π = 6099.557429), which is
-        // 2·63.823008·50 + 10π = 6382.300768 + 31.415927 (flipped 6068.141502 + 31.415927).
+        // 2·64.137167·50 = 6413.716694 (flipped 2·60.995574·50 = 6099.557429).
         let v = volume(&mut s);
         assert!(rel(v, 5000.0 + ring) < 1e-9, "flip {flip}: {v} vs {}", 5000.0 + ring);
-        assert!(rel(v, 2.0 * length * 50.0 + 0.1 * 4.0 * FRAC_PI_2 * 50.0) < 1e-9, "flip {flip}: {v}");
+        assert!(rel(v, 2.0 * length * 50.0) < 1e-9, "flip {flip}: {v}");
     }
 }
 
@@ -823,8 +836,8 @@ fn a_contour_flange_rolls_a_tangent_arc_at_its_own_radius() {
 /// right of the (counterclockwise) travel, outside the arc, the drawn arc is its inside: Ri 20,
 /// Ro 22, and the volume (π/2)(Ro² − Ri²)·50 = (π/2)·84·50 = 2100π = 6597.344573. Flipped, the
 /// material lies inside the arc: Ro 20, Ri 18, (π/2)·76·50 = 1900π = 5969.026042. Its flat is the
-/// roll laid out at its neutral radius Ri + K·T: 50 by π·20.8 = 65.345127 (flipped π·18.8 =
-/// 59.061942).
+/// roll laid out at its neutral radius, at mid-thickness for a roll (K 0.5, not the rule's 0.4),
+/// Ri + 0.5·T: 50 by π·21 = 65.973446 (flipped π·19 = 59.690260).
 #[test]
 fn a_contour_flange_of_one_half_turn_is_a_half_pipe() {
     for (flip, ri) in [(false, 20.0), (true, 18.0)] {
@@ -841,8 +854,8 @@ fn a_contour_flange_of_one_half_turn_is_a_half_pipe() {
         let want = FRAC_PI_2 * (ro * ro - ri * ri) * 50.0;
         let v = volume(&mut s);
         assert!(rel(v, want) < 1e-9, "flip {flip}: {v} vs {want}");
-        // 50 by π·(Ri + 0.4·2): π·20.8 = 65.345127 (flipped π·18.8 = 59.061942).
-        let around = PI * (ri + 0.4 * 2.0);
+        // 50 by π·(Ri + 0.5·2): π·21 = 65.973446 (flipped π·19 = 59.690260).
+        let around = PI * (ri + 0.5 * 2.0);
         assert!((sides[0] - 50.0).abs() < 1e-6 && (sides[1] - around).abs() < 1e-6, "flip {flip}: {sides:?} vs {around}");
         assert_eq!(f["bends"].as_array().map(Vec::len), Some(0), "flip {flip}: {f}");
     }
@@ -2179,7 +2192,8 @@ fn the_bend_table_and_the_dxf_follow_what_flat_cuts_leave_of_a_bend() {
     // BEND_UP layer holds nothing else.
     let bend_lines = |s: &mut Session| -> Vec<(f64, f64)> {
         let text = run(s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
-        let on_layer = text.lines().collect::<Vec<_>>().windows(2).filter(|w| w[0].trim() == "8" && w[1].trim() == "BEND_UP").count();
+        let file = solidcraft_io::read_dxf_file(&text).unwrap();
+        let on_layer = file.entities().iter().filter(|entity| file.layer(entity.layer()).unwrap().name() == "BEND_UP").count();
         let mut found: Vec<(f64, f64)> = solidcraft_io::read_dxf(&text)
             .unwrap()
             .iter()
@@ -2614,7 +2628,12 @@ fn shop_bend(deg: f64, display: Option<&str>) -> Session {
 /// The DXF bend notes of the last sheet body.
 fn bend_notes(s: &mut Session) -> Vec<String> {
     let dxf = run(s, "sheet.export_dxf", json!({"bend_notes": true}))["dxf"].as_str().unwrap_or_default().to_string();
-    dxf.lines().map(str::trim).filter(|l| l.starts_with('B') && l.contains("%%d")).map(str::to_string).collect()
+    let file = solidcraft_io::read_dxf_file(&dxf).unwrap();
+    file.entities()
+        .iter()
+        .filter(|entity| matches!(entity.geometry(), DxfShape::Text { .. }) && file.layer(entity.layer()).unwrap().name() == "BEND_NOTES")
+        .map(|entity| entity.source_text().unwrap().raw_group1().unwrap().trim().to_string())
+        .collect()
 }
 
 #[test]
@@ -2830,6 +2849,50 @@ fn inherited_round_hole_survives_flange_and_unfold_in_flipped_frames() {
     }
 }
 
+#[test]
+fn measure_counts_round_holes_through_unfold_and_refold() {
+    // K-factor 0.33 gives different folded and flat volumes: compare each with its own blank.
+    let mut blank_volumes = [0.0; 3];
+    for holes in [0u64, 3, 19] {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name":"R","thickness":"1","k_factor":"0.33","bend_radius":"0.74","active":true}));
+        base(&mut s, 120.0, 75.4);
+        run(&mut s, "sheet.flange", json!({"edges":[[60,0,1]],"height":10}));
+        for i in 0..holes {
+            run(&mut s, "solid.hole", json!({"position":[20 + 14 * (i % 7),20 + 15 * (i / 7),1],"diameter":4}));
+        }
+        for (stage_index, stage) in ["folded", "unfolded", "refolded"].into_iter().enumerate() {
+            match stage {
+                "unfolded" => {
+                    run(&mut s, "sheet.unfold", json!({}));
+                }
+                "refolded" => {
+                    run(&mut s, "sheet.refold", json!({}));
+                }
+                _ => {}
+            }
+            let measured = run(&mut s, "inspect.measure", json!({}));
+            let body = &measured["bodies"][0];
+            let counts = ["faces", "edges", "vertices"].map(|key| body[key].as_u64().expect("nonnegative topology count"));
+            let measured_volume = body["volume_mm3"].as_f64().unwrap();
+            if holes == 0 {
+                blank_volumes[stage_index] = measured_volume;
+            }
+            // A hole adds one wall and two circular rims, with one vertex on each rim, folded or
+            // flat: the flat body's hole walls are whole cylinders, with no seam edge.
+            // The folded blank extrudes an eight-segment L-section: ten faces, 24 edges, 16 vertices.
+            let blank = if stage == "unfolded" { [6, 12, 8] } else { [10, 24, 16] };
+            assert_eq!(counts, [blank[0] + holes, blank[1] + 2 * holes, blank[2] + 2 * holes], "{holes} holes, {stage}: {body}");
+            assert_eq!(body["face_types"].as_object().unwrap().values().map(|n| n.as_u64().unwrap()).sum::<u64>(), counts[0]);
+            assert_eq!(body["sheet_metal"], true);
+            for (key, count) in ["faces", "edges", "vertices"].into_iter().zip(counts) {
+                assert_eq!(measured["total"][key], count, "{holes} holes, {stage}: total {key}");
+            }
+            assert!(rel(measured_volume, blank_volumes[stage_index] - holes as f64 * PI * 4.0) < 1e-5, "{body}");
+        }
+    }
+}
+
 fn faces(s: &mut Session) -> (u64, u64) {
     let body = run(s, "inspect.measure", json!({}))["bodies"][0].clone();
     (body["faces"].as_u64().unwrap(), body["face_types"]["cylinder"].as_u64().unwrap_or(0))
@@ -2976,7 +3039,7 @@ fn overlapping_round_cuts_keep_exact_union_in_export_and_roundtrip() {
     assert!((volume(&mut s) - expected).abs() < 0.1);
     assert_eq!(flat(&mut s)["cutouts"].as_array().map(Vec::len), Some(1));
     let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap().to_string();
-    assert!(dxf.contains("0\nARC\n"));
+    assert!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Arc { .. })) > 0);
     let mut reopened = Session::default();
     run(&mut reopened, "sketch.insert_dxf", json!({"text": dxf, "name": "Blank"}));
     run(&mut reopened, "sketch.finish", json!({}));
@@ -3182,28 +3245,25 @@ fn depth_step_reopen(s: &mut Session, suffix: &str, want: f64, inside: solidcore
     std::fs::remove_file(path).unwrap();
 }
 
-/// The generic sketch importer intentionally drops DXF layers/depth. Reimport only the
-/// material outline at a separately known depth, never pretend all entities reconstruct3D.
+/// Reimport the actual material layers at a separately known depth. Selection
+/// uses owned geometry and layer handles from the shared layered reader.
 fn dxf_outline_only(text: &str) -> String {
-    let lines: Vec<_> = text.lines().collect();
-    let pairs: Vec<_> = lines.as_chunks::<2>().0.iter().filter_map(|p| Some((p.first()?.trim(), *p.get(1)?))).collect();
-    let mut out = String::from("0\nSECTION\n2\nENTITIES\n");
-    let mut start = 0;
-    for end in 1..=pairs.len() {
-        if end == pairs.len() || pairs.get(end).is_some_and(|p| p.0 == "0") {
-            let entity = &pairs[start..end];
-            if entity.first().is_some_and(|p| matches!(p.1, "LINE" | "ARC" | "CIRCLE"))
-                && entity.iter().any(|p| p.0 == "8" && matches!(p.1, "OUTLINE" | "CUT"))
-            {
-                for (code, value) in entity {
-                    out.push_str(&format!("{code}\n{value}\n"));
-                }
-            }
-            start = end;
+    let source = solidcraft_io::read_dxf_file(text).unwrap();
+    let mut selected = solidcraft_io::DxfFile::new().unwrap();
+    let mut layers = std::collections::BTreeMap::new();
+    for entity in source.entities() {
+        let layer = source.layer(entity.layer()).unwrap();
+        if !matches!(layer.name(), "OUTLINE" | "CUT")
+            || !matches!(entity.geometry(), DxfShape::Line(..) | DxfShape::Arc { .. } | DxfShape::Circle { .. })
+        {
+            continue;
         }
+        let handle = *layers
+            .entry(layer.name().to_string())
+            .or_insert_with(|| selected.declare_layer(layer.name(), layer.color(), layer.linetype(), layer.weight()).unwrap());
+        selected.push(handle, entity.geometry().clone(), entity.weight()).unwrap();
     }
-    out.push_str("0\nENDSEC\n0\nEOF\n");
-    out
+    solidcraft_io::write_dxf_file(&selected).unwrap()
 }
 
 #[test]
@@ -3231,7 +3291,7 @@ fn partial_depth_intersect_retains_bottom_top_and_middle_material_through_histor
                     .iter()
                     .any(|p| p["side"] == *side && p["z0_mm"] == *a && p["z1_mm"] == *b && p["depth_mm"] == b - a)
             );
-            assert!(dxf.contains(&format!("POCKET_{}_Z{a:.6}_TO_{b:.6}_MM", side.to_uppercase())));
+            assert!(dxf_has_layer(&dxf, &format!("POCKET_{}_Z{a:.6}_TO_{b:.6}_MM", side.to_uppercase())));
         }
         let outline = dxf_outline_only(&dxf);
         assert_eq!(solidcraft_io::read_dxf(&outline).unwrap().len(), 4);
@@ -3331,7 +3391,7 @@ fn partial_depth_intersect_keeps_disconnected_tool_islands_and_annular_curves() 
         assert_eq!(state.bodies[0].body.classify_point(Vec3::new(57.0, 30.0, 1.5)).unwrap(), solidcraft_kernel::PointClass::Outside);
     }
     let dxf = run(&mut ring, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap().to_string();
-    assert!(dxf.contains("POCKET_TOP_Z1.000000_TO_2.500000_MM"));
+    assert!(dxf_has_layer(&dxf, "POCKET_TOP_Z1.000000_TO_2.500000_MM"));
     assert_eq!(solidcraft_io::read_dxf(&dxf_outline_only(&dxf)).unwrap().len(), 2);
 }
 
@@ -3571,7 +3631,7 @@ fn partial_depth_intersect_curved_to_object_preserves_current_trimmed_cap_footpr
         solidcraft_kernel::PointClass::Outside
     );
     let dxf = run(&mut s, "sheet.export_dxf", json!({"body":name}))["dxf"].as_str().unwrap().to_string();
-    assert!(dxf.contains("POCKET_TOP_Z1.000000_TO_2.500000_MM"));
+    assert!(dxf_has_layer(&dxf, "POCKET_TOP_Z1.000000_TO_2.500000_MM"));
     let outline = dxf_outline_only(&dxf);
     assert_eq!(solidcraft_io::read_dxf(&outline).unwrap().len(), 5);
     let mut outline_import = Session::default();
@@ -4607,10 +4667,11 @@ fn has_round_cutout(f: &Value, c: [f64; 2], r: f64) -> bool {
 fn dxf_has_circle(s: &mut Session, c: [f64; 2], r: f64) -> bool {
     let dxf = run(s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
     let centre = solidcore_record::Vec2::new(c[0], c[1]);
-    solidcraft_io::read_dxf(&dxf)
-        .unwrap_or_default()
+    solidcraft_io::read_dxf_file(&dxf)
+        .unwrap()
+        .entities()
         .iter()
-        .any(|g| matches!(g, solidcraft_io::Geom2::Circle(at, radius) if at.dist(centre) < 1e-5 && (radius - r).abs() < 1e-5))
+        .any(|entity| matches!(entity.geometry(), DxfShape::Circle { c: at, r: radius } if at.dist(centre) < 1e-5 && (radius - r).abs() < 1e-5))
 }
 
 /// A hole on a flange lands in the flat pattern where the bend allowance puts its panel.
@@ -5046,7 +5107,7 @@ fn closed_corners_reach_the_flat_pattern_and_the_dxf() {
         assert!((v - area * 2.0).abs() < 1e-3 * v, "{deg}: {v} vs {}", area * 2.0);
         // The DXF: the closed outline in straight lines, four bend lines.
         let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
-        assert_eq!(dxf.matches("0\nLINE\n").count(), n + 4, "{deg}: {n} outline points");
+        assert_eq!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Line(..))), n + 4, "{deg}: {n} outline points");
         // Unfold and refold keep it.
         run(&mut s, "sheet.unfold", json!({}));
         run(&mut s, "sheet.refold", json!({}));
@@ -5077,7 +5138,7 @@ fn corner_reliefs_of_the_rule_reach_the_part_the_flat_pattern_and_the_dxf() {
     let mut notch = Session::default();
     alu_tray(&mut notch, 72.0, json!({"corner_relief": "8 mm"}));
     let v0 = volume(&mut notch);
-    assert_eq!(export(&mut notch).matches("0\nARC\n").count(), 0);
+    assert_eq!(dxf_count(&export(&mut notch), |shape| matches!(shape, DxfShape::Arc { .. })), 0);
     run(&mut notch, "sheet.unfold", json!({}));
     let flat0 = volume(&mut notch);
     for (shape, round) in [("round", true), ("rectangular", false)] {
@@ -5912,7 +5973,7 @@ fn edge_flanges_take_their_own_angle_and_height_per_edge() {
     assert!(rel(v1, area * 2.0) < 1e-3, "{v1} vs {}", area * 2.0);
     // The DXF: the outline in straight lines, and four bend lines.
     let dxf = run(&mut one, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
-    assert_eq!(dxf.matches("0\nLINE\n").count(), outline.len() + 4, "{} outline points", outline.len());
+    assert_eq!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Line(..))), outline.len() + 4, "{} outline points", outline.len());
     // Unfold and refold keep it.
     run(&mut one, "sheet.unfold", json!({}));
     assert!(same_points(&outline_points(&flat(&mut one)), &outline_points(&f1)));
@@ -6173,7 +6234,7 @@ fn returns_on_a_tray_close_at_its_corners() {
     assert!(rel(v, area * 2.0) < 1e-3, "{v} vs {}", area * 2.0);
     // The DXF: the outline in straight lines, and eight bend lines.
     let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
-    assert_eq!(dxf.matches("0\nLINE\n").count(), outline.len() + 8, "{} outline points", outline.len());
+    assert_eq!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Line(..))), outline.len() + 8, "{} outline points", outline.len());
     // Unfold and refold keep it.
     run(&mut s, "sheet.unfold", json!({}));
     assert!(same_points(&outline_points(&flat(&mut s)), &outline));
@@ -6483,7 +6544,7 @@ fn a_box_cut_straight_through_a_flat_sheet_is_a_cutout_like_the_extrude_cut() {
     run(&mut s, "solid.cylinder", json!({"base": [70, 30, -1], "radius": 5, "height": 5, "operation": "cut"}));
     assert_eq!(flat(&mut s)["cutouts"].as_array().map(Vec::len), Some(2));
     let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
-    assert!(dxf.contains("CIRCLE"), "the hole stays a circle");
+    assert!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Circle { .. })) > 0, "the hole stays a circle");
     assert!((volume(&mut s) - (14750.0 - PI * 25.0 * 2.5)).abs() < 0.5);
     // A box that only dents the top face is a pocket of constant depth.
     run(&mut s, "solid.box", json!({"corner": [50, 10, 1.5], "length": 10, "width": 10, "height": 5, "operation": "cut"}));
@@ -6536,7 +6597,7 @@ fn flat_pattern_reports_a_round_hole_as_a_circle() {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch": "Hole", "through_all": true, "direction": "symmetric", "operation": "cut"}));
     let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
-    assert!(dxf.contains("CIRCLE"), "the DXF keeps the circle");
+    assert!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Circle { .. })) > 0, "the DXF keeps the circle");
     let f = flat(&mut s);
     let cutouts = f["cutouts"].as_array().cloned().unwrap_or_default();
     assert_eq!(cutouts.len(), 1);
@@ -6998,6 +7059,25 @@ fn a_hole_drilled_into_a_rim_is_a_bore_the_sheet_keeps_when_it_unfolds() {
     assert!(rel(unfolded_volume(&mut reopened), flat_after) < 1e-6);
 }
 
+/// A blind hole drilled into a rim is as deep as drilled (#6748, as
+/// `kc/955-hole-drilled-into-a-sheet-metal-rim`): the bore the sheet keeps runs a hair past the
+/// rim, where the material ends, and stops at the drill's floor inside it. 10 deep into the base's
+/// front rim (y = 0) mid-thickness, 0.6 T across: π (0.3 T)² · 10, folded and flat.
+#[test]
+fn a_blind_hole_into_a_rim_is_as_deep_as_drilled() {
+    let mut s = Session::default();
+    let t = l_bracket(&mut s);
+    let before = volume(&mut s);
+    let flat_before = unfolded_volume(&mut s);
+    let d = t * 0.6;
+    run(&mut s, "solid.hole", json!({"position": [30, 0, t / 2.0], "direction": [0, 1, 0], "diameter": d, "depth": 10}));
+    let removed = PI * (d / 2.0).powi(2) * 10.0;
+    assert!(rel(before - volume(&mut s), removed) < 1e-6, "removed {} of {removed}", before - volume(&mut s));
+    assert_eq!(flat(&mut s)["bores"].as_array().map(Vec::len), Some(1));
+    let flat_after = unfolded_volume(&mut s);
+    assert!(rel(flat_before - flat_after, removed) < 1e-6, "flat: removed {} of {removed}", flat_before - flat_after);
+}
+
 /// The volume of the sheet unfolded; it is folded back after.
 fn unfolded_volume(s: &mut Session) -> f64 {
     run(s, "sheet.unfold", json!({}));
@@ -7099,32 +7179,19 @@ fn staggered_count(w: f64, h: f64, d: f64, pitch: f64, margin: f64) -> usize {
 }
 
 fn perforation_circles(dxf: &str) -> Vec<(f64, f64, f64)> {
-    let lines: Vec<&str> = dxf.lines().map(str::trim).collect();
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i + 1 < lines.len() {
-        if lines[i] == "0" && lines[i + 1] == "CIRCLE" {
-            let (mut layer, mut x, mut y, mut r) = ("", 0.0, 0.0, 0.0);
-            let mut j = i + 2;
-            while j + 1 < lines.len() && lines[j] != "0" {
-                match lines[j] {
-                    "8" => layer = lines[j + 1],
-                    "10" => x = lines[j + 1].parse().unwrap_or(0.0),
-                    "20" => y = lines[j + 1].parse().unwrap_or(0.0),
-                    "40" => r = lines[j + 1].parse().unwrap_or(0.0),
-                    _ => {}
-                }
-                j += 2;
+    let file = solidcraft_io::read_dxf_file(dxf).unwrap();
+    file.entities()
+        .iter()
+        .filter_map(|entity| {
+            if file.layer(entity.layer()).unwrap().name() != "PERFORATION" {
+                return None;
             }
-            if layer == "PERFORATION" {
-                out.push((x, y, r));
+            match entity.geometry() {
+                DxfShape::Circle { c, r } => Some((c.x, c.y, *r)),
+                _ => None,
             }
-            i = j;
-        } else {
-            i += 1;
-        }
-    }
-    out
+        })
+        .collect()
 }
 
 /// #732: Rv 1.0-1.5 over a 100 x 60 x 0.8 sheet: every hole is in the flat pattern and in the DXF (layer

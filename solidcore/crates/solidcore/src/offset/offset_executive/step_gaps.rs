@@ -31,15 +31,18 @@ use crate::curve::curve::{Curve, CurveKind};
 use crate::error::offset::OffsetFailure;
 use crate::error::{EntityRef, Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::kernel::Kernel;
-use crate::math::{max2, Point3, Vec3, EFF_ZERO, EFF_ZERO_SQRT};
+use crate::math::{max2, Point2, Point3, Vec2, Vec3, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::edge::closest_point;
+use crate::surface::plane::Plane;
 use crate::surface::surface::p2::SurfaceKind;
 use crate::surface::surface::p4::{global_point_solve_starts, NoObject};
+use crate::surface::surface::Surface;
 use crate::topology::brep::p1 as bp1;
 use crate::topology::brep::p3::{delete_face_with_body_identity, squeeze_edge, DeleteFaceOptions};
 use crate::topology::brep::p9::make_vertex_split_edge_with_state;
@@ -57,8 +60,11 @@ fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
+/// `SM_ERR`: a stage of the gap search failed with no reason the kernel names
+/// ([`OffsetFailure::StageFailed`], a defect).
+#[track_caller]
 fn sm_err() -> SolidError {
-    SolidError::sm_err(OP)
+    SolidError::offset_stage_failed(OP, crate::error::SM_ERR)
 }
 
 /// The mate of an edge use.
@@ -285,9 +291,9 @@ impl OffsetExecutive {
     /// end; those of the evaluations, solves, curve edits
     /// and the split; [`SolidError::InvalidInput`] for missing topology.
     ///
-    /// With `Kernel::fixes.local_operation_closes_walls_to_nothing` (fork ccbf77a) an edge
-    /// closed to a point is squeezed out instead, and once every gap is closed the faces
-    /// that closed to nothing with such edges are deleted (see `remove_closed_faces`).
+    /// In a local operation an edge closed to a point (fork ccbf77a, WR-566) is squeezed out
+    /// instead, and once every gap is closed the faces that closed to nothing with such edges
+    /// are deleted (see `remove_closed_faces`).
     pub(super) fn close_loop_gaps(
         &mut self,
         kernel: &mut Kernel,
@@ -299,7 +305,8 @@ impl OffsetExecutive {
             .ok_or_else(|| null("no offset B-rep"))?;
         let r = self.close_loop_gaps_in(kernel, original, &mut b, notifications);
         self.set_offset_brep(b);
-        r
+        let segments = r?;
+        self.cap_vertex_gaps(kernel, &segments, notifications)
     }
 
     fn close_loop_gaps_in(
@@ -308,13 +315,75 @@ impl OffsetExecutive {
         original: &Brep,
         b: &mut Brep,
         notifications: &mut OffsetNotifications<'_>,
-    ) -> Result<()> {
+    ) -> Result<Vec<GapSegment>> {
         let approx_tol = self.approximation_tol_3d();
+        let mut segments: Vec<GapSegment> = Vec::new();
         // (WR-657) the corners whose offset planes no longer meet in one point
         self.split_corner_vertices(kernel, original, b, approx_tol, notifications)?;
         // (fork ccbf77a) each edge that closed to a point: its offset face and the original
         // face across it
         let mut closed_edges: Vec<(FaceId, Option<FaceId>)> = Vec::new();
+        let closing = self.close_gaps_of_faces(
+            kernel,
+            original,
+            b,
+            approx_tol,
+            notifications,
+            &mut closed_edges,
+            &mut segments,
+        );
+        if let Err(failure) = closing {
+            // A cancelled pass is a cancellation, never a refusal.
+            if failure.is_cancelled() {
+                return Err(failure);
+            }
+            // (WR-566) a later gap failed after edges had closed to points: an edge closed
+            // where no face (yet) closed to nothing is refused by name, ahead of the later
+            // gap's failure. Mid-pass this can name a face (1043) that the remaining passes
+            // would only have refused as their own failure (1001); either way it is refused.
+            if !closed_edges.is_empty() {
+                self.closed_faces(kernel, original, b, &closed_edges)?;
+            }
+            return Err(failure);
+        }
+        if !closed_edges.is_empty() {
+            self.remove_closed_faces(kernel, original, b, &closed_edges, notifications)?;
+        }
+        let faces = bp1::faces(b, None)?;
+        segments.retain(|s| faces.contains(&s.face));
+        // a gap at a vertex of an open face is a step between that face's rim and the
+        // offset faces, which the step walls close: no vertex polygon
+        let mut kept: Vec<GapSegment> = Vec::new();
+        for s in segments {
+            let on_open = match s.vertex {
+                Some(v) => on_a_face_of(original, v, self.shell_faces())?,
+                None => false,
+            };
+            if !on_open {
+                kept.push(s);
+            }
+        }
+        Ok(kept)
+    }
+
+    /// The passes of [`OffsetExecutive::close_loop_gaps`] over the faces of `b`: each gap
+    /// of each face's loops is closed (`close_loop_gap`), the edges closed to points noted
+    /// in `closed_edges` and the straight segments added to the faces' loops in `segments`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`OffsetExecutive::close_loop_gaps`] before its faces are removed.
+    #[allow(clippy::too_many_arguments)]
+    fn close_gaps_of_faces(
+        &mut self,
+        kernel: &mut Kernel,
+        original: &Brep,
+        b: &mut Brep,
+        approx_tol: f64,
+        notifications: &mut OffsetNotifications<'_>,
+        closed_edges: &mut Vec<(FaceId, Option<FaceId>)>,
+        segments: &mut Vec<GapSegment>,
+    ) -> Result<()> {
         for f in bp1::faces(b, None)? {
             // Each gap closed changes the loop: look again until none is left (each gap
             // is closed once).
@@ -331,10 +400,11 @@ impl OffsetExecutive {
                 let loopuses = b.faceuse(fu)?.loopuses.clone();
                 'loops: for lu in loopuses {
                     let eus = eu::loopuse_edgeuses(b, lu)?;
-                    let num = eus.len();
                     for (kk, &this) in eus.iter().enumerate() {
+                        // the next use round the loop (the first after the last)
                         let next = *eus
-                            .get((kk + 1) % num)
+                            .get(kk + 1)
+                            .or_else(|| eus.first())
                             .ok_or_else(|| null("loop without edge uses"))?;
                         if this == next {
                             continue;
@@ -358,7 +428,22 @@ impl OffsetExecutive {
                             continue;
                         }
                         let sv = b.vertex(v)?.point;
-                        if end.distance(sv) <= tol && start.distance(sv) > tol {
+                        // the original vertex the gap is the offset of: where the
+                        // original edge use of `next` starts (the end of its mate's)
+                        let vertex = match self.edgeuse_to_edgeuses.firsts(next).as_slice() {
+                            [orig] => Some(edgeuse_vertex(original, *orig)?),
+                            _ => match self
+                                .edgeuse_to_edgeuses
+                                .firsts(required_mate(b, next)?)
+                                .as_slice()
+                            {
+                                [orig] => {
+                                    Some(edgeuse_vertex(original, required_mate(original, *orig)?)?)
+                                }
+                                _ => None,
+                            },
+                        };
+                        let segment = if end.distance(sv) <= tol && start.distance(sv) > tol {
                             self.close_loop_gap(
                                 kernel,
                                 original,
@@ -369,8 +454,8 @@ impl OffsetExecutive {
                                 sv,
                                 tol,
                                 notifications,
-                                &mut closed_edges,
-                            )?;
+                                closed_edges,
+                            )?
                         } else if start.distance(sv) <= tol && end.distance(sv) > tol {
                             self.close_loop_gap(
                                 kernel,
@@ -382,10 +467,19 @@ impl OffsetExecutive {
                                 sv,
                                 tol,
                                 notifications,
-                                &mut closed_edges,
-                            )?;
+                                closed_edges,
+                            )?
                         } else {
                             return Err(sm_err());
+                        };
+                        if let Some((from, to)) = segment {
+                            segments.push(GapSegment {
+                                face: f,
+                                from,
+                                to,
+                                tol,
+                                vertex,
+                            });
                         }
                         closed = true;
                         break 'loops;
@@ -393,34 +487,25 @@ impl OffsetExecutive {
                 }
             }
         }
-        if !closed_edges.is_empty() {
-            self.remove_closed_faces(kernel, original, b, &closed_edges, notifications)?;
-        }
         Ok(())
     }
 
-    /// The end of the fork's `CloseLoopGaps` (ccbf77a, opt-in
-    /// `Kernel::fixes.local_operation_closes_walls_to_nothing`): the offset faces that
-    /// closed to nothing as their edges closed to points (`IsDegenerate`: a step's wall
-    /// whose low top moved onto the high top's plane, its edges along the tops now
-    /// coinciding) are deleted, in the order they closed, with their pairs in the
-    /// executive's relations; the merge joins the faces either side along their
-    /// coinciding edges. Every closed edge must be one of theirs or lie across from one of
-    /// them (the sides' edges along the wall).
+    /// The check of [`OffsetExecutive::remove_closed_faces`]: the offset faces that closed
+    /// to nothing with `closed_edges` (`IsDegenerate`), in the order they closed, and the
+    /// same as a set; every closed edge must be one of theirs or lie across from one.
     ///
     /// # Errors
     ///
-    /// [`crate::error::offset::OffsetFailure::EdgeVanishes`] for a closed edge of a face that did not close to
-    /// nothing and across from none that did (a face turned inside out past it); those of
-    /// `IsDegenerate`, the edge and face queries and `DeleteFace`.
-    fn remove_closed_faces(
-        &mut self,
-        kernel: &mut Kernel,
+    /// [`crate::error::offset::OffsetFailure::EdgeVanishes`] for a closed edge of a face
+    /// that did not close to nothing and across from none that did; those of
+    /// `IsDegenerate` and the face queries.
+    fn closed_faces(
+        &self,
+        kernel: &Kernel,
         original: &Brep,
         b: &mut Brep,
         closed_edges: &[(FaceId, Option<FaceId>)],
-        notifications: &mut OffsetNotifications<'_>,
-    ) -> Result<()> {
+    ) -> Result<(Vec<FaceId>, BTreeSet<FaceId>)> {
         // offset faces closed to nothing, in the order they closed, and the original faces
         // they were offset from
         let mut gone_list: Vec<FaceId> = Vec::new();
@@ -444,6 +529,31 @@ impl OffsetExecutive {
                 return Err(self.edge_vanishes(original, face, None));
             }
         }
+        Ok((gone_list, gone))
+    }
+
+    /// The end of the fork's `CloseLoopGaps` (ccbf77a, WR-566): the offset faces that
+    /// closed to nothing as their edges closed to points (`IsDegenerate`: a step's wall
+    /// whose low top moved onto the high top's plane, its edges along the tops now
+    /// coinciding) are deleted, in the order they closed, with their pairs in the
+    /// executive's relations; the merge joins the faces either side along their
+    /// coinciding edges. Every closed edge must be one of theirs or lie across from one of
+    /// them (the sides' edges along the wall).
+    ///
+    /// # Errors
+    ///
+    /// [`crate::error::offset::OffsetFailure::EdgeVanishes`] for a closed edge of a face that did not close to
+    /// nothing and across from none that did (a face turned inside out past it); those of
+    /// `IsDegenerate`, the edge and face queries and `DeleteFace`.
+    fn remove_closed_faces(
+        &mut self,
+        kernel: &mut Kernel,
+        original: &Brep,
+        b: &mut Brep,
+        closed_edges: &[(FaceId, Option<FaceId>)],
+        notifications: &mut OffsetNotifications<'_>,
+    ) -> Result<()> {
+        let (gone_list, gone) = self.closed_faces(kernel, original, b, closed_edges)?;
         let mut gone_eus: BTreeSet<EdgeuseId> = BTreeSet::new();
         let body = notifications.result_brep;
         for &face in &gone_list {
@@ -492,7 +602,7 @@ impl OffsetExecutive {
         tol: f64,
         notifications: &mut OffsetNotifications<'_>,
         closed_edges: &mut Vec<(FaceId, Option<FaceId>)>,
-    ) -> Result<()> {
+    ) -> Result<Option<(Point3, Point3)>> {
         let e = eu::edge(b, u)?.ok_or_else(|| null("edge use without edge"))?;
         let surface = b
             .face(f)?
@@ -525,12 +635,15 @@ impl OffsetExecutive {
                 };
                 let long_enough = keep.length() > EFF_ZERO * (1.0 + ivl.max_dimension());
                 if !long_enough {
-                    // (fork ccbf77a, opt-in) the vertex moved to the edge's other end, where
+                    // (fork ccbf77a, WR-566) the vertex moved to the edge's other end, where
                     // the edge's other vertex is: the edge closed to a point. That is sound
                     // only where a face closes to nothing with it, which `close_loop_gaps`
                     // checks once every gap is closed. The edge is squeezed out, its two
-                    // vertices one, and noted with the original face across it.
-                    if kernel.fixes.local_operation_closes_walls_to_nothing
+                    // vertices one, and noted with the original face across it. Only a
+                    // local operation moves a wall's top onto another face's plane: in a
+                    // shell or offset an edge closed to a point is where the result meets
+                    // itself along a line (no sound solid), refused below by name.
+                    if self.operation() == OffsetOperation::LocalOperation
                         && self.squeeze_closed_edge(
                             kernel,
                             original,
@@ -545,7 +658,7 @@ impl OffsetExecutive {
                             closed_edges,
                         )?
                     {
-                        return Ok(());
+                        return Ok(None);
                     }
                     // (fork 34318f4) elsewhere the vertex moved past the edge's end: the edge
                     // vanishes, the face turns inside out
@@ -556,7 +669,7 @@ impl OffsetExecutive {
                 let new_ivl = curve.natural_interval();
                 set_edge_curve(kernel, b, e, curve, notifications)?;
                 edge::set_interval(b, e, &new_ivl)?;
-                return Ok(());
+                return Ok(None);
             }
         }
 
@@ -622,7 +735,13 @@ impl OffsetExecutive {
             return Err(sm_err());
         }
         output.vertex.ok_or_else(|| null("split without vertex"))?;
-        Ok(())
+        // the segment as the face's loop runs: from the vertex to the gap where the gap is
+        // at the edge use's start, else from the gap to the vertex
+        Ok(Some(if at_start {
+            (vertex_point, gap_end)
+        } else {
+            (gap_end, vertex_point)
+        }))
     }
 
     /// `CloseLoopGap`'s closed edge (fork ccbf77a): when the edge's other vertex is at
@@ -941,6 +1060,290 @@ fn straight_edge_ends(
     )))
 }
 
+/// A straight segment `close_loop_gap` added to an offset face's loop: the face, the
+/// segment's ends in the direction the face's loop runs, the gap's tolerance, and the
+/// original vertex the gap is at (where the gap's edge use has one original edge use).
+#[derive(Clone, Copy)]
+struct GapSegment {
+    face: FaceId,
+    from: Point3,
+    to: Point3,
+    tol: f64,
+    vertex: Option<VertexId>,
+}
+
+impl GapSegment {
+    /// Whether the segment runs between `a` and `b`, either way, within its tolerance.
+    fn joins(&self, a: Point3, b: Point3) -> bool {
+        (self.from.distance(a) <= self.tol && self.to.distance(b) <= self.tol)
+            || (self.from.distance(b) <= self.tol && self.to.distance(a) <= self.tol)
+    }
+}
+
+impl OffsetExecutive {
+    /// Not in the fork (solidcraft#17469): the offset of an original vertex whose faces'
+    /// offsets do not meet in one point. Where they stand apart, `close_loop_gaps` closes
+    /// each face's loop at the vertex with its own straight segment, and where the two
+    /// offsets of an edge at the vertex end at different points (faces tangent along the
+    /// edge, one of whose offsets meets its next face lower than the other's), the longer
+    /// one runs on past the shorter. A plane and a cylinder tangent along an edge that
+    /// ends where a cone stands on a ledge: the plane's offset meets the ledge's at the
+    /// ledge's height, the cylinder's meets the cone's above it, and the cone's and the
+    /// ledge's offsets are joined by segments down to the ledge's offset and along it to
+    /// the plane's. The segments, and the stretch where the edge's longer offset runs on,
+    /// bound a polygon no face fills, and the body built is open there. The vertex's
+    /// offset is that polygon: the plane face it bounds, run against the faces' loops, which
+    /// the merge joins to each face along its side.
+    ///
+    /// A side is a segment no other face borders (a segment of a step wall or one two faces
+    /// share is no side) at a vertex on no open face (`shell_faces`: there the gap is a step
+    /// from the open face's rim, which the step walls close); the segments are chained end to end, each end meeting exactly
+    /// one other within the larger of the two segments' tolerances. A chain that does not
+    /// close is closed by the straight stretch from its last end to its first only where an
+    /// offset edge runs along all of it: a straight edge with both its ends within the
+    /// chain's tolerance, the largest of its segments' (`along_an_edge`). A polygon of three or more corners on one plane within the
+    /// chain's tolerance, twice its area more than that tolerance times its perimeter, is
+    /// filled; any other chain is left as it is (the result is then judged as before). The
+    /// face is kept out of the face extensions: it closes the gap exactly.
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology queries, the closest point solves and the face's construction.
+    fn cap_vertex_gaps(
+        &mut self,
+        kernel: &mut Kernel,
+        segments: &[GapSegment],
+        notifications: &mut OffsetNotifications<'_>,
+    ) -> Result<()> {
+        if segments.len() < 2 {
+            return Ok(());
+        }
+        let mut polygons: Vec<(Vec<Point3>, f64, Option<VertexId>)> = Vec::new();
+        {
+            let b = self.offset_brep().ok_or_else(|| null("no offset B-rep"))?;
+            let mut open: Vec<GapSegment> = Vec::new();
+            for s in segments {
+                if !bordered_elsewhere(b, s)? {
+                    open.push(*s);
+                }
+            }
+            let mut used: BTreeSet<usize> = BTreeSet::new();
+            for (first, s) in open.iter().enumerate() {
+                if !used.insert(first) {
+                    continue;
+                }
+                // the polygon runs each segment backwards, from its `to` to its `from`:
+                // `after` continues from `s`'s end, `before` leads into its start
+                let mut after: Vec<GapSegment> = Vec::new();
+                let mut before: Vec<GapSegment> = Vec::new();
+                let (mut start, mut end) = (s.to, s.from);
+                let mut closed = false;
+                // two segments meet within the larger of their own tolerances
+                let (mut first_tol, mut last_tol) = (s.tol, s.tol);
+                while let Some(j) = only(&open, &used, |c| {
+                    c.to.distance(end) <= max2(last_tol, c.tol)
+                }) {
+                    let Some(c) = open.get(j) else { break };
+                    used.insert(j);
+                    after.push(*c);
+                    end = c.from;
+                    last_tol = c.tol;
+                    if end.distance(start) <= max2(first_tol, last_tol) {
+                        closed = true;
+                        break;
+                    }
+                }
+                while !closed {
+                    let Some(j) = only(&open, &used, |c| {
+                        c.from.distance(start) <= max2(first_tol, c.tol)
+                    }) else {
+                        break;
+                    };
+                    let Some(c) = open.get(j) else { break };
+                    used.insert(j);
+                    before.push(*c);
+                    start = c.to;
+                    first_tol = c.tol;
+                    closed = start.distance(end) <= max2(first_tol, last_tol);
+                }
+                let chain: Vec<GapSegment> = before
+                    .into_iter()
+                    .rev()
+                    .chain(std::iter::once(*s))
+                    .chain(after)
+                    .collect();
+                // the polygon's own tolerance: the largest of its segments'
+                let tol = chain.iter().fold(0.0, |t, c| max2(t, c.tol));
+                let mut corners: Vec<Point3> = chain.iter().map(|c| c.to).collect();
+                if !closed {
+                    if chain.len() < 2 || !along_an_edge(kernel, b, end, start, tol)? {
+                        continue;
+                    }
+                    corners.push(end);
+                }
+                let vertex = s
+                    .vertex
+                    .filter(|_| chain.iter().all(|c| c.vertex == s.vertex));
+                if corners.len() >= 3 {
+                    polygons.push((corners, tol, vertex));
+                }
+            }
+        }
+        for (corners, tol, vertex) in polygons {
+            self.cap_gap_polygon(kernel, &corners, tol, vertex, notifications)?;
+        }
+        Ok(())
+    }
+
+    /// One polygon of [`Self::cap_vertex_gaps`], its `corners` in order: its plane face,
+    /// made when the corners lie on one plane within `tol` and its area is clear of zero,
+    /// and related to its original vertex where one is known.
+    fn cap_gap_polygon(
+        &mut self,
+        kernel: &mut Kernel,
+        corners: &[Point3],
+        tol: f64,
+        vertex: Option<VertexId>,
+        notifications: &mut OffsetNotifications<'_>,
+    ) -> Result<()> {
+        let Some(&origin) = corners.first() else {
+            return Ok(());
+        };
+        let sides = || corners.iter().zip(corners.iter().cycle().skip(1));
+        // Newell's normal: twice the polygon's area along its normal
+        let mut normal = Vec3::ZERO;
+        let mut perimeter = 0.0;
+        for (&p, &q) in sides() {
+            normal += (p - origin).cross(q - origin);
+            perimeter += p.distance(q);
+        }
+        if normal.length() <= tol * perimeter {
+            return Ok(());
+        }
+        let n = normal.unitize()?;
+        if corners.iter().any(|&p| (p - origin).dot(n).abs() > tol) {
+            return Ok(());
+        }
+        let Some(&second) = corners.get(1) else {
+            return Ok(());
+        };
+        let x_axis = (second - origin).unitize()?;
+        let y_axis = n.cross(x_axis);
+        let (mut u_min, mut u_max, mut v_min, mut v_max) = (0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64);
+        for &p in corners {
+            let (u, v) = ((p - origin).dot(x_axis), (p - origin).dot(y_axis));
+            u_min = u_min.min(u);
+            u_max = u_max.max(u);
+            v_min = v_min.min(v);
+            v_max = v_max.max(v);
+        }
+        // the plane reaches past the polygon by its own size, as a face's replaced plane does
+        let margin = max2(u_max - u_min, v_max - v_min);
+        let domain = Extent2d::from_points(
+            Point2::new(u_min - margin, v_min - margin),
+            Point2::new(u_max + margin, v_max + margin),
+        );
+        let mut plane = Plane::new(origin, x_axis, y_axis, Vec2::new(1.0, 1.0), &domain);
+        plane.make_nurb()?;
+        let mut curves = Vec::new();
+        for (&p, &q) in sides() {
+            curves.push(Curve::from(BSplineCurve::create_line_segment(3, p, q)?));
+        }
+        let orientations = vec![OrientType::Same; curves.len()];
+        let mut stores = NotificationStores {
+            records: &mut *notifications.records,
+            attributes: &mut *notifications.attributes,
+            key_of: notifications.result_key_of,
+        };
+        let face = self.make_cap_face(
+            kernel,
+            Surface::from(plane),
+            curves,
+            orientations,
+            &[],
+            &mut NotifyState::from_kernel_stores(&mut stores),
+        )?;
+        self.push_closing_face(face);
+        if let Some(vertex) = vertex {
+            self.relate_vertex_face(vertex, face);
+        }
+        Ok(())
+    }
+}
+
+/// Whether a face other than `s`'s has an edge between `s`'s ends (a step wall's, or the
+/// same segment of a neighbour): such a segment is no side of a vertex's polygon.
+fn bordered_elsewhere(b: &Brep, s: &GapSegment) -> Result<bool> {
+    for &e in b.edge_list() {
+        let ends = crate::query::edge::edge_vertices(b, e)?;
+        let [v0, v1] = ends.as_slice() else {
+            continue;
+        };
+        if s.joins(b.vertex(*v0)?.point, b.vertex(*v1)?.point)
+            && crate::query::edge::edge_faces(b, e)?
+                .iter()
+                .any(|&f| f != s.face)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Whether vertex `v` of `b` lies on one of `faces`: one of its edges borders one of them.
+fn on_a_face_of(b: &Brep, v: VertexId, faces: &[FaceId]) -> Result<bool> {
+    if faces.is_empty() {
+        return Ok(false);
+    }
+    for &e in b.edge_list() {
+        if crate::query::edge::edge_vertices(b, e)?.contains(&v)
+            && crate::query::edge::edge_faces(b, e)?
+                .iter()
+                .any(|f| faces.contains(f))
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// The index of the one segment of `open` not `used` that `meets`, if exactly one does.
+fn only(
+    open: &[GapSegment],
+    used: &BTreeSet<usize>,
+    meets: impl Fn(&GapSegment) -> bool,
+) -> Option<usize> {
+    let mut found = open
+        .iter()
+        .enumerate()
+        .filter(|(j, c)| !used.contains(j) && meets(c))
+        .map(|(j, _)| j);
+    let first = found.next()?;
+    found.next().is_none().then_some(first)
+}
+
+/// Whether an edge of `b` runs along the straight stretch from `p` to `q`: a straight edge
+/// (its control points within `tol` of one line, so the whole curve is) with both ends of
+/// the stretch within `tol` of it. The distance to a straight segment is convex, so the
+/// whole stretch is then within `tol` of the edge.
+fn along_an_edge(k: &Kernel, b: &Brep, p: Point3, q: Point3, tol: f64) -> Result<bool> {
+    for &e in b.edge_list() {
+        let Some(curve) = b.edge(e)?.curve.as_ref() else {
+            continue;
+        };
+        if !crate::topology::brep::trim_extend::is_straight(curve, tol)? {
+            continue;
+        }
+        let near = |x: Point3| -> Result<bool> {
+            Ok(closest_point(k, b, e, x)?.is_some_and(|cp| cp.distance <= tol))
+        };
+        if near(p)? && near(q)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// One corner's planned edits (see [`OffsetExecutive::split_corner_vertices`]): the
 /// offset edges' ends it moves (edge, its start or end, the new point) and the offset
 /// vertices it moves.
@@ -1201,4 +1604,19 @@ fn set_edge_curve(
         b.set_geometry_owner_key(EntityRef::Edge(e), Some(owner));
         Ok(())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_gap_search_that_cannot_continue_is_a_stage_failure() {
+        let e = sm_err();
+        assert_eq!(e.offset_failure(), Some(&OffsetFailure::StageFailed));
+        assert!(e.is_defect());
+        assert_eq!(e.operation(), OP);
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert!(e.is_status_answer());
+    }
 }
