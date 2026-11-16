@@ -199,10 +199,16 @@ fn plan_slot<'a>(
     })
 }
 
-/// Which end of a run-out piece is in the air: `Lo` when it crosses the edge at its lower end.
+/// Which end of a run-out piece is in the air: the end nearer its crossing, as in
+/// `HingeSlot::cut_length` (both ends of a run-out lie either side of the crossing).
 fn air_end(slot: &HingeSlot) -> Option<Side> {
-    slot.crossing
-        .map(|x| if slot.a0 < x { Side::Lo } else { Side::Hi })
+    slot.crossing.map(|x| {
+        if (x - slot.a0).abs() < (x - slot.a1).abs() {
+            Side::Lo
+        } else {
+            Side::Hi
+        }
+    })
 }
 
 /// Pulls neighbouring pieces of one row, sorted by `a0`, apart to `mu` of material tip to tip
