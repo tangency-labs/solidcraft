@@ -166,13 +166,17 @@ impl Cached {
     }
 
     /// A layer's scenes: the ghost of where the bodies are (none for a copy, or with the cut
-    /// tint off), which stays, and the bodies where they stand, which the GPU draws moved.
+    /// tint off), which stays, and the bodies where they stand, which the GPU draws moved. The
+    /// bodies are the Move's picks, so the layer draws them lit in the selection colour, as the
+    /// highlight lights a picked body: the highlight leaves them to the layer
+    /// (`dialogs_move::drawn_as_layer`), and a change of the move lights them anew at no cost
+    /// (#17804).
     fn rest_scenes(&self, colors: Colors, copy: bool) -> (GpuScene, GpuScene) {
         let (mut still, mut moving) = (GpuScene::default(), GpuScene::default());
         let removed = still.color(colors.removed);
         let mut bounds = Aabb3::EMPTY;
         for mesh in &self.meshes {
-            draw(&mut moving, mesh, &IDENTITY, colors, &mut bounds);
+            draw(&mut moving, mesh, &IDENTITY, colors.selected, colors, &mut bounds);
             if !copy && colors.cut_tint {
                 ghost(&mut still, mesh, removed);
             }
@@ -346,7 +350,7 @@ impl MovePreview {
         let removed = scene.color(colors.removed);
         let mut bounds = Aabb3::EMPTY;
         for (mesh, m) in cache.meshes.iter().zip(&motions) {
-            draw(&mut scene, mesh, m, colors, &mut bounds);
+            draw(&mut scene, mesh, m, if colors.tint_new { colors.added } else { colors.body }, colors, &mut bounds);
             if !copy && colors.cut_tint {
                 ghost(&mut scene, mesh, removed);
             }
@@ -367,11 +371,11 @@ fn ghost(scene: &mut GpuScene, mesh: &Mesh, removed: crate::gpu::PaletteIndex) {
     }
 }
 
-/// `mesh` moved by `m`, in the colour of geometry the feature adds, or the body's own where
-/// the preference leaves new surface untinted (a move makes none either way), with its shaded
-/// edges.
-fn draw(scene: &mut GpuScene, mesh: &Mesh, m: &Mat, colors: Colors, bounds: &mut Aabb3) {
-    let added = scene.color(if colors.tint_new { colors.added } else { colors.body });
+/// `mesh` moved by `m`, filled in `fill` (the colour of geometry the feature adds, or the body's
+/// own where the preference leaves new surface untinted: a move makes none either way; or, in a
+/// layer, the selection colour), with its shaded edges.
+fn draw(scene: &mut GpuScene, mesh: &Mesh, m: &Mat, fill: [u8; 4], colors: Colors, bounds: &mut Aabb3) {
+    let added = scene.color(fill);
     for t in &mesh.triangles {
         for k in t {
             let i = *k as usize;
@@ -675,8 +679,9 @@ mod tests {
         assert!(!is_move(&two), "one command only");
     }
 
-    /// The layer looks as the bodies built where they land did: the same picture, but for the
-    /// odd pixel on an outline (the GPU moves single-precision points). Skipped without a GPU
+    /// The layer looks as the bodies built where they land did with the highlight lighting them
+    /// (the layer draws them in the selection colour, #17804): the same picture, but for the odd
+    /// pixel on an outline (the GPU moves single-precision points). Skipped without a GPU
     /// adapter.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
@@ -693,7 +698,9 @@ mod tests {
         let render = |preview: GpuScene, moving: Option<(GpuScene, [[f32; 4]; 4])>| {
             crate::gpu::render_offscreen_preview(GpuScene::default(), preview, moving, proj.vp.to_f32(), proj.cam.back().to_f32(), eye, SIZE)
         };
-        let built = MovePreview::default().compute(&plain, &cmds, c).unwrap().unwrap();
+        // Built where they land, the highlight lights the picked bodies in the selection colour.
+        let lit = Colors { added: c.selected, tint_new: true, ..c };
+        let built = MovePreview::default().compute(&plain, &cmds, lit).unwrap().unwrap();
         let layer = MovePreview::default().compute(&gpu, &cmds, c).unwrap().unwrap().layer.expect("a layer");
         let (still, moving) = layer.scenes.expect("its scenes");
         let transform: [[f32; 4]; 4] = std::array::from_fn(|col| std::array::from_fn(|row| layer.motion[col][row] as f32));
