@@ -289,3 +289,52 @@ fn a_hole_across_the_strip_splits_it_and_a_sliver_does_not() {
     )
     .is_err());
 }
+
+#[test]
+fn the_strip_reaches_as_far_as_its_region_on_the_frame() {
+    // Σ of F as a region on P's plane, frame origin (0, 0, 6), x and y the world axes:
+    // the rectangle (20, 30)–(140, 36). Along +y: 30..36; along −x: −140..−20; plate_faces on
+    // it gives F's y pair, 6 thick.
+    use crate::eval::Frame;
+    use crate::math::Point2;
+    use crate::prism::profile::{Loop2, Region2, Seg2};
+    let c = [
+        Point2::new(20.0, 30.0),
+        Point2::new(140.0, 30.0),
+        Point2::new(140.0, 36.0),
+        Point2::new(20.0, 36.0),
+    ];
+    let sigma = Region2 {
+        outer: Loop2 {
+            segs: (0..4)
+                .map(|i| Seg2::Line {
+                    a: c[i],
+                    b: c[(i + 1) % 4],
+                })
+                .collect(),
+        },
+        holes: vec![],
+    };
+    let frame = Frame {
+        origin: [0.0, 0.0, 6.0],
+        x_axis: [1.0, 0.0, 0.0],
+        y_axis: [0.0, 1.0, 0.0],
+    };
+    let eps = 1e-9;
+    assert_eq!(
+        strip_extent(&sigma, &frame, Vec3::Y, eps).unwrap(),
+        (30.0, 36.0)
+    );
+    assert_eq!(
+        strip_extent(&sigma, &frame, -Vec3::X, eps).unwrap(),
+        (-140.0, -20.0)
+    );
+    assert!(strip_extent(&sigma, &frame, Vec3::Z, eps).is_err());
+    let got = plate_faces(&wall(), Vec3::Z, TOL, |m| {
+        strip_extent(&sigma, &frame, m, eps)
+    })
+    .unwrap()
+    .unwrap();
+    assert_eq!(got.thickness, 6.0);
+    assert_eq!(got.b.normal, Vec3::Y);
+}

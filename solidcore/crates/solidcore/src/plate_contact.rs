@@ -213,6 +213,42 @@ pub fn plate_faces(
     })
 }
 
+/// How far the strip `Σ` reaches along `m`, `Σ` being a region placed on `frame` (P's plane):
+/// `(lo, hi)`, the levels `m · X` of its outer loop's lowest and highest points. This is the
+/// `strip_extent` that [`plate_faces`] asks for: `m` lies in P's plane (square to `n`), so
+/// `m · (O + u·x_axis + v·y_axis) = m · O + u·(m · x_axis) + v·(m · y_axis)`: the region's 2D
+/// extent along `(m · x_axis, m · y_axis)`, shifted by `m · O`.
+///
+/// # Errors
+///
+/// `m` not finite and unit, not in the frame's plane (its in-plane part's length further than
+/// [`SQUARE_SLACK`] from 1), or a region whose extent cannot be found within `eps`.
+pub fn strip_extent(
+    sigma: &crate::prism::profile::Region2,
+    frame: &crate::eval::Frame,
+    m: Vec3,
+    eps: f64,
+) -> Result<(f64, f64)> {
+    check_unit(m)?;
+    let [ox, oy, oz] = frame.origin;
+    let [xx, xy, xz] = frame.x_axis;
+    let [yx, yy, yz] = frame.y_axis;
+    let du = m.dot(Vec3::new(xx, xy, xz));
+    let dv = m.dot(Vec3::new(yx, yy, yz));
+    let d = crate::math::Vec2::new(du, dv);
+    if !((d.length() - 1.0).abs() <= SQUARE_SLACK) {
+        return Err(invalid("the direction does not lie in the strip's plane"));
+    }
+    let d = d
+        .unitize()
+        .map_err(|_| invalid("the direction does not lie in the strip's plane"))?;
+    let (lo, hi) = sigma
+        .extent_along(d, eps)
+        .ok_or_else(|| invalid("the strip's extent could not be found"))?;
+    let base = m.dot(Vec3::new(ox, oy, oz));
+    Ok((base + lo, base + hi))
+}
+
 /// How `T` meets a candidate plane `P` of `S`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Contact {
