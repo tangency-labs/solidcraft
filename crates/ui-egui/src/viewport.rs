@@ -4790,6 +4790,8 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     } else {
         crate::dialogs_move::chained(app).map(|(_, c)| c.iter().flatten().map(|v| v.to_bits()).collect::<Vec<_>>()).hash(&mut h);
     }
+    // And whether the preview draws them, so they are not lit whole (`build_highlight_with_projection`).
+    crate::dialogs_move::drawn_as_layer(app).hash(&mut h);
     app.origin_visible().hash(&mut h);
     app.picking_plane().hash(&mut h);
     app.preferences.reference_geometry_through_bodies.hash(&mut h);
@@ -5163,6 +5165,11 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     let chained = live.as_ref().filter(|_| !dragging);
     let carry = |b: &solidcraft_engine::doc::ModelBody| chain_of(chained, &b.name);
     let replaced = |name: &str| moving(name) || (app.preview.effective_replaced().iter().any(|n| n == name) && chain_of(chained, name).is_none());
+    // A moved body the preview draws as a layer moved on the GPU is lit by that layer, which
+    // draws it in the selection colour: lighting it here copied and moved its every triangle
+    // again at each change of the move, seconds a keystroke on a large assembly (#17804).
+    let as_layer = crate::dialogs_move::drawn_as_layer(app);
+    let lit_by_layer = |name: &str| as_layer && chain_of(chained, name).is_some();
     let shown = |b: &solidcraft_engine::doc::ModelBody| carried_mesh(carry(b), if product { b.mesh() } else { shown_mesh(app, b, &active_bodies) });
     let drawn = |b: &solidcraft_engine::doc::ModelBody| carried_mesh(carry(b), drawn_mesh(app, b));
     let items = app.highlighted();
@@ -5444,7 +5451,9 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                         }
                     } else {
                         let lit = WholeBody { selected: true, colour: c4(t.body_selected) };
-                        if !(gpu_lit(b) && light_whole_body(app, b, &active_bodies, lit, &body_slots, &mut feedback, &mut selected_instances)) {
+                        if !lit_by_layer(name)
+                            && !(gpu_lit(b) && light_whole_body(app, b, &active_bodies, lit, &body_slots, &mut feedback, &mut selected_instances))
+                        {
                             let m = shown(b);
                             let count = b.body.face_count();
                             mesh_tris(&mut feedback, &m, c4(t.body_selected), true, |f| (f as usize) < count);
@@ -10423,13 +10432,29 @@ mod tests {
         app.set_origin_shown(false);
         app.ui.ground_shadow = false;
         app.fit_view();
+        // Twelve edges per placed box, each a straight run of the exported mesh's segments along
+        // a box edge (the export's mesh path puts nodes along them, so their number is the
+        // mesher's): every segment of every outline drawn once per placement.
+        let world = crate::open_meshing::session_world(&app.session);
+        let mut segments = 0;
+        for body in &world.bodies {
+            let mesh = body.mesh();
+            assert_eq!(mesh.edges.len(), 12, "twelve edges per placed box");
+            for edge in &mesh.edges {
+                let (a, b) = (edge[0], edge[edge.len() - 1]);
+                for p in edge {
+                    let t = (*p - a).dot(b - a) / (b - a).dot(b - a);
+                    assert!((a + (b - a) * t - *p).len() < 1e-4, "an outline runs straight along a box edge");
+                }
+                segments += edge.len() - 1;
+            }
+        }
+        assert_eq!(world.bodies.len(), 2);
         for style in 0..4 {
             app.ui.visual_style = style;
             let scene = build_scene(&app).merged();
-            // Twelve edges per placed box, each one segment (a flat face needs no nodes along its
-            // edges), 24 segments.
-            let lines = if style == 1 { 0 } else { 2 * 12 * crate::gpu::LINE_SIZE };
-            assert_eq!(scene.lines.len(), lines, "style {style}: twelve edges per placed box");
+            let lines = if style == 1 { 0 } else { segments * crate::gpu::LINE_SIZE };
+            assert_eq!(scene.lines.len(), lines, "style {style}: every outline segment of both placed boxes");
             assert_eq!(scene.hidden.len(), if style == 3 { lines } else { 0 });
             assert_eq!(scene.tris.is_empty(), style == 2, "wireframe draws only the edges");
         }

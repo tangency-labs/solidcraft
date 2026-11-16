@@ -288,6 +288,11 @@ impl ModelBody {
     pub fn definition_name(&self) -> &str {
         self.source_name.as_deref().unwrap_or(&self.name)
     }
+    /// For a computed placement (a world state's body of a placed component), the geometry key
+    /// of the model body it places: placements of one body share it. 0 for any other body.
+    pub fn source_key(&self) -> u64 {
+        self.source_key
+    }
     /// Display mesh, computed once: chord tolerance 1/1000 of the body size, and no facet of a
     /// curved face or edge turning more than [`kernel::DISPLAY_ANGLE`], so that a bend or a
     /// hole that is small beside the body is still drawn round.
@@ -4523,11 +4528,15 @@ fn apply_beside_sheet_cut(
 ) -> Result<()> {
     let effective = if targets.is_empty() { &f.participants } else { targets };
     let all = effective.len() == 1 && effective.first().is_some_and(|t| t == "*");
+    // Some sheet solids have already been cut, possibly by another pattern group. Preserve
+    // automatic surfaces before passing the rest as names, which would otherwise refuse them.
+    let skip_surfaces = op == Operation::Cut && (all || effective.is_empty());
     let rest: Vec<String> = st
         .bodies
         .iter()
         .filter(|b| {
             !handled.contains(&b.name)
+                && (!skip_surfaces || !b.is_surface())
                 && (all || if effective.is_empty() { b.component == f.component || b.feature == f.id } else { effective.contains(&b.name) })
         })
         .map(|b| b.name.clone())
@@ -4915,10 +4924,35 @@ fn apply_traced_with(
         }
         return Ok(());
     }
-    // #9867: a named surface body is no solid to cut or intersect; say how to get one.
-    if matches!(op, Operation::Cut | Operation::Intersect) && named {
+    // A surface body is no solid to cut or intersect, including automatic targets (#17587).
+    // Automatic cuts with solid targets leave surfaces intact. Keep Thicken's sources too.
+    // Surface-only cuts leave a surface alone when exact bounds prove every tool is clear of
+    // it in its own frame. An intersect would delete even a distant surface.
+    if matches!(op, Operation::Cut | Operation::Intersect) {
+        let cuts_solids = op == Operation::Cut && !named && target_idx.iter().any(|&i| state.bodies.get(i).is_some_and(ModelBody::is_closed));
+        let mut untouched = std::collections::BTreeSet::new();
         for &i in &target_idx {
-            if let Some(b) = state.bodies.get(i).filter(|b| b.body.is_surface()) {
+            if let Some(b) = state.bodies.get(i).filter(|b| b.is_surface()) {
+                // Surface targets never block an automatic solid cut or lose faces to it.
+                // Thicken's source surfaces also stay intact for intersects (#17587).
+                if cuts_solids || (!named && matches!(&f.kind, FeatureKind::Thicken { bodies, .. } if bodies.iter().any(|n| *n == b.name))) {
+                    untouched.insert(i);
+                    continue;
+                }
+                if op == Operation::Cut && !named && !tools.is_empty() {
+                    let into = tool_frame(&b.name);
+                    let mut apart = true;
+                    for tool in &tools {
+                        if !kernel::apart(&b.body, &tool_in(tool, into)?.body)? {
+                            apart = false;
+                            break;
+                        }
+                    }
+                    if apart {
+                        untouched.insert(i);
+                        continue;
+                    }
+                }
                 let verb = if op == Operation::Cut { "a cut" } else { "an intersect" };
                 return Err(DocError::Invalid(format!(
                     "{} is a surface body, and {verb} needs a solid: cut it with Surface › Trim, or Thicken it first",
@@ -4926,6 +4960,7 @@ fn apply_traced_with(
                 )));
             }
         }
+        target_idx.retain(|i| !untouched.contains(i));
     }
     // An intersect's tools act as one body. Unioned after the refusals above, so a union that
     // fails or runs out of time never hides them and is not paid for a refused feature.
@@ -6826,6 +6861,27 @@ fn hole_tools_and_prisms(
     if bottom >= 0.0 {
         return Err(DocError::Invalid("hole depth must be positive".into()));
     }
+    // A hole exactly as deep as the material (To Object on the face it exits by, or a depth of
+    // the wall's thickness) is a through hole. Exact classification against every body: material
+    // just above the bottom, air just past it; a point within a body's tolerance of its boundary
+    // is neither, and the hole is then not taken to exit there; nor is it where the kernel
+    // cannot tell.
+    let at = |h: f64| *position + dir * (-h);
+    let eps = size * 1e-6;
+    let classes = |h: f64| st.bodies.iter().map(|b| b.body.classify_point(at(h))).collect::<std::result::Result<Vec<_>, _>>();
+    let exits = depth.is_some()
+        && classes(bottom + eps).is_ok_and(|c| c.contains(&kernel::PointClass::Inside))
+        && classes(bottom - eps).is_ok_and(|c| c.iter().all(|c| *c == kernel::PointClass::Outside));
+    // Its bore runs on past the exit face as it does above the entry, never to the material
+    // beyond: a floor ending on that face, which is rarely square to the axis to the last 1e-5 rad,
+    // crossed it and the cut left half of it across the exit (#17873).
+    let bore_end = match exits.then(|| Plane::from_normal(at(bottom), dir)).flatten() {
+        Some(exit) => match hole_run_on(st, &exit, r, (size * 0.01).max(0.1)) {
+            (run, near) if near.is_empty() => bottom - run,
+            _ => bottom,
+        },
+        None => bottom,
+    };
     // Each tool's circle seam at its own angle, so seams don't line up between tools.
     let seam = std::cell::Cell::new(0.0);
     let disc = |rad: f64| {
@@ -6844,16 +6900,7 @@ fn hole_tools_and_prisms(
             let half = val(vals, tip_angle, Kind::Angle)? / 2.0;
             // A hole exactly as deep as the material: the point is in the air past the exit
             // face, which would lie on the drill point's shoulder (a through hole, as drilled).
-            let at = |h: f64| *position + dir * (-h);
-            let eps = size * 1e-6;
-            // Exact classification against every body: material where one has the point inside,
-            // air where all have it outside; a point within a body's tolerance of its boundary is
-            // neither, and the hole is then not taken to exit at its shoulder.
-            let classes = |h: f64| st.bodies.iter().map(|b| b.body.classify_point(at(h))).collect::<std::result::Result<Vec<_>, _>>();
-            let solid = classes(bottom + eps)?.contains(&kernel::PointClass::Inside);
-            let air = classes(bottom - eps)?.iter().all(|c| *c == kernel::PointClass::Outside);
-            let exits_at_shoulder = solid && air;
-            if depth.is_some() && half > 1e-3 && half < std::f64::consts::FRAC_PI_2 && !exits_at_shoulder {
+            if depth.is_some() && half > 1e-3 && half < std::f64::consts::FRAC_PI_2 && !exits {
                 // One revolved tool (cylinder with a drill point).
                 let tip = r / half.tan();
                 let up = -dir;
@@ -6867,7 +6914,7 @@ fn hole_tools_and_prisms(
                     .collect());
             }
         }
-        Ok(vec![cyl(r, bottom, top, "bore")?])
+        Ok(vec![cyl(r, bore_end, top, "bore")?])
     };
     let mut tools = Vec::new();
     match hole {
@@ -9817,7 +9864,11 @@ fn trim_to_curved_face(
 /// far: the outer loop alone, drafted when the taper grows it (only the holes narrow) and
 /// straight when the taper narrows it. Run right through the target (past the far side of its
 /// exact box by the margin the straight path takes) and cut back to the face, its far end is the
-/// farthest the tool meets the face; the tool runs a hair past that, and at least `len`.
+/// farthest the tool meets the face; the tool runs a hair past that, and at least `len`. The
+/// envelope only shortens the tool: when its cut fails for a narrowing taper (a straight envelope
+/// wider than the target passes beside it where the tool meets it), the tool runs a hair past the
+/// far side of the target's box, beyond which it meets nothing of it, and its own cut says
+/// whether it ends on the face. A tool that closes before that is refused when it is built.
 #[allow(clippy::too_many_arguments)]
 fn tapered_reach(
     ss: &SolvedSketch,
@@ -9829,13 +9880,14 @@ fn tapered_reach(
     taper: f64,
     corner: Option<kernel::DraftCorner>,
 ) -> Result<f64> {
-    let n = ss.plane.normal();
     let far_side = |body: &Body| -> Result<f64> {
         let bb = body.exact_bounds().map_err(|e| DocError::Invalid(e.to_string()))?;
-        let (c, half) = (bb.center(), bb.size() * 0.5);
-        Ok(sign * (ss.plane.height(c) - base) + half.x * n.x.abs() + half.y * n.y.abs() + half.z * n.z.abs())
+        let [lo, hi] = solidcore_ops::affine::span_along(bb.min.into(), bb.max.into(), ss.plane.origin.into(), ss.plane.normal().into())
+            .map_err(|e| DocError::Invalid(e.to_string()))?;
+        Ok(if sign > 0.0 { hi - base } else { base - lo })
     };
-    let through = far_side(&target.body)?.max(len) + target.body.size() * 0.05 + 1.0 + to_offset.abs();
+    let target_far = far_side(&target.body)?.max(len) + to_offset.abs();
+    let through = target_far + target.body.size() * 0.05 + 1.0;
     extrude_within_reach([base, base + sign * through])?;
     let start_plane = ss.plane.offset(base);
     let mut envelopes = Vec::new();
@@ -9852,7 +9904,10 @@ fn tapered_reach(
             envelopes.extend(centered_extrude(&ss.plane, &outer, lo, hi, None, None, false)?);
         }
     }
-    let cut = trim_to_curved_face(envelopes, target, face, to, to_offset, &ss.plane, base, base + sign * through)?;
+    let cut = match trim_to_curved_face(envelopes, target, face, to, to_offset, &ss.plane, base, base + sign * through) {
+        Err(_) if taper < 0.0 => return Ok(target_far + target.body.size() * 1e-3),
+        cut => cut?,
+    };
     let reach = cut.iter().map(|t| far_side(&t.body)).collect::<Result<Vec<_>>>()?.into_iter().fold(len, f64::max);
     Ok(reach + target.body.size() * 1e-3)
 }
@@ -10211,6 +10266,9 @@ fn eval_feature_kind(
             Ok(())
         }
         FeatureKind::Hole { thread, thread_depth, thread_class, diameter, hand, modeled, ease_out, depth, to, .. } => {
+            if st.bodies.is_empty() {
+                return Err(empty_boolean_targets(doc, st, f, &[], f.participants.is_empty()));
+            }
             let thread_depth = thread_depth.as_ref().map(|d| val(vals, d, Kind::Length)).transpose()?;
             if thread_depth.is_some() && thread.is_none() {
                 return Err(DocError::Invalid("thread depth requires a tapped hole".into()));

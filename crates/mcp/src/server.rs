@@ -177,10 +177,8 @@ impl Tools for Agent {
 
     fn read_resource(&mut self, uri: &str) -> Option<Result<Contents, String>> {
         let read = match uri {
-            // The solvecraft:// URIs are what earlier releases listed (compatibility shim,
-            // docs/compatibility.md); clients that saved them still read the resource.
-            "solidcraft://design" | "solvecraft://design" => self.backend.call("document.inspect", json!({"measure": true})),
-            "solidcraft://commands" | "solvecraft://commands" => self.backend.call("engine.commands", json!({})),
+            "solidcraft://design" => self.backend.call("document.inspect", json!({"measure": true})),
+            "solidcraft://commands" => self.backend.call("engine.commands", json!({})),
             _ => return None,
         };
         Some(read.map(|v| Contents::json(&v)))

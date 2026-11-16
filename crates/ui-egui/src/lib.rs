@@ -236,6 +236,7 @@ pub(crate) mod plugin_menu;
 mod plugin_slots;
 pub(crate) mod plugins;
 pub mod point_clouds;
+pub mod policy;
 pub mod prefs;
 pub mod prefs_notice;
 pub use solidcraft_ui_kit::prefs_window;
@@ -703,6 +704,9 @@ pub struct SolveApp {
     pub crashes: crash_ui::CrashUi,
     /// The update check and its window (`update`).
     pub updater: update::Updater,
+    /// What this computer's administrator set (`policy`). The host loads it at start; the default
+    /// is an unmanaged computer.
+    pub policy: policy::Policy,
     /// Safari's steps for installing the web app, while their window is open (`install`).
     pub install_steps: Option<install::Steps>,
     /// Toolbar buttons the user pinned, removed or reordered.
@@ -1030,6 +1034,7 @@ impl SolveApp {
             tickets: tickets::Tickets::new(),
             crashes: crash_ui::CrashUi::default(),
             updater: update::Updater::default(),
+            policy: policy::Policy::default(),
             install_steps: None,
             toolbar_custom: toolbar_custom::ToolbarCustom::default(),
             settings_profiles: settings_profiles::Profiles::default(),
@@ -1983,10 +1988,18 @@ impl SolveApp {
         }
         // Before the folder pick is cleared: a clicked Browser folder is what Show/Hide acts on.
         // With a menu open, this runs that menu's Show/Hide on what the menu is for.
-        if id == "ui.toggle_visibility" {
+        // Show/Hide (`browser.visibility`) started with nothing to act on, from a 3D mouse button,
+        // the command search or a key bound to it, does the same: it used to run with no
+        // parameters and answer "`visible` must be true or false" (#17912).
+        if matches!(id, "ui.toggle_visibility" | "browser.visibility") {
             if !context_menu::press_shortcut(self, "V") {
                 context_menu::toggle_visibility(self);
             }
+            return;
+        }
+        // Dialog OK runs OK in the open dialog and starts nothing (#17416).
+        if id == "ui.dialog_ok" {
+            dialogs::confirm(self);
             return;
         }
         self.tree.clear_folder_pick();

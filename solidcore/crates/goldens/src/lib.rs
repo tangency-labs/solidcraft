@@ -16,6 +16,8 @@ pub mod cases {
     pub mod contract;
     pub mod topology_entities;
 }
+#[cfg(test)]
+pub(crate) mod certify;
 pub mod compare;
 pub mod constructor;
 pub mod dump;

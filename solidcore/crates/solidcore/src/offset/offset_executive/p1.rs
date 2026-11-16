@@ -1420,7 +1420,7 @@ impl OffsetExecutive {
                 &[],
                 &mut notifications.rekey(offset_key_of),
             )?;
-            // Not upstream (opt-in `Kernel::fixes.local_operation_step_walls`, fork
+            // Not upstream (WR-530 addendum, fork
             // tangency-labs/smlib 5d428ae): a step wall spans the gap between two edges
             // exactly, as a lamina side wall does, and is kept out of the face extensions
             // as one (extended along its rulings it can pass through its own axis, a step

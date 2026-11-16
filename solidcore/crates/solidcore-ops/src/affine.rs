@@ -5,9 +5,11 @@
 //! ([`solidcore::Transform::translation`], [`solidcore::Transform::rotation`],
 //! [`solidcore::Transform::uniform_scaling`], [`solidcore::Transform::reflection`],
 //! [`solidcore::Transform::concat`], [`solidcore::Transform::inverse`]); ops checks the
-//! numbers and passes them on.
+//! numbers and passes them on. Beside them, how far a point or a box reaches along a direction
+//! ([`distance_along`], [`span_along`]), as the kernel measures it.
 
 use solidcore::geom::certified::Verdict;
+use solidcore::geom::extent3d::Extent3d;
 use solidcore::{Transform, Vec3};
 
 use crate::body::REGULAR_RATIO;
@@ -150,6 +152,29 @@ pub fn inverse(matrix: &Matrix) -> Result<Matrix> {
 /// the distance itself). Negative behind `origin`.
 pub fn distance_along(origin: [f64; 3], direction: [f64; 3], point: [f64; 3]) -> f64 {
     Vec3::from(point).distance_along(Vec3::from(origin), Vec3::from(direction))
+}
+
+/// How far the box from `min` to `max` (a body's box, say) reaches from `origin` along
+/// `direction`, `[low, high]`: the least and the greatest [`distance_along`] of its points,
+/// through [`Extent3d::span_along`].
+///
+/// # Errors
+/// [`Error::Argument`] for a number not finite, or a reach not.
+pub fn span_along(
+    min: [f64; 3],
+    max: [f64; 3],
+    origin: [f64; 3],
+    direction: [f64; 3],
+) -> Result<[f64; 2]> {
+    if !finite(&min) || !finite(&max) || !finite(&origin) || !finite(&direction) {
+        return Err(Error::Argument);
+    }
+    let span = Extent3d::from_bounds(min[0], min[1], min[2], max[0], max[1], max[2])
+        .span_along(vec3(origin), vec3(direction));
+    if !finite(&span) {
+        return Err(Error::Argument);
+    }
+    Ok(span)
 }
 
 /// How far the turn in `matrix` (its rows 0 to 2; a translation in it is ignored) moves the
@@ -327,5 +352,30 @@ mod tests {
         assert!((distance_along(o, d, [9.0, 6.0, -4.0]) - 4.0).abs() < 1e-12);
         assert!((distance_along(o, d, [1.0, -1.0, 3.0]) + 3.0).abs() < 1e-12);
         assert_eq!(distance_along(o, d, o), 0.0);
+    }
+
+    #[test]
+    fn span_along_takes_the_box_corners_either_way_round_and_refuses_what_is_not_finite() {
+        let (o, d) = ([1.0, 1.0, 1.0], [1.0, 2.0, 2.0]);
+        assert_eq!(
+            span_along([-1.0, 0.0, 2.0], [3.0, 5.0, 4.0], o, d),
+            Ok([-2.0, 16.0])
+        );
+        assert_eq!(
+            span_along([3.0, 5.0, 4.0], [-1.0, 0.0, 2.0], o, d),
+            Ok([-2.0, 16.0])
+        );
+        assert_eq!(
+            span_along([0.0; 3], [1.0; 3], o, [0.0, f64::NAN, 1.0]),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            span_along([0.0; 3], [f64::INFINITY; 3], o, d),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            span_along([0.0; 3], [f64::MAX; 3], o, d),
+            Err(Error::Argument)
+        );
     }
 }

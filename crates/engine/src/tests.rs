@@ -1313,6 +1313,29 @@ fn unknown_commands_suggest_the_closest_ids() {
     assert_eq!(msg(&long), format!("unknown command `{long}`"));
 }
 
+/// Common verbs recover the command in the same namespace, without executing an alias.
+#[test]
+fn unknown_commands_suggest_equivalent_verbs_in_the_same_namespace() {
+    for (id, candidate) in [("note.create", "notes.add"), ("render.lights.create", "render.cameras.add"), ("create", "add"), (".create", ".add")] {
+        assert!(!crate::cmd::command_verb_alternative(id, candidate), "{id}: {candidate}");
+    }
+    let mut s = Session::default();
+    for (id, wanted) in [
+        ("note.create", "note.add"),
+        ("NOTE.CREATE", "note.add"),
+        ("note.new", "note.add"),
+        ("note.remove", "note.delete"),
+        ("parameters.create", "parameters.add"),
+        ("render.lights.create", "render.lights.add"),
+        ("render.lights.delete", "render.lights.remove"),
+    ] {
+        let error = s.execute(id, &json!({})).unwrap_err();
+        assert!(matches!(error, crate::EngineError::UnknownCommand(_)), "{id}: {error}");
+        let message = error.to_string();
+        assert!(message.starts_with(&format!("unknown command `{id}` (did you mean `{wanted}`")), "{message}");
+    }
+}
+
 #[test]
 fn sample_design_builds() {
     let mut s = Session::default();
@@ -2028,6 +2051,63 @@ fn a_hole_position_of_expressions_follows_the_parameters() {
     assert!((after - want).abs() < 1e-3, "centre y {after}, want {want} (was {before})");
     // A bad expression is refused.
     assert!(s.execute("solid.hole", &json!({"position": ["40", "nope/2", "t"], "diameter": 3})).is_err());
+}
+
+/// #9088: an unreadable hole direction must not silently drill along the face normal.
+#[test]
+fn hole_direction_rejects_malformed_vectors_without_changing_the_design() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
+    let before = (*s.doc).clone();
+    for direction in [json!("sideways"), json!([0, -1]), json!([0, 0, -1, 0]), json!(["1", "0", "0"]), json!({"x": 1}), json!(false), json!(2)] {
+        let err =
+            s.execute("solid.hole", &json!({"position": [10, 10, 10], "diameter": 5, "depth": 5, "direction": direction})).unwrap_err().to_string();
+        assert!(err.contains("`direction`"), "{direction}: {err}");
+        assert_eq!(*s.doc, before, "{direction} changed the design");
+        assert_eq!(s.model.state().body("Plate").unwrap().body.face_count(), 6);
+        assert!((volume(&mut s) - 12_000.0).abs() < 1e-6);
+    }
+}
+
+/// The default normal and the accepted numeric vector forms still make the same blind hole.
+#[test]
+fn hole_direction_accepts_numeric_vectors_and_the_default() {
+    for direction in [None, Some(Value::Null), Some(json!([0, 0, -2])), Some(json!({"x": 0, "y": 0, "z": -2}))] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
+        let mut params = json!({"position": [10, 10, 10], "diameter": 5, "depth": 5, "name": "Hole"});
+        if let Some(direction) = direction {
+            params["direction"] = direction;
+        }
+        run(&mut s, "solid.hole", params);
+        let hole = run(&mut s, "timeline.inspect", json!({"feature": "Hole"}));
+        assert_eq!(hole["definition"]["direction"], json!([0.0, 0.0, -1.0]));
+        assert!((volume(&mut s) - (12_000.0 - PI * 2.5 * 2.5 * 5.0)).abs() < 1e-6);
+    }
+}
+
+/// Sketch-point holes ignore `direction` unless they use the Single hole mode.
+#[test]
+fn hole_direction_is_checked_for_single_sketch_holes() {
+    for single in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "Points"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [10, 10], "radius": 2, "id": "c1"}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = (*s.doc).clone();
+        let result = s.execute(
+            "solid.hole",
+            &json!({"sketch": "Points", "points": ["c1.center"], "single": single, "diameter": 5, "depth": 5, "direction": "sideways"}),
+        );
+        if single {
+            assert!(result.unwrap_err().to_string().contains("`direction`"));
+            assert_eq!(*s.doc, before);
+        } else {
+            result.unwrap();
+            assert!((volume(&mut s) - (12_000.0 - PI * 2.5 * 2.5 * 5.0)).abs() < 1e-6);
+        }
+    }
 }
 
 /// Additive extrusions default to joining even when only a profile side touches material.
@@ -5709,12 +5789,17 @@ fn tapered_extrude_of_a_profile_mixing_lines_and_an_arc() {
 /// outside, its negative for the hole, which the taper narrows as it grows the outside) meets
 /// the ball at z_c, the smaller root of r(z)² + (z − 20)² = R², so the column inside it is the
 /// frustum to z_c less the ball's cap below z_c, and the post is the outside's column less the
-/// hole's. Joined to the ball it adds just that. At −15° the outside would close at z 14.9 and
-/// at +5° the hole at z 17.1, both inside the ball: the tools only run as far as they must.
+/// hole's: the volumes below, worked out once from that (z_c 11.335 at +5°, 10.487 at −5°,
+/// 10.085 at −15°; the hole's 10.019 at +5°, 10.292 at −5°). Joined to the ball (4188.790)
+/// it adds just that. At −15° the outside would close at z 14.9 and at +5° the hole at z 17.1,
+/// both inside the ball: the tools only run as far as they must. A circle r 12 is wider than
+/// the ball where it starts and still meets it narrowing: at −10° at z_c 16.022, at −20° at
+/// 13.095, at −21° at 12.904, closing at z 31.26 just above the ball (its top at z 30); such a
+/// tool runs to the ball's far side. Growing at +5°, it holds the whole ball and is refused.
 #[test]
 fn tapered_extrude_to_a_curved_face_ends_on_it() {
-    let (a, b, c, big_r) = (4.0, 1.5, 20.0, 10.0);
-    let setup = |hole: bool| {
+    let (b, c, big_r) = (1.5, 20.0, 10.0);
+    let setup = |a: f64, hole: bool| {
         let mut s = Session::default();
         run(&mut s, "solid.sphere", json!({"radius": big_r, "center": [0, 0, c], "body_name": "Ball"}));
         run(&mut s, "sketch.create", json!({"plane": "XY", "name": "P"}));
@@ -5725,44 +5810,52 @@ fn tapered_extrude_to_a_curved_face_ends_on_it() {
         run(&mut s, "sketch.finish", json!({}));
         s
     };
-    let column = |r0: f64, slope: f64| {
-        let (qa, qb, qc) = (slope * slope + 1.0, 2.0 * (r0 * slope - c), r0 * r0 + c * c - big_r * big_r);
-        let z_c = (-qb - (qb * qb - 4.0 * qa * qc).sqrt()) / (2.0 * qa);
-        let (r_c, h) = (r0 + slope * z_c, z_c - (c - big_r));
-        PI * z_c / 3.0 * (r0 * r0 + r0 * r_c + r_c * r_c) - PI * h * h * (3.0 * big_r - h) / 3.0
-    };
-    let ball = 4.0 / 3.0 * PI * big_r.powi(3);
+    let ball = 4188.790204786391;
     let measure = |s: &mut Session, body: &str| run(s, "inspect.measure", json!({"bodies": [body]}))["bodies"][0].clone();
-    let topology = |m: &Value| (m["faces"].as_u64(), m["edges"].as_u64(), m["vertices"].as_u64());
+    let topology = |m: &Value| (m["faces"].as_u64(), m["edges"].as_u64(), m["vertices"].as_u64(), m["kernel"]["shells"].as_u64());
     for hole in [false, true] {
         // Untapered, the straight path: the post's faces are its base, its sides and the ball's cap.
-        let mut s = setup(hole);
+        let mut s = setup(4.0, hole);
         run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [0, 0, c - big_r], "operation": "new", "body_name": "Post"}));
         let straight = topology(&measure(&mut s, "Post"));
         assert_eq!(straight.0, Some(if hole { 4 } else { 3 }), "{straight:?}");
         let cones = if hole { 2 } else { 1 };
         // At −15° the hole would grow into the outside before the ball: no hole there.
-        let degs: &[f64] = if hole { &[5.0, -5.0] } else { &[5.0, -5.0, -15.0] };
-        for &deg in degs {
-            let t = deg.to_radians().tan();
-            let post = column(a, t) - if hole { column(b, -t) } else { 0.0 };
+        let posts: &[(f64, f64, f64)] = if hole {
+            &[(4.0, 5.0, 631.703987706579), (4.0, -5.0, 285.63157703482165)]
+        } else {
+            &[
+                (4.0, 5.0, 669.1892253335005),
+                (4.0, -5.0, 408.1381918962213),
+                (4.0, -15.0, 241.3566646562573),
+                (12.0, -10.0, 4765.092818474139),
+                (12.0, -20.0, 3612.7398353298513),
+                (12.0, -21.0, 3520.22820600382),
+            ]
+        };
+        for &(a, deg, post) in posts {
             let taper = format!("{deg} deg");
-            let mut s = setup(hole);
+            let mut s = setup(a, hole);
             run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [0, 0, c - big_r], "taper": taper, "operation": "new", "body_name": "Post"}));
             let m = measure(&mut s, "Post");
             let got = m["volume_mm3"].as_f64().unwrap();
             assert!(rel(got, post) < 1e-4, "{deg} deg, hole {hole}: {got} vs {post}");
             assert_eq!(topology(&m), straight, "{deg} deg, hole {hole}: {m}");
             assert_eq!(m["face_types"], json!({"cone": cones, "plane": 1, "sphere": 1}), "{deg} deg, hole {hole}: only the base is flat: {m}");
-            let mut s = setup(hole);
+            let mut s = setup(a, hole);
             run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [0, 0, c - big_r], "taper": taper, "operation": "join", "targets": ["Ball"]}));
             assert_eq!(s.model.state().bodies.len(), 1, "{deg} deg, hole {hole}");
             assert!(rel(volume(&mut s), ball + post) < 1e-4, "{deg} deg, hole {hole}: {} vs {}", volume(&mut s), ball + post);
             // The ball's face, less the post's foot; with a hole also the ball's face in the hole.
             let m = measure(&mut s, "Ball");
             assert_eq!(m["face_types"], json!({"cone": cones, "plane": 1, "sphere": cones}), "{deg} deg, hole {hole}: {m}");
+            assert_eq!(m["kernel"]["shells"].as_u64(), Some(1), "{deg} deg, hole {hole}: {m}");
         }
     }
+    let mut s = setup(12.0, false);
+    let p = json!({"sketch": "P", "to": [0, 0, c - big_r], "taper": "5 deg", "operation": "new", "body_name": "Post"});
+    let e = s.execute("solid.extrude", &p).unwrap_err().to_string();
+    assert!(e.contains("reaches past the To face"), "{e}");
 }
 
 /// A feature that joins into a body creates none, and its reply says so; a primitive's reply
