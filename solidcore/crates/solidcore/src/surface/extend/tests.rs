@@ -1343,7 +1343,7 @@ fn the_ruled_product_form_past_the_largest_degree_keeps_the_rows_refusal() {
 /// leader (0, 2, 2) -> (10, 2, 2), of order `order`, on a toy net (a unit square, bound
 /// 1e-3); with `certified`, on its own net and bound ([`net_of_definition`]). The planes
 /// run to x = 20, so the feet have room along.
-fn round_blend(order: u32, certified: bool) -> (Kernel, ProceduralBlend) {
+pub(crate) fn round_blend(order: u32, certified: bool) -> (Kernel, ProceduralBlend) {
     round_blend_with(order, certified, 0.5)
 }
 

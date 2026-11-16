@@ -152,6 +152,12 @@ struct Graded {
     hang: bool,
 }
 
+/// #16735's leak checks on result bodies read into the kernel: test code measuring geometry,
+/// which this crate itself does not (docs/layers.md §4).
+#[path = "../../solidcore/tests/support/volume_leak.rs"]
+#[allow(clippy::disallowed_methods)]
+mod volume_leak;
+
 /// An `Option<f64>` as its IEEE bits, for [`Graded::deviation`].
 mod f64_bits {
     #[expect(clippy::ref_option, reason = "the signature serde's `with` calls")]
@@ -1442,14 +1448,28 @@ fn run_case_with_records(
         }
     }
     let mut deviation = None;
-    if let Some(v) = want["volume_mm3"].as_f64() {
+    if let Some(rig) = want["volume_mm3"].as_f64() {
+        // the rig's volume, or the case's volume with tolerant edges' gaps closed (#16735)
+        let closed = CLOSED_GAP_VOLUMES
+            .iter()
+            .find(|(c, _)| e["case"].as_str() == Some(c))
+            .map(|&(_, v)| v);
+        let v = closed.unwrap_or(rig);
         match got.volume {
             Some(g) => {
                 if v != 0.0 {
                     deviation = Some((g - v).abs() / v.abs());
                 }
                 if !within(g, v, tol) {
-                    diffs.push(format!("volume {g} (rig {v})"));
+                    diffs.push(match closed {
+                        Some(_) => format!("volume {g} (closed gaps {v}, rig {rig})"),
+                        None => format!("volume {g} (rig {v})"),
+                    });
+                }
+                if closed.is_some() {
+                    if let Err(x) = moved_from_the_rig(&result, rig, g) {
+                        diffs.push(x);
+                    }
                 }
             }
             None => diffs.push(format!("volume not measured (rig {v})")),
@@ -1460,6 +1480,62 @@ fn run_case_with_records(
     } else {
         Err(Stop::Fail(diffs.join(", ")))
     }
+}
+
+/// The cases whose volume moved off the rig's when `brep_volume` began closing tolerant
+/// edges' gaps (#16735), with their volume now. The rig's records stay as measured (its
+/// integrator leaked through the gaps as this one did); each case is graded on its volume
+/// now, and the move from the rig's is checked within the old leak's bound on the result
+/// ([`moved_from_the_rig`]).
+const CLOSED_GAP_VOLUMES: [(&str, f64); 5] = [
+    // rig 9440.034329164451
+    (
+        "report-peg-concave-round-r3-then-front-round-r1-5",
+        9_440.033_636_074_577,
+    ),
+    // rig 9404.790032915605
+    (
+        "report-peg-concave-round-then-front-round-r2",
+        9_404.789_833_109_295,
+    ),
+    // rig 9432.862095990427
+    (
+        "report-peg-front-round-r1-5-then-concave-round-r3",
+        9_432.861_779_882_673,
+    ),
+    // rig 9399.383292771683
+    (
+        "report-peg-front-round-then-concave-round-r2",
+        9_399.383_029_676_488,
+    ),
+    // rig 112506.83949124035
+    (
+        "16654-fillet-tube-joint-across-a-chamfer-crease-r1",
+        112_506.838_974_893_08,
+    ),
+];
+
+/// The one result body read into the kernel, its volume's move from the rig's `rig` to `got`
+/// checked by `volume_leak::moved_by_the_old_leak`.
+fn moved_from_the_rig(result: &[Slot], rig: f64, got: f64) -> Result<(), String> {
+    let [s] = result else {
+        return Err(format!("{} result bodies, not one", result.len()));
+    };
+    let bytes = s.body.to_smb(true).map_err(|x| format!("to_smb: {x}"))?;
+    // the case's own fixes: the reader refuses what they write otherwise (a round kept as its
+    // definition, `fillet_round_as_definition`, writes a procedural blend surface)
+    let mut k = solidcore::Kernel::default();
+    for name in session::fixes() {
+        let flag = k
+            .fixes
+            .flag_mut(name)
+            .ok_or_else(|| format!("unknown fix {name}"))?;
+        *flag = true;
+    }
+    let mut b = volume_leak::read_smb(&mut k, &bytes, true);
+    volume_leak::moved_by_the_old_leak(&k, &mut b, rig, got, VOLUME_ACCURACY).map(|line| {
+        println!("#16735 move: {line}");
+    })
 }
 
 /// A wrong endpoint, angle, tolerance cap or duplicate seam cannot pass the grader.

@@ -5,6 +5,7 @@ use solidcraft_geom::prelude::*;
 use std::f64::consts::{FRAC_PI_2, PI, SQRT_2};
 
 use serde_json::{Value, json};
+use solidcraft_io::DxfShape;
 
 use crate::Session;
 
@@ -195,8 +196,8 @@ fn a_shelled_tray_keeps_its_walls_and_unfolds_by_the_k_factor() {
     // It exports like a sheet made from flanges: an outline and four bend lines up.
     let dxf = run(&mut s, "sheet.export_dxf", json!({}));
     assert_eq!(dxf["bends"], 4);
-    let lines: Vec<&str> = dxf["dxf"].as_str().unwrap_or_default().lines().collect();
-    assert_eq!(lines.windows(2).filter(|w| w[0].trim() == "8" && w[1].trim() == "BEND_UP").count(), 4, "four bend lines");
+    let file = solidcraft_io::read_dxf_file(dxf["dxf"].as_str().unwrap_or_default()).unwrap();
+    assert_eq!(file.entities().iter().filter(|entity| file.layer(entity.layer()).unwrap().name() == "BEND_UP").count(), 4, "four bend lines");
     assert_eq!(run(&mut s, "sheet.export_bend_table", json!({"format": "json"}))["bends"], 4);
 }
 
@@ -917,11 +918,18 @@ fn flat_circles(s: &mut Session) -> Vec<(f64, [f64; 2])> {
 
 /// How many entities of each kind the flat pattern's DXF has.
 fn dxf_entities(s: &mut Session) -> (usize, usize, usize) {
-    let dxf = run(s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or("").replace("\r\n", "\n");
-    // Group codes may be padded (`  0`): compare the code and value lines trimmed.
-    let lines: Vec<&str> = dxf.lines().map(str::trim).collect();
-    let n = |kind: &str| lines.chunks(2).filter(|pair| pair == &["0", kind]).count();
-    (n("LINE"), n("ARC"), n("CIRCLE"))
+    let result = run(s, "sheet.export_dxf", json!({}));
+    let file = solidcraft_io::read_dxf_file(result["dxf"].as_str().unwrap()).unwrap();
+    let mut counts = (0, 0, 0);
+    for entity in file.entities() {
+        match entity.geometry() {
+            DxfShape::Line(..) => counts.0 += 1,
+            DxfShape::Arc { .. } => counts.1 += 1,
+            DxfShape::Circle { .. } => counts.2 += 1,
+            _ => {}
+        }
+    }
+    counts
 }
 
 /// A plate whose round holes' walls are two half-cylinders each (as many exporters write a hole)
@@ -1134,19 +1142,13 @@ fn contains(s: &Session, p: [f64; 3]) -> bool {
         .is_some_and(|b| b.body.classify_point(solidcore_record::Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside)
 }
 
-/// The LINE entities a DXF draws on `layer` (group codes and values alternate, a line each).
+/// Count actual LINE geometry on an owned layer after the shared layered read.
 fn lines_on(dxf: &str, layer: &str) -> usize {
-    let lines: Vec<&str> = dxf.lines().map(str::trim).collect();
-    let mut in_line = false;
-    let mut count = 0;
-    for pair in lines.chunks(2) {
-        match pair {
-            ["0", kind] => in_line = *kind == "LINE",
-            ["8", name] if in_line && *name == layer => count += 1,
-            _ => {}
-        }
-    }
-    count
+    let file = solidcraft_io::read_dxf_file(dxf).unwrap();
+    file.entities()
+        .iter()
+        .filter(|entity| matches!(entity.geometry(), DxfShape::Line(..)) && file.layer(entity.layer()).unwrap().name() == layer)
+        .count()
 }
 
 /// A plate with an engraving converts: the engraving is a pocket of the sheet, so the sheet keeps

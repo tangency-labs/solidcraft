@@ -54,6 +54,16 @@
 //!   classification, a missing curve where it is dereferenced, and a coincident edge
 //!   whose curve is not of a kind derived from `SmBSplineCurve` (`SM_CAST_PTR` gives
 //!   `NULL`; the copy slices a line or conic to its B-spline part).
+//! - **An unclassified interval end** (not upstream, #17595). Once an interval is inside the
+//!   face, `ClassifyFaceInterval` takes an end the boundary intersections left unclassified
+//!   for a point inside the face too. Here such an end is first classified by the face's
+//!   trims (`PointClassify` at its point of the classification's UV curve, when it has one
+//!   and UV space is allowed), and stays on the edge or vertex that finds. An intersection
+//!   curve that ends on its surface's natural boundary ends on the face's edge there, also
+//!   where that edge's 3D curve lies farther from the surface than the edge's tolerance
+//!   (3.3e-3 against 2.8e-3 on an imported edge), so that the curve/edge intersection finds
+//!   no crossing; taken for inside the face, the end became a vertex 8.8e-3 short of the
+//!   edge and the intersection loop stayed open there.
 //! - **Debug-only work** (`SM_DEBUG_CODE`, `SM_DBG_WARN`, `bReportProb` messages, the
 //!   unused `AreCoincidentMaybe` angle check) is dropped; the angle is still computed.
 //! - **Topology members.** `SmEdge::GetCurve` / `GetInterval` / `IsConnectedTo`,
@@ -2012,6 +2022,36 @@ fn classify_face_interval_on<O: ClassObject>(
         // when the classification was done through the endPoints
         if !did_mid {
             ivl.mid.set_class_object(PointClassType::Face, Some(face));
+        }
+
+        // Not upstream (#17595; see the module's Deviations): an end the boundary
+        // intersections left unclassified is classified by the face's trims before it is
+        // taken for a point inside the face
+        let ends = [ivl.interval.min(), ivl.interval.max()];
+        for (end, t) in [&mut ivl.start, &mut ivl.end].into_iter().zip(ends) {
+            if end.point_class() != PointClassType::Unknown || !ctx.uv_space_okay {
+                continue;
+            }
+            let Some(uv_curve) = context_uv_curve1(access.geometry(), ctx)? else {
+                continue;
+            };
+            let uv = uv_curve.evaluate_point(k, t)?;
+            let mut on_trims = *end;
+            access.point_classify(
+                k,
+                face,
+                Point2::new(uv.x, uv.y),
+                ctx.src_zone_tol_3d,
+                false,
+                true,
+                &mut on_trims,
+            )?;
+            if matches!(
+                on_trims.point_class(),
+                PointClassType::Edge | PointClassType::Vertex
+            ) {
+                *end = on_trims;
+            }
         }
 
         // set any StartPoint or EndPoint with face (or no) classifications to the

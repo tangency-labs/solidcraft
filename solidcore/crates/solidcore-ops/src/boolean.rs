@@ -16,7 +16,7 @@ use solidcore::topology::brep::validation::update_tolerances_after_boolean;
 use solidcore::Brep;
 use solidcore::Result as KernelResult;
 
-use crate::body::{finish_proved, Body, Expect, Outward};
+use crate::body::{finish_proved, Body, Expect, Outward, Proof};
 use crate::session::run_taking;
 use crate::{Error, Result};
 
@@ -74,10 +74,10 @@ fn after_boolean(k: &mut Kernel, r: &mut Brep) -> KernelResult<()> {
 /// with the proof its body held ([`Body::take_held`]), taken where it stands
 /// ([`Expect::of_held`]): an operand a previous operation proved, unchanged since, is not
 /// proved again (#14830).
-fn expect_of(k: &mut Kernel, operands: &mut [(Brep, Option<Outward>)]) -> KernelResult<Expect> {
+fn expect_of(k: &mut Kernel, operands: &mut [(Brep, Proof)]) -> KernelResult<Expect> {
     let mut all = true;
-    for (b, outward) in operands.iter_mut() {
-        all &= Expect::of_held(k, b, outward.take())? != Expect::FACES;
+    for (b, proof) in operands.iter_mut() {
+        all &= Expect::of_held(k, b, std::mem::take(proof))? != Expect::FACES;
     }
     Ok(if all { Expect::SOLID } else { Expect::FACES })
 }
@@ -103,8 +103,8 @@ fn usable(call: &'static str, bodies: &[Body]) -> Result<()> {
     Ok(())
 }
 
-/// The kernel's body taken out of `b`, leaving it empty, with the proof it held.
-fn take(b: &Body) -> (Brep, Option<Outward>) {
+/// The kernel's body taken out of `b`, leaving it empty, with the proof or template it held.
+fn take(b: &Body) -> (Brep, Proof) {
     b.take_held()
 }
 
@@ -161,7 +161,7 @@ pub fn union_all(bodies: Vec<Body>) -> Result<Body> {
     }
     usable("union_all", &bodies)?;
     let d = run_taking("union_all", &operands(&bodies), |k| {
-        let mut held: Vec<(Brep, Option<Outward>)> = bodies.iter().map(take).collect();
+        let mut held: Vec<(Brep, Proof)> = bodies.iter().map(take).collect();
         let expect = expect_of(k, &mut held)?;
         let mut level: Vec<Brep> = held.into_iter().map(|(b, _)| b).collect();
         while level.len() > 1 {
@@ -239,9 +239,9 @@ pub fn imprint(body: Body, tool: Body) -> Result<(Body, bool)> {
     let mut before = [0; 3];
     let d = run_taking("SmApiBooleanWithOptions", &operands(&both), |k| {
         let [body, tool] = &both;
-        let ((mut a, outward), (t, _)) = (take(body), take(tool));
+        let ((mut a, proof), (t, _)) = (take(body), take(tool));
         before = counts(&a);
-        let expect = Expect::of_held(k, &mut a, outward)?;
+        let expect = Expect::of_held(k, &mut a, proof)?;
         let options = MergeOptions::new(false, true, false, false, true);
         let r = sm::boolean_with_options(k, a, t, BooleanOperation::Imprint, options)?.result;
         finished(k, r, expect)

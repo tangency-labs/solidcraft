@@ -339,6 +339,7 @@ mod theme_files_tests;
 use solidcraft_ui_kit::theme_options;
 #[cfg(test)]
 mod thin_extrude_tests;
+pub mod tickets;
 pub mod timeline;
 mod timeline_fold;
 mod timeline_folders;
@@ -550,6 +551,12 @@ pub struct Services {
     /// Upload a model to EasyPrint (Printables' slicer in the browser) and answer with the address
     /// to open (`easyprint_ui`); None: this host can't, and the menu doesn't offer it.
     pub easyprint_upload: Option<easyprint_ui::Upload>,
+    /// HTTP to the ticket server, for problem reports and My tickets (`tickets`); None: reports
+    /// open a GitHub draft instead.
+    pub tickets_http: Option<tickets::Http>,
+    /// Where the ticket server's sign-in is kept: the system keyring (the browser's storage on
+    /// the web). Never a plain file.
+    pub ticket_secrets: Option<std::sync::Arc<dyn agent_chat::backend::Secrets>>,
 }
 
 /// The view before a sketch opened and the view that faced the sketch then (#7038).
@@ -690,6 +697,8 @@ pub struct SolveApp {
     pub messages: messages::Messages,
     /// An editable local issue draft and optional captured app frame.
     pub issue_report: issue_report::ReportState,
+    /// Problem reports on the ticket server: sign-in, sending, the offline queue.
+    pub tickets: tickets::Tickets,
     /// The Crash Reports window.
     pub crashes: crash_ui::CrashUi,
     /// The update check and its window (`update`).
@@ -1018,6 +1027,7 @@ impl SolveApp {
             help: help::HelpState::default(),
             messages: messages::Messages::default(),
             issue_report: issue_report::ReportState::default(),
+            tickets: tickets::Tickets::new(),
             crashes: crash_ui::CrashUi::default(),
             updater: update::Updater::default(),
             install_steps: None,
@@ -2295,6 +2305,18 @@ impl SolveApp {
             });
             return;
         }
+        if id == "file.insert_gerber" {
+            // Like Insert STEP: the board's zip, or any file in its folder, is picked and the
+            // board goes in beside the window, each file's layer found from what it says.
+            // On the web only the chosen file is uploaded, not its folder: there the board's zip.
+            let extensions: &[&str] = if cfg!(target_arch = "wasm32") { &["zip"] } else { &solidcraft_engine::io::BOARD_EXTENSIONS };
+            self.pick_open_for(extensions, |app, path| {
+                if let Some(path) = path {
+                    file_load::insert_board(app, &path, cfg!(target_arch = "wasm32"));
+                }
+            });
+            return;
+        }
         if id == "component.update_links" && self.edit_in_place.active.is_some() {
             // In a part edited in place it also refreshes the assembly around it.
             edit_in_place::refresh(self);
@@ -2561,6 +2583,9 @@ impl SolveApp {
                     })
                     .take(2)
                     .collect();
+                let _ = self.session.execute("select.clear", &json!({}));
+            }
+            if !self.session.selection.is_empty() && (matches!(t.kind, tools::Kind::Draw(_)) || crate::sketch_tools::is_drawing_tool(id)) {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
             self.tool = Some(t);
@@ -3669,6 +3694,7 @@ impl SolveApp {
             ctx.request_repaint();
         }
         issue_report::tick(self, ctx);
+        tickets::tick(self, ctx);
         self.collect_screenshots(ctx);
         self.issue_screenshots(ctx);
         if self.issue_report.draft.is_none() && self.file_picker.is_none() {

@@ -11,12 +11,14 @@
 use std::cell::RefCell;
 
 use solidcore::kernel::Kernel;
-use solidcore::mass::enclosure::VolumeSign;
+use solidcore::mass::enclosure::{enclose_volume, VolumeEnclosure, VolumeSign};
 use solidcore::topology::brep::validation;
 use solidcore::topology::Brep;
 
 thread_local! {
     static CAPTURED: RefCell<Option<Vec<Soundness>>> = const { RefCell::new(None) };
+    /// With [`start_enclosing`]: the relative width the volume enclosure is refined to.
+    static ENCLOSE: RefCell<Option<f64>> = const { RefCell::new(None) };
 }
 
 /// What [`measure`] found of one result body.
@@ -30,6 +32,9 @@ pub struct Soundness {
     pub volume: Option<VolumeSign>,
     /// Its face, edge and vertex counts.
     pub counts: [usize; 3],
+    /// With [`start_enclosing`], a manifold solid's volume enclosure refined
+    /// ([`enclose_volume`]) to the relative width asked for, or its error; `None` otherwise.
+    pub enclosure: Option<Result<VolumeEnclosure, String>>,
 }
 
 impl Soundness {
@@ -65,11 +70,21 @@ impl Soundness {
 
 /// Starts capturing the bodies [`measure`] is handed on this thread.
 pub fn start() {
+    // a `start_enclosing` left without its `take` (a panicking test) ends here
+    ENCLOSE.with(|e| *e.borrow_mut() = None);
     CAPTURED.with(|c| *c.borrow_mut() = Some(Vec::new()));
+}
+
+/// [`start`], and each manifold solid measured also gets its volume enclosure refined to
+/// `relative_width` of the volume ([`Soundness::enclosure`]).
+pub fn start_enclosing(relative_width: f64) {
+    start();
+    ENCLOSE.with(|e| *e.borrow_mut() = Some(relative_width));
 }
 
 /// Stops capturing and returns what was measured since [`start`].
 pub fn take() -> Vec<Soundness> {
+    ENCLOSE.with(|e| *e.borrow_mut() = None);
     CAPTURED.with(|c| c.borrow_mut().take().unwrap_or_default())
 }
 
@@ -99,17 +114,29 @@ fn measured(brep: &mut Brep) -> Soundness {
     // geometry records (a runner's export bookkeeping names them as it pleases), the manifold
     // test and the volume
     match validation::soundness(&mut k, brep) {
-        Ok(found) => Soundness {
-            check: Ok(found.check.lines()),
-            manifold: Some(found.manifold),
-            volume: found.volume,
-            counts,
-        },
+        Ok(found) => {
+            // the width asked for, relative to the larger end of the sign's enclosure
+            let enclosure = match (ENCLOSE.with(|e| *e.borrow()), &found.volume) {
+                (Some(rel), Some(VolumeSign::Positive(e))) => Some(
+                    enclose_volume(&k, brep, rel * e.hi.abs().max(e.lo.abs()))
+                        .map_err(|err| err.to_string()),
+                ),
+                _ => None,
+            };
+            Soundness {
+                check: Ok(found.check.lines()),
+                manifold: Some(found.manifold),
+                volume: found.volume,
+                counts,
+                enclosure,
+            }
+        }
         Err(e) => Soundness {
             check: Err(e.to_string()),
             manifold: None,
             volume: None,
             counts,
+            enclosure: None,
         },
     }
 }

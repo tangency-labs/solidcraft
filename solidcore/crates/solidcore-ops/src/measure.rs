@@ -30,7 +30,7 @@ use crate::blend::middle;
 use crate::body::Body;
 use crate::error::status;
 use crate::order::{self, Order};
-use crate::session::{answer, measure_body, with_body, Answer};
+use crate::session::{answer, measure_body, read_body, with_body, Answer};
 use crate::{Error, Result};
 
 impl Answer for Vec<q::EdgeFaceGapSample> {}
@@ -288,6 +288,28 @@ pub struct EdgeRayPoint {
     pub on_ray: [f64; 3],
     /// The kernel solve's distance between the two (not certified: a solve's).
     pub distance: f64,
+}
+
+/// An edge's curve over the edge's own interval, copied out of its body ([`Body::edge_curve`]) to
+/// be measured against faces and edges of any body ([`Body::closest_to_curve`]).
+#[derive(Debug)]
+pub struct EdgeCurve {
+    curve: solidcore::curve::curve::Curve,
+    interval: solidcore::geom::extent1d::Extent1d,
+}
+
+impl Answer for EdgeCurve {}
+
+/// The closest points of an edge's curve or a point and some faces and edges of a body
+/// ([`Body::closest_to_curve`], [`Body::closest_to_point`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MembersClosest {
+    /// The kernel solve's distance between the two points (not certified: a solve's).
+    pub distance: f64,
+    /// On the curve (within its edge's interval), or the point itself.
+    pub from: [f64; 3],
+    /// On the faces (as they are trimmed) or edges (over their intervals).
+    pub to: [f64; 3],
 }
 
 /// A face's area and the centroid of that area ([`Body::face_centroid`]), from one
@@ -570,6 +592,92 @@ impl Body {
             parameter: c.parameter,
             on_ray: array(c.on_ray),
             distance: c.distance,
+        }))
+    }
+
+    /// Record edge `edge`'s curve over the edge's own interval, copied out of the body to measure
+    /// against faces and edges of this or another body ([`Body::closest_to_curve`]).
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the edges; the kernel's refusal of an edge without
+    /// a curve; any other kernel error.
+    pub fn edge_curve(&self, order: &Order, edge: usize) -> Result<EdgeCurve> {
+        let e = order::edge(order, edge)?;
+        read_body("edge_curve", self, |k, b| {
+            let (curve, interval) = q::edge_curve_copy(k, b, e)?;
+            Ok(EdgeCurve { curve, interval })
+        })
+    }
+
+    /// The closest points of `curve` (over its edge's interval) and record faces `faces` (as
+    /// they are trimmed, their edges and vertices included) and record edges `edges` (over their
+    /// intervals): the kernel's minimum-distance solve on the exact curves and surfaces
+    /// (`query::api_queries::closest_to_members`), never on a tessellation. `None` where the
+    /// kernel's solve answers with a status (no points found).
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces or edges; any other kernel error.
+    pub fn closest_to_curve(
+        &self,
+        order: &Order,
+        faces: &[usize],
+        edges: &[usize],
+        curve: &EdgeCurve,
+    ) -> Result<Option<MembersClosest>> {
+        let probe = q::Probe::Curve {
+            curve: &curve.curve,
+            interval: curve.interval,
+        };
+        self.closest_to(order, faces, edges, probe, "closest_to_curve")
+    }
+
+    /// The closest points of `p` and record faces `faces` and edges `edges`, as
+    /// [`Body::closest_to_curve`] measures them; `from` is `p`.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces or edges or a coordinate that is not
+    /// finite; any other kernel error.
+    pub fn closest_to_point(
+        &self,
+        order: &Order,
+        faces: &[usize],
+        edges: &[usize],
+        p: [f64; 3],
+    ) -> Result<Option<MembersClosest>> {
+        let probe = q::Probe::Point(point(p)?);
+        self.closest_to(order, faces, edges, probe, "closest_to_point")
+    }
+
+    fn closest_to(
+        &self,
+        order: &Order,
+        faces: &[usize],
+        edges: &[usize],
+        probe: q::Probe<'_>,
+        call: &'static str,
+    ) -> Result<Option<MembersClosest>> {
+        let faces = faces
+            .iter()
+            .map(|f| order::face(order, *f))
+            .collect::<Result<Vec<_>>>()?;
+        let edges = edges
+            .iter()
+            .map(|e| order::edge(order, *e))
+            .collect::<Result<Vec<_>>>()?;
+        let c = with_body(call, self, |k, b| {
+            answer(q::closest_to_members(
+                k,
+                b,
+                BrepId::from_index(0),
+                &faces,
+                &edges,
+                probe,
+            ))
+        })?;
+        Ok(c.map(|c| MembersClosest {
+            distance: c.distance,
+            from: array(c.on_probe),
+            to: array(c.on_members),
         }))
     }
 

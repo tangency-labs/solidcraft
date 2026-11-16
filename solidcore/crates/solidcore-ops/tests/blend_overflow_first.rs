@@ -9,6 +9,12 @@
 
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)] // test helpers
 
+/// #16735's leak checks on a body read into the kernel: test code measuring geometry, which
+/// this crate itself does not (docs/layers.md §4).
+#[path = "../../solidcore/tests/support/volume_leak.rs"]
+#[allow(clippy::disallowed_methods)]
+mod volume_leak;
+
 use solidcore::geom::attribute::AttributeStore;
 use solidcore::kernel::Kernel;
 use solidcore::query::api_queries::edge_closest_point;
@@ -81,18 +87,22 @@ fn rounded(bytes: &[u8], at: &[[f64; 3]], r: f64) -> (usize, f64, Vec<bool>) {
 
 /// The plate's two top edges rounded r 2 in one call: the hole-side edge (-15, 0, 2)
 /// overflows and goes first, the other's round meets it as one blend. 8 faces, the kernel's
-/// two passes' 1681.903764986 (the closed form 1681.903758348; capped, 1682.853610631).
+/// two passes' 1681.903764986 (the closed form 1681.903758348; capped, 1682.853610631) until
+/// `brep_volume` closed tolerant edges' gaps (#16735): the 2.0e-8 excess was its leak, and the
+/// body is now the closed form to 1.2e-11 (MEASURED).
 #[test]
 fn the_plate_s_second_round_meets_the_first() {
     let (faces, v, dropped) = rounded(PLATE, &[[-15.0, 0.0, 2.0], [0.0, 15.5, 2.0]], 2.0);
     assert_eq!(faces, 8, "8 as one blend; 10 with the smooth-vertex caps");
-    assert!((v - 1_681.903_764_986).abs() <= 1e-9 * v, "{v}");
+    assert!((v - 1_681.903_758_348).abs() <= 1e-10 * v, "{v}");
     assert_eq!(dropped, vec![false, false]);
 }
 
 /// The notched block's top outline R8 in one call: the front and right edges (over the
 /// notch) go first, then the back and left meet them. 13 faces, 10198.718249145 (capped, 15
-/// faces and 10320.299091700).
+/// faces and 10320.299091700) until `brep_volume` closed tolerant edges' gaps (#16735): the
+/// 2.1e-8 excess was its leak, and the body is now the closed form 10198.718038816 to 5.8e-12
+/// (MEASURED, `issue_2364_alpha1_ends`).
 #[test]
 fn the_notched_block_s_second_rounds_meet_the_first() {
     let at = [
@@ -103,7 +113,7 @@ fn the_notched_block_s_second_rounds_meet_the_first() {
     ];
     let (faces, v, dropped) = rounded(NOTCHED, &at, 8.0);
     assert_eq!(faces, 13, "13 as one blend; 15 with the smooth-vertex caps");
-    assert!((v - 10_198.718_249_145).abs() <= 1e-9 * v, "{v}");
+    assert!((v - 10_198.718_038_816).abs() <= 1e-10 * v, "{v}");
     assert_eq!(dropped, vec![false; 4]);
 }
 
@@ -140,7 +150,15 @@ fn the_fuzz_round_near_a_focal_distance_builds_within_its_budget() {
         serde_json::from_value(records["b27"].take()).unwrap();
     let (input, order) = Body::from_record(&record, true).unwrap();
     let v0 = input.volume(1e-8).unwrap();
-    assert!((v0 - 5_577.325_354_466).abs() <= 1e-9 * v0, "{v0}");
+    // 5,577.325354466 with the integrator before #16735, which leaked through the tolerant
+    // edges' gaps; with them closed it reads 1.3e-5 lower (MEASURED: no closed form). The move
+    // is checked on the body: within its old leak bound, and origin-free.
+    assert!((v0 - 5_577.325_341_277_863).abs() <= 1e-9 * v0, "{v0}");
+    {
+        let mut k = Kernel::default();
+        let mut b = volume_leak::read_smb(&mut k, &input.to_smb(false).unwrap(), false);
+        volume_leak::assert_moved_by_the_old_leak(&k, &mut b, 5_577.325_354_466, v0, 1e-8);
+    }
     let (body, order) = input.copy_with_order(&order).unwrap();
     // a guard: a certificate that is not held to its budget is cancelled after five minutes
     // (and the test fails, Cancelled), instead of running on for hours. Held to it, the round

@@ -395,8 +395,9 @@ fn refit(prim: &Prim, a: Vec2, b: Vec2) -> Option<Prim> {
 /// The loop with each straight edge along a lattice direction moved onto the nearest lattice
 /// line on the region's side, and every other piece (an arc, an edge off the lattice directions)
 /// kept as drawn, its ends moved to meet the snapped edges. The loop must run with the region on
-/// its left. `Err` says why a loop cannot snap.
-pub(crate) fn snap_loop(lp: &Loop, lat: &Lattice) -> Result<Loop, &'static str> {
+/// its left. Each snapped edge then moves `inset` further lattice lines to the region's side (a
+/// field gets smaller). `Err` says why a loop cannot snap.
+pub(crate) fn snap_loop(lp: &Loop, lat: &Lattice, inset: u32) -> Result<Loop, &'static str> {
     let prims = merge_straight_runs(&lp.prims);
     if prims.len() < 2 {
         return Err("degenerate");
@@ -407,11 +408,16 @@ pub(crate) fn snap_loop(lp: &Loop, lat: &Lattice) -> Result<Loop, &'static str> 
             Prim::Line { a, b, .. } => lat.direction_index(direction(a, b)).map(|k| {
                 let nl = lat.normal(k); // the left normal points into the region
                 let mid = (a + b) * 0.5;
+                let mut c = lat.snap_up(k, nl.dot(mid), EPS);
+                for _ in 0..inset {
+                    // The next line in: the nearest one more than EPS further.
+                    c = lat.snap_up(k, c, -EPS);
+                }
                 Line {
                     k,
                     d: Vec2::new(nl.y, -nl.x),
                     nl,
-                    c: lat.snap_up(k, nl.dot(mid), EPS),
+                    c,
                 }
             }),
             Prim::Arc { .. } => None,
@@ -507,18 +513,28 @@ fn mark_lattice_segments(lp: &Loop, lat: &Lattice) -> Loop {
     Loop::new(prims, Some(lp.flattened)).unwrap_or_else(|| lp.clone())
 }
 
-/// Snaps every loop that can. Returns the region and a warning for each loop that collapsed.
-pub(crate) fn snap_region(region: &Region, lat: &Lattice) -> (Region, Vec<String>) {
+/// Snaps every loop that can (the fields, the keep-outs, or both, as asked). Returns the region and a warning for each loop that collapsed.
+pub(crate) fn snap_region(
+    region: &Region,
+    lat: &Lattice,
+    (snap_fields, snap_keepouts): (bool, bool),
+    inset: u32,
+) -> (Region, Vec<String>) {
     let mut warnings = Vec::new();
     let mut parts = Vec::new();
     for (outer, holes) in &region.parts {
         let mut new = Vec::new();
-        for lp in std::iter::once(outer).chain(holes) {
+        let loops = std::iter::once((outer, false)).chain(holes.iter().map(|h| (h, true)));
+        for (lp, keepout) in loops {
+            if keepout && !snap_keepouts || !keepout && !snap_fields {
+                new.push(mark_lattice_segments(lp, lat));
+                continue;
+            }
             // A loop with a flattened curve is followed, never snapped.
             let tried = if lp.flattened {
                 Err("has curves")
             } else {
-                snap_loop(lp, lat)
+                snap_loop(lp, lat, if keepout { 0 } else { inset })
             };
             let snapped = match tried {
                 Ok(s) => s,
