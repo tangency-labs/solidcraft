@@ -958,6 +958,16 @@ struct SplitUvInput {
     for_tessellation: bool,
 }
 
+/// `sm_MakeVertexSplitUVTrimCurve` for one original edge use and its new piece.
+///
+/// (not upstream, which ignores the status and keeps whatever the failed split left) A
+/// split of the UV trim curve that fails drops the trim curves of both uses, as the split
+/// itself does where the split point is off the trim curve: a UV trim curve is the edge
+/// use's lazy cache of its 3D curve on the face, rebuilt when next asked for. The edge's
+/// split has already rewired the edge uses here, so returning the error would leave them
+/// on an edge the B-rep never takes in (review of #16956), and keeping the failed
+/// split's curve would leave the original use's trim spanning the whole edge it had.
+/// Unported dependencies, cancellations and preparation requests still propagate.
 fn split_uv_trim(k: &Kernel, b: &mut Brep, input: SplitUvInput) -> Result<()> {
     let SplitUvInput {
         original,
@@ -968,7 +978,7 @@ fn split_uv_trim(k: &Kernel, b: &mut Brep, input: SplitUvInput) -> Result<()> {
         orientation,
         for_tessellation,
     } = input;
-    crate::topology::brep::p1::make_vertex_split_uv_trim_curve(
+    let split = crate::topology::brep::p1::make_vertex_split_uv_trim_curve(
         k,
         b,
         original,
@@ -978,7 +988,22 @@ fn split_uv_trim(k: &Kernel, b: &mut Brep, input: SplitUvInput) -> Result<()> {
         scaled_zero,
         orientation,
         for_tessellation,
-    )
+    );
+    // `error::ignored`, not `native_failure`, on purpose: the edge split must
+    // complete even when a trim split fails.
+    if crate::error::ignored(split)?.is_none() {
+        for eu in [original, new] {
+            crate::error::ignored(crate::topology::edgeuse::p1::set_uv_trim_curve(
+                b,
+                eu,
+                crate::topology::edgeuse::p1::UvTrimCurveArg::Null,
+                0.0,
+                true,
+                None,
+            ))?;
+        }
+    }
+    Ok(())
 }
 
 /// `MakeVertexSplitEdge`: preserve the scaled parameter boundary, the two-stage
@@ -2828,6 +2853,80 @@ mod tests {
         assert_eq!(e.entity(), None);
         assert!(e.topology_failure().is_some());
         assert_eq!(OrientSheetNote::stop_on_note(Ok(None)), Ok(()));
+    }
+
+    /// A UV trim curve that cannot be split does not leave the edge split half done
+    /// (review of #16956): the split of a box edge whose uses carry trim curves on a
+    /// face without surface (the trim split's `NER` on the surface) completes, with the new
+    /// edge and vertex in the B-rep, the uses rewired to it, and the trim curves of the
+    /// uses dropped. A box edge has four uses (each of its two faces is used from both
+    /// sides), split in mate pairs; every face they reach loses its surface, so every
+    /// trim split fails. Before, the trim split's error was returned after the uses had been
+    /// rewired to an edge the B-rep never took in.
+    #[test]
+    fn a_failed_uv_trim_split_still_completes_the_edge_split() {
+        use crate::topology::edgeuse::p1 as eu1;
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0)
+                .unwrap();
+        b.set_editing_enabled(true);
+        let edge = b.edge_list()[0];
+        let interval = b.edge(edge).unwrap().interval;
+        let parameter = (interval.min() + interval.max()) * 0.5;
+        let uses = b.edge(edge).unwrap().edgeuses.clone();
+        assert_eq!(uses.len(), 4);
+        for &eu in &uses {
+            // the edge's own curve stands in as the trim curve: the split only needs its
+            // interval to hold the split parameter well inside
+            let trim = b.edge(edge).unwrap().curve.clone().unwrap();
+            eu1::set_uv_trim_curve(
+                &mut b,
+                eu,
+                eu1::UvTrimCurveArg::New(Box::new(trim)),
+                0.0,
+                false,
+                None,
+            )
+            .unwrap();
+            // `SetUVTrimCurve` keeps the curve on the same-oriented use of the mate pair
+            assert!(eu1::uv_trim_curve(&b, eu).unwrap().0.is_some());
+        }
+        for &eu in &uses {
+            let face = eu1::face(&b, eu).unwrap().unwrap();
+            b.face_mut(face).unwrap().surface = None;
+        }
+        let (edges, vertices) = (b.edge_list().len(), b.vertex_list().len());
+
+        let mut records = crate::topology::topology::NotifyRecords::new();
+        let mut attributes = crate::geom::attribute::AttributeStore::default();
+        let mut env = edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &crate::topology::loopuse::notify_ref,
+        };
+        let curve_ref =
+            |e: EdgeId, _type_code: i64| crate::topology::loopuse::notify_ref(EntityRef::Edge(e));
+        let out =
+            make_vertex_split_edge(&mut k, &mut b, edge, parameter, &mut env, &curve_ref).unwrap();
+
+        assert!(out.split);
+        let [first, second] = out.edges.unwrap();
+        let new_edge = if first == edge { second } else { first };
+        assert_ne!(new_edge, edge);
+        assert_eq!(b.edge_list().len(), edges + 1);
+        assert_eq!(b.vertex_list().len(), vertices + 1);
+        assert!(b.edge_list().contains(&new_edge));
+        assert!(b.vertex_list().contains(&out.vertex.unwrap()));
+        let new_uses = b.edge(new_edge).unwrap().edgeuses.clone();
+        assert_eq!(new_uses.len(), uses.len());
+        for &eu in uses.iter().chain(&new_uses) {
+            assert!(eu1::uv_trim_curve(&b, eu).unwrap().0.is_none(), "{eu:?}");
+        }
+        for &eu in &new_uses {
+            assert_eq!(b.edgeuse(eu).unwrap().edge, Some(new_edge));
+        }
     }
 
     mod notifications {
