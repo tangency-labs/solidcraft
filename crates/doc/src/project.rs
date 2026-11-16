@@ -380,6 +380,9 @@ fn resolve_uncached(
                 PlaneRef::Construction { feature }
             };
             let other = doc.resolve_plane_in(vals, &pr, 0, 0, Some(st)).map_err(|_| lost(&format!("plane {name}")))?;
+            // A plane of another component is in that component's frame: brought into the
+            // sketch's, the trace of the two planes is where they meet (#17534).
+            let other = plane_in_sketch_frame(doc, &pr, other, st, frame)?;
             plane_trace(plane, &other).into_iter().collect()
         }
     };
@@ -2130,6 +2133,30 @@ fn plane_trace(sk: &Plane, other: &Plane) -> Option<LinkGeom> {
     let p0 = Vec2::new(a, b) * (c / n2);
     let u = Vec2::new(-b, a).normalized()?;
     Some(LinkGeom::Line(p0 - u * AXIS_HALF, p0 + u * AXIS_HALF))
+}
+
+/// The plane `pr` names, in the frame the sketch is in. A construction plane of another
+/// component is in that component's own frame: brought into the sketch's, the trace of the
+/// two planes is where they meet, and not where the plane's own frame has it (#17534).
+fn plane_in_sketch_frame(doc: &Document, pr: &PlaneRef, plane: Plane, st: &ModelState, frame: Option<&(u64, crate::Mat)>) -> Result<Plane> {
+    let PlaneRef::Construction { feature } = pr else { return Ok(plane) };
+    // The sketch's own frame: the component it is authored in and where that component stands.
+    let Some((author, author_frame)) = frame else { return Ok(plane) };
+    if doc.occurrences.is_empty() {
+        return Ok(plane);
+    }
+    // The component the construction plane belongs to: the frame its geometry is in.
+    let owner = doc.features.iter().find(|f| f.id == feature.0).map(|f| f.component).unwrap_or(*author);
+    if owner == *author {
+        return Ok(plane);
+    }
+    // The plane as it was built, in its own component's frame.
+    let Some(crate::construct::ConstructGeom::Plane(built)) = st.construct.iter().find(|c| c.feature == feature.0).map(|c| &c.geom) else {
+        return Ok(plane);
+    };
+    let inverse = crate::mat_inverse(author_frame).ok_or_else(|| DocError::Invalid("the sketch's frame cannot be inverted".into()))?;
+    let m = crate::mat_mul(&inverse, &doc.component_transform(owner));
+    crate::eval::placed_plane(&m, built)
 }
 
 /// Most corners a mesh face's outline has and is still taken for a polygon.

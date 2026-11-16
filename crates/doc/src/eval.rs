@@ -12029,7 +12029,7 @@ fn construction_planes_in_frame<'a>(doc: &Document, st: &ModelState, comp: u64, 
 
 /// `plane` moved by the placement `m`; an error when `m` does not keep it a plane (a placement
 /// that is not a rigid motion, which [`Document`] does not take).
-fn placed_plane(m: &crate::Mat, plane: &Plane) -> Result<Plane> {
+pub(crate) fn placed_plane(m: &crate::Mat, plane: &Plane) -> Result<Plane> {
     Plane::new(crate::apply_point(m, plane.origin), crate::apply_vector(m, plane.x), crate::apply_vector(m, plane.y))
         .ok_or_else(|| DocError::Invalid("a sketch plane cannot be placed: the placement is not a rigid motion".into()))
 }
