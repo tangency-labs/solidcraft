@@ -456,9 +456,10 @@ What the port does today:
   exact. Upstream keeps such a range as a coincidence and the curve is cut at its far end, which
   is no event. `drop_ranges_of_tangencies` (`curve/curve/p8.rs`) drops a range whose gap grows
   faster than linearly from a touching point beyond one of its ends (a point solution, or where
-  the two curves' interval ends meet) at which the curves are tangent, and whose far end lies off
-  the ends of both curves: the touch is the intersection. A real coincidence ends where one of
-  the curves ends, so it is never tested; its gap is rounding and shows no growth either way.
+  the two curves' interval ends meet) at which the curves are tangent, when the range stops short
+  of the touch and its far end, exact, lies off the ends of both curves: the touch is the
+  intersection. A coincidence through the touch reaches it, and one that ends where a curve ends
+  is not a flank; along a coincidence the gap is rounding and shows no growth either way.
 - **A line a hair inside a circle.** A line in a circle's plane, δ inside the circle, crosses
   it at two points `2√(2rδ)` apart and stays within δ of it between them, as two circles do.
   `line_coplanar_circle_intersect_distinct` (`geom/geom_utility/p1.rs`) takes an overlap below

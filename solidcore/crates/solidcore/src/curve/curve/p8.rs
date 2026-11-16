@@ -1782,13 +1782,17 @@ impl Curve {
     /// it is at most a quarter of the far end's, and growth that is linear or slower is
     /// no tangency.
     ///
-    /// The far end must also lie off the ends of both curves' intervals (farther than
-    /// the scaled zero from each): there the curves part inside both of them, an event
-    /// of the gap. Two curves that coincide along a stretch coincide until one of them
-    /// ends, so a coincidence's ends are ends of the curves' intervals; along it the gap
-    /// is only the rounding of the evaluations, whose values say nothing of growth, and
-    /// the growth test is never asked of it (a seam edge along its surface's seam curve,
-    /// a cone's edge along its ruling).
+    /// Three things tell such a flank from a coincidence, whose gap along the range is
+    /// only the rounding of the evaluations and says nothing of growth:
+    /// - the range stops short of the touch (its near end lies farther than the scaled
+    ///   zero from the touch on this curve): a coincidence through a point where the
+    ///   curves meet reaches that point, as the gap is zero all along it;
+    /// - its far end lies off the ends of both curves' intervals (farther than the scaled
+    ///   zero from each), so the range ends where the curves part, not where one of them
+    ///   stops (a seam edge along its surface's seam curve, a cone's edge along its
+    ///   ruling);
+    /// - the far end's two parameters give points within the scaled zero of each other,
+    ///   as an exact end does, and the gap at the midpoint is larger than at the touch.
     ///
     /// # Errors
     ///
@@ -1865,8 +1869,7 @@ impl Curve {
                     if !beyond {
                         continue;
                     }
-                    // the curves part at the far end within both of them: a coincidence
-                    // stops only where one of the curves ends
+                    // the curves part at the far end within both of them
                     let far_self = self.evaluate_point(k, far[0])?;
                     let far_other = other.evaluate_point(k, far[1])?;
                     let parts_inside = self_ends
@@ -1875,13 +1878,18 @@ impl Curve {
                         && other_ends
                             .iter()
                             .all(|e| e.distance(far_other) >= scaled_zero);
+                    // the range stops short of the touch
+                    let short_of_touch = self
+                        .evaluate_point(k, touch[0])?
+                        .distance(self.evaluate_point(k, near[0])?)
+                        >= scaled_zero;
                     // and they are tangent at the touch
                     let tangent = are_parallel(
                         tangent_at(self, touch[0])?,
                         tangent_at(other, touch[1])?,
                         None,
                     );
-                    if !parts_inside || !tangent {
+                    if !parts_inside || !short_of_touch || !tangent {
                         continue;
                     }
                     let g_touch = gap_at(touch[0], touch[1])?;
@@ -1904,7 +1912,7 @@ impl Curve {
                     }
                     let g_mid = mid.distance(other.evaluate_point(k, dropped.parameter)?);
                     let g_far = gap_at(far[0], far[1])?;
-                    if g_touch <= g_mid && 2.0 * g_mid < g_far {
+                    if g_far < scaled_zero && g_touch < g_mid && 2.0 * g_mid < g_far {
                         flank = true;
                     }
                 }
