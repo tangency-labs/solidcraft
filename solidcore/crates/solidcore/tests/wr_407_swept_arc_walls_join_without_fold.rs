@@ -8,10 +8,11 @@
 //! off its plane, so it was not planar and its search domain reached past the fold of its
 //! continuation; upstream's `CoverCoincidentSurface` merged wall B's top onto that folded
 //! continuation and the join lost 5573 mm3. WR-407's frame on the path plane's normal is
-//! the default now, and without `cover_refuses_folded_continuation` the join is still
-//! wrong: the cover still merges onto the folded continuation, and the level-2 check
-//! reports its B-spline net doubling back. With `cover_refuses_folded_continuation` the cover across the
-//! fold is refused and the join has the closed-form volume
+//! the default, and so is its fold rule: without it the join was still wrong (the level-2
+//! check reported the merged face's B-spline net doubling back; its volume missed the
+//! closed form by 7744 mm3 while the queries dropped their statuses, and no longer does
+//! with the statuses passed on (WR-663), but the fold remained). The cover across
+//! the fold is refused and the join has the closed-form volume
 //! `V_A + V_B - overlap = 60 (pi/2)(56^2 - 44^2) + 60 (pi/2)(64^2 - 52^2) - 60 (pi/4)(56^2 - 52^2)`.
 //! The walls' radial faces are the sweep's approximation of the arcs, so the volume is
 //! held to 1 mm3 (the SolidCraft case's tolerance).
@@ -21,9 +22,6 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
-
-#[path = "support/volume_leak.rs"]
-mod volume_leak;
 
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::curve::curve::Curve;
@@ -87,10 +85,9 @@ fn wall(k: &mut Kernel, turn: (Vec3, f64), radius: f64, start: f64, end: f64) ->
         .brep
 }
 
-/// The two walls joined, with `cover_refuses_folded_continuation` (WR-407's cover half) `fixed`.
-fn joined(fixed: bool) -> (Kernel, Brep) {
+/// The two walls joined on the default kernel.
+fn joined() -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.cover_refuses_folded_continuation = fixed;
     // XZ is XY turned 90 degrees about X; YZ is XY turned 120 degrees about (1, 1, 1).
     let a = wall(&mut k, (Vec3::X, 90.0), 50.0, 0.0, 180.0);
     let b = wall(&mut k, (Vec3::new(1.0, 1.0, 1.0), 120.0), 58.0, 90.0, 270.0);
@@ -114,9 +111,11 @@ fn closed_form() -> f64 {
         - 60.0 * (PI / 4.0) * ring(52.0, 56.0)
 }
 
+/// The default join is a valid solid (level 2 reports nothing, so no merged face's
+/// B-spline net doubles back) with the closed-form volume.
 #[test]
 fn wr_407_walls_join_to_the_closed_form_with_the_fix() {
-    let (mut k, mut b) = joined(true);
+    let (mut k, mut b) = joined();
     assert!(brep_is_manifold_solid(&b).unwrap());
     let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
         .unwrap()
@@ -184,46 +183,12 @@ fn trims_inside_domain(k: &Kernel, b: &Brep, margin: f64) -> Result<(), String> 
     Ok(())
 }
 
-/// Without the fold rule the cover merges wall B's top onto wall A's folded
-/// continuation: the level-2 check reports the merged face's B-spline net doubling back.
-/// (Its volume missed the closed form by 7744 mm3 while the queries dropped their
-/// statuses, by 5573 mm3 with upstream's sweep frame, and by 14596 mm3 with a drop piece
-/// stretched onto each trim's edge; with the statuses passed on (WR-663) it no longer
-/// does, but the fold remains.) Pinned until the fold rule is the default
-/// (tangency-labs/solidcraft#17215).
-///
-/// With the fix every trim lies inside its domain (to 1e-9, on its control points), and the
-/// two joins bound the same solid up to their tolerances: their volumes agree within the
-/// two bodies' tolerance volumes ([`volume_leak::tolerance_volume`]).
+/// The default join's trims each lie inside their surface's natural domain (to 1e-9, on
+/// their control points), so the gap closure's uv lines between them stay in the domain.
 #[test]
-fn wr_407_default_join_covers_a_folded_continuation() {
-    let (mut k, mut b) = joined(false);
-    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
-        .unwrap()
-        .lines();
-    assert!(
-        lines
-            .iter()
-            .any(|l| l.contains("Test #5 Bad NonMonotonic CPts")),
-        "{lines:?}"
-    );
-    let v = volume(&k, &mut b);
-    let slack = volume_leak::tolerance_volume(&k, &mut b);
-    let (kf, mut bf) = joined(true);
-    let vf = volume(&kf, &mut bf);
-    let slack_f = volume_leak::tolerance_volume(&kf, &mut bf);
-    eprintln!(
-        "wr_407: without the fix {v} (tolerance volume {slack:.3e}), with it {vf} \
-         ({slack_f:.3e}), closed form {}",
-        closed_form()
-    );
-    if let Err(e) = trims_inside_domain(&kf, &bf, 1e-9) {
-        panic!("with the fix a trim leaves its domain: {e}");
+fn wr_407_default_join_keeps_its_trims_in_their_domains() {
+    let (k, b) = joined();
+    if let Err(e) = trims_inside_domain(&k, &b, 1e-9) {
+        panic!("a trim leaves its domain: {e}");
     }
-    assert!(
-        (v - vf).abs() <= slack + slack_f,
-        "{v} without the fix against {vf} with it: {:.3e} past the tolerance volumes \
-         {slack:.3e} + {slack_f:.3e}",
-        (v - vf).abs()
-    );
 }

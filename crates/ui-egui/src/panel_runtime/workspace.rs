@@ -3435,20 +3435,24 @@ fn shared_label(
             .unwrap_or_else(|| locale.text("ui.panel_host.tab"));
         return locale.format("ui.panel_host.join_target", &[("title", title)]);
     }
+    // In a section with several tabs, moving takes only this tab, not the whole panel (#17217).
+    let one_of_tabs = runtime.layout().layout().containing(instance).is_ok_and(|section| section.tabs.len() > 1);
+    let side = |zone: &Zone| matches!(runtime.environment().direction.edge(*zone), Ok(PhysicalEdge::Left));
     locale
         .text(match action {
             HostSharedAction::Focus => "ui.panel_host.focus",
             HostSharedAction::Close => "ui.panel_host.close",
             HostSharedAction::Collapse => "ui.panel_host.collapse",
             HostSharedAction::ResetHeight => "ui.panel_host.reset_height",
-            HostSharedAction::Move(zone @ (Zone::Left | Zone::Right)) => {
-                if matches!(runtime.environment().direction.edge(*zone), Ok(PhysicalEdge::Left)) {
-                    "ui.panel_host.left"
-                } else {
-                    "ui.panel_host.right"
-                }
-            }
+            HostSharedAction::Move(zone @ (Zone::Left | Zone::Right)) => match (side(zone), one_of_tabs) {
+                (true, false) => "ui.panel_host.left",
+                (false, false) => "ui.panel_host.right",
+                (true, true) => "ui.panel_host.move_tab_left",
+                (false, true) => "ui.panel_host.move_tab_right",
+            },
+            HostSharedAction::Move(Zone::Bottom) if one_of_tabs => "ui.panel_host.move_tab_bottom",
             HostSharedAction::Move(Zone::Bottom) => "ui.panel_host.bottom",
+            HostSharedAction::Move(Zone::Floating) if one_of_tabs => "ui.panel_host.move_tab_floating",
             HostSharedAction::Move(Zone::Floating) => "ui.panel_host.floating",
             HostSharedAction::Move(Zone::Window) | HostSharedAction::Popout => "ui.panel_host.popout",
             HostSharedAction::Join(_) => "ui.panel_host.join",

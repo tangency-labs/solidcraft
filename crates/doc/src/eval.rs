@@ -603,16 +603,61 @@ fn removed_note(gone: &[Vec3]) -> String {
 thread_local! {
     /// Current feature evaluation validation mode (`EachStep`, `EachFeature`, or `Off`).
     static EVAL_VALIDATION: std::cell::Cell<kernel::Validation> = const { std::cell::Cell::new(kernel::Validation::EachFeature) };
+    /// Latest successful thread output per body, confined to the current feature evaluation.
+    static CHECKED_THREAD_OUTPUTS: std::cell::Cell<Option<BTreeMap<String, Body>>> = const { std::cell::Cell::new(None) };
 }
 
-/// Restores `EVAL_VALIDATION` to its previous value when dropped.
-struct EvalValidationGuard(kernel::Validation);
+/// Restores the validation mode and the enclosing feature's checks on scope exit.
+struct EvalValidationGuard {
+    mode: kernel::Validation,
+    checked: Option<BTreeMap<String, Body>>,
+}
+
+impl EvalValidationGuard {
+    fn new(mode: kernel::Validation) -> Self {
+        Self { mode: EVAL_VALIDATION.replace(mode), checked: CHECKED_THREAD_OUTPUTS.replace(Some(BTreeMap::new())) }
+    }
+}
 
 impl Drop for EvalValidationGuard {
-    /// Restores the saved validation mode on scope exit.
     fn drop(&mut self) {
-        EVAL_VALIDATION.set(self.0);
+        CHECKED_THREAD_OUTPUTS.set(self.checked.take());
+        EVAL_VALIDATION.set(self.mode);
     }
+}
+
+/// Record only an unchanged final thread output after its native check succeeded.
+fn remember_checked_thread_output(name: &str, body: &Body) {
+    if EVAL_VALIDATION.get() != kernel::Validation::EachFeature {
+        return;
+    }
+    CHECKED_THREAD_OUTPUTS.with(|cell| {
+        let mut checked = cell.take();
+        if let Some(bodies) = checked.as_mut() {
+            bodies.insert(name.to_owned(), body.clone());
+        }
+        cell.set(checked);
+    });
+}
+
+/// A successful thread check can replace only the same feature's check of that exact shape.
+fn checked_thread_output(body: &Body) -> bool {
+    if EVAL_VALIDATION.get() != kernel::Validation::EachFeature {
+        return false;
+    }
+    CHECKED_THREAD_OUTPUTS.with(|cell| {
+        let checked = cell.take();
+        let found = checked.as_ref().is_some_and(|bodies| bodies.values().any(|old| old.same_shape(body)));
+        cell.set(checked);
+        found
+    })
+}
+
+/// Run a full check, counting the calls separately from reused successful thread checks.
+fn check_feature_body(body: &Body) -> kernel::Result<()> {
+    #[cfg(test)]
+    cost_tests::count(|c| c.kept_checks += 1);
+    kernel::check_kept(body)
 }
 
 /// A blend's refusal as too large (`why`) with the largest `size` (radius, distance) that fits,
@@ -2018,7 +2063,12 @@ fn check_kept(before: &ModelState, after: &ModelState) -> kernel::Result<()> {
         if before.bodies.iter().any(|old| old.body.same_shape(&b.body)) {
             continue;
         }
-        kernel::check_kept(&b.body).map_err(|e| kernel::KernelError::Failed(format!("body `{}`: {e}", b.name)))?;
+        if checked_thread_output(&b.body) {
+            #[cfg(test)]
+            cost_tests::count(|c| c.reused_checks += 1);
+            continue;
+        }
+        check_feature_body(&b.body).map_err(|e| kernel::KernelError::Failed(format!("body `{}`: {e}", b.name)))?;
     }
     Ok(())
 }
@@ -3596,7 +3646,7 @@ impl Model {
                         }
                     }
                     None => kernel::guard(&f.name, || {
-                        let _val_guard = EvalValidationGuard(EVAL_VALIDATION.replace(validation));
+                        let _val_guard = EvalValidationGuard::new(validation);
                         let (r, deferred) =
                             kernel::validating(validation, || eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair));
                         r.map_err(|e| match e {
@@ -6178,6 +6228,26 @@ fn hole_drill_scope(f: &Feature) -> &[String] {
     if f.participants.iter().any(|b| b == "*") { &[] } else { &f.participants }
 }
 
+/// Where hole `f`, placed at one spot `p` (a position, or a Single hole's sketch point), starts
+/// ([`hole_on_surface`]). A spot on a face of any body starts there. Off every face, it moves along
+/// the axis only onto the bodies the hole cuts ([`hole_targets`]): a spot over an opening in its
+/// body never slides through it onto a body the hole leaves alone, such as one of another
+/// component under the opening (#17358). A body the hole cuts further along the axis still takes
+/// it. When the hole cuts every body, or none, every body counts.
+pub fn hole_start(st: &ModelState, f: &Feature, p: Vec3, dir: Vec3) -> Vec3 {
+    let anywhere = hole_on_surface(st, p, dir, &[]);
+    // `hole_on_surface` hands `p` itself back when `p` is on a face (or meets no body at all).
+    if anywhere == p {
+        return p;
+    }
+    let targets = hole_targets(st, f);
+    if targets.len() == st.bodies.len() {
+        return anywhere;
+    }
+    let scope: Vec<String> = targets.iter().map(|b| b.name.clone()).collect();
+    hole_on_surface(st, p, dir, &scope)
+}
+
 fn in_hole_scope(scope: &[String], b: &ModelBody) -> bool {
     scope.is_empty() || scope.contains(&b.name)
 }
@@ -6215,10 +6285,10 @@ fn hole_spots(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, f
         }
         _ => {
             let dir = direction.normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
-            let at = hole_on_surface(st, single_hole_position(vals, st, position, at, points)?, dir, &[]);
+            let at = hole_start(st, f, single_hole_position(vals, st, position, at, points)?, dir);
             let at = with_references(vals, st, f, at, dir, true)?;
             let dir = hole_dir_into_face(st, at, dir, hole_drill_scope(f));
-            return Ok((vec![hole_on_surface(st, at, dir, &[])], dir));
+            return Ok((vec![hole_start(st, f, at, dir)], dir));
         }
     };
     if spots.is_empty() || spots.len() > 10_000 {
@@ -6292,8 +6362,8 @@ fn hole_spots_raw(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature) 
         _ => {
             let dir = direction.normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
             let p = single_hole_position(vals, st, position, at, points)?;
-            let p = if hole_references(f).is_empty() { p } else { with_references(vals, st, f, hole_on_surface(st, p, dir, &[]), dir, false)? };
-            Ok((vec![p], hole_dir_into_face(st, hole_on_surface(st, p, dir, &[]), dir, hole_drill_scope(f))))
+            let p = if hole_references(f).is_empty() { p } else { with_references(vals, st, f, hole_start(st, f, p, dir), dir, false)? };
+            Ok((vec![p], hole_dir_into_face(st, hole_start(st, f, p, dir), dir, hole_drill_scope(f))))
         }
     }
 }
@@ -10768,8 +10838,10 @@ fn eval_feature(
         }
         FeatureKind::FrameEndCap { .. } => crate::end_cap::evaluate(doc, vals, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
-        FeatureKind::BoundingSolid { bodies, margin } => {
+        FeatureKind::BoundingSolid { bodies, margin, margins } => {
             let m = val(vals, margin, Kind::Length)?;
+            let side = |i: usize| margins.as_ref().and_then(|ms| ms.get(i)).map_or(Ok(m), |e| val(vals, e, Kind::Length));
+            let (lo, hi) = (Vec3::new(side(0)?, side(2)?, side(4)?), Vec3::new(side(1)?, side(3)?, side(5)?));
             let mut bb = solidcraft_geom::Aabb3::EMPTY;
             for b in st.bodies.iter().filter(|b| bodies.is_empty() || bodies.iter().any(|t| *t == b.name)) {
                 bb = bb.union(&b.mesh().bounds());
@@ -10777,8 +10849,11 @@ fn eval_feature(
             if bb.is_empty() {
                 return Err(DocError::Invalid("no bodies to bound".into()));
             }
-            let pad = Vec3::new(m, m, m);
-            let b = crate::lineage::numbered_tool(kernel::box_solid(bb.min - pad, bb.max + pad)?);
+            let (min, max) = (bb.min - lo, bb.max + hi);
+            if !(min.x < max.x && min.y < max.y && min.z < max.z) {
+                return Err(DocError::Invalid("a side's margin reaches past the opposite side of the bodies".into()));
+            }
+            let b = crate::lineage::numbered_tool(kernel::box_solid(min, max)?);
             let name = unique_body_name(st, f.body_names.first().map(String::as_str).unwrap_or("Bounding"));
             st.bodies.push(ModelBody::traced_new(name, b, f.id));
             Ok(())

@@ -4110,15 +4110,32 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let t = if p.get("translate").is_some() { req_vec2(cmd, p, "translate")? } else { Vec2::ZERO };
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
-        let (mut cs, ps) = entities(sk, p, cmd)?;
-        with_ellipse_axes(sk, &mut cs);
+        let (mut cs, mut ps) = entities(sk, p, cmd)?;
         let c = if p.get("center").is_some() { point_or_ref(sk, p, "center", cmd)? } else { Vec2::ZERO };
         let rot = rotate(c, ang);
         let f = move |q: Vec2| rot(c + (q - c) * k) + t;
+        // A text's outline points follow its source: the text turns, scales and moves as a
+        // unit, as Move turns it, instead of its points being refused as projected (#17315).
+        let mut links = Vec::new();
+        for entity in string_list(cmd, p, "entities")? {
+            if let Some(link) = super::sketch_create::text_link(sk, &entity)
+                && !links.iter().any(|old| old == link)
+            {
+                links.push(link.to_owned());
+            }
+        }
+        cs.retain(|&i| !sk.curves.get(i).and_then(|c| c.link.as_ref()).is_some_and(|link| links.contains(link)));
+        ps.retain(|&i| !sk.points.get(i).and_then(|p| p.link.as_ref()).is_some_and(|link| links.contains(link)));
+        let mut text_curves = Vec::new();
+        for link in links {
+            text_curves.extend(super::sketch_create::transform_text(sk, cmd, &link, &f, ang, k, false)?);
+        }
+        with_ellipse_axes(sk, &mut cs);
         transform_in_place(sk, &cs, &ps, &f, k, cmd)?;
         let moved = involved_points(sk, &cs, &ps);
         let _ = rotate_axis_constraints(sk, doc, &moved, ang)?;
         scale_dimensions(sk, doc, &cs, &moved, k)?;
+        cs.extend(text_curves);
         Ok(ids_of(sk, &cs))
     })?;
     s.doc_mut().prune_model_params();
