@@ -911,12 +911,60 @@ mod tests {
         let edges = |z: f64| json!([[5, 0, z], [10, 3, z], [5, 6, z], [0, 3, z]]);
         run(&mut s, "surface.patch", json!({"edges": edges(0.0), "body": "Walls", "body_name": "Bottom"}));
         run(&mut s, "surface.patch", json!({"edges": edges(3.0), "body": "Walls", "body_name": "Top"}));
-        run(&mut s, "surface.stitch", json!({"bodies": ["Walls", "Bottom", "Top"]}));
+        let stitched = run(&mut s, "surface.stitch", json!({"bodies": ["Walls", "Bottom", "Top"]}));
+        assert!(stitched["warning"].is_null(), "{stitched}");
         let st = s.world_state().unwrap();
         assert!(!st.body("Walls").unwrap().body.is_surface());
         run(&mut s, "solid.extrude", json!({"sketch": "R", "distance": 3, "body_name": "Solid"}));
         assert!((volume(&s, "Walls") - volume(&s, "Solid")).abs() < 1e-9);
         assert!((volume(&s, "Walls") - 180.0).abs() < 1e-9);
+    }
+
+    /// Open results still succeed, but the reply and timeline say how many boundaries remain.
+    #[test]
+    fn stitch_reports_open_boundary_edges() {
+        for (x, edges, open) in [(20.0, 8, 8), (10.0, 7, 6)] {
+            let mut s = Session::default();
+            sheet(&mut s, "XY", "A", [0.0, 0.0], [10.0, 10.0]);
+            sheet(&mut s, "XY", "B", [x, 0.0], [x + 10.0, 10.0]);
+            let reply = run(&mut s, "surface.stitch", json!({"bodies": ["A", "B"]}));
+            let expected = format!("Stitch result `A` remains open (boundary edges: {open}).");
+            assert_eq!(reply["warning"], expected, "{reply}");
+            assert_eq!(reply["removed_bodies"], json!(["B"]));
+            let st = s.world_state().unwrap();
+            let body = &st.body("A").unwrap().body;
+            assert_eq!((body.face_count(), body.edge_count()), (2, edges));
+            assert!((area(&s, "A") - 200.0).abs() < 1e-9);
+            let id = s.doc.features.last().unwrap().id;
+            let check = |s: &Session| assert_eq!(s.model.result(id).unwrap().warning.as_deref(), Some(expected.as_str()));
+            check(&s);
+            s.model.evaluate(&s.doc);
+            check(&s);
+            run(&mut s, "edit.undo", json!({}));
+            assert_eq!(s.world_state().unwrap().bodies.len(), 2);
+            run(&mut s, "edit.redo", json!({}));
+            check(&s);
+            let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+            check(&cold);
+            let saved = s.model.saved(&s.doc).unwrap();
+            let adopted = solidcraft_doc::Model::adopt(&s.doc, &saved).unwrap();
+            assert_eq!(adopted.result(id).unwrap().warning.as_deref(), Some(expected.as_str()));
+        }
+    }
+
+    /// A cylindrical wall's seam is used twice by its face; only the two circular rims are open.
+    #[test]
+    fn stitch_does_not_count_a_periodic_seam_as_open() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Circle"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.extrude", json!({"sketch": "Circle", "distance": 10, "body_name": "Tube"}));
+        let reply = run(&mut s, "surface.stitch", json!({"bodies": ["Tube"]}));
+        assert_eq!(reply["warning"], "Stitch result `Tube` remains open (boundary edges: 2).");
+        let st = s.world_state().unwrap();
+        let body = &st.body("Tube").unwrap().body;
+        assert_eq!((body.face_count(), body.edge_count()), (1, 3));
     }
 
     /// Unstitch a box: six surface bodies whose faces keep the names they had on the box,

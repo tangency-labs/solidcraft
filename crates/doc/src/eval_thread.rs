@@ -793,6 +793,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         old_auto_size,
         additional_faces,
         target_bodies: _,
+        single_face_selection: _,
     } = &f.kind
     else {
         return Err(DocError::Invalid("not a thread".into()));

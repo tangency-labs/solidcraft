@@ -16,7 +16,7 @@
 //! | [`FilletCorner::new`] with [`FilletCornerKind::Open`] | `SmFilletOpenCorner::SmFilletOpenCorner`           |
 //! | [`FilletCorner::new`] with [`FilletCornerKind::Degenerate`] | `SmFilletDegenerateCorner::SmFilletDegenerateCorner` |
 //! | [`FilletCorner::corner_type`], [`FilletCornerKind::name`] | `GetCornerType`, `GetName` (per derived class)   |
-//! | [`FilletCorner::create`] | `SmFilletCorner::Create` (with `fixes.fillet_corner_per_vertex_fan`, the fork's knife-edge refusal of a two-edge corner, `e418750`, WR-665; not upstream, the refusal of a 3x2 mixed-convexity corner whose rails cross, WR-710) |
+//! | [`FilletCorner::create`] | `SmFilletCorner::Create` (with the fork's knife-edge refusal of a two-edge corner, `e418750`, WR-665; not upstream, the refusal of a 3x2 mixed-convexity corner whose rails cross, WR-710) |
 //! | [`FilletCorner::is_mitre`], [`FilletCorner::filleted_edgeuses`] | the fork's `SmFilletNx2Corner::IsMitre`, `GetFilletedEdgeuses` (`9ba2b12`, WR-634) |
 //! | [`FilletCorner::create_with_solver_lookup`] | `Create` with borrowed executive solvers |
 //! | [`FilletCorner::calc_corner_geom`]                 | `SmFilletCorner::CalcCornerGeom`                      |
@@ -27,8 +27,8 @@
 //! | [`FilletExecutiveData`]                            | the `SmFilletExecutive` members the corner code reads and writes (`m_vEdgeuseSolverMap`, `GetFilletSolverOfEdgeuse`; `m_vExtendedSurfacesMap` for unit `blend.fillet_corner_p1`; CO-PORTED from `blend.fillet_executive_p1`) |
 //!
 //! Deviations:
-//! - **The fork's mitre gap patch** (WR-644, tangency-labs/smlib@2223108, opt-in
-//!   `Kernel::fixes.fillet_mitre_gap_patch`): `adjust_topology_nx2` builds the concave
+//! - **The fork's mitre gap patch** (WR-644, tangency-labs/smlib@2223108):
+//!   `adjust_topology_nx2` builds the concave
 //!   corner's topology for a mitre whose rails meet the side edge apart
 //!   ([`FilletCorner::bevel_gap_patch`]), and the Nx2 corner patch then fills only the gap.
 //! - **Object model.** The class hierarchy is one [`FilletCorner`] record with a
@@ -288,8 +288,7 @@ pub struct FilletCorner {
     /// `m_bBevelGapPatch` (the fork's, WR-644, tangency-labs/smlib@2223108; `FALSE` from
     /// the constructor): a bevel (mitre) whose rails meet the side edge at two places, the
     /// gap between them on the side face's continuation filled by a patch
-    /// (`SmFilletNx2Corner::AdjustTopology`). Set only with
-    /// `fixes.fillet_mitre_gap_patch`.
+    /// (`SmFilletNx2Corner::AdjustTopology`).
     pub bevel_gap_patch: bool,
     /// `m_bExtendedSurfacePatch`.
     pub extended_surface_patch: bool,
@@ -1013,31 +1012,28 @@ impl FilletCorner {
                 let eu1_ = *solver_eus
                     .get(1)
                     .ok_or_else(|| invalid(OP_CREATE, "second filleted edge use"))?;
-                // The fork's (WR-665, tangency-labs/smlib@e418750, opt-in
-                // `fillet_corner_per_vertex_fan`): no two-edge corner is built where an edge
-                // not blended there is a knife edge (its faces folded back on each other,
-                // as where a hole's wall touches the bottom face along a line): the
-                // corners take its faces to meet at an angle.
+                // The fork's (WR-665, tangency-labs/smlib@e418750): no two-edge corner is
+                // built where an edge not blended there is a knife edge (its faces folded
+                // back on each other, as where a hole's wall touches the bottom face along
+                // a line): the corners take its faces to meet at an angle.
                 let mut knife = false;
-                if k.fixes.fillet_corner_per_vertex_fan {
-                    let e0 = edge_of(b, eu0)?;
-                    let e1 = edge_of(b, eu1_)?;
-                    for &other in &all_eus {
-                        if knife {
-                            break;
-                        }
-                        let e = edge_of(b, other)?;
-                        if e != e0
-                            && e != e1
-                            && crate::blend::fillet_solver::p5::is_knife_edge(
-                                k,
-                                b,
-                                e,
-                                tangency_tol_radians,
-                            )?
-                        {
-                            knife = true;
-                        }
+                let e0 = edge_of(b, eu0)?;
+                let e1 = edge_of(b, eu1_)?;
+                for &other in &all_eus {
+                    if knife {
+                        break;
+                    }
+                    let e = edge_of(b, other)?;
+                    if e != e0
+                        && e != e1
+                        && crate::blend::fillet_solver::p5::is_knife_edge(
+                            k,
+                            b,
+                            e,
+                            tangency_tol_radians,
+                        )?
+                    {
+                        knife = true;
                     }
                 }
                 if knife {
@@ -2223,16 +2219,14 @@ impl FilletCorner {
                 continue;
             }
 
-            // The fork's (WR-644, tangency-labs/smlib@2223108, opt-in
-            // `fixes.fillet_mitre_gap_patch`): two rounds mitred at the common face's
-            // concave corner whose rails meet the side edge at two places. The larger
-            // round cut by the side face, and the smaller round's rail, run on past the
-            // side edge onto the side face's continuation, where they meet the mitre's
-            // curve: the gap is filled by a patch on the side face's extended surface, as
-            // at a corner of mixed convexity whose rounds are swept, the mitre's curve
-            // taking the place of the swept face (`CreateCornerPatch`).
-            if k.fixes.fillet_mitre_gap_patch
-                && self.all_eus.as_ref().map_or(0, Vec::len) == 3
+            // The fork's (WR-644, tangency-labs/smlib@2223108): two rounds mitred at the
+            // common face's concave corner whose rails meet the side edge at two places.
+            // The larger round cut by the side face, and the smaller round's rail, run on
+            // past the side edge onto the side face's continuation, where they meet the
+            // mitre's curve: the gap is filled by a patch on the side face's extended
+            // surface, as at a corner of mixed convexity whose rounds are swept, the
+            // mitre's curve taking the place of the swept face (`CreateCornerPatch`).
+            if self.all_eus.as_ref().map_or(0, Vec::len) == 3
                 && p1::check_face_complimentary_corner_concavity(
                     k,
                     target,

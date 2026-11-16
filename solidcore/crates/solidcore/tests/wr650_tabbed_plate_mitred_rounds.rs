@@ -6,7 +6,7 @@
 //! cylinder itself (WR-633), in arc spans that stop at the closed turn (WR-650).
 //!
 //! SolidCraft runs it with its whole preset of fixes on; the round of the mitred corners
-//! needs `fillet_mitre_gap_patch` and `fillet_mitre_concave_face_corners` (without them
+//! needs the WR-644 gap patch and `fillet_mitre_concave_face_corners` (without them
 //! the level 2 check reports `SmSurfOfRevolution` test 7, and 3.8e-4 of the volume is
 //! missing), and with `offset_extension_as_itself` off the fillet fails (status 8).
 //!
@@ -174,7 +174,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_mitre_concave_face_corners = true;
-    k.fixes.fillet_mitre_gap_patch = true;
     k.fixes.fillet_nx1_tangent_side_edge = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_point_step_per_point = true;
@@ -223,9 +222,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.taper_tangent_corner_planes = true;
     k.fixes.thicken_planar_side_walls = true;
     k.fixes.torus_check_spindle_apex = true;
-    k.fixes.torus_iso_circle_axis_from_midpoint = true;
-    k.fixes.torus_major_radius_from_origin = true;
-    k.fixes.torus_signed_gen_curve_interval = true;
     k.fixes.transform_model_size_from_body_box = true;
     k.fixes.transform_scales_each_tolerance = true;
     k.fixes.uv_trim_corner_end_points_only = true;
