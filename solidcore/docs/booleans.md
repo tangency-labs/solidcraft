@@ -311,11 +311,16 @@ within the tolerance, with a face of the thin operand that was already classifie
 or that the coincidence repair (`FixFoundFaceCoincidence`) will not pair with it. When the two
 surfaces are of different analytic kinds, they coincide only over such a tangent patch, whose
 boundary the imprint need not draw in the other face. When the whole face lies within the tolerance
-of the other face's surface (checked at its vertices, along its edges and at the middle of its UV
-domain), the face is the patch, a copy within the tolerance of that part of the other face, and once
-every common edge has been visited it is classified as one (`resolve_tangent_patches`,
-`merge/p4.rs`, for union, difference and intersection); a face that leaves that surface anywhere is
-only partly a copy and goes to the ray. Where the operation keeps no copy of coincident faces (a
+of the other face's surface, the face is the patch, a copy within the tolerance of that part of the
+other face, and once every common edge has been visited it is classified as one
+(`resolve_tangent_patches`, `merge/p4.rs`, for union, difference and intersection). That the whole
+face lies there is proved, not sampled, and only for a face on a cylinder or cone against a plane
+(`cone_face_gap_to_plane`): the plane's distance over the cone is linear along each generator and a
+sinusoid round the axis, so its extremes over a box of angle and height are found exactly, and the
+box holds the face because it holds the convex hulls of the face's edges (their ends for a line,
+their Bezier control points for a B-spline) and the face's one loop does not wind round the axis. Any
+other pair of kinds, and a face that leaves the plane anywhere, is only possibly a copy and goes to
+the ray. Where the operation keeps no copy of coincident faces (a
 difference of faces facing the same way), the patch goes. Where it keeps one, the copy is the other
 face's when that face is kept, so the patch goes, and the patch's when the other face is deleted.
 This replaces a ray cast from a point within the tolerance of the other boundary, whose answer there

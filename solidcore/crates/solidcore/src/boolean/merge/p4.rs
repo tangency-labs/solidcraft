@@ -574,47 +574,180 @@ fn resolve_tangent_patch(
     true
 }
 
-/// Not upstream (#17118): how far `f` strays from the surface of `partner_face`, which must be
-/// analytic (`None` otherwise), measured at its vertices, three points along each edge and the
-/// middle of its UV domain, where a face whose edges lie on the partner can bulge off it.
-fn face_gap(
+/// Not upstream (#17118): a bound on how far any point of `f` lies from the plane of
+/// `partner_face`, proved rather than sampled, for a face on a cylinder or cone; `None` for any
+/// other pair of kinds, or where the bound below does not apply.
+///
+/// Every point of the cone is `O + h A + R(h) (cos t E1 + sin t E2)` with `R(h) = r + h tan(a)`,
+/// and the plane's signed distance `n . (X - P)` there is `C + D h + R(h) S(t)` with `S` a
+/// sinusoid. With `R` positive, that is linear in `h` for each `t`, so over a box
+/// `[t0, t1] x [h0, h1]` it is extreme at `h0` or `h1` and at `S`'s extremes over `[t0, t1]`,
+/// which are at the ends or at `S`'s crest or trough. The box comes from the face's boundary:
+/// its vertices, each line edge's ends and every control point of each B-spline edge's Bezier
+/// segments (a B-spline with positive weights lies in the convex hull of those). `h` is linear,
+/// so the hull's `h` range holds the boundary's. The angles are measured from the points' mean
+/// direction about the axis and must all lie within a quarter turn of it, so the hull lies in a
+/// half-space bounded by a plane through the axis and its angles lie between the points'. A face
+/// with one loop that does not wind round the axis is the region inside that loop, so it lies in
+/// the box of its boundary. The box is widened by the face's edge tolerances, since the edges
+/// lie only within those of the cone.
+fn cone_face_gap_to_plane(
     k: &Kernel,
     b: &Brep,
     f: FaceId,
     partner: &Brep,
     partner_face: FaceId,
 ) -> Result<Option<f64>> {
-    let Some(surface) = partner.face(partner_face)?.surface.as_ref() else {
+    use crate::curve::curve::CurveKind;
+    use crate::surface::implicit::{AnalyticSupport, Implicit};
+    let implicit = |b: &Brep, f: FaceId| -> Result<Option<Implicit>> {
+        Ok(b.face(f)?
+            .surface
+            .as_ref()
+            .and_then(AnalyticSupport::of)
+            .map(|support| support.implicit()))
+    };
+    let (
+        Some(Implicit::Cone {
+            origin,
+            axis,
+            radius,
+            tan_angle,
+        }),
+        Some(Implicit::Plane {
+            origin: plane_origin,
+            normal,
+        }),
+    ) = (implicit(b, f)?, implicit(partner, partner_face)?)
+    else {
         return Ok(None);
     };
-    let Some(support) = crate::surface::implicit::AnalyticSupport::of(surface) else {
+    if face::loops(b, f, false, None)?.len() != 1 {
         return Ok(None);
-    };
-    let implicit = support.implicit();
-    let mut gap = 0.0_f64;
-    if let Some(own) = crate::topology::face::p2::surface(b, f)? {
-        let middle = crate::topology::face::p2::uv_domain(b, f)?.evaluate(0.5, 0.5);
-        gap = implicit.distance(own.evaluate_point(k, middle)?);
     }
+    // the boundary's hull points, and the widest edge tolerance
+    let mut points = Vec::new();
+    let mut widen = 0.0_f64;
     for v in crate::topology::face::p4::vertices(b, f, None, false, None)? {
-        gap = gap.max(implicit.distance(vertex::point(b, v)?));
+        points.push(vertex::point(b, v)?);
     }
     for e in crate::topology::face::p4::edges(b, f, None, false, None)? {
         let edge = b.edge(e)?;
+        widen = widen.max(edge.tolerance);
         let Some(curve) = edge.curve.as_ref() else {
-            continue;
+            return Ok(None);
         };
-        for t in [0.25, 0.5, 0.75] {
-            gap = gap.max(implicit.distance(curve.evaluate_point(k, edge.interval.evaluate(t))?));
+        match curve.kind() {
+            CurveKind::Line(_) => {
+                for t in [0.0, 1.0] {
+                    points.push(curve.evaluate_point(k, edge.interval.evaluate(t))?);
+                }
+            }
+            CurveKind::BSpline(spline) => {
+                let Some(nurb) = spline.nurb.as_ref() else {
+                    return Ok(None);
+                };
+                for segment in nurb.decompose_bez()? {
+                    for c in segment.cpts() {
+                        let w = if c.w == crate::nurbs::math::NOW {
+                            1.0
+                        } else {
+                            c.w
+                        };
+                        if w.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+                            return Ok(None);
+                        }
+                        points.push(Vec3::new(c.x / w, c.y / w, c.z / w));
+                    }
+                }
+            }
+            _ => return Ok(None),
         }
     }
-    Ok(Some(gap))
+    Ok(cone_box_gap(
+        (origin, axis, radius, tan_angle),
+        (plane_origin, normal),
+        &points,
+        widen,
+    ))
+}
+
+/// The bound of [`cone_face_gap_to_plane`] for a face whose boundary lies in the convex hull of
+/// `points`, within `widen` of the cone `(O, A, r, tan(a))`, against the plane `(P, n)`.
+fn cone_box_gap(
+    (origin, axis, radius, tan_angle): (Vec3, Vec3, f64, f64),
+    (plane_origin, normal): (Vec3, Vec3),
+    points: &[Vec3],
+    widen: f64,
+) -> Option<f64> {
+    use std::f64::consts::PI;
+    // each point's height and radial vector about the axis
+    let about = |x: Vec3| {
+        let v = x - origin;
+        let h = v.dot(axis);
+        (h, v - axis * h)
+    };
+    let mean = points
+        .iter()
+        .fold(Vec3::new(0.0, 0.0, 0.0), |m, &x| m + about(x).1);
+    if points.is_empty() || mean.length() == 0.0 {
+        return None;
+    }
+    let e1 = mean * (1.0 / mean.length());
+    let e2 = axis.cross(e1);
+    let (mut h0, mut h1, mut t0, mut t1) = (f64::MAX, f64::MIN, 0.0_f64, 0.0_f64);
+    for &x in points {
+        let (h, v) = about(x);
+        let t = v.dot(e2).atan2(v.dot(e1));
+        if t.abs().partial_cmp(&(0.5 * PI)) != Some(std::cmp::Ordering::Less) {
+            return None;
+        }
+        (h0, h1, t0, t1) = (h0.min(h), h1.max(h), t0.min(t), t1.max(t));
+    }
+    let r_at = |h: f64| radius + tan_angle * h;
+    let r_min = r_at(h0).min(r_at(h1));
+    if r_min.partial_cmp(&widen) != Some(std::cmp::Ordering::Greater) {
+        return None;
+    }
+    // a point within `widen` of the cone where its radius is `R` turns by at most this
+    let spread = (widen / (r_min - widen)).min(1.0).asin();
+    let (h0, h1, t0, t1) = (h0 - widen, h1 + widen, t0 - spread, t1 + spread);
+    let (r0, r1) = (r_at(h0), r_at(h1));
+    if !(r0 > 0.0 && r1 > 0.0 && t1 - t0 < PI) {
+        return None;
+    }
+    // the signed distance C + D h + R(h) (alpha cos t + beta sin t)
+    let c = normal.dot(origin - plane_origin);
+    let d = normal.dot(axis);
+    let (alpha, beta) = (normal.dot(e1), normal.dot(e2));
+    let sine = |t: f64| alpha * t.cos() + beta * t.sin();
+    let crest = beta.atan2(alpha);
+    let (mut s_min, mut s_max) = (sine(t0).min(sine(t1)), sine(t0).max(sine(t1)));
+    let amplitude = alpha.hypot(beta);
+    for (peak, value) in [(crest, amplitude), (crest + PI, -amplitude)] {
+        // the peak's turn nearest the box
+        let at = peak + 2.0 * PI * ((0.5 * (t0 + t1) - peak) / (2.0 * PI)).round();
+        if t0 <= at && at <= t1 {
+            s_min = s_min.min(value);
+            s_max = s_max.max(value);
+        }
+    }
+    let mut gap = 0.0_f64;
+    for (h, r) in [(h0, r0), (h1, r1)] {
+        gap = gap
+            .max((c + d * h + r * s_max).abs())
+            .max((c + d * h + r * s_min).abs());
+    }
+    // the rounding of the sums above, at the size of their terms
+    let size = origin.length() + plane_origin.length() + h0.abs().max(h1.abs()) + r0.max(r1);
+    Some(gap + 64.0 * f64::EPSILON * size)
 }
 
 /// Not upstream (#17118): whether the source face of a tangent patch (`of` when `reverse`, `pf`
-/// otherwise) lies within the tolerance of its partner's surface ([`face_gap`]), so that the
-/// whole face is the patch. A face that leaves the partner's surface somewhere is only
-/// partly a copy of it, and is left to the ray.
+/// otherwise) lies within the tolerance of its partner's surface, so that the whole face is the
+/// patch. Only a face on a cylinder or cone against a plane is bounded
+/// ([`cone_face_gap_to_plane`]); any other face, and a face that leaves the plane somewhere,
+/// is left to the ray.
 fn within_partner(
     k: &Kernel,
     primary: &Brep,
@@ -630,7 +763,7 @@ fn within_partner(
     };
     let tol = crate::topology::face::p2::tolerance(sb, sf)?
         .max(crate::topology::face::p2::tolerance(pb, ppf)?);
-    let gap = face_gap(k, sb, sf, pb, ppf)?;
+    let gap = cone_face_gap_to_plane(k, sb, sf, pb, ppf)?;
     Ok(gap.is_some_and(|g| g <= tol))
 }
 
@@ -2213,6 +2346,56 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// #17118: the bound on how far a cylinder or cone face strays from a plane covers the
+    /// whole face, not only its boundary points. `on` gives points of the cone over a box of
+    /// angles (radians from the x axis) and heights; `exact` is the largest distance from the
+    /// plane over that box.
+    #[test]
+    fn a_cone_face_bound_covers_the_face_between_its_boundary_points() {
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let on = |r: f64, tan: f64, ts: &[f64], hs: &[f64]| -> Vec<Vec3> {
+            let mut out = Vec::new();
+            for &t in ts {
+                for &h in hs {
+                    let rh = r + tan * h;
+                    out.push(Vec3::new(rh * t.cos(), rh * t.sin(), h));
+                }
+            }
+            out
+        };
+        let x = Vec3::new(1.0, 0.0, 0.0);
+        // a sliver of a cylinder of radius 5 beside the plane x = 5, tangent along y = 0
+        let sliver = on(5.0, 0.0, &[0.0, 1e-3], &[0.0, 10.0]);
+        let cylinder = (Vec3::new(0.0, 0.0, 0.0), z, 5.0, 0.0);
+        let tangent = (Vec3::new(5.0, 0.0, 0.0), x);
+        let exact = 5.0 * (1.0 - 1e-3_f64.cos());
+        let bound = cone_box_gap(cylinder, tangent, &sliver, 0.0).unwrap();
+        assert!(bound >= exact && bound < exact + 1e-12, "{bound} {exact}");
+        // the plane x = 4.99 cuts into the cylinder: the face's corners lie on it, but the
+        // face's middle, at y = 0, lies 0.01 beyond it
+        let t = (4.99_f64 / 5.0).acos();
+        let chord = on(5.0, 0.0, &[-t, t], &[0.0, 10.0]);
+        let cutting = (Vec3::new(4.99, 0.0, 0.0), x);
+        assert!(chord
+            .iter()
+            .all(|&p| (p - cutting.0).dot(cutting.1).abs() < 1e-12));
+        let bound = cone_box_gap(cylinder, cutting, &chord, 0.0).unwrap();
+        assert!(bound >= 0.01 - 1e-12, "{bound}");
+        // the edges' tolerance widens the box
+        let widened = cone_box_gap(cylinder, tangent, &sliver, 1e-5).unwrap();
+        assert!(widened > exact, "{widened}");
+        // a cone of radius 5 + h / 2 beside its tangent plane along y = 0
+        let cone = (Vec3::new(0.0, 0.0, 0.0), z, 5.0, 0.5);
+        let normal = Vec3::new(1.0, 0.0, -0.5) * (1.0 / 1.25_f64.sqrt());
+        let sliver = on(5.0, 0.5, &[0.0, 1e-3], &[0.0, 4.0]);
+        let exact = 7.0 * (1.0 - 1e-3_f64.cos()) / 1.25_f64.sqrt();
+        let bound = cone_box_gap(cone, (Vec3::new(5.0, 0.0, 0.0), normal), &sliver, 0.0).unwrap();
+        assert!(bound >= exact && bound < exact + 1e-12, "{bound} {exact}");
+        // a boundary that reaches a quarter turn from its mean direction is not bounded
+        let wide = on(5.0, 0.0, &[-1.6, 0.0, 1.6], &[0.0, 10.0]);
+        assert_eq!(cone_box_gap(cylinder, tangent, &wide, 0.0), None);
     }
 
     /// #17118: a tangent patch waiting for its partner is revisited once a later patch
