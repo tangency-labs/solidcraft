@@ -50,17 +50,23 @@
 //! - **Bounded loops.** The start point loop pops one start point per pass; no pass
 //!   adds start points (`TraceCurve` adds none), so it ends after at most as many
 //!   passes as `FindBoundaryStartPoints` made points.
+//! - **Touching points left for a start point** (not upstream). After the interior
+//!   curves and the removal of degenerate curves that lie on other curves, a touching
+//!   point `FindBoundaryStartPoints` dropped because a start point lies on it is
+//!   added when its surface points are within the tolerance and it is on none of the
+//!   curves left ([`SurfaceIntersector::add_deferred_touching_points`]); such points
+//!   come after the traced curves, where upstream's boundary pass would have put them
+//!   first.
 //! - **Opt-in fix (WR-76, #392).** With
 //!   [`UpstreamFixes::ssi_trace_tangent_curves_once`](crate::kernel::UpstreamFixes::ssi_trace_tangent_curves_once)
 //!   a traced curve removes, before it is flushed, the start points left in a tangent
 //!   cluster with either of its ends (`SurfaceIntersector::remove_end_tangent_clusters`);
 //!   the SolidCraft fork's tangency-labs/smlib@0ce09f2. Off by default (upstream
 //!   behaviour).
-//! - **Opt-in fix (WR-77, #393, #2110).** With
-//!   [`UpstreamFixes::ssi_split_curves_at_singular_points`](crate::kernel::UpstreamFixes::ssi_split_curves_at_singular_points)
-//!   the curves are split at the singular points they pass through after the tangent
-//!   nodes are added (`super::singular_splits`); the SolidCraft fork's
-//!   tangency-labs/smlib@3c9d1d3. Off by default (upstream behaviour).
+//! - **Fix (WR-77, #393, #2110).** The curves are split at the singular points they
+//!   pass through after the tangent nodes are added (`super::singular_splits`); the
+//!   SolidCraft fork's tangency-labs/smlib@3c9d1d3. Always on (once the opt-in
+//!   `ssi_split_curves_at_singular_points`).
 //! - **Empty trace (WR-80).** A curve is traced back the other way
 //!   ([`SurfaceIntersector::trace_back`], part 4) only when `TraceCurve` produced
 //!   points. Upstream also reverses the empty curve of a trace
@@ -517,6 +523,8 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         trees_ready: bool,
     ) -> Result<SurfaceIntersection> {
         let mut result = SurfaceIntersection::default();
+        // filled by FindBoundaryStartPoints, read at the end (not upstream)
+        self.base.deferred_touching.clear();
         // filled by FindInteriorCurves, read by the tangential curve pass (WR-75)
         self.tangent_curve_seeds.clear();
 
@@ -826,41 +834,30 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
             mut deviations,
         } = interior;
 
-        // remove degenerate Curves whose points lie on nonDegenerate intersections
-        let mut ii = 0;
-        while let Some(curve) = curves_3d.get(ii) {
-            if curve.is_degenerate(k, EFF_ZERO, None)? {
-                // status ignored: an unset point (passed on with
-                // `ssi_proto_topology_statuses_pass_on`, fork bcc6f01)
-                let point = ignored(passed_on(
-                    curve.evaluate_point(k, 0.0),
-                    k.fixes.ssi_proto_topology_statuses_pass_on,
-                )?)?
-                .unwrap_or(Vec3::UNDEF);
-                if self
-                    .base
-                    .is_point_on_curve(k, point, &curves_3d, Some(ii))?
-                {
-                    if ii >= surface1_uv_curves.len()
-                        || ii >= surface2_uv_curves.len()
-                        || ii >= deviations.len()
-                        || ii >= curve_types.len()
-                    {
-                        return Err(SolidError::invalid_input(
-                            OP_DI,
-                            "curve arrays of different lengths (upstream reads past them)",
-                        ));
-                    }
-                    curves_3d.remove(ii);
-                    surface1_uv_curves.remove(ii);
-                    surface2_uv_curves.remove(ii);
-                    deviations.remove(ii);
-                    curve_types.remove(ii);
-                    continue;
-                }
-            }
-            ii += 1;
-        }
+        // remove degenerate Curves whose points lie on nonDegenerate intersections, then
+        // (not upstream) add the touching points left for a start point that no curve
+        // left covers
+        let mut found = TsectCurves {
+            curves_3d: core::mem::take(&mut curves_3d),
+            uv_curves: [
+                core::mem::take(&mut surface1_uv_curves),
+                core::mem::take(&mut surface2_uv_curves),
+            ],
+            curve_types: core::mem::take(&mut curve_types),
+            deviations: core::mem::take(&mut deviations),
+        };
+        remove_covered_degenerate_curves_then_add_touching(&mut self.base, k, &mut found)?;
+        let TsectCurves {
+            curves_3d: found_3d,
+            uv_curves: [found_uv1, found_uv2],
+            curve_types: found_types,
+            deviations: found_deviations,
+        } = found;
+        curves_3d = found_3d;
+        surface1_uv_curves = found_uv1;
+        surface2_uv_curves = found_uv2;
+        curve_types = found_types;
+        deviations = found_deviations;
 
         // not upstream (WR-75, opt-in; the fork's AddTangentNodes): report the singular
         // points where crossing branches meet
@@ -877,9 +874,9 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
             )?;
         }
 
-        // not upstream (WR-77, opt-in; the fork's sm_SplitCurvesAtSingularPoints): split
-        // crossing curves at singular points (parallel normals) they pass through
-        if k.fixes.ssi_split_curves_at_singular_points && !self.base.doing_self_intersection {
+        // not upstream (WR-77; the fork's sm_SplitCurvesAtSingularPoints): split crossing
+        // curves at singular points (parallel normals) they pass through
+        if !self.base.doing_self_intersection {
             super::singular_splits::split_curves_at_singular_points(
                 k,
                 self.base.surface(SrfIndex::First),
@@ -914,6 +911,61 @@ fn evaluate_1st_derivatives(
     uv: Point2,
 ) -> Result<(Point3, Vec3, Vec3)> {
     crate::surface::surface::p1::evaluate_1st_derivatives(k, surface, uv, Side::Left, Side::Left)
+}
+
+/// The end of `DoIntersection`'s curve list: removes each degenerate curve of `found`
+/// that lies on another of its curves (upstream), then adds the touching points that
+/// `FindBoundaryStartPoints` left for a start point and that no remaining curve covers
+/// (not upstream, [`SurfaceIntersector::add_deferred_touching_points`]). The removal
+/// comes first so that a degenerate curve it drops covers no touching point.
+///
+/// # Errors
+///
+/// Those of [`SurfaceIntersector::is_point_on_curve`] and of the curves; curve arrays
+/// of different lengths are invalid input.
+fn remove_covered_degenerate_curves_then_add_touching(
+    base: &mut SurfaceIntersector<'_>,
+    k: &Kernel,
+    found: &mut TsectCurves,
+) -> Result<()> {
+    let TsectCurves {
+        curves_3d,
+        uv_curves: [surface1_uv_curves, surface2_uv_curves],
+        curve_types,
+        deviations,
+    } = found;
+    let mut ii = 0;
+    while let Some(curve) = curves_3d.get(ii) {
+        if curve.is_degenerate(k, EFF_ZERO, None)? {
+            // status ignored: an unset point (passed on with
+            // `ssi_proto_topology_statuses_pass_on`, fork bcc6f01)
+            let point = ignored(passed_on(
+                curve.evaluate_point(k, 0.0),
+                k.fixes.ssi_proto_topology_statuses_pass_on,
+            )?)?
+            .unwrap_or(Vec3::UNDEF);
+            if base.is_point_on_curve(k, point, curves_3d, Some(ii))? {
+                if ii >= surface1_uv_curves.len()
+                    || ii >= surface2_uv_curves.len()
+                    || ii >= deviations.len()
+                    || ii >= curve_types.len()
+                {
+                    return Err(SolidError::invalid_input(
+                        OP_DI,
+                        "curve arrays of different lengths (upstream reads past them)",
+                    ));
+                }
+                curves_3d.remove(ii);
+                surface1_uv_curves.remove(ii);
+                surface2_uv_curves.remove(ii);
+                deviations.remove(ii);
+                curve_types.remove(ii);
+                continue;
+            }
+        }
+        ii += 1;
+    }
+    base.add_deferred_touching_points(k, found)
 }
 
 #[cfg(test)]
@@ -994,6 +1046,174 @@ mod tests {
         let inner = Extent2d::from_bounds(0.4, 0.4, 0.6, 0.6);
         let (more, _) = si.grazing_box_process(k, &inner, &inner).unwrap();
         assert!(more);
+    }
+
+    /// Two plane patches whose corners pass 9.9 apart (they do not cross: the line
+    /// where their planes meet leaves A at t = -23158.91 and enters B only up to
+    /// t = -23169.29), intersected with a tolerance of 2785 (goldens
+    /// `intersect.surface_intersector_p5` gen0236). The boundary search finds a
+    /// touching point at A's corner and a start point within the tolerance of it,
+    /// which traces no curve. The touching point used to be dropped for that start
+    /// point, leaving no answer; it is now added at the end, since no curve found
+    /// covers it (WR-51 made the start point test a real distance of the tolerance,
+    /// which reaches this start point).
+    /// A touching point left for a start point is checked against the curves that
+    /// remain once the degenerate curves lying on other curves are removed. Here the
+    /// touching point P is covered only by a degenerate curve D (within 4 tol of it).
+    /// D lies on the line C (0.9 tol past its end) and is removed. P, on the planes'
+    /// meet 3 tol past C's end, is on no curve left (its surface gaps are all zero, so
+    /// the mid-gap test does not join it to C) and is the contact's only report.
+    /// Checked against the curves before the removal, P was dropped together with D.
+    #[test]
+    fn a_touching_point_covered_only_by_a_removed_degenerate_curve_is_kept() {
+        use super::super::p3::{push_touching_curve, DeferredTouching};
+        let k = &Kernel::default();
+        // z = 0 and y = 0.5: they meet along x
+        let a = plane([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let b = plane([0.0, 0.5, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let mut si = SurfaceIntersector::new(k, &a, &d, &b, &d, false).unwrap();
+        let tol = si.this_approx_tol_3d;
+        assert!(tol > 0.0 && tol < 0.01, "{tol}");
+        let touching = |p: Point3, uv: [f64; 2]| {
+            let mut t = TsectPnt::new();
+            *t.srf_pos_mut(SrfIndex::First) = p;
+            *t.srf_pos_mut(SrfIndex::Second) = p;
+            *t.uv_pos_mut(SrfIndex::First) = Point2::new(uv[0], uv[1]);
+            *t.uv_pos_mut(SrfIndex::Second) = Point2::new(uv[0], uv[1]);
+            t
+        };
+        let c_end = Vec3::new(0.5, 0.5, 0.0);
+        let dp = c_end + Vec3::new(0.9 * tol, 0.0, 0.0);
+        let pp = c_end + Vec3::new(3.0 * tol, 0.0, 0.0);
+        let mut found = TsectCurves::default();
+        let line = |dim, p: Point3, q: Point3| {
+            Curve::from(BSplineCurve::create_line_segment(dim, p, q).unwrap())
+        };
+        found
+            .curves_3d
+            .push(line(3, Vec3::new(0.1, 0.5, 0.0), c_end));
+        found.uv_curves[0].push(line(2, Vec3::new(0.1, 0.5, 0.0), Vec3::new(0.5, 0.5, 0.0)));
+        found.uv_curves[1].push(line(2, Vec3::new(0.1, 0.5, 0.0), Vec3::new(0.5, 0.5, 0.0)));
+        found.curve_types.push(TsectCurveType::Crossing);
+        found.deviations.push(0.0);
+        push_touching_curve(&mut found, dp, &touching(dp, [dp.x, dp.y])).unwrap();
+        // P's boundary curve: A's iso line u = P.x across C, which C does not run
+        // along, so only the removal of D decides P (not the #11749 crossing rule)
+        let boundary = line(3, Vec3::new(pp.x, 0.0, 0.0), Vec3::new(pp.x, 1.0, 0.0));
+        si.deferred_touching = vec![DeferredTouching::new(
+            pp,
+            touching(pp, [pp.x, pp.y]),
+            boundary,
+        )];
+        // the premises: D is on C, P is on D and not on C
+        assert!(si
+            .is_point_on_curve(k, dp, &found.curves_3d[..1], None)
+            .unwrap());
+        assert!(pp.distance(dp) < 4.0 * tol);
+        assert!(!si
+            .is_point_on_curve(k, pp, &found.curves_3d[..1], None)
+            .unwrap());
+        assert!(si.is_point_on_curve(k, pp, &found.curves_3d, None).unwrap());
+
+        remove_covered_degenerate_curves_then_add_touching(&mut si, k, &mut found).unwrap();
+        assert!(si.deferred_touching.is_empty());
+        assert_eq!(found.curves_3d.len(), 2);
+        assert_eq!(
+            found.curve_types,
+            [TsectCurveType::Crossing, TsectCurveType::Touching]
+        );
+        assert_eq!(found.curves_3d[1].evaluate_point(k, 0.0).unwrap(), pp);
+        assert_eq!(found.uv_curves[0].len(), 2);
+        assert_eq!(found.uv_curves[1].len(), 2);
+        assert_eq!(found.deviations, [0.0, 0.0]);
+    }
+
+    #[test]
+    fn a_touching_point_no_curve_covers_is_kept() {
+        let k = &Kernel::default();
+        let la = 17_328.120_691_213_055;
+        let lb = 11_527.965_487_154_615;
+        let oa = [
+            -534.257_546_242_803_1,
+            3_609.235_629_132_970_6,
+            14_227.419_314_424_104,
+        ];
+        let xa = [
+            -0.996_769_538_633_399_7,
+            -0.073_244_498_176_162_2,
+            -0.032_950_422_447_696_89,
+        ];
+        let ya = [
+            -0.073_610_447_371_212_76,
+            0.669_038_560_874_377_2,
+            0.739_573_462_274_676_4,
+        ];
+        let ob = [
+            -27_685.723_579_420_985,
+            102.485_228_779_159_39,
+            26_996.495_008_515_747,
+        ];
+        let xb = [
+            0.967_335_014_604_463_7,
+            0.228_281_315_927_273_74,
+            -0.110_229_806_852_292_79,
+        ];
+        let yb = [
+            -0.222_193_158_638_955_42,
+            0.972_844_457_931_221_4,
+            0.064_837_187_836_549_17,
+        ];
+        let patch = |o, x, y, l: f64| {
+            Surface::from(Plane::new(
+                Vec3::from_array(o),
+                Vec3::from_array(x),
+                Vec3::from_array(y),
+                Point2::new(1.0, 1.0),
+                &Extent2d::from_bounds(0.0, 0.0, l, l),
+            ))
+        };
+        let (a, b) = (patch(oa, xa, ya, la), patch(ob, xb, yb, lb));
+        let (da, db) = (
+            Extent2d::from_bounds(0.0, 0.0, la, la),
+            Extent2d::from_bounds(0.0, 0.0, lb, lb),
+        );
+        let tol = 2_785.330_913_332_592_4;
+        let r = do_intersection(k, &a, &da, &b, &db, [false, true], Some(tol), None).unwrap();
+
+        assert_eq!(r.curves_3d.len(), 1, "{r:?}");
+        assert_eq!(r.curve_types, vec![TsectCurveType::Touching]);
+        let c3 = r.curves_3d.first().unwrap();
+        assert!(c3.is_degenerate(k, EFF_ZERO, None).unwrap());
+        let p = c3.evaluate_point(k, 0.0).unwrap();
+        let uv1 = r.surface1_uv_curves[0]
+            .as_ref()
+            .unwrap()
+            .evaluate_point(k, 0.0)
+            .unwrap();
+        let uv2 = r.surface2_uv_curves[0]
+            .as_ref()
+            .unwrap()
+            .evaluate_point(k, 0.0)
+            .unwrap();
+        // A's corner (la, la), on B's edge u = lb, inside B's v range
+        assert_eq!((uv1.x, uv1.y), (la, la));
+        assert_eq!(uv2.x, lb);
+        assert!(uv2.y > 0.0 && uv2.y < lb);
+        // The point is midway between its two surface points, which are its UV
+        // points on A and B; its deviation is their distance, and it lies within
+        // the tolerance of both patches.
+        let on = |o: [f64; 3], x: [f64; 3], y: [f64; 3], uv: Vec3| {
+            Vec3::from_array(o) + Vec3::from_array(x) * uv.x + Vec3::from_array(y) * uv.y
+        };
+        let (pa, pb) = (on(oa, xa, ya, uv1), on(ob, xb, yb, uv2));
+        let dev = *r.deviations.first().unwrap();
+        assert!((dev - pa.distance(pb)).abs() <= 1e-9 * dev);
+        // never closer than the patches' 9.9 separation, and far inside the tolerance
+        assert!(dev > 9.9 && dev < 11.0, "{dev}");
+        assert!(p.distance(pa) <= 0.5 * dev * (1.0 + 1e-9));
+        assert!(p.distance(pb) <= 0.5 * dev * (1.0 + 1e-9));
+        assert!(p.distance(pa) < tol && p.distance(pb) < tol);
     }
 
     #[test]

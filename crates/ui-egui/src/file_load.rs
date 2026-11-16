@@ -84,6 +84,9 @@ pub struct Request {
     /// Insert the file as a mesh whatever its extension says: a PLY goes to `pointcloud.insert`
     /// unless the person chose Insert Mesh for it (then it needs its faces).
     pub mesh: bool,
+    /// Insert the board this file (a zip, or any file in its folder) belongs to: its Gerber and
+    /// Excellon files as one (`file.insert_gerber` with the file as its `set`).
+    pub gerber: bool,
     /// The level the caller's own `param_check` named and the warnings it found before the run:
     /// the reply says both (#9184).
     pub(crate) param_check: Option<(solidcraft_engine::schema::ParamCheck, Vec<String>)>,
@@ -99,6 +102,8 @@ pub struct Request {
     /// The Verify preference added `verify` to the options; unlike a caller's own option it must
     /// not stop an already-open design from being reused. Its check then runs separately.
     pub(crate) auto_verify: bool,
+    /// Open the file with an importer plugin (`file.import`) even when SolidCraft reads it too.
+    pub plugin_import: bool,
 }
 
 impl Request {
@@ -113,12 +118,14 @@ impl Request {
             design: None,
             chat_turn: None,
             mesh: false,
+            gerber: false,
             param_check: None,
             note: None,
             serial: crate::operations::serial(),
             tab: None,
             tries: 0,
             auto_verify: false,
+            plugin_import: false,
         }
     }
     /// It adds what it reads to the active design.
@@ -137,7 +144,13 @@ impl Request {
     }
     fn command(&self) -> (&'static str, Value) {
         match &self.kind {
+            Kind::Open if self.plugin_import => ("file.import", self.params()),
             Kind::Open => ("doc.open", self.params()),
+            Kind::Insert if self.gerber => {
+                let mut params = self.options.clone();
+                params.insert("set".into(), json!(self.path));
+                ("file.insert_gerber", Value::Object(params))
+            }
             Kind::Insert if self.mesh || solidcraft_engine::io::is_mesh_path(&self.path) => ("file.insert_mesh", self.params()),
             Kind::Insert if solidcraft_engine::io::is_point_cloud_path(&self.path) => ("pointcloud.insert", self.params()),
             Kind::Insert => (insert_command(&self.path), self.params()),
@@ -458,6 +471,21 @@ pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
     let _ = begin_request(app, request);
 }
 
+/// Insert PCB: insert the board the picked `path` belongs to, beside the window. On the `web`
+/// only a zip is taken: some browsers (iPhone, iPad) don't filter the picker, and one uploaded
+/// file would be read with whatever else was uploaded before.
+pub(crate) fn insert_board(app: &mut SolveApp, path: &str, web: bool) {
+    if web && !solidcraft_engine::io::is_zip_path(path) {
+        app.set_status(solidcraft_ui_text::tr("ui.insert_pcb.web_zip"), true);
+        return;
+    }
+    let mut request = Request::new(path, Kind::Insert);
+    request.gerber = true;
+    if let Err(e) = begin_request(app, request) {
+        app.set_status(e, true);
+    }
+}
+
 /// A STEP, IGES, FreeCAD or Rhino file the app opens or inserts gets a `Group #N` history folder
 /// while "Fold the History bar into groups" is on, and none while it is off (#8885), unless the
 /// caller chose (`folder`).
@@ -470,7 +498,7 @@ pub(crate) fn step_folder_option(app: &SolveApp, path: &str, options: &mut serde
 /// The preference's `reuse_import` default for an import-backed open only: a native design's
 /// request keeps empty options, so `reuse_open` can still switch to its open tab.
 fn default_reuse_import(app: &SolveApp, request: &mut Request) {
-    if request.kind == Kind::Open && solidcraft_engine::io::is_step_path(&request.path) {
+    if request.kind == Kind::Open && !request.plugin_import && solidcraft_engine::io::is_step_path(&request.path) {
         request.options.entry("reuse_import").or_insert(Value::Bool(app.preferences.reuse_imports));
     }
 }
@@ -489,6 +517,7 @@ pub(crate) fn preferred_options(app: &SolveApp, path: &str) -> serde_json::Map<S
 /// Queue a file operation; on the web (no threads) it runs now.
 pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), String> {
     if request.kind == Kind::Open
+        && !request.plugin_import
         && app.preferences.verify_opened_designs
         && solidcraft_engine::io::is_design_path(&request.path)
         && !request.options.contains_key("verify")
@@ -504,7 +533,7 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
     if app.file_load.idle() && reuse_open(app, &request) {
         return Ok(());
     }
-    if matches!(request.kind, Kind::Open | Kind::Insert) {
+    if matches!(request.kind, Kind::Open | Kind::Insert) && !request.plugin_import {
         // After `reuse_open`: an already open tab is kept whatever the import preferences say,
         // as the folder option is.
         for (k, v) in preferred_options(app, &request.path) {
@@ -520,6 +549,10 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
             return Ok(());
         }
         let r = match &request.kind {
+            Kind::Insert if request.gerber => {
+                let (command, params) = request.command();
+                app.run(command, params)
+            }
             Kind::Insert => {
                 app.insert_path_with(&request.path, &request.options, request.mesh);
                 Ok(Value::Null)
@@ -600,7 +633,7 @@ pub(crate) fn queue(app: &mut SolveApp, mut request: Request) -> Result<(), Stri
 /// Answer each ordinary open separately, including queued requests for the same file.
 /// Validate the caller's scope before looking at existing sessions or resolving paths.
 fn reuse_open(app: &mut SolveApp, request: &Request) -> bool {
-    if request.kind != Kind::Open {
+    if request.kind != Kind::Open || request.plugin_import {
         return false;
     }
     let reused = solidcraft_engine::io::vfs::scoped(request.scope.clone(), || {
@@ -648,7 +681,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         return Some(req);
     };
     let kind = match id {
-        "doc.open" => Kind::Open,
+        "doc.open" | "file.import" => Kind::Open,
         "file.insert_step" | "file.insert_mesh" | "pointcloud.insert" => Kind::Insert,
         "file.export_view_dxf" => Kind::ExportDxf,
         "pointcloud.reload" => Kind::ReloadCloud,
@@ -703,12 +736,14 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         design: None,
         chat_turn: req.chat_turn,
         mesh: false,
+        gerber: false,
         param_check,
         note: None,
         serial: crate::operations::serial(),
         tab: None,
         tries: 0,
         auto_verify: false,
+        plugin_import: id == "file.import",
     };
     let _ = begin_request(app, request);
     None
@@ -817,6 +852,10 @@ fn start(app: &mut SolveApp) {
     // evaluated under the user's validation mode.
     scratch.set_command_check(app.session.command_check());
     scratch.set_validation(app.preferences.validation);
+    // A file an importer plugin reads opens with the plugins the user installed and left on.
+    scratch.plugin_state = app.session.plugin_state.clone();
+    scratch.disabled_plugins = app.session.disabled_plugins.clone();
+    scratch.plugin_limits = app.session.plugin_limits;
     crate::print_face_ui::sync(&mut scratch, &app.preferences);
     if insert {
         scratch.selection = app.session.selection.clone();
@@ -1533,6 +1572,7 @@ fn behind(app: &mut SolveApp, mut running: Running) {
             crate::operations::ended(app, &key, Outcome::Done);
             if request.kind == Kind::Open {
                 app.home.add_recent(&request.path);
+                crate::documents::design_opened(app, &request.path);
             }
             // A recovered design takes its entry with it into the background tab: saved there
             // first, so the old entry can go without the design being lost to a crash.
@@ -1724,6 +1764,14 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                     if let Some(note) = &request.note {
                         app.set_status(note.clone(), false);
                     }
+                    // A file an importer plugin opened: what it could not carry over. A program
+                    // that asked has it in the reply instead.
+                    if request.reply.is_none() {
+                        crate::import_report::offer(app, &made.result);
+                    }
+                }
+                if request.kind == Kind::Open {
+                    crate::documents::design_opened(app, &request.path);
                 }
                 request.answer(Ok(made.result));
             }
@@ -2066,6 +2114,58 @@ mod tests {
         assert!(reply.try_recv().is_ok_and(|r| r["ok"] == json!(false)), "the caller hears it failed");
     }
 
+    /// Insert PCB inserts the board the picked file belongs to straight away, beside the window:
+    /// each file's layer is found from what it says, and one undo removes the board (#12797).
+    #[test]
+    fn insert_pcb_inserts_the_picked_files_board_in_one_undo_step() {
+        const OUTLINE: &str = "%FSLAX46Y46*%
+%MOMM*%
+%ADD10C,0.1*%
+D10*
+X0Y0D02*
+X30000000Y0D01*
+X30000000Y20000000D01*
+X0Y20000000D01*
+X0Y0D01*
+M02*
+";
+        const DRILLS: &str = "M48
+METRIC
+T1C3.0
+%
+T1
+X5.0Y5.0
+X25.0Y5.0
+M30
+";
+        let dir = std::env::temp_dir().join(format!("solidcraft-insert-pcb-{}", std::process::id())).join("Picked");
+        let _ = std::fs::create_dir_all(&dir);
+        for (file, text) in [("board.GKO", OUTLINE), ("board.DRL", DRILLS), ("notes.txt", "hello")] {
+            std::fs::write(dir.join(file), text).unwrap();
+        }
+        let picked = dir.join("board.DRL").to_string_lossy().into_owned();
+        let mut h = crate::scenario::Harness::new();
+        h.app.services.pick_open = Some(Box::new(move |_| Box::pin(std::future::ready(Some(picked.clone())))));
+        h.app.start("file.insert_gerber");
+        h.frames(3);
+        assert!(h.app.dialog.is_none(), "no window to fill in");
+        h.settle();
+        let c = h.app.session.doc.components.iter().find(|c| c.name == "Picked").unwrap_or_else(|| panic!("no board: {:?}", h.app.status));
+        assert_eq!(c.properties.get("pcb.outline").map(String::as_str), Some("board.GKO"));
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.settle();
+        assert!(!h.app.session.doc.components.iter().any(|c| c.name == "Picked"), "one undo removes the board");
+        // On the web a file that isn't the board's zip is refused, whatever else was uploaded.
+        let picked = dir.join("board.GKO").to_string_lossy().into_owned();
+        let components = h.app.session.doc.components.len();
+        insert_board(&mut h.app, &picked, true);
+        assert!(h.app.file_load.idle(), "no import starts");
+        h.settle();
+        assert_eq!(h.app.session.doc.components.len(), components);
+        assert!(h.app.status.as_ref().is_some_and(|(s, _, error)| *error && s.contains("zip")), "{:?}", h.app.status);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap_or(&dir));
+    }
+
     #[test]
     fn a_ply_is_a_point_cloud_unless_inserted_as_a_mesh() {
         let mut request = Request::new("scan.ply", Kind::Insert);
@@ -2073,6 +2173,10 @@ mod tests {
         assert_eq!(Request::new("scan.ply", Kind::Open).command().0, "doc.open");
         request.mesh = true;
         assert_eq!(request.command().0, "file.insert_mesh");
+        // Insert PCB: the picked file is the board's set.
+        let mut request = Request::new("board.zip", Kind::Insert);
+        request.gerber = true;
+        assert_eq!(request.command(), ("file.insert_gerber", json!({"set": "board.zip"})));
     }
 
     /// A FreeCAD file comes in as its rebuilt features; with the preference off, as its solids in

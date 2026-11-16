@@ -1,8 +1,9 @@
 //! A round rolls over a smooth far edge of its face, the whole length (not upstream;
 //! solidcore-native): before its trace, a round's solver rolls its ball on the face beyond on
 //! each side where the ball's contact lies past the face's smooth far edge all along the
-//! round's edge. A lone round is decided in closed form, between planes along a straight edge
-//! only ([`crate::blend::fillet_tangent_rollover::tangent_rollover_supports`]); a round of a
+//! round's edge. A lone round is decided in closed form, along a straight edge between faces
+//! each a plane or a circular cylinder parallel to it only
+//! ([`crate::blend::fillet_tangent_rollover::tangent_rollover_supports`]); a round of a
 //! blend of several, such as one of a chain, from its ball's sections along its edge
 //! (`rails_wholly_past`, upstream's unimplemented tangent case of
 //! `SmFilletSolver::ProcessFullRollOver`).
@@ -33,7 +34,7 @@ use crate::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
 use crate::blend::fillet_geom::p1::FilletSolverId;
 use crate::blend::fillet_solver::p1::{
     test_manifold_tangent_rollover, FilletSolver, FilletSurfaceGenerator,
-    FilletSurfaceGeneratorType, OffsetSurfaceSlot,
+    FilletSurfaceGeneratorType, OffsetSurfaceSlot, SeamDomain,
 };
 use crate::blend::fillet_tangent_rollover::{tangent_rollover_supports, Rollover};
 use crate::curve::curve::Curve;
@@ -76,8 +77,9 @@ impl FilletSession<'_> {
     /// offset surface is replaced by one of the same offset (its sign following the faces'
     /// normals across the edge) on the face beyond's surface, owned by that face, in the solver
     /// and in its fillet geometries, so the rail is traced, classified and trimmed on the face it
-    /// lies on. A lone round is decided in closed form, between planes along a straight edge
-    /// only ([`tangent_rollover_supports`]); each round of a blend of several, such as one of a
+    /// lies on. A lone round is decided in closed form, along a straight edge between faces each
+    /// a plane or a circular cylinder parallel to it only ([`tangent_rollover_supports`]); each
+    /// round of a blend of several, such as one of a
     /// chain, from its ball's sections ([`rails_wholly_past`]). A rail that lies past the edge
     /// only partway is left to the rollover recovery after the trace (`ProcessRollOver`).
     ///
@@ -282,7 +284,23 @@ fn sections(
     let mut out: Vec<TsectPnt> = Vec::new();
     for &t in ts {
         k.check_cancelled(OP)?;
-        let Some(section) = ball_section_at(k, target, solver, curve, t, out.last())? else {
+        // on the trace's domain, extended past a closed surface's seam, as on main: a proposal
+        // that fires and is not accepted after the trace is refused (`RailLeavesFace`), not
+        // left to the rollover recovery after the trace, and the acceptance
+        // ([`rail_within_face`]) refuses a rolled rail that comes within the gap of a face
+        // across its face's edges, as one does that ends on such a face; wrapped, the sections
+        // would propose rails rolled across a seam onto the rest of their surface, which the
+        // recovery builds on main
+        let Some(section) = ball_section_at(
+            k,
+            target,
+            solver,
+            curve,
+            t,
+            out.last(),
+            SeamDomain::Extended,
+        )?
+        else {
             return Ok(None);
         };
         if !is_ball_at(k, target, solver, offsets, curve, t, &section)? {
@@ -511,7 +529,16 @@ fn sides_wholly_off(
     let mut previous: Option<TsectPnt> = None;
     for &t in &ts {
         k.check_cancelled(OP)?;
-        let Some(section) = ball_section_at(k, target, solver, &curve, t, previous.as_ref())?
+        // on the trace's domain, as in [`sections`]
+        let Some(section) = ball_section_at(
+            k,
+            target,
+            solver,
+            &curve,
+            t,
+            previous.as_ref(),
+            SeamDomain::Extended,
+        )?
         else {
             return Ok(None);
         };

@@ -36,6 +36,8 @@ pub mod deferred;
 pub mod delete;
 pub mod design_properties;
 pub mod design_tab_prefs;
+pub mod design_view_ui;
+pub mod design_views;
 mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;
@@ -209,6 +211,7 @@ pub(crate) mod edge_detail;
 mod file_load_ui_tests;
 #[cfg(test)]
 mod fillet_spline_handle_tests;
+pub(crate) mod import_report;
 pub mod mouse_gesture;
 use solidcraft_ui_kit::nav_bar;
 pub(crate) mod navigation;
@@ -234,6 +237,7 @@ pub(crate) mod plugin_menu;
 mod plugin_slots;
 pub(crate) mod plugins;
 pub mod point_clouds;
+pub mod policy;
 pub mod prefs;
 pub mod prefs_notice;
 pub use solidcraft_ui_kit::prefs_window;
@@ -337,6 +341,7 @@ mod theme_files_tests;
 use solidcraft_ui_kit::theme_options;
 #[cfg(test)]
 mod thin_extrude_tests;
+pub mod tickets;
 pub mod timeline;
 mod timeline_fold;
 mod timeline_folders;
@@ -357,6 +362,7 @@ pub(crate) mod view_angles;
 pub use solidcraft_ui_kit::view_compass;
 mod view_confirm;
 pub mod view_gizmo;
+mod view_memory;
 pub mod view_pick;
 pub mod viewport;
 mod viewport_details;
@@ -418,10 +424,14 @@ pub struct UiState {
     pub dark: bool,
     /// Selection filter: kinds a click doesn't pick (`vertices`, `edges`, `faces`, `sketch`).
     pub pick_off: Vec<String>,
-    /// A click on a face picks its whole body.
+    /// A click on a face picks its whole body (Modelling; Preferences › Sketch › Click selects).
     pub pick_bodies: bool,
-    /// A face picks its exact component occurrence in Design and Render.
+    /// A face picks its exact component occurrence (Modelling).
     pub pick_components: bool,
+    /// The Render workspace's own Body / Face / Component choice: `"body"`, `"face"` or
+    /// `"component"`. It is kept apart from Modelling's so a Body chosen in Render does not
+    /// leave Modelling picking whole bodies, nor reach the preferences file.
+    pub render_pick: String,
     /// The selection shape (#4376): a drag in the view draws a freehand lasso that takes what is
     /// wholly inside it, instead of the window/crossing rectangle. Off by default.
     pub lasso_select: bool,
@@ -474,6 +484,7 @@ impl Default for UiState {
             pick_off: Vec::new(),
             pick_bodies: false,
             pick_components: false,
+            render_pick: "face".into(),
             lasso_select: false,
             visual_style: 0,
             ground_shadow: true,
@@ -542,6 +553,12 @@ pub struct Services {
     /// Upload a model to EasyPrint (Printables' slicer in the browser) and answer with the address
     /// to open (`easyprint_ui`); None: this host can't, and the menu doesn't offer it.
     pub easyprint_upload: Option<easyprint_ui::Upload>,
+    /// HTTP to the ticket server, for problem reports and My tickets (`tickets`); None: reports
+    /// open a GitHub draft instead.
+    pub tickets_http: Option<tickets::Http>,
+    /// Where the ticket server's sign-in is kept: the system keyring (the browser's storage on
+    /// the web). Never a plain file.
+    pub ticket_secrets: Option<std::sync::Arc<dyn agent_chat::backend::Secrets>>,
 }
 
 /// The view before a sketch opened and the view that faced the sketch then (#7038).
@@ -641,6 +658,8 @@ pub struct SolveApp {
     pub(crate) easyprint: easyprint_ui::State,
     /// Install plugin…: the plugin waiting for the user's answer.
     pub(crate) plugin_install: plugin_install::State,
+    /// What an importer plugin could not carry over from the file it just opened.
+    pub(crate) import_report: Option<import_report::Shown>,
     /// A Save or Save As being written on a worker (see [`save_job`]).
     saving: Option<save_job::Saving>,
     /// A signature check running on a worker (see [`verify_job`]).
@@ -682,10 +701,15 @@ pub struct SolveApp {
     pub messages: messages::Messages,
     /// An editable local issue draft and optional captured app frame.
     pub issue_report: issue_report::ReportState,
+    /// Problem reports on the ticket server: sign-in, sending, the offline queue.
+    pub tickets: tickets::Tickets,
     /// The Crash Reports window.
     pub crashes: crash_ui::CrashUi,
     /// The update check and its window (`update`).
     pub updater: update::Updater,
+    /// What this computer's administrator set (`policy`). The host loads it at start; the default
+    /// is an unmanaged computer.
+    pub policy: policy::Policy,
     /// Safari's steps for installing the web app, while their window is open (`install`).
     pub install_steps: Option<install::Steps>,
     /// Toolbar buttons the user pinned, removed or reordered.
@@ -912,6 +936,27 @@ impl Drop for SolveApp {
 }
 
 impl SolveApp {
+    /// What a click on a face picks now: `"face"`, `"body"` or `"component"`. In the Render
+    /// workspace that is Render's own choice; elsewhere Modelling's.
+    pub(crate) fn pick_mode(&self) -> &'static str {
+        if !render_workspace::active(self) {
+            return self.ui.pick_mode();
+        }
+        match self.ui.render_pick.as_str() {
+            "body" => "body",
+            "component" => "component",
+            _ => "face",
+        }
+    }
+    /// A click on a face picks its whole body ([`SolveApp::pick_mode`]).
+    pub(crate) fn picks_bodies(&self) -> bool {
+        self.pick_mode() == "body"
+    }
+    /// A click on a face picks its component occurrence ([`SolveApp::pick_mode`]).
+    pub(crate) fn picks_components(&self) -> bool {
+        self.pick_mode() == "component"
+    }
+
     /// Publish this frame's tab accent from the open tab, the sketch being edited and the active
     /// tool or dialog, the three values [`theme::publish_tab`] takes.
     pub(crate) fn publish_tab_accent(&self, ctx: &egui::Context) {
@@ -966,6 +1011,7 @@ impl SolveApp {
             slicer_wait: None,
             easyprint: Default::default(),
             plugin_install: Default::default(),
+            import_report: None,
             saving: None,
             verifying: None,
             viewport: viewport::ViewportState::default(),
@@ -989,8 +1035,10 @@ impl SolveApp {
             help: help::HelpState::default(),
             messages: messages::Messages::default(),
             issue_report: issue_report::ReportState::default(),
+            tickets: tickets::Tickets::new(),
             crashes: crash_ui::CrashUi::default(),
             updater: update::Updater::default(),
+            policy: policy::Policy::default(),
             install_steps: None,
             toolbar_custom: toolbar_custom::ToolbarCustom::default(),
             settings_profiles: settings_profiles::Profiles::default(),
@@ -1186,6 +1234,7 @@ impl SolveApp {
     /// says so where the model would be, and the status line says it too.
     pub fn gpu_unavailable(&mut self) {
         self.viewport.gpu_unavailable = true;
+        self.viewport.gpu_preparing = false;
         let text = self.tr("starting.view_unavailable").to_owned();
         self.set_status(text, true);
     }
@@ -1198,6 +1247,7 @@ impl SolveApp {
         }
         let (installed, stats, tess_ready) = solidcraft_viewport_egui::adopt(rs, built.built);
         self.viewport.gpu = Some(installed);
+        self.viewport.gpu_preparing = false;
         self.viewport.tess_ready = tess_ready;
         self.viewport.draw_stats = Some(stats);
         // The device's own limits (what it was created with), not the adapter's: uploads are split
@@ -1540,6 +1590,7 @@ impl SolveApp {
             // `queued`: it waits for the end of the agent's turn.
             Some("component.edit_in_place") => r.and_then(|v| edit_in_place::command_ran(self, &v).map(|queued| with_queued(v, queued))),
             Some("component.finish_edit") => r.and_then(|v| edit_in_place::finish_command(self).map(|queued| with_queued(v, queued))),
+            Some(view) if view.starts_with("tab.view.") => r.and_then(|v| documents::view_command(self, view, v)),
             _ => r,
         };
         if let Ok(v) = &r {
@@ -1687,8 +1738,14 @@ impl SolveApp {
             }
             if id == "select.filter" {
                 let mode = v.get("mode").and_then(Value::as_str);
-                self.ui.pick_bodies = mode == Some("body");
-                self.ui.pick_components = mode == Some("component");
+                // In Render the choice is Render's own: it must not leave Modelling picking whole
+                // bodies once Render is left, nor reach the preferences file.
+                if render_workspace::active(self) {
+                    self.ui.render_pick = mode.unwrap_or("face").to_string();
+                } else {
+                    self.ui.pick_bodies = mode == Some("body");
+                    self.ui.pick_components = mode == Some("component");
+                }
                 self.ui.pick_off.retain(|kind| kind != "faces");
             }
             if id == "view.shots_strip"
@@ -1767,6 +1824,9 @@ impl SolveApp {
                 }
                 if id == "sketch.move" {
                     released_status(self, language, v);
+                }
+                if id == "occurrence.ground" {
+                    unground_joint_status(self, language, v);
                 }
                 if id == "file.new" {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
@@ -1937,10 +1997,18 @@ impl SolveApp {
         }
         // Before the folder pick is cleared: a clicked Browser folder is what Show/Hide acts on.
         // With a menu open, this runs that menu's Show/Hide on what the menu is for.
-        if id == "ui.toggle_visibility" {
+        // Show/Hide (`browser.visibility`) started with nothing to act on, from a 3D mouse button,
+        // the command search or a key bound to it, does the same: it used to run with no
+        // parameters and answer "`visible` must be true or false" (#17912).
+        if matches!(id, "ui.toggle_visibility" | "browser.visibility") {
             if !context_menu::press_shortcut(self, "V") {
                 context_menu::toggle_visibility(self);
             }
+            return;
+        }
+        // Dialog OK runs OK in the open dialog and starts nothing (#17416).
+        if id == "ui.dialog_ok" {
+            dialogs::confirm(self);
             return;
         }
         self.tree.clear_folder_pick();
@@ -2003,6 +2071,31 @@ impl SolveApp {
             }
             for feature_id in selected {
                 if let Err(why) = self.run("timeline.dependents", json!({ "feature": feature_id })) {
+                    self.set_status(why, true);
+                }
+            }
+            return;
+        }
+        // Toggle Driven Dimension and Toggle Radius / Diameter take the dimension to act on as
+        // `constraint`: from a shortcut or the command search that is the selected one, as in the
+        // context menu (#17189). With none selected they say what to pick, where they used to
+        // answer "`constraint` must be a dimension id".
+        if matches!(id, "sketch.toggle_driven" | "sketch.toggle_diameter") {
+            let dimensions: Vec<String> = self
+                .session
+                .selection
+                .iter()
+                .filter_map(|s| match s {
+                    solidcraft_engine::Sel::SketchConstraint { id } => Some(id.clone()),
+                    _ => None,
+                })
+                .collect();
+            if dimensions.is_empty() {
+                self.set_status(self.tr("ui.toggle_dimension_select_first"), false);
+                return;
+            }
+            for constraint in dimensions {
+                if let Err(why) = self.run(id, json!({ "constraint": constraint })) {
                     self.set_status(why, true);
                 }
             }
@@ -2088,6 +2181,8 @@ impl SolveApp {
                 | "view.navigation_bar"
                 | "view.next_tab"
                 | "view.previous_tab"
+                | "tab.view.open"
+                | "tab.view.reopen"
         ) {
             let _ = self.run(id, json!({}));
             return;
@@ -2114,9 +2209,10 @@ impl SolveApp {
             joint_handles::start(self);
             return;
         }
-        // One selected placement moves as a component, the same way as its Browser menu,
-        // retaining the exact instance path and the grounding/rigid-group restrictions.
-        // A selected body, or a component picked in the tree, opens Move/Copy on those bodies.
+        // One selected placement opens Move/Copy on it the same way as its Browser menu (it
+        // moves by its placement), retaining the exact instance path and the grounding and
+        // rigid-group restrictions, and asking nothing about its pending move first. Selected
+        // bodies, or a component picked in the tree, open Move/Copy on those.
         if id == "solid.move"
             && let [solidcraft_engine::Sel::Occurrence { path }] = self.session.selection.as_slice()
         {
@@ -2228,6 +2324,18 @@ impl SolveApp {
             self.pick_open_for(&[ext], move |app, path| {
                 if let Some(path) = path {
                     dialogs_insert_drawing::open(app, &command, path);
+                }
+            });
+            return;
+        }
+        if id == "file.insert_gerber" {
+            // Like Insert STEP: the board's zip, or any file in its folder, is picked and the
+            // board goes in beside the window, each file's layer found from what it says.
+            // On the web only the chosen file is uploaded, not its folder: there the board's zip.
+            let extensions: &[&str] = if cfg!(target_arch = "wasm32") { &["zip"] } else { &solidcraft_engine::io::BOARD_EXTENSIONS };
+            self.pick_open_for(extensions, |app, path| {
+                if let Some(path) = path {
+                    file_load::insert_board(app, &path, cfg!(target_arch = "wasm32"));
                 }
             });
             return;
@@ -2498,6 +2606,9 @@ impl SolveApp {
                     })
                     .take(2)
                     .collect();
+                let _ = self.session.execute("select.clear", &json!({}));
+            }
+            if !self.session.selection.is_empty() && (matches!(t.kind, tools::Kind::Draw(_)) || crate::sketch_tools::is_drawing_tool(id)) {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
             self.tool = Some(t);
@@ -3606,6 +3717,7 @@ impl SolveApp {
             ctx.request_repaint();
         }
         issue_report::tick(self, ctx);
+        tickets::tick(self, ctx);
         self.collect_screenshots(ctx);
         self.issue_screenshots(ctx);
         if self.issue_report.draft.is_none() && self.file_picker.is_none() {
@@ -3799,6 +3911,7 @@ impl SolveApp {
         self.frame_ms = now_ms() - t0;
         frame_watch::end(self);
         render_workspace::displayed::finish(self, ui.ctx());
+        documents::sync_views(self);
         documents::sync_window_title(self, ui.ctx());
     }
 
@@ -3894,6 +4007,7 @@ impl SolveApp {
         delete::show(self, ui.ctx());
         easyprint_ui::show(self, ui.ctx());
         plugin_install::show(self, ui.ctx());
+        import_report::show(self, ui.ctx());
         linked_source::show_copies(self, ui.ctx());
         joint_handles::show_warning(self, ui.ctx());
         shortcut_box::show(self, ui.ctx());
@@ -4074,6 +4188,30 @@ fn released_status(app: &mut SolveApp, language: solidcraft_ui_text::Locale, v: 
     let msg = language.format(id, &[("count", &count), ("names", &names.join(", "))]);
     app.set_status(msg, false);
     app.status_undo = true;
+}
+
+/// Grounding succeeds even when a joint has lost its origin or conflicts with another joint.
+/// Keep every reported issue in Messages without treating an unchanged placement as a failure.
+fn unground_joint_status(app: &mut SolveApp, language: solidcraft_ui_text::Locale, v: &Value) {
+    use i18n::LocaleNames;
+
+    if v.get("grounded").and_then(Value::as_bool) != Some(false) {
+        return;
+    }
+    let Some(id) = v.get("occurrence").and_then(Value::as_u64) else { return };
+    let occurrence = app.session.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.clone()).unwrap_or_else(|| id.to_string());
+    let occurrence = language.given_name(&occurrence);
+    for problem in ["errors", "conflicts"].iter().filter_map(|key| v.get(key).and_then(Value::as_array)).flatten() {
+        let (Some(joint), Some(reason)) = (problem.get("name").and_then(Value::as_str), problem.get("why").and_then(Value::as_str)) else {
+            continue;
+        };
+        let msg = language.format(
+            "joint.unground_issue",
+            &[("occurrence", &occurrence), ("joint", &language.given_name(joint)), ("reason", &language.diagnostic(reason))],
+        );
+        app.session.echo(msg.clone());
+        app.set_status(msg, false);
+    }
 }
 
 /// An edit in place command's result, saying when it waits for the end of the agent's turn.

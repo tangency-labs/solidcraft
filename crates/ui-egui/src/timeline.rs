@@ -599,6 +599,30 @@ pub(crate) fn status_tip(name: &str, ty: &str, error: Option<&str>, warning: Opt
     }
 }
 
+/// A feature's tooltip in the bottom and the left History: its name and type, its error and
+/// warning, then why a rolled-back feature isn't shown, a sketch's state, the time it took and
+/// the edit hint. Both Histories show this one, so the two stay identical (#14027).
+pub(crate) fn feature_tooltip(
+    name: &str,
+    ty: &str,
+    result: Option<&FeatureResult>,
+    rolled: bool,
+    sketch_state: Option<crate::sketch_state::SketchState>,
+) -> StatusTip {
+    // The type as a user reads it, translated, without the programmatic `Feature` suffix: a
+    // user sees "Fillet", not "FilletFeature".
+    let kind = solidcraft_ui_text::tr_label(ty.strip_suffix("Feature").unwrap_or(ty));
+    let mut lines = Vec::new();
+    // Greyed out says only "not shown": say why (#8100).
+    if rolled {
+        lines.push(solidcraft_ui_text::tr("timeline.feature_rolled_back").to_string());
+    }
+    lines.extend(sketch_state.map(|state| state.text()));
+    lines.extend(result.map(|r| format!("{:.1} ms", r.ms)));
+    lines.push(solidcraft_ui_text::tr("timeline.feature_hint").to_string());
+    StatusTip { tail: lines.join("\n"), ..feature_status_tip(name, kind, result) }
+}
+
 /// A feature's mark: an error, else a warning; none while it is suppressed or rolled back, as
 /// it isn't built then.
 pub(crate) fn feature_status(app: &SolveApp, id: u64) -> Option<Status> {
@@ -1241,6 +1265,7 @@ struct BarSteps<'a> {
 }
 
 impl history_bar::Contents for BarSteps<'_> {
+    /// Draws the bar's chips: each feature, and the folded runs, folders, joints and trays around it.
     fn entries(&mut self, s: &mut history_bar::Strip<'_, '_>) {
         let t = Tokens::get();
         let app = &mut *self.app;
@@ -1305,17 +1330,7 @@ impl history_bar::Contents for BarSteps<'_> {
             let sketch_state = matches!(kind, TimelineKind::Sketch).then(|| sketch_states.get(*id)).flatten();
             let res = results.get(&app.session.model, at, *id);
             let rolled = i >= self.marker_view;
-            let tip = || {
-                let mut lines = Vec::new();
-                // Greyed out says only "not shown": say why (#8100).
-                if rolled {
-                    lines.push(solidcraft_ui_text::tr("timeline.feature_rolled_back").to_string());
-                }
-                lines.extend(sketch_state.map(|state| state.text()));
-                lines.extend(res.map(|r| format!("{:.1} ms", r.ms)));
-                lines.push(solidcraft_ui_text::tr("timeline.feature_hint").to_string());
-                StatusTip { tail: lines.join("\n"), ..feature_status_tip(name, ty, res) }
-            };
+            let tip = || feature_tooltip(name, ty, res, rolled, sketch_state);
             let rect = s.step(&history_bar::Step {
                 id: *id,
                 slot: i,

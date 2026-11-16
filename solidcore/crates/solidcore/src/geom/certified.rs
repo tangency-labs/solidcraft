@@ -39,6 +39,18 @@ pub(crate) fn next_up(x: f64) -> f64 {
     }
 }
 
+/// The next double below `x`, using the same MSRV-compatible primitive as
+/// [`next_up`]. Both signed zeros step to the negative minimum subnormal;
+/// negative infinity and NaN (including its sign and payload) are unchanged.
+#[must_use]
+pub(crate) fn next_down(x: f64) -> f64 {
+    if x.is_nan() {
+        x
+    } else {
+        -next_up(-x)
+    }
+}
+
 /// The answer of comparing a certified quantity with a tolerance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
@@ -241,6 +253,32 @@ mod tests {
             assert_eq!(next_up(value).to_bits(), expected.to_bits());
         }
         assert!(next_up(f64::NAN).is_nan());
+    }
+
+    #[test]
+    fn next_down_keeps_signed_zero_subnormals_and_extreme_values() {
+        let tiny = f64::from_bits(1);
+        for (value, expected) in [
+            (0.0, -tiny),
+            (-0.0, -tiny),
+            (tiny, 0.0),
+            (-tiny, -2.0 * tiny),
+            (1.0, 1.0 - f64::EPSILON / 2.0),
+            (-1.0, -1.0 - f64::EPSILON),
+            (
+                f64::MIN_POSITIVE,
+                f64::from_bits(f64::MIN_POSITIVE.to_bits() - 1),
+            ),
+            (-f64::MAX, f64::NEG_INFINITY),
+            (f64::INFINITY, f64::MAX),
+            (f64::NEG_INFINITY, f64::NEG_INFINITY),
+        ] {
+            assert_eq!(next_down(value).to_bits(), expected.to_bits());
+        }
+        // Explicit payloads prove that neither sign nor payload is canonicalized.
+        for bits in [0x7ff8_0000_0000_0042, 0xfff8_0000_0000_0042] {
+            assert_eq!(next_down(f64::from_bits(bits)).to_bits(), bits);
+        }
     }
 
     /// A bound below half an ulp of the value: the rounded sum is the value, but the exact one

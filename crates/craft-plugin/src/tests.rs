@@ -197,3 +197,72 @@ fn capabilities_are_checked_at_load_with_plain_refusals() {
     groups["runtime"]["permissions"] = json!({"command_groups":["File"]});
     assert!(parse_manifest(groups.to_string().as_bytes(), "sample").is_err());
 }
+
+fn importer() -> Value {
+    json!({"id":"sample","name":"Sample","version":"1","capabilities":["formats@0.1"],"runtime":{
+        "module":"sample.wasm","commands":[],"entries":[{"name":"convert","kind":"importer","extensions":["f3d","ipt"]}],
+        "limits":{"fuel":1000,"memory_mib":512,"deadline_ms":300000,"stack_kib":16384},"permissions":{"input_folder":true}
+    }})
+}
+
+#[test]
+fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
+    let runtime = parse(&importer()).unwrap().runtime.unwrap();
+    assert!(runtime.is_importer());
+    assert_eq!(runtime.max_component_bytes(), MAX_IMPORTER_COMPONENT_BYTES);
+    assert_eq!(runtime.importer_for(Path::new("/x/Bracket.F3D")).map(|e| e.name.as_str()), Some("convert"));
+    assert!(runtime.importer_for(Path::new("bracket.step")).is_none());
+    let refused = |change: &dyn Fn(&mut Value), field: &str| {
+        let mut value = importer();
+        change(&mut value);
+        let failure = parse(&value).unwrap_err();
+        assert!(matches!(&failure, HostError::InvalidManifest { field: f, .. } if f.contains(field)), "{field}: {failure}");
+    };
+    refused(&|v| v["capabilities"] = json!(["commands@0.1"]), "capabilities");
+    refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!([]), "extensions");
+    refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!([".f3d"]), "extensions");
+    refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!(["f3d", "f3d"]), "extensions");
+    refused(&|v| v["runtime"]["entries"][0]["effect"] = json!("read"), "effect");
+    refused(&|v| v["runtime"]["entries"].as_array_mut().unwrap().push(json!({"name":"make"})), "runtime.entries");
+    refused(&|v| v["runtime"]["commands"] = json!(["app.make"]), "runtime.commands");
+    refused(&|v| v["runtime"]["limits"]["stack_kib"] = json!(1 << 20), "stack_kib");
+    // An importer may also check its result; a command may not ask to.
+    let mut evaluating = importer();
+    evaluating["capabilities"] = json!(["evaluate@0.1", "formats@0.1"]);
+    assert!(parse(&evaluating).is_ok());
+    // A command claims no extension, reads no input folder and still finishes within 30 s.
+    let command = |change: &dyn Fn(&mut Value), field: &str| {
+        let mut value = manifest();
+        change(&mut value);
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field: f, .. }) if f.contains(field)), "{field}");
+    };
+    command(&|v| v["runtime"]["entries"] = json!([{"name":"make","extensions":["f3d"]}]), "extensions");
+    command(&|v| v["runtime"]["permissions"] = json!({"input_folder":true}), "input_folder");
+    command(&|v| v["capabilities"] = json!(["commands@0.1", "evaluate@0.1"]), "capabilities");
+    command(&|v| v["runtime"]["limits"] = json!({"fuel":1,"memory_mib":1,"deadline_ms":60000}), "deadline_ms");
+}
+
+fn empty_item() -> LossItem {
+    LossItem { severity: LossSeverity::Info, title: String::new(), subject: String::new(), message: String::new(), code: String::new() }
+}
+
+#[test]
+fn a_loss_report_is_bounded_printable_text() {
+    let report: LossReport = serde_json::from_value(json!({"summary":"12 of 14 features","items":[
+        {"severity":"degraded","subject":"Fillet3","message":"kept as geometry"},
+        {"severity":"info","title":"Parts of the file kept as they are","code":"f3d/source.unindexed-records-retained","message":"14 records"}],
+        "details":{"any":"thing"}}))
+    .unwrap();
+    report.validate().unwrap();
+    assert_eq!(report.items[1].title, "Parts of the file kept as they are");
+    let long_title = json!({"items":[{"severity":"info","title":"t".repeat(121),"message":"x"}]});
+    assert!(serde_json::from_value::<LossReport>(long_title).unwrap().validate().is_err());
+    assert!(serde_json::from_value::<LossReport>(json!({"items":[{"severity":"lost","message":"x"}]})).is_err());
+    let control = LossReport { summary: "bad\nline".into(), ..LossReport::default() };
+    assert!(matches!(control.validate(), Err(HostError::InvalidInput { field, .. }) if field == "loss_report.summary"));
+    let empty = LossReport {
+        items: vec![LossItem { severity: LossSeverity::Info, subject: String::new(), message: " ".into(), ..empty_item() }],
+        ..LossReport::default()
+    };
+    assert!(empty.validate().is_err());
+}

@@ -7,7 +7,7 @@
 crates/doc/src/appearance.rs:nearest_face picks the face nearest a point by the display mesh's triangles
 crates/doc/src/eval.rs:blend_edges_on finds a blend's edges on the display mesh
 crates/doc/src/eval.rs:edge_refs turns edge picks into references through the display mesh
-crates/doc/src/eval.rs:eval_feature places features by the display mesh (faces, edges, nearness)
+crates/doc/src/eval.rs:eval_feature_kind places features by the display mesh (faces, edges, nearness)
 crates/doc/src/eval.rs:face_plane finds a sketch's face plane again on a mesh
 crates/doc/src/eval.rs:face_samples takes a point on each face from its mesh triangles
 crates/doc/src/eval.rs:faces_near finds the faces near a point by the display mesh
@@ -26,7 +26,6 @@ crates/doc/src/eval.rs:unrecorded_touches finds touching pieces by a mesh
 crates/doc/src/eval_more.rs:FaceSlice::outline finds the wall an outline runs along by mesh triangles
 crates/doc/src/eval_more.rs:FaceSlice::recesses finds a plate's recesses by mesh triangles
 crates/doc/src/eval_more.rs:body_under picks the body under a plastic feature's point by the display mesh
-crates/doc/src/eval_more.rs:on_sheet_material decides whether a point touches a sheet by the display mesh
 crates/doc/src/eval_more.rs:planar_normal_at finds the planar face through a point by a mesh
 crates/doc/src/eval_more.rs:plastic_eval places plastic features by a mesh
 crates/doc/src/eval_more.rs:rib_tool runs a rib to the body by the display mesh

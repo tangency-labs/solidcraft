@@ -3582,27 +3582,6 @@ impl SheetBody {
         Ok(())
     }
 
-    /// Topology counted by faces and loops: a round hole is one face bounded by two closed circular
-    /// edges (one vertex each), where the sewn solid splits it into arcs. Returns the change to
-    /// the sewn (faces, edges, vertices).
-    pub fn round_hole_correction(&self) -> (i64, i64, i64) {
-        let (mut df, mut de, mut dv) = (0i64, 0i64, 0i64);
-        let Ok(regions) = self.flat_regions() else { return (0, 0, 0) };
-        for h in regions.iter().flat_map(|r| &r.holes) {
-            let arcs: Vec<(Vec2, f64)> =
-                h.segs.iter().filter_map(|s| if let Seg2::Arc { center, radius, .. } = s { Some((*center, *radius)) } else { None }).collect();
-            let n = h.segs.len() as i64;
-            let full =
-                !arcs.is_empty() && arcs.len() == h.segs.len() && arcs.iter().all(|(c, r)| c.dist(arcs[0].0) < 1e-9 && (r - arcs[0].1).abs() < 1e-9);
-            if full && n > 1 {
-                df += 1 - n;
-                de += 2 - 3 * n;
-                dv += 2 - 2 * n;
-            }
-        }
-        (df, de, dv)
-    }
-
     /// Bounding size of the flat pattern (x, y in the flat frame).
     pub fn flat_size(&self) -> Result<(f64, f64)> {
         let size = self.flat_regions()?.iter().fold(Aabb2::EMPTY, |b, r| b.union(&r.outer.polyline(1e-3).bounds())).size();
@@ -7684,7 +7663,6 @@ mod tests {
             // Body measure tessellates curved faces; the exact region area above is the
             // stronger analytic check, while this follows the existing sheet measure budget.
             assert!((volume - (6000.0 - std::f64::consts::PI * 25.0) * 2.5).abs() < 0.1, "{volume}");
-            assert_eq!(s.round_hole_correction(), (-1, -4, -2));
         }
     }
 

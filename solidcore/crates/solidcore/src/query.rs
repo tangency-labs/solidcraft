@@ -8,6 +8,7 @@ pub mod api_queries;
 pub mod brep;
 pub mod contact;
 pub mod continuity;
+pub mod curve;
 pub mod curve_surface_gap;
 pub mod deviation;
 pub mod distance_bound;
@@ -23,5 +24,6 @@ pub mod poly;
 pub mod poly_properties;
 pub mod tangent_edge;
 pub mod tess;
+pub mod vertex_meet;
 
-pub use face_surface::face_surface_intersect;
+pub use face_surface::{face_surface_feet, face_surface_intersect, SurfaceFoot};

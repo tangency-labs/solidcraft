@@ -308,7 +308,11 @@ definition, rebuilds the span's Hermite rows H, bounds |B − H| on the net's pi
 and |H − S| by `gn_certify_span`, and refuses the net where the sum with one floor passes ε, where
 a piece runs across a station, or where a foot crosses a support's knot line between two stations.
 `recertify_faces` does this for every blend face of a body, as a body rebuilt from a record must be
-before its faces are operands.
+before its faces are operands. A kernel remembers each re-certification it finished
+(`Kernel::recertify_memo`, on with `memoize_curve_caches`), keyed on every bit of the blend's
+record and on the kernel's tolerances and fixes: a record read again on that kernel, its blend
+unchanged, gets the answer the proof gave, which is the answer running it again gives. Only a
+finished proof is kept, never a refusal or a cancel.
 
 ### 4.6 Worked example: a patch on a sphere
 
@@ -511,7 +515,8 @@ A reviewer checks each of these on a change that touches a definition, a net or 
    (`PROCEDURAL_BLEND_TYPE`, `ProceduralBlend::read_from_db`) and the serde records of
    `surface::procedural_blend::record` (`ProceduralBlendRecord`, `ExactRoundRecord`,
    `CornerRecord`), every number as stored. `convert::rebuild`, `exact_rebuild` and
-   `corner_rebuild` make the definition exactly and certify the net again before it is an operand.
+   `corner_rebuild` make the definition exactly and certify the net again before it is an operand
+(or take the proof the kernel already finished for the same record, §4.5).
 9. **A record rebuilds bit for bit.** Written, read back and rebuilt, a definition evaluates as the
    one written; evaluation is a pure function of the definition, and the station memo keys a
    definition by its identity (`DefinitionIdentity`), so two threads agree with one bit for bit.
@@ -522,7 +527,18 @@ A reviewer checks each of these on a change that touches a definition, a net or 
     net and knots bit for bit; `Ruled` past the reach of rows whose end weight ratios differ keeps
     the surface and parameters within `Extended::source` (§6.2).
 12. **Bounded work.** Certificates run fixed loop counts (8 Krawczyk steps, levels 0 to 6, budgets
-    on cells and mirror steps) with no recursion, and poll the kernel's cancel token.
+    on cells and mirror steps) with no recursion, and poll the kernel's cancel token. The Gⁿ
+    section's certificate (`fillet_section::section`) halves at most 3 spans per first span (two
+    full levels of halving; first spans are the solver's stations and the knot-line crossings)
+    plus 128 (`GN_HALVINGS_PER_SPAN`, `GN_HALVING_BUDGET`). A round of halvings that would pass
+    that budget, or a certificate past the fork's 4096 stations, is refused as not certified
+    (`BlendFailure::NotCertified`). It names no size: invariant 3 names one only where the
+    cause's geometry gives it. The budget counts spans, so a model scaled with its tolerance,
+    which makes the same spans, gets the same budget. With the tolerance held, the solver placed
+    more first spans on larger copies of the tightest measured rounds, and the budget grew with
+    them. A budget predicted from each span's own bound is not enough: a round whose ball's
+    offset tube nearly collapses converges at its bounds' h⁴ rate once its spans are proved, so a
+    convergence budget allows its whole cost.
 
 ## 8. If you're stuck
 
