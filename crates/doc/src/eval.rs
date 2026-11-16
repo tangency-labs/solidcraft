@@ -823,6 +823,11 @@ impl ModelState {
         self.kept_separate.get(&feature).copied()
     }
 
+    /// The sources (indices into its `bodies`) body Pattern `feature` could not copy and left out.
+    pub fn pattern_left_out(&self, feature: u64) -> &[usize] {
+        self.pattern_left_out.get(&feature).map_or(&[], Vec::as_slice)
+    }
+
     /// Each edge fillet `feature` tapered (a point on it) with the radius spline it was given.
     pub fn tapered(&self, feature: u64) -> Option<&[(Vec3, kernel::Taper)]> {
         self.tapered.get(&feature).map(Vec::as_slice)
@@ -928,6 +933,10 @@ pub struct ModelState {
     /// How the pieces a join split off into bodies of their own touched the others (by feature
     /// id), for its notice.
     kept_separate: BTreeMap<u64, KeptSeparate>,
+    /// The sources (indices into its `bodies`) each body Pattern could not copy and left out (by
+    /// feature id), so the session keeps the names stored for their copies in their places
+    /// ([`crate::Feature::pattern_pins`]).
+    pattern_left_out: BTreeMap<u64, Vec<usize>>,
     /// For a feature saved before format 14 that split a body, a digest of the later features'
     /// picks its pieces were named by (by feature id, see [`crate::lineage::order_legacy_lumps`]):
     /// the state stands for the feature only while those picks are the same.
@@ -2569,6 +2578,8 @@ struct Change {
     tapered: Option<Vec<(Vec3, kernel::Taper)>>,
     /// A join's touching pieces it kept as bodies of their own.
     kept_separate: Option<KeptSeparate>,
+    /// A body Pattern's sources it left out.
+    pattern_left_out: Option<Vec<usize>>,
     /// Where the feature found its named faces.
     named_faces: Option<Vec<Vec3>>,
 }
@@ -2616,6 +2627,7 @@ impl ModelState {
             && others_same(&self.fitted, &before.fitted, feature)
             && self.tapered.keys().filter(|k| **k != feature).eq(before.tapered.keys().filter(|k| **k != feature))
             && others_same(&self.kept_separate, &before.kept_separate, feature)
+            && others_same(&self.pattern_left_out, &before.pattern_left_out, feature)
             && others_same(&self.named_faces, &before.named_faces, feature)
             && serde_json::to_string(&self.threads).ok() == serde_json::to_string(&before.threads).ok();
         if !same_rest {
@@ -2647,6 +2659,7 @@ impl ModelState {
             fitted: self.fitted.get(&feature).cloned(),
             tapered: self.tapered.get(&feature).cloned(),
             kept_separate: self.kept_separate.get(&feature).copied(),
+            pattern_left_out: self.pattern_left_out.get(&feature).cloned(),
             named_faces: self.named_faces.get(&feature).cloned(),
         })
     }
@@ -2683,6 +2696,10 @@ impl ModelState {
         next.kept_separate.remove(&feature);
         if let Some(k) = change.kept_separate {
             next.kept_separate.insert(feature, k);
+        }
+        next.pattern_left_out.remove(&feature);
+        if let Some(l) = &change.pattern_left_out {
+            next.pattern_left_out.insert(feature, l.clone());
         }
         next.named_faces.remove(&feature);
         if let Some(p) = &change.named_faces {
@@ -4355,7 +4372,7 @@ pub(crate) fn new_name(state: &mut ModelState, f: &Feature, k: usize) -> String 
 /// and number, and a new copy has none (#12114). Names that don't split evenly (stored before
 /// every copy was named), and names of a design saved before then (`in_order`, see
 /// `Feature::pattern_names_in_order`), are read in the order the copies are made.
-fn pattern_name_slot(stored: usize, sources: usize, copies: usize, s: usize, k: usize, in_order: bool) -> Option<usize> {
+pub(crate) fn pattern_name_slot(stored: usize, sources: usize, copies: usize, s: usize, k: usize, in_order: bool) -> Option<usize> {
     if !in_order && sources > 1 && stored > 0 && stored.is_multiple_of(sources) {
         let per = stored / sources;
         return (k < per).then(|| s.saturating_mul(per).saturating_add(k));
@@ -11078,12 +11095,20 @@ fn eval_feature_kind(
             // with a warning: the others are still copied, and only a pattern that copies none
             // fails.
             let mut skipped = Vec::new();
+            let mut left_out = Vec::new();
             let mut first_error = None;
             for (s, n) in bodies.iter().enumerate() {
                 if let Err(e) = pattern_body(doc, f, st, &mats, bodies.len(), s, n, placements.get(s).map(Vec::as_slice)) {
                     skipped.push(n.to_string());
+                    left_out.push(s);
                     first_error.get_or_insert(e);
                 }
+            }
+            // Kept so the names stored for the left-out copies stay theirs when the session pins
+            // the names the copies have now (`Feature::pattern_pins`).
+            st.pattern_left_out.remove(&f.id);
+            if !left_out.is_empty() {
+                st.pattern_left_out.insert(f.id, left_out);
             }
             match first_error {
                 Some(e) if skipped.len() == bodies.len() => Err(e),
