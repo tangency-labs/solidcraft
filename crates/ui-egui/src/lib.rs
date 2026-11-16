@@ -211,6 +211,7 @@ pub(crate) mod edge_detail;
 mod file_load_ui_tests;
 #[cfg(test)]
 mod fillet_spline_handle_tests;
+pub(crate) mod import_report;
 pub mod mouse_gesture;
 use solidcraft_ui_kit::nav_bar;
 pub(crate) mod navigation;
@@ -657,6 +658,8 @@ pub struct SolveApp {
     pub(crate) easyprint: easyprint_ui::State,
     /// Install plugin…: the plugin waiting for the user's answer.
     pub(crate) plugin_install: plugin_install::State,
+    /// What an importer plugin could not carry over from the file it just opened.
+    pub(crate) import_report: Option<import_report::Shown>,
     /// A Save or Save As being written on a worker (see [`save_job`]).
     saving: Option<save_job::Saving>,
     /// A signature check running on a worker (see [`verify_job`]).
@@ -1008,6 +1011,7 @@ impl SolveApp {
             slicer_wait: None,
             easyprint: Default::default(),
             plugin_install: Default::default(),
+            import_report: None,
             saving: None,
             verifying: None,
             viewport: viewport::ViewportState::default(),
@@ -4000,6 +4004,7 @@ impl SolveApp {
         delete::show(self, ui.ctx());
         easyprint_ui::show(self, ui.ctx());
         plugin_install::show(self, ui.ctx());
+        import_report::show(self, ui.ctx());
         linked_source::show_copies(self, ui.ctx());
         joint_handles::show_warning(self, ui.ctx());
         shortcut_box::show(self, ui.ctx());

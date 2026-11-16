@@ -2504,3 +2504,25 @@ fn hostile_params_and_stale_selections_never_fail_badly() {
         assert!(s.execute("selection.get", &v).is_ok(), "{v}");
     }
 }
+
+/// A feature's or a folder's name is 1…128 characters, as the refusal says, not 128 bytes of its
+/// UTF-8: a hundred `ł` (200 bytes) is taken, 129 characters are not.
+#[test]
+fn feature_and_folder_names_count_characters_not_bytes() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"}));
+    let base = s.doc.find_feature("Base").unwrap().id;
+    let group = run(&mut s, "timeline.group", json!({"name": "Housing", "features": [base]}))["group"].as_u64().unwrap();
+    let long = "ł".repeat(100);
+    run(&mut s, "timeline.rename", json!({"feature": base, "name": long}));
+    assert_eq!(s.doc.features.iter().find(|f| f.id == base).map(|f| f.name.as_str()), Some(long.as_str()));
+    run(&mut s, "timeline.rename_group", json!({"group": group, "name": long}));
+    assert_eq!(s.doc.timeline_groups[0].name, long);
+    let too_long = "ł".repeat(129);
+    for (command, params) in
+        [("timeline.rename", json!({"feature": base, "name": too_long})), ("timeline.rename_group", json!({"group": group, "name": too_long}))]
+    {
+        let error = s.execute(command, &params).unwrap_err().to_string();
+        assert!(error.contains("1…128 characters"), "{command}: {error}");
+    }
+}

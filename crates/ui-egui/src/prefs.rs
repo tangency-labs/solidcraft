@@ -1245,6 +1245,10 @@ preference_settings! {
     profile_operations: bool = false, PAGE_GRAPHICS => check_tr("prefs.profile_operations");
     /// With the frame rate: a frame-time graph, a histogram and what the GPU drew (#2548).
     frame_rate_details: bool = false, PAGE_GRAPHICS;
+    /// While the Browser has the keyboard (the last click was on one of its rows), Up/Down move
+    /// the selection, Left/Right fold or unfold, and the arrows do not turn the view (#17931).
+    /// Off: the arrows always turn the view, as before.
+    browser_arrow_keys: bool = true, PAGE_NAVIGATION => check_tr("prefs.browser_arrow_keys");
     /// Draw a wider rim under finished sketch curves to improve contrast on shaded faces.
     sketch_halo: bool = false, PAGE_GRAPHICS => check("Halo under sketch curves");
     /// How joints look in the viewport: 0 the ring and axis drawn before badges, or a badge with

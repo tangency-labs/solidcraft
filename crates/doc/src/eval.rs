@@ -605,6 +605,39 @@ fn removed_note(gone: &[Vec3]) -> String {
     }
 }
 
+/// A blend's picks (per body index, the picks on that body) without those that take a smooth
+/// edge (its faces meet tangentially: a seam or split edge, easy to take with a window pick),
+/// each left out named in `notes`, and without a body left with none, when a pick on any body
+/// remains; else all of them, for the blend to refuse (a single pick, or only smooth edges:
+/// #17919).
+fn without_smooth(st: &ModelState, groups: Vec<(usize, Vec<Vec3>)>, notes: &mut Vec<String>) -> Result<Vec<(usize, Vec<Vec3>)>> {
+    if groups.iter().map(|(_, picks)| picks.len()).sum::<usize>() < 2 {
+        return Ok(groups);
+    }
+    let mut smooth = Vec::with_capacity(groups.len());
+    for (ti, picks) in &groups {
+        let mb = st.bodies.get(*ti).ok_or_else(|| DocError::Invalid("body".into()))?;
+        smooth.push(kernel::smooth_picks(&mb.body, picks)?);
+    }
+    if smooth.iter().flatten().all(|s| *s) || !smooth.iter().flatten().any(|s| *s) {
+        return Ok(groups);
+    }
+    let mut at = Vec::new();
+    let mut kept = Vec::with_capacity(groups.len());
+    for ((ti, picks), smooth) in groups.into_iter().zip(smooth) {
+        let (skipped, rest): (Vec<_>, Vec<_>) = picks.into_iter().zip(smooth).partition(|(_, s)| *s);
+        at.extend(skipped.iter().map(|(p, _)| format!("({}, {}, {})", show_mm(p.x), show_mm(p.y), show_mm(p.z))));
+        if !rest.is_empty() {
+            kept.push((ti, rest.into_iter().map(|(p, _)| p).collect()));
+        }
+    }
+    notes.push(match at.as_slice() {
+        [one] => format!("1 edge skipped: its faces meet tangentially, so there is nothing to blend (the edge at {one})"),
+        _ => format!("{} edges skipped: their faces meet tangentially, so there is nothing to blend (the edges at {})", at.len(), at.join(", ")),
+    });
+    Ok(kept)
+}
+
 thread_local! {
     /// Current feature evaluation validation mode (`EachStep`, `EachFeature`, or `Off`).
     static EVAL_VALIDATION: std::cell::Cell<kernel::Validation> = const { std::cell::Cell::new(kernel::Validation::EachFeature) };
@@ -10853,16 +10886,20 @@ fn eval_feature_kind(
                 FeatureKind::Chamfer { tangent_chain, .. } => *tangent_chain,
                 _ => false,
             };
-            let mut blended = Vec::new();
+            let mut picks = Vec::with_capacity(groups.len());
             for (ti, idx) in &groups {
                 let Some(mb) = st.bodies.get(*ti) else { return Err(DocError::Invalid("body".into())) };
                 let mut w = None;
-                let edges = blend_edges_on(mb, f, edges, idx, &mut w)?;
-                let picked = edges.len();
-                let edges = if chain { kernel::tangent_chain(&mb.body, &edges)? } else { edges };
+                picks.push((*ti, blend_edges_on(mb, f, edges, idx, &mut w)?));
                 if let Some(w) = w {
                     notes.push(w);
                 }
+            }
+            let mut blended = Vec::new();
+            for (ti, edges) in without_smooth(st, picks, &mut notes)? {
+                let Some(mb) = st.bodies.get(ti) else { return Err(DocError::Invalid("body".into())) };
+                let picked = edges.len();
+                let edges = if chain { kernel::tangent_chain(&mb.body, &edges)? } else { edges };
                 let mut note = None;
                 let propagated = edges.len() > picked;
                 let (nb, used, tapered) =
@@ -10876,7 +10913,7 @@ fn eval_feature_kind(
                 // A pattern repeats each edge at a moved copy of a point on it: the edge's middle,
                 // never the pick, which at a vertex two edges share finds either on a copy (#16934).
                 found.extend(kernel::blend_edge_middles(&mb.body, &edges)?);
-                blended.push((*ti, nb));
+                blended.push((ti, nb));
             }
             if !notes.is_empty() {
                 *warning = Some(notes.join("; "));
@@ -11333,12 +11370,18 @@ fn mesh_bodies(meshes: &[crate::MeshData]) -> Result<Vec<(String, Body)>> {
 
 /// The names an Import feature gives the file's bodies, added after the bodies of `st`, in the
 /// file's order: `None` for a body it skips (a later instance of a repeated part). `body_names`
-/// are the feature's stored names (by index), else the file's own.
+/// are the feature's stored names (by index), else the file's own; the ones past the file's
+/// bodies are kept for solids the reader left out.
 pub fn import_body_names(st: &ModelState, body_names: &[String], imp: &kernel::StepImport, skip: &[u64]) -> Vec<Option<String>> {
     let skip: std::collections::HashSet<u64> = skip.iter().copied().collect();
     // Files from board and assembly tools give thousands of bodies the same name: name them
     // from a set, not by searching the bodies for every candidate (cubic).
     let mut names = BodyNames::new(st);
+    // Names kept after the file's bodies belong to solids this reader leaves out (#16857): no
+    // other body takes them.
+    for kept in body_names.iter().skip(imp.bodies.len()).map(|n| n.trim()).filter(|n| !n.is_empty()) {
+        names.taken.insert(kept.to_string());
+    }
     imp.bodies
         .iter()
         .enumerate()
@@ -12576,6 +12619,79 @@ mod chain_tests {
         let (off, faces) = build(false);
         assert_eq!(off, None);
         assert_eq!(faces, Some(8));
+    }
+
+    /// A 40 × 16 × 10 plate ending in a half cylinder of radius 8: its sides run into the
+    /// cylinder's wall tangentially, along smooth edges such as the one at x 40, y 0. A fillet of
+    /// the back top edge and that smooth edge rounds the back edge and says it skipped the
+    /// smooth one (#17919): 6400 + 320π − (1 − π/4)·16 mm³. Beside it a 10 mm cube, a body of its
+    /// own: a fillet of a cube edge and the plate's smooth edge rounds the cube edge and leaves
+    /// the plate as it was (the plate's picks, all smooth, are skipped, not refused). The smooth
+    /// edge alone is refused.
+    #[test]
+    fn a_smooth_edge_among_the_picks_is_skipped_with_a_note() {
+        use std::f64::consts::{FRAC_PI_4, PI};
+        let build = |edges: &[Vec3]| {
+            let mut doc = Document::new("T");
+            let plate = FeatureKind::Box {
+                corner: crate::point_expr(Vec3::ZERO),
+                length: "40".into(),
+                width: "16".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            };
+            doc.add_feature(plate, None).unwrap();
+            let end = FeatureKind::Cylinder {
+                base: crate::point_expr(Vec3::new(40.0, 8.0, 0.0)),
+                axis: crate::Dir(Vec3::Z),
+                radius: "8".into(),
+                height: "10".into(),
+                operation: Operation::Join,
+                references: Vec::new(),
+            };
+            doc.add_feature(end, None).unwrap();
+            let cube = FeatureKind::Box {
+                corner: crate::point_expr(Vec3::new(100.0, 0.0, 0.0)),
+                length: "10".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            };
+            doc.add_feature(cube, None).unwrap();
+            let mut round = fillet(Vec3::ZERO, "1", true);
+            if let FeatureKind::Fillet { edges: e, .. } = &mut round {
+                *e = edges.iter().map(|p| crate::Position(*p)).collect();
+            }
+            let last = doc.add_feature(round, None).unwrap();
+            let mut m = Model::new();
+            m.evaluate(&doc);
+            let r = m.result(last).cloned();
+            let volumes: Vec<f64> = m.state().bodies.iter().map(|b| kernel::measure(&b.body).unwrap().volume).collect();
+            (r, volumes)
+        };
+        let (plate, cube) = (6400.0 + 320.0 * PI, 1000.0);
+        // A round of r 1 along an edge of length l takes (1 − π/4)·l mm³.
+        let round = |l: f64| (1.0 - FRAC_PI_4) * l;
+        for (picks, expected) in [
+            ([Vec3::new(0.0, 8.0, 10.0), Vec3::new(40.0, 0.0, 5.0)], [plate - round(16.0), cube]),
+            ([Vec3::new(105.0, 0.0, 10.0), Vec3::new(40.0, 0.0, 5.0)], [plate, cube - round(10.0)]),
+        ] {
+            let (r, volumes) = build(&picks);
+            let r = r.expect("a result");
+            assert_eq!(r.error, None, "{picks:?}");
+            let warning = r.warning.unwrap_or_default();
+            assert!(warning.contains("1 edge skipped: its faces meet tangentially") && warning.contains("(40, 0, 5)"), "{warning}");
+            assert_eq!(volumes.len(), 2);
+            for (v, e) in volumes.iter().zip(expected) {
+                // Far tighter than the 2.1 mm³ the smaller round takes away.
+                assert!((v - e).abs() < 1e-6 * e, "{picks:?}: {volumes:?} vs {expected:?}");
+            }
+        }
+        let (alone, _) = build(&[Vec3::new(40.0, 0.0, 5.0)]);
+        let error = alone.and_then(|r| r.error).unwrap_or_default();
+        assert!(error.contains("is smooth"), "{error}");
     }
 }
 

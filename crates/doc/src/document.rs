@@ -3379,10 +3379,13 @@ impl Feature {
 
     /// Keep `made`, the names the feature's bodies have now (in the order it builds them), as
     /// its stored names, so they stay as they are whatever comes and goes before it. An Import's
-    /// skipped file bodies keep the names stored for them.
+    /// skipped file bodies keep the names stored for them, and so do the solids its reader left
+    /// out, whose names it keeps after its bodies (#16857).
     pub fn pin_body_names(&mut self, made: &[String]) {
         let slots = self.body_name_slots(made.len());
-        self.body_names.resize(slots.last().map_or(0, |s| s + 1), String::new());
+        let len = slots.last().map_or(0, |s| s + 1);
+        let len = if matches!(self.kind, FeatureKind::Import { .. }) { len.max(self.body_names.len()) } else { len };
+        self.body_names.resize(len, String::new());
         for (slot, name) in slots.iter().zip(made) {
             if let Some(stored) = self.body_names.get_mut(*slot) {
                 stored.clone_from(name);

@@ -22,15 +22,14 @@
 //! Deviations: the fork's `GetOwner() != NULL` checks have no counterpart (curves live in
 //! the owner's store behind handles, none of them owned by an edge yet); replaced curves
 //! stay in that store, as the curves `ProtoTopologyManager::proto_edge_split` replaces do.
-//! WR-452 (trim, always on; upstream has no trim) and WR-453 (extend, opt-in,
-//! `Kernel::fixes.imprint_extends_edge_to_proto_vertex`); both carry the fork's
+//! WR-452 (trim) and WR-453 (extend) are always on (upstream has neither; the WR-453
+//! flag `imprint_extends_edge_to_proto_vertex` was retired by #14246); both carry the fork's
 //! correction ffaf4e8 (WR-498, #1480, #470): an end goes to its proto vertex's position
 //! only when the proto vertex is one vertex in each B-rep.
 //! The fork's `sm_CreateExactlyExtendedCurve` (a8caccd) continues any `SmBSplineCurve`
 //! kind and makes the analytic ones plain B-splines; `extended_curve` continues a plain
 //! B-spline only. Its correction bec8a0b (WR-601) continues a line, circle or ellipse as
-//! that kind and no other analytic kind, so with `imprint_extends_edge_to_proto_vertex` on
-//! the port is the fork at bec8a0b.
+//! that kind and no other analytic kind, so the port is the fork at bec8a0b.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-safe tests
 
@@ -59,7 +58,7 @@ const ANALYTIC_TOL_SCALE: f64 = 100.0;
 impl<O: ClassObject> ProtoTopologyManager<O> {
     /// The block at the top of the fork's `SmEdgeDefinition::Imprint`: for each end of the
     /// definition's interval whose curve point is off its proto vertex, continue the
-    /// curves to the vertex (`imprint_extends_edge_to_proto_vertex`) or else move the end
+    /// curves to the vertex (WR-453) or else move the end
     /// to the curve's point nearest the vertex (WR-452).
     /// Nothing changes for a closed proto edge or where no check passes.
     ///
@@ -131,9 +130,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             if one_vertex && self.move_end_to_pole(k, brep, ed, at_end, pv_pos, gap, pv_tol)? {
                 continue;
             }
-            if k.fixes.imprint_extends_edge_to_proto_vertex
-                && self.extend_end_to_proto_vertex(k, brep, ed, at_end, pv_pos, end_pt, gap)?
-            {
+            if self.extend_end_to_proto_vertex(k, brep, ed, at_end, pv_pos, end_pt, gap)? {
                 continue;
             }
             self.trim_end_to_proto_vertex(k, brep, ed, at_end, pv_pos, gap)?;
