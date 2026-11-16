@@ -1111,32 +1111,9 @@ impl OffsetExecutive {
             // FindAndSetInfiniteRegion when >1 region (editing temporarily false),
             // refresh regions, set void flags by infinite-region identity, then
             // transfer result ownership and clear the executive temporary.
-            // WR-455 (#855; tangency-labs/smlib@601d804): first one pass at the body's
-            // tolerance. Upstream's `StitchIntoSolid` doubles its tolerance until no lamina
-            // edge is left, but the lamina edges a merge leaves are mostly the rims of the
-            // cut-off pieces `MakeManifold` removes next; escalating, it welds two of them
-            // into one edge of a far larger tolerance (a vertex whose tolerance no
-            // clearance excuses). (SER: a failure propagates.)
-            let mut callback = DefaultStitchCallback::new();
-            let mut one_pass = Stitch::new(&mut callback, result.tolerance(), true, false);
-            one_pass.fast_edge_compare = true;
-            one_pass.split_edges_with_vertices = false;
-            one_pass.making_manifold_solid = true;
-            one_pass.do_stitching(kernel, &mut result, None, None, MinGapRequest::default())?;
-            // Only when the offset is to be a solid (an offset solid is asked for, or the
-            // body is one) and that pass closes no region at all would `MakeManifold`
-            // keep nothing: then the body's own seams are open (a sheet thickened by a
-            // few times the body's tolerance), and the stitch widens as upstream's does.
-            // An offset sheet is never widened: welding its lamina edges at up to a
-            // 200th of its size could close its slots.
-            let infinite = result.infinite_region();
-            let closes_a_region = bp1::regions(&result, None)?
-                .into_iter()
-                .any(|region| infinite.is_some_and(|outside| region != outside));
+            // WR-455 (#855; tangency-labs/smlib@601d804): [`stitch_merged_offset`].
             let to_be_solid = self.create_offset_solid() || brep_is_manifold_solid(original)?;
-            if to_be_solid && !closes_a_region {
-                crate::error::ignore_status(stitch::stitch_into_solid(kernel, &mut result))?;
-            }
+            stitch_merged_offset(kernel, &mut result, to_be_solid)?;
             // Opt-in (WR-667; tangency-labs/smlib@37af643): an inset keeps the regions
             // that are cavity, not every finite region (upstream's TODO here: "we will
             // need to select regions to keep"). Where the body is no thicker than the
@@ -2181,6 +2158,80 @@ fn shell_difference_with(
         )),
         Err(error) => Err(error),
     }
+}
+
+/// The merged offset's protective stitch (WR-455, #855; tangency-labs/smlib@601d804):
+/// one pass at the body's tolerance, then upstream's `StitchIntoSolid`, which doubles its
+/// tolerance up to a 200th of the body's size, only where widening completes the solid.
+///
+/// The lamina edges a merge leaves are mostly the rims of cut-off pieces, which
+/// `MakeManifold` deletes next (it deletes every face whose two sides lie in one region);
+/// widened over them, the stitch welds two rims into one edge of a far larger tolerance
+/// (a vertex whose tolerance no clearance excuses). But a body's own seams can also be
+/// open at its tolerance (a sheet thickened by a few times it, or a gap only widening
+/// closes), and then the one pass alone loses the body. So when the offset is to be a
+/// solid and the pass leaves it not closed and manifold: if the pass closes no finite
+/// region (nothing would survive `MakeManifold`), the stitch widens; otherwise both are
+/// tried: the widened
+/// stitch is kept only when what `MakeManifold` would leave of it is closed and manifold
+/// with more faces than it would leave of the one pass (or what it leaves of the one pass
+/// is not closed and manifold); otherwise the body goes back to the one pass. An offset sheet is never
+/// widened: welding its lamina edges at up to a 200th of its size could close its slots.
+///
+/// # Errors
+///
+/// Those of the stitch passes (SER), the snapshot and the topology queries; the widening
+/// stitch's status is ignored, as upstream's.
+pub(crate) fn stitch_merged_offset(
+    kernel: &mut Kernel,
+    result: &mut Brep,
+    to_be_solid: bool,
+) -> Result<()> {
+    let mut callback = DefaultStitchCallback::new();
+    let mut one_pass = Stitch::new(&mut callback, result.tolerance(), true, false);
+    one_pass.fast_edge_compare = true;
+    one_pass.split_edges_with_vertices = false;
+    one_pass.making_manifold_solid = true;
+    one_pass.do_stitching(kernel, result, None, None, MinGapRequest::default())?;
+    if !to_be_solid || brep_is_closed_manifold(result)? {
+        return Ok(());
+    }
+    let infinite = result.infinite_region();
+    let closes_a_region = bp1::regions(result, None)?
+        .into_iter()
+        .any(|region| infinite.is_some_and(|outside| region != outside));
+    if !closes_a_region {
+        // nothing would survive `MakeManifold`: the body's own seams are open
+        return crate::error::ignore_status(stitch::stitch_into_solid(kernel, result));
+    }
+    let one_pass_keeps = kept_by_make_manifold(kernel, result)?;
+    let saved = result.snapshot()?;
+    crate::error::ignore_status(stitch::stitch_into_solid(kernel, result))?;
+    let widened_keeps = kept_by_make_manifold(kernel, result)?;
+    let widen = match (one_pass_keeps, widened_keeps) {
+        (_, None) => false,
+        (None, Some(_)) => true,
+        (Some(one_pass), Some(widened)) => widened > one_pass,
+    };
+    if !widen {
+        result.restore(saved);
+    }
+    Ok(())
+}
+
+/// The number of faces of what `do_extended_offset` goes on with after `MakeManifold`
+/// (every finite region kept; its ordinary failure leaves the body as it is, as there)
+/// when that is closed and manifold (the offset and shell gates' test), on a scratch
+/// copy; `None` otherwise.
+fn kept_by_make_manifold(kernel: &mut Kernel, b: &Brep) -> Result<Option<usize>> {
+    let mut trial = b.clone_standing_for_self()?;
+    crate::error::ignored(crate::topology::brep::p5::make_manifold(
+        kernel, &mut trial, None, false,
+    ))?;
+    if !brep_is_closed_manifold(&trial)? {
+        return Ok(None);
+    }
+    Ok(Some(bp1::faces(&trial, None)?.len()))
 }
 
 /// `OffsetBrep`'s `SER(SM_ERR)` after a failed `DoSolidOffset`: the status is `SM_ERR`,
@@ -5393,6 +5444,110 @@ mod tests {
             (volume - expected).abs() < 1e-6 * expected,
             "volume {volume}"
         );
+    }
+
+    /// Adds to `b` the six faces of the box `lo..hi`, each a separate face of the infinite
+    /// region over its side's rectangle, its top face raised by `top_gap` above the side
+    /// faces' top edges.
+    fn add_loose_box_faces(k: &mut Kernel, b: &mut Brep, lo: Vec3, hi: Vec3, top_gap: f64) {
+        use crate::math::Point2;
+        use crate::topology::brep::p2::ArenaNotifyState;
+        use crate::topology::brep::p8::{create_face_from_surface, FaceBuildEnv};
+        use crate::topology::brep_cache::{arena_identity, CacheObject};
+        use crate::topology::topology_traverser::Marks;
+        // (origin, x axis, y axis, u range, v range) of each side's plane
+        let x = Vec3::new(1.0, 0.0, 0.0);
+        let y = Vec3::new(0.0, 1.0, 0.0);
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let top = hi.z + top_gap;
+        let sides = [
+            (Vec3::new(0.0, 0.0, lo.z), y, x, (lo.y, hi.y), (lo.x, hi.x)),
+            (Vec3::new(0.0, 0.0, top), x, y, (lo.x, hi.x), (lo.y, hi.y)),
+            (Vec3::new(0.0, lo.y, 0.0), x, z, (lo.x, hi.x), (lo.z, hi.z)),
+            (Vec3::new(0.0, hi.y, 0.0), z, x, (lo.z, hi.z), (lo.x, hi.x)),
+            (Vec3::new(lo.x, 0.0, 0.0), z, y, (lo.z, hi.z), (lo.y, hi.y)),
+            (Vec3::new(hi.x, 0.0, 0.0), y, z, (lo.y, hi.y), (lo.z, hi.z)),
+        ];
+        for (origin, u_axis, v_axis, (u0, u1), (v0, v1)) in sides {
+            let domain = Extent2d::from_bounds(u0, v0, u1, v1);
+            let surface = Surface::from(Plane::new(
+                origin,
+                u_axis,
+                v_axis,
+                Point2::new(1.0, 1.0),
+                &domain,
+            ));
+            let mut state = ArenaNotifyState::new(b);
+            let mut env = state.env(None);
+            let mut marks = Marks::default();
+            let this_face = |face| arena_identity(CacheObject::Face(face));
+            let mut fenv = FaceBuildEnv {
+                env: &mut env,
+                marks: &mut marks,
+                this_face: &this_face,
+            };
+            create_face_from_surface(k, b, Some(surface), &domain, &mut fenv).unwrap();
+        }
+    }
+
+    /// WR-455: a merged offset whose one pass at the body's tolerance closes a small box
+    /// while the main box stays open across a gap (its top raised 3 times the tolerance
+    /// above its walls) that only widening closes. Kept with the one pass alone,
+    /// `MakeManifold` would leave the small box only (volume 1); the widened stitch closes
+    /// both, and `MakeManifold` keeps both: 10 x 10 x (10 + gap) + 1. As a sheet's offset
+    /// (not to be a solid) nothing is widened and the main box stays open.
+    #[test]
+    fn merged_offset_widens_when_only_widening_closes_the_body() {
+        let build = |k: &mut Kernel| {
+            let mut b = crate::topology::brep::p3::new_brep(
+                k,
+                crate::geom::tol::USE_DEFAULT,
+                crate::geom::tol::USE_DEFAULT,
+            )
+            .unwrap();
+            let gap = 3.0 * b.tolerance();
+            add_loose_box_faces(
+                k,
+                &mut b,
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(10.0, 10.0, 10.0),
+                gap,
+            );
+            add_loose_box_faces(
+                k,
+                &mut b,
+                Vec3::new(20.0, 0.0, 0.0),
+                Vec3::new(21.0, 1.0, 1.0),
+                0.0,
+            );
+            (b, gap)
+        };
+        let mut k = Kernel::default();
+        let (mut b, gap) = build(&mut k);
+        stitch_merged_offset(&mut k, &mut b, true).unwrap();
+        crate::topology::brep::p5::make_manifold(&mut k, &mut b, None, false).unwrap();
+        assert!(brep_is_manifold_solid(&b).unwrap());
+        assert_eq!(bp1::faces(&b, None).unwrap().len(), 12);
+        let store = AttributeStore::default();
+        let key_of = |_| ObjectKey(0);
+        let attributes = crate::mass::integrator::properties::PropertyAttributes {
+            store: &store,
+            key_of: &key_of,
+        };
+        let volume =
+            crate::mass::integrator::properties::brep_volume(&k, &mut b, 1e-9, &attributes)
+                .unwrap();
+        let expected = 100.0 * (10.0 + gap) + 1.0;
+        assert!(
+            (volume - expected).abs() <= 1e-9 * expected,
+            "volume {volume} want {expected}"
+        );
+
+        // as a sheet's offset: the one pass only, so the main box stays open
+        let mut k = Kernel::default();
+        let (mut b, _) = build(&mut k);
+        stitch_merged_offset(&mut k, &mut b, false).unwrap();
+        assert!(!brep_is_closed_manifold(&b).unwrap());
     }
 
     /// tangency-labs/solidcore#855: a 40 x 40 x 10 plate with a 4 mm hole at (4.99, 20)
