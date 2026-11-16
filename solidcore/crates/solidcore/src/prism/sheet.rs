@@ -13,12 +13,13 @@ use super::profile::{simple_loops, Loop2, Region2, Seg2};
 use super::read::{planar_pieces, principal, Run};
 use crate::error::{Result, SolidError};
 use crate::eval::Frame;
+use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
 use crate::math::Point2;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::api_queries::{face_get_boundary_loops, get_faces};
 use crate::surface::surface::SurfaceKind;
-use crate::topology::{edge, Brep, VertexId};
+use crate::topology::{edge, Brep, FaceId, VertexId};
 
 const OP: &str = "prism::sheet::sheet_regions";
 const OP_LOOPS: &str = "prism::sheet::region_loops";
@@ -113,6 +114,24 @@ pub fn region_loops(region: &Region2, tol: f64) -> Result<RegionLoops> {
 /// `Unsupported` for a face not on a plane parallel to the frame, an edge not read exactly in
 /// it, a hole held by no piece or not decided; those of the topology walk.
 pub fn sheet_regions(k: &Kernel, b: &Brep, frame: &Frame, tol: f64) -> Result<SheetRegions> {
+    planar_face_regions(k, b, frame, tol, |_, _| Ok(true))
+}
+
+/// As [`sheet_regions`], over the faces of `b` that `keep` keeps: it is asked each face with its
+/// surface's natural unit normal (`None` for a face not on a plane) and keeps it, skips it or
+/// refuses the read. A kept face must be on a plane parallel to the frame, else the read is
+/// refused as in [`sheet_regions`].
+///
+/// # Errors
+///
+/// Those of [`sheet_regions`], and `keep`'s.
+pub(crate) fn planar_face_regions(
+    k: &Kernel,
+    b: &Brep,
+    frame: &Frame,
+    tol: f64,
+    keep: impl Fn(FaceId, Option<Vec3>) -> Result<bool>,
+) -> Result<SheetRegions> {
     let (_, _, _, n) = super::profile::axes(frame);
     let mut work = READ_WORK;
     let mut owner: HashMap<VertexId, usize> = HashMap::new();
@@ -123,10 +142,17 @@ pub fn sheet_regions(k: &Kernel, b: &Brep, frame: &Frame, tol: f64) -> Result<Sh
             .surface
             .as_ref()
             .ok_or_else(|| refused("a face without a surface"))?;
-        let SurfaceKind::Plane(plane) = surface.kind() else {
+        let normal = match surface.kind() {
+            SurfaceKind::Plane(plane) => Some(plane.evaluate_normal()),
+            _ => None,
+        };
+        if !keep(face, normal)? {
+            continue;
+        }
+        let Some(normal) = normal else {
             return Err(refused("a face not on a plane"));
         };
-        let up = plane.evaluate_normal().dot(n);
+        let up = normal.dot(n);
         if up.abs() < 1.0 - 1e-9 {
             return Err(refused("a face not in the plane of the regions"));
         }

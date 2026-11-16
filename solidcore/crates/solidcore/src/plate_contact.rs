@@ -380,6 +380,64 @@ pub fn stretches(band: (f64, f64), defects: &[Defect], tol: f64) -> Result<Vec<(
     Ok(out)
 }
 
+/// The `on` half of T's footprint on P (design v2 5.3): the regions, in `frame` (P's plane, its
+/// normal `n` = x × y), of T's planar faces that lie in P and face `−n`. A face lies in P when
+/// every vertex of it is within `tol` of P (its edges then lie in its plane, which is parallel
+/// to P: [`prism::sheet`](crate::prism::sheet) reads them exactly and refuses one off the
+/// plane); it faces `−n` when its outward normal is within [`SQUARE_SLACK`] of `−n`. Faces on
+/// other surfaces, facing elsewhere or at another level are left out; T itself is not changed.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a `tol` that is not positive and finite;
+/// `Unsupported` for a kept face whose outward side is not decided or whose edges are not read
+/// exactly in P; those of the topology walk.
+pub fn footprint_on(
+    k: &crate::kernel::Kernel,
+    t: &crate::topology::Brep,
+    frame: &crate::eval::Frame,
+    tol: f64,
+) -> Result<Vec<crate::prism::profile::Region2>> {
+    if !(tol.is_finite() && tol > 0.0) {
+        return Err(invalid("tol must be positive and finite"));
+    }
+    let (_, _, _, n) = crate::prism::profile::axes(frame);
+    let facing_down = -SQUARE_SLACK.cos();
+    let read = crate::prism::sheet::planar_face_regions(k, t, frame, tol, |face, normal| {
+        let Some(normal) = normal else {
+            return Ok(false);
+        };
+        let natural =
+            crate::prism::measure::outward_is_natural(t, face).ok_or(SolidError::Unsupported {
+                operation: OP,
+                reason: "a face whose outward side is not decided",
+            })?;
+        let outward_up = if natural {
+            normal.dot(n)
+        } else {
+            -normal.dot(n)
+        };
+        if outward_up > facing_down {
+            return Ok(false);
+        }
+        let loops = crate::query::api_queries::face_get_boundary_loops(t, face)?;
+        for &e in &loops.edges {
+            let ends = [
+                crate::topology::edge::start_vertex(t, e)?,
+                crate::topology::edge::end_vertex(t, e)?,
+            ];
+            for v in ends.into_iter().flatten() {
+                let level = crate::prism::profile::height(frame, t.vertex(v)?.point);
+                if level.is_nan() || level.abs() > tol {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
+    })?;
+    Ok(read.regions)
+}
+
 /// Of two opposite unit normals, whether `v` is the one taken as `m`: the first of its components
 /// larger in size than [`SQUARE_SLACK`] is positive. A unit vector has a component of at least
 /// `1/√3`, so one always qualifies.

@@ -363,3 +363,64 @@ fn the_strip_reaches_as_far_as_its_region_on_the_frame() {
     assert_eq!(got.thickness, 6.0);
     assert_eq!(got.b.normal, Vec3::Y);
 }
+
+/// Wall of fixture F as a solid: (20, 30, 6)–(140, 36, 66), extruded along +z.
+fn wall_solid(k: &mut crate::kernel::Kernel) -> crate::topology::Brep {
+    use crate::math::Vec2;
+    use crate::prism::profile::{Loop2, Region2, Seg2};
+    let pts = [
+        Vec2::new(20.0, 30.0),
+        Vec2::new(140.0, 30.0),
+        Vec2::new(140.0, 36.0),
+        Vec2::new(20.0, 36.0),
+    ];
+    let outer = Loop2 {
+        segs: pts
+            .iter()
+            .zip(pts.iter().cycle().skip(1))
+            .map(|(a, b)| Seg2::Line { a: *a, b: *b })
+            .collect(),
+    };
+    let frame = frame_at([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    let region = Region2 {
+        outer,
+        holes: vec![],
+    };
+    crate::prism::extrude::extrude_region(k, &frame, &region, 6.0, 66.0).expect("wall")
+}
+
+fn frame_at(origin: [f64; 3], x_axis: [f64; 3], y_axis: [f64; 3]) -> crate::eval::Frame {
+    crate::eval::Frame {
+        origin,
+        x_axis,
+        y_axis,
+    }
+}
+
+fn areas(regions: &[crate::prism::profile::Region2]) -> Vec<f64> {
+    regions
+        .iter()
+        .map(|r| r.outer.signed_area().expect("area").value)
+        .collect()
+}
+
+/// `on` on P (z = 6, n = +z): Wall's bottom face, 120 × 6 = 720, counter-clockwise (positive).
+/// Its top (z = 66) faces +z, not −n: nothing there. Seen from above with n = −z (x and y
+/// swapped), the top face faces −n: 720 again. 0.5 mm off the bottom (tol 1e-3): nothing.
+#[test]
+fn the_footprint_on_p_is_the_faces_lying_in_it_facing_down() {
+    let mut k = crate::kernel::Kernel::default();
+    let wall = wall_solid(&mut k);
+    let up = [1.0, 0.0, 0.0];
+    let side = [0.0, 1.0, 0.0];
+    let on = |origin, x, y| footprint_on(&k, &wall, &frame_at(origin, x, y), TOL).expect("on");
+    let bottom = on([0.0, 0.0, 6.0], up, side);
+    let a = areas(&bottom);
+    assert!(a.len() == 1 && (a[0] - 720.0).abs() < 1e-9, "{a:?}");
+    assert!(on([0.0, 0.0, 66.0], up, side).is_empty());
+    let a = areas(&on([0.0, 0.0, 66.0], side, up));
+    assert!(a.len() == 1 && (a[0] - 720.0).abs() < 1e-9, "{a:?}");
+    assert!(on([0.0, 0.0, 6.5], up, side).is_empty());
+    assert!(on([0.0, 0.0, 6.0 + 0.5 * TOL], up, side).len() == 1);
+    assert!(footprint_on(&k, &wall, &frame_at([0.0; 3], up, side), 0.0).is_err());
+}
