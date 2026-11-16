@@ -11,7 +11,8 @@
 //!
 //! The arcs are built as the fork's capi `smlib_extrude` builds them (`arc` in
 //! `capi/src/smlib_sweeps.cpp`): the frame turned to the arc's start, the interval
-//! `[0, sweep]` in degrees. The arcs are `SmCylinder` walls (WR-565, also in the fork).
+//! `[0, sweep]` in degrees. The arcs are `SmCylinder` walls only with
+//! `Kernel::fixes.linear_sweep_arc_is_cylinder` (WR-565, also in the fork), so the ring sets it.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -56,6 +57,7 @@ fn arc(
 /// The ring extruded.
 fn ring() -> (Kernel, Brep) {
     let mut k = Kernel::default();
+    k.fixes.linear_sweep_arc_is_cylinder = true;
     let pi = core::f64::consts::PI;
     let mut curves = Vec::new();
     for radius in [10.0, 9.0] {

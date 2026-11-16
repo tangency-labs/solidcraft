@@ -84,6 +84,7 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "imprint_reuses_coincident_face_edge",
     "join_touching_loops",
     "keep_operand_uv_trims",
+    "linear_sweep_arc_is_cylinder",
     "local_operation_box_holds_new_surfaces",
     "local_operation_refuses_loose_tangent_edges",
     "local_operation_step_walls",

@@ -119,6 +119,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.revolution_round_offset_collapses = true;
     f.proto_edge_splits_at_captured_vertices = true;
     f.imprint_reuses_coincident_face_edge = true;
+    f.linear_sweep_arc_is_cylinder = true;
     f.fillet_trace_reaches_rails = true;
     f.box_face_failures_propagate = true;
     f.fillet_removal_takes_ring_fillets = true;

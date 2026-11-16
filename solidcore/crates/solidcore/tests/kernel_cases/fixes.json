@@ -20,6 +20,7 @@
   "local_surface_intersect_guards_max_boundary_retry",
   "revolve_analytic_profile_faces",
   "revolve_holed_profile_void",
+  "linear_sweep_arc_is_cylinder",
   "join_touching_loops",
   "validation_does_not_make_uv_trims",
   "offset_resolve_crossing_loops",

@@ -5,8 +5,8 @@
 //! holds its generating curve to, `SM_EFF_ZERO * 1000 * (1 + size)`: only a curve that is
 //! a circle becomes a cylinder, any other is swept as itself (`SmSurfOfExtrusion`).
 //!
-//! The near circle is a closed curve (when the test was written only a whole circle became
-//! a cylinder; an arc short of a turn does too since WR-565): the exact rational circle stretched by
+//! Without #1495's `linear_sweep_arc_is_cylinder` only a whole circle becomes a cylinder,
+//! so here the near circle is a closed curve: the exact rational circle stretched by
 //! 5e-7 along x, an ellipse about 2e-7 off its fitted circle (closer than the B-rep
 //! tolerance, 1e-5, farther than the cylinder's zero, about 2e-9 at this size). The
 //! issue's text-outline letters are swept exactly either way.
