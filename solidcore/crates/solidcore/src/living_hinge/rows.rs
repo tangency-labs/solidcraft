@@ -47,17 +47,26 @@ pub fn plan_rows(
     let mut slots = Vec::new();
     let mut left_out = 0;
     for k in first..=last {
+        let mut pieces = Vec::new();
         for span in row_spans(k) {
             let (j0, j1) = lattice.slots_meeting(k, span.lo, span.hi);
             for j in j0..=j1 {
                 match plan_slot(spec, lattice, k, j, span, &row_spans) {
-                    Some(slot) => slots.push(slot),
+                    Some(slot) => pieces.push(slot),
                     None => left_out += 1,
                 }
             }
         }
+        pieces.sort_by(|a, b| a.a0.total_cmp(&b.a0));
+        pull_apart(spec, &mut pieces);
+        for piece in pieces {
+            if keeps(spec, &piece) {
+                slots.push(piece);
+            } else {
+                left_out += 1;
+            }
+        }
     }
-    slots.sort_by(|a, b| a.row.cmp(&b.row).then(a.a0.total_cmp(&b.a0)));
     let mut rows = 0;
     let mut last_row = None;
     for s in &slots {
@@ -170,22 +179,15 @@ fn plan_slot<'a>(
     if b1 < b0 {
         return None;
     }
-    let (kind, crossing, inside) = if run_lo {
-        (SlotKind::RunOut, Some(span.lo), b1 - span.lo + r)
+    let (kind, crossing) = if run_lo {
+        (SlotKind::RunOut, Some(span.lo))
     } else if run_hi {
-        (SlotKind::RunOut, Some(span.hi), span.hi - b0 + r)
+        (SlotKind::RunOut, Some(span.hi))
     } else if changed {
-        (SlotKind::Shortened, None, b1 - b0 + spec.slot_width)
+        (SlotKind::Shortened, None)
     } else {
-        (SlotKind::Whole, None, b1 - b0 + spec.slot_width)
+        (SlotKind::Whole, None)
     };
-    if spec.clip == HingeClip::Whole && kind != SlotKind::Whole {
-        return None;
-    }
-    // A piece shorter than the bridge inside the material is left out (design 6.9).
-    if inside < spec.bridge {
-        return None;
-    }
     Some(HingeSlot {
         row: k,
         index: j,
@@ -195,4 +197,51 @@ fn plan_slot<'a>(
         kind,
         crossing,
     })
+}
+
+/// Which end of a run-out piece is in the air: `Lo` when it crosses the edge at its lower end.
+fn air_end(slot: &HingeSlot) -> Option<Side> {
+    slot.crossing
+        .map(|x| if slot.a0 < x { Side::Lo } else { Side::Hi })
+}
+
+/// Pulls neighbouring pieces of one row, sorted by `a0`, apart to `mu` of material tip to tip
+/// (design 6.8): each facing end gives half the shortfall. Two facing ends in the air have no rule.
+fn pull_apart(spec: &LivingHingeSpec, pieces: &mut [HingeSlot]) {
+    let mu = spec.least_material();
+    for i in 1..pieces.len() {
+        let (before, after) = pieces.split_at_mut(i);
+        let (p, q) = (&mut before[i - 1], &mut after[0]);
+        if air_end(p) == Some(Side::Hi) || air_end(q) == Some(Side::Lo) {
+            continue;
+        }
+        let short = mu - (q.a0 - p.a1 - spec.slot_width);
+        if short > GRAZE {
+            p.a1 -= short / 2.0;
+            q.a0 += short / 2.0;
+            for s in [p, q] {
+                if s.kind == SlotKind::Whole {
+                    s.kind = SlotKind::Shortened;
+                }
+            }
+        }
+    }
+}
+
+/// Whether a planned piece is kept: `clip` (design 6.7) and the short-piece rule (design 6.9),
+/// a piece shorter than the bridge inside the material being left out.
+fn keeps(spec: &LivingHingeSpec, slot: &HingeSlot) -> bool {
+    if spec.clip == HingeClip::Whole && slot.kind != SlotKind::Whole {
+        return false;
+    }
+    if slot.a1 < slot.a0 {
+        return false;
+    }
+    let r = spec.radius();
+    let inside = match (air_end(slot), slot.crossing) {
+        (Some(Side::Lo), Some(x)) => slot.a1 - x + r,
+        (Some(Side::Hi), Some(x)) => x - slot.a0 + r,
+        _ => slot.a1 - slot.a0 + spec.slot_width,
+    };
+    inside >= spec.bridge
 }

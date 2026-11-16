@@ -201,3 +201,38 @@ fn refusals() {
         Err(LivingHingeError::TooManySlots { .. })
     ));
 }
+
+#[test]
+fn pieces_a_hair_apart_are_pulled_to_the_least_material() {
+    // A keep-out 0.05 wide at u = 30 splits the middle slot of the even rows into two pieces 0.05
+    // apart tip to tip; design 6.8 pulls each facing end back half of the 1.25 shortfall.
+    let s = spec(HingeClip::RunOut, 3.0);
+    let lattice = Lattice::centred(&s, &BAND).unwrap();
+    let plan = plan_rows(&s, &lattice, |_, _| {
+        vec![
+            RowSpan {
+                lo: 0.0,
+                hi: 30.0,
+                lo_open: true,
+                hi_open: false,
+            },
+            RowSpan {
+                lo: 30.05,
+                hi: 60.0,
+                lo_open: false,
+                hi_open: true,
+            },
+        ]
+    });
+    use SlotKind::*;
+    assert_ends(
+        &row_ends(&plan, 13),
+        &[
+            (1.4, 16.9, Shortened),
+            (20.1, 29.275, Shortened),
+            (30.775, 39.9, Shortened),
+            (43.1, 58.6, Shortened),
+        ],
+    );
+    assert_eq!(plan.left_out, 0);
+}
