@@ -906,22 +906,120 @@ fn flat_chord(c: &[H2], tol: f64) -> Option<(Point2, Point2)> {
         .then_some((s, e))
 }
 
-/// A region's boundary as chords, each within `tol` of the boundary; a span not flat within
-/// `tol` after [`MAX_OVERLAP_DEPTH`] halvings is left out (it only loses the shortcut in
-/// [`pieces_against`]).
-fn flat_chords(r: &Region2, tol: f64) -> Option<Vec<(Point2, Point2)>> {
-    let mut out = Vec::new();
+/// A region's boundary halved until each piece lies within `tol` of its chord, or after
+/// [`MAX_OVERLAP_DEPTH`] halvings: the pieces' boxes (all of them, so together they cover the
+/// boundary) and the chords of the flat ones, each within `tol` of the boundary.
+///
+/// Cost: halving a span shrinks how far its control points stray from its chord about four
+/// times a level, so a span whose control points stray `d` from its chord gives about
+/// `sqrt(d / tol)` pieces (a quarter circle of radius 0.5 at 2.5e-7: about 2^10).
+fn flat_pieces(r: &Region2, tol: f64) -> Option<(Vec<(Point2, Point2)>, Vec<(Point2, Point2)>)> {
+    let (mut boxes, mut chords) = (Vec::new(), Vec::new());
     let mut todo: Vec<(Vec<H2>, u32)> = boundary_spans(r)?.into_iter().map(|c| (c, 0)).collect();
     while let Some((c, depth)) = todo.pop() {
         if let Some(chord) = flat_chord(&c, tol) {
-            out.push(chord);
+            boxes.push(hull_box(&c));
+            chords.push(chord);
         } else if depth < MAX_OVERLAP_DEPTH {
             let (l, r) = halves(&c);
             todo.push((l, depth + 1));
             todo.push((r, depth + 1));
+        } else {
+            boxes.push(hull_box(&c));
         }
     }
-    Some(out)
+    Some((boxes, chords))
+}
+
+/// The parameters `t` (any real) where `lo <= alpha + beta * t <= hi`, as `(from, to)`; empty
+/// when `from > to`.
+fn band_params(alpha: f64, beta: f64, lo: f64, hi: f64) -> (f64, f64) {
+    if beta == 0.0 {
+        return if (lo..=hi).contains(&alpha) {
+            (f64::NEG_INFINITY, f64::INFINITY)
+        } else {
+            (1.0, 0.0)
+        };
+    }
+    let (t0, t1) = ((lo - alpha) / beta, (hi - alpha) / beta);
+    (t0.min(t1), t0.max(t1))
+}
+
+/// The parameters along `s`–`e` (`s + t · (e − s)`) of the points within `r` of the segment
+/// `p`–`q`, as `(from, to)` (an interval: the band round a segment is convex); `None` when there
+/// are none.
+fn capsule_params(s: Point2, e: Point2, p: Point2, q: Point2, r: f64) -> Option<(f64, f64)> {
+    let d = Point2::new(e.x - s.x, e.y - s.y);
+    let dd = d.x * d.x + d.y * d.y;
+    // within r of an end of p–q: |s + t d − c|² <= r²
+    let disc = |c: Point2| -> (f64, f64) {
+        let f = Point2::new(s.x - c.x, s.y - c.y);
+        let (b, cc) = (f.x * d.x + f.y * d.y, f.x * f.x + f.y * f.y - r * r);
+        if dd == 0.0 {
+            return if cc <= 0.0 {
+                (f64::NEG_INFINITY, f64::INFINITY)
+            } else {
+                (1.0, 0.0)
+            };
+        }
+        let root = b * b - dd * cc;
+        if root < 0.0 {
+            return (1.0, 0.0);
+        }
+        let w = root.sqrt();
+        ((-b - w) / dd, (-b + w) / dd)
+    };
+    let mut parts = vec![disc(p), disc(q)];
+    // beside p–q: the projection on it within its ends, the offset from its line within r
+    let u = Point2::new(q.x - p.x, q.y - p.y);
+    let uu = u.x * u.x + u.y * u.y;
+    if uu > 0.0 {
+        let (fx, fy) = (s.x - p.x, s.y - p.y);
+        let (a0, a1) = band_params(fx * u.x + fy * u.y, d.x * u.x + d.y * u.y, 0.0, uu);
+        let side = r * uu.sqrt();
+        let (b0, b1) = band_params(u.x * fy - u.y * fx, u.x * d.y - u.y * d.x, -side, side);
+        parts.push((a0.max(b0), a1.min(b1)));
+    }
+    let (from, to) = parts
+        .into_iter()
+        .filter(|(lo, hi)| lo <= hi)
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), (a, b)| {
+            (lo.min(a), hi.max(b))
+        });
+    (from <= to).then_some((from, to))
+}
+
+/// Whether every point of the segment `s`–`e` lies within `r` of one of `chords`: the
+/// parameter intervals of the bands round the chords near it cover `[0, 1]`.
+fn segment_within(s: Point2, e: Point2, chords: &[(Point2, Point2)], r: f64) -> bool {
+    let bx = (
+        Point2::new(s.x.min(e.x), s.y.min(e.y)),
+        Point2::new(s.x.max(e.x), s.y.max(e.y)),
+    );
+    let mut spans: Vec<(f64, f64)> = chords
+        .iter()
+        .filter(|(p, q)| {
+            let cb = (
+                Point2::new(p.x.min(q.x), p.y.min(q.y)),
+                Point2::new(p.x.max(q.x), p.y.max(q.y)),
+            );
+            boxes_meet(bx, cb, r)
+        })
+        .filter_map(|&(p, q)| capsule_params(s, e, p, q, r))
+        .filter(|&(lo, hi)| hi >= 0.0 && lo <= 1.0)
+        .collect();
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut reach = 0.0;
+    for (lo, hi) in spans {
+        if lo > reach {
+            return false;
+        }
+        reach = f64::max(reach, hi);
+        if reach >= 1.0 {
+            return true;
+        }
+    }
+    false
 }
 
 /// Consecutive chords (one ending where the next starts) joined while every point of the run
@@ -955,21 +1053,23 @@ fn merge_collinear(chords: Vec<(Point2, Point2)>, eps: f64) -> Vec<(Point2, Poin
 /// inside `b`, and the pieces left within `eps` of `b`'s boundary (as chords, in boundary order,
 /// collinear neighbours merged).
 ///
-/// Cost: a piece is halved only while it is neither clear of `b`'s boundary nor flat and
-/// wholly within `eps / 2` of one of `b`'s flattened chords. A stretch running along `b`'s
-/// boundary is therefore kept whole (one near chord per chord of `b` it runs beside), and only the
-/// pieces at a place where the boundaries meet or part go on halving, one per level, at most
-/// [`MAX_OVERLAP_DEPTH`] levels. So with `m` such places on a span, the span gives at most
-/// `2 · MAX_OVERLAP_DEPTH · (m + 1)` pieces and `m + 1` near chords plus those it runs beside,
-/// not the `length / eps` (about 2^21 per millimetre at 1e-6) that halving down to `eps` gave
+/// Cost: `b`'s boundary is flattened once ([`flat_pieces`] at `eps / 4`: `n` pieces, about
+/// `sqrt(d / tol)` per span, one per straight span). A piece of `a` is halved only while it
+/// meets the box of one of them and is not flat within `eps / 4` with its chord wholly within
+/// `eps / 2` of `b`'s chords ([`segment_within`], which may run over several of them). A stretch
+/// running along `b`'s boundary, straight or curved, is therefore kept whole once it is flat,
+/// and only the pieces at a place where the boundaries meet, cross or part go on halving, one
+/// or two per level, at most [`MAX_OVERLAP_DEPTH`] levels. So with `m` such places on a span
+/// and `f` halvings to flatten it, the span gives at most `2^f + 4 · MAX_OVERLAP_DEPTH · (m + 1)`
+/// pieces, each tested against the `n` boxes and chords: `O(n)` work per piece, not the
+/// `length / eps` pieces (about 2^21 per millimetre at 1e-6) that halving down to `eps` gave
 /// (`prism::tests::regions_overlap_keeps_shared_edges_whole` checks the count).
 pub(super) fn pieces_against(
     a: &Region2,
     b: &Region2,
     eps: f64,
 ) -> Option<(bool, Vec<(Point2, Point2)>)> {
-    let other: Vec<(Point2, Point2)> = boundary_spans(b)?.iter().map(|c| hull_box(c)).collect();
-    let other_chords = flat_chords(b, 0.25 * eps)?;
+    let (other, other_chords) = flat_pieces(b, 0.25 * eps)?;
     let mut near = Vec::new();
     let mut todo: Vec<(Vec<H2>, u32)> = boundary_spans(a)?
         .into_iter()
@@ -984,14 +1084,10 @@ pub(super) fn pieces_against(
             }
             continue;
         }
-        // flat within eps / 4 and its chord within eps / 2 of one chord of b (which is within
-        // eps / 4 of b): the distance to a segment is convex, so the ends bound the whole chord
+        // flat within eps / 4 and its chord within eps / 2 of b's chords (which are within
+        // eps / 4 of b): the whole piece is within eps of b's boundary
         if let Some((s, e)) = flat_chord(&c, 0.25 * eps) {
-            let beside = other_chords.iter().any(|&(p, q)| {
-                distance_to_segment(s, p, q) <= 0.5 * eps
-                    && distance_to_segment(e, p, q) <= 0.5 * eps
-            });
-            if beside {
+            if segment_within(s, e, &other_chords, 0.5 * eps) {
                 near.push((s, e));
                 continue;
             }
