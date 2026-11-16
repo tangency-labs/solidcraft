@@ -1234,6 +1234,7 @@ impl SolveApp {
     /// says so where the model would be, and the status line says it too.
     pub fn gpu_unavailable(&mut self) {
         self.viewport.gpu_unavailable = true;
+        self.viewport.gpu_preparing = false;
         let text = self.tr("starting.view_unavailable").to_owned();
         self.set_status(text, true);
     }
@@ -1246,6 +1247,7 @@ impl SolveApp {
         }
         let (installed, stats, tess_ready) = solidcraft_viewport_egui::adopt(rs, built.built);
         self.viewport.gpu = Some(installed);
+        self.viewport.gpu_preparing = false;
         self.viewport.tess_ready = tess_ready;
         self.viewport.draw_stats = Some(stats);
         // The device's own limits (what it was created with), not the adapter's: uploads are split
