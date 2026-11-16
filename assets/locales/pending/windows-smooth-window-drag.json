@@ -1,0 +1,38 @@
+{
+  "en": {
+    "prefs.windows_smooth_window_drag": "Pause drawing while the window is dragged, so it moves smoothly",
+    "prefs.windows_smooth_window_drag_help": "While you drag the window by its title bar, SolidCraft draws nothing and the window follows the pointer smoothly. Animations and progress pause until you let go. Off: SolidCraft keeps drawing during the drag, and the window can move unevenly."
+  },
+  "ar": {
+    "prefs.windows_smooth_window_drag": "إيقاف الرسم مؤقتًا أثناء سحب النافذة لتتحرك بسلاسة",
+    "prefs.windows_smooth_window_drag_help": "أثناء سحب النافذة من شريط العنوان، لا يرسم SolidCraft شيئًا وتتبع النافذة المؤشر بسلاسة. تتوقف الرسوم المتحركة ومؤشرات التقدم مؤقتًا حتى تُفلت. عند الإيقاف: يواصل SolidCraft الرسم أثناء السحب، وقد تتحرك النافذة بشكل متقطع."
+  },
+  "de": {
+    "prefs.windows_smooth_window_drag": "Beim Ziehen des Fensters das Zeichnen anhalten, damit es sich flüssig bewegt",
+    "prefs.windows_smooth_window_drag_help": "Während Sie das Fenster an der Titelleiste ziehen, zeichnet SolidCraft nichts, und das Fenster folgt dem Zeiger flüssig. Animationen und Fortschrittsanzeigen pausieren, bis Sie loslassen. Aus: SolidCraft zeichnet während des Ziehens weiter, und das Fenster kann sich ungleichmäßig bewegen."
+  },
+  "he": {
+    "prefs.windows_smooth_window_drag": "השהיית הציור בזמן גרירת החלון, כדי שינוע בצורה חלקה",
+    "prefs.windows_smooth_window_drag_help": "בזמן שגוררים את החלון בשורת הכותרת, SolidCraft לא מצייר דבר והחלון עוקב אחרי המצביע בצורה חלקה. הנפשות ומחווני התקדמות מושהים עד שמשחררים. כבוי: SolidCraft ממשיך לצייר במהלך הגרירה, והחלון עלול לנוע בצורה לא אחידה."
+  },
+  "ja": {
+    "prefs.windows_smooth_window_drag": "ウィンドウのドラッグ中は描画を一時停止して滑らかに移動する",
+    "prefs.windows_smooth_window_drag_help": "タイトル バーでウィンドウをドラッグしている間、SolidCraft は何も描画せず、ウィンドウはポインターに滑らかに追従します。アニメーションや進行状況は、離すまで一時停止します。オフ: ドラッグ中も SolidCraft は描画を続け、ウィンドウの動きが不規則になることがあります。"
+  },
+  "ko": {
+    "prefs.windows_smooth_window_drag": "창을 드래그하는 동안 그리기를 일시 중지하여 부드럽게 이동",
+    "prefs.windows_smooth_window_drag_help": "제목 표시줄을 잡고 창을 드래그하는 동안 SolidCraft는 아무것도 그리지 않으며 창이 포인터를 부드럽게 따라갑니다. 애니메이션과 진행률은 놓을 때까지 일시 중지됩니다. 끄면: 드래그하는 동안에도 SolidCraft가 계속 그리며, 창이 고르지 않게 움직일 수 있습니다."
+  },
+  "vi": {
+    "prefs.windows_smooth_window_drag": "Tạm dừng vẽ khi kéo cửa sổ để cửa sổ di chuyển mượt mà",
+    "prefs.windows_smooth_window_drag_help": "Khi bạn kéo cửa sổ bằng thanh tiêu đề, SolidCraft không vẽ gì và cửa sổ đi theo con trỏ một cách mượt mà. Hoạt ảnh và tiến trình tạm dừng cho đến khi bạn thả ra. Tắt: SolidCraft tiếp tục vẽ trong khi kéo, và cửa sổ có thể di chuyển không đều."
+  },
+  "zh": {
+    "prefs.windows_smooth_window_drag": "拖动窗口时暂停绘制，使其平稳移动",
+    "prefs.windows_smooth_window_drag_help": "通过标题栏拖动窗口时，SolidCraft 不绘制任何内容，窗口平稳地跟随指针。动画和进度会暂停，直到松开为止。关闭时：拖动期间 SolidCraft 继续绘制，窗口可能移动不均匀。"
+  },
+  "zh-TW": {
+    "prefs.windows_smooth_window_drag": "拖曳視窗時暫停繪製，讓視窗平順移動",
+    "prefs.windows_smooth_window_drag_help": "透過標題列拖曳視窗時，SolidCraft 不會繪製任何內容，視窗會平順地跟隨指標。動畫和進度會暫停，直到放開為止。關閉時：拖曳期間 SolidCraft 會繼續繪製，視窗可能移動不平順。"
+  }
+}

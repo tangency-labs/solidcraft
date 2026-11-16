@@ -546,11 +546,11 @@ fn curves_face(
                 let ctr = at_frac(&dom, *a, *b);
                 let side = (dom.max().x - dom.min().x).min(dom.max().y - dom.min().y);
                 let mut frame = Axis2Placement::default();
-                // SetCanonical's status is ignored, as there
+                // UV curves lie in XY: SetCanonical takes the frame's X and Y axes.
                 let _ = frame.set_canonical(
                     Point3::new(ctr.x, ctr.y, 0.0),
-                    Point3::new(0.0, 0.0, 1.0),
                     Point3::new(1.0, 0.0, 0.0),
+                    Point3::new(0.0, 1.0, 0.0),
                 );
                 (
                     BSplineCurve::create_circle_segment(
@@ -1354,6 +1354,68 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    /// A circular UV trim spans both axes and winds in the requested direction.
+    #[test]
+    fn circular_trims_keep_their_uv_bounds_and_orientation() {
+        use super::super::topology_edgeuse_p1::BssIn;
+        use solidcore::topology::face::p2::loops;
+        use solidcore::topology::face::p3::compute_loop_orientation;
+
+        for rev in [false, true] {
+            let mut k = Kernel::default();
+            let mut b = Brep::new_with_infinite_region().unwrap();
+            let surface = AnySrf::Bspline {
+                surface: SrfIn::Bspline(BssIn {
+                    oob: false,
+                    form: 0,
+                    net: vec![
+                        vec![[0.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0]],
+                        vec![[1.0, 0.0, 0.0, 1.0], [1.0, 1.0, 0.0, 1.0]],
+                    ],
+                    p: 1,
+                    q: 1,
+                    u: vec![0.0, 0.0, 1.0, 1.0],
+                    v: vec![0.0, 0.0, 1.0, 1.0],
+                }),
+            };
+            // A unit square's UV domain: centre (0.3, 0.5), radius 0.1.
+            let trims = vec![vec![CurveIn::Circle {
+                a: 0.3,
+                b: 0.5,
+                r: 0.1,
+                rev,
+            }]];
+            curves_face(&mut k, &mut b, &surface, &trims, &[])
+                .unwrap()
+                .unwrap();
+            assert_eq!(b.faces().len(), 1);
+            let face = FaceId::from_index(0);
+            let loops = loops(&b, face, false, None).unwrap();
+            assert_eq!(loops.len(), 1);
+            let mut bounds = Extent2d::new();
+            let orientation = compute_loop_orientation(
+                &k,
+                &mut b,
+                face,
+                loops[0],
+                Some(&mut bounds),
+                false,
+            )
+            .unwrap();
+            assert!(
+                (bounds.min().x - 0.2).abs() < 1e-12
+                    && (bounds.max().x - 0.4).abs() < 1e-12
+                    && (bounds.min().y - 0.4).abs() < 1e-12
+                    && (bounds.max().y - 0.6).abs() < 1e-12,
+                "rev={rev}: circular trim bounds {bounds:?}"
+            );
+            assert_eq!(
+                orientation,
+                if rev { OrientType::Opposite } else { OrientType::Same }
+            );
+        }
+    }
 
     /// Most generated cases reach a real classification (not a build failure or a
     /// rejection).

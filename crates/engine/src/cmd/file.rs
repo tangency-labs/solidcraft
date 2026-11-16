@@ -37,7 +37,7 @@ use crate::schema::save::{SaveAsParams, SaveParams, SaveResult, SignedSave};
 use crate::schema::save_mesh::{SaveMeshResult, SlicerDelivery};
 use crate::schema::slicers::{SlicerInfo, SlicersParams, SlicersResult};
 use crate::schema::{TypedContract, output_schema_for};
-use crate::{EngineError, Result, Session};
+use crate::{EngineError, Result, Session, store_link_names};
 
 const INSERT_MESH_CONTRACT: TypedContract<InsertMeshParams> = TypedContract::new();
 const INSERT_STEP_CONTRACT: TypedContract<InsertStepParams> = TypedContract::new();
@@ -62,7 +62,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("import")
         .contract(&INSERT_STEP_CONTRACT)
         .output(output_schema_for::<StepInserted>)
-        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
+        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it, its translation column (entries 4, 8 and 12) numbers or length expressions: one that names a parameter is kept, and the import follows the parameter when it changes (a grounded one stays); a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
     CommandSpec::new("file.insert_mesh", "Insert Mesh", crate::checked!("file.insert_mesh", insert_mesh))
         .at("SOLID", "INSERT")
         .icon("import")
@@ -768,9 +768,17 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "only STEP, IGES, FreeCAD and Rhino files (.step, .stp, .igs, .iges, .fcstd, .3dm) can be inserted"));
     }
     let options = step_options(p, cmd)?;
+    // The translation column may be length expressions that name parameters (#8192): the
+    // occurrence keeps them and follows them.
+    let mut kept = [None, None, None];
     let placement = match p.get("matrix") {
         None | Some(Value::Null) => None,
-        Some(m) => Some(super::component::matrix::rigid(m, super::component::matrix::tolerance(p, cmd)?, cmd)?),
+        Some(m) => {
+            let (numbers, names) =
+                super::component::matrix::with_exprs(m, |e| s.doc.eval(e, solidcraft_doc::expr::Kind::Length).map_err(|err| err.to_string()), cmd)?;
+            kept = names;
+            Some(super::component::matrix::rigid(&numbers, super::component::matrix::tolerance(p, cmd)?, cmd)?)
+        }
     };
     let mut out = add_step(s, path, str_(p, "name"), &options)?;
     if let Some(m) = placement {
@@ -781,6 +789,19 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
                 return Err(bad(cmd, "`matrix` moves the import out of a rigid placement within 1e9 mm"));
             }
             o.transform = placed;
+            if kept.iter().any(Option::is_some) {
+                let at = [m[3][0], m[3][1], m[3][2]];
+                o.expressed_moves.push(solidcraft_doc::ExpressedMove {
+                    translate: kept,
+                    at,
+                    frame: solidcraft_doc::IDENTITY,
+                    world: false,
+                    origin: Default::default(),
+                    origin_at: [0.0; 3],
+                    rotation: solidcraft_doc::IDENTITY,
+                    grounded_ok: false,
+                });
+            }
             out["transform"] = json!(o.transform);
         }
         s.refresh();
@@ -1144,7 +1165,7 @@ fn installed_kicad_3dmodel_dir() -> Option<std::path::PathBuf> {
         }
     }
     #[cfg(target_os = "macos")]
-    candidates.push(((0, 0), std::path::PathBuf::from("/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels")));
+    candidates.extend([((0, 0), std::path::PathBuf::from("/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels"))]);
     #[cfg(all(unix, not(target_os = "macos")))]
     candidates.extend([
         ((0, 0), std::path::PathBuf::from("/usr/share/kicad/3dmodels")),
@@ -1249,6 +1270,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
             fresh.active_occurrence_path = Some(fresh.doc.first_path(c));
         }
         fresh.undo.clear();
+        fresh.opened_from_import();
         s.replace_design(fresh);
         let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
         let r: ImportedFile = reply_from(r, "the import")?;
@@ -1829,7 +1851,11 @@ impl Session {
         let unpinned = session.doc.reserved_body_names.is_empty() && session.doc.features.iter().all(|f| f.body_names.is_empty());
         let before = session.doc.clone();
         session.pin_body_names();
-        if unpinned || !std::sync::Arc::ptr_eq(&before, &session.doc) {
+        // Links whose design dropped a guessed name as it opened keep the name of what they were
+        // found on, before a change can move it (#17229).
+        session.pin_dropped_link_names();
+        let dropped = session.has_dropped_link_names();
+        if unpinned || dropped || !std::sync::Arc::ptr_eq(&before, &session.doc) {
             session.pin_rolled_back_body_names();
         }
         session.saved = session.doc.clone();
@@ -1854,6 +1880,11 @@ impl Session {
         whole.doc_mut().marker = None;
         whole.model.evaluate_shared(&whole.doc);
         whole.pin_body_names();
+        // The links of a sketch rolled back or skipped here, whose guessed names their design
+        // dropped as it opened (#17229): the whole timeline finds what each is on, and the name
+        // is the one it had at the geometry the design opened with, before an edit moves it.
+        whole.pin_dropped_link_names();
+        let link_pins = self.dropped_link_pins(&whole);
         let pins: Vec<(u64, Vec<String>)> = whole
             .doc
             .features
@@ -1862,12 +1893,12 @@ impl Session {
             .map(|f| (f.id, f.body_names.clone()))
             .collect();
         let reserve: Vec<String> = whole.doc.reserved_body_names.difference(&self.doc.reserved_body_names).cloned().collect();
-        if pins.is_empty() && reserve.is_empty() {
+        if pins.is_empty() && reserve.is_empty() && link_pins.is_empty() {
             return;
         }
         // As `pin_body_names` stores names: the bodies keep the names they have, so no result
         // changes and none is evaluated again.
-        let renamed: Vec<u64> = pins.iter().map(|(id, _)| *id).collect();
+        let renamed: Vec<u64> = pins.iter().map(|(id, _)| *id).chain(link_pins.iter().map(|(id, ..)| *id)).collect();
         let keep = self.model.pinned_prefix(&self.doc, &renamed);
         let doc = self.doc_mut();
         for (id, names) in pins {
@@ -1875,6 +1906,7 @@ impl Session {
                 f.body_names = names;
             }
         }
+        store_link_names(doc, link_pins);
         doc.reserved_body_names.extend(reserve);
         self.model.refingerprint_shared(&self.doc, keep);
     }

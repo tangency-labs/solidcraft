@@ -1882,3 +1882,100 @@ fn conflict_lists_the_constraints_instead_of_claiming_the_entities_are_fixed() {
         assert!(e.contains("conflicts with"), "{cmd} {params}: {e}");
     }
 }
+
+/// A point placed by a parameter expression (#16554): the inspection says why it is fixed,
+/// Unfix frees it as plain numbers, and moving it before that is refused with the expression.
+#[test]
+fn a_point_placed_by_an_expression_says_so_unfixes_and_refuses_a_move() {
+    let point = |s: &mut Session, id: &str| {
+        run(s, "sketch.inspect", json!({}))["points"].as_array().and_then(|a| a.iter().find(|p| p["id"] == id).cloned()).unwrap_or(Value::Null)
+    };
+    for toggle in [false, true] {
+        let mut s = new_sketch();
+        run(&mut s, "parameters.add", json!({"name": "w", "expression": "20"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], ["w", 0]]}));
+        let p1 = point(&mut s, "p1");
+        assert_eq!(p1["fixed"], true, "{p1}");
+        assert_eq!(p1["fixed_by"], json!({"x": "w"}), "{p1}");
+        let e = s.execute("sketch.move_points", &json!({"moves": [{"point": "p1", "to": [5, 5]}]})).unwrap_err().to_string();
+        assert!(e.contains("\"w\"") && e.contains("p1"), "{e}");
+        let params = if toggle { json!({"entities": ["p1"]}) } else { json!({"entities": ["p1"], "fixed": false}) };
+        let r = run(&mut s, "sketch.constraint.fix", params);
+        assert_eq!(r["result"], json!({"fixed": false, "changed": 1}), "{r}");
+        let p1 = point(&mut s, "p1");
+        assert!(p1.get("fixed_by").is_none_or(Value::is_null), "{p1}");
+        assert_eq!(p1["at"], json!([20.0, 0.0]), "{p1}");
+        // Free now: it no longer follows the parameter, and it can be moved.
+        run(&mut s, "parameters.change", json!({"name": "w", "expression": "30"}));
+        assert_eq!(point(&mut s, "p1")["at"], json!([20.0, 0.0]));
+        let r = run(&mut s, "sketch.move_points", json!({"moves": [{"point": "p1", "to": [25, 0]}]}));
+        assert_eq!(r["moved"][0]["reached"], true, "{r}");
+    }
+    // An equation curve's fit points come from its formulas at every solve: unfixing one is refused.
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.equation_curve", json!({"x": "t", "y": "t * t", "start": -2, "end": 2}));
+    let curve = r["curve"].as_str().unwrap_or_default().to_string();
+    let before = serde_json::to_value(sketch(&s)).unwrap();
+    let pt = sketch(&s).points.iter().find(|p| p.fixed && p.id != "origin").map(|p| p.id.clone()).unwrap();
+    let e = s.execute("sketch.constraint.fix", &json!({"entities": [pt], "fixed": false})).unwrap_err().to_string();
+    assert!(e.contains("equation") && e.contains(&curve), "{e}");
+    assert_eq!(serde_json::to_value(sketch(&s)).unwrap(), before, "the sketch does not change");
+}
+
+/// A negative value on a sided distance dimension flips the free side to the opposite side of its
+/// reference and stores the positive magnitude; intrinsic sizes (length, radius) still refuse it.
+#[test]
+fn negative_distance_dimension_flips_to_the_opposite_side() {
+    // DistanceX from origin to a point on +X.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.point", json!({"point": [15, 0]}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["origin", "p1"], "type": "horizontal", "value": -10}));
+    assert!((d["measured"].as_f64().unwrap() - 10.0).abs() < 1e-6, "{d}");
+    assert_eq!(d["expression"], "10 mm");
+    assert!((sketch(&s).points[1].pos.x + 10.0).abs() < 1e-6, "p1 should flip to -10: {:?}", sketch(&s).points[1].pos);
+
+    // DistanceY from origin to a point on +Y.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.point", json!({"point": [0, 15]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "p1"], "type": "vertical", "value": -12}));
+    assert!((sketch(&s).points[1].pos.y + 12.0).abs() < 1e-6, "p1 should flip to -12: {:?}", sketch(&s).points[1].pos);
+
+    // PointLineDistance from the sketch's y-axis to a point on +X.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.point", json!({"point": [15, 5]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["y", "p1"], "value": -8}));
+    assert!((sketch(&s).points[1].pos.x + 8.0).abs() < 1e-6, "p1 should flip across y-axis to -8: {:?}", sketch(&s).points[1].pos);
+
+    // Distance between origin and a point on +X.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.point", json!({"point": [15, 0]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "p1"], "value": -10}));
+    assert!((sketch(&s).points[1].pos.x + 10.0).abs() < 1e-6, "p1 should flip to -10: {:?}", sketch(&s).points[1].pos);
+
+    // Negative parametric expression keeps the parameter link.
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "10 mm"}));
+    run(&mut s, "sketch.point", json!({"point": [15, 0]}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["origin", "p1"], "type": "horizontal", "value": "-w"}));
+    assert_eq!(d["expression"], "-(-w)");
+    assert!((sketch(&s).points[1].pos.x + 10.0).abs() < 1e-6);
+
+    // Editing an existing sided distance dimension to a negative value also flips and normalizes.
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "10 mm"}));
+    run(&mut s, "sketch.point", json!({"point": [15, 0]}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["origin", "p1"], "type": "horizontal", "value": 15}));
+    let param = d["param"].as_str().unwrap().to_string();
+    let changed = run(&mut s, "parameters.change", json!({"name": param, "expression": "-10"}));
+    assert_eq!(changed["expression"], "10 mm");
+    assert!((sketch(&s).points[1].pos.x + 10.0).abs() < 1e-6, "p1 should flip to -10: {:?}", sketch(&s).points[1].pos);
+    let changed = run(&mut s, "parameters.change", json!({"name": param, "expression": "-w"}));
+    assert_eq!(changed["expression"], "-(-w)");
+    assert!((sketch(&s).points[1].pos.x - 10.0).abs() < 1e-6, "p1 should flip back to +10: {:?}", sketch(&s).points[1].pos);
+
+    // Intrinsic sizes (line length, circle radius) still refuse negative values.
+    let mut s = sketch_with_len();
+    assert!(s.execute("sketch.dimension", &json!({"entities": ["la"], "value": -10})).is_err());
+    let c = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}))["curves"])[0].clone();
+    assert!(s.execute("sketch.dimension", &json!({"entities": [c], "value": -5})).is_err());
+}

@@ -533,6 +533,25 @@ fn editing_a_hole_replaces_its_face_instead_of_adding_one() {
     let (again, position) = last_hole(&h);
     assert_eq!(again, hole, "the same feature");
     assert!(position.dist(on_top) < 1e-3, "OK uses the new face: {position:?}");
+
+    // Rebuilding the inputs after a placement change must keep the editor's one-place rule.
+    h.step(&json!({"call": "ui.editFeature", "params": {"feature": hole}})).unwrap();
+    for (current, next) in [("Single", "Multiple"), ("Multiple", "Single")] {
+        h.step(&json!({"widget": current, "near": "Placement"})).unwrap();
+        h.step(&json!({"widget": next})).unwrap();
+    }
+    for point in [Vec3::new(30.0, 15.0, 10.0), on_top] {
+        h.step(&json!({"call": "ui.dialogInput", "params": {"index": 0}})).unwrap();
+        let at = screen(&mut h, point);
+        h.step(&json!({"click": at})).unwrap();
+    }
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "changing placement must not allow '2 selected' while editing");
+    assert!(matches!(places(&h).as_slice(), [p] if p.dist(on_top) < 1e-3), "{:?}", places(&h));
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let (again, position) = last_hole(&h);
+    assert_eq!(again, hole, "changing placement still edits the same feature");
+    assert!(position.dist(on_top) < 1e-3, "OK uses the last picked face after changing placement: {position:?}");
 }
 
 /// Single holes on two faces with the depth typed as `ScrewDepth = 5`: OK runs one command per

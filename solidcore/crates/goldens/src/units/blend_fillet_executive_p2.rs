@@ -1126,6 +1126,33 @@ impl ExecutiveAccess<Handle> for Access {
                             let Some(Handle::Solver(idx)) =
                                 executive.fillet_solver_of_edgeuse(Handle::Edgeuse(eu))
                             else {
+                                return false;
+                            };
+                            solvers
+                                .get(idx)
+                                .is_some_and(|s| {
+                                    use solidcore::blend::fillet_solver::p1::FilletSolverOps;
+                                    let can_change = match s {
+                                        SolverEntry::ConstantRadius(s) => {
+                                            FilletSolverOps::offset_radii_can_change(s)
+                                        }
+                                        SolverEntry::ConstantDistance(s) => {
+                                            FilletSolverOps::offset_radii_can_change(s)
+                                        }
+                                        SolverEntry::VariableRadius(s) => {
+                                            FilletSolverOps::offset_radii_can_change(&**s)
+                                        }
+                                        SolverEntry::SurfaceSurface(s) => {
+                                            FilletSolverOps::offset_radii_can_change(s)
+                                        }
+                                    };
+                                    matches!(can_change, Ok(false))
+                                })
+                        },
+                        |eu| {
+                            let Some(Handle::Solver(idx)) =
+                                executive.fillet_solver_of_edgeuse(Handle::Edgeuse(eu))
+                            else {
                                 return missing();
                             };
                             solvers
@@ -1577,6 +1604,7 @@ fn executive(target: Option<Handle>) -> FilletExecutive<Handle> {
         open_ends: Vec::new(),
         overflow_first: false,
         classify_only: false,
+        roll_over_pass: false,
         overflow_edges: Vec::new(),
         mitred_edges: Vec::new(),
         fan_split_points: Vec::new(),
@@ -2372,17 +2400,17 @@ mod tests {
         let solver = Handle::Solver(0);
         let side = Handle::Edgeuse(EdgeuseId::from_index(0));
         let expected = missing_error();
-        // The additive API keeps the existing constructor's pinned default.
-        assert!(TemporaryRadiusChange::new(&mut access, solver, 0, side).is_ok());
+        let error = TemporaryRadiusChange::new(&mut access, solver, 0, side).unwrap_err();
+        assert_eq!(error, expected);
         let mut default_body_called = false;
-        // Revert can fail for this intentionally absent solver; the body still ran.
-        let _ = with_temporary_radius_change(&mut access, solver, 0, side, |_| {
+        let error = with_temporary_radius_change(&mut access, solver, 0, side, |_| {
             default_body_called = true;
             Ok(())
-        });
-        assert!(default_body_called);
-        let mut fixes = solidcore::kernel::UpstreamFixes::default();
-        fixes.temporary_radius_setup_errors = true;
+        })
+        .unwrap_err();
+        assert_eq!(error, expected);
+        assert!(!default_body_called);
+        let fixes = solidcore::kernel::UpstreamFixes::default();
         let error =
             TemporaryRadiusChange::new_with_fixes(&mut access, solver, 0, side, &fixes).unwrap_err();
         assert_eq!(error, expected);

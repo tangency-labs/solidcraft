@@ -24,7 +24,7 @@
 //!   edge and the extension, `NoteFitRadius` from `sm_CornerTakesPerRadius` after the
 //!   whole edge; tangency-labs/smlib a3d6d81, 49f393d) note them (WR-696, #2278).
 //! - **Section ends (not the fork's).** A round with WR-674's section ends is trimmed here
-//!   only with `fixes.fillet_section_end_trim_at_creases` (WR-706, #2223): each such end is
+//!   with `fixes.fillet_overflow_trim_at_creases` (WR-706, #2223): each such end is
 //!   cut by its section's plane and closed by the section's flat face, and a side of that
 //!   face that lies along an edge of the body is sewn to the edge's piece the rail's
 //!   imprint cuts off, not imprinted.
@@ -42,6 +42,12 @@
 //! - **Open setbacks and each round's side (the fork's ef57570, ce748fa; smlib#125).** An
 //!   open G1 setback corner's spring curves are imprinted with the sheet's boundary and its
 //!   hole's `3 n` edges stay free; a concave round's sheet lies in the void it fills.
+//! - **The Roll-over's certified creases (not the fork's, #10876).** In the blend corner's
+//!   Roll-over second pass (`FilletSession::set_roll_over_pass`), a crease of an exact torus
+//!   with a cliff face parallel to its axis (a plane, or a cylinder touching the convex
+//!   round) is the certified graph over the face's profile
+//!   ([`crate::blend::blend_corner::rollover::geometry::torus_creases`]), within the body's
+//!   tolerance of the torus, not the general intersection.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -620,10 +626,8 @@ impl FilletSession<'_> {
             faces_of.insert(solver, self.fillet_faces(solver)?);
         }
         let open_ends = self.executive.open_ends.clone();
-        // WR-706: a section end (WR-674) is trimmed here only with its own fix
-        let section_trim = k.fixes.fillet_section_end_trim_at_creases
-            && k.fixes.fillet_overflow_trim_at_creases
-            && k.fixes.fillet_round_ends_at_tangent_continuation;
+        // WR-706: a section end (WR-674) is trimmed here only with the crease trim
+        let section_trim = k.fixes.fillet_overflow_trim_at_creases;
         if !section_trim && open_ends.iter().any(|end| end.section) {
             return Err(invalid("a section end is not trimmed at its creases"));
         }
@@ -906,7 +910,27 @@ impl FilletSession<'_> {
                 // fitted to the body's own accuracy, so that creases meeting at a corner of
                 // the sheet (on two faces past a cliff) meet there within it; exact
                 // sections stay exact
-                let found = creases(k, &mut sheet, s, self.objects.target, f, body_tol)?;
+                // Not upstream (#10876): the Roll-over's torus against a cliff face parallel
+                // to its axis, its creases as certified graphs over the face's profile
+                let certified = if self.executive.roll_over_pass {
+                    match (
+                        face::p2::surface(&sheet, s)?,
+                        face::p2::surface(self.objects.target, f)?,
+                    ) {
+                        (Some(torus), Some(cliff)) => {
+                            crate::blend::blend_corner::rollover::geometry::torus_creases(
+                                k, torus, cliff, tol, body_tol,
+                            )?
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                let found = match certified {
+                    Some(found) => found,
+                    None => creases(k, &mut sheet, s, self.objects.target, f, body_tol)?,
+                };
                 // each crease where it lies inside both faces
                 let mut in_face = Vec::new();
                 for c in &found {

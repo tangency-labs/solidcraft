@@ -1,7 +1,7 @@
 //! Regression test for WR-528 (the fork's tangency-labs/smlib@e881cdb, capi test
 //! `booleans crescent_on_rim_join`): a crescent prism standing against a cylinder,
-//! its r 10 wall on the cylinder's wall, united with it. With
-//! `Kernel::fixes.close_loop_relates_only_coincident_edges`, the cylinder's rim
+//! its r 10 wall on the cylinder's wall, united with it. With the fix (the only
+//! path since its flag was retired), the cylinder's rim
 //! split at the crescent's corners is no longer related to the crescent's r 6 arc,
 //! and the join is a valid solid of the exact volume, both across the cylinder's
 //! seam and clear of it.
@@ -71,7 +71,6 @@ fn crescent_on_rim_join_is_exact_with_the_fix() {
     // across the cylinder's seam, and clear of it
     for angle in [0.0, 90.0] {
         let mut k = Kernel::default();
-        k.fixes.close_loop_relates_only_coincident_edges = true;
         let cylinder = create_cylinder(&mut k, Vec3::new(0.0, 0.0, 0.0), R, HEIGHT).unwrap();
         let prism = crescent_prism(&mut k, angle);
         let mut joined = boolean_union(&mut k, cylinder, prism).unwrap();

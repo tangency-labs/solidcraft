@@ -177,6 +177,10 @@ fn keywords(id: &str) -> &'static str {
         "file.export_stl" | "file.export_3mf" => "mesh 3d print printing",
         "file.export_obj" => "mesh",
         "file.export_urdf" => "robot ros simulation",
+        "sketch.constraint.tangent" => "g1 tangency continuity smooth",
+        "sketch.constraint.curvature" => "g2 curvature continuity smooth",
+        "sketch.blend_curve" => "g1 g2 g3 g4 continuity tangent curvature bridge",
+        "solid.fillet" => "g1 g2 continuity curvature blend round",
         _ => "",
     }
 }
@@ -878,6 +882,11 @@ mod tests {
         assert_eq!(search(&app, "extr").first().map(|x| x.0), Some("solid.extrude"));
         assert_eq!(search(&app, "solid.fil").first().map(|x| x.0), Some("solid.fillet"));
         assert!(search(&app, "constrain").iter().any(|x| x.0 == "sketch.constraint.parallel"), "by panel");
+        for (query, id) in
+            [("g1", "sketch.constraint.tangent"), ("g2", "sketch.constraint.curvature"), ("g2", "sketch.blend_curve"), ("g2", "solid.fillet")]
+        {
+            assert!(search(&app, query).iter().any(|x| x.0 == id), "{query:?} finds {id}");
+        }
         app.sbox.used("solid.shell");
         app.sbox.used("solid.revolve");
         let all = search(&app, "");
