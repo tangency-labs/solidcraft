@@ -784,6 +784,94 @@ fn a_variable_round_s_net_is_certified_on_wide_pieces() {
     assert_eq!(rounds, 1);
 }
 
+/// tangency-labs/solidcraft#17640: a kernel certifies a record's procedural blend once. Every
+/// boolean in an application gives back a record that the next operation reads again, and each
+/// read gave every blend its definition back and certified its net again (6 s a boolean on a
+/// part of 60 such rounds). Read on one kernel twice, the variable round's record certifies its
+/// blend the first time only, and builds the same body both times; with the memo off
+/// (`memoize_curve_caches`, as `curve-memo-off` builds every kernel) each read certifies it.
+#[test]
+fn a_records_procedural_blend_is_certified_once_on_a_kernel() {
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap();
+    let e = edge_at(&b, [10.0, 10.0, 30.0]);
+    let start = vertex_at(&b, [10.0, 0.0, 30.0]);
+    fillet_variable(&b, e, start, 1, &[0.0, 0.0, 1.0, 1.0], &[2.0, 5.0]).unwrap();
+    let (record, _) = b.to_record().unwrap();
+    let blends = record
+        .faces
+        .iter()
+        .filter(|f| matches!(f.surface, solidcore_record::brep::Surface::Blend { .. }))
+        .count() as u64;
+    assert!(blends > 0, "the variable round kept no definition");
+    for memo in [true, false] {
+        let mut k = Kernel {
+            fixes: solidcore::kernel::UpstreamFixes::all(),
+            memoize_curve_caches: memo,
+            ..Kernel::default()
+        };
+        let read = |k: &mut Kernel| {
+            let before = k.work_counters.blends_recertified();
+            let (mut made, _) = solidcore_convert::brep::to_kernel(k, &record, true).unwrap();
+            let (again, _) = solidcore_convert::brep::to_record(k, &mut made).unwrap();
+            (k.work_counters.blends_recertified() - before, again)
+        };
+        let (first, once) = read(&mut k);
+        let (second, twice) = read(&mut k);
+        assert_eq!(
+            first, blends,
+            "memo {memo}: the first read certifies each blend"
+        );
+        assert_eq!(
+            second,
+            if memo { 0 } else { blends },
+            "memo {memo}: the second read"
+        );
+        assert_eq!(
+            once, twice,
+            "memo {memo}: the two reads build different bodies"
+        );
+    }
+    // A hit needs every input of the certificate to match. A net with one control point moved,
+    // or the same record on a kernel of other tolerances, is certified again (whether or not it
+    // certifies), however often the record was read before.
+    let mut moved = record.clone();
+    let face = moved
+        .faces
+        .iter_mut()
+        .find(|f| matches!(f.surface, solidcore_record::brep::Surface::Blend { .. }))
+        .unwrap();
+    match face.nurbs.as_mut() {
+        Some(solidcore_record::brep::Surface::Spline { points, .. }) => points[1][1][0] += 1e-9,
+        Some(solidcore_record::brep::Surface::RationalSpline { homogeneous, .. }) => {
+            homogeneous[1][1][0] += 1e-9;
+        }
+        other => panic!("the blend's net is {other:?}"),
+    }
+    let mut k = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        memoize_curve_caches: true,
+        ..Kernel::default()
+    };
+    let certified = |k: &mut Kernel, r: &Record| {
+        let before = k.work_counters.blends_recertified();
+        let _ = solidcore_convert::brep::to_kernel(k, r, true);
+        k.work_counters.blends_recertified() - before
+    };
+    assert_eq!(certified(&mut k, &record), blends);
+    assert_eq!(certified(&mut k, &record), 0);
+    assert!(
+        certified(&mut k, &moved) >= 1,
+        "a moved net was taken as certified"
+    );
+    k.tolerances.model_size_estimate *= 2.0;
+    assert_eq!(
+        certified(&mut k, &record),
+        blends,
+        "other tolerances were taken as the same"
+    );
+}
+
 /// A law with a corner rounds its edge as the union of its balls (`docs/generic-blend.md` §3.2,
 /// "Corners in a radius law"): at a peak the two sides' rounds cross and end on their crossing,
 /// at a dip the corner ball's zone lies between them. Each removes its balls' union, integrated
@@ -3717,4 +3805,118 @@ fn a_round_split_by_rollover_ends_its_last_piece_at_a_closed_edge_s_seam() {
             assert!(p.z >= 33.55 - r - 0.5 && p.z <= 39.0, "{bx:?}");
         }
     }
+}
+
+/// The ring and the wedge of tangency-labs/solidcraft#17715: a ring about x, its outer side a
+/// band of the torus of radii 40 and 5 (the generating circle's arc from 175 to 210 degrees in
+/// the meridian half-plane, x = 5 cos t, rho = 40 + 5 sin t), and a wedge revolved 16 degrees
+/// about x, between the half-planes at 12 and 28 degrees from the ring's seam, the half-plane
+/// at angle theta running along (0, sin theta, -cos theta) (the issue's design, sketched on XZ).
+/// The wedge's profile is the arc from 180 to 210 degrees, the cone line to (x, rho) =
+/// (-1, 34), the cylinder line to (-5, 34) and the plane line x = -5 up to the arc's leftmost
+/// point, where it is tangent to the arc.
+fn ring_and_wedge() -> Body {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::sweep::revolve;
+    use solidcore_ops::BooleanOp;
+
+    let meridian = |theta: f64| {
+        let e = [0.0, theta.sin(), -theta.cos()];
+        let at = move |x: f64, rho: f64| [x, rho * e[1], rho * e[2]];
+        let arc = move |from: f64, to: f64| Curve::Arc {
+            center: at(0.0, 40.0),
+            // x cross e, so that the arc's angle t runs from x towards e
+            axis: [0.0, -e[2], e[1]],
+            reference: [1.0, 0.0, 0.0],
+            radius: 5.0,
+            start: from.to_radians(),
+            end: to.to_radians(),
+        };
+        (at, arc)
+    };
+    let line = |start: [f64; 3], end: [f64; 3]| Curve::Line { start, end };
+    let (at, arc) = meridian(0.0);
+    let t = |deg: f64| {
+        let r = f64::to_radians(deg);
+        (5.0 * r.cos(), 40.0 + 5.0 * r.sin())
+    };
+    let (x0, r0) = t(175.0);
+    let (x1, r1) = t(210.0);
+    let ring_profile = [
+        arc(175.0, 210.0),
+        line(at(x1, r1), at(0.0, 32.0)),
+        line(at(0.0, 32.0), at(0.0, 48.0)),
+        line(at(0.0, 48.0), at(x0, r0)),
+    ];
+    let ring = revolve(&ring_profile, [0.0; 3], [1.0, 0.0, 0.0], 2.0 * PI, true).unwrap();
+    let (at, arc) = meridian(12.0_f64.to_radians());
+    let wedge_profile = [
+        arc(180.0, 210.0),
+        line(at(x1, r1), at(-1.0, 34.0)),
+        line(at(-1.0, 34.0), at(-5.0, 34.0)),
+        line(at(-5.0, 34.0), at(-5.0, 40.0)),
+    ];
+    let wedge = revolve(
+        &wedge_profile,
+        [0.0; 3],
+        [1.0, 0.0, 0.0],
+        16.0_f64.to_radians(),
+        true,
+    )
+    .unwrap();
+    boolean(ring, wedge, BooleanOp::Union).unwrap().unwrap()
+}
+
+/// A round on the short edge where the wedge's end cap meets the ring's torus band, the arc
+/// from 180 to 210 degrees of the generating circle in the cap's half-plane at 28 degrees
+/// (tangency-labs/solidcraft#17715), builds. The cap lies between that arc and the plane line
+/// x = -5, which leaves the arc's 180 degree end along it: the cap closes to a cusp there, and
+/// the round's rail on it, the circle of radius 5 + r about the arc's centre, lies past x = -5
+/// wherever |t - 180| < acos(5 / (5 + r)), 19.4 degrees for r 0.3. There the material the
+/// round adds is trimmed flush with the plane x = -5 continued, and the band's rail ends on
+/// the band's tangent seam with that plane, continued past the cap's plane (without it the
+/// corner fails with status 1001). At the arc's 210 degree end the round ends on the plane
+/// square to the arc: the ring's rim circle there is square to the arc, and leans over the
+/// round only by its tangent's rounding (taken for a lean, the cap was tilted, and the faces
+/// the rails enclose were left open past them).
+///
+/// The added volume is the region within r of both the cap's plane and the band, outside the
+/// balls about the round's spine (centres 5 + r from the generating circle's centre in the
+/// half-plane at 28 + asin(r / rho) degrees), with x >= -5 and on the round's side of the end
+/// plane square to the arc at its 210 degree end. Integrated by Monte Carlo (10^7 points,
+/// about 0.3 % of error) it is 0.03675 without the sliver between the band and the plane
+/// x = -5 past the tangent circle, and 0.03742 with it; the bounds take 2 % more each way.
+#[test]
+fn a_round_on_a_revolved_end_cap_that_closes_to_a_cusp_builds() {
+    all_fixes();
+    let b = ring_and_wedge();
+    let before = volume(&b);
+    let theta = 28.0_f64.to_radians();
+    let on_cap = |x: f64, rho: f64| Vec3::new(x, rho * theta.sin(), -rho * theta.cos());
+    // the arc's chord's middle picks the arc, whose ends are the generating circle's points at
+    // 210 and 180 degrees
+    let e = nearest_edge(
+        &b,
+        [
+            -4.665063509461097,
+            38.75 * theta.sin(),
+            -38.75 * theta.cos(),
+        ],
+    );
+    let (k, brep) = kernel_copy(&b);
+    let edge_id = brep.edge_list()[e];
+    let curve = edge::curve(&brep, edge_id).unwrap().unwrap();
+    let ivl = edge::interval(&brep, edge_id).unwrap();
+    let ends = [ivl.min(), ivl.max()].map(|t| curve.evaluate_point(&k, t).unwrap());
+    for want in [on_cap(-2.5 * 3.0_f64.sqrt(), 37.5), on_cap(-5.0, 40.0)] {
+        assert!(ends.iter().any(|p| p.distance(want) < 1e-6), "{ends:?}");
+    }
+    let made = blend(&b, Blend::Round, &[e], &[0.3], &[], Corners::Filled)
+        .unwrap_or_else(|e| panic!("the round on the cap's arc does not build: {e:?}"));
+    assert!(!made.made.is_empty());
+    assert!(b.is_manifold_solid().unwrap());
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    let added = volume(&b) - before;
+    assert!((0.0360..=0.0381).contains(&added), "{added}");
 }

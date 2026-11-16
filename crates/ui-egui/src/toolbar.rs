@@ -538,7 +538,7 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
         rows.push(FileRow::Separator);
     }
     for item in entries {
-        rows.push(row(&item.command, &item.label, "", "prefs_plugins", shown));
+        rows.push(row(&item.command, &item.label, "", "prefs_plugins", shown || item.importer));
     }
     rows
 }

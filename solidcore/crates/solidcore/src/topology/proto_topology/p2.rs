@@ -122,8 +122,8 @@
 //! - **Not upstream: ends fitted to proto vertices (WR-452, WR-453, #435, #410).**
 //!   [`ProtoTopologyManager::imprint_edge_definition`] first fits each end of the definition's
 //!   interval to its proto vertex where `imprint_ends`'s checks pass (the SMLib fork's
-//!   thread-groove fixes, tangency-labs/smlib b43876f; the continuation a8caccd is opt-in,
-//!   `Kernel::fixes.imprint_extends_edge_to_proto_vertex`).
+//!   thread-groove fixes, tangency-labs/smlib b43876f, and the continuation a8caccd; the
+//!   flag `imprint_extends_edge_to_proto_vertex` was retired by #14246).
 //! - **Not upstream: one trim interval** (WR-767, tangency-labs/solidcore#3214).
 //!   [`ProtoTopologyManager::create_proto_edge`] trims the 3D curve and its uv curves to the
 //!   one interval none of their trims snaps (`exact_pieces::common_trim_interval`); upstream

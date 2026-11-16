@@ -1,13 +1,13 @@
-//! The fork's tangency-labs/smlib@95bf434, under WR-588's
-//! `Kernel::fixes.face_tight_box_searches_trim`: `sm_CellDirectedMax` takes a cell's greatest
+//! The fork's tangency-labs/smlib@95bf434, in WR-588's trimmed-face search:
+//! `sm_CellDirectedMax` takes a cell's greatest
 //! point as the face's only when it classifies inside the face (`SM_PC_FACE`), not on an edge
 //! or a vertex, which is within the face's zone tolerance of its boundary inside or out.
 //!
 //! The fork's case: the corner of a box of 10 with its three edges there rounded r 1 is a
 //! sphere octant about (1, 1, 1) in [0, 1]^3 (the blend corner's Ball, a ball patch on that
 //! sphere; the fork at 95bf434 built it as the pinned corner's `SmSphere`). Its sphere's points just past the arc in y = 1
-//! classify on the boundary, and the face boxed to y 1.0000243; with the fix it boxes to
-//! [0, 1]^3, to 1e-9.
+//! classify on the boundary, and the face boxed to y 1.0000243; now it boxes to [0, 1]^3, to
+//! 1e-9.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -39,9 +39,8 @@ fn edges_at(k: &Kernel, b: &Brep, p: Point3) -> Vec<EdgeId> {
         .collect()
 }
 
-/// The tight box of the sphere octant (the Ball's patch) at the box's rounded corner, with
-/// the search as given.
-fn octant_box(searches_trim: bool) -> Extent3d {
+/// The tight box of the sphere octant (the Ball's patch) at the box's rounded corner.
+fn octant_box() -> Extent3d {
     let mut k = Kernel::default();
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
     let edges = edges_at(&k, &b, Point3::new(0.0, 0.0, 0.0));
@@ -53,7 +52,6 @@ fn octant_box(searches_trim: bool) -> Extent3d {
             .unwrap();
         session.do_fillet(&mut k).unwrap();
     }
-    k.fixes.face_tight_box_searches_trim = searches_trim;
     let spheres: Vec<_> = b
         .faces()
         .ids()
@@ -71,7 +69,7 @@ fn octant_box(searches_trim: bool) -> Extent3d {
 /// on its boundary arcs took the box past them (y 1.0000243).
 #[test]
 fn fork_95bf434_rounded_corner_boxes_to_its_octant() {
-    let bx = octant_box(true);
+    let bx = octant_box();
     let (lo, hi) = (bx.min(), bx.max());
     for (what, got, want) in [
         ("x min", lo.x, 0.0),
@@ -83,17 +81,4 @@ fn fork_95bf434_rounded_corner_boxes_to_its_octant() {
     ] {
         assert!((got - want).abs() <= 1e-9, "{what}: {got}, want {want}");
     }
-}
-
-/// Without the search the box is the surface's over the face's domain points that classify
-/// on the face, as upstream; it is not tighter than the octant.
-#[test]
-fn rounded_corner_box_without_the_search_holds_the_octant() {
-    let bx = octant_box(false);
-    let (lo, hi) = (bx.min(), bx.max());
-    assert!(lo.x <= 1e-9 && lo.y <= 1e-9 && lo.z <= 1e-9, "{lo:?}");
-    assert!(
-        hi.x >= 1.0 - 1e-9 && hi.y >= 1.0 - 1e-9 && hi.z >= 1.0 - 1e-9,
-        "{hi:?}"
-    );
 }

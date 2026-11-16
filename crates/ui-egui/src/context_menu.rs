@@ -2993,24 +2993,31 @@ fn show_rename(app: &mut SolveApp, ctx: &egui::Context) {
         done = Some(true);
     }
     match done {
+        // A refused name keeps the box open, focused with the name selected; the status line says
+        // why.
         Some(true) => {
-            let _ = commit_rename(app, &r);
+            if commit_rename(app, &r).is_err() {
+                r.focused = false;
+                app.menu.rename = Some(r);
+            }
         }
         Some(false) => {}
         None => app.menu.rename = Some(r),
     }
 }
 
-/// Finish a rename from automation: commit (true) or cancel.
-pub fn finish_rename(app: &mut SolveApp, text: Option<&str>, commit: bool) -> bool {
-    let Some(mut r) = app.menu.rename.take() else { return false };
+/// Finish a rename from automation: commit (true) or cancel. A refused name is the error and
+/// leaves the rename in progress, as the box stays open for a person.
+pub fn finish_rename(app: &mut SolveApp, text: Option<&str>, commit: bool) -> Result<(), String> {
+    let Some(mut r) = app.menu.rename.take() else { return Err("no rename in progress".into()) };
     if let Some(s) = text {
         r.text = s.to_string();
     }
-    if commit {
-        let _ = commit_rename(app, &r);
+    if commit && let Err(e) = commit_rename(app, &r) {
+        app.menu.rename = Some(r);
+        return Err(e);
     }
-    true
+    Ok(())
 }
 
 /// How the workspace menu shows each of SolidCraft's workspaces ([`Target::Workspace`]).

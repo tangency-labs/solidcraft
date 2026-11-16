@@ -89,8 +89,8 @@ struct App {
     solve: SolveApp,
     /// The setup still to run, a step a frame, behind the starting page (#1210).
     setup: solidcraft_ui_egui::starting::Starting<App>,
-    /// The viewport's shader compile, running beside the window while the starting page shows; the
-    /// app waits for it when it closes (#1210).
+    /// The viewport's shader compile, running beside the window while the start page shows (it no
+    /// longer waits for it); the app waits for it when it closes (#1210).
     gpu_job: Option<solidcraft_ui_egui::starting::Worker<solidcraft_ui_egui::WgpuBuilt>>,
     /// The settings folder whose start marker the first frame clears (`startup::started`).
     starting: Option<std::path::PathBuf>,
@@ -99,9 +99,12 @@ struct App {
     /// Frames the window has begun, the starting page's included: the first is fitted to the work
     /// area before the window shows, the second asks for the foreground.
     window_frames: u32,
-    /// Frames begun once the setup was done; the second one means the first was drawn (startup is
-    /// over).
+    /// Frames begun once the setup was done; the second one means the first was drawn (the start
+    /// page is up).
     frames: u32,
+    /// Startup is over: the start page was drawn and the 3D view's pipelines are compiled (or
+    /// failed). Until then a crash still counts as a failed start.
+    up: bool,
     /// Started over the control channel: the window doesn't ask for the foreground.
     take_focus_unwanted: bool,
     /// Coming forward after a close that asks about unsaved designs.
@@ -246,11 +249,10 @@ impl eframe::App for App {
         }
         if self.frames < 2 {
             self.frames += 1;
-            // A second frame right away, which means the first was presented: the app is up.
+            // A second frame right away, which means the first was presented: the start page is up.
             ctx.request_repaint();
             if self.frames == 2 {
-                mark("app up");
-                solidcraft_engine::crash::phase(solidcraft_engine::crash::RUNNING);
+                mark("start page up (first app frame presented)");
                 // A DMG install has no installer step: put solidcraft-cli on PATH, quietly.
                 #[cfg(target_os = "macos")]
                 std::thread::spawn(solidcraft_ui_egui::cli_link::install_on_launch);
@@ -259,15 +261,26 @@ impl eframe::App for App {
                     solidcraft_ui_egui::ai_connect::begin(&mut self.solve);
                     solidcraft_ui_egui::agent_chat::begin(&mut self.solve);
                 }
-                if let Some((path, attempt)) = self.backend_attempt.take()
-                    && let Err(reason) = startup::confirm_backend_start(&path, &attempt)
-                {
-                    log::warn!("graphics: could not confirm the startup choice: {reason}");
-                    self.solve.set_status(reason, true);
+                if !self.setup.settled() {
+                    solidcraft_engine::crash::phase("viewport pipelines (shader compile)");
                 }
-                if let Some(dir) = self.starting.take() {
-                    startup::started(&dir);
-                }
+            }
+        }
+        // Startup is over once the 3D view's shader compile, running beside the start page, is
+        // done too: a driver that crashes in it still counts as a failed start (safe mode, the
+        // backend retry), and a new graphics API is confirmed only once it drew the view.
+        if !self.up && self.frames >= 2 && self.setup.settled() {
+            self.up = true;
+            mark("app up (3D view ready)");
+            solidcraft_engine::crash::phase(solidcraft_engine::crash::RUNNING);
+            if let Some((path, attempt)) = self.backend_attempt.take()
+                && let Err(reason) = startup::confirm_backend_start(&path, &attempt)
+            {
+                log::warn!("graphics: could not confirm the startup choice: {reason}");
+                self.solve.set_status(reason, true);
+            }
+            if let Some(dir) = self.starting.take() {
+                startup::started(&dir);
             }
         }
         self.watch_device();
@@ -393,6 +406,11 @@ impl eframe::App for App {
     }
     /// The app is closing: work still running beside the window ends first, then the session.
     fn on_exit(&mut self) {
+        // Closed from the start page before the 3D view was ready: as a close from the starting
+        // page, a close the user asked for is no failed start (#1210).
+        if let Some(dir) = self.starting.take() {
+            startup::closed_while_starting(&dir, self.gpu.as_ref().is_none_or(|g| g.lost_at.is_none()));
+        }
         // A shader compile from the start still running ends before the GPU is torn down: a
         // driver call cut off as the process exits can crash it (#1210).
         if let Some(job) = self.gpu_job.take()
@@ -690,11 +708,21 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
                 dialog = dialog.add_filter(label, &case_variants(first));
             }
             // The groups come from the format registry, so a new format joins this dialog by itself.
-            let mut everything = io::formats::open_extensions(true);
+            // Installed importer plugins read more kinds of file: they join "everything" and add
+            // a group of their own, named after the plugin.
+            let plugins = io::formats::plugin_open_filters();
+            let mut everything: Vec<&str> = io::formats::open_extensions(true);
             everything.extend(["dxf", "svg"]);
+            for (_, exts) in &plugins {
+                everything.extend(exts.iter().map(String::as_str).filter(|e| !io::formats::open_extensions(true).contains(e)));
+            }
             dialog = dialog.add_filter(solidcraft_ui_text::tr("file.open.drawing_filter"), &case_variants(&everything));
             for (label, exts) in io::formats::import_filters(true) {
                 dialog = dialog.add_filter(label, &case_variants(&exts));
+            }
+            for (label, exts) in &plugins {
+                let exts: Vec<&str> = exts.iter().map(String::as_str).collect();
+                dialog = dialog.add_filter(label.as_str(), &case_variants(&exts));
             }
             let future = dialog.add_filter("All files", &["*"]).pick_file();
             let folder = open_folder.clone();
@@ -1490,12 +1518,20 @@ fn main() -> eframe::Result {
             let nav_bridge = nav_bridge::NavBridge::start(&cc.egui_ctx);
             // The rest is slow on some computers: it runs after the window shows, a step a frame,
             // behind the starting page (#1210).
+            // The 3D view's shader compile starts with the first step and runs beside the app: the
+            // start page does not wait for it (#1210).
             let opening = sample || !files.is_empty();
-            // A software renderer draws the page on the CPU the shader compile needs: rarely.
-            let software = gpu_setup.as_ref().is_some_and(|g| g.rs.adapter.get_info().device_type == eframe::wgpu::DeviceType::Cpu);
-            let setup = solidcraft_ui_egui::starting::Starting::default()
-                .wait_frame(std::time::Duration::from_millis(if software { 1000 } else { 100 }))
-                .until("starting.view", move |a: &mut App, ctx| view_step(a, ctx, gpu_setup.as_ref()))
+            // Driven over the control channel, the app still waits for it before it takes commands:
+            // clients take pictures of the view as soon as they are connected.
+            let mut setup = solidcraft_ui_egui::starting::Starting::default();
+            if let Some(gpu_setup) = gpu_setup {
+                if control_port.is_some() {
+                    setup = setup.until("", move |a: &mut App, ctx| view_step(a, ctx, &gpu_setup));
+                } else {
+                    setup = setup.beside(move |a: &mut App, ctx| view_step(a, ctx, &gpu_setup));
+                }
+            }
+            let setup = setup
                 .then(if opening { "starting.design" } else { "" }, move |a: &mut App, _ctx| {
                     solidcraft_engine::crash::phase("design");
                     let app = &mut a.solve;
@@ -1576,6 +1612,7 @@ fn main() -> eframe::Result {
                 backend_attempt: attempt_in_app,
                 window_frames: 0,
                 frames: 0,
+                up: false,
                 take_focus_unwanted: control_port.is_some(),
                 come_forward: come_forward::ComeForward::default(),
                 gpu,
@@ -1612,15 +1649,14 @@ struct GpuSetup {
     scene_samples: u32,
 }
 
-/// The 3D view's setup step (#1210): the shader compile runs on a [`Worker`] beside the window,
-/// whose page keeps drawing; the pipelines go in use the frame after it is done. `true` once the
-/// step is over: the view has its pipelines, or says it can't draw (the compile failed), or there
-/// is no GPU device at all.
+/// The 3D view's setup (#1210): the shader compile runs on a [`Worker`] beside the window, whose
+/// start page is usable meanwhile; a design opened before it is done says in its view that the
+/// view is being prepared. The pipelines go in use the frame after it is done. `true` once it is
+/// over: the view has its pipelines, or says it can't draw (the compile failed).
 ///
 /// [`Worker`]: solidcraft_ui_egui::starting::Worker
-fn view_step(a: &mut App, ctx: &egui::Context, gpu: Option<&GpuSetup>) -> bool {
+fn view_step(a: &mut App, ctx: &egui::Context, gpu: &GpuSetup) -> bool {
     use solidcraft_ui_egui::starting::{Poll, Worker};
-    let Some(gpu) = gpu else { return true };
     let gpu_meshing = !a.solve.cpu_meshing;
     let (scene_samples, depth_bits) = (gpu.scene_samples, gpu.depth_bits);
     let build = move |rs: &eframe::egui_wgpu::RenderState| {
@@ -1631,6 +1667,9 @@ fn view_step(a: &mut App, ctx: &egui::Context, gpu: Option<&GpuSetup>) -> bool {
     let Some(job) = &a.gpu_job else {
         solidcraft_engine::note!("SolidCraft graphics: {:?}, MSAA {scene_samples}x (requested {}x)", gpu.rs.adapter.get_info().backend, gpu.samples);
         solidcraft_engine::crash::phase("viewport pipelines (shader compile)");
+        // Home's pictures, drawn off the window thread, wait for the renderer the compile installs.
+        solidcraft_engine::capture::coming(true);
+        a.solve.viewport.gpu_preparing = true;
         let rs = gpu.rs.clone();
         match Worker::spawn("viewport pipelines", ctx.clone(), move || build(&rs)) {
             Ok(job) => a.gpu_job = Some(job),
@@ -1647,7 +1686,10 @@ fn view_step(a: &mut App, ctx: &egui::Context, gpu: Option<&GpuSetup>) -> bool {
         Poll::Done(built) => gpu_ready(a, gpu, built),
         // The compile panicked (its crash report is written): the view says it can't draw, rather
         // than staying empty.
-        Poll::Failed => a.solve.gpu_unavailable(),
+        Poll::Failed => {
+            a.solve.gpu_unavailable();
+            solidcraft_engine::capture::coming(false);
+        }
     }
     a.gpu_job = None;
     mark("viewport pipelines");
@@ -1681,7 +1723,7 @@ fn startup_step(step: &'static str, detail: &str) {
 }
 
 /// The renderer settings: with `cpu`, the software adapter (WARP, lavapipe, llvmpipe). The
-/// backends come from `startup::choose_backends` (on Windows D3D12 first, and only the backend
+/// backends come from `startup::choose_backends` (on Windows Vulkan first, and only the backend
 /// in use is started); `preference` is `graphics.json`'s `backend`.
 fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuConfiguration {
     // One frame in flight, as eframe's own default (`NativeOptions::default`): egui-wgpu's

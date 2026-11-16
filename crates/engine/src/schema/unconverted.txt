@@ -9,5 +9,3 @@ solid.loft
 solid.offset_face
 solid.shell
 solid.thread
-surface.extrude
-surface.revolve

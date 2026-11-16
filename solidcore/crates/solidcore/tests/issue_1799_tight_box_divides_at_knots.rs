@@ -1,5 +1,5 @@
 //! WR-651 (tangency-labs/smlib@326de73), the second half of #1799's trimmed-face tight box
-//! (`Kernel::fixes.face_tight_box_searches_trim`, WR-588): the search divides an undecided
+//! (WR-588): the search divides an undecided
 //! cell at the surface's knot inside it, not only at its middle.
 //!
 //! A rational patch is read monotone only within one knot span. Halved at middles alone, a
@@ -109,10 +109,9 @@ fn line(from: Point3, to: Point3) -> Curve {
     Curve::from(Line::create_line_segment(3, from, to, Some(&interval)).unwrap())
 }
 
-/// The tight box of the cylinder trimmed to `0 <= z <= top`, with the trim search on or off.
-fn trimmed_cylinder_box(top: f64, searches_trim: bool) -> Extent3d {
+/// The tight box of the cylinder trimmed to `0 <= z <= top`.
+fn trimmed_cylinder_box(top: f64) -> Extent3d {
     let mut k = Kernel::default();
-    k.fixes.face_tight_box_searches_trim = searches_trim;
     let curves = vec![
         arc(0.0, false),
         line(Point3::new(0.0, -1.0, 0.0), Point3::new(0.0, -1.0, top)),
@@ -129,27 +128,18 @@ fn assert_close(what: &str, got: f64, want: f64) {
     assert!((got - want).abs() <= 1e-9, "{what}: {got}, want {want}");
 }
 
-/// With the search on, the cells over the knots divide there and are read monotone: the box
+/// The cells over the knots divide there and are read monotone: the box
 /// is the face's, exactly. Halved at middles only, the cells over u = 1/3 along the trim at
 /// z = 0.3 stay undecided to the depth limit and the box reaches above 0.3.
 #[test]
 fn trimmed_rational_cylinder_box_is_exact_with_the_search() {
-    let bx = trimmed_cylinder_box(0.3, true);
+    let bx = trimmed_cylinder_box(0.3);
     assert_close("z max", bx.max().z, 0.3);
     assert_close("z min", bx.min().z, 0.0);
     assert_close("x max", bx.max().x, 1.0);
     assert_close("x min", bx.min().x, -1.0);
     assert_close("y max", bx.max().y, 1.0);
     assert_close("y min", bx.min().y, -1.0);
-}
-
-/// Flag off (upstream): the surface's global solves classify outside the face, so the box
-/// is the vertices' and edges', which here is the face's too.
-#[test]
-fn trimmed_rational_cylinder_box_without_the_search_is_the_edges() {
-    let bx = trimmed_cylinder_box(0.3, false);
-    assert_close("z max", bx.max().z, 0.3);
-    assert_close("z min", bx.min().z, 0.0);
 }
 
 /// The barrel's outer profile in the plane y = 0: a cubic B-spline from (5, 0, 0) to
@@ -238,12 +228,12 @@ fn profile_x_at_z(z: f64) -> f64 {
     profile_at(&k, &c, (a + b) / 2.0).x
 }
 
-/// WR-588 at operation level (#1954): the barrel's tight box is its surface's either way.
+/// WR-588 at operation level (#1954): the barrel's tight box is its surface's.
 /// Cut by a boolean difference of the box over y >= 0, z <= 5, the tall bulge stays on the
 /// face only on the side y < 0. The face's +y extreme is the lower bulge's crest, inside the
-/// face. Off (pinned upstream), the global solve finds the cut-away bulge, classifies it
-/// outside the face and drops it: the body's +y side is the cut edge round the waist at
-/// z = 5. On (the fork), the trim search finds the crest. The other five sides agree.
+/// face, which the trim search finds. Upstream's global solve found the cut-away bulge,
+/// classified it outside the face and dropped it: the body's +y side was the cut edge round
+/// the waist at z = 5. The other five sides agree.
 #[test]
 fn wr_588_barrel_cut_below_its_waist_is_boxed_to_its_upper_bulge() {
     let tall = profile_max_x(0.0, 5.0);
@@ -253,48 +243,42 @@ fn wr_588_barrel_cut_below_its_waist_is_boxed_to_its_upper_bulge() {
         waist < low - 1.0 && low < tall - 1.0,
         "{waist} {low} {tall}"
     );
-    for searches_trim in [false, true] {
-        let mut k = Kernel::default();
-        k.fixes.face_tight_box_searches_trim = searches_trim;
-        let whole = barrel(&mut k);
-        // control: uncut, the surface's global extremes are the face's
-        let bx = brep_bounding_box(&k, &whole, true).unwrap();
-        for (what, got, want) in [
-            ("x max", bx.max().x, tall),
-            ("x min", bx.min().x, -tall),
-            ("y max", bx.max().y, tall),
-            ("y min", bx.min().y, -tall),
-            ("z max", bx.max().z, 10.0),
-            ("z min", bx.min().z, 0.0),
-        ] {
-            assert!(
-                (got - want).abs() <= 1e-9,
-                "{searches_trim}: whole {what}: {got}, want {want}"
-            );
-        }
-
-        let cut = create_box(&mut k, Point3::new(-20.0, 0.0, -1.0), 40.0, 20.0, 6.0).unwrap();
-        let body = boolean_difference(&mut k, whole, cut).unwrap();
-        assert_eq!(faces(&body, None).unwrap().len(), 7, "{searches_trim}");
-        let bx = brep_bounding_box(&k, &body, true).unwrap();
-        let want_y = if searches_trim { low } else { waist };
+    let mut k = Kernel::default();
+    let whole = barrel(&mut k);
+    // control: uncut, the surface's global extremes are the face's
+    let bx = brep_bounding_box(&k, &whole, true).unwrap();
+    for (what, got, want) in [
+        ("x max", bx.max().x, tall),
+        ("x min", bx.min().x, -tall),
+        ("y max", bx.max().y, tall),
+        ("y min", bx.min().y, -tall),
+        ("z max", bx.max().z, 10.0),
+        ("z min", bx.min().z, 0.0),
+    ] {
         assert!(
-            (bx.max().y - want_y).abs() <= 1e-9,
-            "{searches_trim}: y max {}, want {want_y}",
-            bx.max().y
+            (got - want).abs() <= 1e-9,
+            "whole {what}: {got}, want {want}"
         );
-        for (what, got, want) in [
-            ("x max", bx.max().x, tall),
-            ("x min", bx.min().x, -tall),
-            ("y min", bx.min().y, -tall),
-            ("z max", bx.max().z, 10.0),
-            ("z min", bx.min().z, 0.0),
-        ] {
-            assert!(
-                (got - want).abs() <= 1e-9,
-                "{searches_trim}: cut {what}: {got}, want {want}"
-            );
-        }
+    }
+
+    let cut = create_box(&mut k, Point3::new(-20.0, 0.0, -1.0), 40.0, 20.0, 6.0).unwrap();
+    let body = boolean_difference(&mut k, whole, cut).unwrap();
+    assert_eq!(faces(&body, None).unwrap().len(), 7);
+    let bx = brep_bounding_box(&k, &body, true).unwrap();
+    let want_y = low;
+    assert!(
+        (bx.max().y - want_y).abs() <= 1e-9,
+        "y max {}, want {want_y}",
+        bx.max().y
+    );
+    for (what, got, want) in [
+        ("x max", bx.max().x, tall),
+        ("x min", bx.min().x, -tall),
+        ("y min", bx.min().y, -tall),
+        ("z max", bx.max().z, 10.0),
+        ("z min", bx.min().z, 0.0),
+    ] {
+        assert!((got - want).abs() <= 1e-9, "cut {what}: {got}, want {want}");
     }
 }
 
@@ -357,7 +341,6 @@ fn sheet() -> Surface {
 #[test]
 fn tight_box_cells_are_solved_on_their_own_subpatch() {
     let mut k = Kernel::default();
-    k.fixes.face_tight_box_searches_trim = true;
     let (cx, cy, r) = DISK;
     let circle = Curve::from(create_circle(Point3::new(cx, cy, 5.0), r).unwrap());
     let b = trim_project_parallel(
@@ -454,7 +437,6 @@ fn ramp_z_at(spans: usize, x: f64) -> f64 {
 /// solves read.
 fn trimmed_ramp_box(spans: usize) -> (Extent3d, u64) {
     let mut k = Kernel::default();
-    k.fixes.face_tight_box_searches_trim = true;
     let corners = [
         (0.5, 0.0),
         (RAMP_STOP, 0.0),
@@ -588,7 +570,6 @@ fn mixed_chamfer_face() -> Surface {
 #[test]
 fn a_dip_the_whole_domain_solve_misses_is_inside_the_box() {
     let mut k = Kernel::default();
-    k.fixes.face_tight_box_searches_trim = true;
     let face = mixed_chamfer_face();
     let dip = face
         .evaluate_point(
@@ -661,7 +642,6 @@ fn quarter_cylinder() -> Surface {
 #[test]
 fn a_ridge_along_a_face_is_divided_only_across_it() {
     let mut k = Kernel::default();
-    k.fixes.face_tight_box_searches_trim = true;
     let (b, f) = sheet_on(&mut k, quarter_cylinder(), 1e-6).unwrap();
     assert_eq!(
         (

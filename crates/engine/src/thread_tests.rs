@@ -290,6 +290,19 @@ fn automatic_sizing_past_the_coarse_range_suggests_a_size_with_its_pitch() {
 }
 
 #[test]
+fn the_dialog_fills_in_a_size_with_its_pitch_past_the_coarse_range() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 75, "height": 10, "body_name": "Shaft"}));
+    let state = s.model.state();
+    let size = crate::cmd::large_thread_size(&state, Vec3::new(75.0, 0.0, 5.0)).unwrap();
+    assert_eq!(size, "M150x4");
+    run(&mut s, "solid.thread", json!({"face": [75, 0, 5], "designation": size}));
+    // A cylinder the coarse table covers is sized automatically, so there is nothing to fill in.
+    run(&mut s, "solid.cylinder", json!({"base":[300,0,0],"radius": 10, "height": 10, "body_name": "Small", "operation": "new"}));
+    assert_eq!(crate::cmd::large_thread_size(&s.model.state(), Vec3::new(310.0, 0.0, 5.0)), None);
+}
+
+#[test]
 fn qualified_automatic_sizing_past_the_coarse_range_ignores_another_bodys_valid_size() {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"base":[33.5,0,0],"radius":4,"height":10,"body_name":"Small","operation":"new"}));

@@ -581,6 +581,16 @@ pub(crate) fn view_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, 
     if mods.alt || menu_open {
         return false;
     }
+    // The Browser has the keyboard (its last click was on a row): plain arrows move through its
+    // tree instead of turning the view (#17931).
+    if app.preferences.browser_arrow_keys
+        && matches!(key, Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown)
+        && !ctrl
+        && !mods.shift
+        && app.tree.content.browser_focused()
+    {
+        return false;
+    }
     let result = crate::render_workspace::result_active(app);
     if key == Key::Num8 && ctrl && !mods.shift && !result {
         crate::viewport::look_at_selection(app);
@@ -3637,6 +3647,45 @@ mod view_key_tests {
             }
         }
         assert!(crate::keymap::RESERVED.contains(&crate::keymap::key_name(egui::Key::Num8, egui::Modifiers::COMMAND).as_str()));
+    }
+
+    /// #17931: with the Browser holding the keyboard (its last click was on a row) the plain arrows
+    /// do not turn the view, so the tree can take them; a click in the view hands them back, and
+    /// the `browser_arrow_keys` preference turns this off.
+    #[test]
+    fn arrows_leave_the_view_alone_while_the_browser_has_focus() {
+        let mut h = Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "base": [30, 0, 0]})).unwrap();
+        h.step(&json!({"call": "ui.view", "params": {"view": "front"}})).unwrap();
+        h.frames(3);
+        assert!(h.app.preferences.browser_arrow_keys, "on by default");
+        assert!(!h.app.tree.content.browser_focused(), "nothing is focused yet");
+        let (yaw, _) = turned(&mut h, json!({"key": "ArrowLeft"}));
+        assert!(yaw.abs() > 0.1, "the view turns before the Browser has focus: {yaw}");
+        h.step(&json!({"click": {"handle": "row:Body1"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.tree.content.browser_focused(), "a click on a row gives the Browser the keyboard");
+        let (yaw, pitch) = turned(&mut h, json!({"key": "ArrowLeft"}));
+        assert!(yaw.abs() < 1e-9 && pitch.abs() < 1e-9, "the view does not turn: {yaw} {pitch}");
+        for _ in 0..2 {
+            h.step(&json!({"key": "ArrowDown"})).unwrap();
+            h.frames(2);
+        }
+        let selected = format!("{:?}", h.app.session.selection);
+        assert!(selected.contains("Body2"), "Down moves the selection through the rows: {selected}");
+        let (_, pitch) = turned(&mut h, json!({"key": "ArrowUp"}));
+        assert!(pitch.abs() < 1e-9, "nor does Up: {pitch}");
+        h.app.preferences.browser_arrow_keys = false;
+        let (yaw, _) = turned(&mut h, json!({"key": "ArrowLeft"}));
+        assert!(yaw.abs() > 0.1, "with the preference off the arrows turn the view again: {yaw}");
+        h.app.preferences.browser_arrow_keys = true;
+        h.step(&json!({"click": {"world": [5, 5, 10]}})).unwrap();
+        h.frames(2);
+        assert!(!h.app.tree.content.browser_focused(), "a click in the view takes the keyboard back");
+        let (yaw, _) = turned(&mut h, json!({"key": "ArrowLeft"}));
+        assert!(yaw.abs() > 0.1, "and the arrows turn the view: {yaw}");
     }
 
     /// #16601: in an orthographic view, zooming to the cursor and orbiting around it never move the target along
