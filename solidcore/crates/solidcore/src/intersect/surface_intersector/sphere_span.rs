@@ -298,10 +298,11 @@ impl SweepNet {
         }
         let along = self.along;
         let c = n.map(|p| p.get(along).copied().unwrap_or(Ivl::whole()));
+        // the derivative's Bernstein coefficients over 3 (the sign test is homogeneous)
         let b = [
-            three * (c[1] - c[0]),
-            three * (c[2] - c[1]),
-            three * (c[3] - c[2]),
+            difference(c[1], c[0]),
+            difference(c[2], c[1]),
+            difference(c[3], c[2]),
         ];
         if keeps_sign(b) || keeps_sign(b.map(|x| Ivl::from(0.0) - x)) {
             SpanSweep::Monotone
@@ -309,6 +310,24 @@ impl SweepNet {
             SpanSweep::TurnsBack
         }
     }
+}
+
+/// An enclosure of `a − b`: the point difference when both are points and their
+/// floating-point difference is exact (Knuth's two-sum error is zero), so that equal
+/// control points give exactly 0 and not an interval about it; otherwise the outward
+/// rounded difference.
+fn difference(a: Ivl, b: Ivl) -> Ivl {
+    let points = a.lo == a.hi && b.lo == b.hi;
+    if points {
+        let (x, y) = (a.lo, -b.lo);
+        let sum = x + y;
+        let y_part = sum - x;
+        let error = (x - (sum - y_part)) + (y - y_part);
+        if error == 0.0 && sum.is_finite() {
+            return Ivl::from(sum);
+        }
+    }
+    a - b
 }
 
 /// Whether the quadratic with the enclosed Bernstein coefficients `b` is non-negative over
@@ -1382,6 +1401,11 @@ mod tests {
         assert!(!q(4.0, -2.0 - 1e-12, 1.0));
         assert!(!q(-1e-300, 1.0, 1.0));
         assert!(!q(f64::NAN, 1.0, 1.0));
+        // a constant sweep coordinate is monotone: equal points differ by exactly 0
+        let c = Ivl::from(9.261_725_223_348_444);
+        assert_eq!(difference(c, c), Ivl::from(0.0));
+        assert!(keeps_sign([difference(c, c); 3]));
+        assert!(difference(Ivl::from(1.0), Ivl::from(1e-30)).lo < 1.0);
         assert!(!q(1.0, f64::NAN, 1.0));
     }
 
@@ -1474,7 +1498,7 @@ mod tests {
         let (uv, xyz) = spans(k, &s, Point2::new(0.30, 0.5), Point2::new(0.32, 0.5));
         let mut b = [
             uv[0],
-            uv[0] + uv[1] * (4.0 / 3.0),
+            uv[0] + uv[1] * 2.0,
             uv[2] - uv[3] / 3.0,
             uv[2],
         ];
