@@ -14,7 +14,7 @@ use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::{Dashes, Group, Item, ObjectKind};
 use solidcraft_geom::prelude::*;
 
-use super::lines::drawable;
+use super::lines::{chain_dashes_mm, drawable};
 use crate::params::bad;
 use crate::{Result, Session};
 
@@ -143,12 +143,9 @@ pub fn flat_group(flat: &Flat, frame: &ViewFrame, object: u64, group: LineGroup)
 }
 
 /// A bend line's dashes in line `group`: bent up, ISO 128's chain line (type 04: long dash, dot);
-/// bent down, its double-chain line (type 05: long dash, two dots). Dashes are 20 line widths, gaps
-/// 3 and dots 1, of the narrow line.
+/// bent down, its double-chain line (type 05: long dash, two dots) ([`chain_dashes_mm`]).
 pub fn bend_dashes_mm(up: bool, group: LineGroup) -> Vec<f64> {
-    let widths: &[f64] = if up { &[20.0, 3.0, 1.0, 3.0] } else { &[20.0, 3.0, 1.0, 3.0, 1.0, 3.0] };
-    let d = LineKind::Thin.width_mm(group);
-    widths.iter().map(|w| w * d).collect()
+    chain_dashes_mm(if up { 1 } else { 2 }, group)
 }
 
 /// `lengths_mm` started where a line `length_mm` long has its first, long dash at its middle.

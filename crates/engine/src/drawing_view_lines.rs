@@ -346,6 +346,18 @@ pub fn paper_lines(lines: &Lines, object: u64, group: LineGroup) -> (Group, Vec<
     (Group { object, kind: ObjectKind::View, items }, drew)
 }
 
+/// ISO 128-20's narrow long-dashed dotted lines in line `group`, with its Table 3 lengths: a long dash
+/// of 24 widths of the narrow line, then `dots` dots of half a width, each after a gap of 3, and a gap
+/// of 3 to end. One dot is type 04 (a bend bent up); two, type 05 (a bend bent down).
+pub fn chain_dashes_mm(dots: usize, group: LineGroup) -> Vec<f64> {
+    let d = LineKind::Thin.width_mm(group);
+    let mut lengths = vec![24.0 * d, 3.0 * d];
+    for _ in 0..dots {
+        lengths.extend([0.5 * d, 3.0 * d]);
+    }
+    lengths
+}
+
 /// `seg`, or nothing where it has no length to draw: a line whose ends are one point. An arc too
 /// short to sweep is drawn as its chord.
 pub(super) fn drawable(seg: Seg2) -> Option<Seg2> {
