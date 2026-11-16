@@ -979,6 +979,7 @@ fn cell_grid_edit_refills_every_stored_value() {
 }
 
 /// Edit Feature refills the keep-outs' clip and the snap inset, and OK makes the same feature.
+/// The dialog always sends the angle (as the first-time form does), so the stored record names one.
 #[test]
 fn cell_grid_edit_refills_the_keepout_clip_and_the_snap_inset() {
     let mut h = Harness::new();
@@ -988,7 +989,7 @@ fn cell_grid_edit_refills_the_keepout_clip_and_the_snap_inset() {
     h.app.run("sketch.finish", json!({})).unwrap();
     let stored = json!({
         "sketch": "Field", "size": "6 mm", "web": "1.5 mm", "depth": "2 mm", "clip": "snap", "keepout_clip": "whole",
-        "snap_inset": "1", "targets": ["Plate"],
+        "snap_inset": "1", "angle": "15 deg", "targets": ["Plate"],
     });
     h.app.run("solid.cell_grid", stored).unwrap();
     let kind = h.app.session.doc.find_feature("CellGrid1").unwrap().kind.clone();
