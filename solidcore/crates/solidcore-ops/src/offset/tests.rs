@@ -196,6 +196,90 @@ fn the_top_moves_out() {
     assert!(rel(volume(&b), ABC + 2.0 * 600.0) < 1e-9);
 }
 
+/// The index of the edge of `b` through `p`, in its edge list (the order a blend reads
+/// without a record order).
+fn edge_at(b: &Body, p: [f64; 3]) -> usize {
+    use solidcore::query::api_queries::edge_closest_point;
+    let k = Kernel::default();
+    let brep = b.lock();
+    let p = solidcore::Point3::new(p[0], p[1], p[2]);
+    brep.edge_list()
+        .iter()
+        .position(|&e| edge_closest_point(&k, &brep, e, p).is_ok_and(|c| c.closest.distance < 1e-9))
+        .unwrap()
+}
+
+/// #14370: an 82 x 47 x 20 box with a post r 10, 10 high, about each corner, the posts' outer
+/// top edges rounded 6 and the box's corners above them chamfered 4, shelled 1 inward open
+/// at the top. Each chamfer's foot ends where its post's round ends, so four faces meet
+/// there: the box's wall, the chamfer, the post's top and the round. The input has 22 faces
+/// (4 walls, the bottom, the top, and 4 each of chamfers, posts, rounds and post tops), 52
+/// edges and 32 vertices, 8 of them those four-face corners. The shell keeps the 21 faces
+/// left and their 52 edges and 32 vertices, adds the 21 faces' offsets with their 44 edges
+/// and 24 vertices off the top, and the top's ring with its inner 8 edges and 8 vertices; each
+/// four-face corner's offset is two vertices joined by a new edge (the wall's offset meets
+/// the post top's between the chamfer's and the round's): 43 faces, 112 edges, 72 vertices,
+/// one shell.
+#[test]
+fn a_box_whose_rounded_posts_end_at_chamfered_corners_shells() {
+    all_fixes();
+    let (a, c) = (41.0, 23.5);
+    let mut b = make_box([-a, -c, 0.0], [2.0 * a, 2.0 * c, 20.0]).unwrap();
+    for (sx, sy) in [(-1.0_f64, -1.0_f64), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+        // the cylinder's seam (its +x side) turned to point into the box, so the union leaves
+        // each post's side one face, as the reporter's extrusion makes it
+        let post = make_cylinder([0.0; 3], 10.0, 10.0).unwrap();
+        let (s, co) = (-sy).atan2(-sx).sin_cos();
+        post.transform(&[
+            [co, s, 0.0, 0.0],
+            [-s, co, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [sx * a, sy * c, 0.0, 1.0],
+        ])
+        .unwrap();
+        b = crate::boolean::boolean(b, post, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+    }
+    // each post's top edge, through its point outward on the diagonal
+    let h = 10.0 / 2f64.sqrt();
+    let rims: Vec<usize> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+        .iter()
+        .map(|&(sx, sy)| edge_at(&b, [sx * (a + h), sy * (c + h), 10.0]))
+        .collect();
+    crate::blend::blend(
+        &b,
+        crate::blend::Blend::Round,
+        &rims,
+        &[6.0],
+        &[],
+        crate::blend::Corners::Filled,
+    )
+    .unwrap();
+    let corners: Vec<usize> = [(-a, -c), (a, -c), (a, c), (-a, c)]
+        .iter()
+        .map(|&(x, y)| edge_at(&b, [x, y, 15.0]))
+        .collect();
+    crate::blend::blend(
+        &b,
+        crate::blend::Blend::Chamfer,
+        &corners,
+        &[4.0],
+        &[],
+        crate::blend::Corners::Filled,
+    )
+    .unwrap();
+    assert_eq!(b.counts().unwrap(), [22, 52, 32]);
+    let o = order(&b);
+    let lid = through(&b, &o, [0.0, 0.0, 20.0]);
+    shell(&b, &o, &[lid], -1.0).unwrap();
+    assert_eq!(b.counts().unwrap(), [43, 112, 72]);
+    assert_eq!(b.to_record().unwrap().0.shells.len(), 1);
+    assert!(b.is_manifold_solid().unwrap());
+    let report = b.check(crate::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+}
+
 /// `body` with its face through `at` split by the plane `z = height`.
 fn split_at_height(body: &Body, at: [f64; 3], height: f64) -> Body {
     let plane = ([0.0, 0.0, height], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
