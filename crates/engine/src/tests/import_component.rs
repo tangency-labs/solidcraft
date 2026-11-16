@@ -324,6 +324,25 @@ fn an_imports_rigid_group_holds_the_parts_it_placed() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Paste New of a later placement of an imported assembly copies its rigid group too: the
+/// copy's parts are held, as a copy of the first placement's would be.
+#[test]
+fn paste_new_of_a_later_placement_of_an_import_copies_its_rigid_group() {
+    let dir = temp_dir("rigid-paste");
+    let path = rig_file(&dir);
+    let mut s = Session::default();
+    let rig = run(&mut s, "file.insert_step", json!({"path": path}))["component"].as_u64().unwrap();
+    let second = run(&mut s, "occurrence.copy", json!({"component": rig, "translate": [200, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let copied = run(&mut s, "component.paste_new", json!({"component": rig, "occurrence": second, "translate": [0, 200, 0]}));
+    let copy = copied["component"].as_u64().unwrap();
+    assert_ne!(copy, rig);
+    let group = s.doc.rigid_group_of(copy).unwrap_or_else(|| panic!("no group for the copy: {:?}", s.doc.assembly.rigid_groups));
+    assert_eq!(s.doc.rigid_group_members(group).len(), 6, "{group:?}");
+    let original = s.doc.rigid_group_of(rig).unwrap();
+    assert!(group.members.iter().all(|m| !original.members.contains(m)), "the copy holds its own parts");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_mesh_file_comes_in_as_one_component() {
     let dir = temp_dir("stl");
