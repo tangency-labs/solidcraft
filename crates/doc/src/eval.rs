@@ -7269,33 +7269,27 @@ fn feature_tools_with_constructor(
             // A negative distance flips the side.
             let (mut lo, mut hi) = if a <= b { (a, b) } else { (b, a) };
             // To a curved (or slanted) face: run right through the target body, then keep what
-            // lies before its surface (the tool less the body, the piece at the start). An end
-            // the offset carries back across the start, away from that face, never meets it: it
-            // ends at its level, as for a plane, instead of running out through the whole body.
-            // A wall that runs along the extrusion (a cylinder's side, when extruding along its
-            // axis) and lies clear of the profile is never reached: the point picked on it stands
-            // for the plane through it, as a point in space does (#11923). A wall that crosses the
-            // profile seen along the extrusion still trims the tool to the body.
+            // lies before that face's surface, offset by the To offset along the travel
+            // (`trim_to_face`, #12617). An end the offset carries back across the start, away from
+            // that face, never meets it: it ends at its level, as for a plane, instead of running
+            // out through the whole body. A wall that runs along the extrusion (a cylinder's side,
+            // when extruding along its axis) and lies clear of the profile is never reached: the
+            // point picked on it stands for the plane through it, as a point in space does
+            // (#11923). A wall that crosses the profile seen along the extrusion still trims the
+            // tool to the body.
             let curved = curved_face(&tst, to_end_face, Some(n))
                 .filter(|_| toward_to)
                 .filter(|_| !to_end_face.is_some_and(|face| runs_along(&tst, face, n) && !meets_footprint(&tst, face, &ss.plane, &regions)));
-            // The tool is cut back to that surface below, which removes the part a To offset adds
-            // past it: the offset would change nothing, so say so instead of cutting nothing (#12617).
-            if curved.is_some()
-                && matches!(operation, Operation::Join | Operation::Cut)
-                && let Some(e) = &extent.to_offset
-                && val(vals, e, Kind::Length)? > 1e-9
-            {
-                return Err(DocError::Invalid(
-                    "not supported yet: To Object with an offset past a curved or slanted face (the tool is cut back to that face, so the offset would do nothing); use a Distance, or an offset of 0 or less".into(),
-                ));
-            }
+            let to_offset = match (&extent.to, &extent.to_offset) {
+                (Some(_), Some(e)) => val(vals, e, Kind::Length)?,
+                _ => 0.0,
+            };
             if let Some(bi) = curved
                 && let Some(tb) = tst.bodies.get(bi)
             {
                 let m = tb.mesh();
                 let hs: Vec<f64> = m.positions.iter().map(|q| (*q - ss.plane.origin).dot(n) - off).collect();
-                let margin = tb.body.size() * 0.05 + 1.0;
+                let margin = tb.body.size() * 0.05 + 1.0 + to_offset.abs();
                 if hi > 0.0 {
                     hi = hs.iter().cloned().fold(hi, f64::max) + margin;
                 } else {
@@ -7332,7 +7326,21 @@ fn feature_tools_with_constructor(
             {
                 let start = if hi > 0.0 { lo + off } else { hi + off };
                 let far = if hi > 0.0 { hi + off } else { lo + off };
-                tools = trim_to_face(tools, tb, fi, &ss.plane, start, far)?;
+                tools = match extent.to {
+                    // A To offset: the end is the face's offset surface, not the face (#12617).
+                    Some(p) if to_offset.abs() > 1e-9 => {
+                        let travel = if hi > 0.0 { n } else { n * -1.0 };
+                        let trimmed =
+                            trim_to_offset_face(tools, tb, fi, p.0, travel, to_offset, |q: Vec3| ((q - ss.plane.origin).dot(n) - start).abs())?;
+                        // A tool the offset surface misses comes back whole, its end cap still at
+                        // the far height the extent was run out to: refused, as `trim_to_face` does.
+                        if trimmed.iter().any(|t| kernel::has_cap_at(&t.body, &ss.plane, far, far - start)) {
+                            return Err(DocError::Invalid("the profile reaches past the offset surface of the To face".into()));
+                        }
+                        trimmed
+                    }
+                    _ => trim_to_face(tools, tb, fi, &ss.plane, start, far)?,
+                };
             }
             // A join's profile grows into the material it joins; its sketch plane and depth as drawn
             // still serve a join into sheet metal (`sheet_join`), which takes the sketch's regions.
@@ -9582,6 +9590,74 @@ fn trim_to_face(tools: Vec<Traced>, target: &ModelBody, face: usize, plane: &Pla
         return Err(DocError::Invalid("nothing lies between the profile and the To object".into()));
     }
     Ok(out)
+}
+
+/// Tools run through `target`, cut back to the surface of its face `face` offset by `offset`
+/// along `travel`, the direction the extent runs (a negative offset: that far short of the face):
+/// each tool split by the face's offset sheet (`offset_sheet`), extended, keeping the piece(s)
+/// that touch the start (a plane face of the piece at `dist_to_start` 0). The kernel refuses the offset for some
+/// surfaces (#8137): the feature then fails with that reason rather than ending somewhere else.
+/// `near` is a point on the face (the To pick). With no offset, see [`trim_to_face`].
+fn trim_to_offset_face(
+    tools: Vec<Traced>,
+    target: &ModelBody,
+    face: usize,
+    near: Vec3,
+    travel: Vec3,
+    offset: f64,
+    dist_to_start: impl Fn(Vec3) -> f64,
+) -> Result<Vec<Traced>> {
+    let target_traced = target.traced();
+    let sheet = offset_sheet(target, face, near, travel, offset)?;
+    let tool = kernel::SplitTool::Face { body: &sheet, face: 0 };
+    let split = tools.iter().map(|t| kernel::split_body(&t.body, &tool)).collect::<std::result::Result<Vec<_>, _>>().map_err(|e| {
+        DocError::Invalid(format!(
+            "not supported yet: To Object with an offset from this face: the extent cannot be cut by its offset surface ({e}); use a Distance, or an offset of 0"
+        ))
+    })?;
+    let mut out = Vec::new();
+    for (t, parts) in tools.iter().zip(split) {
+        for part in parts {
+            let tol = (part.size() * 1e-4).max(1e-6);
+            // Touching the start: a plane face square to the travel at the start's level (a piece
+            // of the tool's start cap), read from the B-rep.
+            let touches = (0..part.face_count()).any(|fi| {
+                matches!(kernel::face_surface(&part, fi), Some(kernel::FaceSurface::Plane { normal, point })
+                    if normal.vec().cross(travel).len() <= 1e-6 * travel.len() && dist_to_start(point) < tol)
+            });
+            if touches {
+                out.push(Traced::step(part, &[t, &target_traced]));
+            }
+        }
+    }
+    if out.is_empty() {
+        return Err(DocError::Invalid("nothing lies between the profile and the To object".into()));
+    }
+    Ok(out)
+}
+
+/// The surface of `target`'s face `face` as a sheet body `offset` past the face along `travel`
+/// (short of it when negative): the kernel's offset of that face, whose sign follows the face's
+/// surface normal, which for a reversed face (the bore of a tube) points the other way than the
+/// travel past it. The sheet is built with the offset's own sign and rebuilt on the other side
+/// when it lands on the wrong one, measured on the sheet's exact surface at its point nearest
+/// `near`.
+fn offset_sheet(target: &ModelBody, face: usize, near: Vec3, travel: Vec3, offset: f64) -> Result<Body> {
+    let refused = |e: &dyn std::fmt::Display| {
+        DocError::Invalid(format!(
+            "not supported yet: To Object with an offset from this face: its offset surface cannot be built ({e}); use a Distance, or an offset of 0"
+        ))
+    };
+    let dir = travel.normalized().ok_or_else(|| DocError::Invalid("the extent has no direction".into()))?;
+    let tol = (target.body.size() * 1e-4).clamp(1e-4, 1.0);
+    let sheet = kernel::offset_surface(&target.body, &[face], offset, tol).map_err(|e| refused(&e))?;
+    // Where the sheet landed, along the travel from the pick (the point of its exact surface
+    // nearest the pick): past the face when positive.
+    let side = kernel::face_surface(&sheet, 0).and_then(|s| s.nearest(near)).map(|q| (q - near).dot(dir));
+    match side {
+        Some(side) if side * offset < 0.0 => kernel::offset_surface(&target.body, &[face], -offset, tol).map_err(|e| refused(&e)),
+        _ => Ok(sheet),
+    }
 }
 
 /// One point on each face of a body (a triangle centre, so it lies on the face).
