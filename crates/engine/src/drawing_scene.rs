@@ -88,7 +88,8 @@ use solidcraft_sketch::PaperFonts;
 use crate::drawing_picture::{picture_items, view_parts};
 use crate::drawing_table_paper::SheetTables;
 use crate::drawing_view::{
-    CHORD_MM, Choice, LineRequest, MIN_MODEL_CHORD_MM, Shown, ShownSet, Stats, Styles, Unmeasured, ViewSessions, copy_for, paper_lines,
+    CHORD_MM, Choice, LineRequest, MIN_MODEL_CHORD_MM, PreparedBodies, Shown, ShownSet, Stats, Styles, Unmeasured, ViewSessions, copy_for,
+    paper_lines,
 };
 use crate::params::bad;
 use crate::title_block_text::{self, CellText, Set};
@@ -420,18 +421,23 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     let copy = (!s.pending_moves.is_empty()).then(|| designed(s));
     let s = copy.as_ref().unwrap_or(s);
     // Worked out once for the sheet for each state of the assembly its views draw (#13048): every
-    // view of that state draws from the same one. Each view's lines are placed as they are drawn, so
-    // at most one view's are held beside the scene.
+    // view of that state draws from the same one, and lends the next the bodies it prepared for exact
+    // lines (#13218). Each view's lines are placed as they are drawn, so at most one view's are held
+    // beside the scene.
     let mut sessions = ViewSessions::new(s);
     let mut shown: BTreeMap<Choice, std::result::Result<ShownSet, Unmeasured>> = BTreeMap::new();
+    let mut prepared: BTreeMap<Choice, PreparedBodies> = BTreeMap::new();
     // What each view drew its lines from, kept as it is drawn (the lines themselves aren't): the
     // state of the assembly it draws, and its bodies.
     let mut owners = Vec::new();
     let drawn = on.iter().map(|(id, view, centre)| {
         let choice = sessions.choice(view);
         let drawn = match sessions.drawing(&choice) {
-            Ok((from, failing)) => draw(from, failing, shown.entry(choice.clone()).or_insert_with(|| crate::drawing_view::shown(from)), *id, view),
-            Err(why) => draw(s, &[], &Err(why), *id, view),
+            Ok((from, failing)) => {
+                let shown = shown.entry(choice.clone()).or_insert_with(|| crate::drawing_view::shown(from));
+                draw(from, failing, shown, prepared.entry(choice.clone()).or_default(), *id, view)
+            }
+            Err(why) => draw(s, &[], &Err(why), &mut PreparedBodies::default(), *id, view),
         };
         owners.extend(drawn.owners.clone().map(|of| (*id, choice, of)));
         (*id, *centre, drawn)
@@ -628,7 +634,15 @@ impl Lettering {
 /// [`CHORD_MM`] on paper, or coarser past 100:1, where that would ask the mesh for chords finer than
 /// [`MIN_MODEL_CHORD_MM`]; centred on the view ([`assemble`] moves them to its centre). Lines past
 /// the paper scene's [`MAX_RECORDS`] are refused here, so no view holds more than a scene takes.
-fn draw(s: &Session, failing: &[String], shown: &std::result::Result<ShownSet, Unmeasured>, id: u64, view: &ResolvedView) -> Drawn {
+/// The bodies its exact lines need come from `prepared`, as the sheet's other views left them.
+fn draw(
+    s: &Session,
+    failing: &[String],
+    shown: &std::result::Result<ShownSet, Unmeasured>,
+    prepared: &mut PreparedBodies,
+    id: u64,
+    view: &ResolvedView,
+) -> Drawn {
     if let Some(of) = &view.flat {
         return draw_flat(s, id, view, of);
     }
@@ -663,7 +677,7 @@ fn draw(s: &Session, failing: &[String], shown: &std::result::Result<ShownSet, U
         Err(e) => return none(Status::Failed(reason(e))),
     };
     let lines = frame.boundary(&around).map_err(|e| bad(CMD, e.to_string())).and_then(|rect| {
-        let mut lines = crate::drawing_view::lines(s, &set, &frame, &request, CMD)?;
+        let mut lines = crate::drawing_view::lines(s, &set, &frame, &request, prepared, CMD)?;
         styles.leave_shaded_to_pictures(&mut lines);
         Ok((lines, rect))
     });
@@ -1909,7 +1923,8 @@ impl Job {
             (None, Some((was, shown))) if Arc::ptr_eq(&was, &state) => shown,
             _ => crate::drawing_view::shown(&copy),
         };
-        let mut drawn = draw(&copy, &failing, &shown, ticket.view, &ticket.resolved);
+        // One view a job, so nothing it prepares is lent to another.
+        let mut drawn = draw(&copy, &failing, &shown, &mut PreparedBodies::default(), ticket.view, &ticket.resolved);
         if panicked {
             drawn.status = Status::Failed(COPY_PANICKED.into());
         }
