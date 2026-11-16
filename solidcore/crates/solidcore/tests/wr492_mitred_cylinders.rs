@@ -100,11 +100,17 @@ fn mitred_union(turn: f64) -> (solidcore::Result<Brep>, Kernel, f64) {
 
 #[test]
 fn small_turns_fail_like_cpp() {
+    // With `Relate`'s status dropped, as in C++ SMLib, these fail later at `MakeFaceuse`
+    // (1001), after `Relate` refused to relate the two operands' vertices (up to the first
+    // status passed on, both paths compute the same). The fork passes it on (WR-658,
+    // tangency-labs/smlib e7ebc8d), so the union is refused at the conflict itself: the
+    // vertex is already related to another one.
     for turn in [0.1, 0.25, 0.3] {
         let (r, ..) = mitred_union(turn);
         let e = r.unwrap_err();
         assert!(
-            e.operation().contains("make_faceuse") && e.sm_status() == Some(1001),
+            e.operation() == "boolean::topology_intersector::p1::relate"
+                && e.to_string().contains("another entity is already related"),
             "turn {turn}: {e}"
         );
     }

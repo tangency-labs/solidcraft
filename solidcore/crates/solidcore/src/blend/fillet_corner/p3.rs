@@ -350,6 +350,27 @@ pub struct FilletCorner {
     /// is looked for across the cliff's tangent seam as well. Set only on the second pass's corner
     /// at V, where the concave chain meets the cliff.
     pub roll_over: bool,
+    /// Not upstream (#10876): the Roll-over's End across the cliff's tangent seam
+    /// ([`crate::blend::blend_corner::rollover::seam_end`]), set by its topology: the end rib is
+    /// two fillet edges, on the end face and on the wall, meeting at the seam, and the cap is
+    /// two faces, one on each, split along the seam's line ([`FilletCorner::wide_cap`]).
+    pub(crate) seam_cap: Option<SeamCap>,
+}
+
+/// Not upstream (#10876): an Nx1 End whose rib and cap span the end face and the wall across
+/// the cliff's tangent seam ([`FilletCorner::seam_cap`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SeamCap {
+    /// The fillet vertex S where the rib crosses the seam's line (placed by the topology).
+    pub split_vertex: VertexId,
+    /// The corner's rail end that is not the tangent end (on the wall's rim).
+    pub rail_vertex: VertexId,
+    /// The end face, the cap piece at the tangent end lies on (its extension).
+    pub end_face: FaceId,
+    /// The wall, the cap piece at the rail end lies on (its extension).
+    pub wall: FaceId,
+    /// W, where the seam meets the cap's side edge: the caps' other common point.
+    pub seam_point: Point3,
 }
 
 /// What the corner methods operate on besides the corner itself.
@@ -595,6 +616,27 @@ impl FilletCorner {
         self.turned_back_arcs.iter().any(Option::is_some)
     }
 
+    /// Not upstream: an Nx1 cap of more than three edges, built as an end patch: a
+    /// turned-back cap ([`FilletCorner::turned_back_cap`]) or a cap across the cliff's tangent
+    /// seam ([`FilletCorner::seam_cap`], four edges, two faces).
+    pub(crate) fn wide_cap(&self) -> bool {
+        self.turned_back_cap() || self.seam_cap.is_some()
+    }
+
+    /// A cap across the cliff's tangent seam ([`FilletCorner::seam_cap`]) is closed only by
+    /// its end patch: when its end face is not extended (the session cleared
+    /// [`FilletCorner::extended_surface_patch`]), a stage failure (a defect), not a corner
+    /// left open.
+    fn seam_cap_needs_its_end_patch(&self) -> Result<()> {
+        if self.seam_cap.is_some() && !self.extended_surface_patch {
+            return Err(SolidError::blend(
+                OP_PATCH,
+                crate::error::blend::BlendFailure::StageFailed,
+            ));
+        }
+        Ok(())
+    }
+
     /// `SmFilletCorner(crContext, cpVertex, pSolverEUs, pAllEUs, pExec, dApproxTol3d,
     /// dTangencyTolRadians)` and the derived constructors (CO-PORTED, module docs):
     /// no fillet vertices, edges or surfaces, every flag off except
@@ -646,6 +688,7 @@ impl FilletCorner {
             end_cap: None,
             turned_back_arcs: [None, None],
             roll_over: false,
+            seam_cap: None,
         }
     }
 
@@ -1873,13 +1916,17 @@ impl FilletCorner {
     /// from the extended side face (`CreateEndPatch`) or the default patch; otherwise
     /// nothing. Not upstream: a turned-back cap ([`FilletCorner::turned_back_cap`], four or
     /// five edges) takes the end patch when its end face is extended, and nothing otherwise
-    /// (the default patch is three-sided).
+    /// (the default patch is three-sided). A cap across the cliff's tangent seam
+    /// ([`FilletCorner::seam_cap`], #10876) takes the end patch too (its two faces), and
+    /// fails when its end face is not extended: no other patch closes it.
     ///
     /// # Errors
     ///
-    /// Those of the patch builders; [`SolidError::Unported`] (`CreateEndPatch`).
+    /// Those of the patch builders; [`SolidError::Unported`] (`CreateEndPatch`); a stage
+    /// failure for a seam cap whose end face is not extended.
     pub fn create_corner_patch_nx1(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
-        if self.edges.len() == 3 || (self.turned_back_cap() && self.extended_surface_patch) {
+        self.seam_cap_needs_its_end_patch()?;
+        if self.edges.len() == 3 || (self.wide_cap() && self.extended_surface_patch) {
             if self.extended_surface_patch {
                 self.create_end_patch(env)?;
             } else {
@@ -1902,7 +1949,8 @@ impl FilletCorner {
         extended_surface: impl Fn(FaceId) -> Option<Surface>,
         note_end_face_error: &mut dyn FnMut(&FilletCorner),
     ) -> Result<()> {
-        if self.edges.len() == 3 || (self.turned_back_cap() && self.extended_surface_patch) {
+        self.seam_cap_needs_its_end_patch()?;
+        if self.edges.len() == 3 || (self.wide_cap() && self.extended_surface_patch) {
             if self.extended_surface_patch {
                 let mut end_env = CornerPatchEnv {
                     k: &mut *env.k,

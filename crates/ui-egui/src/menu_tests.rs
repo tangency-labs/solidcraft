@@ -2201,6 +2201,19 @@ fn only_one_row_is_lit_while_a_flyout_is_closing() {
     h.frames(2);
     assert!(rect_of("menu:appearance.assign:Aluminum - Satin").is_some(), "the flyout is still closing");
     assert_eq!(lit_rows(&h, &rows), vec![other.label.clone()], "the parent gives up its highlight as soon as the pointer leaves it");
+    // On down the menu, over the separator below Appearance (#17668): nothing lights up again,
+    // and the flyout closes 0.3 s after the pointer left Appearance, not 0.3 s after the separator.
+    h.frames(10);
+    let at = rows.iter().position(|i| i.id == "ui.appearance").unwrap();
+    let sep = at + rows[at..].iter().position(Item::is_sep).unwrap();
+    let above = rect_of(&format!("menu:{}", rows[sep - 1].id)).unwrap();
+    let below = rect_of(&format!("menu:{}", rows[sep + 1].id)).unwrap();
+    h.step(&json!({"move":[above.center().x, (above.bottom() + below.top()) / 2.0]})).unwrap();
+    h.frames(2);
+    assert!(lit_rows(&h, &rows).is_empty(), "no row is lit over the separator: {:?}", lit_rows(&h, &rows));
+    h.frames(8);
+    assert!(rect_of("menu:appearance.assign:Aluminum - Satin").is_none(), "the flyout closed on time over the separator");
+    assert!(h.app.viewport.context_menu.is_some(), "the menu itself stays open");
 }
 
 /// A component's menu (its Component flyout holds Appearance, which has a flyout of its own),
