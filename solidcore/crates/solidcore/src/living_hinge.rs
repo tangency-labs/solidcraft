@@ -29,6 +29,7 @@
 //! more than [`MAX_SLOTS`] lattice slots is refused before anything is allocated.
 
 pub(crate) mod lattice;
+pub(crate) mod near;
 pub(crate) mod rows;
 
 #[cfg(test)]
