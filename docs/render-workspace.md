@@ -43,6 +43,12 @@ aspect. Final output size and saved sampling settings are unchanged. Invalid
 authored dimensions/sampling are refused before constructing the small live copy. An older image is marked as updating and cannot
 be used to pick geometry against a different projection.
 
+**Pause live** freezes the current live image. **Close Render Image**
+(`render.result.close`) and returning to **Model Preview**
+(`render.result.view {view: "model"}`) stop automatic live rendering and show the
+fast model preview. **Resume live** restarts automatic rendering. Completed
+render images remain retained for viewing and export.
+
 Automatic images belong to an isolated scratch session. They do not enter retained
 results or replace the completed image selected for Copy, Export or Regrade. An
 explicit Render action displays its progressing image. If live capture or rendering

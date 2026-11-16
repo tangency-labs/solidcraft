@@ -1657,6 +1657,48 @@ fn vertex_parameters_on_lines_conics_and_splines() {
     assert!(map_edge(&offset, s, e, true, false, false, tol).unwrap_err().contains("not supported yet: OFFSET_CURVE_3D"));
 }
 
+/// A rational quadratic circle of radius 2 in quarters, from (2, 0), running on for `quarters`
+/// quarter turns (more than four: a full turn and then some, as a record keeps a turn unrolled).
+fn quarter_circle_spline(quarters: usize) -> Curve {
+    let corners = [[2.0, 0.0], [2.0, 2.0], [0.0, 2.0], [-2.0, 2.0], [-2.0, 0.0], [-2.0, -2.0], [0.0, -2.0], [2.0, -2.0]];
+    let points: Vec<P3> = (0..=2 * quarters).map(|i| corners[i % 8]).map(|[x, y]| [x, y, 0.0]).collect();
+    let weights: Vec<f64> = (0..points.len()).map(|i| if i % 2 == 0 { 1.0 } else { std::f64::consts::FRAC_1_SQRT_2 }).collect();
+    let mut multiplicities = vec![3];
+    multiplicities.extend(std::iter::repeat_n(2, quarters - 1));
+    multiplicities.push(3);
+    Curve::BSpline(Box::new(crate::geom::BSplineCurve {
+        degree: 2,
+        points,
+        weights: Some(weights),
+        knots: (0..=quarters).map(|k| k as f64).collect(),
+        multiplicities,
+        form: crate::geom::CurveForm::Unspecified,
+        closed: crate::geom::Logical::False,
+        self_intersect: crate::geom::Logical::Unknown,
+        knot_spec: crate::geom::KnotSpec::Unspecified,
+    }))
+}
+
+#[test]
+fn a_closed_edge_on_a_spline_that_runs_on_past_a_full_turn_is_the_turn_between_its_passes() {
+    // Five quarters from (2, 0): the curve passes (0, 2) at 1 and again at 5, its end. A
+    // record's turn whose seam moved is written so, and read back the edge is that turn.
+    let tol = 1e-7;
+    let five = quarter_circle_spline(5);
+    let m = map_edge(&five, [0.0, 2.0, 0.0], [0.0, 2.0, 0.0], true, true, true, tol).unwrap();
+    assert!((m.interval[0] - 1.0).abs() < 1e-9 && (m.interval[1] - 5.0).abs() < 1e-9, "{:?}", m.interval);
+    assert!(m.with_step && !m.sense_mismatch);
+    // Passing (2, 0) at 0 and 4: the same, the first pass at the curve's start.
+    let m = map_edge(&five, [2.0, 0.0, 0.0], [2.0, 0.0, 0.0], true, true, true, tol).unwrap();
+    assert!(m.interval[0].abs() < 1e-9 && (m.interval[1] - 4.0).abs() < 1e-9, "{:?}", m.interval);
+    // Three quarters pass each point once: no loop there to be the edge.
+    let three = quarter_circle_spline(3);
+    assert!(map_edge(&three, [0.0, 2.0, 0.0], [0.0, 2.0, 0.0], true, true, true, tol).unwrap_err().contains("closed edge on an open curve"));
+    // Nine quarters pass (0, 2) three times: which turn is the edge is not known.
+    let nine = quarter_circle_spline(9);
+    assert!(map_edge(&nine, [0.0, 2.0, 0.0], [0.0, 2.0, 0.0], true, true, true, tol).unwrap_err().contains("closed edge on an open curve"));
+}
+
 use std::f64::consts::{FRAC_PI_2, PI};
 
 /// The file's solids: `cube` with `edit` applied to its text.

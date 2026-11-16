@@ -226,7 +226,9 @@ pub(crate) fn immediate_wheel(
     for event in &input.events {
         let egui::Event::MouseWheel { unit, delta, modifiers, phase, source, .. } = event else { continue };
         let modifier_zoom = claims_scroll(*modifiers, zoom_modifier);
-        if !modifier_zoom && modifiers.matches_any(options.zoom_modifier) {
+        // A gesture always ends, whatever keys are down by then (#16460).
+        let closes = matches!(phase, egui::TouchPhase::End | egui::TouchPhase::Cancel);
+        if !modifier_zoom && !closes && modifiers.matches_any(options.zoom_modifier) {
             continue;
         }
         out.modifier_scroll |= modifier_zoom;
@@ -420,11 +422,21 @@ pub(crate) fn axis_wheel(ctx: &egui::Context, page_height: f32) -> (f32, f32, f3
 }
 
 /// Give this frame's wheel to the widget under the pointer that uses it itself (a value field
-/// stepping its number, `value_step`): no scroll area or camera under it moves as well.
+/// stepping its number, `value_step`): no scroll area or camera under it moves as well. A
+/// gesture's `Start` and `End` stay, with nothing to scroll: the camera follows the bracket
+/// around a trackpad gesture, and an `End` taken here would leave the view navigating, with
+/// every pick off, until the next gesture (#16460).
 pub(crate) fn claim_wheel(ctx: &egui::Context) {
     ctx.input_mut(|i| {
         i.smooth_scroll_delta = egui::Vec2::ZERO;
-        i.events.retain(|e| !matches!(e, egui::Event::MouseWheel { .. }));
+        i.events.retain_mut(|e| match e {
+            egui::Event::MouseWheel { phase: egui::TouchPhase::Move, .. } => false,
+            egui::Event::MouseWheel { delta, .. } => {
+                *delta = egui::Vec2::ZERO;
+                true
+            }
+            _ => true,
+        });
     });
 }
 
@@ -1743,6 +1755,63 @@ mod tests {
         input.events = vec![event(egui::TouchPhase::End, egui::MouseWheelSource::Trackpad)];
         super::immediate_wheel(&input, options, 600.0, &mut gesture, &mut bracketed, &mut coast, crate::prefs::TrackpadScroll::ShiftOrbits, None);
         assert!(!gesture && !bracketed, "the End closes the gesture and its bracket");
+    }
+
+    /// #16460: a gesture's `End` closes it even when a widget took the frame's wheel or Ctrl
+    /// is held by then; otherwise the view stays navigating and nothing can be picked.
+    #[test]
+    fn a_trackpad_gesture_ends_after_a_claimed_wheel_or_with_ctrl_held() {
+        let options = egui::InputOptions::default();
+        let event = |phase, modifiers| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(8.0, 12.0),
+            modifiers,
+            phase,
+        };
+        for (end_mods, claimed) in [(egui::Modifiers::NONE, true), (egui::Modifiers { ctrl: true, command: true, ..Default::default() }, false)] {
+            let mut gesture = false;
+            let mut bracketed = false;
+            let mut coast = super::TrackpadCoast::default();
+            let ctx = egui::Context::default();
+            let mut input = egui::InputState::default();
+            input.events = vec![event(egui::TouchPhase::Start, egui::Modifiers::NONE)];
+            super::immediate_wheel(&input, options, 600.0, &mut gesture, &mut bracketed, &mut coast, crate::prefs::TrackpadScroll::ShiftOrbits, None);
+            assert!(gesture && bracketed);
+            let raw = egui::RawInput {
+                events: vec![event(egui::TouchPhase::Move, end_mods), event(egui::TouchPhase::End, end_mods)],
+                ..Default::default()
+            };
+            let mut events = Vec::new();
+            let _ = ctx.run_ui(raw, |ui| {
+                if claimed {
+                    super::claim_wheel(ui.ctx());
+                }
+                events = ui.input(|i| i.events.clone());
+            });
+            if claimed {
+                assert!(
+                    events
+                        .iter()
+                        .all(|e| matches!(e, egui::Event::MouseWheel { delta, phase: egui::TouchPhase::End, .. } if *delta == egui::Vec2::ZERO)),
+                    "{events:?}"
+                );
+            }
+            let mut input = egui::InputState::default();
+            input.events = events;
+            let raw = super::immediate_wheel(
+                &input,
+                options,
+                600.0,
+                &mut gesture,
+                &mut bracketed,
+                &mut coast,
+                crate::prefs::TrackpadScroll::ShiftOrbits,
+                None,
+            );
+            assert!(!gesture && !bracketed, "the End closes the gesture (claimed: {claimed})");
+            assert_eq!(raw.pan, egui::Vec2::ZERO, "a claimed wheel moves nothing");
+        }
     }
 
     #[test]
