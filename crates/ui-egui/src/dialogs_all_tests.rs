@@ -918,7 +918,7 @@ fn align_components_mode_switches_and_aligns_only_selected_instance() {
 }
 form_case!(remove, "solid.remove", []);
 form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing"]);
-form_case!(face_pattern, "solid.pattern.face", ["Type", "Layout", "Quantity", "Quantity 2", "Grid angle", "Margin"]);
+form_case!(face_pattern, "solid.pattern.face", ["Type", "Layout", "Quantity U", "Quantity V", "Grid angle", "Margin"]);
 
 /// Pattern on Face's attractors sit behind Advanced: off, the dialog sends a plain pattern and has
 /// no attractor picks; on, it has Attractors and Far attractors, which take points, edges, faces

@@ -129,8 +129,8 @@ pub(crate) fn draw(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
         enter |= expr_row(ui, "Seed", &mut f.seed);
         choice_row(ui, "Noise", "fp_noise", &mut f.noise, &["White noise", "Blue noise", "Pink noise", "Brown noise"]);
     } else {
-        enter |= crate::dialogs::quantity_row(ui, doc, "Quantity", &mut f.count1);
-        enter |= crate::dialogs::quantity_row(ui, doc, "Quantity 2", &mut f.count2);
+        enter |= crate::dialogs::quantity_row(ui, doc, "Quantity U", &mut f.count1);
+        enter |= crate::dialogs::quantity_row(ui, doc, "Quantity V", &mut f.count2);
         enter |= hint_row(ui, "Grid angle", &mut f.angle, "none");
     }
     enter |= hint_row(ui, "Margin", &mut f.margin, "none");
