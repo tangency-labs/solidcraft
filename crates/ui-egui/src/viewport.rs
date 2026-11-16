@@ -7091,7 +7091,15 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
         let shown_ms = crate::now_ms() - at;
         if shown_ms < STATUS_TOAST_MS {
             let undo = app.status_undo;
-            let actions = if undo { vec![(solidcraft_ui_text::tr_label("Undo"), ToastKind::Secondary)] } else { Vec::new() };
+            // An error offers Report…: the report dialog, filled in with it (when tickets work here).
+            let report = error && !undo && crate::issue_report::ticket::enabled(app);
+            let actions = if undo {
+                vec![(solidcraft_ui_text::tr_label("Undo"), ToastKind::Secondary)]
+            } else if report {
+                vec![(solidcraft_ui_text::tr("report.report_action"), ToastKind::Secondary)]
+            } else {
+                Vec::new()
+            };
             let extras = ToastExtras {
                 close: Some("toast:status:close"),
                 countdown: Some((countdown_left(0.0, shown_ms / 1000.0, STATUS_TOAST_MS / 1000.0), STATUS_TOAST_MS / 1000.0)),
@@ -7099,12 +7107,18 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
                 card_hint: (!undo).then(|| solidcraft_ui_text::tr("messages.chip_hint")),
                 ..Default::default()
             };
+            let reported = report.then(|| msg.clone());
             if let Some(toast) = paint_toast_ext(ui, free, msg, ToastLead::Dot(error), &actions, extras) {
                 let r = toast.rect;
                 if undo && toast.clicked == Some(0) {
                     app.status = None;
                     app.status_undo = false;
                     let _ = app.run("edit.undo", json!({}));
+                }
+                if report && toast.clicked == Some(0) {
+                    app.status = None;
+                    let dialog = app.dialog.clone();
+                    crate::issue_report::begin(app, ui.ctx(), dialog.as_ref(), reported.as_deref());
                 }
                 obstacles.push(r);
                 crate::scenario::publish_rect("toast", r);
@@ -8070,7 +8084,21 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let selected: std::collections::HashSet<_> = app
         .highlighted()
         .iter()
-        .filter_map(|item| crate::sketch_modify_ui::point_id(&app.session, item).and_then(|id| sk.resolve_point(id)))
+        .filter_map(|item| {
+            // A selected arc or circle keeps its centre marked even after its hover sleeps.
+            let curve = match item {
+                Sel::SketchCurve { id, sketch } if sketch.is_none_or(|owner| owner == sid) => Some(id),
+                Sel::ExternalSketchCurve { id, sketch } if *sketch == sid => Some(id),
+                _ => None,
+            };
+            if let Some(id) = curve {
+                return match sk.curves.get(sk.curve_index(id)?)?.kind {
+                    CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } => Some(c),
+                    _ => None,
+                };
+            }
+            crate::sketch_modify_ui::point_id(&app.session, item).and_then(|id| sk.resolve_point(id))
+        })
         .collect();
     let (selected_splines, selected_handles) = selected_spline_handles(sk, &app.session.selection);
     let handle_mirrors = selected_spline_handle_mirrors(sk, &app.session.selection);

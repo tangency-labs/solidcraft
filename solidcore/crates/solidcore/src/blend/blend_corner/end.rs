@@ -477,6 +477,26 @@ fn ball_touching_at(
     p: Point3,
 ) -> Result<(bool, bool, f64)> {
     let fs = solvers.solver_of_edgeuse(fil_eu)?;
+    ball_touching_with(k, target, fs, side_eu, other_face, p, None)
+}
+
+/// [`ball_touching_at`] for the solver `fs`: the ball touching F (the solver's face that
+/// the side edge of `side_eu` bounds) at its point `p` and the solver's other face G
+/// (`other_face`), its radius looked for on `(0, cap]`, `cap` the solver's radius where
+/// `None`. Returns `(on_g, within, rho)` as [`ball_touching_at`] does, `rho` being `cap`
+/// where the root lies past it.
+///
+/// # Errors
+/// As [`ball_touching_at`].
+pub(crate) fn ball_touching_with(
+    k: &Kernel,
+    target: &Brep,
+    fs: &crate::blend::fillet_solver::p1::FilletSolver,
+    side_eu: EdgeuseId,
+    other_face: FaceId,
+    p: Point3,
+    cap: Option<f64>,
+) -> Result<(bool, bool, f64)> {
     let side_faces = [face_of(target, side_eu)?, radial_face(target, side_eu)?];
     let mut f_index = 2;
     for ii in 0..2 {
@@ -495,7 +515,7 @@ fn ball_touching_at(
     let offset_f = &fs.surface(f_index)?.ok_or_else(nul)?.surface;
     let f = offset_f.base_surface();
     let g = crate::topology::face::p2::surface(target, other_face)?.ok_or_else(nul)?;
-    let radius = offset_f.offset_distance().abs();
+    let radius = cap.unwrap_or_else(|| offset_f.offset_distance().abs());
     let sign = if offset_f.offset_distance() < 0.0 {
         -1.0
     } else {
