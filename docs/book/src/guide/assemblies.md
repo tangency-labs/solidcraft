@@ -705,15 +705,15 @@ made virtual with `component.metadata.set {component, virtual: true}`.
 ## Finding things in the browser
 
 The magnifier in the Browser panel's header (or Ctrl+F with the pointer over the browser, unless you gave Ctrl+F to a command) opens a
-field in the header, in place of the panel's title. It finds components, bodies, sketches, joints, and construction planes, axes and points by name. It finds the text anywhere in a name,
+search box in the header, in place of the panel's title. The box holds the magnifier, the field, a filter and **×**. It finds components, bodies, sketches, joints, and construction planes, axes and points by name. It finds the text anywhere in a name,
 ignoring case. With `*` (any text) or `?` (any one character) in it, the whole name must match:
 `*:1` finds every first instance. Each placement of a component is found on its own, so a bolt
 placed six times is listed six times, each under the components that hold it.
 
 Only the matches and their parents stay in the tree, opened for the search; closing a row there
-leaves the tree's own folds as they were. The filter beside the field narrows the search to the kinds
+leaves the tree's own folds as they were. The filter narrows the search to the kinds
 you tick, each with how many it matches, or with nothing typed lists everything of those kinds;
 **All kinds** clears them. **Select all** selects what was found, and **Hide others** hides every
 body it didn't find; the line under the field then says how many it hid, with **Undo**. Esc, **×**
-or the magnifier again ends the search and closes the field. Scripts and agents
+or the magnifier in the box ends the search and closes the box. Scripts and agents
 search the same way with `browser.find`.

@@ -367,7 +367,7 @@ fn the_header_action_shows_the_bar_and_ends_the_search() {
     click(&mut h, "browser:magnifier");
     assert!(!browser_folded(&h), "the bar's panel unfolds");
     assert!(handle_at("browser:search").is_some());
-    assert_eq!(header_action_on(&h), Some(true), "the magnifier shows the field is open");
+    assert_eq!(header_action_on(&h), None, "the magnifier moves into the search box");
     h.call("ui.text", json!({"text": "washer"}));
     h.frames(2);
     assert_eq!(count("Washer"), 1);
@@ -377,8 +377,8 @@ fn the_header_action_shows_the_bar_and_ends_the_search() {
     assert!(!h.app.tree.search.on());
     assert!(h.app.tree.search.text.is_empty());
     assert_eq!(count("Origin"), 1);
-    assert_eq!(header_action_on(&h), Some(false), "the magnifier is off again");
-    // The magnifier stays in the header while the field is open, so a second press ends the search too.
+    assert_eq!(header_action_on(&h), Some(false), "the magnifier is back in the header");
+    // The magnifier in the box ends the search too.
     click(&mut h, "browser:magnifier");
     h.call("ui.text", json!({"text": "washer"}));
     h.frames(2);
@@ -1003,18 +1003,40 @@ fn the_header_says_how_many_bodies_there_are() {
     assert_eq!(status(&one).as_deref(), Some("1 body"));
 }
 
-/// State 2: the field takes the title's place in the panel's header, level with the magnifier, so a
-/// search costs no row of the tree; the first row under the header is the tree's own.
+/// State 2: the field takes the title's place in the panel's header, level with the header's
+/// actions, so a search costs no row of the tree; the first row under the header is the tree's own.
 #[test]
 fn the_field_takes_the_titles_place_in_the_header() {
     let mut h = assembly();
     let magnifier = handle_at("browser:magnifier").unwrap();
     let first_row = handle_at("row:Document Settings").unwrap();
     open(&mut h);
-    let field = crate::scenario::rect_of("browser:search").unwrap();
-    assert!((field.center().y - magnifier.y).abs() <= 1.0, "the field {field:?} is on the header's line at {}", magnifier.y);
-    assert!(field.max.x < magnifier.x, "the field stays before the header's actions");
+    let frame = crate::scenario::rect_of("browser:search:frame").unwrap();
+    assert!((frame.center().y - magnifier.y).abs() <= 1.0, "the box {frame:?} is on the header's line at {}", magnifier.y);
     assert!((handle_at("row:Document Settings").unwrap().y - first_row.y).abs() <= 0.5, "the tree doesn't move down");
+}
+
+/// @Nathan-Dane's box (#1634): the magnifier, the field, the filter and the × all inside one frame,
+/// as tall as a close button, inset from the panel's edge; the magnifier in it ends the search.
+#[test]
+fn the_icons_sit_inside_the_search_box() {
+    let t = solidcraft_theme::Tokens::get();
+    let mut h = assembly();
+    open(&mut h);
+    let frame = crate::scenario::rect_of("browser:search:frame").unwrap();
+    let bar = crate::scenario::rect_of("browser:search:bar").unwrap();
+    assert!((frame.height() - t.form_close_size).abs() <= 0.5, "{frame:?}");
+    assert!((frame.left() - bar.left() - t.space_6).abs() <= 0.5, "inset from the edge: {frame:?} in {bar:?}");
+    let field = crate::scenario::rect_of("browser:search").unwrap();
+    let kinds = crate::scenario::rect_of("browser:search:kinds").unwrap();
+    assert!(frame.contains_rect(field) && frame.contains_rect(kinds), "{field:?} {kinds:?} in {frame:?}");
+    let (magnifier, clear) = (handle_at("browser:magnifier").unwrap(), handle_at("browser:search:clear").unwrap());
+    assert!(frame.contains(magnifier) && frame.contains(clear), "{magnifier:?} {clear:?} in {frame:?}");
+    // In the design's order: the magnifier, the field, the filter, the ×.
+    assert!(magnifier.x < field.left() && field.right() <= kinds.left() && kinds.right() <= clear.x);
+    search(&mut h, "washer");
+    click(&mut h, "browser:magnifier");
+    assert!(!h.app.tree.search.on() && handle_at("browser:search").is_none(), "the magnifier ends the search");
 }
 
 /// State 5: a search that finds nothing says so, names the text, and offers to end the search.

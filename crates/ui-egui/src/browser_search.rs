@@ -10,7 +10,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use egui::{Pos2, Sense, vec2};
+use egui::{Pos2, vec2};
 use serde_json::json;
 use solidcraft_engine::browser_find::{self, Kind, MAX_PATTERN_CHARS, Pattern, Search};
 use solidcraft_engine::doc::{Document, FeatureKind, ModelState};
@@ -274,8 +274,8 @@ pub(crate) fn body_count(session: &Session) -> String {
     solidcraft_ui_text::format(if count == 1 { "ui.browser_bodies_one" } else { "ui.browser_bodies_other" }, &[("count", &count.to_string())])
 }
 
-/// The narrowest the header's field gets (`field_row`): a field three buttons wide, the filter and
-/// the × with their spacing, and the row's margins; 136 at the default tokens, so it fits the
+/// The narrowest the header's box gets (`field_row`): the magnifier, a field, the filter and the ×,
+/// with the inset and spacing; 136 at the default tokens, so it fits the
 /// default 250-wide Browser beside its actions. Narrower headers move their actions to a row below
 /// (the panel host's rule for a long title).
 pub(crate) fn header_min_width() -> f32 {
@@ -308,33 +308,26 @@ pub(crate) fn bar_shown(app: &SolveApp) -> bool {
     !crate::render_workspace::active(app) && (search.shown || search.on())
 }
 
-/// The search field, its filter of kinds and the ×, in `rect`: the Browser panel's header, or its
-/// first row when the host can't give the header (a Browser grouped with other panels). The × (or
-/// Esc) ends the search and takes the field away.
+/// The search box in `rect`, in @Nathan-Dane's design: the magnifier, the field, the filter of kinds
+/// and the ×, all inside one frame inset from the panel's edge. `rect` is the Browser panel's header,
+/// or its first row when the host can't give the header (a Browser grouped with other panels). The
+/// magnifier, the × or Esc ends the search and takes the box away.
 pub(crate) fn field_row(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect) {
     let t = Tokens::get();
     refresh(app);
     crate::scenario::publish_rect("browser:search:bar", rect);
-    let mut row =
-        ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(vec2(t.space_4, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    row.spacing_mut().item_spacing = vec2(t.space_4, t.space_4);
-    let ui = &mut row;
-    let button = t.space_24 + ui.spacing().item_spacing.x;
-    let field_width = (ui.available_width() - 2.0 * button).max(t.space_24);
+    let frame = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + t.space_6, rect.center().y - t.form_close_size / 2.0),
+        egui::pos2(rect.right().max(rect.left() + t.space_6), rect.center().y + t.form_close_size / 2.0),
+    );
+    // One id wherever it is drawn: a field that moves into the header keeps the keyboard.
+    let id = egui::Id::unique("browser_search_field");
+    let end = solidcraft_ui_text::tr("ui.browser_search_end");
+    let search = crate::ui_kit::SearchBox::frame(ui, frame, id, t.radius_sm, Some(end), "browser");
+    let button = t.space_24;
+    let trailing = 2.0 * button + t.space_2;
     let hint = solidcraft_ui_text::tr("ui.browser_search_hint");
-    let field = ui
-        .allocate_ui(vec2(field_width, crate::ui_kit::row_height()), |ui| {
-            // One id wherever it is drawn: a field that moves into the header keeps the keyboard.
-            crate::ui_kit::bounded_cell_editor(
-                ui,
-                egui::Id::unique("browser_search_field"),
-                &mut app.tree.search.text,
-                hint,
-                false,
-                MAX_PATTERN_CHARS,
-            )
-        })
-        .inner;
+    let field = search.editor(ui, &mut app.tree.search.text, hint, MAX_PATTERN_CHARS, trailing);
     crate::scenario::publish_handle("browser:search", field.rect.center());
     crate::scenario::publish_rect("browser:search", field.rect);
     if std::mem::take(&mut app.tree.search.focus) {
@@ -343,20 +336,23 @@ pub(crate) fn field_row(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect)
     // Esc in the field ends the search and closes it (egui gives up the focus on Esc).
     let escaped = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape));
     field.backing_on_hover_text(solidcraft_ui_text::tr("ui.browser_search_tip"));
-    kind_filter(app, ui);
-    let (clear_rect, _) = ui.allocate_exact_size(vec2(t.space_24, t.space_24), Sense::hover());
-    let clear = crate::ui_kit::icon_button_at(ui, clear_rect, "close", solidcraft_ui_text::tr("ui.browser_search_clear"));
+    let magnifier = search.magnifier.as_ref().is_some_and(egui::Response::clicked);
+    if let Some(m) = &search.magnifier {
+        crate::scenario::publish_handle("browser:magnifier", m.rect.center());
+    }
+    let at =
+        |n: f32| egui::Rect::from_center_size(egui::pos2(frame.right() - t.space_2 - button * (n - 0.5), frame.center().y), vec2(button, button));
+    kind_filter(app, ui, at(2.0));
+    let clear = crate::ui_kit::icon_button_at(ui, at(1.0), "close", solidcraft_ui_text::tr("ui.browser_search_clear"));
     crate::scenario::publish_handle("browser:search:clear", clear.rect.center());
-    if clear.clicked() || escaped {
+    if clear.clicked() || escaped || magnifier {
         app.tree.search.clear();
     }
 }
 
-/// The field's filter: a list of the design's kinds to tick, each with how many match whether
+/// The box's filter in `rect`: a list of the design's kinds to tick, each with how many match whether
 /// ticked or not, and All kinds to clear them; a badge on the button counts the kinds ticked.
-fn kind_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let t = Tokens::get();
-    let (rect, _) = ui.allocate_exact_size(vec2(t.space_24, t.space_24), Sense::hover());
+fn kind_filter(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect) {
     let ticked = app.tree.search.kinds.len();
     let filter = crate::ui_kit::filter_button_at(ui, rect, "find_kinds", solidcraft_ui_text::tr("ui.browser_search_kinds"), ticked, |ui| {
         // Only while the list is open: the field is there on every frame.
