@@ -2650,10 +2650,15 @@ impl BSplineCurve {
 /// `t` also stays on a curve that is degenerate at the zone tolerance `zone_tol_3d`
 /// (`is_ncrv_degenerate`, the measure of `SmBSplineCurve::IsDegenerate`: its control
 /// points' box is point-sized). Such a curve (a circle of radius 1e-6) is a point to the
-/// kernel, check test #15 does not look for poles in it, and every split of it is at
-/// the pole scale: moving ends to knots would move them by large parts of the curve, and
-/// two ends of one piece would move to one knot, so the pieces would overlap. A curve
-/// larger than that snaps as described, short knot spans included. A piece of such a
+/// kernel at that tolerance, and every split of it is at the pole scale: moving ends to
+/// knots would move them by large parts of the curve, and two ends of one piece would
+/// move to one knot, so the pieces would overlap. A pole end span the trim then leaves
+/// is cleaned as upstream cleans it (`pole_end` in the caller), so check test #15 (which
+/// skips only curves degenerate at its own 1e-6 pole tolerance) is still met. The test
+/// is on the curve passed in: trimming an already trimmed copy of a curve near the
+/// threshold can decide differently, while the pieces of one edge's split, cut from the
+/// same curve, always agree. A curve larger than that snaps as described, short knot
+/// spans included. A piece of such a
 /// curve whose two ends both lie within a pole of one knot (shorter than twice the pole
 /// tolerance) still keeps its requested ends in the caller while its neighbours move to
 /// the knot.
