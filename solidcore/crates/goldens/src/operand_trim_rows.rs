@@ -634,7 +634,7 @@ mod local_operation {
 mod trim_blocks {
     use super::digest;
     use crate::trim_hook::with_hook;
-    use crate::trims_on_edges::{certify_brep, TrimCertificate};
+    use crate::trims_on_edges::{certify_brep, certify_edgeuse, TrimCertificate};
     use crate::UnitDiff;
     use solidcore::kernel::Kernel;
     use solidcore::topology::Brep;
@@ -760,4 +760,157 @@ mod trim_blocks {
     }
 
     include!("operand_trim_rows/trim_blocks.rs");
+
+    /// A row the trim drop moves in a unit that writes trim counts or owners, not trims:
+    /// this branch's output digest, main's (7d4445c0c, from main's own run) and every
+    /// value that differs from main's, as `(array, index, main, now)`.
+    struct DropRow {
+        case: &'static str,
+        new: u64,
+        main: u64,
+        moved: &'static [(&'static str, usize, f64, f64)],
+    }
+
+    /// The edge uses whose trims the drop leaves in place although main writes them off
+    /// their edges too: a kept trim is not a moved row. In the `heal.heal_data_p3` cuts
+    /// through 90 degrees (`*_s90_*`) and the wide ones (`*_wide_*`) the cut's two trims,
+    /// edge uses 1 and 11, run past the cone's seam (`u` to 1.086..1.096 on its `[0, 1]`
+    /// domain); the kernel's own surface evaluation puts them 0.037 to 1.85 off their
+    /// edges on main (7d4445c0c) and here (sampled, 201 points each against 4001
+    /// of the edge), so they are not certified. Filed as
+    /// `plan/findings/heal.heal_data_p3--split-face-seam-trims-past-seam.md`. On main edge uses 5 and 8
+    /// of those cases are off too (to 0.356): the drop removes those, and the trims made
+    /// again from their edges are certified.
+    fn off_on_main(case: &str) -> &'static [u32] {
+        if case.starts_with("split_face_seam_cone_")
+            && (case.contains("_s90_") || case.contains("_wide_"))
+        {
+            &[1, 11]
+        } else {
+            &[]
+        }
+    }
+
+    /// Certifies the drop rows `rows` of `runner`'s unit, where `drop(main, now)` says a
+    /// moved value records fewer trims now than on main.
+    /// * **Replay**: the case's output has this branch's digest, so the run is the row.
+    /// * **Only these moved**: each listed value holds `now`; put back to `main`, the output
+    ///   has main's digest, so every other value is main's bit for bit.
+    /// * **Each move is a dropped trim**: `drop(main, now)`, or `main == now` as numbers (a
+    ///   zero's sign).
+    /// * **Trims on edges**: on a scratch copy of each body the unit writes, each edge use
+    ///   with no trim (nor its mate) gets the one made from its edge when a caller asks for
+    ///   it ([`remade`]); every trim then lies on its edge within the edge's tolerance
+    ///   ([`certify_edgeuse`]), but for the kept trims main writes off their edges too
+    ///   ([`off_on_main`], each of which must be there). So a consumer of the body gets trims on its edges, and a
+    ///   dropped trim is equal or closer, never farther.
+    ///
+    /// The trims made again, in all.
+    fn certify_drops(runner: &dyn UnitDiff, rows: &[DropRow], drop: fn(f64, f64) -> bool) -> usize {
+        let mut made_all = 0;
+        let mut off = Vec::new();
+        for row in rows {
+            let case = crate::case::regression_case(runner, row.case);
+            let name = row.case;
+            let certs: Rc<RefCell<Vec<TrimCertificate>>> = Rc::default();
+            let made: Rc<RefCell<usize>> = Rc::default();
+            let (sink, made_sink) = (Rc::clone(&certs), Rc::clone(&made));
+            let out = with_hook(
+                Box::new(move |b: &mut Brep| {
+                    let k = Kernel::default();
+                    let (s, n) = remade(&k, b);
+                    *made_sink.borrow_mut() += n;
+                    let kept_off = off_on_main(name);
+                    let mut skipped = Vec::new();
+                    for (eu, r) in s.edgeuses().iter() {
+                        if r.uv_trim_curve.is_none() {
+                            continue;
+                        }
+                        if kept_off.contains(&eu.index()) {
+                            skipped.push(eu.index());
+                            continue;
+                        }
+                        let tol = s.edge(r.edge.unwrap()).unwrap().tolerance;
+                        let c = certify_edgeuse(&k, &s, eu, 0.125 * tol)
+                            .unwrap_or_else(|e| panic!("{name}: edge use {}: {e}", eu.index()));
+                        sink.borrow_mut().push(c);
+                    }
+                    assert_eq!(skipped, kept_off, "{name}: the kept trims off their edges");
+                }),
+                || runner.run_rust(&case),
+            )
+            .unwrap();
+            assert_eq!(
+                digest(&out.values, &out.ints),
+                row.new,
+                "{name}: not the row"
+            );
+            let mut values = out.values.clone();
+            for &(key, i, main, now) in row.moved {
+                let a = values
+                    .get_mut(key)
+                    .unwrap_or_else(|| panic!("{name}: no {key}"));
+                assert_eq!(
+                    a[i].to_bits(),
+                    now.to_bits(),
+                    "{name}: {key}[{i}] is {:e}",
+                    a[i]
+                );
+                assert!(
+                    drop(main, now) || main == now,
+                    "{name}: {key}[{i}] {main:e} -> {now:e} is not a dropped trim"
+                );
+                a[i] = main;
+            }
+            assert_eq!(
+                digest(&values, &out.ints),
+                row.main,
+                "{name}: more than the listed values moved"
+            );
+            let certs = certs.borrow();
+            assert!(!certs.is_empty(), "{name}: no trims");
+            for c in certs.iter() {
+                if !c.holds() {
+                    off.push(format!("{name}: {c:?}"));
+                }
+            }
+            let made = *made.borrow();
+            eprintln!(
+                "{name}: {} trims certified on their edges, {made} made again",
+                certs.len()
+            );
+            made_all += made;
+        }
+        assert!(off.is_empty(), "{}", off.join("\n"));
+        made_all
+    }
+
+    /// The 26 `heal.heal_data_p3` rows (`split_face_seam_cone_*`): splitting the cone's
+    /// face at its seam changes the new face's surface kind, so the moved edge uses' trims
+    /// are dropped; four owner-block entries (`put_owner_block`, per edge use) go from
+    /// `1` (a trim the edge use owns) to `-2` (none).
+    #[test]
+    fn heal_data_p3_drop_rows_are_certified() {
+        let made = certify_drops(&crate::units::heal_heal_data_p3::Runner, HEAL_P3, |m, n| {
+            m == 1.0 && n == -2.0
+        });
+        assert_eq!(HEAL_P3.len(), 26);
+        assert!(made > 0, "no dropped trim was made again");
+    }
+
+    /// The 5 `primitive.api_trim_ops` rows: an edge's count of trims held by its uses
+    /// (`util::primitive::append`) is one lower; `gen0087` also writes a zero with the
+    /// other sign.
+    #[test]
+    fn api_trim_ops_drop_rows_are_certified() {
+        let made = certify_drops(
+            &crate::units::primitive_api_trim_ops::Runner,
+            TRIM_OPS,
+            |m, n| n == m - 1.0 && n >= 0.0,
+        );
+        assert_eq!(TRIM_OPS.len(), 5);
+        assert!(made > 0, "no dropped trim was made again");
+    }
+
+    include!("operand_trim_rows/drop_rows.rs");
 }

@@ -2590,6 +2590,7 @@ fn rust_heal(
             Ok(new_probs) if last_without_state => {
                 if repair {
                     put_repair_summary(&h, &b, &mut o).map_err(|e| harness(e.to_string()))?;
+                    crate::trim_hook::observe(&mut b);
                     put_owner_block(&b, &mut o).map_err(|e| harness(e.to_string()))?;
                 }
                 o.extend([0.0, flag(new_probs)]);
