@@ -1455,31 +1455,11 @@ pub(crate) fn record_edge(curve: BCurve, ps: P3, pe: P3, closed: bool, full: boo
             conic(curve.clone(), &position, radii, ps, pe, true, full)?
         }
         BCurve::Spline { .. } | BCurve::RationalSpline { .. } | BCurve::Polyline { .. } => {
-            let mapped = open_or_closed(curve, ps, pe, true, closed, tol)?;
-            if closed { closed_at_vertex(mapped, ps)? } else { mapped }
+            open_or_closed(curve, ps, pe, true, closed, tol)?
         }
         BCurve::SurfaceIntersection { .. } => return Err(unsupported("an intersection curve without an interval")),
     };
     Ok((mapped.curve, mapped.interval, mapped.with_step))
-}
-
-/// A closed edge on a closed spline or polyline, all of it, starting and ending at its vertex
-/// `at`: the curve restarted there (exactly) when the vertex is not where the curve starts.
-fn closed_at_vertex(mapped: Mapped, at: P3) -> R<Mapped> {
-    let [a, b] = mapped.interval;
-    let eval = CurveEval::new(&mapped.curve).map_err(|e| e.to_string())?;
-    let knots = match &mapped.curve {
-        BCurve::Spline { knots, .. } | BCurve::RationalSpline { knots, .. } => knots.clone(),
-        BCurve::Polyline { points } => (0..points.len()).map(|i| i as f64).collect(),
-        _ => Vec::new(),
-    };
-    let t = project(&eval, a, b, &knots, v3(at)).ok_or("no parameter for the edge's vertex")?;
-    let eps = 1e-9 * (b - a);
-    if t - a <= eps || b - t <= eps {
-        return Ok(mapped);
-    }
-    let curve = crate::kernel::restart_curve(&mapped.curve, t)?;
-    Ok(Mapped { curve, interval: [t, t + (b - a)], ..mapped })
 }
 
 /// The STEP placement of a record frame: its axis x × y.
