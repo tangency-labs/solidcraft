@@ -68,7 +68,7 @@ impl Lattice {
         let pitch = spec.pitch();
         // Bound in floats before any integer is formed (design 5.3).
         let bound = ((b.v_max - b.v_min) / s + 2.0) * ((b.u_max - b.u_min) / pitch + 2.0);
-        if !(bound <= MAX_SLOTS as f64) {
+        if bound.is_nan() || bound > MAX_SLOTS as f64 {
             return Err(LivingHingeError::TooManySlots {
                 slots: if bound.is_finite() {
                     bound as u64

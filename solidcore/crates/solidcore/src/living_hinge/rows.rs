@@ -38,11 +38,10 @@ pub fn plan_rows(
     // Rows first..=last, with one row of no material on each side for the neighbour rule.
     let all: Vec<Vec<RowSpan>> = (first..=last).map(|k| spans(k, lattice.row_v(k))).collect();
     let row_spans = |k: i64| -> &[RowSpan] {
-        if k < first || k > last {
-            &[]
-        } else {
-            &all[(k - first) as usize]
-        }
+        usize::try_from(k - first)
+            .ok()
+            .and_then(|i| all.get(i))
+            .map_or(&[], Vec::as_slice)
     };
     let mut slots = Vec::new();
     let mut left_out = 0;
@@ -217,7 +216,9 @@ fn pull_apart(spec: &LivingHingeSpec, pieces: &mut [HingeSlot]) {
     let mu = spec.least_material();
     for i in 1..pieces.len() {
         let (before, after) = pieces.split_at_mut(i);
-        let (p, q) = (&mut before[i - 1], &mut after[0]);
+        let (Some(p), Some(q)) = (before.last_mut(), after.first_mut()) else {
+            continue;
+        };
         if air_end(p) == Some(Side::Hi) || air_end(q) == Some(Side::Lo) {
             continue;
         }

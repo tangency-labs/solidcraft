@@ -59,8 +59,7 @@ fn near_line(a: (f64, f64), b: (f64, f64), v: f64, q: f64) -> Option<(f64, f64)>
         let (nx, ny) = (-dy / len * q, dx / len * q);
         let corners = [(nx, ny), (dx + nx, dy + ny), (dx - nx, dy - ny), (-nx, -ny)];
         let row = v - a.1;
-        for (i, &p) in corners.iter().enumerate() {
-            let r = corners[(i + 1) % corners.len()];
+        for (&p, &r) in corners.iter().zip(corners.iter().cycle().skip(1)) {
             let (y0, y1) = (p.1 - row, r.1 - row);
             if y0 == y1 {
                 if y0 == 0.0 {
@@ -128,7 +127,7 @@ fn near_arc(
             points.extend(cuts.iter().copied().filter(|&x| l < x && x < h));
             points.sort_by(f64::total_cmp);
             for w in points.windows(2) {
-                let (x0, x1) = (w[0], w[1]);
+                let &[x0, x1] = w else { continue };
                 if x1 <= x0 {
                     continue;
                 }

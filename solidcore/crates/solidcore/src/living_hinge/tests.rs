@@ -82,6 +82,7 @@ fn lattice_of_case_a() {
 
 #[test]
 fn case_a_runs_out_on_alternate_rows() {
+    use SlotKind::*;
     let s = spec(HingeClip::RunOut, 3.0);
     let (_, plan) = plan_band(&s);
     assert_eq!(plan.rows, 27);
@@ -97,7 +98,6 @@ fn case_a_runs_out_on_alternate_rows() {
         plan.open_area(0.2)
     );
     assert!(close(plan.outline_length(0.2), 2782.893801));
-    use SlotKind::*;
     // t = -13 and t = 13 (odd): run out at both edges.
     let odd = [
         (-1.4, 5.4, RunOut),
@@ -154,6 +154,7 @@ fn case_k_wider_bridge_drops_short_ends() {
 
 #[test]
 fn closed_ends_keep_the_margin() {
+    use SlotKind::*;
     // Both ends inside the plate, margin 0: a slot may touch them (reach r).
     let s = spec(HingeClip::RunOut, 3.0);
     let lattice = Lattice::centred(&s, &BAND).unwrap();
@@ -166,7 +167,6 @@ fn closed_ends_keep_the_margin() {
         }]
     });
     assert_eq!(plan.count(RunOut), 0);
-    use SlotKind::*;
     let even = [
         (0.1, 16.9, Shortened),
         (20.1, 39.9, Whole),
@@ -204,6 +204,7 @@ fn refusals() {
 
 #[test]
 fn pieces_a_hair_apart_are_pulled_to_the_least_material() {
+    use SlotKind::*;
     // A keep-out 0.05 wide at u = 30 splits the middle slot of the even rows into two pieces 0.05
     // apart tip to tip; design 6.8 pulls each facing end back half of the 1.25 shortfall.
     let s = spec(HingeClip::RunOut, 3.0);
@@ -224,7 +225,6 @@ fn pieces_a_hair_apart_are_pulled_to_the_least_material() {
             },
         ]
     });
-    use SlotKind::*;
     assert_ends(
         &row_ends(&plan, 13),
         &[
