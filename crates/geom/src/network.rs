@@ -81,6 +81,13 @@ pub trait NetCurve {
     fn is_point(&self) -> bool {
         false
     }
+
+    /// Where two of the curve's pieces meet with the largest change of direction, and that
+    /// change (radians, from 0 for pieces that meet tangent to π for one that turns back): named
+    /// when the curve cannot be fitted. `None` for a curve of one piece.
+    fn sharpest_joint(&self) -> Option<(Vec3, f64)> {
+        None
+    }
 }
 
 /// A side of a network collapsed to one point: the apex of a three-sided patch, where the two
@@ -170,6 +177,8 @@ struct Track<'a> {
     point: bool,
     /// The finite-difference step of [`Track::ders`]: a quarter of the smallest table cell.
     step: f64,
+    /// The curve's sharpest joint ([`NetCurve::sharpest_joint`]).
+    joint: Option<(Vec3, f64)>,
     condition: Option<(Continuity, Box<dyn CrossFace + 'a>)>,
 }
 
@@ -200,7 +209,7 @@ impl<'a> Track<'a> {
                 return invalid(format!("{label} is a point: a continuity condition needs a curve"));
             }
             let step = step(&t);
-            return Ok(Track { label, curve, s: t.clone(), t, pts, length: 0.0, flipped: false, point, step, condition: None });
+            return Ok(Track { label, curve, s: t.clone(), t, pts, length: 0.0, flipped: false, point, step, joint: None, condition: None });
         }
         if !(acc > 1e-9 && acc.is_finite()) {
             return invalid(format!("{label} has no length"));
@@ -210,7 +219,8 @@ impl<'a> Track<'a> {
         }
         let condition = condition.filter(|(g, _)| *g != Continuity::G0);
         let step = step(&s);
-        Ok(Track { label, curve, s, t, pts, length: acc, flipped: false, point, step, condition })
+        let joint = curve.sharpest_joint();
+        Ok(Track { label, curve, s, t, pts, length: acc, flipped: false, point, step, joint, condition })
     }
 
     fn continuity(&self) -> Continuity {
@@ -425,6 +435,8 @@ struct Target<'f> {
     /// Derivatives (orders 1, 2, …) at the first and last parameter.
     ders: [Vec<Vec3>; 2],
     tol: f64,
+    /// The sharpest joint of the curve it follows, named when it cannot be fitted.
+    joint: Option<(Vec3, f64)>,
 }
 
 /// The common cubic space of a direction and each target's control points in it: breaks at
@@ -471,7 +483,7 @@ fn fit_direction(base: &[f64], ders: [usize; 2], targets: &mut [Target]) -> Spli
         }
         let interp = Interpolant::new(space.clone(), conds.clone())?;
         let mut ctrls = Vec::with_capacity(targets.len());
-        let mut worst: Option<(f64, String)> = None;
+        let mut worst: Option<(f64, String, Option<(Vec3, f64)>)> = None;
         for tg in targets.iter_mut() {
             let data: Vec<Vec3> = conds
                 .iter()
@@ -486,8 +498,8 @@ fn fit_direction(base: &[f64], ders: [usize; 2], targets: &mut [Target]) -> Spli
                 for q in [0.25, 0.75] {
                     let t = breaks[k] + (breaks[k + 1] - breaks[k]) * q;
                     let off = space.eval(&ctrl, t, 0)?.dist((tg.value)(t)?);
-                    if off > tg.tol && worst.as_ref().is_none_or(|(w, _)| off / tg.tol > *w) {
-                        worst = Some((off / tg.tol, format!("{} (off by {off:.2e} at the best fit)", tg.label)));
+                    if off > tg.tol && worst.as_ref().is_none_or(|(w, _, _)| off / tg.tol > *w) {
+                        worst = Some((off / tg.tol, format!("{} (off by {off:.2e} at the best fit)", tg.label), tg.joint));
                     }
                 }
             }
@@ -495,14 +507,22 @@ fn fit_direction(base: &[f64], ders: [usize; 2], targets: &mut [Target]) -> Spli
         }
         match worst {
             None => return Ok((space, ctrls)),
-            Some((_, what)) if spans * 2 > MAX_SPANS => {
+            Some((_, what, joint)) if spans * 2 > MAX_SPANS => {
+                let corner =
+                    joint.map_or(String::new(), |(p, angle)| format!("; its curves meet at {} turning by {:.1}°", point_text(p), angle.to_degrees()));
                 return Err(SplineError::Unsupported(format!(
-                    "{what} can't be fitted closely enough: a curve with a sharp corner, or one that turns very sharply, can't be part of a boundary surface"
+                    "{what} can't be fitted closely enough{corner}: a curve with a sharp corner, or one that turns very sharply, can't be part of a boundary surface"
                 )));
             }
             Some(_) => m *= 2,
         }
     }
+}
+
+/// A point for a message, each coordinate to a thousandth of a millimetre.
+fn point_text(p: Vec3) -> String {
+    let c = |x: f64| (x * 1000.0).round() / 1000.0 + 0.0;
+    format!("({}, {}, {})", c(p.x), c(p.y), c(p.z))
 }
 
 /// Linear interpolation at `x` of `values` given at the increasing parameters `xs` (held
@@ -722,6 +742,42 @@ pub fn network_surface(u: Vec<NetworkCurve>, v: Vec<NetworkCurve>, tol: Toleranc
             }
         }
     }
+    if nv == 0 {
+        // A loft passes through the curves in turn, so along each end it runs through their ends
+        // in turn. Two neighbours that meet at an end (cross there, within the crossing
+        // tolerance) hold it still for one step; unless every curve ends at that point it then
+        // has to move on, and a smooth path through a point it stands still at overshoots back
+        // past it: the surface folds out past its curves. Curves that meet end to end are the
+        // sides of a patch, not sections across it.
+        for e in [0.0, 1.0] {
+            let ends: Vec<Vec3> = us.iter_mut().map(|t| t.point(e)).collect::<SplineResult<_>>()?;
+            let Some(&first) = ends.first() else { continue };
+            let meet = |a: Vec3, b: Vec3| -> SplineResult<bool> {
+                solidcore_ops::measure::points_meet([a.x, a.y, a.z], [b.x, b.y, b.z], tol.cross)
+                    .or_else(|e| invalid(format!("the ends of the curves can't be compared: {e}")))
+            };
+            let mut all_meet = true;
+            for p in &ends {
+                all_meet &= meet(*p, first)?;
+            }
+            if all_meet {
+                continue;
+            }
+            let mut found = None;
+            for (i, w) in ends.windows(2).enumerate() {
+                if meet(w[0], w[1])? {
+                    found = Some(i);
+                    break;
+                }
+            }
+            if let Some(i) = found {
+                let (a, b) = (&us[i].label, &us[i + 1].label);
+                return invalid(format!(
+                    "{a} and {b} meet at an end the other curves don't reach, so a surface through the curves in turn would fold back past them there. Curves that meet end to end are the sides of a patch: give the two that share a corner (the surface spans to the side across), or cross them with curves of the other direction"
+                ));
+            }
+        }
+    }
 
     // A point is a side: the first or last curve of its direction.
     for ts in [&us, &vs] {
@@ -879,7 +935,10 @@ pub fn network_surface(u: Vec<NetworkCurve>, v: Vec<NetworkCurve>, tol: Toleranc
         let up_ref = &up;
         let mut targets: Vec<Target> = Vec::new();
         for i in 0..nu {
-            let label = us_cell.borrow()[i].label.clone();
+            let (label, joint) = {
+                let tracks = us_cell.borrow();
+                (tracks[i].label.clone(), tracks[i].joint)
+            };
             let cell = &us_cell;
             targets.push(Target {
                 label,
@@ -889,6 +948,7 @@ pub fn network_surface(u: Vec<NetworkCurve>, v: Vec<NetworkCurve>, tol: Toleranc
                 }),
                 ders: [Vec::new(), Vec::new()],
                 tol: tol.fit,
+                joint,
             });
         }
         for cond in ends.iter().flatten() {
@@ -906,6 +966,7 @@ pub fn network_surface(u: Vec<NetworkCurve>, v: Vec<NetworkCurve>, tol: Toleranc
                     }),
                     ders: [Vec::new(), Vec::new()],
                     tol: scale[order - 1] * 1e-4,
+                    joint: None,
                 });
             }
         }
@@ -960,7 +1021,10 @@ pub fn network_surface(u: Vec<NetworkCurve>, v: Vec<NetworkCurve>, tol: Toleranc
         let vp_ref = &vp;
         let mut targets: Vec<Target> = Vec::new();
         for (j, cd) in cross_ders.iter().enumerate() {
-            let label = vs_cell.borrow()[j].label.clone();
+            let (label, joint) = {
+                let tracks = vs_cell.borrow();
+                (tracks[j].label.clone(), tracks[j].joint)
+            };
             let cell = &vs_cell;
             let ders = [cd[0][..end_order[0]].to_vec(), cd[1][..end_order[1]].to_vec()];
             targets.push(Target {
@@ -971,6 +1035,7 @@ pub fn network_surface(u: Vec<NetworkCurve>, v: Vec<NetworkCurve>, tol: Toleranc
                 }),
                 ders,
                 tol: tol.fit,
+                joint,
             });
         }
         fit_direction(&base_v, end_order, &mut targets)?
@@ -1425,6 +1490,32 @@ mod tests {
                 let d = pts.iter().map(|q| q.dist(p)).fold(f64::INFINITY, f64::min);
                 assert!(d < 0.3, "section at z = {z} is {d} from the surface's samples");
             }
+        }
+    }
+
+    /// Three curves of one direction that meet end to end (an arc, and two lines up from its ends
+    /// to a common top) are the sides of a patch: a loft through them in turn folded out far past
+    /// them (#17220), so it is refused, naming the two that meet. Two of them that share a corner
+    /// loft to a surface inside the curves' bounding box.
+    #[test]
+    fn curves_one_way_that_meet_end_to_end_are_refused_not_folded() {
+        let (a, b, c) = (Vec3::new(30.0, 0.0, 0.0), Vec3::new(0.0, 30.0, 0.0), Vec3::new(30.0, 15.0, 50.0));
+        let arc = |t: f64| Vec3::new(30.0 * (std::f64::consts::FRAC_PI_2 * t).cos(), 30.0 * (std::f64::consts::FRAC_PI_2 * t).sin(), 0.0);
+        let folded = network_surface(vec![curve("arc", arc), line("line", a, c), line("edge", b, c)], vec![], TOL).unwrap_err();
+        assert!(folded.to_string().contains("arc and line meet at an end"), "{folded}");
+        let s = network_surface(vec![curve("arc", arc), line("line", a, c)], vec![], TOL).unwrap();
+        // The box of the arc and the line: x and y 0 to 30, z 0 to 50.
+        let inside = |q: Vec3| {
+            let m = TOL.cross;
+            (-m..=30.0 + m).contains(&q.x) && (-m..=30.0 + m).contains(&q.y) && (-m..=50.0 + m).contains(&q.z)
+        };
+        let pts = grid(&s, 40);
+        for q in &pts {
+            assert!(inside(*q), "{q:?} outside the curves' bounding box");
+        }
+        // It spans to the side across: the top and the arc's far end are on it.
+        for p in [b, c] {
+            assert!(pts.iter().any(|q| q.dist(p) < TOL.cross), "{p:?} not on the surface");
         }
     }
 

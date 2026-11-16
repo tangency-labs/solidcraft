@@ -407,6 +407,107 @@ fn length(f: &Frame, iso: Iso, (x_far, x_half): (Vec3, Vec3), x0: Vec3, x1: Vec3
     Ok(radius * phi)
 }
 
+/// The widened analytic path measures the distance in the side's own frame, from the
+/// STEP parameters the construction widened: the closed-form radius and arc keep the
+/// result the same at any position. The parameters come through the polar converters, so
+/// their own rounding is in the angle and radius bounds, and a conversion that could only
+/// be solved numerically is refused as not exact.
+pub(super) fn widened_across(
+    k: &Kernel,
+    (source, source_dom, source_side): (&Surface, &crate::geom::extent2d::Extent2d, BoxSide),
+    (s, dom, side): (&Surface, &crate::geom::extent2d::Extent2d, BoxSide),
+) -> Result<Across> {
+    let support = AnalyticSupport::check(k, s)?;
+    let form = crate::blend::fillet_section::station::as_b_spline(k, s)?
+        .ok_or_else(|| SolidError::surface_failed(OP, "the surface has no B-spline form"))?;
+    let middle = side.point(dom, 0.5);
+    let end = side.at(&knot_box(&form)?);
+    let to = if side.is_u() {
+        Point2::new(end, middle.y)
+    } else {
+        Point2::new(middle.x, end)
+    };
+    let from = source_side.point(source_dom, 0.5);
+    let parallel = round_the_axis(s, side) == Some(true);
+    // a straight iso (a cone's ruling, a plane) is its chord, on the form
+    let circular = match support.implicit() {
+        Implicit::Cone { .. } => parallel,
+        Implicit::Sphere { .. } | Implicit::Torus { .. } => true,
+        Implicit::Plane { .. } => false,
+    };
+    if !circular {
+        return Ok(super::measure::across(super::measure::chord(
+            &form, middle, to,
+        )?));
+    }
+    let (a, a_exact) = source.convert_uv_from_nurbs_to_step_exact(k, from)?;
+    let (b, b_exact) = s.convert_uv_from_nurbs_to_step_exact(k, to)?;
+    // A numerical inverse is no closed form: its angle is not bounded by the conversion's
+    // rounding, so the distance across cannot be certified here.
+    if !(a_exact && b_exact) {
+        return Err(super::not_exact(None));
+    }
+    // The polar converters' own rounding, in degrees: it scales with the angles converted
+    // (up to a turn), so it is taken from both ends rather than from the difference alone.
+    let conv_x = gamma(8) * (a.x.abs() + b.x.abs());
+    let conv_y = gamma(8) * (a.y.abs() + b.y.abs());
+    let (radius, radius_err, delta, conv) = match support.implicit() {
+        Implicit::Cone {
+            radius, tan_angle, ..
+        } => {
+            let term = tan_angle * a.y;
+            let r = radius + term;
+            (
+                r,
+                gamma(4) * (radius.abs() + term.abs()) + tan_angle.abs() * conv_y.to_radians(),
+                b.x - a.x,
+                conv_x,
+            )
+        }
+        Implicit::Sphere { radius, .. } => {
+            if parallel {
+                let latitude = a.y.to_radians();
+                let r = radius * latitude.cos();
+                (
+                    r,
+                    gamma(8) * radius * (1.0 + latitude.abs())
+                        + radius * latitude.sin().abs() * conv_y.to_radians(),
+                    b.x - a.x,
+                    conv_x,
+                )
+            } else {
+                (radius, 0.0, b.y - a.y, conv_y)
+            }
+        }
+        Implicit::Torus { major, minor, .. } => {
+            if parallel {
+                let latitude = a.y.to_radians();
+                let term = minor * latitude.cos();
+                (
+                    major + term,
+                    gamma(12) * (major.abs() + minor * (1.0 + latitude.abs()))
+                        + minor * latitude.sin().abs() * conv_y.to_radians(),
+                    b.x - a.x,
+                    conv_x,
+                )
+            } else {
+                (minor, 0.0, b.y - a.y, conv_y)
+            }
+        }
+        Implicit::Plane { .. } => {
+            return Ok(super::measure::across(super::measure::chord(
+                &form, middle, to,
+            )?));
+        }
+    };
+    let angle = delta.to_radians().abs();
+    let angle_err = gamma(4) * angle + conv.to_radians();
+    Ok(super::measure::across(super::measure::circle_from_angle(
+        (radius, radius_err),
+        (angle, angle_err),
+    )?))
+}
+
 /// `cur` continued Natural past `side` by `distance` across it, capped (module docs): the
 /// result, its across length, whether the cap stopped it, and its construction bound;
 /// `None` where the (capped) distance is below the side's resolution ([`below_resolution`]).
@@ -627,12 +728,28 @@ fn joint_removed(out: &Net, side: BoxSide, joint: f64) -> Result<Net> {
 /// through it (a meridian, a tube), within its rounding; a ruling is straight by its
 /// degree. Refused as not exact otherwise.
 ///
-/// The limit, `8 gamma_32` times the point's own size (`|c|` plus the frame's size times
-/// `|w|`) plus the plane's height times `|w|`, has the shape of a rounding bound but its
-/// factor is tuned, not derived: `8` and `32` count no operations of `extract_iso_crv`, the
-/// dot product or the height. It is held to that size by a test (refused at twice it,
-/// accepted at half), and measured well inside it (largest off / limit 0.0123 over the
-/// offset and extension goldens); deriving it is open.
+/// The limit is the rounding of the test, counted (definitions-and-certificates.md §4.4,
+/// §7.5). The iso's control point `c_j = (h_j, w_j)` is `L = q - m` de Boor levels of the
+/// net's points across the side (`extract_iso_crv`: `q` the degree across, `m` the knot's
+/// multiplicity at the middle; a boundary row is copied, `L = 0`), so it is within `γ_(12L)`
+/// of its stencil's size (12 operations a level, as `eval::collapse` counts them), per
+/// coordinate. With `H_j` and `W_j` the largest coordinate and weight of point `j`'s stencil
+/// (the `q + 1` net points it is made from), `|o|` the largest coordinate of the axis's
+/// origin and `1.75 >= √3` the norm of a unit normal over its largest coordinate, write
+/// `A_j = 1.75 (H_j + |o| W_j) + |height| W_j`. Then:
+///
+/// | term | count | what it bounds |
+/// |---|---|---|
+/// | the point and its test | `γ_(12L+6) A_j` | the de Boor levels, `h - o w` (2), the dot product with the normal (3), the height times `w` and the difference (1 together, chained) |
+/// | a parallel's height | `γ_(12L+7) A_0 \|w_j\| / (\|w_0\| - γ_(12L) W_0)` | the height read off the first point: its levels, the same five operations and the division |
+/// | a meridian's or tube's normal | `2 (γ_(12L+8) A_k / (\|w_k\| - γ_(12L) W_k) / \|far\| + γ_12) · 1.75 (H_j + \|o\| W_j)` | the normal `unit(axis × far)` from the farthest point `k`: its levels, `x / w` and the radial part (8), the cross product and the unit (with the stored axis's own rounding, 12); a unit vector moves at most `2 \|δc\| / \|c\|` |
+/// | the limit itself | `× (1 + γ_16)` | the limit's own operations, rounded outward |
+///
+/// Taken at the stencil's size, not the point's: a de Boor level rounds its inputs, the
+/// stencil, so an iso point far smaller than its rows (a parallel at a long cylinder's
+/// middle) has the rows' rounding. Measured on the offset and extension goldens before this
+/// count (#15039), every point was off its plane by at most 0.0123 of the tuned limit
+/// `8 γ_32 (|c| + size |w| + |height| |w|)`, which this replaces.
 fn certify_iso(
     s: &BSplineSurface,
     side: BoxSide,
@@ -652,49 +769,153 @@ fn certify_iso(
         (middle.x, Direction::V)
     };
     let curve = extract_iso_crv(net, t, dir)?;
-    let points: Vec<(Vec3, f64, f64)> = curve
+    let stencils = iso_stencils(net, side.is_u(), t)?;
+    let weight = |w: f64| if w == NOW { 1.0 } else { w };
+    let o = f.origin.x.abs().max(f.origin.y.abs()).max(f.origin.z.abs());
+    // (x_j = h_j - o w_j, w_j, the stencil's (H_j, W_j))
+    let points: Vec<(Vec3, f64, (f64, f64))> = curve
         .cpts()
         .iter()
-        .map(|p| {
-            let w = if p.w == NOW { 1.0 } else { p.w };
-            let h = Vec3::new(p.x, p.y, p.z);
-            // X W from the origin, and the size of its terms
-            let mag = p.x.abs().max(p.y.abs()).max(p.z.abs()) + f.size * w.abs();
-            (h - f.origin * w, w, mag)
+        .zip(&stencils.sizes)
+        .map(|(p, &size)| {
+            let w = weight(p.w);
+            (Vec3::new(p.x, p.y, p.z) - f.origin * w, w, size)
         })
         .collect();
-    let Some(&(x0, w0, _)) = points.first() else {
+    if points.len() != curve.cpts().len() {
+        return Err(SolidError::surface_failed(
+            OP,
+            "the iso and the net's stencils differ in count",
+        ));
+    }
+    let Some(&(x0, w0, (h0, ww0))) = points.first() else {
         return Err(SolidError::surface_failed(
             OP,
             "the iso has no control points",
         ));
     };
-    // the plane's normal and its offset from the origin, per unit weight
-    let (n, height) = if matches!(iso, Iso::Parallel) {
-        (f.axis, f.axis.dot(x0) / w0)
-    } else {
-        // through the axis and the iso: its farthest point from the axis sets it
-        let far = points
-            .iter()
-            .map(|&(x, w, _)| {
-                let d = x * (1.0 / w);
-                d - f.axis * f.axis.dot(d)
-            })
-            .fold(
-                Vec3::ZERO,
-                |m, d| if d.length() > m.length() { d } else { m },
-            );
-        (unit(f.axis.cross(far))?, 0.0)
-    };
-    for &(x, w, mag) in &points {
-        // the dot product's rounding and the plane's own (its normal and height from
-        // stored points), a few ulps of the terms' size each
-        let off = n.dot(x) - height * w;
-        if off.abs() > 8.0 * gamma(32) * (mag + height.abs() * w.abs()) {
+    let levels = stencils.levels;
+    let g = |ops: usize| gamma(12 * levels + ops);
+    let lift = |h: f64, ww: f64| NORM_OVER_MAX * (h + o * ww);
+    // the exact weight's least magnitude, from a computed one
+    let least = |w: f64, ww: f64| w.abs() - gamma(12 * levels) * ww;
+    // the plane's normal, its offset from the origin per unit weight, and the plane's own
+    // error as a part per unit weight (a parallel's height) and per lifted size (a normal)
+    let (n, height, per_w, turn) = if matches!(iso, Iso::Parallel) {
+        let height = f.axis.dot(x0) / w0;
+        let d0 = least(w0, ww0);
+        if d0.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
             return Err(refused(ExtendRefusal::NotExact, None));
         }
+        let a0 = lift(h0, ww0) + height.abs() * ww0;
+        (f.axis, height, g(7) * a0 / d0, 0.0)
+    } else {
+        // through the axis and the iso: its farthest point from the axis sets it
+        let (far, (wk, (hk, wwk))) = points
+            .iter()
+            .map(|&(x, w, size)| {
+                let d = x * (1.0 / w);
+                (d - f.axis * f.axis.dot(d), (w, size))
+            })
+            .fold((Vec3::ZERO, (1.0, (0.0, 0.0))), |m, d| {
+                if d.0.length() > m.0.length() {
+                    d
+                } else {
+                    m
+                }
+            });
+        let dk = least(wk, wwk);
+        let reach = far.length();
+        if dk.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater)
+            || reach.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater)
+        {
+            return Err(refused(ExtendRefusal::NotExact, None));
+        }
+        let turn = 2.0 * (g(8) * lift(hk, wwk) / dk / reach + gamma(12));
+        (unit(f.axis.cross(far))?, 0.0, 0.0, turn)
+    };
+    for &(x, w, (h, ww)) in &points {
+        let off = n.dot(x) - height * w;
+        let lifted = lift(h, ww);
+        let a = lifted + height.abs() * ww;
+        let limit = (g(6) * a + per_w * w.abs() + turn * lifted) * (1.0 + gamma(16));
+        // written to accept, so a NaN refuses
+        if off.abs() <= limit {
+            continue;
+        }
+        return Err(refused(ExtendRefusal::NotExact, None));
     }
     Ok(())
+}
+
+/// `1.75`, at least `√3`: the Euclidean norm of a vector over its largest coordinate, so a
+/// unit normal's dot product with `x` is at most this times `x`'s largest coordinate.
+const NORM_OVER_MAX: f64 = 1.75;
+
+/// The net's points each control point of an iso is made from (module `certify_iso`).
+struct IsoStencils {
+    /// The de Boor levels the iso is made with: the degree across less the knot's
+    /// multiplicity at the parameter (0 where the iso is a boundary row, copied).
+    levels: usize,
+    /// For each iso control point, the largest coordinate and the largest weight of its
+    /// stencil.
+    sizes: Vec<(f64, f64)>,
+}
+
+/// The stencils of the iso of `net` along u at `v = t` (`along_u`) or along v at `u = t`:
+/// for each iso point, the `q + 1` net points across whose de Boor levels make it (the
+/// span holding `t`, as `extract_iso_crv` finds it), and the levels.
+///
+/// # Errors
+///
+/// `SM_ERR` where the knots hold no span at `t`.
+fn iso_stencils(net: &Net, along_u: bool, t: f64) -> Result<IsoStencils> {
+    let (p, q) = net.degrees();
+    let (knots, deg) = if along_u {
+        (net.v_knots(), q)
+    } else {
+        (net.u_knots(), p)
+    };
+    let no_span = || SolidError::surface_failed(OP, "the knots hold no span at the iso");
+    // the last span whose start is at most t, within the clamped spans
+    let last = knots.len().checked_sub(deg + 2).ok_or_else(no_span)?;
+    let span = (deg..=last)
+        .rev()
+        .find(|&i| knots.get(i).is_some_and(|&k| k <= t))
+        .unwrap_or(deg);
+    let mult = knots.iter().filter(|&&k| k == t).count();
+    let levels = deg.saturating_sub(mult);
+    let first = span.checked_sub(deg).ok_or_else(no_span)?;
+    let cpts = net.cpts();
+    let size = |c: &CPoint| {
+        let w = if c.w == NOW { 1.0 } else { c.w };
+        (c.x.abs().max(c.y.abs()).max(c.z.abs()), w.abs())
+    };
+    let fold = |a: (f64, f64), b: (f64, f64)| (a.0.max(b.0), a.1.max(b.1));
+    let sizes: Vec<(f64, f64)> = if along_u {
+        cpts.iter()
+            .map(|row| {
+                row.iter()
+                    .skip(first)
+                    .take(deg + 1)
+                    .map(size)
+                    .fold((0.0, 0.0), fold)
+            })
+            .collect()
+    } else {
+        let width = cpts.first().map_or(0, Vec::len);
+        (0..width)
+            .map(|j| {
+                cpts.iter()
+                    .skip(first)
+                    .take(deg + 1)
+                    .filter_map(|row| row.get(j))
+                    .map(size)
+                    .fold((0.0, 0.0), fold)
+            })
+            .collect()
+    };
+    Ok(IsoStencils { levels, sizes })
 }
 
 /// `out`, a net continued Natural past `side` (its `deg` points past the joint in each row
@@ -990,13 +1211,33 @@ mod tests {
     use super::*;
     use crate::surface::cone::p1::Cone;
 
-    /// The limit `certify_iso` holds a parallel's homogeneous control point `c` to: the
-    /// rounding at the point's own size and the frame's, `8 gamma_32 (|c| + size |w| +
-    /// |height| |w|)` (written out here so that a change to the limit's size fails).
-    fn limit(c: &CPoint, size: f64, height: f64) -> f64 {
-        let w = if c.w == NOW { 1.0 } else { c.w };
-        let mag = c.x.abs().max(c.y.abs()).max(c.z.abs()) + size * w.abs();
-        8.0 * gamma(32) * (mag + height.abs() * w.abs())
+    /// The limit `certify_iso` holds point `j` of a parallel of `form` across `side` to, for
+    /// a net of degree 1 across with one span (both rows the stencil, one de Boor level),
+    /// the axis's origin at 0, written out from the count in `certify_iso`'s docs so a change
+    /// to the count fails here: `(γ_18 A_j + γ_19 A_0 |w_j| / (|w_0| - γ_12 W_0)) (1 + γ_16)`,
+    /// `A = 1.75 H + |height| W`.
+    fn limit(form: &BSplineSurface, side: BoxSide, j: usize, height: f64) -> f64 {
+        let net = form.gw_nurb().unwrap();
+        let w = |c: &CPoint| if c.w == NOW { 1.0 } else { c.w };
+        // (H, W) over the points whose index along the iso is `i`: the whole stencil
+        let stencil = |i: usize| {
+            let mut hw = (0.0_f64, 0.0_f64);
+            for (a, row) in net.cpts().iter().enumerate() {
+                for (b, c) in row.iter().enumerate() {
+                    if (if side.is_u() { a } else { b }) == i {
+                        hw.0 = hw.0.max(c.x.abs()).max(c.y.abs()).max(c.z.abs());
+                        hw.1 = hw.1.max(w(c).abs());
+                    }
+                }
+            }
+            hw
+        };
+        let (hj, wwj) = stencil(j);
+        let (h0, ww0) = stencil(0);
+        let a = |h: f64, ww: f64| 1.75 * h + height.abs() * ww;
+        // both rows share their weights here, so the iso's weight is the stencil's
+        (gamma(18) * a(hj, wwj) + gamma(19) * a(h0, ww0) * wwj / (ww0 - gamma(12) * ww0))
+            * (1.0 + gamma(16))
     }
 
     /// A cylinder of radius 1 about z, 60 degrees round, 1000 long: rows far larger than
@@ -1043,11 +1284,13 @@ mod tests {
         )
     }
 
-    /// `certify_iso` refuses a parallel whose control point is off its plane by twice the
-    /// limit at the point's own size and passes one off by half of it: the limit's size is
-    /// pinned, and a limit taken at the net's rows (1000 here) would pass both.
+    /// `certify_iso` refuses a parallel whose control point is off its plane by a fifth past
+    /// the counted limit and passes one off by a fifth within it (#15039). The margin is the
+    /// test's own rounding: the offset is computed at the size the limit bounds, so it is
+    /// known only to a few of the limit's ulps-of-size, not to one ulp. The limit is at the
+    /// stencil's size: both rows, 0 and 1000 along the axis, for the parallel at 500.
     #[test]
-    fn the_turn_certificate_holds_the_iso_to_its_own_size() {
+    fn the_turn_certificate_holds_the_iso_to_its_counted_rounding() {
         let form = long_cylinder();
         let frame = Frame {
             origin: Vec3::new(0.0, 0.0, 0.0),
@@ -1074,17 +1317,19 @@ mod tests {
                 continue;
             }
             assert!(certify_iso(&form, side, middle, &frame, Iso::Parallel).is_ok());
-            let lim = limit(&pts[1], frame.size, z(&pts[0]));
+            let lim = limit(&form, side, 1, z(&pts[0]));
+            // the stencil's size, the rows at 0 and 1000, not the point's at 500
+            assert!(lim > 1000.0 * 1.75 * gamma(18), "{side:?}: {lim:e}");
             let w1 = if pts[1].w == NOW { 1.0 } else { pts[1].w };
-            let over = moved(&form, side, 1, 2.0 * lim / w1);
+            let over = moved(&form, side, 1, 1.2 * lim / w1);
             assert!(
                 certify_iso(&over, side, middle, &frame, Iso::Parallel).is_err(),
-                "{side:?}: twice the limit passes"
+                "{side:?}: 1.2 times the limit passes"
             );
-            let under = moved(&form, side, 1, 0.5 * lim / w1);
+            let under = moved(&form, side, 1, 0.8 * lim / w1);
             assert!(
                 certify_iso(&under, side, middle, &frame, Iso::Parallel).is_ok(),
-                "{side:?}: half the limit is refused"
+                "{side:?}: 0.8 times the limit is refused"
             );
             tested += 1;
         }

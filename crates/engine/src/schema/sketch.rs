@@ -510,8 +510,9 @@ pub struct SymmetryResult {
 pub struct FixOutcome {
     /// Whether they are fixed now (`false`: released).
     pub fixed: bool,
-    /// How many points and curves changed; those already as asked, the origin, projected
-    /// geometry and a point fixed by its own coordinates are not counted.
+    /// How many points and curves changed; those already as asked, the origin and projected
+    /// geometry are not counted. A point placed by parameter expressions is released as plain
+    /// numbers at its current place.
     pub changed: usize,
 }
 
@@ -879,7 +880,8 @@ impl<'de> Deserialize<'de> for SymmetryParams {
 }
 
 /// Fix points and curves where they are, or release them (a curve keeps its radius too; the
-/// origin, projected geometry and a point fixed by its own coordinates are left as they are).
+/// origin and projected geometry are left as they are; a point placed by parameter expressions
+/// is released where they come to now, as plain numbers).
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = fix_required)]
 pub struct FixParams {

@@ -1,5 +1,6 @@
-//! The contract for Render Image and Check Render Request in `cmd/render/jobs.rs` (#13311). Both
-//! commands take the same image request; `render.preflight` only checks it.
+//! The contract and reply types for Render Image and Check Render Request in
+//! `cmd/render/jobs.rs` (#13311). Both commands take the same image request; `render.preflight`
+//! only checks it.
 //!
 //! The handler reads a request in one of two forms. With `progressive: true` it is the GPU form
 //! (`ProgressiveStart`); otherwise it is the runtime form (`Start`), for the raster and CPU
@@ -20,15 +21,18 @@
 //!
 //! The render crate has no `JsonSchema`. The schema types each top-level key and publishes the
 //! render crate's option sections (`raytrace`, `settings`, `lens` and the others) as JSON objects.
+//! The replies do the same: what the engine says about the request is typed, and the render
+//! crate's sections (the request, what it resolved to, its cost and options) are objects.
 
 use std::borrow::Cow;
 
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value, json};
 
 use super::check::whole;
+use super::render_jobs::JobState;
 
 /// The keys only the GPU form takes. The runtime form refuses them.
 pub(crate) const GPU_ONLY: &[&str] = &[
@@ -344,6 +348,164 @@ impl JsonSchema for RenderRequest {
             "not": {"required": ["setup", "settings"], "properties": {"setup": {"not": null_only}, "settings": {"not": null_only}}},
         })
     }
+}
+
+/// What Render Image (`render.start`) returns: the queued job's status, as Render Progress gives
+/// it for a job, without the shot queue.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RenderStarted {
+    #[serde(flatten)]
+    pub state: JobState,
+    /// For a runtime request: the setup's controls the raster image executor leaves out
+    /// (`exposure_ev`, `environment_rotation`, `environment_intensity`, those not at their neutral
+    /// value), as in Check Render Request. Left out for a GPU request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignored_controls: Option<Vec<&'static str>>,
+}
+
+/// What Check Render Request (`render.preflight`) returns: the request as a job would run it, and
+/// what it would cost, without queuing anything. The reply has the request's form.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum RenderChecked {
+    Runtime(RuntimeChecked),
+    Gpu(GpuChecked),
+}
+
+/// Check Render Request for a runtime request (raster or CPU ray tracing).
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RuntimeChecked {
+    #[serde(flatten)]
+    pub checked: Checked,
+    /// The setup's controls the raster image executor leaves out: `exposure_ev`,
+    /// `environment_rotation` and `environment_intensity`, those not at their neutral value. Empty
+    /// for CPU ray tracing, which refuses them.
+    pub ignored_controls: Vec<&'static str>,
+    /// How the CPU ray tracer carries light, in words: direct and mirror light only, or path
+    /// lighting through a finite number of bounces, through glass too where it refracts. A raster
+    /// request gets the first.
+    pub stage_transport: &'static str,
+    /// The CPU resource profile: `compact`, `studio` or `workstation`. Always `compact` for a
+    /// raster request.
+    pub cpu_budget: String,
+    /// That profile's image, geometry, memory and work limits, as the render crate gives them.
+    pub cpu_limits: Map<String, Value>,
+    /// The bytes the request's lights, environment and resource metadata keep while the job
+    /// runs, in bytes. `admission` counts them.
+    pub retained_request_bytes: u64,
+}
+
+/// Check Render Request for a GPU request (`progressive: true`).
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct GpuChecked {
+    #[serde(flatten)]
+    pub checked: Checked,
+    /// The job's options, as the render crate gives them.
+    pub options: Map<String, Value>,
+    /// The bytes the options keep while the job runs. `admission` counts them.
+    pub retained_options_bytes: u64,
+    /// With `clamp_indirect`: how indirect light is clamped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub indirect_clamp: Option<IndirectClamp>,
+}
+
+/// What both forms of Check Render Request return.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct Checked {
+    /// The backend and executor the request resolved to, with the image's size and format, as the
+    /// render crate gives them.
+    pub resolved: Map<String, Value>,
+    /// The cost the job was admitted with (triangles, scratch and total bytes, and the host's
+    /// memory where it has one), as the render crate gives it.
+    pub admission: Map<String, Value>,
+    /// The image request the job would run, as the render crate gives it.
+    pub request: Map<String, Value>,
+    /// The design revision the scene was captured from.
+    pub scene_generation: u64,
+    /// The image host that would run it: `native_worker` or `cooperative`.
+    pub host: String,
+    /// How many passive stage panels the setup places.
+    pub stage_panels: usize,
+    /// The environment's metadata, as the render crate gives it: an HDR's, or for a GPU request
+    /// also a gradient sky's. `null` without one, and for a CPU sky or constant environment, which
+    /// are in `request`.
+    pub environment: Option<Map<String, Value>>,
+    /// The surface maps the scene uses, as the render crate sums them up, or `null` without any.
+    pub textures: Option<Map<String, Value>>,
+    /// How transparency is rendered: `sorted_alpha_approximation` (raster), `opaque_only`,
+    /// `coverage_alpha` (a transparent background) or `physical_transmission` (glass that
+    /// refracts).
+    pub transparency: &'static str,
+    /// Whether glass in the scene refracts.
+    pub refraction: bool,
+    /// The glass shapes the executor refracts through: `thin_sheet`, `closed_box` and
+    /// `closed_mesh`. Empty for an executor without glass, and for a runtime request without it.
+    pub dielectric_boundaries: Vec<&'static str>,
+    /// The setup's clear coats, as saved. Left out without any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coats: Option<Vec<Map<String, Value>>>,
+    /// With denoising on: how the image is denoised. Left out otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub denoising: Option<Denoising>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// How a denoised image is filtered.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct Denoising {
+    /// The filter: `edge_aware_atrous`.
+    pub method: &'static str,
+    /// For CPU ray tracing: `native_cpu`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<&'static str>,
+    /// How many passes the filter makes, 1 to 3.
+    pub passes: u32,
+    /// Each pass's step between taps, in pixels: 1, 2 and 4.
+    pub steps: Vec<u32>,
+    /// The denoise settings, as the render crate gives them.
+    pub settings: Map<String, Value>,
+    /// Whether the request asked for the guide mask (`denoise_diagnostics`).
+    pub diagnostics_requested: bool,
+    /// What happens to isolated bright pixels, in words, or `disabled`.
+    pub outlier_policy: &'static str,
+    /// How mirrors and glass are filtered, in words.
+    pub optical_policy: &'static str,
+    /// The guide images the filter follows.
+    pub guides: &'static str,
+    /// What the filter leaves as rendered, in words.
+    pub bypass: &'static str,
+    /// What the filter can't do, in words.
+    pub limitation: &'static str,
+    /// Always true: the unfiltered linear image is kept.
+    pub raw_linear_accumulator_preserved: bool,
+    /// For CPU ray tracing, always true: a kept linear EXR is unfiltered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_linear_exr_preserved: Option<bool>,
+    /// Where in the pipeline the filter runs: `linear_before_tone_map`.
+    pub output_stage: &'static str,
+    /// For CPU ray tracing: the filter's work, in words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_units: Option<&'static str>,
+    /// For CPU ray tracing: which checkpoint images are filtered, in words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoints: Option<&'static str>,
+}
+
+/// How a GPU request's indirect light is clamped (`clamp_indirect`).
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct IndirectClamp {
+    /// The largest contribution a path keeps.
+    pub limit: f64,
+    /// The bounce the clamp starts from: 1, the first indirect one.
+    pub from_bounce: u32,
+    /// Always true: a clamped contribution keeps its hue.
+    pub keeps_hue: bool,
+    /// Always true: the clamp darkens real caustics and glints.
+    pub biased: bool,
+    /// What the clamp changes beyond the image, in words.
+    pub limitation: &'static str,
 }
 
 #[cfg(test)]

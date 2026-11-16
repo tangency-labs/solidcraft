@@ -11,6 +11,8 @@
 //! | Rust                                  | Status difftest compares |
 //! |---------------------------------------|--------------------------|
 //! | [`SweepFailure::RailPastStationCap`]  | `SM_ERR`                 |
+//! | [`SweepFailure::LoftSectionsTooLarge`] | `SM_ERR`                |
+//! | [`SweepFailure::LoftMatchTooLarge`]   | `SM_ERR`                 |
 //! | [`SweepFailure::Failed`]              | `SM_ERR`                 |
 //! | [`SweepFailure::Missing`]             | `SM_ERR_NULL_POINTER`    |
 //!
@@ -35,6 +37,25 @@ pub enum SweepFailure {
         /// The wires (sections and stations) at the cap.
         wires: usize,
     },
+    /// Two loft sections too large to pair: the band their pairing is searched in
+    /// ([`crate::sweep::loft_sections`]) would have no room within its cells, with `first` and
+    /// `second` segments. Sections of equal counts up to `largest` segments pair.
+    LoftSectionsTooLarge {
+        /// The first section's segments.
+        first: usize,
+        /// The second section's segments.
+        second: usize,
+        /// The most segments two sections of equal counts may have.
+        largest: usize,
+    },
+    /// Loft sections whose match ([`crate::sweep::loft_sections`]) would give a section
+    /// `segments` segments, more than the caller's bound `most`.
+    LoftMatchTooLarge {
+        /// The segments the section would get (at least).
+        segments: usize,
+        /// The caller's bound.
+        most: usize,
+    },
     /// A sweep routine could not continue, as the phrase says (for example "the swept edge
     /// has no trimming curves").
     Failed(&'static str),
@@ -47,7 +68,10 @@ impl SweepFailure {
     /// The status the C++ reports for it (a comparison detail): `SM_ERR`.
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::RailPastStationCap { .. } | Self::Failed(_) => SM_ERR,
+            Self::RailPastStationCap { .. }
+            | Self::LoftSectionsTooLarge { .. }
+            | Self::LoftMatchTooLarge { .. }
+            | Self::Failed(_) => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
         }
     }
@@ -59,6 +83,9 @@ impl SweepFailure {
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::RailPastStationCap { .. } => ErrorKind::NotWithinTolerance,
+            Self::LoftSectionsTooLarge { .. } | Self::LoftMatchTooLarge { .. } => {
+                ErrorKind::Unsupported
+            }
             Self::Failed(_) | Self::Missing(_) => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -70,7 +97,9 @@ impl SweepFailure {
     #[must_use]
     pub const fn replaces_upstream_status(&self) -> bool {
         match self {
-            Self::RailPastStationCap { .. } => false,
+            Self::RailPastStationCap { .. }
+            | Self::LoftSectionsTooLarge { .. }
+            | Self::LoftMatchTooLarge { .. } => false,
             Self::Failed(_) | Self::Missing(_) => true,
         }
     }
@@ -88,6 +117,18 @@ impl core::fmt::Display for SweepFailure {
             } => write!(
                 f,
                 "a railed loft's guided edges were asked within {asked:e} of their rails; at {wires} wires the bound proved is {reached:e}"
+            ),
+            Self::LoftSectionsTooLarge {
+                first,
+                second,
+                largest,
+            } => write!(
+                f,
+                "loft sections of {first} and {second} segments are too large to pair; sections of equal counts up to {largest} segments pair"
+            ),
+            Self::LoftMatchTooLarge { segments, most } => write!(
+                f,
+                "matching loft sections would give a section {segments} segments, more than the {most} allowed"
             ),
         }
     }
@@ -198,37 +239,6 @@ mod tests {
     /// waits on other work).
     #[test]
     fn the_sweep_routines_build_no_bare_statuses() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut files = vec![root.join("sweep.rs")];
-        let mut dirs = vec![root.join("sweep")];
-        while let Some(dir) = dirs.pop() {
-            for entry in std::fs::read_dir(dir).expect("read dir") {
-                let path = entry.expect("entry").path();
-                if path.is_dir() {
-                    dirs.push(path);
-                } else if path.extension().is_some_and(|x| x == "rs") {
-                    files.push(path);
-                }
-            }
-        }
-        files.sort();
-        assert!(files.len() > 20, "{files:?}");
-        for path in files {
-            let text = std::fs::read_to_string(&path)
-                .expect("read")
-                .replace("\r\n", "\n");
-            let library = text
-                .find("\n#[cfg(test)]\nmod ")
-                .map_or(text.as_str(), |at| &text[..at]);
-            let bare: usize = [
-                "SolidError::sm_err(",
-                "SolidError::null_pointer(",
-                "SolidError::Upstream {",
-            ]
-            .iter()
-            .map(|needle| library.matches(needle).count())
-            .sum();
-            assert_eq!(bare, 0, "bare statuses in {}", path.display());
-        }
+        super::super::bare_scan::assert_waiting("sweep", 21, &[]);
     }
 }

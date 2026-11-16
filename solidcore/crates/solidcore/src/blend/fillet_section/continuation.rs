@@ -87,7 +87,9 @@ pub(crate) fn section_weight_range(
 /// the extension's box where `B` or `C` is not positive is a weight that vanishes there:
 /// refused ([`ExtendRefusal::WeightVanishes`]).
 fn gn_weight_range(n: usize, src: [f64; 2], ext: [f64; 2], w: [f64; 2]) -> Result<(f64, f64)> {
-    let exp = i32::try_from(n).map_err(|_| SolidError::sm_err(OP))?;
+    let exp = i32::try_from(n).map_err(|_| {
+        SolidError::blend_failed(OP, "the section's order does not fit an exponent")
+    })?;
     let a = |t: f64| (1.0 - t).powi(exp + 1) + t.powi(exp + 1);
     let far = |[x, y]: [f64; 2]| {
         if (x - 0.5).abs() >= (y - 0.5).abs() {
@@ -138,7 +140,10 @@ fn gn_weight_range(n: usize, src: [f64; 2], ext: [f64; 2], w: [f64; 2]) -> Resul
     let g = gamma(4 * n + 8);
     let (hi, lo) = (hi * (1.0 + g), lo * (1.0 - g));
     if !(hi.is_finite() && lo > 0.0) {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the section's weight is not proved positive over the extension",
+        ));
     }
     Ok((hi, lo))
 }
@@ -169,4 +174,23 @@ pub(crate) fn net_weights(net: &Net) -> (f64, f64) {
         lo = lo.min(w);
     }
     (hi, lo)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_weight_not_proved_positive_is_a_typed_failure() {
+        // A(t) is inf - inf at t = 1e200: the weight's bound is not finite
+        let error = gn_weight_range(2, [1e200, 1e200], [0.5, 0.5], [0.5, 0.5]).unwrap_err();
+        assert_eq!(
+            error,
+            SolidError::blend_failed(
+                OP,
+                "the section's weight is not proved positive over the extension"
+            )
+        );
+        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+    }
 }

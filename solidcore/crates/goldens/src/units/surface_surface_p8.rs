@@ -814,6 +814,94 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    /// The drops `CreateBlendSurface`'s sampler makes along one boundary curve
+    /// (`GetSampleValues`, 100 samples and the end): each curve point dropped onto the
+    /// surface over its natural domain, from the previous foot (none for the first). Each
+    /// foot is enclosed ([`crate::certify::nearest`]); returns the widest enclosure relative
+    /// to its upper end.
+    fn blend_drops(k: &Kernel, name: &str, surface: &Surface, curve: &SmCurve, ivl: &Extent1d) -> f64 {
+        use solidcore::surface::surface::p4::NoObject;
+        use solidcore::surface::surface::p5::DropPointOptions;
+        let domain = surface.natural_uv_domain_with_nurb(k).expect("domain");
+        let mut guess = None;
+        let mut widest = 0.0_f64;
+        for ii in 0..=100_u32 {
+            let param = if ii < 100 { f64::from(ii) / 100.0 } else { 1.0 };
+            let p = curve.evaluate_point(k, ivl.evaluate(param)).expect("curve point");
+            let opts = DropPointOptions {
+                guess_uv: guess,
+                ..Default::default()
+            };
+            let d = surface.drop_point::<NoObject>(k, p, &domain, &opts).expect("drop");
+            assert!(d.success, "{name} sample {ii}: the drop failed");
+            let e = crate::certify::nearest(k, surface, None, p, d.result_uv);
+            assert!(e.lo <= e.hi, "{name} sample {ii}: {e:?}");
+            if e.width() > 1e-12 * e.hi.max(1.0) {
+                // the drop without a guess (the global solve), for comparison
+                let g = surface
+                    .drop_point::<NoObject>(k, p, &domain, &DropPointOptions::default())
+                    .expect("drop");
+                let at = |uv| p.distance(surface.evaluate_point(k, uv).expect("point"));
+                eprintln!(
+                    "{name} sample {ii}: foot {:?} distance {:e} in [{:e}, {:e}]; global foot {:?} distance {:e}",
+                    d.result_uv,
+                    at(d.result_uv),
+                    e.lo,
+                    e.hi,
+                    g.result_uv,
+                    at(g.result_uv)
+                );
+            }
+            widest = widest.max(e.width() / e.hi.max(f64::MIN_POSITIVE));
+            guess = Some(d.result_uv);
+        }
+        widest
+    }
+
+    /// WR-56 (#17467, #17773): a blend surface between boundary curves of two surfaces,
+    /// whose cross derivatives are sampled at the feet of the curves' points dropped onto
+    /// their surfaces, each drop guessed from the one before. Every foot is certified the
+    /// nearest point of its surface, to a width of 1e-9 of its distance
+    /// (its upper end): the moved row `gen1959`'s 2 x 101 feet, and `gen0378`'s 101 on its first
+    /// surface, where taking a guessed local result nearer than its guess kept local
+    /// minima up to 0.19 farther than the nearest point (samples 63 to 81) until the
+    /// global solve decided them. (`gen0378`'s second surface is not asserted: its row is
+    /// main's, and one foot there, which the global solve also finds, is enclosed only to
+    /// 5.3e-4.)
+    #[test]
+    fn wr56_blend_samples_drop_to_the_nearest_point() {
+        for (name, sides) in [("gen0378", &[1][..]), ("gen1959", &[1, 2][..])] {
+            let case = crate::case::regression_case(&Runner, name);
+            let i: Inputs = case.parse().expect("inputs");
+            let row = rust_run(&i).unwrap_or_else(|_| panic!("{name}: rust"));
+            assert_eq!(row.first(), Some(&0.0), "{name}: status");
+            let OpIn::Blend {
+                curve1,
+                ivl1,
+                other,
+                curve2,
+                ivl2,
+                ..
+            } = &i.op
+            else {
+                panic!("{name}: not a blend case");
+            };
+            let k = Kernel::default();
+            let s1 = surface_of(&k, &i.surface).expect("surface").expect("a surface");
+            let s2 = surface_of(&k, other).expect("surface").expect("a surface");
+            let c1 = curve_of(curve1).expect("curve").expect("a curve");
+            let c2 = curve_of(curve2).expect("curve").expect("a curve");
+            for (side, s, c, ivl) in [(1, &s1, &c1, ivl1), (2, &s2, &c2, ivl2)] {
+                if !sides.contains(&side) {
+                    continue;
+                }
+                let widest = blend_drops(&k, name, s, c, &ivl_of(*ivl));
+                eprintln!("{name} surface {side}: widest relative enclosure {widest:e}");
+                assert!(widest <= 1e-9, "{name} surface {side}: {widest:e}");
+            }
+        }
+    }
+
     /// Generated cases reach every op, and the comparable ones mostly compare values.
     #[test]
     fn generated_cases_are_diverse() {

@@ -721,6 +721,7 @@ mod tests {
                 width: "5 mm".into(),
                 height: "10 mm".into(),
                 operation: crate::Operation::NewBody,
+                centred: false,
             },
             None,
         )

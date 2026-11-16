@@ -817,18 +817,17 @@ pub fn is_degenerate(k: &Kernel, b: &Brep, tol_3d: f64) -> Result<bool> {
     }
 
     // If Brep might be degenerate - Do expensive full check (CalculateBoundingBox's
-    // status is ignored: a failure leaves the default box)
+    // status is ignored upstream: a failure leaves the default box)
     // CalculateBoundingBox(sBBox): header defaults bApprox = FALSE, bTight = FALSE,
     // bExpandByZoneTol3d = TRUE
-    let bbox = match ignored(qbrep::calculate_bounding_box(
+    let Some(bbox) = ignored(qbrep::calculate_bounding_box(
         k,
         b,
         BoundingBoxOptions::default(),
-    ))? {
-        Some(bbox) => bbox,
+    ))?
+    else {
         // fork 60a8a51: without a box there is no evidence the B-rep is a point
-        None if k.fixes.brep_edit_statuses_pass_on => return Ok(false),
-        None => crate::geom::extent3d::Extent3d::default(),
+        return Ok(false);
     };
     Ok(bbox.is_point_sized(tol_3d))
 }
@@ -890,15 +889,12 @@ pub fn reset_infinite_region(
     // manage IsVoid region bits
     match void_setting {
         SetRegionVoidType::NestedSolid => {
-            // status ignored upstream; the port's null-dereference marker still propagates
+            // status ignored upstream; passed on here (WR-658)
             match set_region_is_void_flags_for_nested_solids(k, b) {
                 Err(e @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => {
                     return Err(e)
                 }
-                r => ignore_status(crate::error::passed_on(
-                    r,
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?,
+                r => r?,
             }
         }
         SetRegionVoidType::InfiniteRegionOnly => {
@@ -972,12 +968,7 @@ pub fn set_region_is_void_flags_for_nested_solids(k: &mut Kernel, b: &mut Brep) 
 
         // the shells mated to this one (increments an unused mark value)
         // (status ignored upstream: a failed call is read as no mated shells)
-        for mated in ignored(crate::error::passed_on(
-            shell_mated_shells(k, b, shell),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?
-        .unwrap_or_default()
-        {
+        for mated in shell_mated_shells(k, b, shell)? {
             let nested = shell_region(b, mated)?.ok_or_else(|| {
                 null("SetRegionIsVoidFlagsForNestedSolids: mated shell without region")
             })?;
@@ -1481,11 +1472,7 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
         .curve
         .as_ref()
         .ok_or_else(|| null("sm_CheckUVTrimCurve: edge without curve"))?;
-    let edge_3d_start = ignored(crate::error::passed_on(
-        curve.evaluate_point(k, edge_ivl.evaluate(0.0)),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?
-    .unwrap_or(Point3::UNDEF);
+    let edge_3d_start = curve.evaluate_point(k, edge_ivl.evaluate(0.0))?;
 
     let mate_vertex = |b: &Brep| -> Result<VertexId> {
         start_vertex(
@@ -1504,11 +1491,7 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
         eu1::face(b, eu)?.ok_or_else(|| null("sm_CheckUVTrimCurve: edge use without face"))?;
     let surf = face2::surface(b, face)?
         .ok_or_else(|| null("sm_CheckUVTrimCurve: face without surface"))?;
-    let face_3d_start = ignored(crate::error::passed_on(
-        surf.evaluate_point(k, Point2::new(start_uv.x, start_uv.y)),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?
-    .unwrap_or(Point3::UNDEF);
+    let face_3d_start = surf.evaluate_point(k, Point2::new(start_uv.x, start_uv.y))?;
 
     let face_tol = face2::tolerance(b, face)?;
     let edge_tol = edge::tolerance(b, e)?;
@@ -1530,22 +1513,14 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
     }
 
     // Now the other end:
-    let edge_3d_end = ignored(crate::error::passed_on(
-        curve.evaluate_point(k, edge_ivl.evaluate(1.0)),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?
-    .unwrap_or(Point3::UNDEF);
+    let edge_3d_end = curve.evaluate_point(k, edge_ivl.evaluate(1.0))?;
     let end_vtx = if reverse {
         start_vertex(b, eu)?
     } else {
         mate_vertex(b)?
     };
     let vrtx_3d_end = vertex::point(b, end_vtx)?;
-    let face_3d_end = ignored(crate::error::passed_on(
-        surf.evaluate_point(k, Point2::new(end_uv.x, end_uv.y)),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?
-    .unwrap_or(Point3::UNDEF);
+    let face_3d_end = surf.evaluate_point(k, Point2::new(end_uv.x, end_uv.y))?;
     vrtx_tol = vertex::tolerance(b, end_vtx)?; // have to update this to End vtx.
 
     let dist_face_vrtx_end = face_3d_end.distance(vrtx_3d_end);
@@ -1705,52 +1680,6 @@ fn evaluate_binormal(
     )
 }
 
-/// `EvaluateBinormal(dParameter, TRUE, rPos, rBinormal, &rTangent, &rNormal)` with its
-/// status ignored, as `CreateEdgeEdgeBlend` calls it: the outputs upstream goes on with.
-/// The out-params start as `SM_UNDEF_DOUBLE` (`SmVector3d`'s default). `EvaluateBinormal`
-/// writes them all only on success; its one status before its "Init outputs" step (not
-/// a loop edge use) leaves them undefined, every later one leaves the point, tangent and
-/// normal zeroed and the binormal undefined. `Err` for [`SolidError::Unported`] and for
-/// `topology.edgeuse_p3`'s own [`SolidError::InvalidInput`] (an upstream null dereference).
-fn evaluate_binormal_status_ignored(
-    k: &Kernel,
-    b: &mut Brep,
-    eu: EdgeuseId,
-    parameter: f64,
-) -> Result<BinormalEval> {
-    let undefined = BinormalEval {
-        point: Vec3::UNDEF,
-        binormal: Vec3::UNDEF,
-        tangent: Vec3::UNDEF,
-        face_normal: Vec3::UNDEF,
-        uv: Point2::UNDEF,
-    };
-    // fork 60a8a51 passes the status on (`SER`)
-    if k.fixes.brep_edit_statuses_pass_on {
-        return evaluate_binormal(k, b, eu, parameter, true);
-    }
-    if !eu1::is_loop_edgeuse(b, eu)? {
-        return Ok(undefined); // SER(SM_ERR_INVALID_INPUT) before the outputs are set
-    }
-    match evaluate_binormal(k, b, eu, parameter, true) {
-        Ok(eval) => Ok(eval),
-        Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(
-            e @ SolidError::InvalidInput {
-                operation: "topology::edgeuse::p3",
-                ..
-            },
-        ) => Err(e),
-        // a status after "Init outputs": point, tangent and normal set to zero
-        Err(_) => Ok(BinormalEval {
-            point: Vec3::new(0.0, 0.0, 0.0),
-            tangent: Vec3::new(0.0, 0.0, 0.0),
-            face_normal: Vec3::new(0.0, 0.0, 0.0),
-            ..undefined
-        }),
-    }
-}
-
 // ---- curve side (sm_FindSideOfCurve) ----------------------------------------------------
 
 /// `sm_FindSideOfCurve`: projects `point` onto `curve` along `projection_direction`
@@ -1770,6 +1699,46 @@ pub fn find_side_of_curve(
     projection_direction: Vec3,
     tol: f64,
 ) -> Result<bool> {
+    match side_of_curve(k, curve, point, projection_direction, tol)? {
+        SideOfCurve::Right(right) => Ok(right),
+        SideOfCurve::Undecided(reason) => Err(SolidError::topology_failed(OP, reason)),
+        SideOfCurve::NoProjection => Err(SolidError::topology_failed(OP, NOT_ONCE)),
+    }
+}
+
+/// Why [`find_side_of_curve`] fails when the projection has no single solution.
+const NOT_ONCE: &str = "the point does not project onto the curve exactly once";
+
+/// What [`side_of_curve`] found for a point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SideOfCurve {
+    /// The point is off the curve: whether it lies on the right-hand side.
+    Right(bool),
+    /// The side is left open, as upstream's `UNSURE`: the point is on the curve (within
+    /// the tolerance), the tangent is along the projection direction, the projected
+    /// vector and the tangent are parallel, or the projection has no single solution
+    /// and the curve may be nearest at an end (a point beyond the end of the curve).
+    /// It carries the reason [`find_side_of_curve`] fails with.
+    Undecided(&'static str),
+    /// The projection gave no solution although the curve comes nearer to the point
+    /// inside its interval than at its ends: a nearest point exists there and was not
+    /// found, so nothing is known about the point (#13679).
+    NoProjection,
+}
+
+/// [`find_side_of_curve`] with its `SM_ERR` cases told apart: a caller that reads an
+/// undecided side as "on the curve" must not read a failed projection that way.
+///
+/// # Errors
+///
+/// Those of the solve and evaluation.
+pub(crate) fn side_of_curve(
+    k: &Kernel,
+    curve: &Curve,
+    point: Point3,
+    projection_direction: Vec3,
+    tol: f64,
+) -> Result<SideOfCurve> {
     // Project Point onto Curve along the Projection direction
     let vectors = [projection_direction];
     let solutions = curve.global_point_solve::<NoObject>(
@@ -1790,10 +1759,16 @@ pub fn find_side_of_curve(
 
     // Determine if point is on left or right side of the curve relative to the projection plane.
     if solutions.len() != 1 {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the point does not project onto the curve exactly once",
-        ));
+        // No solution where the curve is nearest at an end is the projection's
+        // ordinary answer for a point beyond the end. Where the curve comes nearer
+        // inside, a nearest point exists that the projection did not find.
+        let missed = solutions.is_empty()
+            && nearer_inside_than_at_ends(k, curve, point, projection_direction, tol)?;
+        return Ok(if missed {
+            SideOfCurve::NoProjection
+        } else {
+            SideOfCurve::Undecided(NOT_ONCE)
+        });
     }
     let sol = solutions.get(0).ok_or_else(|| {
         SolidError::topology_failed(OP, "the curve has no projection of the point")
@@ -1809,9 +1784,33 @@ pub fn find_side_of_curve(
     // Project vectors into projection plane
     vec = projection_direction.cross(vec).cross(projection_direction);
 
+    // (not upstream, #13658) The nearest point of an open curve to a point beyond its
+    // end is that end, where the line to the point is not square to the curve. The
+    // projection returned no solution there before it answered at an interval's ends,
+    // and a point beyond the end of the curve is on neither of its sides, so it stays a
+    // failure. A closed curve has no such end: its seam is a point like any other.
+    let interval = curve.natural_interval();
+    let parameter = sol.start.param(0)?;
+    let at_end = [interval.min(), interval.max()]
+        .iter()
+        .any(|end| (parameter - end).abs() <= EFF_ZERO * (1.0 + end.abs()));
+    if at_end && !curve.is_closed(k, &interval, 0.0)? {
+        let along = projection_direction.cross(p1).cross(projection_direction);
+        let scale = vec.length() * along.length();
+        if vec.length() >= EFF_ZERO
+            && along.length() >= EFF_ZERO
+            && (vec.dot(along) / scale).abs() > EFF_ZERO_RAD
+        {
+            return Err(SolidError::topology_failed(
+                OP,
+                "the point does not project onto the curve exactly once",
+            ));
+        }
+    }
+
     // point is on the curve
     if vec.length() < tol {
-        return Err(SolidError::topology_failed(OP, "the point is on the curve"));
+        return Ok(SideOfCurve::Undecided("the point is on the curve"));
     }
 
     vec = vec.unitize_or_z();
@@ -1819,8 +1818,7 @@ pub fn find_side_of_curve(
 
     // projection direction is the same as the curve tangent or curve tangent is zero
     if tan.length() < tol {
-        return Err(SolidError::topology_failed(
-            OP,
+        return Ok(SideOfCurve::Undecided(
             "the curve tangent is zero or along the projection direction",
         ));
     }
@@ -1829,14 +1827,42 @@ pub fn find_side_of_curve(
     // projected vec and curve tangent are parallel
     let side = tan.cross(vec);
     if side.length() < EFF_ZERO {
-        return Err(SolidError::topology_failed(
-            OP,
+        return Ok(SideOfCurve::Undecided(
             "the point lies along the curve tangent",
         ));
     }
 
     // set output
-    Ok(side.dot(projection_direction) <= 0.0)
+    Ok(SideOfCurve::Right(side.dot(projection_direction) <= 0.0))
+}
+
+/// Whether the curve, seen along `direction`, comes nearer to `point` at one of its
+/// knots, or of the 64 equal steps of its interval, than at both of its ends, by more
+/// than `tol`. `true` proves the nearest point is not an end; `false` proves nothing.
+fn nearer_inside_than_at_ends(
+    k: &Kernel,
+    curve: &Curve,
+    point: Point3,
+    direction: Vec3,
+    tol: f64,
+) -> Result<bool> {
+    const STEPS: u32 = 64;
+    let interval = curve.natural_interval();
+    let direction = direction.unitize_or_z();
+    let distance = |t: f64| -> Result<f64> {
+        Ok(direction
+            .cross(point - curve.evaluate_point(k, t)?)
+            .length())
+    };
+    let at_ends = distance(interval.evaluate(0.0))?.min(distance(interval.evaluate(1.0))?);
+    let (knots, _) = curve.knots(k, Some(&interval))?;
+    let steps = (1..STEPS).map(|i| interval.evaluate(f64::from(i) / f64::from(STEPS)));
+    for t in knots.into_iter().chain(steps) {
+        if distance(t)? + tol < at_ends {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 // ---- face sectors (sm_FindSectorOfFace) -------------------------------------------------
@@ -2105,8 +2131,9 @@ pub fn update_vertex_edge_intervals(
                         None,
                     ))?;
                     // (fork 60a8a51 passes this status on: `SER`)
-                    let status = get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
-                    crate::error::status_passed_on(status, k.fixes.brep_edit_statuses_pass_on)?;
+                    if let Some(e) = get_or_create_uv_trim_curve(k, b, eu, false, false, true)? {
+                        return Err(e);
+                    }
                 }
             }
         }
@@ -2127,9 +2154,10 @@ pub fn update_vertex_edge_intervals(
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] for a seam without exactly four edge uses or missing
-/// trim curves; those of UV trim creation, endpoint evaluations, the singularity
-/// test and the trim curve swap. No trims are swapped after a failed prerequisite.
+/// [`SolidError::InvalidInput`] when the seam's own edge uses have no UV trim curve;
+/// those of the singularity test and the trim curve swap. As the fork does (60a8a51),
+/// a seam without exactly four edge uses, a neighbour whose trim curve cannot be
+/// created, or an end point that cannot be evaluated swaps nothing (`Ok(false)`).
 pub fn redistribute_seam_uv_trim_curves(
     k: &Kernel,
     b: &mut Brep,
@@ -2146,15 +2174,8 @@ pub fn redistribute_seam_uv_trim_curves(
     let eus = b.edge(new_edge)?.edgeuses.clone();
     // fork 60a8a51: without its four edge uses, their trim curves and their end points
     // there is nothing to compare, so nothing is swapped.
-    let soft = k.fixes.brep_edit_statuses_pass_on;
-    if soft && eus.len() != 4 {
-        return Ok(false);
-    }
-    // SM_ASSERT upstream; this algorithm handles exactly two mated pairs (#520).
     if eus.len() != 4 {
-        return Err(null(
-            "sm_RedistributeSeamUVTrimCurves: expected 4 edge uses",
-        ));
+        return Ok(false);
     }
     // sEdgeuse[0] = Starts At StartVertex OneFace, sEdgeuse[3] = Starts At EndVertex OtherFace
     let this_eu = *eus
@@ -2175,18 +2196,13 @@ pub fn redistribute_seam_uv_trim_curves(
         }
     }
 
-    // Both the outer Result and the retained projection status must succeed.
-    // Upstream checks these statuses and curves only with SM_ASSERT (#520).
+    // Upstream checks these statuses and curves only with SM_ASSERT (#520); a neighbour
+    // without its trim curve swaps nothing (fork 60a8a51).
     for eu in [prev_this, prev_other] {
         let fetched = eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
-        if soft && (fetched.status.is_err() || eu1::uv_trim_curve(b, eu)?.0.is_none()) {
+        // (a missing dependency or a cancellation still propagates)
+        if ignored(fetched.status)?.is_none() || eu1::uv_trim_curve(b, eu)?.0.is_none() {
             return Ok(false);
-        }
-        fetched.status?;
-        if eu1::uv_trim_curve(b, eu)?.0.is_none() {
-            return Err(null(
-                "sm_RedistributeSeamUVTrimCurves: neighbor without UV trim curve",
-            ));
         }
     }
 
@@ -2202,15 +2218,10 @@ pub fn redistribute_seam_uv_trim_curves(
         (prev_this, 1.0),
         (prev_other, 1.0),
     ]) {
-        let r = normalized_evaluate(k, b, eu, t, true, true);
-        *slot = if soft {
-            match ignored(r)? {
-                Some(p) => p,
-                None => return Ok(false),
-            }
-        } else {
-            r?
-        };
+        match ignored(normalized_evaluate(k, b, eu, t, true, true))? {
+            Some(p) => *slot = p,
+            None => return Ok(false),
+        }
     }
     let [this_point_uv, other_point_uv, prev_this_point_uv, prev_other_point_uv] = end_uvs;
 
@@ -2727,15 +2738,9 @@ pub fn make_vertex_split_uv_trim_curve(
     //    sIvl13D, sIvl23D = 3DCurve     [start,SplitParam],   [SplitParam,   end]
     let mut ivl2 = ivl1;
     // (the SetMinMax statuses are not checked upstream)
-    ignored(crate::error::passed_on(
-        ivl1.set_min_max(ivl1.min(), edge_split_parameter_uv),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    ivl1.set_min_max(ivl1.min(), edge_split_parameter_uv)?;
     let ivl1_3d = Extent1d::from_min_max(ivl1.min(), edge_split_parameter);
-    ignored(crate::error::passed_on(
-        ivl2.set_min_max(edge_split_parameter_uv, ivl2.max()),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    ivl2.set_min_max(edge_split_parameter_uv, ivl2.max())?;
     let ivl2_3d = Extent1d::from_min_max(edge_split_parameter, ivl2.max());
 
     // trim and bind UVTrimCurves to Edgeuses (the attached curve is edited in place)
@@ -3349,20 +3354,8 @@ pub fn create_edge_edge_blend(
                 // (evaluation statuses are not checked upstream: a failure leaves the
                 // sample unset; undefined coordinates here)
                 let t = ii as f64 / (num_loc - 1) as f64;
-                rail1_pos.push(
-                    ignored(crate::error::passed_on(
-                        rail1.evaluate_point(ivl1.evaluate(t)),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?
-                    .unwrap_or(Point3::UNDEF),
-                );
-                rail2_pos.push(
-                    ignored(crate::error::passed_on(
-                        rail2.evaluate_point(ivl2.evaluate(t)),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?
-                    .unwrap_or(Point3::UNDEF),
-                );
+                rail1_pos.push(rail1.evaluate_point(ivl1.evaluate(t))?);
+                rail2_pos.push(rail2.evaluate_point(ivl2.evaluate(t))?);
             }
 
             // Check under which orientation the distance between rail curves is less
@@ -3393,19 +3386,19 @@ pub fn create_edge_edge_blend(
     }
 
     // set the bIntoFace values for curve/Surface pairs
-    // (both statuses ignored upstream: a failure leaves defined UNDEF / zero outputs)
+    // (both statuses ignored upstream; fork 60a8a51 passes them on: `SER`)
     let BinormalEval {
         binormal: edge1_binormal,
         tangent: mut edge1_tangent,
         face_normal: mut face1_normal,
         ..
-    } = evaluate_binormal_status_ignored(k, b_1, eu_1, ivl1.evaluate(0.5))?;
+    } = evaluate_binormal(k, b_1, eu_1, ivl1.evaluate(0.5), true)?;
     let BinormalEval {
         binormal: edge2_binormal,
         tangent: mut edge2_tangent,
         face_normal: mut face2_normal,
         ..
-    } = evaluate_binormal_status_ignored(k, b2_mut!(), eu_2, ivl2.evaluate(0.5))?;
+    } = evaluate_binormal(k, b2_mut!(), eu_2, ivl2.evaluate(0.5), true)?;
     if eu1::orientation(b_1, eu_1)? == OrientType::Opposite {
         edge1_tangent = -edge1_tangent;
     }
@@ -3433,11 +3426,7 @@ pub fn create_edge_edge_blend(
     // make sure two curve intervals run in the same direction and share a common parameterization
     if !same_dir_curves {
         // (status not checked upstream; the interval is left as is on failure)
-        ivl2 = ignored(crate::error::passed_on(
-            rail2.reverse_parameterization(&ivl2),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?
-        .unwrap_or(ivl2);
+        ivl2 = rail2.reverse_parameterization(&ivl2)?;
         in_from_the_left = !in_from_the_left;
     }
 
@@ -3451,14 +3440,8 @@ pub fn create_edge_edge_blend(
             let nat = rail2.natural_interval();
             let mut new_ivl = nat;
             // (neither status is checked upstream)
-            ignored(crate::error::passed_on(
-                new_ivl.set_min_max(nat.min() * scale + offset, nat.max() * scale + offset),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
-            ignored(crate::error::passed_on(
-                rail2.edit_parameterization(&new_ivl),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            new_ivl.set_min_max(nat.min() * scale + offset, nat.max() * scale + offset)?;
+            rail2.edit_parameterization(&new_ivl)?;
             *ivl2 = ivl1;
         }
         Ok(())
@@ -3481,11 +3464,7 @@ pub fn create_edge_edge_blend(
     // make sure two curve intervals run in the same direction and share a common
     // parameterization (upstream repeats both steps here)
     if !same_dir_curves {
-        ivl2 = ignored(crate::error::passed_on(
-            rail2.reverse_parameterization(&ivl2),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?
-        .unwrap_or(ivl2);
+        ivl2 = rail2.reverse_parameterization(&ivl2)?;
     }
     rescale(&mut rail2, &mut ivl2)?;
 
@@ -3756,20 +3735,17 @@ pub fn heal_brep(
 ) -> Result<()> {
     let mut heal_data = HealData::<HealLoopHandle>::default();
     // pass the call along (status ignored upstream)
-    ignored(crate::error::passed_on(
-        heal_data.heal_brep(
-            k,
-            Some(b),
-            healer_op,
-            HealBrepTargets {
-                vertices: opt_vertices,
-                edges: opt_edges,
-                faces: opt_faces,
-            },
-            make_uv_trim_curves,
-        ),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    heal_data.heal_brep(
+        k,
+        Some(b),
+        healer_op,
+        HealBrepTargets {
+            vertices: opt_vertices,
+            edges: opt_edges,
+            faces: opt_faces,
+        },
+        make_uv_trim_curves,
+    )?;
     Ok(())
 }
 
@@ -3852,7 +3828,9 @@ mod tests {
     #[test]
     fn brep_intersect_mut_empty_controls_and_point_options() {
         let mut k = Kernel::default();
-        // Native also returns no singular point for this exact tangency.
+        // At z = 0 the paraboloid z = (u - 1/2)^2 + (v - 1/2)^2 touches the plane at its
+        // apex (1/2, 1/2, 0) only, with both normals along z: no curve, one touching point
+        // (WR-74's contact point search). At z = -1/8 they do not meet.
         for z in [0.0, -0.125] {
             for reverse in [false, true] {
                 for want_points in [false, true] {
@@ -3865,7 +3843,18 @@ mod tests {
                     let (curves, points) =
                         brep_intersect_mut(&k, first, second, 1e-6, 2.0, want_points).unwrap();
                     assert!(curves.is_empty());
-                    assert_eq!(points, want_points.then(Vec::new));
+                    let Some(points) = points else {
+                        assert!(!want_points);
+                        continue;
+                    };
+                    assert!(want_points);
+                    if z == 0.0 {
+                        assert_eq!(points.len(), 1, "{points:?}");
+                        let apex = Point3::new(0.5, 0.5, 0.0);
+                        assert!((points[0] - apex).length() <= 1e-12, "{points:?}");
+                    } else {
+                        assert!(points.is_empty(), "{points:?}");
+                    }
                 }
             }
         }
@@ -4042,8 +4031,8 @@ mod tests {
                 fail_status: SM_ERR_INVALID_INPUT,
                 ..DropCurveFail::default()
             }));
-            assert!(redistribute_fixture(&mut b, edge)
-                .is_err_and(|e| e.upstream_status() == Some(SM_ERR_INVALID_INPUT)));
+            // a neighbour whose trim curve cannot be created swaps nothing (fork 60a8a51)
+            assert!(!redistribute_fixture(&mut b, edge).unwrap());
             assert_eq!(seam_sides(&b, uses), [0.0, 1.0]);
         }
     }
@@ -4054,12 +4043,19 @@ mod tests {
         for count in [0, 2, 6] {
             let mut bad = b.clone_standing_for_self().unwrap();
             bad.edge_mut(edge).unwrap().edgeuses = uses.into_iter().cycle().take(count).collect();
-            assert!(redistribute_fixture(&mut bad, edge).is_err());
+            // without its four edge uses nothing is swapped (fork 60a8a51)
+            assert!(
+                !redistribute_fixture(&mut bad, edge).unwrap(),
+                "{count} uses"
+            );
         }
         for eu in [uses[0], uses[2], previous[0], previous[1]] {
             let mut bad = b.clone_standing_for_self().unwrap();
             bad.edgeuse_mut(eu).unwrap().uv_trim_curve = Some(Curve::from(BSplineCurve::default()));
-            assert!(redistribute_fixture(&mut bad, edge).is_err());
+            // an end point that cannot be evaluated swaps nothing (fork 60a8a51)
+            let before = format!("{bad:?}");
+            assert!(!redistribute_fixture(&mut bad, edge).unwrap(), "{eu:?}");
+            assert_eq!(format!("{bad:?}"), before);
         }
         for eu in [uses[0], uses[2]] {
             let mut bad = b.clone_standing_for_self().unwrap();
@@ -4216,6 +4212,66 @@ mod tests {
         assert_eq!((rs.clone(), vs.clone()), (vec![a, c, None], vec![2, 2, 3]));
         assert_eq!(find_highest_vote(&rs, &vs).unwrap(), None);
         assert!(find_highest_vote(&rs, &[1]).is_err());
+    }
+
+    /// #13658: a point beside a line has a side; a point beyond either end of it has
+    /// none, although the line's nearest point to it is now found (that end).
+    #[test]
+    fn a_point_beyond_the_end_of_a_curve_has_no_side() {
+        use crate::nurbs::b_spline_curve::p1::BSplineCurve;
+        let k = Kernel::default();
+        let line = Curve::from(
+            BSplineCurve::create_line_segment(3, Vec3::new(-1.0, 0.0, 0.0), Vec3::X).unwrap(),
+        );
+        let side =
+            |x: f64, y: f64| find_side_of_curve(&k, &line, Vec3::new(x, y, 0.0), Vec3::Z, 1e-6);
+        assert_eq!(side(0.25, 0.5), Ok(false));
+        assert_eq!(side(0.25, -0.5), Ok(true));
+        let not_once = SolidError::topology_failed(
+            OP,
+            "the point does not project onto the curve exactly once",
+        );
+        for (x, y) in [(2.0, 0.5), (2.0, -0.5), (-3.0, 1.0), (1.5, 0.0)] {
+            assert_eq!(side(x, y), Err(not_once.clone()), "({x}, {y})");
+        }
+    }
+
+    /// The side of a point whose nearest point is a corner of a closed curve does not
+    /// depend on where the curve's seam is. Before #13658 the projection found the
+    /// corner when it was inside the curve and nothing when it was the seam.
+    #[test]
+    fn the_side_of_a_closed_curve_does_not_depend_on_its_seam() {
+        use crate::nurbs::b_spline_curve::p1::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as Net;
+        use crate::nurbs::math::{CPoint, NOW};
+        let k = Kernel::default();
+        let square = |points: [(f64, f64); 5]| {
+            let controls = points
+                .iter()
+                .map(|(x, y)| CPoint::new(*x, *y, 0.0, NOW))
+                .collect();
+            let knots = vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0];
+            Curve::from(BSplineCurve::from_nurb(
+                Net::new(controls, 1, knots).unwrap(),
+                3,
+                false,
+            ))
+        };
+        // the unit square, counter-clockwise: its seam at the corner (0, 0), then at (1, 0)
+        let seam_at_corner = square([(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)]);
+        let corner_inside = square([(1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0), (1.0, 0.0)]);
+        // outside a counter-clockwise square is the right of the walk; (-1, -1) and
+        // (-1, -0.5) are nearest the corner (0, 0), (0.5, -1) the bottom edge
+        for (x, y) in [(-1.0, -1.0), (-1.0, -0.5), (0.5, -1.0), (2.0, 2.0)] {
+            let point = Vec3::new(x, y, 0.0);
+            for curve in [&seam_at_corner, &corner_inside] {
+                assert_eq!(
+                    find_side_of_curve(&k, curve, point, Vec3::Z, 1e-6),
+                    Ok(true),
+                    "({x}, {y})"
+                );
+            }
+        }
     }
 
     #[test]

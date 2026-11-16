@@ -173,6 +173,19 @@ fn source(s: &Session, v: &Value, cmd: &str) -> Result<LinkSource> {
             if Some(f.id) == s.active_sketch {
                 return Err(bad(cmd, "a sketch cannot project its own geometry"));
             }
+            if let Some(target) = sketch_store::active(s)
+                && let (Some(source_index), Some(target_index)) = (s.doc.feature_index(f.id), s.doc.feature_index(target))
+                && source_index > target_index
+            {
+                return Err(bad(
+                    cmd,
+                    format!(
+                        "sketch `{}` comes after this sketch in the timeline, so its geometry cannot be used here. \
+                         Move the source sketch earlier if its dependencies allow, or use a sketch after it.",
+                        f.name
+                    ),
+                ));
+            }
             if let Some(c) = curve {
                 return Ok(LinkSource::SketchCurve { sketch: f.id, curve: c.to_string() });
             }
@@ -197,10 +210,14 @@ fn point_source(s: &Session, name: &str, cmd: &str) -> Result<LinkSource> {
     }
 }
 
-/// An origin axis (`X`, `Y` or `Z`, in any case), or a construction axis by its name (#9324).
+/// An origin axis (`X`, `Y` or `Z`, in any case), a construction axis by its name (#9324), or the
+/// origin axis of a component by its Browser key (`o:2/origin/Z`, #15086).
 fn axis_source(s: &Session, name: &str, cmd: &str) -> Result<LinkSource> {
     if ["X", "Y", "Z"].iter().any(|axis| name.eq_ignore_ascii_case(axis)) {
         return Ok(LinkSource::Axis { name: name.to_ascii_uppercase() });
+    }
+    if s.origin_axis(name).is_some() {
+        return Ok(LinkSource::Axis { name: name.to_string() });
     }
     match s.doc.find_feature(name) {
         Some(f) if matches!(f.kind, FeatureKind::ConstructionAxis { .. }) => Ok(LinkSource::Axis { name: f.name.clone() }),
@@ -475,8 +492,9 @@ fn add_link_unless_present(
     } else {
         None
     };
-    // The link is the edge that was picked, not whichever is nearest the picked point later.
+    // The link is the edge or vertex that was picked, not whichever is nearest the picked point later.
     let edge_name = solidcraft_doc::project::resolved_edge_name(&st, &r);
+    let vertex_name = solidcraft_doc::project::resolved_vertex_name(&st, &r);
     let link = sk.add_link_with_wires(kind, r.source, &r.geom, &r.wires)?;
     // The wires' exact curves, as a refresh of the link gives them (an included edge's record
     // curve): a link made now is the one its sketch would resolve.
@@ -484,6 +502,7 @@ fn add_link_unless_present(
     if let Some(l) = sk.links.iter_mut().find(|l| l.id == link) {
         l.face_name = name;
         l.edge_name = edge_name;
+        l.vertex_name = vertex_name;
     }
     Ok(Some(link))
 }

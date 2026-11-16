@@ -115,6 +115,48 @@ fn gears_save_and_open_with_their_definition() {
     assert!(old.assembly.links.iter().all(|l| l.coupling.is_none()) && old.assembly.links.len() == 2);
 }
 
+/// A coupling command put in place of a motion link takes the sizes the call leaves out from the
+/// coupling it replaces: an edit dialog can't re-offer a picked round face, so an edited gear
+/// keeps the radii picked on its discs, a rack and a screw their radius and pitch.
+#[test]
+fn an_edited_coupling_keeps_the_sizes_it_is_not_given() {
+    let mut s = gear_train();
+    run(&mut s, "joint.drive", json!({"joint": "G1", "value": 60})); // G2 at -30°
+    let l = run(&mut s, "joint.list", json!({}));
+    let (ra, rb) = (l["links"][0]["coupling"]["ra"].clone(), l["links"][0]["coupling"]["rb"].clone());
+    assert!(ra.is_object() && rb.is_object(), "{l}"); // the round faces picked on the discs
+    let r = run(&mut s, "joint.gear", json!({"a": "G1", "b": "G2", "link": 0}));
+    assert_eq!(r["link"], 0, "{r}");
+    let l = run(&mut s, "joint.list", json!({}));
+    assert_eq!((l["links"][0]["coupling"]["ra"].clone(), l["links"][0]["coupling"]["rb"].clone()), (ra, rb), "{l}");
+    // The kept radii drive as before: G1 at 90° puts G2 at -45° (r1/r2 = 10/20).
+    run(&mut s, "joint.drive", json!({"joint": "G1", "value": 90}));
+    assert!(close_to(shown(&mut s, "G2"), -45.0), "{}", shown(&mut s, "G2"));
+    // A rack redefined without a radius keeps the radius picked on the pinion's round face, and
+    // the rack stays put: 8 mm turns it 8·π/4 per quarter turn, before and after.
+    let mut s = rack();
+    run(&mut s, "joint.rack_pinion", json!({"a": "Pinion", "b": "Rail", "radius": {"occurrence": "Pinion", "circle": [8, 0, 2]}}));
+    run(&mut s, "joint.drive", json!({"joint": "Pinion", "value": 45}));
+    let before = run(&mut s, "joint.list", json!({}));
+    let radius = before["links"][0]["coupling"]["radius"].clone();
+    assert!(radius.is_object(), "{before}");
+    let r = run(&mut s, "joint.rack_pinion", json!({"a": "Pinion", "b": "Rail", "link": 0}));
+    assert_eq!(r["link"], 0, "{r}");
+    assert_eq!(run(&mut s, "joint.list", json!({}))["links"][0]["coupling"]["radius"], radius);
+    assert!(close_to(shown(&mut s, "Rail"), 8.0 * std::f64::consts::FRAC_PI_4), "{}", shown(&mut s, "Rail"));
+    run(&mut s, "joint.drive", json!({"joint": "Pinion", "value": 90}));
+    assert!(close_to(shown(&mut s, "Rail"), 8.0 * std::f64::consts::FRAC_PI_2), "{}", shown(&mut s, "Rail"));
+    // A screw redefined without a pitch keeps the pitch it was given.
+    let mut s = Session::default();
+    base(&mut s);
+    part(&mut s, "Nut", [-1.0, -1.0, 0.0]);
+    pin(&mut s, "cylindrical", "Thread", "Base", "Nut", Vec3::ZERO, Vec3::Z);
+    run(&mut s, "joint.screw", json!({"joint": "Thread", "pitch": "2 mm"}));
+    let r = run(&mut s, "joint.screw", json!({"joint": "Thread", "link": 0, "reverse": true}));
+    assert_eq!(r["link"], 0, "{r}");
+    assert_eq!(s.doc.assembly.links[0].coupling, Some(Coupling::Screw { pitch: Size::Expr("2 mm".into()), reverse: true }));
+}
+
 /// A pinion of radius 8 about +Z at the origin, a rack under it sliding along +X, and a stop the
 /// rack runs into after 10 mm.
 fn rack() -> Session {
@@ -428,4 +470,35 @@ fn an_editor_accepts_the_ratios_rolling_the_marker_works_out() {
     s.accept_commands(prepared).unwrap();
     assert_eq!(s.doc.marker, None);
     assert!(close_to(ratio(&s), -0.6), "{}", ratio(&s));
+}
+
+/// Opening a design saved rolled back before body names were pinned works the later bodies'
+/// names out from the whole timeline (#14008), and keeps nothing else that evaluation reads: a
+/// gear picked on a face after the marker keeps the ratio the file has, and the parts stay
+/// where the file has them.
+#[test]
+fn pinning_the_names_after_the_marker_leaves_a_gear_on_a_later_face_alone() {
+    let s = gear_train();
+    let g1 = s.doc.components.iter().find(|c| c.name == "G1").map(|c| c.id).unwrap_or_else(|| panic!("no G1"));
+    let disc = s.model.state().bodies.iter().find(|b| b.component == g1).map(|b| b.feature).unwrap_or_else(|| panic!("no G1 disc"));
+    let at = s.doc.features.iter().position(|f| f.id == disc).unwrap_or_else(|| panic!("no G1 disc feature"));
+    let mut doc = (*s.doc).clone();
+    for f in &mut doc.features {
+        f.body_names.clear();
+    }
+    doc.reserved_body_names.clear();
+    // Rolled back before G1's disc, so its face is not there, with the ratio the file was saved
+    // with (the whole timeline makes it -0.5).
+    doc.marker = Some(at);
+    if let Some(l) = doc.assembly.links.first_mut() {
+        l.ratio = 0.25;
+    }
+    let text = doc.to_json();
+    let plain = Session::opened(solidcraft_doc::Document::from_json(&text).unwrap(), None);
+    let opened = Session::opened_at(solidcraft_doc::Document::from_json(&text).unwrap(), None, None);
+    assert!(opened.doc.feature(disc).is_some_and(|f| !f.body_names.is_empty()), "the disc after the marker has its name");
+    assert_eq!(opened.doc.marker, Some(at));
+    assert_eq!(opened.doc.assembly.links.first().map(|l| l.ratio), Some(0.25));
+    assert_eq!(opened.doc.assembly, plain.doc.assembly);
+    assert_eq!(opened.doc.occurrences, plain.doc.occurrences);
 }

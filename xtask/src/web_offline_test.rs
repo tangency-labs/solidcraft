@@ -102,6 +102,7 @@ pub fn run_api(site: &str) -> Result<(), String> {
     // Use the app's normal backend selection, including WebGPU where available.
     cdp.call("Page.navigate", json!({"url": format!("http://127.0.0.1:{}{PREFIX}", server.port)}))?;
     wait_for(&mut cdp, "!!window.solidcraft && !document.getElementById('solidcraft_loading')", "the browser API is ready", |v| v == true)?;
+    println!("web-api-test: mouse buttons: {}", mouse_test(&mut cdp)?);
     let result = cdp.eval(API_TEST)?;
     let path = downloads.join("Untitled-view.dxf");
     let started = Instant::now();
@@ -121,6 +122,88 @@ pub fn run_api(site: &str) -> Result<(), String> {
     let keys = cdp.eval(KEYS_TEST)?;
     println!("web-api-test: {keys}");
     Ok(())
+}
+
+/// The app's mouse buttons follow the browser's: a chord leaves none held (a second button
+/// pressed while one is held fires `pointermove`, not `pointerdown`), and so do a drag let go
+/// outside the window, a release the page never heard of and the window losing focus. The focus
+/// moving inside the page lets go of none (#16209).
+fn mouse_test(cdp: &mut Cdp) -> Result<String, String> {
+    // The model viewport, not the start page, under the pointer.
+    let ui = cdp.eval("window.solidcraft.request('ui.home', {open: false}).then(() => window.solidcraft.request('ui.inspect'))")?;
+    let at = |i: usize| ui["viewport"][i].as_f64().ok_or("web-api-test: no model viewport");
+    let (x, y) = (at(0)? + at(2)? / 2.0, at(1)? + at(3)? / 2.0);
+    let mouse = |cdp: &mut Cdp, kind: &str, (x, y): (f64, f64), button: &str, buttons: u32| {
+        let clicks = if kind == "mouseMoved" { 0 } else { 1 };
+        cdp.call("Input.dispatchMouseEvent", json!({"type": kind, "x": x, "y": y, "button": button, "buttons": buttons, "clickCount": clicks}))
+            .map(|_| ())
+    };
+    // The buttons egui holds once two frames have run.
+    let held = |cdp: &mut Cdp| -> Result<u64, String> {
+        let v = cdp.eval("(async () => { await window.solidcraft.request('ui.inspect'); await window.solidcraft.request('ui.inspect'); return window.solidcraft.buttons(); })()")?;
+        v.as_u64().ok_or_else(|| format!("web-api-test: buttons() gave {v}"))
+    };
+    let expect = |cdp: &mut Cdp, want: u64, what: &str| -> Result<(), String> {
+        let got = held(cdp)?;
+        if got == want { Ok(()) } else { Err(format!("web-api-test: {what}: the app holds buttons {got:#b}, the browser {want:#b}")) }
+    };
+    let c = (x, y);
+    mouse(cdp, "mouseMoved", c, "none", 0)?;
+    // Right, then left; right let go, then left.
+    mouse(cdp, "mousePressed", c, "right", 2)?;
+    mouse(cdp, "mousePressed", c, "left", 3)?;
+    expect(cdp, 3, "a chord's second button")?;
+    mouse(cdp, "mouseReleased", c, "right", 1)?;
+    expect(cdp, 1, "one of a chord's buttons let go")?;
+    mouse(cdp, "mouseReleased", c, "left", 0)?;
+    expect(cdp, 0, "right then left, let go in the same order")?;
+    // Left, then right; let go in reverse order.
+    mouse(cdp, "mousePressed", c, "left", 1)?;
+    mouse(cdp, "mousePressed", c, "right", 3)?;
+    mouse(cdp, "mouseReleased", c, "right", 1)?;
+    mouse(cdp, "mouseReleased", c, "left", 0)?;
+    expect(cdp, 0, "left then right, let go in reverse order")?;
+    // A right drag let go outside the window: the canvas has the pointer, so the release arrives.
+    mouse(cdp, "mousePressed", c, "right", 2)?;
+    mouse(cdp, "mouseMoved", (x + 40.0, y + 20.0), "right", 2)?;
+    mouse(cdp, "mouseMoved", (-30.0, -30.0), "right", 2)?;
+    expect(cdp, 2, "a drag outside the window")?;
+    mouse(cdp, "mouseReleased", (-30.0, -30.0), "right", 0)?;
+    expect(cdp, 0, "a drag let go outside the window")?;
+    // A release the page never heard of: the next move has no buttons held.
+    mouse(cdp, "mouseMoved", c, "none", 0)?;
+    mouse(cdp, "mousePressed", c, "right", 2)?;
+    mouse(cdp, "mouseMoved", (x + 10.0, y), "none", 0)?;
+    expect(cdp, 0, "a move with no buttons after a lost release")?;
+    mouse(cdp, "mouseReleased", (x + 10.0, y), "right", 0)?;
+    // The focus moves inside the page with a button held, as when a value box takes the keyboard
+    // while its manipulator is dragged (#16209): eframe gives it to its hidden text input, the
+    // canvas's next sibling, and back to the canvas, and the window hears each blur too.
+    let focus = |cdp: &mut Cdp, to: &str| -> Result<(), String> {
+        let js = format!(
+            "(() => {{ const c = document.getElementById('solidcraft_canvas'), t = c && c.nextElementSibling; if (!t || t.tagName !== 'INPUT') return 'no hidden text input after the canvas'; const e = {to}; e.focus(); return document.activeElement === e ? 'ok' : 'the focus did not move to ' + e.tagName; }})()"
+        );
+        match cdp.eval(&js)? {
+            Value::String(s) if s == "ok" => Ok(()),
+            v => Err(format!("web-api-test: {v}")),
+        }
+    };
+    focus(cdp, "c")?;
+    mouse(cdp, "mousePressed", c, "middle", 4)?;
+    focus(cdp, "t")?;
+    expect(cdp, 4, "the focus moved to the hidden text input")?;
+    focus(cdp, "c")?;
+    expect(cdp, 4, "the focus came back to the canvas")?;
+    mouse(cdp, "mouseReleased", c, "middle", 0)?;
+    expect(cdp, 0, "let go after the focus moved inside the page")?;
+    // The window loses focus with a button held.
+    mouse(cdp, "mousePressed", c, "middle", 4)?;
+    cdp.eval("window.dispatchEvent(new Event('blur'))")?;
+    expect(cdp, 0, "the window lost focus")?;
+    mouse(cdp, "mouseReleased", c, "middle", 0)?;
+    cdp.call("Input.dispatchKeyEvent", json!({"type": "keyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}))?;
+    cdp.call("Input.dispatchKeyEvent", json!({"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}))?;
+    Ok("chords, a drag let go outside, a lost release and blur leave none held; focus moving inside the page lets go of none".into())
 }
 
 /// The browser's own tab switching keys reach it while the app has the keyboard (#5227): their
@@ -259,6 +342,12 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
                 // than `index.html`; copies of one build don't. A file of its own per copy lets
                 // a step hold back what one build has and the next lacks (step 13).
                 std::fs::write(to.join(format!("own-{build}.txt")), format!("{build}\n")).map_err(|e| format!("{}: {e}", to.display()))?;
+                // And a file of one name with each build's own content, as the stand-in has
+                // (`shared.js`): the update-in-another-tab step asks for it to tell which build's
+                // copy answered. A real build has no such file, and the network's 404 would fail
+                // the step whatever the worker does.
+                std::fs::write(to.join("shared.js"), format!("document.documentElement.dataset.shared = \"{build}\";\n"))
+                    .map_err(|e| format!("{}: {e}", to.display()))?;
                 let index = to.join("index.html");
                 let html = std::fs::read_to_string(&index).map_err(|e| format!("{}: {e}", index.display()))?;
                 std::fs::write(&index, mark(&html, build)?).map_err(|e| format!("{}: {e}", index.display()))?;
@@ -469,7 +558,13 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
                 "caches.keys().then(async (ks) => { const out = {}; for (const k of ks) if (k.startsWith('solidcraft-app-pages ')) { const c = await caches.open(k); for (const r of await c.keys()) out[r.url] = await (await c.match(r)).text(); } return out; })",
             )
             .unwrap_or_default();
-        return Err(format!("the open v3 page was given another build's file after the update: {shared}; page records: {records}"));
+        // Whether the request went through the worker at all (workerStart is 0 when it did not).
+        let how = cdp
+            .eval(
+                "(async () => { const e = performance.getEntriesByType('resource').filter((r) => r.name.includes('shared.js?later')).pop(); const reg = await navigator.serviceWorker.getRegistration(); return { workerStart: e ? e.workerStart : null, controller: navigator.serviceWorker.controller ? navigator.serviceWorker.controller.state : null, active: reg && reg.active ? reg.active.state : null, installing: Boolean(reg && reg.installing), waiting: Boolean(reg && reg.waiting) }; })()",
+            )
+            .unwrap_or_default();
+        return Err(format!("the open v3 page was given another build's file after the update: {shared}; page records: {records}; request: {how}"));
     }
     // A page whose record is lost never gets the worker's build instead: its request fails visibly.
     let lost = cdp.eval(

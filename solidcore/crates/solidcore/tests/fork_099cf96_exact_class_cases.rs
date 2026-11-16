@@ -28,7 +28,7 @@
 //! builds `sphere_plane` (its End at a smooth vertex, as the fork since smlib#124) and, on
 //! the default kernel with the exact classes but no other fix, builds the pipes (traced, and
 //! failing a validity test), so neither profile has these marks now. Since #2864 the ball's
-//! half rim is refused again, its round ending at the sphere's seam. With SolidCraft's
+//! half rim's round runs on across the sphere's seam into the whole rim. With SolidCraft's
 //! current section fixes, the fitted tee meets its original tolerance even with procedural rounds off.
 //! With `fillet_round_as_definition` enabled (#2274), a fitted round is instead a
 //! `ProceduralBlend`: check its definition's ball contact to 1e-9, and its stored net
@@ -41,8 +41,8 @@
 //! the pipes' arc into a long piece and a short one up to the cut. The fork's one point per
 //! rim reached only part of these two, so its round had to end at a smooth vertex where the
 //! unselected part carries on, and `SmFilletNx1Corner` returned 1001 there: the two 1001s
-//! above are that End, not the exact classes. Half a rim, built (#2660) or refused (#2864), is
-//! not the body the case's volume is for.
+//! above are that End, not the exact classes. Half a rim now rounds the whole rim, its round
+//! run on across the seam's vertex (#2864).
 //!
 //! `sphere_plane` is checked against its closed form, `sphere_plane_closed_form`: the ball
 //! R 10 below z = 4 is 4000 pi / 3 - 288 pi = 3284.011520552530, and the round r 2 (the
@@ -63,9 +63,7 @@
     clippy::indexing_slicing
 )] // test helpers
 
-use solidcore::blend::blend_corner::end::RUNS_ON_ACROSS_SEAM;
 use solidcore::blend::fillet_executive::api::fillet_edges;
-use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
@@ -673,11 +671,12 @@ fn the_pipes_join_only_with_wr77() {
 /// The grading sees what it's for: on a case that passes, a volume one part in 1e5 off and
 /// each wrong surface kind are refused, and the fork's marks on it don't hold.
 /// The ball's rim with one of its two edges picked, as the case was before #2441: the half
-/// rim's round would end at the sphere's seam, and a round does not end at a seam (#2864).
-/// The session, driven as `fillet_edges` drives it, says that is why (the 1001 is the status
-/// `fillet_edges` returns, checked by `holds`).
+/// rim's round reaches the sphere's seam, and a round does not end at a seam (#2864). It runs
+/// on across it into the other half, so the round is the whole rim's, graded as the case with
+/// both edges picked: its closed form, revolved. Before the run-on it was refused at the seam
+/// (status 1001).
 #[test]
-fn the_ball_s_half_rim_is_refused() {
+fn the_ball_s_half_rim_runs_on_across_the_seam() {
     let mut case = cases()
         .into_iter()
         .find(|c| c.name == "sphere_plane")
@@ -685,21 +684,7 @@ fn the_ball_s_half_rim_is_refused() {
     case.points.truncate(1);
     for kernel in [solidcraft_kernel, solidcraft_before_definitions] {
         let got = grade(&case, &mut kernel());
-        assert!(holds(Mark::Status1001, &got), "{got:?}");
-
-        let mut k = kernel();
-        let mut b = sphere_plane(&mut k).unwrap();
-        let e = pick(&k, &b, case.points[0]).unwrap();
-        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
-        let r = s
-            .prepare_constant_radius_edges(&mut k, &[e], case.r, 1, 1, 1.0)
-            .and_then(|()| s.do_fillet(&mut k));
-        assert!(r.is_err(), "the half rim's round refused");
-        assert_eq!(
-            s.error_info().comment,
-            RUNS_ON_ACROSS_SEAM,
-            "refused at the seam"
-        );
+        assert!(holds(Mark::Passes, &got), "{got:?}");
     }
 }
 

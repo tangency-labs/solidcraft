@@ -6,7 +6,7 @@
 //! others: several constraints between one pair add up, and b keeps every motion they leave free.
 
 use serde_json::{Map, Value, json};
-use solidcraft_doc::joints::{Constraint, Joint, JointKind, JointOrigin, Snap};
+use solidcraft_doc::joints::{Constraint, Fit, Joint, JointKind, JointOrigin, RefShape};
 
 use super::{CommandSpec, add_joint, joint_id, new_joint, origin_param, value};
 use crate::params::{bad, bool_, str_};
@@ -21,7 +21,8 @@ const TYPE_MESSAGE: &str = "`type` must be mate, flush, distance, concentric, in
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("assembly.constraint.create", "Constrain", crate::checked!("assembly.constraint.create", create))
-        .icon("joint")
+        .at("SOLID", "ASSEMBLE")
+        .icon("constrain")
         .contract(&CREATE_CONTRACT)
         .output(output_schema_for::<JointAddedResult>)
         .params(
@@ -45,67 +46,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         ),
 ];
 
-/// What a reference is, for the rules that need one kind.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Shape {
-    /// A planar face or a frame: its plane and normal.
-    Plane,
-    /// A round face's or edge's centre and axis.
-    Round,
-    /// A point (a vertex, an edge, a sketch point): its position.
-    Point,
-    /// A datum or construction axis: a line, with no rim or radius.
-    Axis,
+/// The shape of a joint origin, for the table of rules (`Constraint::fit`).
+fn shape(o: &JointOrigin) -> RefShape {
+    RefShape::of(&o.snap)
 }
 
-fn shape(o: &JointOrigin) -> Shape {
-    match o.snap {
-        Snap::FaceCenter { .. } | Snap::Frame { .. } | Snap::Plane { .. } => Shape::Plane,
-        Snap::Axis { .. } => Shape::Axis,
-        Snap::CircleCenter { .. } => Shape::Round,
-        Snap::Point { .. } | Snap::Edge { .. } => Shape::Point,
-    }
-}
-
-/// How a rule is kept: the joint's kind, whether b is turned to face along a (`flip`), and whether
-/// the two references were given the other way round (the plane or axis goes on side a).
-struct Kept {
-    kind: JointKind,
-    /// `Some` where the rule fixes the facing; `None` keeps the parts' facing now.
-    flip: Option<bool>,
-    swap: bool,
-}
-
-fn kept(c: Constraint, a: Shape, b: Shape, cmd: &str) -> Result<Kept> {
-    use Shape::*;
-    let fixed = |kind, flip| Ok(Kept { kind, flip: Some(flip), swap: false });
-    let facing = |kind| Ok(Kept { kind, flip: None, swap: false });
-    // A line: a round face's or edge's axis, or an axis itself.
-    let axial = |s: Shape| matches!(s, Round | Axis);
-    // A rule between one plane or axis and something else: the plane or axis on side a.
-    let onto = |kind, want: &dyn Fn(Shape) -> bool, other_ok: &dyn Fn(Shape) -> bool| {
-        if want(a) && other_ok(b) {
-            Ok(Kept { kind, flip: Some(false), swap: false })
-        } else if want(b) && other_ok(a) {
-            Ok(Kept { kind, flip: Some(false), swap: true })
-        } else {
-            Err(bad(cmd, format!("{} needs {}", c.name(), needs(c))))
-        }
-    };
-    match (c, a, b) {
-        (Constraint::Mate, Plane, Plane) => fixed(JointKind::Planar, false),
-        (Constraint::Flush, Plane, Plane) => fixed(JointKind::Planar, true),
-        (Constraint::Distance, Plane, Plane) => facing(JointKind::Planar),
-        (Constraint::Distance, ..) => onto(JointKind::PointOnPlane, &|s| s == Plane, &|s| matches!(s, Round | Point)),
-        (Constraint::Concentric, ..) if axial(a) && axial(b) => facing(JointKind::Cylindrical),
-        (Constraint::Insert, Round, Round) => facing(JointKind::Revolute),
-        (Constraint::Parallel, ..) => facing(JointKind::Parallel),
-        (Constraint::Perpendicular, ..) => fixed(JointKind::Perpendicular, false),
-        (Constraint::Angle, ..) => fixed(JointKind::Angle, false),
-        (Constraint::Tangent, ..) => onto(JointKind::LineOnPlane, &|s| s == Plane, &|s| s == Round),
-        (Constraint::PointOnAxis, ..) => onto(JointKind::PointOnLine, &axial, &|s| s == Point),
-        _ => Err(bad(cmd, format!("{} needs {}", c.name(), needs(c)))),
-    }
+/// How rule `c` is kept between references of shapes `a` and `b`, or why it is refused.
+fn kept(c: Constraint, a: RefShape, b: RefShape, cmd: &str) -> Result<Fit> {
+    c.fit(a, b).ok_or_else(|| bad(cmd, format!("{} needs {}", c.name(), needs(c))))
 }
 
 /// The references a rule takes, for its refusal.
@@ -115,7 +63,7 @@ fn needs(c: Constraint) -> &'static str {
         Constraint::Distance => "two planar faces, or a planar face and a point",
         Constraint::Concentric => "two round faces, round edges or axes",
         Constraint::Insert => "two round edges",
-        Constraint::Parallel | Constraint::Perpendicular | Constraint::Angle => "two faces or axes",
+        Constraint::Parallel | Constraint::Perpendicular | Constraint::Angle => "two faces, edges or axes (a point has no direction)",
         Constraint::Tangent => "a planar face and a round face",
         Constraint::PointOnAxis => "a round face or edge (its axis) or an axis, and a point",
     }
@@ -131,7 +79,7 @@ fn along(s: &Session, a: &JointOrigin, b: &JointOrigin, cmd: &str) -> Result<boo
 
 /// The joint's `flip` for a rule: the way the rule fixes (a mate against, a flush along), or for a
 /// rule that fixes neither, the way the parts face now, so b is not turned over; `turn` turns it.
-fn facing(s: &Session, rule: &Kept, a: &JointOrigin, b: &JointOrigin, turn: bool, cmd: &str) -> Result<bool> {
+fn facing(s: &Session, rule: &Fit, a: &JointOrigin, b: &JointOrigin, turn: bool, cmd: &str) -> Result<bool> {
     let f = match rule.flip {
         Some(f) => f,
         None => along(s, a, b, cmd)?,

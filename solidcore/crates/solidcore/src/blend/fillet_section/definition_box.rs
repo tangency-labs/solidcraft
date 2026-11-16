@@ -40,7 +40,7 @@
 //!   the direct enclosure, not the centred form. The net's piece only seeds the feet.
 
 use super::certificate::{
-    crosses_a_knot, gn_enclose_over, is_foot_past_domain_end, knot_cuts, partials_hull,
+    crosses_a_knot, gn_enclose_over_using, is_foot_past_domain_end, knot_cuts, partials_hull,
     EndContinuation, NurbsCurve, SpanAt,
 };
 use super::definition::{t2_pow, tv_dot, T2Of, TvOf};
@@ -161,10 +161,14 @@ pub fn gn_def_face_of<'a>(k: &Kernel, surface: &'a Surface) -> Result<GnDefFace<
         }
     };
     let (Some(s0), Some(s1)) = (def.support(0), def.support(1)) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the definition does not have two supports",
+        ));
     };
     let nurbs_of = |s: &Surface| -> Result<Nurbs> {
-        let bs = as_b_spline(k, s)?.ok_or_else(|| SolidError::sm_err(OP))?;
+        let bs = as_b_spline(k, s)?
+            .ok_or_else(|| SolidError::blend_failed(OP, "a support is not a NURBS surface"))?;
         Nurbs::of(&bs)
     };
     let sup_n = [nurbs_of(s0)?, nurbs_of(s1)?];
@@ -211,11 +215,17 @@ impl GnDefFace<'_> {
 fn def_piece_at(k: &Kernel, d: &mut GnDefFace<'_>, net: &Nurbs, kk: usize) -> Result<DefPiece> {
     let knots = if d.swapped { &net.v } else { &net.u };
     let (Some(&k0), Some(&k1)) = (knots.get(kk), knots.get(kk + 1)) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the piece's knots are outside the net",
+        ));
     };
     let piece = k1 > k0;
     if !piece {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the piece has no span (its two knots are equal)",
+        ));
     }
     if d.pieces.len() < knots.len() {
         d.pieces.resize(knots.len(), DefPiece::NONE);
@@ -233,7 +243,9 @@ fn def_piece_at(k: &Kernel, d: &mut GnDefFace<'_>, net: &Nurbs, kk: usize) -> Re
         for f in 0..2 {
             let w = def
                 .seed(f)
-                .ok_or_else(|| SolidError::sm_err(OP))?
+                .ok_or_else(|| {
+                    SolidError::blend_failed(OP, "the definition has no seed for the face")
+                })?
                 .evaluate_point(p.s)?;
             if let Some(x) = seed.get_mut(2 * f) {
                 *x = w.x;
@@ -259,7 +271,10 @@ fn def_piece_at(k: &Kernel, d: &mut GnDefFace<'_>, net: &Nurbs, kk: usize) -> Re
     }
     match d.pieces.get(kk) {
         Some(p) if p.state == 1 => Ok(*p),
-        _ => Err(SolidError::sm_err(OP)),
+        _ => Err(SolidError::blend_failed(
+            OP,
+            "the piece's station did not solve",
+        )),
     }
 }
 
@@ -318,7 +333,10 @@ fn box_st(d: &GnDefFace<'_>, ua: f64, ub: f64, va: f64, vb: f64) -> Result<(Ivl,
     let t = Ivl::from(d.a[1]) + Ivl::from(d.b[1]) * pt;
     let finite = s.lo.is_finite() && s.hi.is_finite() && t.lo.is_finite() && t.hi.is_finite();
     if !finite {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the piece's box is not finite",
+        ));
     }
     Ok((s, t))
 }
@@ -342,8 +360,11 @@ fn leader_parts(d: &GnDefFace<'_>, s: Ivl) -> Result<Vec<(Ivl, usize)>> {
 /// ([`partials_on`]), and the hull taken. No station invariant is assumed: a net with knots
 /// removed, refitted or edited is enclosed on its definition all the same (#2570); `(ku,
 /// kv)` names the net's piece whose middle station seeds the feet. Refused where the feet's
-/// box crosses a face's knot line below [`super::certificate::FEET_BOX_CONTINUITY`], or a
-/// box lies past a face's or the leader's knots.
+/// box crosses a face's knot line below [`super::certificate::FEET_BOX_CONTINUITY`] for
+/// `lk >= 2` (for `lk <= 1` such a box is taken cell by cell,
+/// [`super::certificate::gn_enclose_over`], and refused by name, `Unsupported`, only where a
+/// cell is not decided, two feet are apart or the box runs past the knots), or a box lies
+/// past a face's or the leader's knots.
 ///
 /// # Errors
 ///
@@ -366,28 +387,31 @@ pub fn definition_partials_naive(
     let (s, t) = box_st(d, ua, ub, va, vb)?;
     let mut out: Option<Partials<Ivl>> = None;
     for (part, leader) in leader_parts(d, s)? {
-        let (p, _) = partials_on(k, d, net, kk, part, leader, t, lk)?;
+        let (p, _) = partials_on(k, d, net, kk, part, leader, t, lk, lk)?;
         out = Some(match out {
             None => p,
             Some(h) => partials_hull(h, &p, lk),
         });
     }
-    out.ok_or_else(|| SolidError::sm_err(OP))
+    out.ok_or_else(|| SolidError::blend_failed(OP, "no piece encloses the box"))
 }
 
 /// The definition's partials over `s x t` (`s` on the leader's piece `leader`), to total
 /// order `lk` in its `(u, v)`, enclosed, and whether its feet's box crosses a knot line of
 /// a face (where the definition is only as smooth as the face). Its feet's series in s
 /// over `s` are enclosed by Krawczyk's operator on the faces it rolls on themselves
-/// ([`gn_enclose_over`] piecewise: the feet's box cut at the faces' knot lines, each part on
-/// its own piece, hulled) and the leader's piece, seeded from the station in the middle of
-/// the net's piece `kk` along s; then the arc in `(sigma, dt)` over t, as
-/// `EvaluateDefinition` makes it (the circle's centre the ball's: a constant radius), in
-/// rounded interval arithmetic.
+/// ([`super::certificate::gn_enclose_over`] piecewise: the feet's box cut at the faces' knot
+/// lines, each part on its own piece, hulled) and the leader's piece, seeded from the
+/// station in the middle of the net's piece `kk` along s; then the arc in `(sigma, dt)` over
+/// t, as `EvaluateDefinition` makes it (the circle's centre the ball's: a constant radius),
+/// in rounded interval arithmetic. `use_lk`: the order the caller's own use takes (the
+/// centred form asks for `lk = use_lk + 1`); at 1 or less a feet's box across a knot line
+/// below `C^2` is taken cell by cell ([`gn_enclose_over_using`]).
 ///
 /// # Errors
 ///
-/// `SM_ERR` where an enclosure is not proved, or `lk` is past `SM_GN_MAXS`.
+/// `SM_ERR` where an enclosure is not proved, or `lk` is past `SM_GN_MAXS`; the cell path's
+/// named refusals (`Unsupported`) and `FootPastDomainEnd` as they come.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn partials_on(
     k: &Kernel,
@@ -398,9 +422,13 @@ fn partials_on(
     leader: usize,
     t: Ivl,
     lk: usize,
+    use_lk: usize,
 ) -> Result<(Partials<Ivl>, bool)> {
     if lk > MAX_S {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the order is past the most the series hold",
+        ));
     }
     let piece = def_piece_at(k, d, net, kk)?;
     // the feet over s, guessed at its ends from the piece's middle
@@ -427,7 +455,7 @@ fn partials_on(
         *xb = c0 + db * (c1 + db * c2);
     }
     let [n0, n1] = &d.sup_n;
-    let e = match gn_enclose_over(
+    let e = match gn_enclose_over_using(
         k,
         [n0, n1],
         &d.leader,
@@ -439,11 +467,14 @@ fn partials_on(
         None,
         None,
         d.ends,
+        use_lk,
     ) {
         Ok(Some(e)) => e,
         // a foot past its support's domain end, refused by name (#14284)
         Err(e) if is_foot_past_domain_end(&e) => return Err(e),
-        _ => return Err(SolidError::sm_err(OP)),
+        // the feet across a knot line below C^2, refused by name (cell by cell, #14284)
+        Err(e @ SolidError::Unsupported { .. }) => return Err(e),
+        _ => return Err(SolidError::blend_failed(OP, "the enclosure is not proved")),
     };
     let mut crossed = false;
     for (f, n) in d.sup_n.iter().enumerate() {
@@ -581,7 +612,7 @@ pub fn definition_partials_over_box(
             Some(h) => partials_hull(h, &p, lk),
         });
     }
-    out.ok_or_else(|| SolidError::sm_err(OP))
+    out.ok_or_else(|| SolidError::blend_failed(OP, "no piece encloses the box"))
 }
 
 /// [`definition_partials_over_box`] on one part `s x t` (`s` on the leader's piece
@@ -597,12 +628,12 @@ fn centred_on(
     t: Ivl,
     lk: usize,
 ) -> Result<Partials<Ivl>> {
-    let (wide, crossed) = partials_on(k, d, net, kk, s, leader, t, lk + 1)?;
+    let (wide, crossed) = partials_on(k, d, net, kk, s, leader, t, lk + 1, lk)?;
     if crossed {
         return Ok(wide);
     }
     let (sm, tm) = (s.mid(), t.mid());
-    let (mid, _) = partials_on(k, d, net, kk, Ivl::from(sm), leader, Ivl::from(tm), lk)?;
+    let (mid, _) = partials_on(k, d, net, kk, Ivl::from(sm), leader, Ivl::from(tm), lk, lk)?;
     // the part's half widths in (u, v): s = A + B p
     let dp = (s - Ivl::from(sm)) / Ivl::from(d.b[0]);
     let dq = (t - Ivl::from(tm)) / Ivl::from(d.b[1]);
@@ -627,7 +658,10 @@ fn centred_on(
                 let x = Ivl::new(cmax(c.lo, w.lo), cmin(c.hi, w.hi));
                 let meet = x.lo <= x.hi;
                 if !meet {
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::blend_failed(
+                        OP,
+                        "the two enclosures do not meet",
+                    ));
                 }
                 *g = x;
             }
