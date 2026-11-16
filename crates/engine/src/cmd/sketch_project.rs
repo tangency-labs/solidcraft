@@ -618,9 +618,12 @@ fn include_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 /// `{vertex: [x,y,z], body?}` under one of `keys` is projected into the sketch first, as
 /// Project does, and stands for the projected curve (or point) in the parameters returned.
 /// Any body's edges work, a mirrored or patterned copy's too; the link keeps the edge's
-/// persistent name, so the constraint follows the edge through rebuilds.
+/// persistent name, so the constraint follows the edge through rebuilds. An edge's middle,
+/// `{midpoint: {edge: [x,y,z], body?}}`, projects the edge and becomes `{midpoint: <its curve>}`,
+/// the middle of the projected line (#17920).
 pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&str]) -> Result<Value> {
-    if !keys.iter().any(|k| p.get(*k).is_some_and(model_ref)) {
+    let middle_of = |v: &Value| v.get("midpoint").filter(|m| m.get("edge").is_some() && model_ref(m)).cloned();
+    if !keys.iter().any(|k| p.get(*k).is_some_and(|v| model_ref(v) || middle_of(v).is_some())) {
         return Ok(p.clone());
     }
     let id = sketch_store::target(s, p, cmd)?;
@@ -629,8 +632,12 @@ pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&s
     refresh(s, &doc, id, &mut sk);
     let mut out = p.clone();
     for key in keys {
-        let Some(v) = p.get(*key).filter(|v| model_ref(v)) else { continue };
-        out[*key] = json!(project_ref(s, &doc, id, &mut sk, v, cmd)?);
+        let Some(v) = p.get(*key) else { continue };
+        if let Some(m) = middle_of(v) {
+            out[*key] = json!({"midpoint": project_ref(s, &doc, id, &mut sk, &m, cmd)?});
+        } else if model_ref(v) {
+            out[*key] = json!(project_ref(s, &doc, id, &mut sk, v, cmd)?);
+        }
     }
     sketch_store::write(&mut doc, id, sk)?;
     *s.doc_mut() = doc;
