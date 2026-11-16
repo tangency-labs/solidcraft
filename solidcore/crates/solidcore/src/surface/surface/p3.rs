@@ -58,11 +58,15 @@
 //!   one sheet, and [`CoverCoincident::fold`] names the reversed pair
 //!   ([`ContinuationFold`]). tangency-labs/solidcore#434. The fork also refused a sample
 //!   whose normal is shorter than `SM_EFF_ZERO_SQRT` times the normal at the centre of
-//!   the natural domain; that cut-off is no derived bound, and it refused covers at the
-//!   degenerate corners of the surface's own domain (a collapsed edge, whose normal is
-//!   exactly zero). Here a sample whose normal is exactly zero has no direction and
-//!   witnesses nothing: each comparison bridges it to the last sample with a direction
-//!   along its grid row and column, so a reversal across it is still a fold.
+//!   the natural domain; that cut-off is no derived bound, and it refused covers at
+//!   degenerate points of the surface's own domain (an edge where `Du` and `Dv` are
+//!   parallel, whose normal is exactly zero, or a collapsed edge, whose evaluated normal
+//!   is short but has its limit direction). Here a sample whose computed normal is no
+//!   longer than the cross product's own rounding bound (`2 γ_4 |Du| |Dv|`) has no
+//!   direction and witnesses nothing: each comparison bridges it to the last sample with
+//!   a direction along its grid row and column, so a reversal across it is still a fold.
+//!   Any other normal, however short, is compared by its direction. A non-finite normal
+//!   refuses (the fork's NaN unit vector passed its comparisons).
 //! - **A face across a wrapped seam is covered** (WR-599; the fork's
 //!   tangency-labs/smlib@16bf1cb; upstream refuses every crossing). A boundary step across this surface's seam in a
 //!   direction it is closed in over its natural domain is no failure, and the domain
@@ -330,9 +334,10 @@ pub struct CoverCoincident {
 
 /// The witness that the continuation of a B-spline-based surface past its natural
 /// domain folds over the domain a cover would merge onto (WR-407), found on the
-/// `21 x 21` grid over that domain. `uv` is the later sample in grid order (u major, then
-/// v) and `neighbour` the sample it was compared with: the one before it along its grid
-/// row or column, past any sample whose normal is exactly zero.
+/// `21 x 21` grid over that domain. The points are in the surface's STEP parameters. `uv`
+/// is the later sample in grid order (u major, then v) and `neighbour` the sample it was
+/// compared with: the one before it along its grid row or column, past any sample whose
+/// normal has no direction (no longer than its rounding bound).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ContinuationFold {
     /// The unit normals at `uv` and `neighbour` turn back: their dot product `dot` is not
@@ -1604,10 +1609,12 @@ impl Surface {
     /// in its STEP parameters, on the `21 x 21` grid `CoverCoincidentSurface`'s fold rule
     /// samples (WR-407): two neighbouring samples whose unit normals turn back
     /// (`!(dot > 0)`, so a NaN dot refuses), or a sample that cannot be evaluated or whose
-    /// normal is not finite. A sample whose normal is exactly zero (a degenerate point,
-    /// such as a collapsed edge of the natural domain) has no direction and witnesses
-    /// nothing; the next sample along its row and its column is compared with the last
-    /// one before it that has a direction, so a reversal across it is still found.
+    /// normal is not finite. A sample whose computed normal is no longer than its own
+    /// rounding bound ([`Surface::step_normal_with_noise`]; an exact zero included, as
+    /// at a degenerate edge where `Du` and `Dv` are parallel) has no direction and
+    /// witnesses nothing; the next sample along its row and its column is compared with
+    /// the last one before it that has a direction, so a reversal across it is still
+    /// found.
     ///
     /// # Errors
     ///
@@ -1623,13 +1630,15 @@ impl Surface {
                     ii as f64 / NUM_FOLD_SAMPLES_DENOM,
                     jj as f64 / NUM_FOLD_SAMPLES_DENOM,
                 );
-                let Some((normal, length)) = self.step_normal(k, uv)? else {
+                let Some((normal, length, noise)) = self.step_normal_with_noise(k, uv)? else {
                     return Ok(Some(ContinuationFold::NotEvaluated { uv }));
                 };
                 if !length.is_finite() {
                     return Ok(Some(ContinuationFold::NotEvaluated { uv }));
                 }
-                if length == 0.0 {
+                // No direction: within the cross product's own rounding (also an exact
+                // zero, and a normal whose length underflows).
+                if length <= noise {
                     continue;
                 }
                 let unit = normal / length;
@@ -1654,6 +1663,25 @@ impl Surface {
     ///
     /// Those of the evaluation.
     fn step_normal(&self, k: &Kernel, uv: Point2) -> Result<Option<(Vec3, f64)>> {
+        Ok(self
+            .step_normal_with_noise(k, uv)?
+            .map(|(n, length, _)| (n, length)))
+    }
+
+    /// [`Surface::step_normal`] with the length below which the computed normal has no
+    /// direction: `2 γ_4 |Du| |Dv|` of the computed derivatives. Each component of
+    /// `Du × Dv` is `a b - c d` in two products and a difference, so the computed
+    /// normal `n'` is off the exact cross product `n` of the computed derivatives by
+    /// `|e| <= √2 γ_2 |Du| |Dv|`. A computed length (three squares, a sum of three and
+    /// a root) is within `γ_4` relative of the true one. So a computed `|n'|` above
+    /// `2 γ_4 |Du| |Dv|` (computed lengths) gives `|n'| > |e|` in exact arithmetic,
+    /// hence `n' · n >= |n'| (|n'| - |e|) > 0`: the computed direction is within 90
+    /// degrees of the cross product's. At or below it the direction is not determined.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluation.
+    fn step_normal_with_noise(&self, k: &Kernel, uv: Point2) -> Result<Option<(Vec3, f64, f64)>> {
         let Some(d) = ignored(self.evaluate_step(k, uv, 1, 1, EvaluateFlags::default()))? else {
             return Ok(None);
         };
@@ -1664,7 +1692,8 @@ impl Surface {
             return Ok(None);
         };
         let normal = du.cross(dv);
-        Ok(Some((normal, normal.length())))
+        let noise = 2.0 * crate::nurbs::math::gamma(4) * du.length() * dv.length();
+        Ok(Some((normal, normal.length(), noise)))
     }
 
     /// The face that owns this surface directly (`GetOwner()` when it is an `SmFace`),
@@ -2321,6 +2350,8 @@ mod tests {
             !covered.success,
             "the planar sheet's cover across the fold fails: {covered:?}"
         );
+        // The search failed before the fold rule ran.
+        assert_eq!(covered.fold, None);
         assert_eq!(u_max, 1.0);
         Ok(())
     }

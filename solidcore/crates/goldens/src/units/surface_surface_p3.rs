@@ -832,8 +832,9 @@ impl UnitDiff for Runner {
     }
 }
 
-/// WR-407's fold rule is the default (tangency-labs/solidcraft#17215): the seven
-/// generated covers it moves, replayed with their witnesses.
+/// WR-407's fold rule is the default (tangency-labs/solidcraft#17215): the six generated
+/// covers it now refuses, replayed with their witnesses, and gen2303, which the fork's
+/// rule refused and which keeps its cover.
 #[cfg(test)]
 mod fold_witness_tests {
     use super::*;
@@ -891,6 +892,8 @@ mod fold_witness_tests {
         let covered_domain = covered.covered_step_domain.unwrap();
         let after = after.step_uv_domain();
         assert_eq!(after, orig.union(&covered_domain));
+        // The corner is the first sample of the fold rule's grid over that domain.
+        assert_eq!(after.evaluate(0.0, 0.0), corner);
         assert!(!covered_domain.is_contained_by(&orig, 0.0));
     }
 
@@ -927,6 +930,8 @@ mod fold_witness_tests {
             let (n0, l0) = unit_normal(&input, uv);
             let (n1, l1) = unit_normal(&input, neighbour);
             assert!(l0 > 0.0 && l1 > 0.0, "gen{index:04}: {l0} {l1}");
+            // Exact: a refused cover has not changed the surface, so these are the
+            // evaluations and the arithmetic the rule did.
             assert_eq!(n0.dot(n1), dot, "gen{index:04}");
             assert!(dot < 0.0, "gen{index:04}: {dot}");
             // At least one of the pair is on the continuation.
