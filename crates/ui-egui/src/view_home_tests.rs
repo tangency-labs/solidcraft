@@ -738,3 +738,38 @@ fn orbit_up_to_the_top_view_and_around_keeps_one_pivot() {
         assert!(std::f64::consts::FRAC_PI_2 - h.app.cam.pitch < 1e-3, "{case}: the drag reached the top view");
     }
 }
+
+/// Home frames the part in the area the panels leave free (#17881): the ribbon and the
+/// workspace card are panels too, so the part's middle lands below them, not in the middle of
+/// the whole view. The fallback layout (no shared panel host) leaves them out of the framing
+/// area as the shared host does.
+#[test]
+fn home_frames_the_part_in_the_area_the_panels_leave_free() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    moved_block(&mut h);
+    h.app.ui.show_browser = true;
+    h.settle();
+    let rect = h.app.viewport.rect.unwrap();
+    let panels = h.app.shell.cards.clone();
+    assert!(!panels.is_empty(), "the shell keeps its cards");
+    // Without the shared host the layout is the app's own.
+    h.app.disable_panel_runtime().unwrap();
+    let ctx = h.ctx.clone();
+    crate::viewport::refresh_layout(&mut h.app, &ctx);
+    let layout = h.app.viewport.layout.as_ref().expect("a layout for the view");
+    assert!(layout.usable.is_none(), "the fallback layout has no host contour");
+    // The framing area leaves the panels free.
+    for panel in &panels {
+        assert!(!layout.middle.intersect(*panel).is_positive(), "the framing area {:?} covers the panel {panel:?}", layout.middle);
+    }
+    // Home centres the part in the free area.
+    let mut cam = h.app.cam;
+    cam.set_view(StandardView::Iso);
+    let cam = h.app.fitted(cam);
+    h.app.cam = cam;
+    let bounds = crate::viewport::view_bounds(&h.app);
+    let at = crate::viewport::projection(&h.app, rect).to_screen(bounds.center()).unwrap();
+    let free = layout.drawable.center();
+    assert!(at.distance(free) < 1.0, "Home puts the part at {at:?}, the free area's middle is {free:?}");
+}
