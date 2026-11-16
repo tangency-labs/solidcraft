@@ -37,7 +37,9 @@
 //!   what was classified with the edge's zone, or with the gap at which either point was
 //!   taken to be on the edge where that is wider, up to the most a local tolerance may be
 //!   (`LOCAL_TOLERANCE_RATIO`). Within the band the edge lies in the face, and where on
-//!   that piece it passes through is not determined.
+//!   that piece it passes through is not determined. An edge tangent to the face at either
+//!   point (`COINCIDENT_TANGENT_SINE`, the coincidence check's angle) runs in the face there:
+//!   those two points are the ends of a stretch the edge and the face share and stay two.
 //! - **Removed proto edges** (SolidCraft fix, tangency-labs/smlib 93efd6d, UB-239).
 //!   Upstream's `SplitIntersectingProtoEdges` deletes the combined-away proto edge while
 //!   other proto edges (overlap lists) still name it (`CombineProtoEdge` hands its
@@ -129,7 +131,9 @@ use crate::intersect::point_class::{
 use crate::kernel::Kernel;
 use crate::math::{max2, min2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::nurbs::knots::Side;
 use crate::query::face::p2 as face_p2;
+use crate::surface::surface::p6::COINCIDENT_TANGENT_SINE;
 
 use super::p1::proto::{can_imprint, find_position_from_pcs, topo_dimension};
 use super::p1::{
@@ -2211,7 +2215,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 /// distance is that to the surface point a local solve finds from `uv_guess` (any surface
 /// point bounds the distance from above). A part not proved is halved, at most
 /// [`MAX_CROSSING_HALVINGS`] times, and a point found outside the band ends the proof; a
-/// piece not proved is not in the band.
+/// piece not proved is not in the band. The edge must also cross the face at both ends of the
+/// piece: the sine of its tangent against the face's normal there at least
+/// [`COINCIDENT_TANGENT_SINE`]. Tangent to the face at an end (the coincidence check's
+/// angle), the edge runs in the face there, and the two points are the ends of a stretch the
+/// two share, not one crossing.
 ///
 /// # Errors
 ///
@@ -2264,6 +2272,22 @@ fn edge_piece_in_face_band<O: ClassObject>(
     let (Some(at_a), Some(at_b)) = (distance(a, uv_guess)?, distance(b, uv_guess)?) else {
         return Ok(false);
     };
+
+    // An edge tangent to the face at either end (within the coincidence check's angle) runs
+    // in the face there: the two points are the ends of a stretch the edge and the face
+    // share, not one crossing.
+    let crosses = |t: f64, on: Point2| -> Result<bool> {
+        let Some(tangent) = curve.evaluate(k, t, 1, true, true)?.get(1).copied() else {
+            return Ok(false);
+        };
+        let normal = surface.evaluate_normal(k, on, Side::Right, Side::Right)?;
+        let sine = (tangent.dot(normal) / tangent.length()).abs();
+        // (a NaN sine, from a vanishing tangent, is no crossing)
+        Ok(sine >= COINCIDENT_TANGENT_SINE)
+    };
+    if !crosses(a, at_a.1)? || !crosses(b, at_b.1)? {
+        return Ok(false);
+    }
     let mut parts = vec![(a, at_a, b, at_b, 0_u32)];
     while let Some((a, at_a, b, at_b, halvings)) = parts.pop() {
         // A length the bound does not enclose (a curve kind without one, a width under its

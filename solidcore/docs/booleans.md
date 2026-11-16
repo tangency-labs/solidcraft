@@ -279,8 +279,13 @@ the face's trims put there, below), up to the most a local tolerance may be, 100
 the face, and where on that piece it passes through is not determined. The proof is a bound, not
 samples: a part of the piece is within half the sum of its two ends' distances to the surface and
 its length (an enclosed upper bound, `Curve::length_bound`), parts not proved are halved (ten times
-at most), and a piece not proved stays two points. With two vertices the intersection loop stayed
-open between them.
+at most), and a piece not proved stays two points. The edge must also cross the face at both
+points: the sine of its tangent against the face's normal at least 0.017, the angle below which
+the coincidence check takes a curve for running in a surface (`COINCIDENT_TANGENT_SINE`). Two
+points where the edge is tangent to the face are the ends of a stretch the two share, and stay
+two (an edge of tolerance 7.6e-3 running 4.5e-3 off a face: two curve ends 0.019 apart on it,
+their distances from the face 4e-5 apart). With two vertices for one crossing the intersection
+loop stayed open between them.
 
 **A curve end on the face's boundary.** An interval of a curve inside a face used to take an end
 the boundary intersections left unclassified for a point inside the face

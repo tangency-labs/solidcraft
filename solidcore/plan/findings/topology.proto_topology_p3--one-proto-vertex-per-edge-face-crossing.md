@@ -26,6 +26,8 @@
 
 The band widens to the gap at which either point was accepted where that exceeds the edge's zone (prisms 0.05 and 0.1 larger: a point 4.44e-3 from the wall against a band of 3.97e-3), capped at 1000 zone tolerances.
 
+**Crossing, not a shared stretch.** The golden case `boolean.topology_intersector_p2` `gen0433` (a generated script intersecting two fixture bodies) has an edge of zone tolerance 7.56e-3 running beside a face: two curve ends on it at parameters 6.61936 and 6.61588, 0.0189 apart, 4.568e-3 and 4.526e-3 from the face. The piece between them is inside the band (7.57e-3), and the first form of the rule merged them (8 proto vertices became 7, the golden's only change). They are the ends of a stretch on which the edge runs in the face, the case `SimpleCoincidenceChecker` decides by tangency (`|dot| < 0.017`), not one crossing. The rule now also asks that the edge cross the face at both points, its tangent's sine against the face's normal at least that 0.017 (`COINCIDENT_TANGENT_SINE`, named in `surface/surface/p6.rs`); the issue's crossings have sines of 0.023 to 0.032. `gen0433` is unchanged again (913 cases, 0 changed).
+
 **Open.**
 - With the slab as the first operand the first fixture's union at 0 and 0.05 out is closed, with the faces and edges of the other order (10, 21), but the outward-solid proof does not pass and ops answers `NotSolid`. The part joins in either order.
 - A loop still left open is classified as before: no refusal names it.
