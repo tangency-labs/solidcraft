@@ -111,9 +111,10 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
             color: None,
             hidden: body.is_some_and(|b| b.visible == Some(false)),
             placement: r.placement,
-            brep: r.solid.brep,
+            brep: Some(r.solid.brep),
             face_origin: r.solid.face_origin,
             sheet: r.solid.sheet,
+            copy_of: None,
         };
         unplaced.push(assembly::Unplaced { body: r.body, record });
     }

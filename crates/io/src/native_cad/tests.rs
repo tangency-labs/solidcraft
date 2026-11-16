@@ -482,6 +482,9 @@ fn an_assembly_read_into_records_has_the_tree_our_step_reader_gives_it() {
         assert_eq!(theirs.bodies.len(), bodies, "{name}");
         assert_eq!(tree_of(&theirs), tree_of(&ours), "{name}");
         assert!(same_bodies(&built(&theirs), &built(&ours)), "{name}: the bodies differ from our reader's");
+        // The same part placed twice is one part to the design, as with our reader.
+        let parts = |imp: &solidcraft_kernel::StepImport| imp.bodies.iter().map(|b| b.source_item).collect::<std::collections::BTreeSet<_>>().len();
+        assert_eq!(parts(&theirs), parts(&ours), "{name}: parts");
     }
 }
 

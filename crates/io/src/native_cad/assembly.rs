@@ -3,11 +3,12 @@
 //! occurrence puts it, as SolidCraft's STEP reader places an assembly's bodies (one body per
 //! placed use, in world coordinates; each node's transform relative to its parent).
 //!
-//! A part used twice is two bodies, at its two placements. A body no occurrence reaches stays where
+//! A part used twice is two bodies, at its two placements: the second a copy of the first
+//! ([`RecordBody::copy_of`]), so the design knows them as one part and the record is kept once. A body no occurrence reaches stays where
 //! it is, under a root named after the file. An occurrence that mirrors or scales is left out with
 //! the reason, as a body whose own placement does is ([`solidcore_cadir`]).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use cadmpeg_ir::document::CadIr;
 use cadmpeg_ir::products::{Occurrence, OccurrenceParent, ProductDefinition, PrototypeReference};
@@ -35,7 +36,7 @@ pub(super) fn placed(ir: &CadIr, product: &str, read: Vec<Unplaced>, warnings: &
         by_body: HashMap::new(),
         read: &read,
         bodies: Vec::new(),
-        used: HashSet::new(),
+        first: HashMap::new(),
         visits: 0,
         full: false,
         warnings,
@@ -61,7 +62,7 @@ pub(super) fn placed(ir: &CadIr, product: &str, read: Vec<Unplaced>, warnings: &
         tree.push(walk.node(o, &Transform::identity(), &[], false, 0, &mut stack));
     }
     // Bodies no occurrence reaches stay where they are, under a root named after the file.
-    let loose: Vec<usize> = (0..read.len()).filter(|i| !walk.used.contains(i)).collect();
+    let loose: Vec<usize> = (0..read.len()).filter(|i| !walk.first.contains_key(i)).collect();
     if !loose.is_empty() {
         let mut node = StepNode { name: product.to_string(), transform: IDENTITY, bodies: Vec::new(), children: Vec::new() };
         for i in loose {
@@ -85,8 +86,9 @@ struct Walk<'a, 'w> {
     by_body: HashMap<&'a str, Vec<usize>>,
     read: &'a [Unplaced],
     bodies: Vec<RecordBody>,
-    /// The read bodies some occurrence placed.
-    used: HashSet<usize>,
+    /// The read bodies some occurrence placed, each with the body its first placement is: later
+    /// placements are copies of that one.
+    first: HashMap<usize, usize>,
     visits: usize,
     /// The body limit was reached and said so.
     full: bool,
@@ -152,17 +154,27 @@ impl Walk<'_, '_> {
                         if !self.room() {
                             break;
                         }
-                        self.used.insert(i);
-                        node.bodies.push(self.bodies.len());
+                        let at = self.bodies.len();
+                        node.bodies.push(at);
                         let placement = mat_mul(&world, &u.record.placement.unwrap_or(IDENTITY));
-                        self.bodies.push(RecordBody {
+                        let placed = RecordBody {
                             name: if u.record.name.is_empty() { name.clone() } else { u.record.name.clone() },
                             path: path.clone(),
                             instance: o.name.clone().filter(|n| !n.trim().is_empty()),
                             hidden: hidden || u.record.hidden,
                             placement: (placement != IDENTITY).then_some(placement),
                             ..u.record.clone()
-                        });
+                        };
+                        // The part's first placement keeps the record; each later one is a copy
+                        // of it, so the design knows them as one part placed again.
+                        let placed = match self.first.get(&i) {
+                            Some(&original) => RecordBody { brep: None, face_origin: Vec::new(), copy_of: Some(original), ..placed },
+                            None => {
+                                self.first.insert(i, at);
+                                placed
+                            }
+                        };
+                        self.bodies.push(placed);
                     }
                 }
             }

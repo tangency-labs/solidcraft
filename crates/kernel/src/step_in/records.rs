@@ -52,10 +52,19 @@ pub struct RecordBody {
     /// Where the record goes (column-major 4 × 4, millimetres), when not where it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placement: Option<M4>,
-    /// The record, in its own coordinates.
-    pub brep: Brep,
-    /// The file's face of each of the record's faces (an index the file's reader names it by).
+    /// The record, in its own coordinates; none for a copy ([`RecordBody::copy_of`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brep: Option<Brep>,
+    /// The file's face of each of the record's faces (an index the file's reader names it by);
+    /// none for a copy.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub face_origin: Vec<u64>,
+    /// Another placement of an earlier body of the import (its index), as an assembly that uses
+    /// one part twice places it twice: this body is that one's record, faces and sheet, placed by
+    /// its own `placement`, and the same part to the design (its faces are that body's). Its own
+    /// `brep`, `face_origin` and `sheet` are not used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy_of: Option<usize>,
     /// No closed shell: a surface body.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sheet: bool,
@@ -85,10 +94,20 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
     // A body SMLib refuses is left out, as a STEP import leaves out a solid it cannot make, and
     // the others still come in: `kept[k]` is where record body `k` is among the bodies made.
     let mut kept = vec![None; records.bodies.len()];
+    // Each original's part, made once and placed again for each of its copies.
+    let mut originals: std::collections::HashMap<usize, Part> = std::collections::HashMap::new();
     for (k, r) in records.bodies.iter().enumerate() {
         let label = if r.name.is_empty() { format!("body {}", k + 1) } else { r.name.clone() };
-        let made =
-            part_of(r).and_then(|part| placed(&part.body, &r.placement.unwrap_or(super::IDENTITY)).map(|b| (part, b)).map_err(|e| e.to_string()));
+        // The record body whose part this is: itself, or the one it is a copy of.
+        let source = r.copy_of.unwrap_or(k);
+        let part = match r.copy_of {
+            None => part_of(r),
+            Some(j) => copy_part(records, &originals, k, j),
+        };
+        let made = part.and_then(|part| {
+            finite_placement(r)?;
+            placed(&part.body, &r.placement.unwrap_or(super::IDENTITY)).map(|b| (part, b)).map_err(|e| e.to_string())
+        });
         let (part, body) = match made {
             Ok(made) => made,
             Err(why) => {
@@ -107,7 +126,7 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
         };
         // Each face known by its record body and its face in the file (from 1: a certificate
         // takes no 0), as a STEP import knows its faces by their entities.
-        let item = k as u64 + 1;
+        let item = source as u64 + 1;
         let sources: Option<Vec<_>> = part
             .face_origin
             .iter()
@@ -130,9 +149,12 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
         if part.closed {
             report.solids += 1;
         }
+        if r.copy_of.is_none() {
+            originals.insert(k, part.clone());
+        }
         kept[k] = Some(bodies.len());
         bodies.push(ImportedBody {
-            source_item: k as u64,
+            source_item: source as u64,
             face_origin: part.face_origin,
             name: r.name.clone(),
             body,
@@ -202,20 +224,36 @@ pub fn records_text(records: &ImportRecords) -> Result<String> {
 
 /// The body SMLib makes of one record, checked first: a record from a file is hostile input.
 fn part_of(r: &RecordBody) -> std::result::Result<Part, String> {
-    if r.face_origin.len() != r.brep.faces.len() {
-        return Err(format!("{} face origins for {} faces", r.face_origin.len(), r.brep.faces.len()));
+    let brep = r.brep.as_ref().ok_or("no record")?;
+    if r.face_origin.len() != brep.faces.len() {
+        return Err(format!("{} face origins for {} faces", r.face_origin.len(), brep.faces.len()));
     }
-    if let Some(m) = r.placement
-        && m.iter().flatten().any(|x| !x.is_finite())
-    {
-        return Err("a placement that is not finite".into());
-    }
-    solidcore_ops::record_check::validate(&r.brep).map_err(|e| format!("the record is invalid: {e}"))?;
-    solidcore_ops::record_check::agreement(&r.brep).map_err(|e| format!("the record's geometry disagrees: {e}"))?;
+    solidcore_ops::record_check::validate(brep).map_err(|e| format!("the record is invalid: {e}"))?;
+    solidcore_ops::record_check::agreement(brep).map_err(|e| format!("the record's geometry disagrees: {e}"))?;
     // A sheet is what its record is, whatever the file says: no bounded region but the
     // infinite one's.
-    let sheet = r.sheet || r.brep.regions.len() <= 1;
-    record_part(&r.brep, &r.face_origin, sheet).map_err(|f| f.msg)
+    let sheet = r.sheet || brep.regions.len() <= 1;
+    record_part(brep, &r.face_origin, sheet).map_err(|f| f.msg)
+}
+
+/// The part of body `k`, a copy of body `j`: `j`'s, which must be an earlier original that
+/// imported.
+fn copy_part(records: &ImportRecords, originals: &std::collections::HashMap<usize, Part>, k: usize, j: usize) -> std::result::Result<Part, String> {
+    if j >= k {
+        return Err(format!("a copy of body {}, which does not come before it", j.saturating_add(1)));
+    }
+    if records.bodies.get(j).is_none_or(|o| o.copy_of.is_some()) {
+        return Err(format!("a copy of body {}, which is itself a copy", j + 1));
+    }
+    originals.get(&j).cloned().ok_or_else(|| format!("a copy of body {}, which was not imported", j + 1))
+}
+
+/// The body's placement, when it has one, is finite.
+fn finite_placement(r: &RecordBody) -> std::result::Result<(), String> {
+    match r.placement {
+        Some(m) if m.iter().flatten().any(|x| !x.is_finite()) => Err("a placement that is not finite".into()),
+        _ => Ok(()),
+    }
 }
 
 /// Every node's bodies index one of `count` bodies, and the tree is no deeper and has no more
