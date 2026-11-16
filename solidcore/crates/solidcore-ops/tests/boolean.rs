@@ -2469,9 +2469,10 @@ fn pocketed_bin() -> Body {
 /// (y, height above the floor, dy/dt) at `t`.
 fn insert_top(t: f64) -> [f64; 3] {
     let (y0, ym, y1) = (2.85, 200.0, 249.15);
-    let y = (1.0 - t).powi(2) * y0 + 2.0 * t * (1.0 - t) * ym + t * t * y1;
+    let u = 1.0 - t;
+    let y = u * u * y0 + 2.0 * t * u * ym + t * t * y1;
     let dy = 2.0 * (1.0 - t) * (ym - y0) + 2.0 * t * (y1 - ym);
-    [y, 21.0 * (1.0 - t).powi(2), dy]
+    [y, 21.0 * u * u, dy]
 }
 
 /// The parameter of `insert_top` at `y`.
@@ -2552,7 +2553,7 @@ fn simpson(f: impl Fn(f64) -> f64, a: f64, b: f64, n: u32) -> f64 {
 /// round's floor edge for 0.027 before it ends there, touching it to fourth order. The
 /// curve/edge intersection took the last 0.027 for a coincident stretch (both its ends
 /// within the scaled zero) and split the curve there, which the insert's own topology did
-/// not follow: the join was refused ("SM_ERR"; on the issue's insert, "not a closed solid"),
+/// not follow: the join was refused (`SM_ERR`; on the issue's insert, "not a closed solid"),
 /// while the mirror image against x = 165.15, whose subdivision found the touching point,
 /// joined. The range is the flank of the tangency at the touching point and is dropped. The
 /// join is the bin and the insert less what they share: the insert's corners

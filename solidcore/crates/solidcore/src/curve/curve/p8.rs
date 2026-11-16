@@ -75,8 +75,9 @@ use crate::geom::global_solver::{
 use crate::geom::solution_array::{
     OperandObject, Solution, SolutionArray, SolutionEnd, SolutionObject, SolutionType,
 };
-use crate::geom::tol::{are_same, scaled_zero2, ScaledZero};
+use crate::geom::tol::{are_parallel, are_same, scaled_zero2, ScaledZero};
 use crate::geom::tree::Tree;
+use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
 use crate::math::{max2, min2, min4, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::ProjectionType;
@@ -1773,13 +1774,21 @@ impl Curve {
     /// A range is such a flank when both its ends are exact to the scaled zero and a
     /// touching point lies beyond one end on both curves (a point solution, or the
     /// point where an end of each curve's interval meets the other's within the scaled
-    /// zero), from which the gap grows faster than linearly up to the range's far end:
-    /// the gap at the touch is no larger than at this curve's midpoint between it and the
-    /// far end (dropped onto the other curve), and the gap there is less than half the
-    /// far end's. A coincidence keeps the gap at zero along the range and through its
-    /// ends; the gap of a tangency grows at least as the square of the distance from the
-    /// touch, so at the midpoint it is at most a quarter of the far end's, and growth
-    /// that is linear or slower is no tangency.
+    /// zero), where the two curves are tangent, and from which the gap grows faster
+    /// than linearly up to the range's far end: the gap at the touch is no larger than
+    /// at this curve's midpoint between it and the far end (dropped onto the other
+    /// curve), and the gap there is less than half the far end's. The gap of a tangency
+    /// grows at least as the square of the distance from the touch, so at the midpoint
+    /// it is at most a quarter of the far end's, and growth that is linear or slower is
+    /// no tangency.
+    ///
+    /// The far end must also lie off the ends of both curves' intervals (farther than
+    /// the scaled zero from each): there the curves part inside both of them, an event
+    /// of the gap. Two curves that coincide along a stretch coincide until one of them
+    /// ends, so a coincidence's ends are ends of the curves' intervals; along it the gap
+    /// is only the rounding of the evaluations, whose values say nothing of growth, and
+    /// the growth test is never asked of it (a seam edge along its surface's seam curve,
+    /// a cone's edge along its ruling).
     ///
     /// # Errors
     ///
@@ -1809,6 +1818,17 @@ impl Curve {
                 }
             }
         }
+        // the ends of each curve's interval, where a coincidence of the two can stop
+        let self_ends = [
+            self.evaluate_point(k, interval.min())?,
+            self.evaluate_point(k, interval.max())?,
+        ];
+        let other_ends = [
+            other.evaluate_point(k, other_interval.min())?,
+            other.evaluate_point(k, other_interval.max())?,
+        ];
+        let tangent_at =
+            |c: &Self, t: f64| -> Result<Vec3> { Ok(at(&c.evaluate(k, t, 1, true, true)?, 1)) };
         let mut ii = 0;
         while ii < sols.len() {
             let range = sol_at(sols, ii)?;
@@ -1843,6 +1863,25 @@ impl Curve {
                         .zip(far.iter())
                         .all(|((t, n), f)| (t - n) * (f - n) <= 0.0 && (t - f).abs() > 0.0);
                     if !beyond {
+                        continue;
+                    }
+                    // the curves part at the far end within both of them: a coincidence
+                    // stops only where one of the curves ends
+                    let far_self = self.evaluate_point(k, far[0])?;
+                    let far_other = other.evaluate_point(k, far[1])?;
+                    let parts_inside = self_ends
+                        .iter()
+                        .all(|e| e.distance(far_self) >= scaled_zero)
+                        && other_ends
+                            .iter()
+                            .all(|e| e.distance(far_other) >= scaled_zero);
+                    // and they are tangent at the touch
+                    let tangent = are_parallel(
+                        tangent_at(self, touch[0])?,
+                        tangent_at(other, touch[1])?,
+                        None,
+                    );
+                    if !parts_inside || !tangent {
                         continue;
                     }
                     let g_touch = gap_at(touch[0], touch[1])?;
