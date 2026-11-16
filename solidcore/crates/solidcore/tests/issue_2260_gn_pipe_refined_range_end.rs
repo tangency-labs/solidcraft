@@ -105,7 +105,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "offset_open_edge_second_trim_point",
     "offset_resolve_crossing_loops",
     "offset_stitch_at_body_tolerance",
-    "offset_swap_uv_extended_distance",
     "point_class_gap_3d_propagates_no_drop_error",
     "point_on_start_point_squared_tolerance",
     "point_solve_keeps_triangle_guess",
@@ -134,8 +133,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "transform_scales_each_tolerance",
     "uv_trim_corner_end_points_only",
     "validation_does_not_make_uv_trims",
-    "volume_lift_third_derivative_terms",
-    "volume_representational_end_continuities",
 ];
 
 /// The volume 729f893 gives the rounded body at accuracy 1e-7.

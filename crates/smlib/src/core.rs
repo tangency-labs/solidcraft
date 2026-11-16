@@ -148,7 +148,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ellipse_step_interval_checks = true;
     f.corner_patch_face_side_twist = true;
     f.boolean_union_refuses_solid_leak = true;
-    f.offset_swap_uv_extended_distance = true;
     f.validation_does_not_make_uv_trims = true;
     f.proto_edge_split_upper_keeps_the_old_max = true;
     f.point_on_start_point_squared_tolerance = true;
@@ -156,8 +155,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_exact_round_classes = true;
     f.offset_edges_keep_source_tolerance = true;
     f.surface_continuity_checks_last_v_knot = true;
-    f.volume_lift_third_derivative_terms = true;
-    f.volume_representational_end_continuities = true;
     f.offset_open_edge_second_trim_point = true;
     f.ssi_split_curves_at_singular_points = true;
     f.surface_parallel_to_vector_checks = true;
