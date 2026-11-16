@@ -898,4 +898,65 @@ mod tests {
         let r = isolate(&piece, 0.0, 1.0, &mut nodes, &mut out);
         assert!(matches!(r, Err(SolidError::InvalidInput { .. })));
     }
+    /// (#17961 review r2) Simple interior knots (0, 0, 0, 1, 2.3, 3.1, 4, 4, 4), so
+    /// extraction inserts knots, under end weights 100 against `wl` = 1 or 1e-3 (weight
+    /// ratios 1e2 and 1e5). z has a bump of `dz` (1e-10 or 1e-7) over [1, 2.3], whose
+    /// three stored points all have weight `wl`, while x and y crawl at 1e-7, so the
+    /// perpendicular analyses refuse it and the box's z max comes from the turning points.
+    ///
+    /// Over [1, 2.3] the weights are equal, so z is the quadratic of the stored `X / wl`.
+    /// Its peak, from the stored f64 values in exact rational arithmetic (vertex
+    /// `(c0 c2 - c1^2) / (c0 - 2 c1 + c2)` of its Bezier values), is, by `(wl, dz)`:
+    /// 5.0000000000769230255 (1, 1e-10), 5.0000000000769229690 (1e-3, 1e-10),
+    /// 5.0000000769230772023 (1, 1e-7) and 5.0000000769230773073 (1e-3, 1e-7); `peak` is
+    /// the nearest f64. Every other span's hull stays under `5 + 0.61 dz`.
+    /// The box must reach it to within the documented rule (b) bound for that span
+    /// (`M = 5 + dz`, `rho = 1`, degree 2, `d <= MAX_DEPTH`; constants doubled to
+    /// cover the second-order terms) plus the evaluation's rounding (two de Boor levels
+    /// and a division) and `peak`'s, under `gamma_16 M`. While extraction's rounding was
+    /// sized from the end weights, (1e-3, 1e-7) missed by 6.4e-10, over 300 times that.
+    #[test]
+    fn heavy_end_weights_do_not_widen_a_bumps_turning_point() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        let k = Kernel::default();
+        for (wl, dz, peak) in [
+            (1.0, 1e-10, 5.000000000076923),
+            (1e-3, 1e-10, 5.000000000076923),
+            (1.0, 1e-7, 5.000000076923077),
+            (1e-3, 1e-7, 5.000000076923078),
+        ] {
+            let pts = [
+                [0.0, 0.0, 5.0],
+                [0.5e-7, 0.1e-7, 5.0],
+                [1.0e-7, 0.0, 5.0 + dz],
+                [1.5e-7, 0.1e-7, 5.0 + 0.37 * dz],
+                [2.0e-7, 0.0, 5.0],
+                [2.5e-7, 0.1e-7, 1.0],
+            ];
+            let w = [100.0, wl, wl, wl, wl, 100.0];
+            let pw = pts
+                .iter()
+                .zip(w)
+                .map(|(p, w)| CPoint::new(p[0] * w, p[1] * w, p[2] * w, w))
+                .collect();
+            let knots = vec![0.0, 0.0, 0.0, 1.0, 2.3, 3.1, 4.0, 4.0, 4.0];
+            let nl = NlCurve::new(pw, 2, knots).unwrap();
+            let c = Curve::from(BSplineCurve::from_nurb(nl, 3, false));
+            let m = 5.0 + dz;
+            let u = f64::EPSILON / 2.0;
+            let rule_b =
+                8.0 * (2.0 * 14.0 * 2.0 + 2.0 * MAX_DEPTH as f64) * u * m + 4.0 * f64::EPSILON * m;
+            let eval = gamma(16) * m;
+            let top = c
+                .calculate_tight_bounding_box(&k, &c.natural_interval())
+                .unwrap()
+                .max()
+                .z;
+            assert!(
+                top >= peak - rule_b - eval && top <= peak + eval,
+                "wl {wl} dz {dz}: {top} against {peak}, short by {}",
+                peak - top
+            );
+        }
+    }
 }
