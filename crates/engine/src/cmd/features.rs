@@ -211,7 +211,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("split_body")
         .contract(&SPLIT_BODY_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("body: name; plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id, line: curve id (a straight sketch line, along the sketch's normal)"),
+        .params("body: name; plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended), tool_plane?: bool (default false; true uses only that face's infinite plane and follows the face) — or sketch: id, line: curve id (a straight sketch line, along the sketch's normal)"),
     CommandSpec::new("solid.press_pull", "Press Pull", crate::checked!("solid.press_pull", press_pull))
         .contract(&PRESS_PULL_CONTRACT)
         .output(output_schema_for::<PressPullResult>)
@@ -852,7 +852,12 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
         FeatureKind::Extrude { operation: Operation::Join | Operation::Cut | Operation::Intersect, targets, .. }
             if participants.is_empty() && targets.is_empty() =>
         {
-            shown_scope(s).unwrap_or_default()
+            let shown = shown_scope(s).unwrap_or_default();
+            if shown.is_empty() && shown_scope(s).is_some() {
+                // An empty list would mean every body, hidden ones included.
+                return Err(EngineError::Other("no shown solid body to change: show one, or name the bodies".into()));
+            }
+            shown
         }
         _ => participants,
     };
@@ -1259,14 +1264,15 @@ fn face_join_targets(s: &Session, p: &Value, operation: Operation, sketches: &[u
 /// The bodies a Join, Cut or Intersect that names none may change, less the hidden ones, when
 /// some of them are hidden: stored as the feature's `targets`, so a hidden body is left alone
 /// (#3961, #6901) and showing it again later doesn't change the model. None when every one is
-/// shown; empty when none is.
+/// shown; empty when none is. A shown surface body is left out: naming one as a target is
+/// refused ("a cut needs a solid"), while an operation that names none skips it (#18083).
 pub fn shown_scope(s: &Session) -> Option<Vec<String>> {
     let st = s.model.state();
     let scope = active_scope(s, &st);
     if scope.iter().all(|b| s.body_visible(&b.name)) {
         return None;
     }
-    Some(scope.into_iter().filter(|b| s.body_visible(&b.name)).map(|b| b.name.clone()).collect())
+    Some(scope.into_iter().filter(|b| s.body_visible(&b.name) && !b.is_surface()).map(|b| b.name.clone()).collect())
 }
 
 /// The bodies a feature of the active component works on when it names none: the component's
@@ -3305,6 +3311,7 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
                 body: BodyName(body),
                 plane: solidcraft_doc::PlaneRef::Origin { name: "XY".into() },
                 tool: None,
+                tool_plane: false,
                 sketch: Some(solidcraft_doc::SketchId(sketch)),
                 line: Some(line),
             },
@@ -3326,13 +3333,14 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
                 body: BodyName(body),
                 plane: solidcraft_doc::PlaneRef::Origin { name: "XY".into() },
                 tool: Some(solidcraft_doc::FaceAt { body: BodyName(tb), point: Position(point) }),
+                tool_plane: bool_(p, "tool_plane").unwrap_or(false),
                 sketch: None,
                 line: None,
             },
         );
     }
     let plane = plane_param(s, p.get("plane"), cmd)?;
-    add_feature(s, p, FeatureKind::Split { body: BodyName(body), plane, tool: None, sketch: None, line: None })
+    add_feature(s, p, FeatureKind::Split { body: BodyName(body), plane, tool: None, tool_plane: false, sketch: None, line: None })
 }
 
 /// The fits [`clearance_diameter`] knows (close, normal, loose, and their older names).

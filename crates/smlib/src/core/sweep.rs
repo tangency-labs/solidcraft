@@ -951,7 +951,9 @@ pub(crate) fn sweep_placed(profile: &[Profile], path: &[Profile], frame: SweepFr
             if closed {
                 let tol = b.tolerance();
                 match stitch_faces(k, &mut b, tol, None, false) {
-                    Ok(s) if s.lamina_edges != 0 => return Ok(Err(Error::NotSolid)),
+                    // A solid asked for has no free edge left; a sheet (an open profile, or one
+                    // not capped) keeps the profile's own ends free (#17828).
+                    Ok(s) if cap && s.lamina_edges != 0 => return Ok(Err(Error::NotSolid)),
                     Ok(_) => b.refresh_cached_topology(),
                     Err(e) => return Ok(Err(status(e))),
                 }

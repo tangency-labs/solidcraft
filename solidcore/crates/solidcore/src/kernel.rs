@@ -640,13 +640,6 @@ pub struct UpstreamFixes {
     /// `sm_IsInterior`, `sm_AreOverlapping`, `sm_WhichPVToCombine`) (WR-662, #2009 group
     /// C; tangency-labs/smlib bcc6f01). Off by default for pinned parity.
     pub ssi_proto_topology_statuses_pass_on: bool,
-    /// Analytic `STEPInversion` (sphere, surface of revolution, so cone and cylinder) tells
-    /// its answers (off the surface, outside the sweep) apart from real failures, and the
-    /// cone and sphere intersection callers that read the location after a failed
-    /// inversion pass the failure on instead of reading "exterior" and dropping a point
-    /// or curve (WR-662, #2009 group C; tangency-labs/smlib dfc7cb6). Off by default for
-    /// pinned parity.
-    pub analytic_inversion_answers_apart: bool,
     /// `SmCone::CreateIsoCircleFromPoint` as the SolidCraft fork has it (WR-704;
     /// tangency-labs/smlib 1279539, with 672a437's `SER` on the NURB conversion): the
     /// circle's STEP height is the reference point's projection onto the axis clamped to
@@ -721,8 +714,6 @@ pub struct UpstreamFixes {
     pub ssi_trace_tangent_curves_once: bool,
     /// `DoIntersection` traces the tangential intersection curves the marcher cannot follow (the surfaces touch along them, `n1 x n2 = 0`), and the crossing branches through the contact points where crossing curves meet, which it reports as touching points (WR-75; tangency-labs/smlib ef4ab25, e9fde8f, d8c61db, 1693c9d). `FindInteriorCurves` keeps the node pairs it skips for parallel normals as seeds. A crossing branch the marcher's curve covers except inside the band where the surfaces are within tolerance of each other is dropped, not traced on along a tangency past that curve's end (#2089).
     pub ssi_tangent_curve_tracer: bool,
-    /// `SmSurfaceIntersector::DoIntersection` splits each traced crossing (or near-tangent) B-spline curve, with its two UV curves, where it passes through a singular point of the intersection (the normals parallel while two branches cross): `|n1 x n2|` is sampled 8 times per knot span, each sharp minimum refined by golden section, and the curve split where the sine is below 1e-6 and rises above 1e-3 again on both sides, more than 10 approximation tolerances from its ends; the tails are appended. Upstream's marcher steps straight through such a node, so the curves cross there without ending; two cylinders touching inside at one point then union to a body that loses one of them, fails 1001 in `MakeFaceuse`, or fails the check's seam tests (WR-77, #393, #2110; the fork's tangency-labs/smlib@3c9d1d3, `sm_SplitCurvesAtSingularPoints`).
-    pub ssi_split_curves_at_singular_points: bool,
     /// `SmPointClassification::GetGap3d(pOptSurface)` returns `Err(SM_ERR)` (and propagates
     /// object-point, surface-drop, and surface-evaluation failures) when the object point
     /// has no single drop point on `pOptSurface` even at `100 * sObjZoneTol3d` (WR-58).
