@@ -223,19 +223,21 @@ fn each_pcurve(
             } else {
                 tolerance
             };
-            let pc = on.pcurve(u.curve, &c, u.interval, own, certify).map_err(|e| {
-                let at = |t: f64| c.point(t).map(|p| [p.x, p.y, p.z]);
-                let message = format!(
-                    "pcurve of loop {w} use {i} ({:?} to {:?}): {e}",
-                    at(u.interval[0]),
-                    at(u.interval[1])
-                );
-                match e {
-                    Error::Invalid(_) => Error::Invalid(message),
-                    Error::Failed(_) => Error::Failed(message),
-                    Error::TooLarge(_) => Error::TooLarge(message),
-                }
-            });
+            let pc = on
+                .pcurve(u.curve, &c, u.interval, own, certify)
+                .map_err(|e| {
+                    let at = |t: f64| c.point(t).map(|p| [p.x, p.y, p.z]);
+                    let message = format!(
+                        "pcurve of loop {w} use {i} ({:?} to {:?}): {e}",
+                        at(u.interval[0]),
+                        at(u.interval[1])
+                    );
+                    match e {
+                        Error::Invalid(_) => Error::Invalid(message),
+                        Error::Failed(_) => Error::Failed(message),
+                        Error::TooLarge(_) => Error::TooLarge(message),
+                    }
+                });
             if let Err(e @ (Error::Invalid(_) | Error::TooLarge(_))) = pc {
                 return Err(e);
             }
@@ -494,9 +496,7 @@ impl On {
             })?;
             // The certificate evaluates the net on its knots. The surface evaluator wraps
             // closed nets, so keep every candidate inside that same natural domain.
-            for ((x, knots), (degree, count)) in
-                uv.iter_mut().zip([u, v]).zip([(p, nu), (q, nv)])
-            {
+            for ((x, knots), (degree, count)) in uv.iter_mut().zip([u, v]).zip([(p, nu), (q, nv)]) {
                 let (Some(&lo), Some(&hi)) = (knots.get(degree), knots.get(count)) else {
                     return Err(Error::Invalid("pcurve surface domain".into()));
                 };
@@ -1002,7 +1002,12 @@ impl On {
 /// A whole-span lift-error bound for a linear UV segment. L1 norms enclose Euclidean
 /// norms. All arithmetic, including interpolation coefficients and the span radius, is
 /// outward rounded; an evaluator unable to enclose a weight or a knot proves nothing.
-fn lift_bound(sn: &Nurbs, cn: &NurbsCurve, [a, b]: [f64; 2], [pa, pb]: [[f64; 2]; 2]) -> Option<f64> {
+fn lift_bound(
+    sn: &Nurbs,
+    cn: &NurbsCurve,
+    [a, b]: [f64; 2],
+    [pa, pb]: [[f64; 2]; 2],
+) -> Option<f64> {
     let h = Ivl::from(b) - Ivl::from(a);
     let d = [
         (Ivl::from(pb[0]) - Ivl::from(pa[0])) / h,
@@ -1010,10 +1015,7 @@ fn lift_bound(sn: &Nurbs, cn: &NurbsCurve, [a, b]: [f64; 2], [pa, pb]: [[f64; 2]
     ];
     let m = 0.5 * (a + b);
     let dt = Ivl::from(m) - Ivl::from(a);
-    let qm = [
-        Ivl::from(pa[0]) + d[0] * dt,
-        Ivl::from(pa[1]) + d[1] * dt,
-    ];
+    let qm = [Ivl::from(pa[0]) + d[0] * dt, Ivl::from(pa[1]) + d[1] * dt];
     let sm = nurbs_partials_over_box(sn, qm[0].lo, qm[0].hi, qm[1].lo, qm[1].hi, 1, 0).ok()?;
     let cm = curve_derivs_over(cn, Ivl::from(m), 1, None).ok()?;
     let e = v_sub(sm.at(0, 0), *cm.first()?);
