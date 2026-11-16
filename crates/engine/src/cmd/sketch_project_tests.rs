@@ -1521,6 +1521,16 @@ fn intersect_leaves_a_plane_near_the_axis_far_from_its_origin_to_the_section() {
     let plane = Plane { origin: Vec3::new(0.0, 0.0, 0.0), x: Vec3::new(0.0, 1.0, 0.0), y: Vec3::new(-1e-7, 0.0, 1.0) };
     let st = s.model.state();
     let far = &st.body("Far").unwrap().body;
+    // The test only proves the section guard if the cylinder's stored axis origin lies far from
+    // the face (which spans z = 1,000,000..1,000,001): were it stored near the base, the old
+    // guard would reject this plane too. So the origin must be near z = 0.
+    let mut origins = Vec::new();
+    for face in 0..far.face_count() {
+        if let Some(solidcraft_kernel::FaceSurface::Cylinder { origin, .. }) = solidcraft_kernel::face_surface(far, face) {
+            origins.push(origin.z);
+        }
+    }
+    assert!(!origins.is_empty() && origins.iter().all(|z| z.abs() < 1.0), "cylinder axis origin z {origins:?}");
     for face in 0..far.face_count() {
         assert!(solidcraft_kernel::axial_face_section(far, face, &plane).unwrap().is_none(), "face {face}");
     }
