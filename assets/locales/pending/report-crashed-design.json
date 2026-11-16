@@ -1,0 +1,7 @@
+{
+  "en": {
+    "report.design_from_crash": "This is the design that was open when SolidCraft closed, as the crash report kept it.",
+    "report.design_from_recovery": "The open design is new and empty, so this is the design kept for recovery when SolidCraft last closed.",
+    "report.design_none_crash": "No design is attached: SolidCraft had no saved copy of the design that was open when it closed."
+  }
+}

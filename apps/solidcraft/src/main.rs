@@ -1204,6 +1204,12 @@ fn main() -> eframe::Result {
             _ => files.push(a),
         }
     }
+    // The log on disk, which a problem report attaches the end of (`log_file`); the run
+    // before's log is kept beside it.
+    if let Some(dir) = solidcraft_engine::recovery::data_dir() {
+        solidcraft_ui_egui::log_file::install(&dir.join("logs"));
+    }
+    log::info!("SolidCraft {} ({}) started", solidcraft_ui_egui::help::VERSION, solidcraft_ui_egui::help::COMMIT);
     // `--max-file-size 2GB`: the largest files this run reads, over Preferences, never saved (#4086).
     if let Some(value) = max_file_size {
         let applied = startup::max_file_size(value.as_deref()).and_then(|bytes| solidcraft_engine::io::limits::set_override(Some(bytes)));
