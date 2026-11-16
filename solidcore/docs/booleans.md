@@ -449,6 +449,14 @@ What the port does today:
   second tool whole, as a void.
   Parallel cones (drill points) are met by the marching intersection and are not decided this
   way, nor are coplanar faces bounded by such circles.
+- **A curve ending tangent to an edge.** A curve that touches an edge in contact of high order
+  (where a wall's intersection with a top tangent to the floor ends on the floor's arc, apart from
+  it as the fourth power of the distance) stays within the scaled zero of the edge for a while
+  beside the touch, and the curve/curve intersection can report a range there with both ends
+  exact. Upstream keeps such a range as a coincidence and the curve is cut at its far end, which
+  is no event. `drop_ranges_of_tangencies` (`curve/curve/p8.rs`) drops a range whose gap grows
+  faster than linearly from a touching point beyond one of its ends (a point solution, or where
+  the two curves' interval ends meet): the touch is the intersection.
 - **A line a hair inside a circle.** A line in a circle's plane, δ inside the circle, crosses
   it at two points `2√(2rδ)` apart and stays within δ of it between them, as two circles do.
   `line_coplanar_circle_intersect_distinct` (`geom/geom_utility/p1.rs`) takes an overlap below

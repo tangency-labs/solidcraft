@@ -896,6 +896,14 @@ impl Curve {
             }
 
             if !needs_more_work {
+                self.drop_ranges_of_tangencies(
+                    k,
+                    &mut sols,
+                    other,
+                    interval,
+                    other_interval,
+                    dist_tol,
+                )?;
                 return Ok(sols);
             }
         }
@@ -1157,6 +1165,10 @@ impl Curve {
             };
             sols.set_size(last_index.wrapping_add(1));
         }
+
+        // Not upstream (#18064): a range with exact ends on the flank of a tangency is no
+        // coincidence
+        self.drop_ranges_of_tangencies(k, &mut sols, other, interval, other_interval, dist_tol)?;
 
         // Phase 2: remove coincident segments which include or are adjacent to point
         // intersections (nearly tangent intersecting curves often lie within a
@@ -1741,6 +1753,130 @@ impl Curve {
                     done = false;
                     break;
                 }
+            }
+        }
+        Ok(())
+    }
+
+    /// Not upstream (#18064): removes from `sols` each range solution that is the flank
+    /// of a tangency, not a stretch where the two curves coincide.
+    ///
+    /// Two curves in contact of high order (a curve ending on an arc it is tangent to,
+    /// apart as the fourth power of the distance from the touch) stay within the scaled
+    /// zero of each other for a while beside the touching point, so the solve can report
+    /// a range there whose two ends are both exact intersections; upstream keeps such a
+    /// range as a coincidence (`classify_ranges`), and the curves are then cut at its
+    /// far end, which is no event on either curve. Phase 2 (`cull_ranges_near_points`)
+    /// discards a range beside a point solution for the same reason, but only when it is
+    /// shorter than a thousandth of the domain.
+    ///
+    /// A range is such a flank when both its ends are exact to the scaled zero and a
+    /// touching point lies beyond one end on both curves (a point solution, or the
+    /// point where an end of each curve's interval meets the other's within the scaled
+    /// zero), from which the gap grows faster than linearly up to the range's far end:
+    /// the gap at the touch is no larger than at this curve's midpoint between it and the
+    /// far end (dropped onto the other curve), and the gap there is less than half the
+    /// far end's. A coincidence keeps the gap at zero along the range and through its
+    /// ends; the gap of a tangency grows at least as the square of the distance from the
+    /// touch, so at the midpoint it is at most a quarter of the far end's, and growth
+    /// that is linear or slower is no tangency.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations.
+    fn drop_ranges_of_tangencies<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        sols: &mut SolutionArray<O>,
+        other: &Self,
+        interval: &Extent1d,
+        other_interval: &Extent1d,
+        dist_tol: f64,
+    ) -> Result<()> {
+        let gap_at = |a: f64, b: f64| -> Result<f64> {
+            Ok(self
+                .evaluate_point(k, a)?
+                .distance(other.evaluate_point(k, b)?))
+        };
+        // where the ends of the two intervals meet: touching points the solve need not
+        // report
+        let mut touches: Vec<[f64; 2]> = Vec::new();
+        for a in [interval.min(), interval.max()] {
+            for b in [other_interval.min(), other_interval.max()] {
+                let p = self.evaluate_point(k, a)?;
+                if gap_at(a, b)? < EFF_ZERO * (1.0 + p.max_dimension()) {
+                    touches.push([a, b]);
+                }
+            }
+        }
+        let mut ii = 0;
+        while ii < sols.len() {
+            let range = sol_at(sols, ii)?;
+            if range.solution_type != SolutionType::RangeOfValues {
+                ii += 1;
+                continue;
+            }
+            let pnt = self.evaluate_point(k, range.start.parameters[0])?;
+            let scaled_zero = EFF_ZERO * (1.0 + pnt.max_dimension());
+            if range.start.solution_value >= scaled_zero || range.end.solution_value >= scaled_zero
+            {
+                ii += 1;
+                continue;
+            }
+            let ends = [
+                [range.start.parameters[0], range.start.parameters[1]],
+                [range.end.parameters[0], range.end.parameters[1]],
+            ];
+            let mut candidates = touches.clone();
+            for s in sols.as_slice() {
+                if s.solution_type == SolutionType::SingleValue {
+                    candidates.push([s.start.parameters[0], s.start.parameters[1]]);
+                }
+            }
+            let mut flank = false;
+            for touch in candidates {
+                for (near, far) in [(ends[0], ends[1]), (ends[1], ends[0])] {
+                    // the touch lies beyond the near end, away from the far end, on both
+                    let beyond = touch
+                        .iter()
+                        .zip(near.iter())
+                        .zip(far.iter())
+                        .all(|((t, n), f)| (t - n) * (f - n) <= 0.0 && (t - f).abs() > 0.0);
+                    if !beyond {
+                        continue;
+                    }
+                    let g_touch = gap_at(touch[0], touch[1])?;
+                    // this curve's midpoint between the touch and the far end, dropped onto
+                    // the other curve between them
+                    let mut span = Extent1d::from_value(touch[1]);
+                    span.add_value(far[1]);
+                    let mid = self.evaluate_point(k, (touch[0] + far[0]) / 2.0)?;
+                    let dropped = other.drop_point(
+                        k,
+                        &span,
+                        mid,
+                        None,
+                        dist_tol,
+                        Some(span.mid()),
+                        SolverOperation::Minimize,
+                    )?;
+                    if !dropped.success {
+                        continue;
+                    }
+                    let g_mid = mid.distance(other.evaluate_point(k, dropped.parameter)?);
+                    let g_far = gap_at(far[0], far[1])?;
+                    if g_touch <= g_mid && 2.0 * g_mid < g_far {
+                        flank = true;
+                    }
+                }
+                if flank {
+                    break;
+                }
+            }
+            if flank {
+                sols.remove_at(ii, 1);
+            } else {
+                ii += 1;
             }
         }
         Ok(())
