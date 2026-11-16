@@ -3379,6 +3379,61 @@ fn cached_evaluation_matches_from_scratch() {
     }
 }
 
+/// A sketch on a plane turned about a model edge follows the edge when a parameter moves it: the
+/// cache must not take the turned plane as fixed because its base plane is.
+#[test]
+fn a_sketch_on_a_plane_turned_about_a_model_edge_follows_it_after_a_change() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "cx", "expression": "40 mm"}));
+    run(&mut s, "solid.cylinder", json!({"base": ["cx", 0, 0], "radius": 5, "height": 10, "body_name": "Shaft"}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [46, -2], "p1": [48, -8]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XZ", "axis": {"face": [45, 0, 5]}, "angle": "30 deg", "name": "Turned"}));
+    let turned = s
+        .doc
+        .features
+        .iter()
+        .find_map(|f| match &f.kind {
+            solidcraft_doc::FeatureKind::ConstructionPlane { plane } if f.name == "Turned" => Some(plane.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert!(matches!(turned, solidcraft_doc::PlaneRef::AtAngle { line: Some(_), .. }), "{turned:?}");
+    run(&mut s, "solid.extrude", json!({"sketch": "Profile", "distance": 2, "operation": "new", "name": "Fin"}));
+    let id = s.doc.find_feature("Profile").unwrap().id;
+    if let Some(solidcraft_doc::FeatureKind::Sketch { plane, .. }) = s.doc_mut().feature_mut(id).map(|f| &mut f.kind) {
+        *plane = turned;
+    }
+    s.refresh();
+    let same = |s: &Session, what: &str| {
+        let mut fresh = solidcraft_doc::Model::new();
+        fresh.no_cache = true;
+        fresh.evaluate(&s.doc);
+        assert!(fresh.results.iter().all(|r| r.error.is_none()), "{what}");
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{what}");
+        let shape = |st: &solidcraft_doc::ModelState| {
+            let mut v = st
+                .bodies
+                .iter()
+                .map(|b| {
+                    let m = solidcraft_kernel::measure(&b.body).unwrap();
+                    let c = [m.centroid.x, m.centroid.y, m.centroid.z].map(|v| (v * 1e6).round());
+                    (b.name.clone(), (m.volume * 1e6).round(), c, m.faces)
+                })
+                .collect::<Vec<_>>();
+            v.sort_by(|a, b| a.0.cmp(&b.0));
+            v
+        };
+        assert_eq!(shape(&s.model.state()), shape(&fresh.state()), "{what}");
+    };
+    same(&s, "made");
+    for cx in ["40.5 mm", "41 mm", "40 mm"] {
+        run(&mut s, "parameters.change", json!({"name": "cx", "expression": cx}));
+        same(&s, &format!("cx = {cx}"));
+    }
+}
+
 /// A fillet keeps its edge when an earlier sketch dimension resizes the body (QA s06).
 #[test]
 fn fillet_follows_its_edge_after_an_upstream_resize() {
