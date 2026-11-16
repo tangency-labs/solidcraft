@@ -534,6 +534,7 @@ fn kind_name(kind: ObjectKind) -> &'static str {
         ObjectKind::Dimension => "dimension",
         ObjectKind::Note => "note",
         ObjectKind::ViewLabel => "view_label",
+        ObjectKind::Balloon => "balloon",
         ObjectKind::TitleBlock => "title_block",
         ObjectKind::PartsList => "parts_list",
         ObjectKind::RevisionTable => "revision_table",

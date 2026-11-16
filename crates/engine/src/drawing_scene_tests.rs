@@ -1891,6 +1891,8 @@ fn a_replys_text_and_fonts_keep_to_its_schema() {
         objects: Vec::new(),
         dimensions: Vec::new(),
         notes: Vec::new(),
+        balloons: Vec::new(),
+        tables: Vec::new(),
         out_of_date: Vec::new(),
         param_warnings: Vec::new(),
     };
@@ -2056,7 +2058,7 @@ fn a_views_box_is_what_it_draws() {
             owners: None,
             why: None,
         };
-        let (_, _, objects, _, _) =
+        let (_, _, objects, _, _, _) =
             assemble(&record, Projection::Third, &labels(&record), &[], &[], &[], [(7, centre, &drawn)].into_iter()).unwrap().finish().unwrap();
         let object = objects.iter().find(|o| o.object == 7).unwrap();
         assert!(near(&object.bounds_mm, min, max), "{object:?}");
@@ -2593,6 +2595,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
         dimension: id,
         view: front,
         kind: ObjectKind::Dimension,
+        row: None,
         status: solidcraft_doc::drawing::dimension::Status::Ok,
         group: Some(Arc::new(Group { object: id, kind: ObjectKind::Dimension, items })),
         fonts: Vec::new(),
@@ -2603,7 +2606,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
     let off_paper = dimension(2, vec![stroke(Vec2::new(1e9, 0.0))]);
     let fits = dimension(3, vec![stroke(Vec2::X)]);
     assembly.add_dimensions([&too_many, &off_paper, &fits].into_iter());
-    let (scene, _, objects, states, _) = assembly.finish().unwrap();
+    let (scene, _, objects, states, _, _) = assembly.finish().unwrap();
     assert!(!states[0].drawn && states[0].why.as_deref().is_some_and(|w| w.contains("records")), "{:?}", states[0]);
     assert!(!states[1].drawn && states[1].why.is_some(), "{:?}", states[1]);
     assert!(states[2].drawn && states[2].why.is_none(), "{:?}", states[2]);
@@ -2638,6 +2641,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
             dimension: id,
             view: front,
             kind: ObjectKind::Dimension,
+            row: None,
             status: solidcraft_doc::drawing::dimension::Status::Ok,
             group: Some(Arc::new(Group { object: id, kind: ObjectKind::Dimension, items })),
             fonts,
@@ -2651,7 +2655,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
     let mut assembly =
         assemble(record, Projection::Third, &labels(record), &[], &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view.clone()))).unwrap();
     assembly.add_dimensions([&a, &too_big, &b].into_iter());
-    let (scene, _, objects, states, _) = assembly.finish().unwrap();
+    let (scene, _, objects, states, _, _) = assembly.finish().unwrap();
     assert!(states[0].drawn && !states[1].drawn && states[2].drawn, "{states:?}");
     assert_eq!(scene.fonts.len(), 1);
     assert_eq!(scene.fonts[0].glyphs.len(), shared, "its 7 stays out");
@@ -2670,7 +2674,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
     let fits = text(5, "8", (room - records(&bare) - fonts) / per_line);
     assert!(records(&over) <= room);
     assembly.add_dimensions([&over, &fits].into_iter());
-    let (_, _, _, states, _) = assembly.finish().unwrap();
+    let (_, _, _, states, _, _) = assembly.finish().unwrap();
     assert!(!states[0].drawn && states[0].why.as_deref().is_some_and(|why| why.contains("records")), "{:?}", states[0]);
     assert!(states[1].drawn, "{:?}", states[1]);
 }

@@ -41,7 +41,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CHECK, "Check Drawing",
     .doc_only()
     .contract(&CONTRACT)
     .output(output_schema_for::<CheckResult>)
-    .params("sheet?: id or name (default: every sheet) → {sheet?, findings: [{kind, sheet, object: {kind: view|dimension|balloon|note|table|image|title_block, id}, cell?, field?, item?, why}], counts: [{kind, count}], coverage: [{feature, name, state, by?: [{kind: dimension|note, id}], why?}], coverage_counts: [{state, count}]}: what makes the drawing wrong or incomplete, in sheet order, then by the record each names. kind is one of a closed list: lost, ambiguous, unmeasurable, suppressed, failed (a dimension, balloon or note whose reference isn't found as one thing, can't be measured, or depends on a suppressed or failed feature; failed is also a view that can't be drawn), overridden (a dimension whose text is typed over its value, or a title block cell whose typed text hides a value), out_of_date (a view or dimension a deferred drawing shows as it last was), nothing_shown (a view with nothing to measure), empty_field (a title block field with no value, as source.key; a revision field only once the drawing has a revision row; a cell whose typed text fills it is none), not_ballooned (a row of a parts list on the sheet that no balloon points at, by item), outside_sheet (a view outside its sheet's drawing space or over its title block; a dimension, image or table off the paper). coverage lists each feature of the design in timeline order, apart from the findings: covered (a dimension or note points at a face it made: an edge covers the latest feature among the faces it separates, a corner the latest among its edges' faces, a pattern's copy the pattern; by lists them), not_covered (a view draws a face it made, named from exact history, and nothing points at it), unknown (the faces a view draws of it aren't named from exact history), not_applicable (it is suppressed or rolled back, only reference parts draw it, or no view draws a face it made: a sketch, a plane). Coverage says a dimension or a note points at a feature, not that it is fully dimensioned. With sheet, the findings and the coverage are of that sheet only, and sheet echoes its id. The sheet is read as an export reads it: a deferred drawing is checked as it shows the model, with what it shows as it last was listed. Read-only: nothing is drawn or saved, and the same drawing always gives the same answer.")];
+    .params("sheet?: id or name (default: every sheet) → {sheet?, findings: [{kind, sheet, object: {kind: view|dimension|balloon|note|table|image|title_block, id}, cell?, field?, item?, why}], counts: [{kind, count}], coverage: [{feature, name, state, by?: [{kind: dimension|note, id}], why?}], coverage_counts: [{state, count}]}: what makes the drawing wrong or incomplete, in sheet order, then by the record each names. kind is one of a closed list: lost, ambiguous, unmeasurable, suppressed, failed (a dimension, balloon or note whose reference isn't found as one thing, can't be measured, or depends on a suppressed or failed feature; failed is also a view that can't be drawn), overridden (a dimension whose text is typed over its value, or a title block cell whose typed text hides a value), out_of_date (a view, or a dimension, balloon or note on a view, that a deferred drawing shows as it last was), nothing_shown (a view with nothing to measure), empty_field (a title block field with no value, as source.key; a revision field only once the drawing has a revision row; a cell whose typed text fills it is none), not_ballooned (a row of a parts list on the sheet that no balloon points at, by item), outside_sheet (a view outside its sheet's drawing space or over its title block; a dimension, balloon, image or table off the paper). coverage lists each feature of the design in timeline order, apart from the findings: covered (a dimension or note points at a face it made: an edge covers the latest feature among the faces it separates, a corner the latest among its edges' faces, a pattern's copy the pattern; by lists them), not_covered (a view draws a face it made, named from exact history, and nothing points at it), unknown (the faces a view draws of it aren't named from exact history), not_applicable (it is suppressed or rolled back, only reference parts draw it, or no view draws a face it made: a sketch, a plane). Coverage says a dimension or a note points at a feature, not that it is fully dimensioned. With sheet, the findings and the coverage are of that sheet only, and sheet echoes its id. The sheet is read as an export reads it: a deferred drawing is checked as it shows the model, with what it shows as it last was listed. Read-only: nothing is drawn or saved, and the same drawing always gives the same answer.")];
 
 fn check(s: &mut Session, p: &Value) -> Result<Value> {
     let request: CheckParams = crate::schema::read(CHECK, p)?;
@@ -103,8 +103,15 @@ fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> 
             CheckedKind::View
         } else if d.dimension(id).is_some() {
             CheckedKind::Dimension
-        } else {
+        } else if d.balloons.by_id(id).is_some() {
+            CheckedKind::Balloon
+        } else if d.notes.by_id(id).is_some() {
             CheckedKind::Note
+        } else {
+            // Every id listed is one of this drawing's records, so this is the scene and the record
+            // disagreeing: refused as `selection.delete` refuses an id it can't name, not listed as
+            // something it isn't.
+            return Err(bad(CHECK, format!("the drawing has no view, dimension, balloon or note {}", ids::encode(id))));
         };
         out.push(finding(FindingKind::OutOfDate, sheet, object(kind, id), last.into()));
     }
@@ -129,6 +136,7 @@ fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> 
             ObjectKind::Dimension => CheckedKind::Dimension,
             ObjectKind::Note => CheckedKind::Note,
             ObjectKind::ViewLabel => CheckedKind::ViewLabel,
+            ObjectKind::Balloon => CheckedKind::Balloon,
             ObjectKind::PartsList | ObjectKind::RevisionTable => CheckedKind::Table,
             // Images are painted with the border and aren't among the objects: read below.
             ObjectKind::SheetImage | ObjectKind::SheetBorder | ObjectKind::DrawingBorder | ObjectKind::TitleBlock => continue,

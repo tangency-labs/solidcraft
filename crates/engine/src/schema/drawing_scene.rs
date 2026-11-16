@@ -25,8 +25,9 @@ pub struct SheetSceneParams {
 /// sheet's lower-left corner: the drawing border's (object: the sheet), then each image's picture
 /// (object and source: the placement), then each view's strokes (object: the view), then each
 /// dimension's lines and arrowheads (object: the dimension), each note of a view (object: the
-/// note) and each view's label (object: the view), then each note on the sheet, then the title
-/// block's (object: the sheet).
+/// note), each view's label (object: the view) and each balloon's circle, number and leader (object:
+/// the balloon), then each parts list's and revision table's (object: the table), then each note on
+/// the sheet, then the title block's (object: the sheet).
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
 pub struct SheetPaperScene(pub solidcraft_geom::paper::Scene);
@@ -43,6 +44,9 @@ impl JsonSchema for SheetPaperScene {
             ObjectKind::Dimension,
             ObjectKind::Note,
             ObjectKind::ViewLabel,
+            ObjectKind::Balloon,
+            ObjectKind::PartsList,
+            ObjectKind::RevisionTable,
             ObjectKind::TitleBlock,
         ];
         paper_scene_schema(generator, &kinds, true)
@@ -108,6 +112,35 @@ pub struct SheetSceneNote {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub view: Option<String>,
     pub status: &'static str,
+    pub drawn: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+}
+
+/// One table on the sheet: `ok`, or `failed` when it can't be read or laid out, and whether its lines
+/// are in the scene, with why not. The rest of the sheet still draws.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetSceneTable {
+    pub table: String,
+    pub status: &'static str,
+    pub drawn: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+}
+
+/// One balloon of a view on the sheet: where the edge its arrow ends on stands with the model, in
+/// `drawing.dimension.inspect`'s words; what it reads of its parts list, in
+/// `drawing.balloon.inspect`'s words, and its number when it has one; and whether it is in the scene,
+/// with why not, or what of it is left out.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetSceneBalloon {
+    pub balloon: String,
+    pub view: String,
+    pub status: &'static str,
+    /// `ok`, `no_list`, `not_found`, `reference` or `no_row`.
+    pub row_status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item: Option<String>,
     pub drawn: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub why: Option<String>,
@@ -275,7 +308,7 @@ pub struct SheetSceneResult {
     pub scene: SheetPaperScene,
     /// Each view on the sheet, in id order.
     pub views: Vec<SheetSceneView>,
-    /// The sheet's border, then each view on it, then each dimension and note drawn, in paint order:
+    /// The sheet's border, then each view on it, then each dimension, note, balloon and table drawn, in paint order:
     /// each that is on paper. What draws nothing and has no boundary isn't one.
     pub objects: Vec<SheetObjectResult>,
     /// Each dimension of a view on the sheet, by view and id.
@@ -283,7 +316,12 @@ pub struct SheetSceneResult {
     /// Each note of a view on the sheet, by view and id, then each note on the sheet, by id.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<SheetSceneNote>,
-    /// The views, dimensions and notes a deferred drawing shows as they last were.
+    /// Each balloon of a view on the sheet, by view and id.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub balloons: Vec<SheetSceneBalloon>,
+    /// Each table on the sheet, by id.
+    pub tables: Vec<SheetSceneTable>,
+    /// The views, dimensions, notes and balloons a deferred drawing shows as they last were.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub out_of_date: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
