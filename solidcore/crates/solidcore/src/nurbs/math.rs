@@ -272,9 +272,14 @@ impl CPoint {
     /// combination is affine, so it is that value in exact arithmetic, where the rounded
     /// `alpha*x + beta*x` can land an ulp off it. Knot insertion uses it, so a curve cut
     /// out of one along an iso-line (a UV trim on a seam or a domain side) stays on it.
+    /// A non-finite `alpha` (a zero-length knot span) has no affine combination: the
+    /// result is [`Self::combine2`]'s, NaN included, so the failure stays visible.
     #[must_use]
     pub fn affine2(alpha: f64, a: Self, b: Self) -> Self {
         let mut r = Self::combine2(alpha, a, 1.0 - alpha, b);
+        if !alpha.is_finite() {
+            return r;
+        }
         if a.x == b.x {
             r.x = a.x;
         }

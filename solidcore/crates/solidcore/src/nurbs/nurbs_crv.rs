@@ -2601,6 +2601,11 @@ mod tests {
             assert_eq!(p.x, u);
         }
         assert_eq!(t.cpts()[0].y, 1.0);
+        // a combination without a finite weight (a zero-length span) stays NaN, shared
+        // coordinates included: the shared-coordinate rule never hides a failed insertion
+        let a = CPoint::new(u, 0.0, NOZ, NOW);
+        let nan = CPoint::affine2(f64::NAN, a, a);
+        assert!(nan.x.is_nan() && nan.y.is_nan(), "{nan:?}");
     }
 
     #[test]
