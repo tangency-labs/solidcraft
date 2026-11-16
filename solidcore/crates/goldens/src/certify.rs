@@ -2,7 +2,9 @@
 //! surface, around the answer a drop gave. The lower end is the kernel's certified lower bound
 //! ([`surface_distance_lower_bound`]: the convex hull of the NURBS form's Bezier patches,
 //! subdivided, rounding carried); the upper end is the distance to the drop's surface point,
-//! plus the rounding of evaluating that point. Every point of the surface is at least `lo`
+//! plus the rounding of evaluating that point and of the distance. The evaluation's rounding
+//! is bounded from the NURBS form's net (ARGUED in [`evaluation_slack`]); an analytic surface
+//! is evaluated in its own form, which its NURBS form represents exactly up to rounding. Every point of the surface is at least `lo`
 //! from the point, and the drop's foot is at most `hi`: the foot is the nearest point to
 //! within `hi - lo`, whatever the drop did.
 //!
@@ -101,7 +103,11 @@ pub(crate) fn nearest(
 ) -> Enclosure {
     let surface = measured(surface);
     let q = surface.evaluate_point(k, foot).expect("the foot");
-    let hi = p.distance(q) + evaluation_slack(k, surface);
+    // the evaluation's rounding, and the distance's own (a difference per coordinate, three
+    // squares, two sums and a root, on coordinates at most the larger point's size)
+    let hi = p.distance(q)
+        + evaluation_slack(k, surface)
+        + gamma(8) * p.max_dimension().max(q.max_dimension()) * 3.0_f64.sqrt();
     // ask for the foot's distance: the subdivision stops once the nearest piece is that far
     let lo = surface_distance_lower_bound(k, surface, uv_box, p, p.distance(q))
         .expect("the lower bound");

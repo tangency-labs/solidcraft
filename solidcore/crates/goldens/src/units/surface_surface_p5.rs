@@ -1908,7 +1908,8 @@ mod tests {
     /// - `gen2872`: the point is on the surface twice, on both sides of a seam; both are
     ///   returned (want solutions), each within the evaluation's rounding of the point,
     ///   where main and the in-order test returned one local foot 3.5e-12 off.
-    /// - `gen1398`: the answer is no farther than main's (3.645652443993998e-10).
+    /// - `gen1398`: the answer is no farther than main's (3.645652443993998e-10); the
+    ///   point is that near the surface, so the enclosure bounds it only from above.
     #[test]
     fn wr56_moved_guessed_drops_are_decided_by_the_global_solve() {
         use crate::certify::{evaluation_slack, nearest};
@@ -1922,6 +1923,8 @@ mod tests {
         eprintln!("gen0558: foot {:?} distance {d:e} in {e:?}", r.result_uv);
         assert!(e.holds(d), "gen0558: {d:e} outside {e:?}");
         assert!(d < 3.2e-5, "gen0558: {d:e}");
+        // the nearest point to within 1.1e-13 (measured width 1.05e-13)
+        assert!(e.width() <= 1.1e-13, "gen0558: {e:?} is not tight");
 
         let (s, p, dom, opts) = wr56_drop(2872);
         assert!(opts.want_solutions);

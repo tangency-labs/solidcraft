@@ -3628,8 +3628,8 @@ mod tests {
         // names make the guess look farther), and so does the port: a nearer result
         // is not shown to be the nearest point (#17773).
         let nearer_guess = result_uv + Point2::new(0.1, 0.0);
-        // The guess is closer than the result: upstream accepted it; the port
-        // rejects it, as the final test intends.
+        // The guess is closer than the result: upstream accepted it; the port sends
+        // it to the global solve, as every moved result.
         let farther_guess = result_uv - Point2::new(h, 0.0);
         // Equidistant but moved: upstream accepted it; the port sends it to the
         // global solve too.

@@ -1597,17 +1597,25 @@ mod tests {
     /// bounded below by the certified surface distance bound and above by its own foot. Each
     /// row's gap lies in the enclosure, and the value before WR-56 (`5.278e-9`, a drop that
     /// stopped short of the nearest point) lies above it.
+    ///
+    /// The same for the moved rows `review_gapval_ellips_ts2.smb_{0,1}_16_{0,2}`: edge use 16
+    /// of the `ellips_ts2.smb` B-rep, whose gap was `3.7008e-12` before.
     #[test]
     fn wr56_pinched_face_max_gap_is_enclosed() {
         use crate::certify::sampled_max;
         use solidcore::geom::tol::context_xsect_tol_3d;
         use solidcore::heal::gap::GapFunction;
-        const BEFORE: f64 = 5.278_275_086_186_592e-9;
-        for name in [
-            "face_pinched_huge_gaps0_0_0",
-            "face_pinched_huge_gaps0_0_1",
-            "face_pinched_huge_gaps0_2_0",
-            "face_pinched_huge_gaps0_2_1",
+        const PINCHED: f64 = 5.278_275_086_186_592e-9;
+        const ELLIPS: f64 = 3.700_826_664_369_302e-12;
+        for (name, before) in [
+            ("face_pinched_huge_gaps0_0_0", PINCHED),
+            ("face_pinched_huge_gaps0_0_1", PINCHED),
+            ("face_pinched_huge_gaps0_2_0", PINCHED),
+            ("face_pinched_huge_gaps0_2_1", PINCHED),
+            ("review_gapval_ellips_ts2.smb_0_16_0", ELLIPS),
+            ("review_gapval_ellips_ts2.smb_0_16_2", ELLIPS),
+            ("review_gapval_ellips_ts2.smb_1_16_0", ELLIPS),
+            ("review_gapval_ellips_ts2.smb_1_16_2", ELLIPS),
         ] {
             let case = crate::case::regression_case(&Runner, name);
             let inputs: Inputs = case.parse().expect("inputs");
@@ -1626,7 +1634,10 @@ mod tests {
             .expect("build") else {
                 panic!("{name}: the face did not build");
             };
-            let e = eid(0);
+            let OpIn::Gaps { eu, .. } = inputs.op else {
+                panic!("{name}: not a gaps case");
+            };
+            let e = eid(eu);
             let edge = eu1::edge(&b, e).expect("edge").expect("an edge");
             let face = eu1::face(&b, e).expect("face").expect("a face");
             let curve = b.edge(edge).expect("edge").curve.as_ref().expect("curve");
@@ -1652,7 +1663,7 @@ mod tests {
                 gf.samples().len()
             );
             assert!(enclosure.holds(gap), "{name}: {gap:e} outside {enclosure:?}");
-            assert!(enclosure.hi < BEFORE, "{name}: {enclosure:?} reaches {BEFORE:e}");
+            assert!(enclosure.hi < before, "{name}: {enclosure:?} reaches {before:e}");
         }
     }
 }

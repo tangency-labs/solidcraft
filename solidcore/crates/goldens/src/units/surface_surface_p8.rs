@@ -836,7 +836,6 @@ mod tests {
             assert!(d.success, "{name} sample {ii}: the drop failed");
             let e = crate::certify::nearest(k, surface, None, p, d.result_uv);
             assert!(e.lo <= e.hi, "{name} sample {ii}: {e:?}");
-            eprintln!("AFTER {name} {ii} {:?} {:?} {}", d.result_uv.x, d.result_uv.y, d.gap);
             if e.width() > 1e-12 * e.hi.max(1.0) {
                 // the drop without a guess (the global solve), for comparison
                 let g = surface
@@ -862,8 +861,8 @@ mod tests {
     /// WR-56 (#17467, #17773): a blend surface between boundary curves of two surfaces,
     /// whose cross derivatives are sampled at the feet of the curves' points dropped onto
     /// their surfaces, each drop guessed from the one before. Every foot is certified the
-    /// nearest point of its surface, to the asserted width (relative to the surface's
-    /// size): the moved row `gen1959`'s 2 x 101 feet, and `gen0378`'s 101 on its first
+    /// nearest point of its surface, to a width of 1e-9 of its distance
+    /// (its upper end): the moved row `gen1959`'s 2 x 101 feet, and `gen0378`'s 101 on its first
     /// surface, where taking a guessed local result nearer than its guess kept local
     /// minima up to 0.19 farther than the nearest point (samples 63 to 81) until the
     /// global solve decided them. (`gen0378`'s second surface is not asserted: its row is
