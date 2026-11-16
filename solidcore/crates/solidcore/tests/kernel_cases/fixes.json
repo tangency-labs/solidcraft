@@ -37,7 +37,6 @@
   "offset_extension_as_itself",
   "fillet_cleanup_keeps_target_faces",
   "fillet_mitre_concave_face_corners",
-  "cone_create_canonical_preserves_inside_out_and_checks_height",
   "offset_analytic_mate_edges",
   "shell_edges_on_analytics_exact",
   "curve_contacts_at_curve_ends",
