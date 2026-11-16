@@ -6,7 +6,6 @@
   Produces, in $env:DIST (default: dist/release):
     solidcraft-<version>-windows-<arch>.msi            per-machine installer (WiX v5)
     solidcraft-<version>-windows-<arch>-portable.zip   solidcraft.exe + solidcraft-cli.exe + licences
-                                                       (+ the solvecraft-cli.exe compatibility alias)
     SolidCraft-<version>-windows-<arch>.exe            the app alone (x64 only: a plain download)
 
   The binaries link the C runtime statically (+crt-static), so nothing else needs installing.
@@ -35,7 +34,9 @@
 param(
   [ValidateSet('x64', 'x86', 'arm64')] [string] $Arch = 'x64',
   [switch] $SkipBuild,
-  [ValidateSet('all', 'stage', 'package')] [string] $Phase = 'all'
+  [ValidateSet('all', 'stage', 'package')] [string] $Phase = 'all',
+  # Only the portable zip (solidcraft.exe + the CLI): no MSI, no plain .exe. For test builds.
+  [switch] $PortableOnly
 )
 $ErrorActionPreference = 'Stop'
 $Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -71,7 +72,10 @@ if (-not $SkipBuild -and $Phase -ne 'package') {
   # proc-macros are unaffected.
   $flagVar = 'CARGO_TARGET_' + ($Target.ToUpper() -replace '-', '_') + '_RUSTFLAGS'
   [Environment]::SetEnvironmentVariable($flagVar, '-C target-feature=+crt-static')
-  Invoke-Native "cargo build ($Target)" { cargo build --release --locked -p solidcraft -p solidcraft-cli --target $Target }
+  # Two invocations: cargo unifies features per invocation, and the app's eframe turns on wgpu's
+  # GL backend, which would link opengl32.dll into the CLI too (see the import check below).
+  Invoke-Native "cargo build app ($Target)" { cargo build --release --locked -p solidcraft --target $Target }
+  Invoke-Native "cargo build CLI ($Target)" { cargo build --release --locked -p solidcraft-cli --target $Target }
 }
 $Bin = Join-Path $TargetDir "$Target\release"
 $Stage = Join-Path $TargetDir "windows-package\$Arch"
@@ -86,19 +90,40 @@ function Get-PeHeader([string] $Path) {
   return @{ Machine = [BitConverter]::ToUInt16($bytes, $pe + 4); Subsystem = [BitConverter]::ToUInt16($bytes, $pe + 0x5C) }
 }
 $Machine = switch ($Arch) { 'x64' { 0x8664 } 'x86' { 0x14C } 'arm64' { 0xAA64 } }
-# solvecraft-cli.exe: the old CLI name, forwarding to solidcraft-cli.exe (compatibility shim,
-# docs/compatibility.md). Built by `-p solidcraft-cli` with the CLI.
-foreach ($check in @(@('solidcraft.exe', 2), @('solidcraft-cli.exe', 3), @('solvecraft-cli.exe', 3))) {
+foreach ($check in @(@('solidcraft.exe', 2), @('solidcraft-cli.exe', 3))) {
   $h = Get-PeHeader (Join-Path $CheckDir $check[0])
   if ($h.Machine -ne $Machine) { throw "$($check[0]) is for machine 0x$('{0:X}' -f $h.Machine), expected 0x$('{0:X}' -f $Machine) ($Arch)" }
   if ($h.Subsystem -ne $check[1]) { throw "$($check[0]) has PE subsystem $($h.Subsystem), expected $($check[1])" }
   Write-Output "ok $($check[0]): $Arch, PE subsystem $($h.Subsystem)"
 }
 & (Join-Path $PSScriptRoot 'check-icon.ps1') -Path (Join-Path $CheckDir 'solidcraft.exe')
+
+# The CLI must not import opengl32.dll: Windows Server Core has none, and the loader then refuses
+# to start the CLI at all (0xC0000135, no output; #14971). The app keeps GL and may import it.
+function Get-DllImports([string] $Path) {
+  $objdump = Get-Command llvm-objdump -ErrorAction SilentlyContinue
+  if ($objdump) {
+    return & $objdump.Source -p $Path | Select-String '^\s*DLL Name:\s*(\S+)' | ForEach-Object { $_.Matches[0].Groups[1].Value }
+  }
+  $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+  $vs = if (Test-Path $vswhere) { & $vswhere -latest -products * -property installationPath }
+  $dumpbin = if ($vs) { Get-ChildItem (Join-Path $vs 'VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe') -ErrorAction SilentlyContinue | Select-Object -Last 1 }
+  if (-not $dumpbin) { throw 'cannot check the CLI imports: neither llvm-objdump nor dumpbin was found' }
+  return & $dumpbin.FullName /nologo /dependents $Path | Select-String '^\s+(\S+\.dll)\s*$' | ForEach-Object { $_.Matches[0].Groups[1].Value }
+}
+foreach ($exe in 'solidcraft-cli.exe') {
+  $imports = @(Get-DllImports (Join-Path $CheckDir $exe))
+  if ($imports.Count -eq 0) { throw "could not read the DLL imports of $exe" }
+  if ($imports -contains 'opengl32.dll') {
+    throw "$exe imports opengl32.dll, so it will not start on Windows Server Core (0xC0000135). wgpu's GL backend (feature `"gles`") reached the CLI: build it in its own cargo invocation, without the app."
+  }
+  Write-Output "ok ${exe}: no opengl32.dll import ($($imports.Count) DLLs)"
+}
+& (Join-Path $PSScriptRoot 'check-shortcuts.ps1') -Path (Join-Path $Root 'assets/platforms/windows/solidcraft.wxs')
 if ($Phase -ne 'package') {
   Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Force -Path $Stage | Out-Null
-  Copy-Item (Join-Path $Bin 'solidcraft.exe'), (Join-Path $Bin 'solidcraft-cli.exe'), (Join-Path $Bin 'solvecraft-cli.exe') $Stage
+  Copy-Item (Join-Path $Bin 'solidcraft.exe'), (Join-Path $Bin 'solidcraft-cli.exe') $Stage
   foreach ($f in 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE', 'THIRD-PARTY-LICENSES.txt') { Copy-Item (Join-Path $Root $f) $Stage }
 }
 if ($Phase -eq 'stage') {
@@ -111,6 +136,7 @@ if (-not (Test-Path $Icon)) { throw "Missing package icon: $Icon" }
 
 # ---- MSI ---------------------------------------------------------------------------------------
 $Msi = Join-Path $Dist "solidcraft-$Version-windows-$Arch.msi"
+if (-not $PortableOnly) {
 Invoke-Native 'wix build' {
   wix build (Join-Path $Root 'assets/platforms/windows/solidcraft.wxs') -arch $Arch `
     -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
@@ -123,6 +149,7 @@ Invoke-Native 'MSI shortcut icon validation (ICE50)' {
 }
 # wix writes its debug symbols (.wixpdb) next to the MSI; keep them out of the release assets.
 Remove-Item -Force -ErrorAction SilentlyContinue ([IO.Path]::ChangeExtension($Msi, '.wixpdb'))
+}
 
 # ---- portable zip ------------------------------------------------------------------------------
 $Portable = Join-Path $TargetDir "windows-package\solidcraft-$Version-windows-$Arch-portable"
@@ -135,8 +162,8 @@ Remove-Item -Force $Zip -ErrorAction SilentlyContinue
 Compress-Archive -Path $Portable -DestinationPath $Zip
 
 # ---- the app as a plain download (x64) ---------------------------------------------------------
-$Outputs = @($Msi, $Zip)
-if ($Arch -eq 'x64') {
+$Outputs = if ($PortableOnly) { @($Zip) } else { @($Msi, $Zip) }
+if ($Arch -eq 'x64' -and -not $PortableOnly) {
   $Exe = Join-Path $Dist "SolidCraft-$Version-windows-$Arch.exe"
   Copy-Item (Join-Path $Stage 'solidcraft.exe') $Exe
   $Outputs += $Exe

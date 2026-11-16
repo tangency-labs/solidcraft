@@ -154,7 +154,8 @@ impl FilletCorner {
 
             // when binormal opposes tangent - get radial edgeuse
             if tangent.dot(bin_vec) < 0.0 {
-                seam = eu1::radial(target, seam)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+                seam = eu1::radial(target, seam)?
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the seam's radial edge use"))?;
             }
             seam_edgeuse = Some(seam);
 
@@ -248,7 +249,10 @@ impl FilletCorner {
 
         // get edgeuses marking filletEdge sector
         if edge::edgeuses(pseudo.brep(), fillet_edge, None, None)?.len() != 2 {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the fillet edge does not have exactly two edge uses",
+            ));
         }
 
         // set FilletEdgeuse->FilletGeom pointers

@@ -1,6 +1,5 @@
-//! Fork tangency-labs/smlib@1b016ca under `Kernel::fixes.offset_resolve_crossing_loops`
-//! (WR-345 addendum): an offset face's loops winding the other way under an opening are
-//! the cavity's floor.
+//! Fork tangency-labs/smlib@1b016ca (WR-345 addendum): an offset face's loops winding the
+//! other way under an opening are the cavity's floor.
 //!
 //! SolidCraft rig case shell/616 (a lid shelled 0.5 open at a rib's outer side, which
 //! stands 0.15 in from the skirt's outer wall), rebuilt from the commit message: a
@@ -28,21 +27,31 @@ mod offset_fixture;
 
 use offset_fixture::{planar_faces_at, volume, Notifications};
 use solidcore::boolean::api_brep::boolean_union;
-use solidcore::error::offset::{OffsetFailure, Unsoundness};
-use solidcore::error::Reason;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::math::Point3;
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::brep_is_manifold_solid;
-use solidcore::{Brep, Kernel, SolidError};
+use solidcore::{Brep, Kernel};
 
 /// The block with the rib `inset` in from its outer wall x = 0.
 fn ribbed(k: &mut Kernel, inset: f64) -> Brep {
     let block = create_box(k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 5.0).unwrap();
     let rib = create_box(k, Point3::new(inset, 2.0, 5.0), 3.0, 16.0, 3.0).unwrap();
     boolean_union(k, block, rib).unwrap()
+}
+
+fn shell_options() -> ShellOptions {
+    ShellOptions {
+        offset: OffsetOptions {
+            distance: -0.5,
+            extend_convex_edges: true,
+            merge_results: true,
+        },
+        create_offset_solid: true,
+        merge_sheet_side_walls: true,
+    }
 }
 
 /// The part shelled 0.5 inward open at the rib's outer side, under `fixes`.
@@ -57,15 +66,7 @@ fn shell(fixes: &UpstreamFixes, inset: f64) -> solidcore::Result<(bool, f64)> {
     let mut wall = OffsetExecutive::shell_brep(
         &mut k,
         part,
-        ShellOptions {
-            offset: OffsetOptions {
-                distance: -0.5,
-                extend_convex_edges: true,
-                merge_results: true,
-            },
-            create_offset_solid: true,
-            merge_sheet_side_walls: true,
-        },
+        shell_options(),
         &open,
         &mut notifications.context(),
     )
@@ -76,46 +77,20 @@ fn shell(fixes: &UpstreamFixes, inset: f64) -> solidcore::Result<(bool, f64)> {
     Ok((manifold, volume(&k, &mut wall)?))
 }
 
-fn crossing(walls_touch: bool) -> UpstreamFixes {
-    let mut f = UpstreamFixes::default();
-    f.offset_resolve_crossing_loops = true;
-    f.offset_walls_touch_refused = walls_touch;
-    f
-}
-
-/// Upstream (crossing loops not resolved): the merge returns no manifold solid (ten
-/// edges that are not manifold, two regions, 23 faces); the shell refuses it
-/// (`OffsetFailure::Unsound`, `NotManifoldSolid`, #3094) instead of returning it.
-#[test]
-fn default_fixes_refuse_the_shell_that_is_no_solid() {
-    let error = shell(&UpstreamFixes::default(), 0.15).unwrap_err();
-    let SolidError::Failed(failure) = &error else {
-        panic!("not a refusal: {error}");
-    };
-    assert_eq!(
-        failure.reason,
-        Reason::Offset(OffsetFailure::Unsound {
-            what: Unsoundness::NotManifoldSolid
-        })
-    );
-}
-
-/// The floor under the opening is kept: the shell is the closed form (with and without
-/// a759622's touch refusal, which this case does not reach).
+/// The floor under the opening is kept: the shell is the closed form (a759622's touch
+/// refusal does not reach this case).
 #[test]
 fn floor_under_the_opening_is_kept() {
-    for walls_touch in [false, true] {
-        let (manifold, v) = shell(&crossing(walls_touch), 0.15).unwrap();
-        assert!(manifold, "{walls_touch}");
-        assert!((v - 587.5).abs() <= 1e-9 * 587.5, "{walls_touch}: {v}");
-    }
+    let (manifold, v) = shell(&UpstreamFixes::default(), 0.15).unwrap();
+    assert!(manifold);
+    assert!((v - 587.5).abs() <= 1e-9 * 587.5, "{v}");
 }
 
 /// Control: the rib 0.6 in, past the moved wall, has loops that do not cross; the shell
 /// has the same closed form.
 #[test]
 fn rib_past_the_moved_wall_is_unchanged() {
-    let (manifold, v) = shell(&crossing(false), 0.6).unwrap();
+    let (manifold, v) = shell(&UpstreamFixes::default(), 0.6).unwrap();
     assert!(manifold);
     assert!((v - 587.5).abs() <= 1e-9 * 587.5, "{v}");
 }

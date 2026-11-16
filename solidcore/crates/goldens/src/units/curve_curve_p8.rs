@@ -327,7 +327,9 @@ fn build(c: &CurveIn) -> Result<Curve, HarnessError> {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -986,11 +988,7 @@ mod tests {
             .find(|c| c["name"] == "range_end_preserves_noncollapsed_tail")
             .unwrap();
         let op: OpIn = serde_json::from_value(case["inputs"].clone()).unwrap();
-        let original = rust(&op).unwrap();
-        assert_eq!(original.values["out"][0], 2.0);
-        let mut fixes = solidcore::kernel::UpstreamFixes::default();
-        fixes.refine_cc_range_ends = true;
-        let out = rust_with_fixes(&op, &fixes).unwrap();
+        let out = rust(&op).unwrap();
         assert_eq!(out.ints["status"], vec![0]);
         let values = &out.values["out"];
         assert_eq!(values[0], 3.0);

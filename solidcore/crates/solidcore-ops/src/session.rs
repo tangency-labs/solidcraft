@@ -1,32 +1,54 @@
-//! The session: one kernel for the process (SMLib's context is process-global too, and some of
-//! its state, such as the fillet solver's latched step, lives for the whole process), every call
-//! under its lock and a panic guard.
+//! The session: the kernels ops calls run on, each call on a kernel of its own and under a panic
+//! guard.
 //!
+//! - **Kernels:** a call takes an idle kernel, the one used last first, or makes a fresh one when
+//!   none is idle, and gives it back when it ends ([`take`], [`give_back`]). The pool's lock is
+//!   held only to take or give back a kernel, never during a call, so calls on different bodies
+//!   run at once and a long call holds up only the calls on its own bodies: a call waits for a
+//!   body another call holds on that body's own lock. A call that holds two bodies at once
+//!   locks them in one order ([`Body::lock_pair`]), so calls on the same bodies in other orders
+//!   never wait on each other for good. Calls one after another all get the same kernel, so
+//!   they see the state it keeps as one process kernel would (its random draws, caches and
+//!   context); calls side by side see the states of different kernels. At most
+//!   [`most_idle`] kernels wait between calls, however many once ran side by side. A kernel
+//!   holds no global state and a body's identities are valid only in the kernel that issued
+//!   them, so any kernel takes any body.
+//! - **Process-lifetime state:** the state upstream keeps for the whole process (SMLib's context
+//!   is process-global) is the fillet solver's latched step: the first step a call latches is
+//!   the process's ([`publish_step`]), and every kernel a call takes runs with it.
 //! - **Configuration:** the kernel runs with the opt-in fixes the application names
 //!   ([`set_fixes`], by `UpstreamFixes` flag name); which ones is the application's choice, never
 //!   ops'. Everything else about the kernel (its tolerances, context, caches) is the kernel's
 //!   default: ops offers no way to change it, so every kernel the session makes is configured
 //!   alike ([`fresh`]). Each call takes them as it starts. A thread may name its own
-//!   ([`set_thread_fixes`]), so tests with different fixes share the kernel without racing (#2983).
-//! - **Panics:** a panic inside a call is caught; the kernel, which it may have left half-updated,
-//!   is replaced by a fresh one of the same configuration, carrying the process-lifetime state the
-//!   kernel keeps as upstream keeps it for the process (the fillet solver's latched step), and the
-//!   call fails with [`Error::Internal`]. A call that only reads a body never leaves it unusable:
-//!   it reads it under its own guard ([`read_body`]) or measures a copy ([`measure_body`]). A
-//!   call that edits a body and panics puts it back as it came in ([`with_body`]).
+//!   ([`set_thread_fixes`]), so tests with different fixes run side by side without racing
+//!   (#2983).
+//! - **Panics:** a panic inside a call is caught; the call's kernel, which it may have left
+//!   half-updated, is dropped, and the call fails with [`Error::Internal`]. So is the kernel of a
+//!   call cancelled part way. A call that only reads a body never leaves it unusable: it reads it
+//!   under its own guard ([`read_body`]) or measures a copy ([`measure_body`]). A call that edits
+//!   a body and panics puts it back as it came in ([`with_body`]).
 //! - **Failures:** an application may install a callback ([`set_failure_hook`]) that is handed a
-//!   failed call's name, why it failed and its input bodies as binary `.smb` bytes, written under
-//!   the kernel's lock from bodies no panic left half-edited. The callback runs with no lock held
-//!   and under its own panic guard; calling ops from it is refused ([`Error::Reentered`]), as is
-//!   calling ops from inside a kernel call. Ops itself writes nothing and logs nothing.
-//! - **The call running now:** [`current_call`] reads it without a lock, for crash reports.
+//!   failed call's name, why it failed and its input bodies as binary `.smb` bytes, written on
+//!   the call's kernel (a fresh one after a panic) from bodies no panic left half-edited. The
+//!   callback runs with no lock held and under its own panic guard; calling ops from it is
+//!   refused ([`Error::Reentered`]), as is calling ops from inside a kernel call. Ops itself
+//!   writes nothing and logs nothing.
+//! - **The call running now:** [`current_call`] gives the call running on the calling thread,
+//!   without a lock, for crash reports: a panic hook runs on the thread that panicked.
+#![cfg_attr(
+    feature = "profile",
+    doc = "- **Profiles** (feature `profile`): [`profiled`] returns the kernel's profile of each \
+           ops call made inside it, one per call, each taken from the call's own kernel so that \
+           calls on other threads never mix into it. Without the feature none of this exists."
+)]
 
 use std::cell::Cell;
+use std::num::NonZeroUsize;
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
-use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
-use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
+use solidcore::kernel::{CancelToken, Kernel, KernelOptions, UpstreamFixes};
 use solidcore::topology::brep::p3::brep_copy;
 use solidcore::{Brep, SolidError};
 
@@ -34,7 +56,10 @@ use crate::body::Body;
 use crate::error::status;
 use crate::{Error, Result};
 
-static KERNEL: Mutex<Option<Kernel>> = Mutex::new(None);
+/// The kernels waiting between calls, the one given back last at the end.
+static IDLE: Mutex<Vec<Kernel>> = Mutex::new(Vec::new());
+/// The fillet solver's step, once a call has latched it: the process's.
+static STEP: OnceLock<f64> = OnceLock::new();
 static FIXES: Mutex<Option<UpstreamFixes>> = Mutex::new(None);
 
 /// A failed call, as the failure callback sees it.
@@ -109,8 +134,8 @@ pub fn set_fixes<'a>(
 }
 
 /// [`set_fixes`] for the calling thread alone: its calls run with exactly these fixes whatever
-/// other threads name, so tests on parallel threads with different fixes share the one kernel
-/// without racing. A thread that never calls it runs with the process's ([`set_fixes`]).
+/// other threads name, so tests on parallel threads with different fixes share the session's
+/// kernels without racing. A thread that never calls it runs with the process's ([`set_fixes`]).
 ///
 /// Not part of the API: it is public only so that this crate's integration tests, which are
 /// separate crates, can name their fixes per test. An application names its fixes once
@@ -154,23 +179,71 @@ pub fn set_failure_hook(hook: Option<Hook>) {
     *HOOK.lock().unwrap_or_else(PoisonError::into_inner) = hook;
 }
 
+/// What a work counter of the kernel reads ([`counted`]).
+#[cfg(test)]
+pub(crate) type Counter = fn(&solidcore::kernel::WorkCounters) -> u64;
+
+/// `f`'s value, and how much the kernels' work counter `counter` grew in the ops calls this
+/// thread makes inside it (tests: what the kernel did, whichever kernels the calls ran on).
+#[cfg(test)]
+pub(crate) fn counted<T>(counter: Counter, f: impl FnOnce() -> T) -> (T, u64) {
+    let outer = COUNTED.with(|c| c.replace(Some((counter, 0))));
+    let value = f();
+    let grew = COUNTED.with(|c| c.replace(outer)).map_or(0, |(_, n)| n);
+    (value, grew)
+}
+
 /// A kernel of the session's configuration: the kernel's default options and the fixes the
-/// application named. The first kernel and every kernel after a panic are made here, so they
-/// are configured alike.
+/// application named. Every kernel the pool makes is made here, so they are configured alike.
 fn fresh() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = current_fixes();
     k
 }
 
-/// The kernel that replaces `old` after a panic: [`fresh`], with the process-lifetime state
-/// upstream keeps for the whole process (the fillet solver's latched step, a value set once).
-fn replacement(old: Option<&Kernel>) -> Kernel {
-    let k = fresh();
-    if let Some(step) = old.and_then(|o| o.fillet_point_step.get()) {
+/// The most kernels kept idle between calls: as many as calls the machine runs at once. More
+/// would only be dropped later; fewer leave a fresh kernel to be made for the next calls side by
+/// side. One where the machine cannot say (wasm32, where calls run one at a time).
+fn most_idle() -> usize {
+    static MOST: OnceLock<usize> = OnceLock::new();
+    *MOST.get_or_init(|| std::thread::available_parallelism().map_or(1, NonZeroUsize::get))
+}
+
+/// A kernel for a call: the idle one given back last, or a fresh one when none is idle. It runs
+/// with the process's latched step, once a call has latched one ([`publish_step`]).
+fn take() -> Kernel {
+    let idle = IDLE.lock().unwrap_or_else(PoisonError::into_inner).pop();
+    let k = idle.unwrap_or_else(fresh);
+    if let Some(&step) = STEP.get() {
         k.fillet_point_step.set(Some(step));
     }
     k
+}
+
+/// A call's kernel, fit to use again, back among the idle ones (dropped when [`most_idle`] wait
+/// already).
+fn give_back(k: Kernel) {
+    let surplus = {
+        let mut idle = IDLE.lock().unwrap_or_else(PoisonError::into_inner);
+        if idle.len() < most_idle() {
+            idle.push(k);
+            None
+        } else {
+            Some(k)
+        }
+    };
+    // dropped with no lock held
+    drop(surplus);
+}
+
+/// The step the fillet solver latched on `k`, if it did, is the process's from now on: upstream
+/// latches it in a function static, once for the whole process. The first call to latch one
+/// publishes it; a call latching another at the same moment on another kernel keeps its own
+/// for that call only.
+fn publish_step(k: &Kernel) {
+    if let Some(step) = k.fillet_point_step.get() {
+        let _ = STEP.set(step);
+    }
 }
 
 thread_local! {
@@ -180,6 +253,70 @@ thread_local! {
     static IN_CALL: Cell<u32> = const { Cell::new(0) };
     /// Whether this thread is running the failure callback.
     static IN_HOOK: Cell<bool> = const { Cell::new(false) };
+    /// Whether the call running on this thread was cancelled, as [`with_body`] decided it when it
+    /// kept or put back its body: [`run_with`] then answers the same, so a cancel landing between
+    /// the two never leaves an edit in place under a `Cancelled` answer.
+    static STOPPED: Cell<Option<bool>> = const { Cell::new(None) };
+    /// The call running on this thread ([`current_call`]).
+    static CURRENT: Cell<Option<&'static str>> = const { Cell::new(None) };
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The work counter this thread counts while it runs inside [`counted`], and how much it
+    /// grew so far.
+    static COUNTED: Cell<Option<(Counter, u64)>> = const { Cell::new(None) };
+}
+
+#[cfg(feature = "profile")]
+thread_local! {
+    /// The profiles of this thread's calls, while it runs inside [`profiled`]. Per thread:
+    /// calls on other threads run at the same time, and each collects only its own calls.
+    static PROFILES: std::cell::RefCell<Option<Vec<CallProfile>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// One ops call's kernel profile (feature `profile`): what the kernel's profiler recorded
+/// inside it ([`solidcore::profile`]).
+#[cfg(feature = "profile")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallProfile {
+    /// The call's name, as [`current_call`] gives it.
+    pub call: &'static str,
+    /// What the profiler recorded inside it. Its first scope is the call itself, named
+    /// `call`, whose counters are the call's totals; the kernel's own scopes nest under it.
+    pub profile: solidcore::profile::Profile,
+}
+
+/// Runs `f` and returns, beside its value, the kernel profile of each ops call this thread
+/// makes inside it, in order (feature `profile`). Each call's profile is taken from its own
+/// kernel as the call ends, so calls other threads make meanwhile are in none of them;
+/// a call that panics or is cancelled reports what ran before. Nested, the inner `profiled`
+/// returns its calls and the outer one gets them too.
+#[cfg(feature = "profile")]
+pub fn profiled<T>(f: impl FnOnce() -> T) -> (T, Vec<CallProfile>) {
+    /// Puts the enclosing `profiled`'s collection back (this one's calls added to it), on a
+    /// return or a panic out of `f`.
+    struct Restore(Option<Vec<CallProfile>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let outer = self.0.take();
+            PROFILES.with(|p| {
+                let mut p = p.borrow_mut();
+                let inner = p.take();
+                *p = outer.map(|mut o| {
+                    o.extend(inner.into_iter().flatten());
+                    o
+                });
+            });
+        }
+    }
+    let outer = PROFILES.with(|p| p.borrow_mut().replace(Vec::new()));
+    let restore = Restore(outer);
+    let value = f();
+    let mine = PROFILES.with(|p| p.borrow().clone().unwrap_or_default());
+    drop(restore);
+    (value, mine)
 }
 
 /// Is this thread inside a kernel call, whose panic the session catches? (Crash reports mark
@@ -189,37 +326,16 @@ pub fn in_call() -> bool {
     IN_CALL.with(Cell::get) > 0
 }
 
-/// The longest call name [`current_call`] gives.
-const NAME_MAX: usize = 96;
-static NAME: [AtomicU8; NAME_MAX] = [const { AtomicU8::new(0) }; NAME_MAX];
-static NAME_LEN: AtomicUsize = AtomicUsize::new(0);
-
-/// `call` is running now (`None`: none is). One at a time, under the kernel's lock.
-fn set_current(call: Option<&str>) {
-    NAME_LEN.store(0, Ordering::SeqCst);
-    let Some(call) = call else { return };
-    let bytes = call.as_bytes();
-    let n = bytes.len().min(NAME_MAX);
-    for (slot, b) in NAME.iter().zip(bytes) {
-        slot.store(*b, Ordering::Relaxed);
-    }
-    NAME_LEN.store(n, Ordering::SeqCst);
-}
-
-/// The kernel call running now, if any. Takes no lock, for crash reports, so it may be cut short
-/// or mixed with the next call's name if read just as one starts.
+/// The kernel call running on the calling thread, if any: for crash reports, which a panic hook
+/// writes on the thread that panicked. Calls on other threads run at the same time, each its
+/// own thread's. Takes no lock; `None` too on a thread being torn down.
 #[must_use]
 pub fn current_call() -> Option<String> {
-    let n = NAME_LEN.load(Ordering::SeqCst);
-    if n == 0 {
-        return None;
-    }
-    let bytes: Vec<u8> = NAME
-        .iter()
-        .take(n)
-        .map(|b| b.load(Ordering::Relaxed))
-        .collect();
-    Some(String::from_utf8_lossy(&bytes).into_owned())
+    CURRENT
+        .try_with(Cell::get)
+        .ok()
+        .flatten()
+        .map(str::to_owned)
 }
 
 /// How a call's value reads: whether it is a refusal, for the calls whose answer can carry one.
@@ -240,11 +356,11 @@ impl<T> Answer for Result<T> {
 macro_rules! plain {
     ($($t:ty),* $(,)?) => { $(impl Answer for $t {})* };
 }
-plain!((), bool, f64, usize, [usize; 3], Vec<u8>, Brep);
+plain!((), bool, f64, usize, [usize; 3], Vec<u8>, Vec<usize>, Brep);
 
 impl<T> Answer for Option<T> {}
 
-/// Runs `f` on the process's kernel ([`run_on`] with no inputs).
+/// Runs `f` on a kernel of its own ([`run_on`] with no inputs).
 ///
 /// # Errors
 /// As [`run_on`].
@@ -263,9 +379,9 @@ fn message(p: &(dyn std::any::Any + Send)) -> String {
         .unwrap_or_default()
 }
 
-/// Runs `f` on the process's kernel, for a call that reads the bodies `inputs`. Should it fail
-/// while a failure callback is installed, the callback gets them. `f` must not hold a body of
-/// `inputs` locked past its return (they are written for the callback after it).
+/// Runs `f` on a kernel of its own ([`take`]), for a call that reads the bodies `inputs`. Should
+/// it fail while a failure callback is installed, the callback gets them. `f` must not hold a
+/// body of `inputs` locked past its return (they are written for the callback after it).
 ///
 /// # Errors
 /// [`Error::Reentered`] from inside a kernel call or the failure callback; the kernel's error
@@ -298,37 +414,89 @@ fn run_with<T: Answer>(
     before: bool,
     f: impl FnOnce(&mut Kernel) -> solidcore::Result<T>,
 ) -> Result<T> {
+    /// The call ends on this thread, by its return or a panic.
     struct Depth;
     impl Drop for Depth {
         fn drop(&mut self) {
+            CURRENT.with(|c| c.set(None));
             IN_CALL.with(|d| d.set(d.get().saturating_sub(1)));
         }
     }
     if in_call() || IN_HOOK.with(Cell::get) {
         return Err(Error::Reentered);
     }
-    let mut guard = KERNEL.lock().unwrap_or_else(PoisonError::into_inner);
-    let k = guard.get_or_insert_with(fresh);
+    // Cancelled already: refused before it waits for the kernel.
+    let token = crate::cancel::current();
+    if token.as_ref().is_some_and(CancelToken::is_cancelled) {
+        return Err(Error::Cancelled);
+    }
+    let mut k = take();
     k.fixes = current_fixes();
-    set_current(Some(call));
+    k.cancel.clone_from(&token);
+    CURRENT.with(|c| c.set(Some(call)));
     IN_CALL.with(|d| d.set(d.get() + 1));
     let depth = Depth;
     // the callback as the call starts: the one a failure of this call reports to
     let hook = HOOK.lock().unwrap_or_else(PoisonError::into_inner).clone();
     // the operands as they come in, for a call that consumes them, when someone will read them
-    let snapshot = (before && hook.is_some()).then(|| written(k, inputs));
-    let caught = catch_unwind(AssertUnwindSafe(|| f(k)));
-    let r = match caught {
-        Ok(Ok(v)) => Ok(v),
-        Ok(Err(e)) => Err(status(e)),
-        Err(p) => {
-            let next = replacement(guard.as_ref());
-            *guard = Some(next);
-            Err(Error::Internal(format!("{call}: {}", message(p.as_ref()))))
-        }
+    let snapshot = (before && hook.is_some()).then(|| written(&k, inputs));
+    STOPPED.with(|d| d.set(None));
+    // this thread collects profiles: the call's alone (earlier calls on this kernel left
+    // records in it, dropped here)
+    #[cfg(feature = "profile")]
+    let profiling = PROFILES.with(|p| p.borrow().is_some());
+    #[cfg(feature = "profile")]
+    if profiling {
+        let _ = k.take_profile();
+    }
+    #[cfg(test)]
+    let counting = COUNTED
+        .with(Cell::get)
+        .map(|(counter, _)| counter(&k.work_counters));
+    let caught = catch_unwind(AssertUnwindSafe(|| {
+        #[cfg(feature = "profile")]
+        let _scope = profiling.then(|| k.profiler.scope(call));
+        f(&mut k)
+    }));
+    // (its scope closed with the closure, a panic's unwinding included)
+    #[cfg(feature = "profile")]
+    if profiling {
+        let profile = k.take_profile();
+        PROFILES.with(|p| {
+            if let Some(v) = p.borrow_mut().as_mut() {
+                v.push(CallProfile { call, profile });
+            }
+        });
+    }
+    #[cfg(test)]
+    if let (Some(start), Some((counter, n))) = (counting, COUNTED.with(Cell::get)) {
+        let grew = counter(&k.work_counters).saturating_sub(start);
+        COUNTED.with(|c| c.set(Some((counter, n.saturating_add(grew)))));
+    }
+    publish_step(&k);
+    let stopped = STOPPED
+        .with(Cell::take)
+        .unwrap_or_else(|| token.as_ref().is_some_and(CancelToken::is_cancelled));
+    let (r, fit) = match caught {
+        // Cancelled during the call: no result, even one the kernel finished first, and a
+        // kernel whose caches it may have left half-built is not used again.
+        Ok(_) if stopped => (Err(Error::Cancelled), false),
+        Ok(Ok(v)) => (Ok(v), true),
+        Ok(Err(e)) => (Err(status(e)), true),
+        Err(p) => (
+            Err(Error::Internal(format!("{call}: {}", message(p.as_ref())))),
+            false,
+        ),
     };
-    set_current(None);
+    // the kernel a panic or a cancel may have left half-updated is dropped: another writes the
+    // report and goes back to the pool in its place
+    if !fit {
+        k = take();
+    }
+    k.cancel = None;
+    // A cancellation is the application's own: no failure to report.
     let why = match &r {
+        Err(Error::Cancelled) => None,
         Ok(v) => v.refusal(),
         Err(e) => Some(e.to_string()),
     };
@@ -338,12 +506,12 @@ fn run_with<T: Answer>(
         // the call, so nothing reenters, and the writer's own panic is caught.
         let inputs = match snapshot {
             Some(taken) => taken,
-            None => written(guard.get_or_insert_with(fresh), inputs),
+            None => written(&k, inputs),
         };
         Some((hook, why, inputs))
     });
     drop(depth);
-    drop(guard);
+    give_back(k);
     if let Some((hook, why, inputs)) = report {
         IN_HOOK.with(|h| h.set(true));
         // A panicking callback loses nothing of the call's result.
@@ -360,8 +528,8 @@ fn run_with<T: Answer>(
 }
 
 /// The failed call's inputs as `.smb` bytes, each from a consistent body: one a panic left
-/// half-edited is not written, nor one still held (by the call or its caller), which is never
-/// waited for under the kernel's lock.
+/// half-edited is not written, nor one still held (by the call, its caller or another call),
+/// which is never waited for.
 fn written(
     k: &Kernel,
     inputs: Inputs<'_>,
@@ -386,14 +554,26 @@ fn written(
 /// A call the kernel answers with a status, any status but success standing for no answer: an
 /// error that is exactly a kernel status ([`SolidError::sm_status`]) is `None`. Every other
 /// error (unported code, invalid input to an adapter, a missing record...) fails the call
-/// instead of hiding as a skipped entity.
+/// instead of hiding as a skipped entity. So does a status error whose cause chain
+/// ([`SolidError::cause`]) holds a solidcore-side failure ([`SolidError::is_port_failure`]) or a
+/// cancellation, or a blend certificate that spent its work budget
+/// ([`SolidError::is_not_certified`]): a stage that failed because a call was unported, because
+/// the caller cancelled or because the work was given up, is no answer of the operation on its
+/// input.
 ///
 /// # Errors
-/// The kernel's error when it stands for no status.
+/// The kernel's error when it stands for no status, or when its cause chain holds a port
+/// failure, a cancellation or a certificate past its budget.
 pub(crate) fn answer<T>(r: solidcore::Result<T>) -> solidcore::Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.sm_status().is_some() => Ok(None),
+        Err(e)
+            if e.is_status_answer()
+                && !std::iter::successors(Some(&e), |e| e.cause())
+                    .any(SolidError::is_not_certified) =>
+        {
+            Ok(None)
+        }
         Err(e) => Err(e),
     }
 }
@@ -426,7 +606,12 @@ pub(crate) fn with_body<T: Answer>(
         let r = catch_unwind(AssertUnwindSafe(|| {
             b.with_rollback(
                 |br| f(k, br),
-                |r| r.as_ref().is_ok_and(|v| v.refusal().is_none()),
+                // a call cancelled part way returns no result ([`run_with`]): its edit goes too
+                |r| {
+                    let stopped = crate::cancel::is_cancelled();
+                    STOPPED.with(|d| d.set(Some(stopped)));
+                    r.as_ref().is_ok_and(|v| v.refusal().is_none()) && !stopped
+                },
             )
         }));
         drop(b);
@@ -484,7 +669,7 @@ fn unfinished(call: &'static str) -> Error {
 }
 
 /// A deliberate panic inside a kernel call, which the session catches as it catches any
-/// ([`Error::Internal`], the kernel replaced by a fresh one): for an application's crash-report
+/// ([`Error::Internal`], its kernel dropped): for an application's crash-report
 /// check.
 ///
 /// # Errors

@@ -6,7 +6,8 @@
 //!
 //! Floating chains move together whichever member is grabbed. Parts held
 //! by joints to something fixed go to `joint_drag`; grounded parts and the active component's
-//! own bodies are left to the selection box.
+//! own bodies are left to the selection box. Both drags grab the part [`grabbed_face`] finds: a
+//! selected part under the pointer comes first, even behind another part (#15648).
 
 use solidcraft_engine::geom::prelude::*;
 use std::sync::Arc;
@@ -54,19 +55,30 @@ fn placement_of(app: &SolveApp, body: &str) -> Option<Vec<u64>> {
     path.get(..active.len() + 1).map(<[u64]>::to_vec)
 }
 
-/// Begin a drag on the part under `p` when nothing holds it in place. True when one began.
-pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
-    // The face under the pointer, past the part's own edges and vertices (not past sketches or
-    // construction geometry in front of it).
-    let hits = crate::viewport::pick(app, proj, p);
-    let Some((body, at)) =
-        hits.into_iter().take_while(|h| matches!(h, Hit::Face { .. } | Hit::Edge { .. } | Hit::Vertex { .. })).find_map(|h| match h {
+/// The face a drag that starts at `p` grabs, and the point on it: the nearest face under the
+/// pointer, past the parts' own edges and vertices (not past sketches or construction geometry in
+/// front of it). When the selection holds a part under the pointer, its nearest face instead,
+/// even where another part is in front (#15648): one of two copies placed on top of each other.
+pub(crate) fn grabbed_face(app: &SolveApp, proj: &Proj, p: Pos2) -> Option<(String, Vec3)> {
+    let faces = |hits: Vec<Hit>| {
+        hits.into_iter().take_while(|h| matches!(h, Hit::Face { .. } | Hit::Edge { .. } | Hit::Vertex { .. })).filter_map(|h| match h {
             Hit::Face { body, point, .. } => Some((body, point)),
             _ => None,
         })
-    else {
-        return false;
     };
+    let front = faces(crate::viewport::pick(app, proj, p)).next()?;
+    let s = &app.session;
+    if s.selection.is_empty() || crate::selection::holds_body(s, &front.0) {
+        return Some(front);
+    }
+    // Every body's nearest face along the ray, nearest first: only when a selected part may be
+    // behind the front one, so a plain drag picks once.
+    faces(crate::viewport::pick_all(app, proj, p)).find(|(body, _)| crate::selection::holds_body(s, body)).or(Some(front))
+}
+
+/// Begin a drag on the part under `p` when nothing holds it in place. True when one began.
+pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
+    let Some((body, at)) = grabbed_face(app, proj, p) else { return false };
     let Some(path) = placement_of(app, &body) else { return false };
     let s = &app.session;
     if s.drag_group(&path).is_err() {

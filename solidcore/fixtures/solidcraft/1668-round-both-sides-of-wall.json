@@ -243,8 +243,7 @@
     }
    },
    "fixes": [
-    "fillet_refuse_rounds_breaking_through",
-    "fillet_gn_section_generator"
+    "fillet_refuse_rounds_breaking_through"
    ]
   },
   {
@@ -309,8 +308,7 @@
     }
    },
    "fixes": [
-    "fillet_refuse_rounds_breaking_through",
-    "fillet_gn_section_generator"
+    "fillet_refuse_rounds_breaking_through"
    ]
   }
  ]

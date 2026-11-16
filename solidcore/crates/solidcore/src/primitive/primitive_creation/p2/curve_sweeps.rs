@@ -45,7 +45,7 @@ fn trimmed_edge_curve(
     let k = a.kernel(target)?;
     let source = a.brep(edge.0)?;
     let curve = crate::topology::edge::curve(source, edge.1)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::primitive_missing(OP, "the edge's curve"))?;
     let mut copy = curve.copy(k)?;
     let mut interval = crate::topology::edge::interval(source, edge.1)?;
     // fork c8f6a31 (WR-662): SER(pCrv->Trim(sInterval, FALSE)).
@@ -79,7 +79,7 @@ impl PrimitiveCreation {
     ) -> Result<()> {
         // Get Profile curves from input edges (in the target region's context)
         if self.region().is_none() {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::primitive_missing(OP, "the target region"));
         }
         let mut curves = Vec::new();
         for &edge in edges {
@@ -127,7 +127,7 @@ impl PrimitiveCreation {
     ) -> Result<()> {
         // Get Profile curves from input faces (in the target region's context)
         if self.region().is_none() {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::primitive_missing(OP, "the target region"));
         }
         let mut curves = Vec::new();
         for &face in input_faces {
@@ -181,7 +181,7 @@ impl PrimitiveCreation {
         side_faces.clear();
         end_faces.clear();
         if self.region().is_none() {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::primitive_missing(OP, "the target region"));
         }
 
         // Get the Shape from the first pipe (its status is ignored upstream)
@@ -222,6 +222,7 @@ impl PrimitiveCreation {
             orient_profile_perpendicular_to_path: true,
             move_to_profile: false,
             profile_at_path_start: false,
+            up: None,
         };
         self.create_curve_sweep(
             a,

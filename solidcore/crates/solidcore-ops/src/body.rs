@@ -4,6 +4,7 @@
 //! Operations take a body and change it, as the kernel does; an application that keeps its
 //! input calls [`Body::copy`] first.
 
+use std::collections::BTreeSet;
 use std::sync::{Mutex, MutexGuard, PoisonError, TryLockError};
 
 use solidcore::kernel::Kernel;
@@ -13,9 +14,13 @@ use solidcore::geom::certified::Verdict;
 use solidcore::mass::integrator::properties::{brep_volume, no_unsure_region, PropertyAttributes};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::primitive::api_primitives as primitives;
+use solidcore::query::api_queries::brep_is_closed_touching_solids;
 use solidcore::topology::brep::mirror::transform_matrix;
+use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p3::{brep_copy, brep_copy_mapped};
-use solidcore::topology::brep::{is_outward_solid, is_outward_touching_solids};
+use solidcore::topology::brep::primitive_outward::{is_outward_primitive, Template};
+use solidcore::topology::brep::sheet::turn_over_sheet;
+use solidcore::topology::brep::{is_outward_solid, is_valid_and_outward};
 use solidcore::topology::face::p2 as face_p2;
 use solidcore::topology::FaceId;
 use solidcore::{Brep, EntityRef, Vec3};
@@ -29,29 +34,172 @@ use crate::split::copies_of;
 use crate::{Error, Result};
 
 /// A kernel body, with its own lock: the kernel's operations take `&mut Brep`, even to measure.
+/// Beside the B-rep it may hold the proof that the B-rep is valid and faces out ([`Outward`]),
+/// made on that very B-rep and dropped by any mutable access to it ([`BodyGuard`]): a proof
+/// cannot outlive a change of the body it proves (#14830).
 #[derive(Debug)]
-pub struct Body(Mutex<Brep>);
+pub struct Body(Mutex<Held>);
+
+/// What a [`Body`]'s lock holds: the B-rep, and its proof while nothing has changed it, or the
+/// template a kernel constructor built it from while nothing has changed it (#14830: proved
+/// from the template's closed form when an operation first takes it, [`Expect::of_held`]).
+#[derive(Debug)]
+pub(crate) struct Held {
+    brep: Brep,
+    outward: Option<Outward>,
+    primitive: Option<Template>,
+}
+
+/// What a body taken out of its lock brings for its proof ([`Body::take_held`]): the proof it
+/// held, the template it was built from, both or neither.
+#[derive(Debug, Default)]
+pub(crate) struct Proof {
+    outward: Option<Outward>,
+    primitive: Option<Template>,
+}
+
+/// The proof that a B-rep is valid and faces out ([`is_valid_and_outward`] held on it), with
+/// the kernel settings it was made under. Made only by [`prove`], on the B-rep it is then kept
+/// beside; it stands for that B-rep only while it is unchanged ([`BodyGuard`]) and the
+/// kernel's settings are the same ([`Outward::holds`]).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Outward {
+    settings: Box<Settings>,
+}
+
+/// The kernel settings a proof depends on: its tolerances and the upstream fixes (which change
+/// the validity check and the enclosure), and the context's model size estimate, size ratio and
+/// zone tolerance (which tolerance queries read). A session names its fixes per call
+/// ([`crate::session::set_fixes`], [`crate::session::set_thread_fixes`]), so they can differ
+/// between two operations; a proof made under other settings is not taken.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Settings {
+    tolerances: solidcore::kernel::Tolerances,
+    fixes: solidcore::kernel::UpstreamFixes,
+    /// The context's stored model size estimate, size ratio and zone tolerance, by their bits.
+    context: [u64; 3],
+}
+
+impl Settings {
+    fn of(k: &Kernel) -> Settings {
+        Settings {
+            tolerances: k.tolerances,
+            fixes: k.fixes,
+            context: [
+                k.context.stored_model_size_estimate().to_bits(),
+                k.context.stored_large_small_size_ratio().to_bits(),
+                k.context.this_zone_tol_3d().to_bits(),
+            ],
+        }
+    }
+}
+
+impl Outward {
+    /// Whether the proof stands under `k`'s settings: the ones it was made under.
+    fn holds(&self, k: &Kernel) -> bool {
+        *self.settings == Settings::of(k)
+    }
+}
+
+/// The proof that `b` is valid and faces out, if it is ([`is_valid_and_outward`], the part of
+/// the solid tests after their topology test): the only maker of an [`Outward`].
+///
+/// # Errors
+/// The kernel's, from the validity check and the volume's sign.
+fn prove(k: &mut Kernel, b: &mut Brep) -> solidcore::Result<Option<Outward>> {
+    Ok(is_valid_and_outward(k, b)?.then(|| Outward {
+        settings: Box::new(Settings::of(k)),
+    }))
+}
+
+/// A [`Body`] locked: the B-rep to read through `Deref`; through `DerefMut` it is handed out
+/// only once the proof beside it is dropped, so no change of the B-rep keeps a proof made
+/// before it.
+#[derive(Debug)]
+pub(crate) struct BodyGuard<'a>(MutexGuard<'a, Held>);
+
+impl std::ops::Deref for BodyGuard<'_> {
+    type Target = Brep;
+    fn deref(&self) -> &Brep {
+        &self.0.brep
+    }
+}
+
+impl std::ops::DerefMut for BodyGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Brep {
+        self.0.outward = None;
+        self.0.primitive = None;
+        &mut self.0.brep
+    }
+}
 
 impl Body {
     /// A body the kernel made.
     #[must_use]
     pub(crate) fn new(b: Brep) -> Body {
-        Body(Mutex::new(b))
+        Body::held(b, None)
+    }
+
+    /// A body with the proof [`finish_proved`] made on it, if any.
+    #[must_use]
+    pub(crate) fn held(brep: Brep, outward: Option<Outward>) -> Body {
+        Body(Mutex::new(Held {
+            brep,
+            outward,
+            primitive: None,
+        }))
+    }
+
+    /// A body a kernel constructor has just built from `t`, unproved: an operation that first
+    /// takes it proves it from `t`'s closed form ([`Expect::of_held`]), so a body only measured
+    /// is never proved.
+    #[must_use]
+    pub(crate) fn primitive(brep: Brep, t: Template) -> Body {
+        Body(Mutex::new(Held {
+            brep,
+            outward: None,
+            primitive: Some(t),
+        }))
     }
 
     /// The kernel's body, locked. A body an earlier panic left unfinished is still handed out;
     /// [`with_body`] refuses it first.
-    pub(crate) fn lock(&self) -> MutexGuard<'_, Brep> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    pub(crate) fn lock(&self) -> BodyGuard<'_> {
+        BodyGuard(self.0.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    /// Two different bodies locked at once, returned in the order given. They are locked in one
+    /// order whichever is given first (by address, which stays put while both are borrowed), so
+    /// two calls holding the same two bodies, on threads of their own, never wait on each other
+    /// for good. The only way ops holds two bodies at once.
+    pub(crate) fn lock_pair<'a>(a: &'a Body, b: &'a Body) -> (BodyGuard<'a>, BodyGuard<'a>) {
+        if std::ptr::from_ref(a) < std::ptr::from_ref(b) {
+            let ga = a.lock();
+            (ga, b.lock())
+        } else {
+            let gb = b.lock();
+            (a.lock(), gb)
+        }
     }
 
     /// The kernel's body, locked, unless a panic left it unfinished or it is held now (never
     /// waited for): why not, if not.
-    pub(crate) fn try_read(&self) -> std::result::Result<MutexGuard<'_, Brep>, &'static str> {
-        self.0.try_lock().map_err(|e| match e {
+    pub(crate) fn try_read(&self) -> std::result::Result<BodyGuard<'_>, &'static str> {
+        self.0.try_lock().map(BodyGuard).map_err(|e| match e {
             TryLockError::Poisoned(_) => "the body was left unfinished by a panic: not written",
             TryLockError::WouldBlock => "the body was held: not written",
         })
+    }
+
+    /// The kernel's body taken out, leaving it empty, with its proof and its template: the one
+    /// way either leaves a body (under one lock, before anything can change the B-rep).
+    pub(crate) fn take_held(&self) -> (Brep, Proof) {
+        let mut held = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let proof = Proof {
+            outward: held.outward.take(),
+            primitive: held.primitive.take(),
+        };
+        (std::mem::replace(&mut held.brep, Brep::new()), proof)
     }
 
     /// Whether a panic interrupted an edit of this body.
@@ -64,7 +212,10 @@ impl Body {
     #[must_use]
     #[allow(dead_code)] // the families' operations take their operands out
     pub(crate) fn into_inner(self) -> Brep {
-        self.0.into_inner().unwrap_or_else(PoisonError::into_inner)
+        self.0
+            .into_inner()
+            .unwrap_or_else(PoisonError::into_inner)
+            .brep
     }
 
     /// A deep copy (`SmApiBrepCopy`): the same topology in the same order, with the attributes
@@ -142,6 +293,46 @@ impl Body {
         })?
     }
 
+    /// Turns this sheet over ([`turn_over_sheet`], `SmFace::SwapUV` on each face): each face's
+    /// side the other way (its surface's u and v swapped, its normal reversed), its edges as they
+    /// were, the body valid. Turning a sheet over twice gives it back. `order` is this body's
+    /// record order (its record's, from [`Body::from_record`] or [`Body::to_record`]).
+    ///
+    /// The turned sheet's record, its order and, for each record edge of `order`, the index of
+    /// the same edge in the new record: the record numbers edges by its canonical walk, which a
+    /// turned face's loops take the other way round (docs/native-brep.md, "Canonical order"), so
+    /// picks and history go through this map. The kernel keeps every edge, so the map is a
+    /// lookup.
+    ///
+    /// # Errors
+    /// [`Error::Unsupported`] for a body with a closed shell (turned over, a solid would be inside
+    /// out), the body as it was; [`Error::Argument`], before the body is touched, for an `order`
+    /// that is not this body's (one naming an edge the body does not have); the kernel's status;
+    /// those of [`Body::to_record`].
+    pub fn turn_over(&self, order: &Order) -> Result<TurnedOver> {
+        with_body("turn_over_sheet", self, |k, b| {
+            // the kernel keeps every edge, so an order whose edges are all the body's maps
+            // through the turned record below; any other is refused before the sheet turns
+            let edges: BTreeSet<_> = b.edge_list().iter().collect();
+            if !order.edges.iter().all(|e| edges.contains(e)) {
+                return Ok(Err(Error::Argument));
+            }
+            Ok(turn_over_sheet(k, b).map_err(status))
+        })??;
+        let (record, new_order) = self.to_record()?;
+        let now = new_order.record_edges();
+        let edges = order
+            .edges
+            .iter()
+            .map(|e| now.get(e).copied().ok_or(Error::Argument))
+            .collect::<Result<Vec<u32>>>()?;
+        Ok(TurnedOver {
+            record,
+            order: new_order,
+            edges,
+        })
+    }
+
     /// Face, edge and vertex counts.
     ///
     /// # Errors
@@ -173,6 +364,18 @@ impl Body {
             brep_volume(k, b, relative_accuracy, &attrs)
         })
     }
+}
+
+/// A sheet turned over ([`Body::turn_over`]): its record and order, and where each record edge
+/// of the order it was turned with went.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TurnedOver {
+    /// The turned sheet's record.
+    pub record: Record,
+    /// Its record order.
+    pub order: Order,
+    /// For each record edge before the turn, its index in `record`.
+    pub edges: Vec<u32>,
 }
 
 /// The conditioning a body's motion must be proved above, its smallest scale against its
@@ -231,11 +434,25 @@ impl Body {
     /// [`Error::Unsupported`] for what the record cannot carry (yet); [`Error::Record`] for
     /// kernel data that does not make a valid record; the kernel's error by its type.
     pub fn to_record(&self) -> Result<(Record, Order)> {
+        self.with_record("brep::to_record", |_, record, order| Ok((record, order)))
+    }
+
+    /// `f` on this body's kernel B-rep with its record and [`Order`] ([`Body::to_record`]), in
+    /// one call under the body's lock, so the order is the one of the B-rep `f` reads. The body
+    /// is edited as [`Body::to_record`] edits it.
+    ///
+    /// # Errors
+    /// Those of [`Body::to_record`]; `f`'s, by its type.
+    pub(crate) fn with_record<T>(
+        &self,
+        call: &'static str,
+        f: impl FnOnce(&Brep, Record, Order) -> solidcore::Result<T>,
+    ) -> Result<T> {
         let mut out = None;
         let mut refusal = None;
-        with_body("brep::to_record", self, |k, b| {
+        with_body(call, self, |k, b| {
             match to_record(k, b) {
-                Ok(made) => out = Some(made),
+                Ok((record, order)) => out = Some(f(b, record, order)?),
                 Err(Unsupported::Kernel(e)) => return Err(e),
                 Err(e) => refusal = Some(refused(e)),
             }
@@ -267,6 +484,35 @@ impl Expect {
     pub(crate) fn of(k: &mut Kernel, input: &mut Brep) -> solidcore::Result<Expect> {
         Ok(Expect {
             solid: is_outward_solid(k, input)?,
+            touching: false,
+        })
+    }
+
+    /// As [`Expect::of`], for an operand taken out of its body with what it held
+    /// ([`Body::take_held`]): the manifold test always, then the proof where it stands under
+    /// `k`'s settings; else, for a body a constructor built and nothing changed since, the
+    /// validity check and its template's closed form in place of the enclosure
+    /// ([`is_outward_primitive`], #14830); else a new proof (`is_outward_solid`'s, step by
+    /// step), which is also what a template whose certificate refuses gets. A proof or a
+    /// template is only ever taken in place of the same test on the same B-rep: none, or a
+    /// proof made under other settings, proves as [`Expect::of`] does.
+    ///
+    /// # Errors
+    /// As [`Expect::of`]; those of [`is_outward_primitive`].
+    pub(crate) fn of_held(
+        k: &mut Kernel,
+        input: &mut Brep,
+        proof: Proof,
+    ) -> solidcore::Result<Expect> {
+        let solid = is_manifold_solid(input)?
+            && (proof.outward.is_some_and(|o| o.holds(k))
+                || match proof.primitive {
+                    Some(t) => is_outward_primitive(k, input, &t)?,
+                    None => false,
+                }
+                || prove(k, input)?.is_some());
+        Ok(Expect {
+            solid,
             touching: false,
         })
     }
@@ -304,25 +550,38 @@ impl Expect {
 ///
 /// # Errors
 /// The kernel's error from the solid test.
-pub(crate) fn finish(
+pub(crate) fn finish(k: &mut Kernel, b: Brep, expect: Expect) -> solidcore::Result<Result<Brep>> {
+    Ok(finish_proved(k, b, expect)?.map(|(b, _)| b))
+}
+
+/// As [`finish`], with the proof its solid test made on the result, if it made one (a solid
+/// result: the topology test, then [`prove`]), for the result's [`Body`] to keep
+/// ([`Body::held`]).
+///
+/// # Errors
+/// The kernel's error from the solid test.
+pub(crate) fn finish_proved(
     k: &mut Kernel,
     mut b: Brep,
     expect: Expect,
-) -> solidcore::Result<Result<Brep>> {
+) -> solidcore::Result<Result<(Brep, Option<Outward>)>> {
     if b.face_list().is_empty() {
         return Ok(Err(Error::Empty));
     }
-    let solid = |k: &mut Kernel, b: &mut Brep| {
-        if expect.touching {
-            is_outward_touching_solids(k, b)
-        } else {
-            is_outward_solid(k, b)
-        }
+    if !expect.solid {
+        return Ok(Ok((b, None)));
+    }
+    // is_outward_touching_solids / is_outward_solid, step by step, keeping the proof
+    let closed = if expect.touching {
+        is_manifold_solid(&b)? || brep_is_closed_touching_solids(&b)?
+    } else {
+        is_manifold_solid(&b)?
     };
-    if expect.solid && !solid(k, &mut b)? {
+    let outward = if closed { prove(k, &mut b)? } else { None };
+    if outward.is_none() {
         return Ok(Err(Error::NotSolid));
     }
-    Ok(Ok(b))
+    Ok(Ok((b, outward)))
 }
 
 /// Copies of each attribute `from` carries in `src`.
@@ -397,7 +656,8 @@ pub fn make_box(origin: [f64; 3], size: [f64; 3]) -> Result<Body> {
         return Err(Error::Argument);
     }
     let [x, y, z] = size;
-    run("create_box", |k| primitives::create_box(k, o, x, y, z)).map(Body::new)
+    run("create_box", |k| primitives::create_box(k, o, x, y, z))
+        .map(|b| Body::primitive(b, Template::Block { origin: o, size }))
 }
 
 /// A cylinder about +Z from its base centre, radius and height positive (`SmApiCreateCylinder`).
@@ -412,7 +672,16 @@ pub fn make_cylinder(origin: [f64; 3], radius: f64, height: f64) -> Result<Body>
     run("create_cylinder", |k| {
         primitives::create_cylinder(k, o, radius, height)
     })
-    .map(Body::new)
+    .map(|b| {
+        Body::primitive(
+            b,
+            Template::Cylinder {
+                origin: o,
+                radius,
+                height,
+            },
+        )
+    })
 }
 
 /// A sphere, radius positive (`SmApiCreateSphere`).
@@ -424,7 +693,8 @@ pub fn make_sphere(center: [f64; 3], radius: f64) -> Result<Body> {
     if !positive(radius) {
         return Err(Error::Argument);
     }
-    run("create_sphere", |k| primitives::create_sphere(k, o, radius)).map(Body::new)
+    run("create_sphere", |k| primitives::create_sphere(k, o, radius))
+        .map(|b| Body::primitive(b, Template::Sphere { center: o, radius }))
 }
 
 /// A cone or frustum about +Z (`SmApiCreateCone`): base radius and height positive, top radius
@@ -460,5 +730,14 @@ pub fn make_torus(center: [f64; 3], major_radius: f64, minor_radius: f64) -> Res
     run("create_torus", |k| {
         primitives::create_torus(k, o, major_radius, minor_radius)
     })
-    .map(Body::new)
+    .map(|b| {
+        Body::primitive(
+            b,
+            Template::Torus {
+                center: o,
+                major: major_radius,
+                minor: minor_radius,
+            },
+        )
+    })
 }

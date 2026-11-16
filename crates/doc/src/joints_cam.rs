@@ -527,7 +527,7 @@ fn setup(doc: &Document, st: &ModelState, l: &MotionLink, c: &Cam) -> Result<Set
     if cam.a.occurrence == cam.b.occurrence {
         return Err(bad("the cam joint joins two parts"));
     }
-    let (fa, fb) = (super::resolve_origin(doc, st, &cam.a)?, super::resolve_origin(doc, st, &cam.b)?);
+    let (fa, fb) = (cam.offset_frame_a(super::resolve_origin(doc, st, &cam.a)?), super::resolve_origin(doc, st, &cam.b)?);
     let (pts, occ, size) = profile_points(doc, st, &c.profile, cam, (&fa, &fb))?;
     if pts.len() < 3 || pts.len() > MAX_PROFILE_POINTS || !size.is_finite() || size <= 0.0 {
         return Err(bad(&format!("the profile must have 3 to {MAX_PROFILE_POINTS} points")));
@@ -555,7 +555,7 @@ fn setup(doc: &Document, st: &ModelState, l: &MotionLink, c: &Cam) -> Result<Set
     // The moving side travels (or turns) by +value along its z when it is b, −value when it is a.
     let c_inv = inv(&frame)?;
     let moves_b = follower_is_b(doc, cam, fol, (fixed, occ))?;
-    let (ga, gb) = (super::resolve_origin(doc, st, &fol.a)?, super::resolve_origin(doc, st, &fol.b)?);
+    let (ga, gb) = (fol.offset_frame_a(super::resolve_origin(doc, st, &fol.a)?), super::resolve_origin(doc, st, &fol.b)?);
     let guide = if moves_b {
         mat_mul(&world(doc, fol.a.occurrence), &ga)
     } else {
@@ -930,7 +930,7 @@ mod tests {
     /// a guide only on the cam's own side is refused.
     #[test]
     fn the_guide_is_the_side_fewer_moving_joints_from_the_frame() {
-        let origin = JointOrigin { occurrence: 0, snap: super::super::Snap::Point { point: Vec3::ZERO, z: None, x: None } };
+        let origin = JointOrigin::new(0, super::super::Snap::Point { point: Vec3::ZERO, z: None, x: None });
         let joint = |id: u64, kind: JointKind, a: u64, b: u64| super::super::Joint {
             id,
             name: format!("J{id}"),
@@ -944,8 +944,19 @@ mod tests {
             angle: 0.0,
             suppressed: false,
             exprs: Default::default(),
+            offset_xy: [0.0; 2],
+            captured: None,
+            constraint: None,
         };
-        let occ = |id: u64, grounded: bool| crate::Occurrence { id, component: id, parent: 0, name: format!("O{id}"), transform: IDENTITY, grounded };
+        let occ = |id: u64, grounded: bool| crate::Occurrence {
+            id,
+            component: id,
+            parent: 0,
+            name: format!("O{id}"),
+            transform: IDENTITY,
+            grounded,
+            expressed_moves: Vec::new(),
+        };
         // 1 frame (grounded), 2 cam, 3-6 a rigid chain to the guide 7, 8 the piston, 9 crank, 10 rod.
         let mut doc = Document { occurrences: (1..=10).map(|id| occ(id, id == 1)).collect(), ..Document::default() };
         let (r, v, s) = (JointKind::Rigid, JointKind::Revolute, JointKind::Slider);

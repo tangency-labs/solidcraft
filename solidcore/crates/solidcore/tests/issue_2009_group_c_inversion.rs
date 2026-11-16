@@ -13,7 +13,7 @@ use solidcore::nurbs::b_spline_surface::LocationType;
 use solidcore::surface::cone::Cone;
 use solidcore::surface::sphere::Sphere;
 use solidcore::surface::surface::Surface;
-use solidcore::{Kernel, SolidError};
+use solidcore::Kernel;
 
 fn kernel(apart: bool) -> Kernel {
     let mut k = Kernel::default();
@@ -23,7 +23,9 @@ fn kernel(apart: bool) -> Kernel {
 
 fn code<T: std::fmt::Debug>(r: &solidcore::Result<T>) -> i32 {
     match r {
-        Err(SolidError::Upstream { code, .. }) => *code,
+        Err(e) if solidcore::error::upstream_status(e).is_some() => {
+            solidcore::error::upstream_status(e).unwrap_or(-1)
+        }
         other => panic!("expected an upstream status, got {other:?}"),
     }
 }

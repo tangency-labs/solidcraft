@@ -4,12 +4,12 @@
 use crate::{
     ProductMesh, ProductScene,
     job::{CancelToken, ErrorCode, JobError, Result},
-    surface::OpaqueSurface,
 };
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb3, Mesh};
+use solidcraft_viewport::surface::OpaqueSurface;
 use std::{collections::BTreeSet, fmt, sync::Arc};
 
 pub const MAX_STAGE_PANELS: usize = 32;

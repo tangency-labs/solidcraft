@@ -8,6 +8,7 @@
 //! | [`find_first_point_within_tol_to_pnt`] | `SmTools::FindFirstPointWithinTolToPnt`   |
 //! | [`find_first_vertex_within_tol_to_pnt`]| `SmTools::FindFirstVertexWithinTolToPnt`  |
 //! | [`find_coincident_edge`]               | `SmTools::FindCoincidentEdge`             |
+//! | [`find_edge_proved_along`]             | none (own design)                         |
 //! | [`find_edge`]                          | `SmTools::FindEdge`                       |
 //! | [`find_face`]                          | `SmTools::FindFace`                       |
 //! | [`PointMatch`]                         | the out-params of `FindFirstPointWithinTolToPnt` |
@@ -312,6 +313,62 @@ pub fn find_coincident_edge(
     Ok(None)
 }
 
+/// Not upstream: the index of the first of `edges` between the query's vertices that is
+/// proved to be the query's curve (docs/booleans.md, "One edge or two"): every point of
+/// the curve over its interval within the query's tolerance plus the edge's of the edge's
+/// curve over its interval, and every point of the edge's curve as near the query's, or in
+/// the ball of one of the two vertices (its tolerance about its point), which holds both
+/// curves' ends ([`Curve::proved_together`]: an enclosure, where
+/// [`find_coincident_edge`] samples). The edge owning the curve is skipped. `None` where
+/// no edge is proved.
+///
+/// # Errors
+///
+/// Those of the edge and vertex queries and of the proof (its cancellation).
+pub fn find_edge_proved_along(
+    k: &Kernel,
+    brep: &Brep,
+    query: &CoincidentEdgeQuery<'_>,
+    edges: &[EdgeId],
+) -> Result<Option<usize>> {
+    let (v1, v2) = (query.start_vertex, query.end_vertex);
+    let mut ends = Vec::new();
+    for v in [v1, v2] {
+        ends.push((brep.vertex(v)?.point, vertex_tolerance(brep, v)?));
+    }
+    for (ii, &e) in edges.iter().enumerate() {
+        if query.curve_owner == Some(e) {
+            continue;
+        }
+        let matches = (edge_vertex(brep, e)? == Some(v1)
+            && edge_other_vertex(brep, e, v1)? == Some(v2))
+            || (edge_vertex(brep, e)? == Some(v2) && edge_other_vertex(brep, e, v2)? == Some(v1));
+        if !matches {
+            continue;
+        }
+        // The edge's tolerance, at most the B-rep's: an edge's tolerance grows when a vertex
+        // of it takes in another point (a merge already decided), and read back here it
+        // decided the next edge by the merges before it. A 2 x 3 sheet shelled by exactly two
+        // tolerances had its wall along y = 3, merged after the one along y = 0, made one
+        // edge where y = 0 kept two (`tests/one_edge_or_two_symmetric_walls.rs`). The B-rep's
+        // tolerance is the same for every edge of the operation.
+        let edge_tol = edge_tolerance(brep, e)?.min(brep.tolerance());
+        let tol = query.tolerance + edge_tol;
+        let edge_ivl = edge_interval(brep, e)?;
+        if query.curve.proved_together(
+            k,
+            &query.interval,
+            edge_curve(brep, e)?,
+            &edge_ivl,
+            tol,
+            &ends,
+        )? {
+            return Ok(Some(ii));
+        }
+    }
+    Ok(None)
+}
+
 /// Finds the edge of `brep` nearest to `point` and the curve parameter of the
 /// closest point on it (`SmTools::FindEdge`). There is no distance limit.
 ///
@@ -391,7 +448,7 @@ fn edge_interval(brep: &Brep, e: EdgeId) -> Result<Extent1d> {
 /// `pE->GetCurve()`, `NER` on a missing curve.
 fn edge_curve(brep: &Brep, e: EdgeId) -> Result<&Curve> {
     crate::topology::edge::curve(brep, e)?
-        .ok_or(SolidError::null_pointer("geom::tools::edge_curve"))
+        .ok_or_else(|| SolidError::geom_missing("geom::tools::edge_curve", "the edge's curve"))
 }
 
 /// `pE->GetCurve()->EvaluatePoint(t)` (`NER` on a missing curve).
@@ -402,17 +459,20 @@ fn edge_curve_point(k: &Kernel, brep: &Brep, e: EdgeId, t: f64) -> Result<Point3
 /// First derivative from `pE->GetCurve()->Evaluate(t, 1, TRUE, ...)`.
 fn edge_curve_derivative(k: &Kernel, brep: &Brep, e: EdgeId, t: f64) -> Result<Vec3> {
     let pv = edge_curve(brep, e)?.evaluate(k, t, 1, true, true)?;
-    pv.get(1).copied().ok_or(SolidError::null_pointer(
-        "geom::tools::edge_curve_derivative",
-    ))
+    pv.get(1).copied().ok_or_else(|| {
+        SolidError::geom_missing(
+            "geom::tools::edge_curve_derivative",
+            "the curve's derivative",
+        )
+    })
 }
 
 /// First derivative from `pCurve->Evaluate(t, 1, TRUE, ...)`.
 fn curve_derivative(k: &Kernel, curve: &Curve, t: f64) -> Result<Vec3> {
     let pv = curve.evaluate(k, t, 1, true, true)?;
-    pv.get(1)
-        .copied()
-        .ok_or(SolidError::null_pointer("geom::tools::curve_derivative"))
+    pv.get(1).copied().ok_or_else(|| {
+        SolidError::geom_missing("geom::tools::curve_derivative", "the curve's derivative")
+    })
 }
 
 /// `pCurve->DropPoint(ivl, pt, NULL, tol, &guess, ...)` (local solve, `SM_SO_MINIMIZE`).

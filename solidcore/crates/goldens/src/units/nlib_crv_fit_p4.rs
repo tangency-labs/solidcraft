@@ -23,6 +23,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::error::nurbs::nlib_number;
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::crv_basic::Curve;
@@ -97,7 +98,7 @@ fn dump(o: &mut Vec<f64>, c: &Curve) {
 /// The NLib status of a Rust error (`NL_ERROR.eno`).
 fn nl_status(e: &SolidError) -> f64 {
     match e {
-        SolidError::Nlib { code, .. } => f64::from(code.code()),
+        e if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
         _ => -1.0,
     }
 }
@@ -105,7 +106,9 @@ fn nl_status(e: &SolidError) -> f64 {
 /// The `SmStatus` of a Rust error.
 fn sm_status(e: &SolidError) -> f64 {
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }

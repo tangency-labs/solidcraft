@@ -436,7 +436,9 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
                 Ok(()) => 0,
                 Err(e) if e.is_unported() => return Err(e),
                 Err(solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. }) => 1007,
-                Err(solidcore::SolidError::Upstream { code, .. }) => code,
+                Err(e) if solidcore::error::upstream_status(&e).is_some() => {
+                    solidcore::error::upstream_status(&e).unwrap_or(-1)
+                }
                 Err(_) => solidcore::error::SM_ERR,
             };
             // `GetFaces` / `GetEdges` / `GetVertices` as the shim reads them (a traversal
@@ -470,7 +472,9 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
                 Ok(()) => 0,
                 Err(e) if e.is_unported() => return Err(e),
                 Err(solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. }) => 1007,
-                Err(solidcore::SolidError::Upstream { code, .. }) => code,
+                Err(e) if solidcore::error::upstream_status(&e).is_some() => {
+                    solidcore::error::upstream_status(&e).unwrap_or(-1)
+                }
                 Err(_) => solidcore::error::SM_ERR,
             };
             record.extend([
@@ -527,7 +531,9 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
                 Ok(()) => 0,
                 Err(e) if e.is_unported() => return Err(e),
                 Err(solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. }) => 1007,
-                Err(solidcore::SolidError::Upstream { code, .. }) => code,
+                Err(e) if solidcore::error::upstream_status(&e).is_some() => {
+                    solidcore::error::upstream_status(&e).unwrap_or(-1)
+                }
                 Err(_) => solidcore::error::SM_ERR,
             };
             // On success Boolean2D returns A (here moved into the output slot) and

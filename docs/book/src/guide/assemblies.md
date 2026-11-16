@@ -46,8 +46,10 @@ angle. A ghost shows where the part started. **OK** keeps the new angle.
 
 A component is placed by its **occurrences**. Paste creates another instance of the same
 component, and **Paste New** creates an independent copy. Move an occurrence with the move
-triad, then **Capture Position** to keep it or **Revert** to put it back. SolidCraft asks before
-the next command if a move wasn't captured. **Ground** fixes an occurrence in place, and
+triad, then **Capture Position** to keep it or **Revert** to put it back. **Capture Position**
+also saves every joint's current values, and **Revert Position** puts the joints back to them,
+clamped to their limits, together with the parts, as one undo step. SolidCraft asks before the
+next command if a move wasn't captured. **Ground** fixes an occurrence in place, and
 **Unground** (the same row of **Placement** in the browser's context menu) frees it again.
 
 The design's first part is grounded when it is made: the first occurrence placed directly in the
@@ -68,7 +70,9 @@ does not move, and a part that joints hold to something grounded moves only as f
 allow (below). Dragging any member of a chain joined to nothing grounded moves the whole chain,
 preserving its joint values. Shared nested definitions move in every instance; the selected
 instance follows the pointer even when its parent is rotated differently from the first one. A drag that starts on empty space, on a part that can't move, or
-with Shift, Ctrl (Cmd) or Alt held draws a selection box instead. Other uncaptured moves stay
+with Shift, Ctrl (Cmd) or Alt held draws a selection box instead. A drag over a selected part
+grabs that part, even where another part is in front of it: select a copy's row in the Browser
+to drag it off a grounded copy placed on top of it. Other uncaptured moves stay
 pending. Scripts and agents do the same with `occurrence.drag {occurrence or path, at, point}`,
 which moves the placement by `point - at` in world coordinates and answers the placements it
 `moved`.
@@ -93,6 +97,25 @@ closes the handles.
 
 To use the previous Move panel, turn off **Use joint motion handles for assembly Move**
 in the same settings section.
+
+**Place a part from parameters.** `occurrence.move` takes its `translate` as numbers or as length
+expressions over the design's parameters (`"translate": ["0 mm", "tube_front_y", 0]`), as
+`solid.move` does for bodies. An occurrence moved by expressions that name a parameter keeps them
+(`expressed_moves` in `component.list`) and, whenever such a parameter changes, moves on by the
+difference, along the axes the move was given in (`space: local` or `world`), so an imported STEP
+part placed at a station follows the station. Other moves of it (a drag, another move) stay, and
+undo, saving and opening keep the expressions. Renaming a parameter carries into them, and
+deleting one they use is refused. A move by expressions is captured at once (`capture: false` is
+refused with them). If an expression stops working out (say a parameter becomes an angle), the
+part stays where it is until it works out again.
+
+The same holds for the `origin` a move turns about (a part that turns about a point that follows a
+parameter is carried by what the turn leaves behind when the point moves), for the translation
+column of a `matrix` (the last entry of each of the first three rows, or entries 4, 8 and 12 of a
+flat one; the rotation entries are numbers), and for the `matrix` of `file.insert_step`, which
+places the new part the same way. A grounded part stays put, as with `translate`. The turn's
+`angle`, the rotation entries of a `matrix` and an absolute placement (`to`, `to_matrix`) are
+worked out once, when the move is made.
 
 Paste New copies nested component definitions, sketches, feature histories and generated
 dimension parameters. Repeated child instances remain shared within the new copy. Materials,
@@ -128,6 +151,11 @@ with the motion axis along that edge. A revolute joint turns about the picked ed
 moves along it. Round edges use their circle's centre and normal. Existing saved joint origins
 keep their axes.
 
+A joint origin picked on a part inside a sub-assembly that is placed more than once stays on the
+copy it was picked on. A joint at it holds or moves that copy as a whole, since every copy shares
+the part inside. Scripts give the copy with `"path"`: the occurrence ids from the root down to the
+part, as `occurrence.properties` reports them.
+
 A joint origin on a face or a hole keeps the turn it had when it was picked: when the face tilts
 (a bend angle or a rotation changing with a parameter) the part on it tilts with the face but
 doesn't spin about it.
@@ -138,13 +166,19 @@ point, its x and y running along the two edges into the face. The edge, the face
 are found again by name, so a bracket set 40 mm in from a panel's corner (a planar joint with
 values `[40, 40, 0]`) stays 40 mm in from that corner when the panel changes size.
 
-A joint's offset, angle and values can be typed as expressions over the design's parameters
+A joint's Z offset, angle and values can be typed as expressions over the design's parameters
 (`"offset": "gap + 2"`, `"values": ["travel"]`). The joint keeps them and works them out again
 whenever the design changes, so a part seated `gap` above a panel moves with `gap`. Renaming a
 parameter carries into the joints that use it, and deleting one they use is refused. If an
 expression stops working out (say a parameter becomes an angle), the joint is left out of the
 solve and `joint.solve` gives the reason, instead of placing the part from old numbers. Typing a
 plain number, or driving the value, drops that expression.
+
+**Edit Joint → Position** shows **Offset X**, **Offset Y** and **Offset Z**. X and Y move along
+the saved first attachment's axes. Their expressions are evaluated once, as during creation;
+scripts use `offset_x` and `offset_y`. Older designs keep their saved attachment positions,
+with X and Y initially zero for additional shifts from those positions. Assembly constraints
+keep their existing controls and reference geometry until changed to a plain joint.
 
 **Relations** are joints that tie only part of a placement, so a part is placed the way a
 designer describes it, one relation at a time: `parallel` (z along z, free to move and turn
@@ -293,6 +327,11 @@ part ("Pedestal:1 is not connected to anything grounded"), the Drive Joints dial
 row, `motion.play` lists such joints under `unmoved`, and `joint.list` names every such chain under
 `floating`. Ground a part of the chain, or join it to a grounded part (a rigid as-built joint keeps
 it where it is), and it moves.
+
+Driving a joint turns the side that is held by no grounded part, with everything joined to it
+rigidly. A rigid joint whose origin is lost (its face was deleted) still holds its two parts as
+they are, so the parts beyond it move with the side that turns. A joint between two grounded
+parts has nothing to turn: the reason says "both sides are held by grounded parts" and names them.
 
 `joint.drive` answers the joint's values as `joint.list` gives them, in degrees and millimetres
 with their units and limits, and `moved` says whether any part moved. A joint's origins are mated
@@ -460,7 +499,8 @@ To edit the source, right-click a linked component or occurrence in the Browser 
 **Open Linked Design**. It opens the part in another tab and reports if its file is missing.
 **Break Link** (`component.break_link`) keeps the bodies and forgets the file, and
 `component.links` lists the links, whether their files are found, and whether they changed since
-the assembly last read them (`changed`). A linked component holds
+the assembly last read them (`changed`). When a file can't be reached it also gives a
+`state` (`missing`, `unreadable` or `not_allowed`) and a `reason`. A linked component holds
 the part's bodies only: its timeline, parameters and sheet-metal data (flat pattern, bend
 table) stay in the part's own design.
 
@@ -483,6 +523,14 @@ to use. Relinking updates that component's stored path and solid bodies for **al
 instances**, keeping their identities and placements. Cancelling or choosing a missing,
 invalid, empty or self-referencing design leaves the assembly unchanged. The operation is
 one undo step and the new path is saved relative to the assembly when possible.
+
+To swap only one occurrence of a component placed several times, right-click that occurrence
+and choose **Component → Relink Source…**. Only that occurrence shows the chosen design. It
+keeps its position, grounding and joints, which move to the same faces of the new design where
+it has them. It becomes an occurrence of the component already linked to that design, or of a
+new linked component; the other occurrences keep the old source. Scripts pass the occurrence:
+`component.relink {component, occurrence, path}`, and the reply's `component` is then the one
+the occurrence shows and `previous_component` the one it showed.
 
 Scripts use `component.relink {component, path}`. The reply includes `previous_path`, `path`,
 `warnings`, `joint_errors` and `joint_conflicts`. Changed geometry can invalidate a joint's
@@ -517,8 +565,8 @@ the component shares them, Paste New copies them, and they are saved with the co
 `component.metadata.set {component, part_number?, description?, revision?, bom_type?, values?, properties?}`
 changes them in one undo step (an empty value removes a field). The root component is the
 design itself: its properties are `document.metadata`'s. Standard parts (`parts.insert`) get a
-part number from their standard and size (`ISO 4762 M6x20`, or a bearing's designation) and a
-description; **Change Part Size** renumbers them, keeping a field you changed yourself.
+part number from their standard and size (`ISO 4762 M6x20`, `GOST 7798-70 M12x60`, or a bearing's
+designation) and a description; **Change Part Size** renumbers them, keeping a field you changed yourself.
 
 **Bill of Materials** (`assembly.bom`, on the **INSPECT** panel) counts the placed components:
 

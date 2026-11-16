@@ -25,6 +25,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::error::nurbs::nlib_number;
 use solidcore::nurbs::crv_basic::Curve;
 use solidcore::nurbs::math::{CPoint, NOW, NOZ};
 use solidcore::nurbs::srf_adv::p6 as adv;
@@ -269,7 +270,7 @@ fn der_entry(der: &[Option<CrvIn>], i: usize) -> Option<&CrvIn> {
 fn status<T>(r: &SolidResult<T>) -> f64 {
     match r {
         Ok(_) => 0.0,
-        Err(SolidError::Nlib { code, .. }) => f64::from(code.code()),
+        Err(e) if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
         // `ST_BezCalcArcLength` past its recursion limit: upstream's bare error flag.
         Err(SolidError::NotConverged { operation, .. })
             if *operation == "nurbs::bezier::calc_arc_length" =>
@@ -317,6 +318,8 @@ fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
                 deg: s.deg,
                 dir: Direction::from_flag(s.dir).ok_or_else(|| harness("bad direction flag"))?,
                 e: s.e,
+                // the fork's upright option, off: upstream's sweep, as the golden records it
+                up: None,
             };
             let r = adv::create_sweep_scale(&traj, &sect, v3(s.z0), &opt);
             o.push(status(&r));

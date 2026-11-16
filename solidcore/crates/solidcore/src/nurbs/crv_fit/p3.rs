@@ -45,9 +45,9 @@
 //! - [`interp_knots_and_tangents`] rejects a degree above `NL_MAXDEG` with
 //!   `InvalidInput` (upstream overruns its basis scratch arrays; the port would
 //!   otherwise size its knot arrays from the degree).
-//! - Errors are [`SolidError::Nlib`] values with the upstream `NL_*_ERR` number.
+//! - Errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the upstream `NL_*_ERR` number.
 //!   The `NL_STACKS` arguments and the routine-name strings have no counterpart.
-//! - Work arrays that cannot be reserved return [`NlibCode::Memory`] (upstream's
+//! - Work arrays that cannot be reserved return [`NurbsFailure::Memory`] (upstream's
 //!   `NL_MEM_ERR` from a failed `N_Malloc`) instead of aborting. Index arithmetic on
 //!   caller counts (`n + p + 1`, `p + 1`, `2 * p`, ...) that would overflow `NL_INDEX`
 //!   (undefined behaviour upstream) returns [`SolidError::InvalidInput`]; where the
@@ -63,7 +63,7 @@
 //!   fork computes the parameters before the checks). A parameter slice whose
 //!   length is not the point count gives `InvalidInput` (upstream reads past it).
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::basis_derivs;
 use crate::nurbs::crv_basic::{size_arrays, Curve};
@@ -233,7 +233,7 @@ fn fill_end_derivs(
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when `p < 2` or `p > kk + 2`; [`NlibCode::Storage`] when an
+/// [`NurbsFailure::Input`] when `p < 2` or `p > kk + 2`; [`NurbsFailure::Storage`] when an
 /// existing `cur` is too small; errors of the estimate, of
 /// [`KnotVector::basis_eval`], of the LU decomposition and of the solve;
 /// `InvalidInput` for empty `a`, fewer than four points with a derivative to
@@ -252,7 +252,7 @@ pub fn interp_end_derivs(
 
     // Check for curve memory.
     if p < 2 || p > kk + 2 {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     // If derivatives are missing we will estimate them.
@@ -337,7 +337,7 @@ pub fn interp_end_derivs(
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when `k == 0`; errors of the estimate and of
+/// [`NurbsFailure::Input`] when `k == 0`; errors of the estimate and of
 /// [`KnotVector::basis_eval`]; `InvalidInput` for empty `a` or fewer than four
 /// points with a derivative to estimate.
 #[allow(clippy::many_single_char_names)] // upstream's names
@@ -346,7 +346,7 @@ pub fn cubic_spline_interp(a: &[Vec3], ds: Vec3, de: Vec3, par: ParamMethod) -> 
     let k = hi(a, OP, "no data points")?;
 
     if k <= 0 {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     // If derivatives are missing we will estimate them.
@@ -462,7 +462,7 @@ pub fn cubic_spline_interp(a: &[Vec3], ds: Vec3, de: Vec3, par: ParamMethod) -> 
 ///
 /// # Errors
 ///
-/// [`NlibCode::Degree`] when `p` is not 2 or 3; `NL_GEO_ERR` for a tangent that
+/// [`NurbsFailure::Degree`] when `p` is not 2 or 3; `NL_GEO_ERR` for a tangent that
 /// cannot be normalised (the earlier ones stay rescaled); errors of
 /// [`basis_derivs`], of the LU decomposition and of the solve; `InvalidInput` for
 /// empty `a`, fewer than `kk + 1` derivatives or a matrix entry outside upstream's
@@ -480,7 +480,7 @@ pub fn interp_first_derivs(
 
     // Check for curve memory.
     if !(2..=3).contains(&p) {
-        return Err(SolidError::nlib(OP, NlibCode::Degree));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Degree));
     }
     let n = 2 * kk + 1;
 
@@ -567,10 +567,7 @@ fn tan_knots(ul: &[f64], p: usize, tan: Tan) -> Result<Option<Vec<f64>>> {
     };
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(SolidError::Nlib {
-            code: NlibCode::Input,
-            ..
-        }) => Ok(None),
+        Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input)) => Ok(None),
         Err(e) => Err(e),
     }
 }
@@ -597,9 +594,9 @@ fn rescale(t: &mut Vec3, fac: f64) -> Result<()> {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] for a given knot vector whose knots are all equal, `p < 2`,
+/// [`NurbsFailure::Input`] for a given knot vector whose knots are all equal, `p < 2`,
 /// `per` outside `[0, 1]`, `u` not spanning a given knot vector, or `p > k + 1`
-/// with one tangent; [`NlibCode::Knot`] for an invalid given knot vector;
+/// with one tangent; [`NurbsFailure::Knots`] for an invalid given knot vector;
 /// `NL_GEO_ERR` for a tangent that cannot be normalised; errors of
 /// [`interp_given_params`], [`interp_knots_and_deriv`] and
 /// [`interp_knots_and_derivs`]; `InvalidInput` for empty `a`, too few parameters, a
@@ -631,27 +628,27 @@ pub fn interp_knots_and_tangents(
             pt += 1;
         }
         if pt >= mt {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
         KnotVector::from_slice(ut)?.validate(idx(pt, OP)?)?;
     }
 
     if p < 2 {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     if pu > MAX_DEGREE {
         return Err(SolidError::InvalidInput {
             operation: OP,
-            reason: "degree above NL_MAXDEG (upstream scratch array size)",
+            reason: "degree above the largest degree the NURBS routines handle",
         });
     }
     if per < 0.0 || per > 1.0 {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     if let (Some(u), Some(ut)) = (u, knt.as_deref()) {
         if at(u, 0, OP)? != at(ut, 0, OP)? || at(u, k, OP)? != at(ut, mt, OP)? {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
     }
 
@@ -770,7 +767,7 @@ pub fn interp_knots_and_tangents(
     // Now interpolate data points.
     if !ideal_ok {
         // N_FitCrvKnotsAndDeriv: p > k + 1 = n.
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     let kni = KnotVector::from_slice(&ui)?;
     let cur = match &tangents {
@@ -911,7 +908,7 @@ pub fn approx_closed_conditions(
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when `p < 1`, `p > nn + kk + ll`, `kk >= p` or `ll >= p`;
+/// [`NurbsFailure::Input`] when `p < 1`, `p > nn + kk + ll`, `kk >= p` or `ll >= p`;
 /// errors of [`param_values`], [`basis_derivs`], [`KnotVector::basis_eval`], of the
 /// LU decomposition and of the solve; `InvalidInput` for empty `a` or a matrix entry
 /// outside upstream's storage.
@@ -936,7 +933,7 @@ pub fn interp_high_derivs(
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when `p < 1`, `p > nn + kk + ll`, `kk >= p` or `ll >= p`;
+/// [`NurbsFailure::Input`] when `p < 1`, `p > nn + kk + ll`, `kk >= p` or `ll >= p`;
 /// `InvalidInput` for empty `a`, a `u` whose length is not `a.len()`, or a matrix
 /// entry outside upstream's storage; errors of [`basis_derivs`],
 /// [`KnotVector::basis_eval`], of the LU decomposition and of the solve.
@@ -950,7 +947,7 @@ pub fn interp_high_derivs_params(
     fit_high_derivs(a, p, ds, de, u, OP_HIGH_PARAMS)
 }
 
-/// The input checks of `N_FitCrvHighDerivs(Params)`: [`NlibCode::Input`] when
+/// The input checks of `N_FitCrvHighDerivs(Params)`: [`NurbsFailure::Input`] when
 /// `p < 1`, `p > nn + kk + ll`, `kk >= p` or `ll >= p`; `InvalidInput` for empty `a`.
 fn high_derivs_check(
     a: &[Vec3],
@@ -967,10 +964,10 @@ fn high_derivs_check(
     // Check for curve memory.
     let n = nn + kk + ll;
     if p < 1 || p > n {
-        return Err(SolidError::nlib(op, NlibCode::Input));
+        return Err(SolidError::nurbs(op, NurbsFailure::Input));
     }
     if kk >= p || ll >= p {
-        return Err(SolidError::nlib(op, NlibCode::Input));
+        return Err(SolidError::nurbs(op, NurbsFailure::Input));
     }
     Ok(())
 }
@@ -1133,10 +1130,7 @@ mod tests {
         let r = interp_end_derivs(&a, p, ds, ds, ParamSource::Inherited, &mut slot);
         assert!(matches!(
             r,
-            Err(SolidError::Nlib {
-                code: NlibCode::Storage,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Storage))
         ));
     }
 
@@ -1155,10 +1149,7 @@ mod tests {
         );
         assert!(matches!(
             r,
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
         let two = &a[..2];
         let r = interp_end_derivs(
@@ -1194,10 +1185,7 @@ mod tests {
         let r = cubic_spline_interp(&a[..1], ds, de, ParamMethod::Uniform);
         assert!(matches!(
             r,
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
     }
 
@@ -1221,10 +1209,7 @@ mod tests {
         let r = interp_first_derivs(&a, &mut d, 4, VectorKind::Derivative, ParamMethod::Uniform);
         assert!(matches!(
             r,
-            Err(SolidError::Nlib {
-                code: NlibCode::Degree,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Degree))
         ));
     }
 
@@ -1275,10 +1260,7 @@ mod tests {
         );
         assert!(matches!(
             r,
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
         let mut knt = None;
         let r = interp_knots_and_tangents(
@@ -1292,10 +1274,7 @@ mod tests {
         );
         assert!(matches!(
             r,
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
         let mut t = Vec3::new(1.0, 0.0, 0.0);
         let r = interp_knots_and_tangents(
@@ -1309,10 +1288,7 @@ mod tests {
         );
         assert!(matches!(
             r,
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
     }
 
@@ -1332,10 +1308,7 @@ mod tests {
         let r = approx_closed_conditions(&a, 2, None, 2, ParamMethod::Uniform);
         assert!(matches!(
             r,
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
     }
 
@@ -1358,18 +1331,12 @@ mod tests {
         let r = interp_high_derivs(&a, 2, &ds, &[], ParamMethod::Uniform);
         assert!(matches!(
             r,
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
         let r = interp_high_derivs(&a, 0, &[], &[], ParamMethod::Uniform);
         assert!(matches!(
             r,
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
     }
 
@@ -1422,10 +1389,7 @@ mod tests {
         let a = pts();
         assert!(matches!(
             approx_closed_conditions(&a, 3, None, 1 << 62, ParamMethod::Uniform),
-            Err(SolidError::Nlib {
-                code: NlibCode::Memory,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Memory))
         ));
         assert!(
             approx_closed_conditions(&a, i64::MAX as usize, None, 1, ParamMethod::Uniform).is_err()

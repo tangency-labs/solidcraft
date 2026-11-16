@@ -1,0 +1,16 @@
+[package]
+name = "solidcraft-viewport-egui"
+description = "The shared viewport renderer in an egui window: its GPU pipelines drawn in egui-wgpu paint callbacks over a background the host paints"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+egui = { workspace = true }
+egui-wgpu = { workspace = true }
+log = { workspace = true }
+solidcraft-viewport-gpu = { workspace = true }
+wgpu = { workspace = true }

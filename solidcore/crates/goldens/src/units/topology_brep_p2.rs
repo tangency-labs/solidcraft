@@ -490,7 +490,7 @@ fn status<T>(r: Result<T, SolidError>) -> Result<(f64, Option<T>), Fail> {
         Err(e) => match Output::unported(&e) {
             Some(o) => Err(Fail::Deferred(Box::new(o))),
             None => match e {
-                SolidError::Upstream { code, .. } => Ok((f64::from(code), None)),
+                e if solidcore::error::upstream_status(&e).is_some() => Ok((f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1)), None)),
                 other => Err(Fail::Harness(harness(format!("rust: {other}")))),
             },
         },
@@ -1080,7 +1080,8 @@ fn merge_rust(
         Err(e) => match Output::unported(&e) {
             Some(o) => Ok(o),
             None => match e {
-                SolidError::Upstream { code, .. } => {
+                e if solidcore::error::upstream_status(&e).is_some() => {
+                    let code = solidcore::error::upstream_status(&e).unwrap_or(-1);
                     Ok(Output::new().values("out", vec![0.0, f64::from(code), 0.0, 0.0]))
                 }
                 other => Err(harness(format!("rust: {other}"))),
@@ -1144,7 +1145,7 @@ fn merge_ssi_rust(
         Err(e) => match Output::unported(&e) {
             Some(o) => return Ok(o),
             None => match e {
-                SolidError::Upstream { code, .. } => (f64::from(code), 0, 0),
+                e if solidcore::error::upstream_status(&e).is_some() => (f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1)), 0, 0),
                 other => return Err(harness(format!("rust: {other}"))),
             },
         },
