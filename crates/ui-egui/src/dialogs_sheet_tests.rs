@@ -31,7 +31,7 @@ fn flange_follows_the_picks() {
         assert_eq!(c[0].1["type"], "base");
         assert_eq!(c[0].1["profiles"], json!([0]));
         run_all(&mut app, c);
-        assert_eq!(app.session.model.state().sheets.len(), 1);
+        assert_eq!(app.session.model.state().surface_sheets.len(), 1);
         // Four edge flanges at once, 20 high, outside.
         let edges: Vec<Sel> = [[50.0, 0.0, 2.5], [50.0, 60.0, 2.5], [0.0, 30.0, 2.5], [100.0, 30.0, 2.5]]
             .iter()
@@ -370,7 +370,7 @@ fn bend_table_picker_writes_the_current_body() {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         app.run("sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20})).unwrap();
-        let body = app.session.model.state().sheets[0].body.clone();
+        let body = app.session.model.state().surface_sheets[0].body.clone();
         let path = std::env::temp_dir().join(format!("solidcraft-bend-table-{}.csv", std::process::id()));
         let output = path.to_string_lossy().into_owned();
         let chosen = output.clone();
@@ -394,6 +394,7 @@ fn bend_table_picker_writes_the_current_body() {
 /// made with it, and the dialog shows it the next time.
 #[test]
 fn rules_dialog_picks_the_corner_relief_shape() {
+    use solidcraft_engine::doc::develop::{CornerRelief, JointKind, Relief};
     for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.set", json!({"layout":mode}));
@@ -408,10 +409,12 @@ fn rules_dialog_picks_the_corner_relief_shape() {
         h.app.run("sketch.finish", json!({})).unwrap();
         h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         h.app.run("sheet.flange", json!({"edges": [[60, 0, 2], [120, 45, 2], [60, 90, 2], [0, 45, 2]], "height": 20, "angle": "72 deg"})).unwrap();
-        // The rounds in the base of the tray, and the shape the open dialog shows.
+        // The tray's corners relieved with a round (a corner's relief belongs to the two bends that
+        // meet there, and is cut from the flat wherever it reaches; the flat-first sheet drew it
+        // in the base's outline), and the shape the open dialog shows.
         let rounds = |app: &SolveApp| {
             let state = app.session.model.state();
-            state.sheets.last().map(|s| s.base.outer.segs.iter().filter(|g| matches!(g, solidcore_record::Seg2::Arc { .. })).count())
+            state.surface_sheets.last().map(|s| s.sheet.corners.iter().filter(|c| c.relief == CornerRelief::Round).count())
         };
         let shown = |app: &SolveApp| match app.dialog.as_ref().map(|d| &d.kind) {
             Some(Kind::Sheet(Sm::Rules { relief, .. })) => Some(*relief),
@@ -438,7 +441,14 @@ fn rules_dialog_picks_the_corner_relief_shape() {
         h.step(&json!({"widget": "OK"})).unwrap();
         assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
         assert_eq!(h.app.session.doc.sheet_rule(None).corner_relief_shape, "tear");
-        let torn = h.app.session.model.state().sheets.last().map(|s| s.flanges.iter().filter(|f| f.tear == (true, true)).count());
+        // Both ends of a bend are its joint's: each of the four bends is torn at both its corners.
+        let torn = h.app.session.model.state().surface_sheets.last().map(|s| {
+            s.sheet
+                .joints
+                .iter()
+                .filter(|j| matches!(&j.kind, JointKind::Bend(b) if matches!(b.relief, (Relief::Tear { .. }, Relief::Tear { .. }))))
+                .count()
+        });
         assert_eq!((rounds(&h.app), torn), (Some(0), Some(4)));
     }
 }
@@ -492,6 +502,7 @@ fn rules_dialog_sets_how_bend_angles_read() {
 /// the size the dialog shows reach the part, the bends and the flat pattern.
 #[test]
 fn the_rule_manager_relieves_a_corner_that_is_not_square() {
+    use solidcraft_engine::doc::develop::CornerRelief;
     let mut h = crate::scenario::Harness::new();
     h.app
         .run(
@@ -510,17 +521,27 @@ fn the_rule_manager_relieves_a_corner_that_is_not_square() {
             json!({"edges": [[60, 0, 2], [142.5, 38.9711431703, 2], [105, 77.9422863406, 2], [22.5, 38.9711431703, 2]], "height": 38.6, "angle": "90 deg"}),
         )
         .unwrap();
-    // The base of the notch has its four corners, and the bends run the whole length of the edges.
-    let base = |app: &SolveApp| {
-        let state = app.session.model.state();
-        state.sheets.last().map(|s| (s.base.outer.segs.len(), s.flanges.iter().map(|f| s.zone_span(f).1 - s.zone_span(f).0).collect::<Vec<_>>()))
+    // The corners a relief cuts (a round or a square: a corner's relief belongs to the two bends
+    // that meet there and is cut from the flat wherever it reaches; the flat-first sheet drew a
+    // kite in its base's outline), and the bends' lengths in the flat pattern's bend table.
+    let base = |app: &mut SolveApp| {
+        let cut = app
+            .session
+            .model
+            .state()
+            .surface_sheets
+            .last()
+            .map(|s| s.sheet.corners.iter().filter(|c| matches!(c.relief, CornerRelief::Round | CornerRelief::Square)).count())?;
+        let flat = app.session.execute("sheet.flat_pattern", &json!({})).ok()?;
+        let bends: Vec<f64> = flat["bends"].as_array()?.iter().map(|b| b["length"].as_f64().unwrap_or(f64::NAN)).collect();
+        Some((cut, bends))
     };
     let shown = |app: &SolveApp| match app.dialog.as_ref().map(|d| &d.kind) {
         Some(Kind::Sheet(Sm::Rules { relief, .. })) => Some(*relief),
         _ => None,
     };
-    let (segs, notch_bends) = base(&h.app).expect("the sheet");
-    assert_eq!(segs, 4, "the notch cuts nothing out of the base");
+    let (cut, notch_bends) = base(&mut h.app).expect("the sheet");
+    assert_eq!(cut, 0, "the notch cuts nothing out of the flat");
     h.step(&json!({"start": "sheet.manage_rules"})).unwrap();
     h.frames(3);
     assert_eq!(shown(&h.app), Some(0), "a rule starts with the notch");
@@ -534,11 +555,21 @@ fn the_rule_manager_relieves_a_corner_that_is_not_square() {
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
     assert_eq!(h.app.session.doc.sheet_rule(None).corner_relief_shape, "rectangular");
     assert_eq!(h.app.session.doc.sheet_rule(None).corner_relief, "8 mm");
-    // A kite at each of the four corners: two more edges than the notch's four.
-    let (segs, relieved) = base(&h.app).expect("the sheet");
-    assert_eq!(segs, 12, "a kite at each corner of the base");
+    // A relief at each of the four corners: a parallelogram centered where the two zones' center
+    // lines cross, c = 3 − π/2 in from both edges (the tangent lines R + T = 3 in, the zones
+    // BA = π wide outside them), its sides along the two bends 4 from there. The notch ends each
+    // zone square across from where the tangent lines cross, (π/2)/tan(α/2) along the bend past
+    // the zones' crossing (α the corner's angle), and the relief's side along the other bend
+    // crosses the bend's center line 4/sin α past it: each end is 4/sin α − (π/2)/tan(α/2)
+    // shorter. Each bend has a 60° end and a 120° end, so it is
+    // (4/sin 60° − (π/2)/tan 30°) + (4/sin 120° − (π/2)/tan 60°) = (16 − 2π)/√3 shorter (the
+    // flat-first kite, set on the base's corner, took 4 off each end).
+    let (cut, relieved) = base(&mut h.app).expect("the sheet");
+    assert_eq!(cut, 4, "a relief at each corner of the base");
+    let shorter = (16.0 - 2.0 * std::f64::consts::PI) / 3f64.sqrt();
+    assert!(notch_bends.len() == 4 && relieved.len() == 4, "{notch_bends:?} and {relieved:?}");
     for (was, now) in notch_bends.iter().zip(&relieved) {
-        assert!((was - now - 8.0).abs() < 1e-6, "{notch_bends:?} and {relieved:?}: the bends are 8 mm shorter");
+        assert!((was - now - shorter).abs() < 1e-6, "{notch_bends:?} and {relieved:?}: the bends are {shorter} mm shorter");
     }
     // The flat pattern is one loop, and the part folds.
     let flat = h.app.session.execute("sheet.flat_pattern", &json!({})).expect("the flat pattern");
@@ -599,13 +630,16 @@ fn flange_dialog_picks_a_corner_relief_of_its_own() {
         assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
         assert_eq!(relief(&h.app), Some((Some("round".into()), Some("6 mm".into()))));
         assert!(h.app.session.model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", h.app.session.model.results);
+        // The corners relieved with a round: a corner's relief belongs to the two bends that meet
+        // there and is cut from the flat wherever it reaches (the flat-first sheet drew it as an
+        // arc of its base's outline). The two flanges make one corner, at the origin.
         let arcs = |app: &SolveApp| {
             app.session
                 .model
                 .state()
-                .sheets
+                .surface_sheets
                 .last()
-                .map(|s| s.base.outer.segs.iter().filter(|g| matches!(g, solidcore_record::Seg2::Arc { .. })).count())
+                .map(|s| s.sheet.corners.iter().filter(|c| c.relief == solidcraft_engine::doc::develop::CornerRelief::Round).count())
         };
         assert_eq!(arcs(&h.app), Some(1), "the round is cut at the one corner the two flanges make");
         // Edit Feature shows both again; Rule and an empty size take the feature back to the rule's relief.
@@ -859,42 +893,152 @@ fn flange_dialog_offers_material_outside_and_tangent_bend_positions() {
     assert_eq!(saved, "tangent");
 }
 
-/// Convert takes a fixed face and, for a solid or shelled body, its bend edges; Edit Feature
-/// brings both back.
+/// Convert (#6748) takes the faces that make the sheet and the edges that bend more faces onto
+/// them, on the faces' body; the command refuses faces skipped beside faces picked. Edit Feature
+/// brings the body, the faces and the edges back.
 #[test]
-fn convert_takes_the_fixed_face_and_the_bend_edges() {
+fn convert_takes_the_faces_picked_and_the_bend_edges() {
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length": 100, "width": 60, "height": 30, "body_name": "Tray"})).unwrap();
     s.execute("solid.shell", &json!({"faces": [[50, 30, 30]], "thickness": 2})).unwrap();
     let mut app = SolveApp::new(s, Services::default());
     app.start("sheet.convert");
     let mut d = app.dialog.clone().unwrap();
-    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), ["Fixed Face", "Bend Edges"]);
-    assert!(apply_commands(&app, &d).is_err(), "nothing to convert without a face");
-    // The face alone is the plate conversion: no `bends`.
-    d.inputs[0].items = face_sel(&app.session, Vec3::new(50.0, 30.0, 0.0)).into_iter().collect();
-    assert!(apply_commands(&app, &d).unwrap()[0].1.get("bends").is_none());
+    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), ["Body", "Bend Edges", "Skip Faces", "Faces", "Engrave Faces"]);
+    assert!(apply_commands(&app, &d).is_err(), "nothing to convert without a body");
+    // The floor alone: one face, its body, and no `bends`.
+    d.inputs[3].items = face_sel(&app.session, Vec3::new(50.0, 30.0, 0.0)).into_iter().collect();
+    let c = apply_commands(&app, &d).unwrap();
+    assert!(c[0].1.get("bends").is_none() && c[0].1.get("faces").is_none() && c[0].1["body"] == json!("Tray"), "{}", c[0].1);
+    assert_eq!(c[0].1["face"], json!([50.0, 30.0, 0.0]));
+    // A face skipped beside it goes to the command, which refuses it: the faces picked are the
+    // whole sheet.
+    d.inputs[2].items = face_sel(&app.session, Vec3::new(50.0, 0.0, 15.0)).into_iter().collect();
+    let c = apply_commands(&app, &d).unwrap();
+    assert!(c[0].1.get("face").is_some() && c[0].1.get("skip").is_some(), "{}", c[0].1);
+    d.inputs[2].items.clear();
     let edges: Vec<Sel> = [[50.0, 0.0, 0.0], [100.0, 30.0, 0.0], [50.0, 60.0, 0.0], [0.0, 30.0, 0.0]]
         .iter()
         .filter_map(|p| edge_sel(&app.session, Vec3::new(p[0], p[1], p[2])))
         .collect();
     d.inputs[1].items = edges;
     let c = apply_commands(&app, &d).unwrap();
-    assert_eq!(c[0].0, "sheet.convert");
+    assert_eq!((c[0].0.as_str(), c[0].1.get("skip")), ("sheet.convert", None));
     assert_eq!(c[0].1["bends"], json!([[50.0, 0.0, 0.0], [100.0, 30.0, 0.0], [50.0, 60.0, 0.0], [0.0, 30.0, 0.0]]));
     run_all(&mut app, c);
     let bends = |app: &mut SolveApp| app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"].as_array().map(Vec::len);
     assert_eq!(bends(&mut app), Some(4));
-    // Edit Feature: the face and the four edges are back in their rows, and OK rebuilds the sheet.
+    // Edit Feature: the body, the four edges and the face are back in their rows, and OK
+    // rebuilds the sheet.
     let f = app.session.doc.features.last().unwrap().clone();
     let e = edit_dialog(&app, f.id, None).unwrap();
-    assert_eq!((e.inputs[0].items.len(), e.inputs[1].items.len()), (1, 4));
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Convert { side: 0, .. })));
+    assert_eq!(e.inputs.iter().map(|i| i.items.len()).collect::<Vec<_>>(), [1, 4, 0, 1, 0]);
     let c = apply_commands(&app, &e).unwrap();
     assert_eq!(c[0].0, "timeline.redefine");
     assert_eq!(c[0].1["params"]["bends"].as_array().map(Vec::len), Some(4));
     run_all(&mut app, c);
     assert_eq!(bends(&mut app), Some(4));
     assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+}
+
+/// Convert (#6748) fixes no face: it takes the body, the edges that bend and the faces it skips,
+/// and the material's side; a solid tray converts with its top skipped. Edit Feature brings all
+/// of it back.
+#[test]
+fn convert_takes_the_body_its_bends_and_the_faces_it_skips() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 100, "width": 60, "height": 30, "body_name": "Block"})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    app.start("sheet.convert");
+    let mut d = app.dialog.clone().unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: "Block".into() }];
+    if let Kind::Sheet(Sm::Convert { side, .. }) = &mut d.kind {
+        *side = 1;
+    }
+    d.inputs[1].items = [[50.0, 0.0, 0.0], [100.0, 30.0, 0.0], [50.0, 60.0, 0.0], [0.0, 30.0, 0.0]]
+        .iter()
+        .filter_map(|p| edge_sel(&app.session, Vec3::new(p[0], p[1], p[2])))
+        .collect();
+    d.inputs[2].items = face_sel(&app.session, Vec3::new(50.0, 30.0, 30.0)).into_iter().collect();
+    let c = apply_commands(&app, &d).unwrap();
+    let p = &c[0].1;
+    assert!(p.get("face").is_none() && p.get("engrave").is_none() && p["direction"] == json!("outside"), "{p}");
+    assert_eq!((p["bends"].as_array().map(Vec::len), p["skip"].as_array().map(Vec::len)), (Some(4), Some(1)));
+    // Faces picked to engrave go to the command as `engrave`, which reads them; none here.
+    d.inputs[4].items = face_sel(&app.session, Vec3::new(50.0, 0.0, 15.0)).into_iter().collect();
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["engrave"], json!([[50.0, 0.0, 15.0]]), "{}", c[0].1);
+    d.inputs[4].items.clear();
+    // Inside is the default, and goes unsaid.
+    if let Kind::Sheet(Sm::Convert { side, .. }) = &mut d.kind {
+        *side = 0;
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert!(c[0].1.get("direction").is_none());
+    run_all(&mut app, c);
+    let flat = app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
+    assert_eq!((flat["surfaces"].clone(), flat["bends"].as_array().map(Vec::len)), (json!(true), Some(4)), "{flat}");
+    // Edit Feature as the app opens it: rolled back to before the conversion, where the skipped
+    // face still is.
+    let f = app.session.doc.features.last().unwrap().clone();
+    app.edit_feature(f.id);
+    let e = app.dialog.clone().unwrap();
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Convert { side: 0, .. })));
+    assert_eq!(e.inputs.iter().map(|i| i.items.len()).collect::<Vec<_>>(), [1, 4, 1, 0, 0]);
+}
+
+/// Recognize (#6748) takes a body that is sheet metal already, here a tray shelled 2 thick: it
+/// sends a new rule's name, the rule it makes is the body's 2 mm, and Edit Feature brings the
+/// body back. Convert says such a body is sheet metal already, and never says so of a surface
+/// body.
+#[test]
+fn recognize_makes_the_bodys_rule_and_convert_points_to_it() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 100, "width": 60, "height": 30, "body_name": "Tray"})).unwrap();
+    s.execute("solid.shell", &json!({"faces": [[50, 30, 30]], "thickness": 2})).unwrap();
+    s.execute("sketch.create", &json!({"plane": "XY", "name": "Open"})).unwrap();
+    let made = s.execute("sketch.line", &json!({"points": [[200, 40], [200, 0], [260, 0]]})).unwrap();
+    s.execute("sketch.finish", &json!({})).unwrap();
+    let curves = made["created"]["curves"].clone();
+    s.execute("surface.extrude", &json!({"sketch": "Open", "curves": curves, "distance": 50, "body_name": "Open"})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    assert!(own_thickness(&app, "Tray").is_some_and(|t| (t - 2.0).abs() < 1e-9));
+    assert_eq!(own_thickness(&app, "Open"), None, "a surface body is surfaces only");
+    app.start("sheet.recognize");
+    let mut d = app.dialog.clone().unwrap();
+    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), ["Body", "Surface Face", "Skip Faces", "Bend Edges"]);
+    assert!(apply_commands(&app, &d).is_err(), "nothing to recognize without a body");
+    d.inputs[0].items = vec![Sel::Body { name: "Tray".into() }];
+    if let Kind::Sheet(Sm::Recognize { new_rule, .. }) = &mut d.kind {
+        *new_rule = "Tray rule".into();
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!((c[0].0.as_str(), c[0].1["new_rule"].clone(), c[0].1.get("rule")), ("sheet.recognize", json!("Tray rule"), None));
+    run_all(&mut app, c);
+    let made = app.session.doc.sheet.rules.iter().find(|r| r.name == "Tray rule").map(|r| r.thickness.clone());
+    assert_eq!(made.as_deref(), Some("2 mm"));
+    let f = app.session.doc.features.last().unwrap().clone();
+    let e = edit_dialog(&app, f.id, None).unwrap();
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Recognize { .. })));
+    assert_eq!(e.inputs[0].items, vec![Sel::Body { name: "Tray".into() }]);
+}
+
+/// What the Recognize dialog reads follows its Surface Face pick, as the command does (#6748).
+/// The 100 x 60 x 30 tray shelled 2 thick inward reads 2.000 mm from its largest face with
+/// another behind it. Picked on its rim at (1, 30, 30), the top of the wall x 0 … 2, it reads no
+/// sheet: the only face level with the rim and facing back at it is the bottom, 30 behind, more
+/// than a sixth of the rim's 116.6 across (√(100² + 60²) = 116.62; 6 · 30 = 180).
+#[test]
+fn recognize_reads_the_body_from_its_surface_face_pick() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 100, "width": 60, "height": 30, "body_name": "Tray"})).unwrap();
+    s.execute("solid.shell", &json!({"faces": [[50, 30, 30]], "thickness": 2, "direction": "inside"})).unwrap();
+    let app = SolveApp::new(s, Services::default());
+    let unpicked = measure_text(&app, "Tray", None, &[]);
+    assert!(unpicked.as_ref().is_ok_and(|t| t.contains("2.000")), "{unpicked:?}");
+    let rim = measure_text(&app, "Tray", Some(Vec3::new(1.0, 30.0, 30.0)), &[]);
+    assert!(rim.as_ref().is_err_and(|e| e.contains("no face behind it")), "{rim:?}");
 }
 
 /// The Path Flange dialog takes the edge and the path's sketch lines: one feature, one body,
@@ -1197,9 +1341,10 @@ fn flat_circles(app: &mut SolveApp, dialog: &Dialog, rect: Rect) -> Vec<egui::ep
 #[test]
 fn flat_perforations_match_export_centres_and_cutout_style() {
     let (mut app, dialog) = perforated_flat();
+    // The centres the DXF exports (`surface_dxf`): the sheet's flat as it is read.
     let state = crate::open_meshing::session_world(&app.session);
-    let sheet = state.sheets.last().unwrap();
-    let holes = sheet.perforation_holes(&sheet.perforations[0]).unwrap();
+    let sheet = state.surface_sheets.last().unwrap().shown();
+    let holes = sheet.perforation_holes(&sheet.perforations[0]);
     let rect = Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0));
     let circles = flat_circles(&mut app, &dialog, rect);
     assert_eq!(circles.len(), holes.len());
@@ -1220,8 +1365,8 @@ fn flat_perforations_match_export_centres_and_cutout_style() {
     assert_eq!(app.flat_view.perforations.as_ptr(), cached, "navigation reuses the centres");
     app.run("sheet.perforate", json!({"diameter": 2, "pitch": 10})).unwrap();
     let state = crate::open_meshing::session_world(&app.session);
-    let sheet = state.sheets.last().unwrap();
-    let expected: usize = sheet.perforations.iter().map(|p| sheet.perforation_holes(p).unwrap().len()).sum();
+    let sheet = state.surface_sheets.last().unwrap().shown();
+    let expected: usize = sheet.perforations.iter().map(|p| sheet.perforation_holes(p).len()).sum();
     assert!(expected > 155);
     assert_eq!(flat_circles(&mut app, &dialog, rect).len(), expected, "model changes refresh the centres");
 }
@@ -1253,7 +1398,7 @@ fn hem_handle_runs_along_the_hem_to_its_tip() {
     for flipped in [false, true] {
         let mut app = plate(crate::ui_kit::LayoutMode::Floating);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
-        let body = app.session.model.state().sheets[0].body.clone();
+        let body = app.session.model.state().surface_sheets[0].body.clone();
         app.session.selection = vec![edge_sel(&app.session, Vec3::new(50.0, 0.0, 2.5)).unwrap()];
         app.start("sheet.hem");
         let mut d = app.dialog.clone().unwrap();
@@ -1330,7 +1475,7 @@ fn perforate_ok_targets_the_picked_sheet_and_updates_flat_data() {
     for face in [false, true] {
         let mut app = plate(crate::ui_kit::LayoutMode::Docked);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
-        let body = app.session.model.state().sheets[0].body.clone();
+        let body = app.session.model.state().surface_sheets[0].body.clone();
         app.session.selection =
             vec![if face { face_sel(&app.session, Vec3::new(50.0, 30.0, 2.5)).unwrap() } else { Sel::Body { name: body.clone() } }];
         app.start("sheet.perforate");
@@ -1351,7 +1496,7 @@ fn perforate_ok_targets_the_picked_sheet_and_updates_flat_data() {
 fn perforate_edit_restores_dimensions_pattern_and_target() {
     let mut app = plate(crate::ui_kit::LayoutMode::Docked);
     app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
-    let body = app.session.model.state().sheets[0].body.clone();
+    let body = app.session.model.state().surface_sheets[0].body.clone();
     app.run("sheet.perforate", json!({"body": body, "diameter": "4 mm", "pitch": "9 mm", "margin": "5 mm", "pattern": "square"})).unwrap();
     let feature = app.session.doc.features.last().unwrap();
     let dialog = edit_dialog(&app, feature.id, None).expect("Perforate can be edited");

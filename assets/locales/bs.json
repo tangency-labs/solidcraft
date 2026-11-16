@@ -1547,7 +1547,7 @@
   "help.plastic.rest": "Dodaje oslonac na licu: okruglu ili pravougaonu podlogu, punu ili šuplju, s nagibom. Koristite ga kao potporu ili odstojnik u brizganom kućištu.",
   "help.plastic.snap_fit": "Dodaje kuku škljocajućeg spoja na licu, s njenom dužinom, debljinom i zapinjačem. Koristite ga da dijelove spojite zaklapanjem bez vijaka.",
   "help.pointcloud.insert": "Umetnite PLY, XYZ ili PTS skeniranje kao oblak tačaka uz model. Koristite ga kao referencu pri izradi modela iz izmjerenih podataka.",
-  "help.sheet.convert": "Pretvara ploču ili izdubljeno tijelo ujednačene debljine u tijelo od lima, sa savijanjima na ivicama koje izaberete. Koristite ga da postojeći dio učinite razvijivim.",
+  "help.sheet.convert": "Pretvara površi u lim po pravilu: lica punog tijela ili tijela površi, sa savijanjima na ivicama koje izaberete. Koristite ga da od modeliranog oblika napravite dio od lima.",
   "help.sheet.export_bend_table": "Čuva tabelu savijanja tijela od lima kao CSV ili JSON: uglove, poluprečnike i položaje savijanja u razvijenom obliku. Koristite ga za presu za savijanje ili radionicu.",
   "help.sheet.export_dxf": "Čuva razvijeni oblik kao DXF, s obrisima, linijama savijanja i neobaveznim napomenama o savijanju. Koristite ga za rezanje laserom, plazmom ili vodenim mlazom.",
   "help.sheet.flange": "Dodaje prirubnicu: osnovnu ploču iz skice, zid duž otvorene konture skice ili savijeni zid na ivicama lima. Koristite je za izgradnju dijelova od lima.",

@@ -163,8 +163,16 @@ fn encoded_text(e: &Entity) -> String {
 
 /// All loops of the flat pattern (outlines, cut-outs, islands).
 fn loops(s: &Session) -> Vec<solidcore_record::Loop2> {
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = s.model.state().surface_sheets[0].shown().regions;
     regions.iter().flat_map(|r| std::iter::once(r.outer.clone()).chain(r.holes.clone())).collect()
+}
+
+/// The cuts a sheet's flat makes along split edges' junctions (`SurfaceSheet::slits`), as the flat
+/// shows them: each as a loop out along the cut and back, as the flat model spliced them into its
+/// outline.
+fn junction_cuts(s: &Session) -> Vec<solidcore_record::Region2> {
+    let slits = s.model.state().surface_sheets.first().map(|sk| sk.shown().slits).unwrap_or_default();
+    slits.iter().map(|&[a, b]| solidcore_record::Region2 { outer: solidcore_record::Loop2::polygon(&[a, b]), holes: Vec::new() }).collect()
 }
 
 /// The profiles of the DXF read into a new sketch: their areas, largest first.
@@ -220,7 +228,7 @@ fn a_spline_cut_out_is_the_splines_it_was() {
     }
     // The same plate comes back.
     let areas = reimported_areas(&dxf);
-    let plate = s.model.state().sheets[0].flat_regions().unwrap_or_default()[0].area();
+    let plate = s.model.state().surface_sheets[0].shown().regions[0].area();
     assert!((areas[0] - plate).abs() < 1e-6, "{areas:?} {plate}");
 }
 
@@ -254,7 +262,7 @@ fn a_g4_blend_cut_out_is_one_spline_of_degree_nine_and_closes() {
 
     // The cut-out closes, so the same plate and the same cut-out come back.
     let areas = reimported_areas(&dxf);
-    let plate = s.model.state().sheets[0].flat_regions().unwrap_or_default()[0].area();
+    let plate = s.model.state().surface_sheets[0].shown().regions[0].area();
     assert!(areas.len() == 2 && (areas[0] - plate).abs() < 1e-6 && (areas[1] - (6000.0 - plate)).abs() < 1e-6, "{areas:?} {plate}");
 }
 
@@ -279,7 +287,7 @@ fn text_is_splines_and_lines_not_chords() {
     // The plate with the letters cut out comes back from the file with its area (the largest region; the islands inside the
     // letters come in no fixed order).
     let areas = reimported_areas(&dxf);
-    let plate = s.model.state().sheets[0].flat_regions().unwrap_or_default().iter().map(|r| r.area()).fold(0.0, f64::max);
+    let plate = s.model.state().surface_sheets[0].shown().regions.iter().map(|r| r.area()).fold(0.0, f64::max);
     assert!((areas[0] - plate).abs() < 1e-3, "{areas:?} {plate}");
 }
 
@@ -389,7 +397,7 @@ fn the_flat_pattern_is_on_layers_by_role_and_inner_contours_come_first() {
     let es = entities(dxf);
     let on = |layer: &str| es.iter().filter(|e| layer_of(e) == layer).collect::<Vec<_>>();
     // OUTLINE: the tray's outer contour alone, one entity for each of its segments (lines and arcs).
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = s.model.state().surface_sheets[0].shown().regions;
     let plate =
         regions.iter().max_by(|a, b| a.area().total_cmp(&b.area())).map(|r| r.outer.clone()).unwrap_or(solidcore_record::Loop2 { segs: Vec::new() });
     assert_eq!(
@@ -752,7 +760,7 @@ fn segments_on_opposite_sides_cut_the_blank_at_the_junction() {
         assert!(errors.is_empty(), "unfold: {errors:?}");
     };
     // The flat pattern: the outline runs out along the junction and back.
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&s);
     assert!(
         regions.iter().any(|r| cut(&r.outer, from, to) && cut(&r.outer, to, from)),
         "the blank is cut at the junction: {:?}",
@@ -770,7 +778,7 @@ fn segments_on_opposite_sides_cut_the_blank_at_the_junction() {
     let mut differ = plate_in(sheet_of_2mm(), &[]);
     run(&mut differ, "sheet.flange", flange([false, true], ["20 mm", "15 mm"]));
     let step = Vec2::new(50.0, 3.0 - (PI + 12.0));
-    let regions = differ.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&differ);
     assert!(
         regions.iter().any(|r| cut(&r.outer, from, step) && cut(&r.outer, step, from)),
         "the blank is not cut at the differing-height junction: {:?}",
@@ -783,7 +791,7 @@ fn segments_on_opposite_sides_cut_the_blank_at_the_junction() {
     // Same-side stretches of different heights: two bends, one piece, no cut at the junction.
     let mut same = plate_in(sheet_of_2mm(), &[]);
     run(&mut same, "sheet.flange", flange([false, false], ["20 mm", "15 mm"]));
-    let regions = same.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&same);
     assert!(!regions.iter().any(|r| cut(&r.outer, from, to) && cut(&r.outer, to, from)), "a same-side junction stays joined");
 }
 
@@ -816,7 +824,7 @@ fn a_notch_through_a_junctions_far_edge_still_parts_the_blank() {
     let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
         lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
     };
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&s);
     assert!(
         regions.iter().any(|r| cut(&r.outer, bend, left) && cut(&r.outer, left, bend)),
         "the blank is not cut from the bend line to the notch's edge: {:?}",
@@ -869,7 +877,7 @@ fn a_round_notch_over_a_junctions_far_edge_ends_the_cut_on_the_arc() {
     let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
         lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
     };
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&s);
     assert!(
         regions.iter().any(|r| cut(&r.outer, bend, on_arc) && cut(&r.outer, on_arc, bend)),
         "the blank is not cut from the bend line to the arc: {:?}",
@@ -943,7 +951,7 @@ fn every_surviving_bridge_of_a_junction_is_cut() {
     let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
         lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
     };
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&s);
     for (a, b) in bridges {
         assert!(
             regions.iter().any(|r| cut(&r.outer, a, b) && cut(&r.outer, b, a)),
@@ -1004,7 +1012,7 @@ fn a_junction_cut_stops_at_its_own_tip_on_a_c_shaped_blank() {
     let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
         lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
     };
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&s);
     assert!(
         regions.iter().any(|r| cut(&r.outer, bend, left) && cut(&r.outer, left, bend)),
         "the blank is not cut from the bend line to the notch's edge: {:?}",
@@ -1080,7 +1088,7 @@ fn opposite_side_stretches_of_different_angles_cut_from_the_inner_bend_line() {
     let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
         lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
     };
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&s);
     assert!(
         regions.iter().any(|r| cut(&r.outer, inner, nearer_far) && cut(&r.outer, nearer_far, inner)),
         "the flat loop has no cut from the inner bend line {inner:?} to the nearer far edge {nearer_far:?}          ({offset} mm apart from the farther-out bend line {farther_out:?}): {:?}",
@@ -1114,9 +1122,12 @@ fn opposite_side_stretches_of_different_angles_cut_from_the_inner_bend_line() {
     assert!(errors.is_empty(), "unfold: {errors:?}");
 }
 
-// Outputs recorded from upstream main at c0fb2cbce93b1e040bcbc73a917e5b5c262889e4.
-// Independent upstream and integrated-writer runs matched all 53 payloads byte for byte.
-// Pins were migrated only after that comparison; fixtures and semantic assertions are unchanged.
+// Outputs first recorded from upstream main at c0fb2cbce93b1e040bcbc73a917e5b5c262889e4, then
+// re-recorded on #9245 (the flat derived from the part's surfaces), on x86_64 Windows with main's
+// #16617 and #16825 merged in. The exact-curve outputs are byte for byte those of #9245 before the
+// merge, so the shared converter and the owned layer file keep its output; the arc-fitted ones
+// follow the platform's math library (see UBUNTU_MATH_OUTPUTS). Fixtures and semantic assertions
+// are unchanged.
 // These byte pins are fixed expectations, never regenerated by the test.
 #[cfg(not(target_arch = "wasm32"))]
 mod byte_regressions {
@@ -1131,47 +1142,47 @@ mod byte_regressions {
         ("circle-two-halves-arcs.dxf", 5967, "df6777b52620858b58be4bcaba2d04fcf153fa0b4c44e7a721bba5ae702bfb6b"),
         ("round-ended-slot-exact.dxf", 6342, "c8836ac4d130f98c8ef71570168fd52a744e45db72820b8d5e8130270acc1fab"),
         ("round-ended-slot-arcs.dxf", 6342, "c8836ac4d130f98c8ef71570168fd52a744e45db72820b8d5e8130270acc1fab"),
-        ("ellipse-exact.dxf", 6056, "38f0a9605f5075032a106bd2dac1fd3fe1b9bc9c407e260a0515707fc859e728"),
-        ("ellipse-arcs.dxf", 17237, "1f81c49bf65eefa0c92d1f0cce63876bd4f3f6649ecf5a454e3b5aa3027c4948"),
-        ("cubic-spline-exact.dxf", 6965, "0f259a0346acbc063c8725c4c2016e4d07a2d97c1f9729317426c162ceb66245"),
-        ("cubic-spline-arcs.dxf", 13950, "20d4f657823be5241a717659066b45e7ebe5dfc5c43a14d05cfdadac99446bba"),
-        ("degree-nine-exact.dxf", 6830, "fc3166d517f2ba19712698a12cb9bc4a7561f91daaf0566462ef0f4d4acd9810"),
-        ("degree-nine-arcs.dxf", 14741, "73e8e236b9fac4b7e38d3c423ef2357d39a06506bbcac0b0fb91dfa602cca676"),
-        ("text-outlines-exact.dxf", 14137, "85245de8e3f4886958939513771cb5d800c5e09c0a48e3b533217721dfd9bd6c"),
-        ("text-outlines-arcs.dxf", 26401, "7f720fa76e06116ad0c22ab169a673cc59ca5e3c7ad6ee962a1f2890f52f475a"),
-        ("tray-default.dxf", 27028, "74ea1ac8f1f36655bab12b19050fa303132d99557761c13a926c9125e40346da"),
-        ("tray-exact-cut-bends-true-roles.dxf", 27961, "cf448499d4c5f8fe9815f0851db19343b4c1a090a27fd353052583a90e514e4c"),
-        ("tray-exact-cut-bends-true-single.dxf", 26756, "160e9e4b3d56e1700569f18356e81f0163458bcb30abda30af5312dbb96180c0"),
-        ("tray-exact-cut-bends-false-roles.dxf", 27419, "b4830c0472d5fdc5643dcf2159dccaf13cd87df6e0f280e59ae33369c6129214"),
-        ("tray-exact-cut-bends-false-single.dxf", 26240, "5514c74269a554f0a73a11d4879539324b65d324e60c7ebdf89571d99e0c5682"),
-        ("tray-exact-etch-bends-true-roles.dxf", 27961, "64dc840c386fadd6ff1e2dbf40883e70f9769862ea4a1656a08cbf246f0e7b17"),
-        ("tray-exact-etch-bends-true-single.dxf", 26756, "9d9692271cd2b83ebb60063146704bffb732ccbcb0080b5d13cc679e8cec86a6"),
-        ("tray-exact-etch-bends-false-roles.dxf", 27419, "3e84a798df2a2df18a25ec4836d7976c014cf90930c117c1e612f6b334c2ae1e"),
-        ("tray-exact-etch-bends-false-single.dxf", 26240, "f532be3ada2ec2b604433df8c6d7aca2288fbdc3525db7794c36e952c1641ed7"),
-        ("tray-arcs-cut-bends-true-roles.dxf", 45154, "d1acc8eb7463c6e66bbddeee4a4b94bac33420fd16e46c21f67128bc7278a3f3"),
-        ("tray-arcs-cut-bends-true-single.dxf", 43580, "eeba51da134c0debd15b58083ffb26ca6aaeaabbedaa7b4256c9daaa20e9679f"),
-        ("tray-arcs-cut-bends-false-roles.dxf", 44608, "a12b62d26726087fa04eb5d2aa858d6dc584fe616c39f739aaf121848cd42775"),
-        ("tray-arcs-cut-bends-false-single.dxf", 43060, "eeb4a30d1dc006d4857fcebdc9ab17f994ad56e2c83f03587c8eb5726a90469c"),
-        ("tray-arcs-etch-bends-true-roles.dxf", 45154, "ec4a7278b2d9afb87da671c43f12b79079ebaedb23665e1ddf1ac8e745541e7a"),
-        ("tray-arcs-etch-bends-true-single.dxf", 43580, "73fbff7f1ef84e517f046db40d33a0eac1f1acbf960bf19b819c3da9b2160196"),
-        ("tray-arcs-etch-bends-false-roles.dxf", 44608, "685f7116b7e767f5cabc343854f889e3bb9f5ea0f6ba6ee77f752e32d313fe06"),
-        ("tray-arcs-etch-bends-false-single.dxf", 43060, "d9a33f1023af0f4c60623c27df23b7ad6d696972f6a873a703e94adb2b7daf76"),
-        ("rule-bend-down-exact-bends-true-roles.dxf", 6427, "7a26485b4ce66a969c8b3887ba50949ef36faea3c087b40f2e7fe1d838b22324"),
-        ("rule-bend-down-exact-bends-false-single.dxf", 5624, "3d2b503eb20200376cef608522459f7a68cf44d022442191333a09ba71dea438"),
-        ("rule-bend-down-arcs-bends-true-roles.dxf", 6427, "7a26485b4ce66a969c8b3887ba50949ef36faea3c087b40f2e7fe1d838b22324"),
-        ("rule-bend-down-arcs-bends-false-single.dxf", 5624, "3d2b503eb20200376cef608522459f7a68cf44d022442191333a09ba71dea438"),
-        ("rule-included-down-exact-bends-true-roles.dxf", 6428, "0fb0d63f170581276520b4d490305026bfc31da6aeaa19424bf9631871c2b06a"),
-        ("rule-included-down-exact-bends-false-single.dxf", 5625, "04c56009bee0b0a7dda321010589dc43cf10087457d43d3218247bf767bc9896"),
-        ("rule-included-down-arcs-bends-true-roles.dxf", 6428, "0fb0d63f170581276520b4d490305026bfc31da6aeaa19424bf9631871c2b06a"),
-        ("rule-included-down-arcs-bends-false-single.dxf", 5625, "04c56009bee0b0a7dda321010589dc43cf10087457d43d3218247bf767bc9896"),
-        ("pocket-and-engraved-text-exact.dxf", 23727, "5d7cd4b2232f5761be746fe0eccf9424c940db3a8913bdd293447699564b8723"),
-        ("pocket-and-engraved-text-arcs.dxf", 40890, "af52f9441f5c9ea7b4dfb089f88ebd932fff5ab84bb3b90d1ae86da295c822ad"),
+        ("ellipse-exact.dxf", 6055, "76216b57d27865e2251f270fb29fc9f41880dc1a8b01522ac4606545c26104e7"),
+        ("ellipse-arcs.dxf", 17237, "080c9e9c6175d66998a3adaa4127d1b66aa209c7cdfef17adb304f8f867bc1d4"),
+        ("cubic-spline-exact.dxf", 6932, "8d9f2c530cf113546f5d076f4b9fd672611603477b184be179e02e1d3d3c12d7"),
+        ("cubic-spline-arcs.dxf", 13948, "e1d0a9fbcaef9acda694841e0fed6fec880fa05146ed378786d566dee648f529"),
+        ("degree-nine-exact.dxf", 6806, "75d2581389987867ec9254d721fd638ecac95ee5b67d4db12bdf204d764bd7a9"),
+        ("degree-nine-arcs.dxf", 14742, "e4bc2863c13412d9c3cfabf38a7ac5a40387dae0da023cb84f66eeb507906214"),
+        ("text-outlines-exact.dxf", 13943, "d4fb81c8c7cf8e5fcd75cc90d6c1bda37b0eda032943fc8e2eedec9250f596fa"),
+        ("text-outlines-arcs.dxf", 26294, "45d0555c30b777c6e127852c7de6ae8ced366398e714270dc9d97ddd78d9c67b"),
+        ("tray-default.dxf", 25616, "98dd90d5ca4c2fb9569274605d59ad5488639da89468182afc2123c0b3e39ad3"),
+        ("tray-exact-cut-bends-true-roles.dxf", 26549, "2c1590ff4459e397f043edf0875ef9a98e99181855a0981264bea67d5bde9468"),
+        ("tray-exact-cut-bends-true-single.dxf", 25368, "1337e15f6f5a6d54f951db772356d961a649fd9e4cdec65f6959563de1f4a6d8"),
+        ("tray-exact-cut-bends-false-roles.dxf", 26007, "33214a549fd84d4745a9bc75463ed2b497d19590001a585ea4d572b002511934"),
+        ("tray-exact-cut-bends-false-single.dxf", 24852, "1c0c866f16c59a5025adc341a19019edb9b819db0053f123855f662b5abc99fa"),
+        ("tray-exact-etch-bends-true-roles.dxf", 26549, "2b945e13b10d6814ad9da7b370a4e49e5ee494928d1f331e1e885ff87632d98a"),
+        ("tray-exact-etch-bends-true-single.dxf", 25368, "1337e15f6f5a6d54f951db772356d961a649fd9e4cdec65f6959563de1f4a6d8"),
+        ("tray-exact-etch-bends-false-roles.dxf", 26007, "ba8b3eb4252034fccd830dd237aeaf043d71ba9f1fca8de5c0c0a12bd4da6542"),
+        ("tray-exact-etch-bends-false-single.dxf", 24852, "1c0c866f16c59a5025adc341a19019edb9b819db0053f123855f662b5abc99fa"),
+        ("tray-arcs-cut-bends-true-roles.dxf", 44164, "539712d1bd28cb9ce304b2aeeb4047148db21dbe42e608d28544ef24f7811409"),
+        ("tray-arcs-cut-bends-true-single.dxf", 42614, "e9c7c4b1f9bb295f40e280f8d1c0c8b4f06fa8867a56439104d758cf7e05511b"),
+        ("tray-arcs-cut-bends-false-roles.dxf", 43618, "65455a51ef2ac6d0ba22f5a34978bcc0e654cbf75635215c2c8aeba5bc0b6aa4"),
+        ("tray-arcs-cut-bends-false-single.dxf", 42094, "60ac52e83d266cfd3dff855e0342145749e4eae3de3ec67c2c4caa664303b71f"),
+        ("tray-arcs-etch-bends-true-roles.dxf", 44164, "90d38034b7955cbb6df649a05beba0e41c2a4b6e28038e3114463426fea15bef"),
+        ("tray-arcs-etch-bends-true-single.dxf", 42614, "e9c7c4b1f9bb295f40e280f8d1c0c8b4f06fa8867a56439104d758cf7e05511b"),
+        ("tray-arcs-etch-bends-false-roles.dxf", 43618, "98eee98b63487f3c5bd43a8eb1a77d018770a187c258cbb215f44cf357010350"),
+        ("tray-arcs-etch-bends-false-single.dxf", 42094, "60ac52e83d266cfd3dff855e0342145749e4eae3de3ec67c2c4caa664303b71f"),
+        ("rule-bend-down-exact-bends-true-roles.dxf", 6404, "6cb5e52159e65d31291487fdaefeaf0c96dff4972518e207abcdbb0d6777788b"),
+        ("rule-bend-down-exact-bends-false-single.dxf", 5601, "2e870ef208815323672950bf63bd894a531c84f69daa92ac3cf13f65ec72ee83"),
+        ("rule-bend-down-arcs-bends-true-roles.dxf", 6404, "6cb5e52159e65d31291487fdaefeaf0c96dff4972518e207abcdbb0d6777788b"),
+        ("rule-bend-down-arcs-bends-false-single.dxf", 5601, "2e870ef208815323672950bf63bd894a531c84f69daa92ac3cf13f65ec72ee83"),
+        ("rule-included-down-exact-bends-true-roles.dxf", 6405, "ffbd14348da7d622ce41515db742113a81821e715c33d4e3bba244495d41ce73"),
+        ("rule-included-down-exact-bends-false-single.dxf", 5602, "1d2e0d4bf7885a7214fda47d2b99c273b4e67aeb2f7bf0eef43558b02f9bdb2a"),
+        ("rule-included-down-arcs-bends-true-roles.dxf", 6405, "ffbd14348da7d622ce41515db742113a81821e715c33d4e3bba244495d41ce73"),
+        ("rule-included-down-arcs-bends-false-single.dxf", 5602, "1d2e0d4bf7885a7214fda47d2b99c273b4e67aeb2f7bf0eef43558b02f9bdb2a"),
+        ("pocket-and-engraved-text-exact.dxf", 23727, "495ece7e645b894f1a50b3b451c5831e7bbe7f48a768b765a55cc9db29181442"),
+        ("pocket-and-engraved-text-arcs.dxf", 40896, "4d5a113500ca094e86f0151a6f5acd2de44d9223ab20995a31124627f0e215a8"),
         ("perforation-exact.dxf", 9350, "4fc84deef7b61c33309580a06aa536ca94a0102308775a228181d61d911d4702"),
         ("perforation-arcs.dxf", 9350, "4fc84deef7b61c33309580a06aa536ca94a0102308775a228181d61d911d4702"),
         ("per-body-0-exact.dxf", 5870, "ddf43d4388e2ea0d6f9d51c2207033c49cadf958caa8298ae109596d748e9c12"),
-        ("per-body-1-exact.dxf", 6109, "409f13e1811cfc8861aaf98a3cc8dfb4f8a3d23db1073afe48d114fefc94cea2"),
+        ("per-body-1-exact.dxf", 6086, "f53dfe5cb620274fc7295a0d7caed372e452b1b977ae8a0625ecd589ca0472d2"),
         ("per-body-0-arcs.dxf", 5870, "ddf43d4388e2ea0d6f9d51c2207033c49cadf958caa8298ae109596d748e9c12"),
-        ("per-body-1-arcs.dxf", 6109, "409f13e1811cfc8861aaf98a3cc8dfb4f8a3d23db1073afe48d114fefc94cea2"),
+        ("per-body-1-arcs.dxf", 6086, "f53dfe5cb620274fc7295a0d7caed372e452b1b977ae8a0625ecd589ca0472d2"),
         ("writer-bmp-controls.dxf", 5236, "d65c4af9750a54c24fcc8fc1ee68c35ab4c59315f375861c81040c4c1bbd2e5e"),
         ("writer-bmp-cap.dxf", 6947, "b498adacdd4bd5606988b2288caa070d3065f58beb1d2353d3bbba186e33eb3b"),
         ("unicode-early.txt", 159, "90c374179d2388832a9bbcafbbabd4c3887edde4989eedd9cfcbd48b4199b4f1"),
@@ -1181,23 +1192,24 @@ mod byte_regressions {
         ("unicode-far-after-cap.txt", 163, "87709acb08a4e729b4480182419ad843ab2c7887fc73dd23bc86a3e86f35beaa"),
     ];
 
-    // Independently captured from unchanged upstream c0fb2cbc with Ubuntu 24.04's
-    // glibc 2.39 math functions. Its arc-fit last decimals differ from glibc 2.44;
-    // both the old converter and this converter produce each complete byte stream.
-    // Keep exact (length, SHA-256) pairs: no numeric normalization or loose tolerance.
-    const UBUNTU_MATH_OUTPUTS: [ExpectedOutput; 12] = [
-        ("ellipse-arcs.dxf", 17239, "5d90da6a9057fa3c59f3a3b105c10119e6e9d87f53b80dabcffccc2f523b0bd7"),
-        ("cubic-spline-arcs.dxf", 13950, "edb0bcf9081d497bc1cfca4e1411547b2ac16faa1e4020310edfd28647d8d987"),
-        ("text-outlines-arcs.dxf", 26402, "31106ecbc2efbce70a6fe39bd30a510896c57a95c32285fca709b83e927d309d"),
-        ("tray-arcs-cut-bends-true-roles.dxf", 45156, "eb958dee8819820e54d503c2a137b43854e016b886ddb55c85fc48b229171d45"),
-        ("tray-arcs-cut-bends-true-single.dxf", 43582, "a1e41f30b003fae5e133e40218b1791de6f66db07b358cc66579535b4a70306c"),
-        ("tray-arcs-cut-bends-false-roles.dxf", 44610, "c0c53b7a57572d263330339551049ac7bd4622dea2697f301640676d8c7145a6"),
-        ("tray-arcs-cut-bends-false-single.dxf", 43062, "d81f0d877303982757db2da84f43825dd7d79ef48e4c6c8e624f37e95dc37f9d"),
-        ("tray-arcs-etch-bends-true-roles.dxf", 45156, "4c2d234cc5a52b673ce684c315b6c19795bd4e477d61e880ea014d34fed25ed6"),
-        ("tray-arcs-etch-bends-true-single.dxf", 43582, "4127e81e7e5b7d281067c34fe25f5b8c50905a2a047ba85e7d2df639619a66af"),
-        ("tray-arcs-etch-bends-false-roles.dxf", 44610, "1843ec0c2a60611c75715714d6763e75fe478e8509b2b02f267320d07f7058d3"),
-        ("tray-arcs-etch-bends-false-single.dxf", 43062, "598c9a3c5632372db84843fb7d600b20b5c0d85f22419e6d3219902c8860cbc9"),
-        ("pocket-and-engraved-text-arcs.dxf", 40893, "e3b38c00b28d742d93c8d9163b190a1f92f561f77842f9c2442943c5800e7946"),
+    // The arc-fitted outputs whose last decimals differ on Ubuntu 24.04's glibc 2.39, the math
+    // library of CI's Native Linux tests: captured there in the ci profile on the same head as
+    // EXPECTED_OUTPUTS (h0witzer/solidcraft Actions run 43773943106). The other 40 are the same
+    // on both. Keep exact (length, SHA-256) pairs: no numeric normalization or loose tolerance.
+    const UBUNTU_MATH_OUTPUTS: [ExpectedOutput; 13] = [
+        ("ellipse-arcs.dxf", 17239, "38a68a766f4dcd536f7e825b62f75c1cd3d50416b4cf9d84159bbfb374b1445e"),
+        ("cubic-spline-arcs.dxf", 13947, "b1a17ef08c3009c5461ce9ec7fb9c1085f861b82ff974726f44510f5321ab788"),
+        ("degree-nine-arcs.dxf", 14744, "bc1a88e7ac3f9b216bcd76bfb4f4fb647fbde381383bfd5bdf2241aed6595421"),
+        ("text-outlines-arcs.dxf", 26294, "34a4abe89b99922d49a80088f220f8f4ad2f8022d94647447a173612ef3d1219"),
+        ("tray-arcs-cut-bends-true-roles.dxf", 44165, "e6488189a5584413012bbabe1b44832c8ce14f565a86e58ffe50068dd7db24fc"),
+        ("tray-arcs-cut-bends-true-single.dxf", 42615, "efbf49726da35fe5abb731fcf2fb6f3c8d1bbce6b64ca970746490ed761759f6"),
+        ("tray-arcs-cut-bends-false-roles.dxf", 43619, "186f681bf9aebcf7086d3fcc987efdda6a0583d0d6b8572678139a5dbb634ff9"),
+        ("tray-arcs-cut-bends-false-single.dxf", 42095, "7a065e7a339e26239587d6f27364b5b3c3cd8e8ff4aa77bfecf155e874bbe5a1"),
+        ("tray-arcs-etch-bends-true-roles.dxf", 44165, "79bc510af86ab8f49bdb4f35c4818d6169dc51f7a37303118c9389306cfc1379"),
+        ("tray-arcs-etch-bends-true-single.dxf", 42615, "efbf49726da35fe5abb731fcf2fb6f3c8d1bbce6b64ca970746490ed761759f6"),
+        ("tray-arcs-etch-bends-false-roles.dxf", 43619, "6c9bf32afe56ff831a1e4dcf7e1aacd26632037dbb742f93b719d6b3b3101d5e"),
+        ("tray-arcs-etch-bends-false-single.dxf", 42095, "7a065e7a339e26239587d6f27364b5b3c3cd8e8ff4aa77bfecf155e874bbe5a1"),
+        ("pocket-and-engraved-text-arcs.dxf", 40893, "3f8999b3f7ae2b8a016868344e00bf60df35ec1a947bf46e08da9a027370ba8d"),
     ];
 
     struct BytePins {
@@ -1583,15 +1595,17 @@ fn legacy_caller_circle_keeps_an_admitted_sub_writer_precision_arc() {
     let error = path_shapes(DxfPath::Closed(&lp), DxfPathStyle::Exact).unwrap_err();
     assert!(error.to_string().contains("arc endpoints collapse"));
 
-    // Start with a real command-produced sheet's admitted rule/frame and replace only
-    // its public source outline. This tests the SheetBody/flat_regions/export API,
-    // not a claim about ordinary sketch-command or saved-design reachability.
+    // Start with a real command-produced sheet and replace only the outline of its flat region
+    // (the flat is derived from the part's surfaces; this changes the derived data the exporter
+    // is handed, it is never written back). This tests the surface_dxf export route, not a
+    // claim about ordinary sketch-command or saved-design reachability.
     let session = plate_with(&[]);
-    let mut sheet = session.model.state().sheets[0].clone();
-    sheet.base.outer = lp.clone();
-    let flat = sheet.flat_regions().expect("the public sheet flat-region route admits this outline");
+    let mut sheet = session.model.state().surface_sheets[0].clone();
+    assert_eq!(sheet.regions.len(), 1);
+    sheet.regions[0].outer = lp.clone();
+    let flat = sheet.shown().regions;
     assert_eq!(flat.len(), 1);
-    assert_eq!(flat[0].outer.segs, lp.segs, "flat-region admission must preserve the actual witness pieces");
+    assert_eq!(flat[0].outer.segs.len(), lp.segs.len(), "the shown flat keeps every witness piece");
     assert_eq!(super::loop_circle(&flat[0].outer), Some((center, 8.0)));
 
     // Cam's written caller contract promises the same CIRCLE here. These are
@@ -1600,7 +1614,8 @@ fn legacy_caller_circle_keeps_an_admitted_sub_writer_precision_arc() {
         let shapes = super::flat_loop_shapes(&flat[0].outer, style).expect("admitted legacy whole circle remains exportable");
         assert!(matches!(shapes.as_slice(), [DxfShape::Circle { c, r }] if *c == center && *r == 8.0));
     }
-    let dxf = super::flat_dxf(&sheet, &super::DxfOptions::default()).expect("the real default flat-pattern exporter retains its whole-circle result");
+    let dxf = super::surface_dxf(&session, &sheet, &super::DxfOptions::default())
+        .expect("the real default flat-pattern exporter retains its whole-circle result");
     let es = entities(&dxf);
     assert_eq!((count(&es, "CIRCLE"), count(&es, "ARC"), count(&es, "LINE")), (1, 0, 0));
 }

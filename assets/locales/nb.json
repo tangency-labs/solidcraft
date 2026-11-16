@@ -1547,7 +1547,7 @@
   "help.plastic.rest": "Legger til et anlegg på en flate: en rund eller rektangulær pute, massiv eller hul, med slippvinkel. Bruk det som støtte eller avstandsstykke i et støpt hus.",
   "help.plastic.snap_fit": "Legger til en snap-fit-krok på en flate, med lengde, tykkelse og hake. Bruk det til å klikke deler sammen uten skruer.",
   "help.pointcloud.insert": "Sett inn en PLY-, XYZ- eller PTS-skanning som en punktsky ved siden av modellen. Bruk den som referanse når du bygger en modell fra måledata.",
-  "help.sheet.convert": "Gjør en plate eller en uthulet kropp med jevn tykkelse om til en platekropp, med bøyninger ved kantene du velger. Bruk det til å gjøre en eksisterende del utbrettbar.",
+  "help.sheet.convert": "Gjør flater om til plate etter regelen: flatene til en volumkropp eller en flatekropp, med bøyninger ved kantene du velger. Bruk det til å lage en platedel av en modellert form.",
   "help.sheet.export_bend_table": "Lagrer bøyetabellen til en platekropp som CSV eller JSON: vinkler, radier og bøyeposisjoner i utbrettingen. Bruk det til kantpressen eller verkstedet.",
   "help.sheet.export_dxf": "Lagrer utbrettingen som en DXF, med konturer, bøyelinjer og valgfrie bøyenotater. Bruk det til laser-, plasma- eller vannskjæring.",
   "help.sheet.flange": "Legger til en flens: en grunnplate fra en skisse, en vegg langs en åpen skissekontur eller en bøyd vegg på platekanter. Bruk det til å bygge opp platedeler.",
