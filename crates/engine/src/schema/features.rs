@@ -1104,6 +1104,12 @@ pub struct MoveParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "Point3")]
     pub axis: Option<Point3>,
+    /// The edge or round face of the model the turn was picked on, `{edge|face: [x,y,z], body?}`:
+    /// the move keeps turning about it where it is, when an earlier step moves the body
+    /// (#17974). `axis` and `origin` give the line where it is now and the turn's sense.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "GeoRefParam")]
+    pub about: Option<GeoRefParam>,
     /// Angle expression; default zero.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "AngleExpr")]

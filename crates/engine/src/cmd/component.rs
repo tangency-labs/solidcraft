@@ -588,6 +588,7 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
     }
     reply(ListResult {
         active: s.active_component,
+        active_path: s.active_occurrence_path.clone().unwrap_or_default(),
         components: out,
         pending_moves: s.pending_moves.keys().copied().collect(),
         param_warnings: Vec::new(),

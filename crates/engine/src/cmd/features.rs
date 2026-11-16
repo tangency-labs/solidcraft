@@ -222,7 +222,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.move", "Move/Copy", crate::checked!("solid.move", move_bodies))
         .at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch)
         .contract(&MOVE_CONTRACT).output(output_schema_for::<MoveResult>)
-        .params("bodies: [names]; translate?: [x,y,z] (length exprs or numbers, applied after rotation); axis?: [x,y,z] (default: world Z with origin, else the body's component's Z, world Z at the root); angle?: angle expr; origin?: [x,y,z] (length exprs or numbers in world coordinates; default: the body's component's origin, the world origin at the root); matrix?: rigid row-major 3x4 or 4x4, flat or rows (instead of translate/axis/angle/origin); tolerance?: matrix rotation tolerance (default 1e-9, at most 1e-3); copy?: bool (default false; true keeps originals and transforms copies); occurrences?: [occurrence paths, root first] (only with copy: copies each component independently and transforms the copies in world space; reply lists them in occurrences); name?, body_name?, body_names?"),
+        .params("bodies: [names]; translate?: [x,y,z] (length exprs or numbers, applied after rotation); axis?: [x,y,z] (default: world Z with origin, else the body's component's Z, world Z at the root); about?: {edge|face: [x,y,z], body?} (the edge or round face the turn is about, kept as a reference so the turn follows it when an earlier step moves the body; axis and origin give the turn's sense and where it is now); angle?: angle expr; origin?: [x,y,z] (length exprs or numbers in world coordinates; default: the body's component's origin, the world origin at the root); matrix?: rigid row-major 3x4 or 4x4, flat or rows (instead of translate/axis/angle/origin); tolerance?: matrix rotation tolerance (default 1e-9, at most 1e-3); copy?: bool (default false; true keeps originals and transforms copies); occurrences?: [occurrence paths, root first] (only with copy: copies each component independently and transforms the copies in world space; reply lists them in occurrences); name?, body_name?, body_names?"),
 ];
 
 /// Where an extrude starts and which way is positive: a point inside the (first) profile or
@@ -2372,8 +2372,8 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
 pub(crate) fn move_matrix_params(p: &Value) -> Result<Option<Value>> {
     let Some(matrix) = p.get("matrix") else { return Ok(None) };
     let cmd = "solid.move";
-    if ["translate", "axis", "angle", "origin"].iter().any(|k| p.get(k).is_some()) {
-        return Err(bad(cmd, "matrix cannot be combined with translate, axis, angle or origin"));
+    if ["translate", "axis", "angle", "origin", "about"].iter().any(|k| p.get(k).is_some()) {
+        return Err(bad(cmd, "matrix cannot be combined with translate, axis, angle, origin or about"));
     }
     let m = super::component::matrix::rigid(matrix, super::component::matrix::tolerance(p, cmd)?, cmd)?;
     let (axis, angle) = super::component::matrix::axis_angle(&m);
@@ -2581,6 +2581,23 @@ fn move_placements(s: &mut Session, p: &Value, plan: crate::frames::PlacementMov
     Ok(out)
 }
 
+/// The edge or round face of the model a move's turn is about (`about`, #17974), kept so the turn
+/// follows it. It needs `axis`, along it, and `angle`; `axis` gives the turn's sense, and with
+/// `origin` the line the move turns about when the edge is no longer found.
+fn move_turn_about(s: &Session, p: &Value, cmd: &str) -> Result<Option<solidcraft_doc::construct::GeoRef>> {
+    let Some(v) = p.get("about") else { return Ok(None) };
+    let Some((geo, _, d)) = super::construct::model_axis_param(s, Some(v), cmd)? else {
+        return Err(bad(cmd, "`about` must be {edge: [x,y,z], body?} or {face: [x,y,z], body?}"));
+    };
+    let (Some(axis), Some(_)) = (p.get("axis").and_then(vec3).and_then(|a| a.normalized()), p.get("angle")) else {
+        return Err(bad(cmd, "`about` needs `axis` and `angle`"));
+    };
+    if axis.cross(d).len() > 1e-6 {
+        return Err(bad(cmd, "`about` does not lie along `axis`"));
+    }
+    Ok(Some(geo))
+}
+
 fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.move";
     let bodies = string_list(cmd, p, "bodies")?;
@@ -2589,6 +2606,7 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let translate = point_param(s, p, "translate", cmd)?.unwrap_or_else(|| point_expr(Vec3::ZERO));
     let origin = point_param(s, p, "origin", cmd)?;
+    let rotate_about = move_turn_about(s, p, cmd)?;
     let copy = bool_(p, "copy").unwrap_or(false);
     // The command boundary captures these before instance names become definition names.
     let copy_frames: Vec<solidcraft_doc::Mat> = if copy {
@@ -2612,6 +2630,7 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
             translate,
             origin,
             rotate_axis: p.get("axis").and_then(vec3).map(Dir),
+            rotate_about,
             angle: expr(p, "angle"),
             copy,
             copy_frames,

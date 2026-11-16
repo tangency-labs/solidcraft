@@ -1864,16 +1864,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 if crate::joint_handles::begin(app, o) {
                     return;
                 }
-                let mut movement = crate::browser::OccMove::new(o);
-                movement.had_pending = app.session.pending_moves.contains_key(&o);
-                movement.path = p.get("path").and_then(Value::as_array).map(|p| p.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
-                movement.baseline = app
-                    .session
-                    .pending_moves
-                    .get(&o)
-                    .copied()
-                    .or_else(|| app.session.doc.occurrences.iter().find(|occ| occ.id == o).map(|occ| occ.transform));
-                app.tree.occurrence_move = Some(movement);
+                // Move/Copy on the component: it moves by its placement, at the placement named.
+                let path: Vec<u64> =
+                    p.get("path").and_then(Value::as_array).map(|p| p.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+                let path = if path.last() == Some(&o) { path } else { crate::dialogs_move::first_path(app, o) };
+                crate::dialogs_move::open_on_occurrence(app, path, false);
             }
         }
         "ui.isolateOccurrence" => {
