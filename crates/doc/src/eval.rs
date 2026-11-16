@@ -4697,6 +4697,28 @@ pub(crate) fn empty_intersection(bodies: &[&str]) -> DocError {
     DocError::Invalid(format!("the intersection is empty: nothing of {body} would remain; check that the profile overlaps the body"))
 }
 
+thread_local! {
+    /// What the feature being evaluated says about targets it found joined into another body
+    /// ([`joined_into`]); [`eval_feature`] adds them to its warning.
+    static JOINED_TARGETS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The body that the target `name`, gone from the model, is part of now: a Combine before `f`
+/// joined it into its target, which a later Combine may have joined on in turn (#17807). `None`
+/// when no such Combine took it (a cut or intersect consumes its tools: they are part of
+/// nothing), or the body it went into is gone too.
+fn joined_into<'d>(doc: &'d Document, state: &ModelState, f: &Feature, name: &str) -> Option<&'d str> {
+    let mut now: Option<&'d str> = None;
+    for g in doc.features.iter().take_while(|g| g.id != f.id).filter(|g| !g.suppressed) {
+        if let FeatureKind::Combine { target, tools, operation: Operation::Join | Operation::NewBody, keep_tools: false } = &g.kind
+            && tools.iter().any(|t| t.0.as_str() == now.unwrap_or(name))
+        {
+            now = Some(target.0.as_str());
+        }
+    }
+    now.filter(|b| state.body(b).is_some())
+}
+
 /// The body a feature's target name `name` picks. Body names are unique, so a body of the
 /// feature's component asked to be called a name another component's body already has (a
 /// linked component's `AS5047P_PCB`) was named otherwise (`Body1`), and the name still picks the
@@ -4855,7 +4877,20 @@ fn apply_traced_with(
     } else {
         let mut v = Vec::new();
         for t in targets {
-            v.push(named_target(doc, state, f, t)?);
+            let i = match named_target(doc, state, f, t) {
+                // A target an earlier Combine has since joined into its own target is that
+                // body now (#17807), as a Combine tool that is part of another body is.
+                Err(DocError::Unknown(_)) if let Some(base) = joined_into(doc, state, f, t) => {
+                    JOINED_TARGETS.with(|n| n.borrow_mut().push(format!("`{t}` is part of `{base}` now")));
+                    let i = named_target(doc, state, f, base)?;
+                    if v.contains(&i) {
+                        continue;
+                    }
+                    i
+                }
+                r => r?,
+            };
+            v.push(i);
         }
         v
     };
@@ -10045,6 +10080,24 @@ fn chamfer_with(
 }
 
 fn eval_feature(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &mut ModelState,
+    warning: &mut Option<String>,
+    import_report: &mut Option<Arc<kernel::ImportReport>>,
+    repair: &mut Option<Arc<kernel::RepairReport>>,
+) -> Result<()> {
+    JOINED_TARGETS.with(|n| n.borrow_mut().clear());
+    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair);
+    for note in JOINED_TARGETS.with(|n| std::mem::take(&mut *n.borrow_mut())) {
+        append_warning(warning, note);
+    }
+    r
+}
+
+/// [`eval_feature`] for one kind of feature.
+fn eval_feature_kind(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
     f: &Feature,
