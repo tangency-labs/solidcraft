@@ -25,7 +25,7 @@
 //! | [`MixedCorner`]           | `SmBlendCorner`'s `m_apMixedSurface`, `m_vMixed3d`, `m_vMixedUV`, `m_vMixedOrients`, and `SmMixedRing` |
 //! | [`classify_mixed`]        | `SmBlendCorner::ClassifyMixed`                        |
 //! | `mixed_ring` (private)    | `sm_MixedRing`                                        |
-//! | `leaving` (private)       | `sm_MixedLeaving`                                     |
+//! | `leaving` (crate)         | `sm_MixedLeaving`                                     |
 //! | `param_of` (private)      | `sm_MixedParam`                                       |
 //! | `curve_surface` (private) | `sm_MixedCurveSurface`                                |
 //! | `rail_wall` (private)     | `sm_MixedRailWall`                                    |
@@ -497,7 +497,13 @@ impl SolutionObject for MxObject {
 /// [`crate::query::edge_turn::leaving_derivative`]'s ([`crate::query::edge_turn::leaving_tangent`]);
 /// this adds the closed edge's start and
 /// this module's errors (a vertex the edge does not meet, no curve, a tangent of no length).
-fn leaving(k: &Kernel, b: &Brep, e: EdgeId, vertex: VertexId, op: &'static str) -> Result<Vec3> {
+pub(crate) fn leaving(
+    k: &Kernel,
+    b: &Brep,
+    e: EdgeId,
+    vertex: VertexId,
+    op: &'static str,
+) -> Result<Vec3> {
     let at_start = edge::start_vertex(b, e)? == Some(vertex);
     if !at_start && edge::end_vertex(b, e)? != Some(vertex) {
         // the edge does not meet the vertex

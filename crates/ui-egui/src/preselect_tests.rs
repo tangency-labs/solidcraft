@@ -1914,7 +1914,12 @@ fn thread_size_suggestion_reopens_without_changing_saved_thread_parameters() {
             params["designation"] = json!(size);
         }
         let id = h.app.run("solid.thread", params).unwrap()["feature"].as_u64().unwrap();
-        let before = h.app.session.doc.feature(id).unwrap().kind.clone();
+        let mut before = h.app.session.doc.feature(id).unwrap().kind.clone();
+        // Editing a legacy point-only selection records its body, preserving every thread option.
+        if let solidcraft_engine::doc::FeatureKind::Thread { target_bodies, single_face_selection, .. } = &mut before {
+            *target_bodies = vec!["Body1".into()];
+            *single_face_selection = true;
+        }
         h.app.edit_feature(id);
         h.frames(2);
         let d = h.app.dialog.as_ref().unwrap();
@@ -4637,10 +4642,14 @@ fn hovering_a_picked_face_draws_hover_edges_and_preserves_selection_fill() {
 }
 
 /// #3683: a body or feature row lights what the Browser and timeline rows light: the body, or
-/// the feature's geometry; leaving it puts the view back.
+/// the feature's geometry; leaving it puts the view back. A tool a Combine's live preview stands
+/// in for (a join's) is lit by its outline, not its faces.
 #[test]
 fn hovering_a_body_or_feature_row_lights_it_as_the_browser_does() {
-    let lit = |h: &crate::scenario::Harness| crate::viewport::build_highlight(&h.app).merged().tris;
+    let lit = |h: &crate::scenario::Harness| {
+        let m = crate::viewport::build_highlight(&h.app).merged();
+        (m.tris, m.lines, m.overlay, m.hidden)
+    };
     let mut h = crate::scenario::Harness::new();
     for (name, x) in [("Block", 0), ("Cutter", 10), ("Other", 20)] {
         h.app.run("solid.box", json!({"corner": [x, x, x], "length": 20, "width": 20, "height": 20, "body_name": name})).unwrap();

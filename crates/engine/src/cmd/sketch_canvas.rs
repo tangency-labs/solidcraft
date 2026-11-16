@@ -81,7 +81,7 @@ fn image_bytes(p: &Value, cmd: &str) -> Result<Vec<u8>> {
 fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
     let bytes = image_bytes(p, cmd)?;
     let (format, pixels) = image_info(&bytes).ok_or_else(|| bad(cmd, "only PNG and JPEG images can be inserted"))?;
-    let plane = super::sketch::plane_ref(s, p, cmd)?;
+    let plane = super::sketch::plane_ref_numbers(s, p, cmd)?;
     let (vals, _) = s.doc.param_values();
     let pl = s.doc.resolve_plane_in(&vals, &plane, 0, s.active_component, Some(&s.model.state()))?;
     // A decal sits where the face was picked.

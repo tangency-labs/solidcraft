@@ -4219,7 +4219,9 @@ mod tests {
         let mut env = TopologyEnv {
             all_attributes: &[],
             attributes: &mut store,
-            key_of: &key_of,
+            // distinct, typed identities (`TopologyEnv::key_of`; the module's `key_of`
+            // names every object alike)
+            key_of: &crate::topology::loopuse::notify_ref,
             records: &mut records,
             next_key: 1,
         };

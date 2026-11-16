@@ -823,6 +823,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             open_ends: Vec::new(),
             overflow_first: false,
             classify_only: false,
+            roll_over_pass: false,
             overflow_edges: Vec::new(),
             mitred_edges: Vec::new(),
             fan_split_points: Vec::new(),
@@ -993,6 +994,12 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// `CreateFilletBrep`.
     pub fn set_classify_only(&mut self, value: bool) {
         self.classify_only = value;
+    }
+
+    /// Not upstream (#10876): the session is the blend corner's Roll-over's second pass
+    /// ([`Self::roll_over_pass`]); before `CreateFilletBrep`.
+    pub fn set_roll_over_pass(&mut self, value: bool) {
+        self.roll_over_pass = value;
     }
 
     /// `GetOverflowEdges` (the fork's, WR-634, tangency-labs/smlib@241f7ba): the edges of
