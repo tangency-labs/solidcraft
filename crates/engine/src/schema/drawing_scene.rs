@@ -256,7 +256,9 @@ pub struct DrawingUpdateParams {}
 /// What `drawing.update` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct DrawingUpdateResult {
-    /// How many views wait to be drawn: the sheet page draws them, as a command that reads their sheet does.
+    /// How many views wait to be drawn on the sheet page. For a deferred drawing a command that reads
+    /// their sheet draws them too; an automatic drawing's scenes and exports draw from the model at
+    /// once and leave this as it is.
     pub waiting: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -292,7 +294,8 @@ pub struct DrawingStatusResult {
     pub views: Vec<ViewStatusResult>,
     /// Each dimension, in id order.
     pub dimensions: Vec<DimensionStatusResult>,
-    /// How many views are out of date.
+    /// How many views are out of date on the sheet page. An automatic drawing's scenes and exports
+    /// draw from the model at once and don't change it.
     pub waiting: usize,
     /// A deferred drawing: its views and dimensions out of date wait for `drawing.update`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
