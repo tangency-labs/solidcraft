@@ -1650,7 +1650,8 @@ mod tests {
 
     /// A ray along +x at y = 3, z = 10 crosses the side of the radius-5 cylinder about z at
     /// x = -4 and x = 4 (a 3-4-5 triangle): from x = -20 the first face hit is the side at
-    /// (-4, 3, 10), 16 along the ray, its surface evaluating to that point at the hit's (u, v);
+    /// (-4, 3, 10), 16 along the ray, its surface at the hit's (u, v) on the ray (within the
+    /// B-rep's zone tolerance) and at that point;
     /// from the axis, the far side at 4; from x = 20 facing away, nothing. What is no ray is
     /// refused before any solve.
     #[test]
@@ -1672,7 +1673,12 @@ mod tests {
         );
         assert!((near.distance - 16.0).abs() < 1e-9, "{near:?}");
         let surface = face::p2::surface(&b, near.face).unwrap().unwrap();
-        assert_eq!(surface.evaluate_point(&k, near.uv).unwrap(), near.point);
+        let on = surface.evaluate_point(&k, near.uv).unwrap();
+        let along = on - Point3::new(-20.0, 3.0, 10.0);
+        let off_line = (along - x * along.dot(x)).length();
+        let zone = brep_zone_tol_3d(&k, &b, SmallTopoType::NormalSize);
+        assert!(off_line <= zone, "{on:?} is {off_line} off the ray");
+        assert!(on.distance(Point3::new(-4.0, 3.0, 10.0)) < 1e-9, "{on:?}");
         let far = query
             .first_face_hit(&k, &mut b, ray(Point3::new(0.0, 3.0, 10.0)))
             .unwrap()
