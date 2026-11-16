@@ -528,9 +528,13 @@ fn body_case(
         volume(&front),
         crate::test_corpus::raw_counts(&e),
     );
+    let want = CLOSED_GAP_VOLUMES
+        .iter()
+        .find(|(c, _)| *c == case)
+        .map_or(m.volume, |(_, v)| *v);
     assert!(
-        rel(v, m.volume) < 1e-9,
-        "{case}: volume {v} vs rig {}",
+        rel(v, want) < 1e-9,
+        "{case}: volume {v} vs {want} (rig {})",
         m.volume
     );
     assert!(rel(a, m.area) < 1e-9, "{case}: area {a} vs rig {}", m.area);
@@ -582,6 +586,15 @@ fn corpus_split_body_by_its_own_face_extended() {
         Some("b18"),
     );
 }
+
+/// The cases whose parts' volume moved off the rig's when `brep_volume` began closing tolerant
+/// edges' gaps (#16735): the rig measures with SMLib's integrator, which leaks through them as
+/// this one did. Each is held to its volume now, as the others to the rig's.
+const CLOSED_GAP_VOLUMES: [(&str, f64); 1] = [(
+    // the rig's 3348.9377643252164, 1.3e-9 below
+    "booleans/3830-split-cup-by-extended-spline-surface",
+    3_348.937_768_682_578_3,
+)];
 
 /// A thin-walled cup split by an extruded spline sheet extended at both ends: the two parts add
 /// up to the cup (closed form 3349.04); the sheet stays, a third body.

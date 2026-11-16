@@ -560,6 +560,8 @@ fn same(a: Point3, b: Point3, tol: f64) -> bool {
 /// nearest `edge_mid`, the middle of the filleted edge. A kept new piece becomes the
 /// geometry's face in `faces`. Refused (`NoRoom`, in `note`) for an end face that is not
 /// planar and for a rib that does not split a face in two or part it from its middle.
+/// The section is fitted to `fit_tol` and merged at `tol` (the fork uses `tol` for both;
+/// the crease trim fits it tighter, #17673).
 ///
 /// # Errors
 /// The refusals as `SM_ERR`; `SM_ERR` for a failed drop of the edge's middle; those of the
@@ -573,6 +575,7 @@ pub fn cut_fillet_at_open_end(
     vertex_point: Point3,
     edge_mid: Point3,
     tol: f64,
+    fit_tol: f64,
     note: &mut Option<Refusal>,
 ) -> Result<()> {
     let planar = end_surface.is_planar(k, EFF_ZERO)?;
@@ -619,7 +622,7 @@ pub fn cut_fillet_at_open_end(
             &uv_domain,
             at,
             normal,
-            Some(tol),
+            Some(fit_tol),
             None,
         )?;
         if section.curves_3d.is_empty() {

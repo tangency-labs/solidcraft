@@ -9,7 +9,7 @@
 //! | [`end_at_smooth_vertex`], [`continuing_edges`] | `SmBlendCorner::EndAtSmoothVertex` (its test, with every edge it finds: solidcore's) |
 //! | [`calc_end_edge_geom`]            | `SmBlendCorner::CalcEndEdgeGeom` (before the base `CalcCornerEdgeGeom`) |
 //! | `calc_end_cap_edges` (private)    | `SmBlendCorner::CalcEndCapEdges`          |
-//! | `ball_touching_at` (private)      | `SmBlendCorner::BallTouchingAt` (54a4ee7 splits it out of 41a39ec's `RadiusReachingSideEdgeEnd`, bit for bit) |
+//! | `ball_touching_at` (private)      | `SmBlendCorner::BallTouchingAt` (54a4ee7 splits it out of 41a39ec's `RadiusReachingSideEdgeEnd`), G's surface continued exactly (#17780; not the fork's) |
 //! | `radius_reaching_side_edge_end` (private) | `SmBlendCorner::RadiusReachingSideEdgeEnd` |
 //! | `refuse_end_past_side_edge` (private) | `SmBlendCorner::RefuseEndPastSideEdge` |
 //! | `blend_runs_out_past_vertex` (private) | none (a round run on past a smooth vertex keeps going past its side edge's end) |
@@ -37,6 +37,7 @@
 //! it the same (the fork's recursion there has no bound). No recursion (WR-697).
 
 use super::swept::SweptSolvers;
+use crate::blend::fillet_cliff_overflow::distance_to_surface;
 use crate::blend::fillet_corner::p3::CornerPatchEnv;
 use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_corner::topology::same_convexity_edges_round_vertex;
@@ -463,6 +464,14 @@ fn depth_under_edge_continued(first: f64, second: f64, span: f64) -> f64 {
 /// `(0, r]`, r the fillet's radius. Returns `(on_g, within, rho)`: `on_g` where `p` lies on
 /// G (rho 0); `within` where the root lies below r (else rho is r).
 ///
+/// Not the fork's (#17780): G is G's surface continued as far as it continues exactly
+/// ([`distance_to_surface`]: a plane whole, a cylinder, cone, sphere or torus continued as
+/// itself), the surface the solver offsets, not G's surface over its face's own domain. The
+/// ball touching F at P, past the corner's vertex, touches G's surface beyond the face's
+/// end: dropped on the face's own domain, the centre's foot stopped at the domain's side
+/// (the vertex), so the ball came out larger than the round's and a rail that does run past
+/// P was found not to.
+///
 /// # Errors
 /// `SM_ERR` when no solver face is F, or a point does not drop on F or G;
 /// `SM_ERR_NULL_POINTER` without solver, offset surface or G's surface; those of the drops
@@ -514,7 +523,6 @@ pub(crate) fn ball_touching_with(
     }
     let offset_f = &fs.surface(f_index)?.ok_or_else(nul)?.surface;
     let f = offset_f.base_surface();
-    let g = crate::topology::face::p2::surface(target, other_face)?.ok_or_else(nul)?;
     let radius = cap.unwrap_or_else(|| offset_f.offset_distance().abs());
     let sign = if offset_f.offset_distance() < 0.0 {
         -1.0
@@ -534,17 +542,16 @@ pub(crate) fn ball_touching_with(
         ));
     }
     let normal = f.evaluate_normal(k, dropped.result_uv, Side::Left, Side::Left)?;
-    let g_domain = g.natural_uv_domain_with_nurb(k)?;
     let distance = |rho: f64| -> Result<f64> {
         let centre = p + normal * (sign * rho);
-        let at = g.drop_point::<NoObject>(k, centre, &g_domain, &DropPointOptions::default())?;
-        if !at.success {
+        let gap = distance_to_surface(k, target, other_face, centre)?;
+        if gap >= BIG_DOUBLE {
             return Err(SolidError::blend_failed(
                 OP,
                 "a centre does not drop onto the other face",
             ));
         }
-        Ok(at.gap - rho)
+        Ok(gap - rho)
     };
     let mut lo = 0.0;
     let mut hi = radius;

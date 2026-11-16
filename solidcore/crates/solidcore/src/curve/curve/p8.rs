@@ -64,10 +64,11 @@
 use crate::curve::curve::p1::refine_cc_solutions;
 use crate::curve::curve::p2::{at, CciGlobalSolver, Curve};
 use crate::curve::curve::p4::{analytic_curve_intersect, AnalyticOperand};
-use crate::curve::curve::p5::make_curve_cache_with_zone_tol;
+use crate::curve::curve::p5::{make_curve_cache_with_zone_tol, memoized_cache_top_box};
 use crate::curve::curve_cache::CurveCache;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{
     Branch, GlobalSolve, SolutionRequested, SolveRequest, SolverOperation, MAX_SOLVER_TREES,
 };
@@ -287,6 +288,15 @@ fn cache_analytic<O: SolutionObject>(
     Ok(cache.analytic_curve(k)?.cloned())
 }
 
+/// The top box of the tree of the cache [`build_cache`] would return for `curve` at
+/// `zone_tol_3d`, read from the curve's memo when it holds that build (not upstream,
+/// #14453); `None` when it does not, or the tree has no top node. A memo hit copies the
+/// tree with every box as it is ([`crate::geom::tree::Tree::retag_curve_tree`]), so this
+/// is the box the tree of that cache has.
+fn memoized_top_box(k: &Kernel, curve: &Curve, zone_tol_3d: Option<f64>) -> Option<Extent3d> {
+    memoized_cache_top_box(k, curve, zone_tol_3d.or_else(|| curve.owner_zone_tol_3d()))
+}
+
 /// The cache tree (`GetTree`, `NER`).
 fn cache_tree<O: SolutionObject>(cache: &CurveCache<O>) -> Result<&Tree<O>> {
     cache
@@ -397,6 +407,7 @@ impl Curve {
             &mut None,
             [None, None],
             0.0,
+            true,
         )
     }
 
@@ -502,6 +513,7 @@ impl Curve {
             cache2,
             zone_tols,
             contact_tol,
+            false,
         )
     }
 
@@ -545,6 +557,7 @@ impl Curve {
                 cache2,
                 [None, None],
                 0.0,
+                false,
             )?
             .without_objects())
     }
@@ -553,7 +566,10 @@ impl Curve {
     /// the cache slots of [`Curve::global_curve_intersect_cached`]. `zone_tols` are the
     /// zone tolerances the caller resolved for the curves' owners, used only where a
     /// slot's cache is built ([`build_cache`]); `None` preserves the corresponding
-    /// curve's recorded owner tolerance.
+    /// curve's recorded owner tolerance. `own_slots`: true only when the slots are the
+    /// callee's locals, dropped on return; the top-box return (#14453) skips filling
+    /// them. A caller's kept slots (`false`) are filled as before, wherever the
+    /// intersection needs the caches.
     fn global_curve_intersect_body<O: SolutionObject>(
         &self,
         k: &Kernel,
@@ -566,6 +582,7 @@ impl Curve {
         cache2_slot: &mut Option<CurveCache<O>>,
         zone_tols: [Option<f64>; 2],
         contact_tol: f64,
+        own_slots: bool,
     ) -> Result<SolutionArray<O>> {
         let [h_this, h_other] = opts.handles;
         let same_curve = core::ptr::eq(self, other);
@@ -609,6 +626,24 @@ impl Curve {
             // exit when Line/Line solutions are complete
             if !needs_more_intersections {
                 return Ok(sols);
+            }
+        }
+
+        // Not upstream (#14453): two curves whose memoised caches' top boxes are apart
+        // have no intersection, the same test as below on the same boxes, read from the
+        // memo without copying the caches into this call's own slots (a boolean asks
+        // this for every pair of proto edges, nearly all apart); a caller's kept slots
+        // are filled as before
+        if own_slots && !same_curve && cache1_slot.is_none() && cache2_slot.is_none() {
+            if let (Some(root1), Some(root2)) = (
+                memoized_top_box(k, self, zone_tols[0]),
+                memoized_top_box(k, other, zone_tols[1]),
+            ) {
+                let mut bbox = root1;
+                bbox.expand_absolute(dist_tol);
+                if bbox.are_disjoint(&root2, 0.0) {
+                    return Ok(sols);
+                }
             }
         }
 
@@ -1911,6 +1946,82 @@ mod tests {
             Ok(s) => assert!(s.is_empty()),
             Err(e) => assert!(e.is_unported()),
         }
+    }
+
+    /// With the memo on, a pair whose caches the memo holds is answered from their trees'
+    /// top boxes (#14453), and those are the boxes of fresh builds' trees, bit for bit: a
+    /// pair apart gives no solutions, and a crossing pair the solutions of the memo off,
+    /// call after call.
+    #[test]
+    fn memoised_top_boxes_answer_as_fresh_caches() {
+        let on = Kernel {
+            memoize_curve_caches: true,
+            ..Kernel::default()
+        };
+        let off = Kernel {
+            memoize_curve_caches: false,
+            ..Kernel::default()
+        };
+        let a = polyline(&[[0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [2.0, 0.0, 0.0]]);
+        let far = polyline(&[[0.0, 50.0, 0.0], [1.0, 51.0, 0.0], [2.0, 50.0, 0.0]]);
+        let across = polyline(&[[0.0, 0.2, 0.0], [1.0, 0.1, 0.0], [2.0, 0.3, 0.0]]);
+        assert!(
+            memoized_top_box(&on, &a, None).is_none(),
+            "nothing memoised yet"
+        );
+        for b in [&far, &across] {
+            let fresh = a.global_curve_intersect(&off, &unit(), b, &unit(), 1e-6, &opts());
+            for _ in 0..3 {
+                let memo = a.global_curve_intersect(&on, &unit(), b, &unit(), 1e-6, &opts());
+                assert_eq!(format!("{memo:?}"), format!("{fresh:?}"));
+            }
+            for c in [&a, b] {
+                let built = build_cache::<H>(&off, c, Some(H(0)), None).unwrap();
+                let tree = built.tree().unwrap();
+                let top = tree.node(tree.top_node().unwrap()).unwrap().bbox;
+                assert_eq!(memoized_top_box(&on, c, None), Some(top));
+            }
+        }
+        let apart = a.global_curve_intersect(&on, &unit(), &far, &unit(), 1e-6, &opts());
+        assert!(apart.unwrap().is_empty());
+        assert!(
+            memoized_top_box(&off, &a, None).is_none(),
+            "the memo off reads nothing"
+        );
+    }
+
+    /// The cached forms fill a kept slot when the curves' memoised top boxes are apart (the
+    /// top-box return is only for the uncached form, whose slots are its own), and give the
+    /// uncached solutions.
+    #[test]
+    fn kept_slots_are_filled_when_the_top_boxes_are_apart() {
+        let k = Kernel {
+            memoize_curve_caches: true,
+            ..Kernel::default()
+        };
+        let a = polyline(&[[0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [2.0, 0.0, 0.0]]);
+        let far = polyline(&[[0.0, 50.0, 0.0], [1.0, 51.0, 0.0], [2.0, 50.0, 0.0]]);
+        // the uncached form builds and memoises both curves' caches
+        let fresh = a.global_curve_intersect(&k, &unit(), &far, &unit(), 1e-6, &opts());
+        assert!(memoized_top_box(&k, &a, None).is_some());
+        assert!(memoized_top_box(&k, &far, None).is_some());
+        let (mut slot_a, mut slot_b) = (None, None);
+        let kept = a.global_curve_intersect_cached(
+            &k,
+            &unit(),
+            &far,
+            &unit(),
+            1e-6,
+            &opts(),
+            &mut slot_a,
+            &mut slot_b,
+        );
+        assert_eq!(format!("{kept:?}"), format!("{fresh:?}"));
+        assert!(kept.unwrap().is_empty());
+        assert!(
+            slot_a.is_some() && slot_b.is_some(),
+            "the kept slots are filled"
+        );
     }
 
     #[test]

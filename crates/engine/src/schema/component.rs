@@ -1023,14 +1023,14 @@ pub struct PropertiesResult {
     pub param_warnings: Vec<String>,
 }
 
-/// The new name `component.rename` reads: text of 1 to 128 bytes once trimmed.
+/// The new name `component.rename` reads: text of 1 to 128 characters once trimmed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ComponentName(pub String);
 
 impl<'de> Deserialize<'de> for ComponentName {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
-            Value::String(s) if !s.trim().is_empty() && s.trim().len() <= 128 => Ok(ComponentName(s)),
+            Value::String(s) if !s.trim().is_empty() && s.trim().chars().count() <= 128 => Ok(ComponentName(s)),
             _ => Err(D::Error::custom(whole("`name` must be 1…128 characters"))),
         }
     }
@@ -1042,7 +1042,7 @@ impl JsonSchema for ComponentName {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "Text with something in it; once surrounding blanks are cut, at most 128 bytes.",
+            "description": "Text with something in it; once surrounding blanks are cut, at most 128 characters.",
             "type": "string",
             "pattern": not_blank_pattern()
         })
@@ -1644,6 +1644,15 @@ pub struct GroundResult {
     pub occurrence: u64,
     /// Whether it is grounded now.
     pub grounded: bool,
+    /// The resulting placement within its parent, in the design's column-major matrix form.
+    pub transform: [[f64; 4]; 4],
+    /// Names of occurrences whose world placement changed in the solve (their first path when
+    /// nested in a component placed more than once). Empty also when already correctly placed.
+    pub moved: Vec<String>,
+    /// Joint errors and conflicts from the assembly-wide solve, including unrelated joints.
+    /// Degrees of freedom and the fixed-occurrence list are omitted.
+    #[serde(flatten)]
+    pub solved: super::joints::SolveReport,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

@@ -258,9 +258,9 @@
 {"case":"cov_tjunc4_v_list_squeeze","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[855.6324446115059,867.6364518950099,100463.57221755014],[205.0,205.0,4031.0]],"n":289}}}
 {"case":"cov_tjunc5_do","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[767.7216315404025,767.7216315404025,122254.19103096018]],"n":249}}}
 {"case":"cov_tjunc5_do_cand","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[743.8628275224443,743.8628275224443,117444.98191152995],[150.0,150.0,1436.0]],"n":273}}}
-{"case":"cov_tjunc5_do_cand_v","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[630.4175493961017,630.4175493961017,87955.93812994997]],"n":223}}}
+{"case":"cov_tjunc5_do_cand_v","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[631.4179220518313,631.4179220518313,88288.96947037552]],"n":223}}}
 {"case":"cov_tjunc5_do_nonmanifold_gaps","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[2e+20,2e+20,1.3e+21]],"n":215}}}
-{"case":"cov_tjunc5_do_sf","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[557.8449890164637,557.8449890164637,73030.8969092994]],"n":207}}}
+{"case":"cov_tjunc5_do_sf","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[555.8449890164637,555.8449890164637,72618.8969092994]],"n":207}}}
 {"case":"cov_tjunc5_split","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[600.2011868154156,600.2011868154156,20900.603560446245]],"n":56}}}
 {"case":"cov_tjunc5_split_editing","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1007.0]}}
 {"case":"cov_tjunc5_split_editing_nonmanifold","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1007.0]}}

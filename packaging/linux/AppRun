@@ -13,8 +13,7 @@
 # is ever replaced: rewriting the entry during a launch makes GNOME Shell lose the
 # window it is about to map (#9679), so a user-edited entry survives and never
 # triggers a rewrite. Every failure here must leave the launch untouched. Opt out with
-# SOLIDCRAFT_NO_DESKTOP_INTEGRATION=1 (the pre-rename SOLVECRAFT_NO_DESKTOP_INTEGRATION
-# still works: compatibility shim, docs/compatibility.md), or for good with an empty
+# SOLIDCRAFT_NO_DESKTOP_INTEGRATION=1, or for good with an empty
 # file $XDG_DATA_HOME/solidcraft/no-desktop-integration. Nothing is installed either
 # when appimaged (go-appimage) already made an entry for this AppImage, or when a
 # launcher that manages AppImages (Gear Lever, AppImageLauncher) started it: it sets
@@ -33,9 +32,9 @@ CLI_MARKER="# solidcraft-cli wrapper written by the SolidCraft AppImage"
 # Marks a .desktop entry this script wrote. An entry without it is the user's
 # (hand-edited, or written by an older release) and is never overwritten (#9679).
 DESK_MARKER="X-SolidCraft-Generated=true"
-# Compatibility shim (docs/compatibility.md): the desktop ids of earlier releases (0.8 until the
-# move to Tangency Labs, and before 0.8).
-OLD_DESK_IDS="ai.storyteller.solidcraft ai.storyteller.solvecraft"
+# Compatibility shim (docs/compatibility.md): the desktop id of earlier releases (0.8 until the
+# move to Tangency Labs).
+OLD_DESK_IDS="ai.storyteller.solidcraft"
 
 # The wrapper in ~/.local/bin: $1 is the AppImage's path, $2 the home folder.
 install_cli() {
@@ -57,7 +56,7 @@ install_cli() {
 }
 
 integrate() {
-  case "${SOLIDCRAFT_NO_DESKTOP_INTEGRATION:-${SOLVECRAFT_NO_DESKTOP_INTEGRATION:-}}" in
+  case "${SOLIDCRAFT_NO_DESKTOP_INTEGRATION:-}" in
     1 | true | yes) return 0 ;;
   esac
   # The AppImage runtime exports $APPIMAGE; without it (an extracted AppDir) there

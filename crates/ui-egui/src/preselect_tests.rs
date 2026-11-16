@@ -978,7 +978,12 @@ fn used_profile_of_the_last_sketch_is_not_pre_picked() {
     h.frames(2);
     let ui = h.call("ui.selection", json!({}))["result"].clone();
     assert_eq!(ui["selection"], json!([]));
-    assert_eq!(ui["dialog"], json!([{"label":"Profiles","items":[]}]), "the extruded sketch's profile is taken again");
+    // Join also shows its empty Target Bodies (#17657).
+    assert_eq!(
+        ui["dialog"],
+        json!([{"label":"Profiles","items":[]},{"label":"Target Bodies","items":[]}]),
+        "the extruded sketch's profile is taken again"
+    );
     let d = h.app.dialog.as_ref().unwrap();
     assert!(matches!(d.kind, Kind::Extrude { operation: 1, auto_op: true, .. }), "Join, not Cut: {:?}", d.kind);
     assert_eq!(d.active, 0, "picks go to Profiles");
@@ -1848,7 +1853,8 @@ fn thread_size_suggestion_follows_picks_without_overwriting_manual_sizes() {
         (large.clone(), "M20"),
         (large.clone(), "M20"),
         (small.clone(), "M8"),
-        (unsupported, ""),
+        // Past the coarse table the size is filled in with its pitch, and the next face replaces it.
+        (unsupported, "M100x4"),
         (small.clone(), "M8"),
         (planar, ""),
     ] {

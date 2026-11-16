@@ -9,6 +9,8 @@
 //! cargo run -p goldens -- --all --digest-dir <dir> [--digest-debug]   # one `<dir>/<unit>.digest`
 //!          per unit (native vs wasm32: scripts/wasm-digest.sh)
 //! options: --seeds N (default 16)  --filter <substr>
+//!          --dump-smb <dir>   # the bodies each case measures, as `<dir>/<unit>/<case>.<label>.<n>.smb`
+//!          (`goldens::dump`; off by default)
 //!          --jobs N (-j; default 1, 0 = all cores)   # units in N child processes (`goldens::jobs`)
 //!          --report-dir <dir>  --no-report   # where `--jobs` keeps its unit times
 //! cargo run -p goldens -- --ssi-corpus [--tol 1e-6|default] [--jobs N] [glob]
@@ -25,7 +27,7 @@ use goldens::case::repo_root;
 use goldens::{registry, CaseContext, RunOptions};
 
 const USAGE: &str = "usage: goldens [--unit <id>]... [--all] (--goldens [--bless] [--reverse] [--goldens-dir <dir>] | --digest-dir <dir> [--digest-debug])
-       [--seeds N] [--filter <substr>] [--jobs N] [--report-dir <dir>] [--no-report]
+       [--seeds N] [--filter <substr>] [--dump-smb <dir>] [--jobs N] [--report-dir <dir>] [--no-report]
        goldens --list [--seeds N]
        goldens --ssi-corpus [--tol 1e-6|default] [--jobs N] [--report-dir <dir>] [--no-report] [case-glob]
        goldens --solidcraft-cases [--report-dir <dir>] [--no-report] [case-glob]
@@ -65,6 +67,8 @@ struct Args {
     goldens_dir: Option<PathBuf>,
     /// `--reverse`: run each unit's cases in reverse order.
     reverse: bool,
+    /// `--dump-smb`: where to write the bodies each case measures.
+    dump_smb: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -101,6 +105,7 @@ fn parse_args() -> Result<Args, String> {
             }
             "--goldens-dir" => a.goldens_dir = Some(PathBuf::from(val("--goldens-dir")?)),
             "--reverse" => a.reverse = true,
+            "--dump-smb" => a.dump_smb = Some(PathBuf::from(val("--dump-smb")?)),
             "-h" | "--help" => return Err(String::new()),
             other
                 if (a.ssi_corpus || a.solidcraft_cases || a.step_corpus)
@@ -230,6 +235,7 @@ fn main() -> ExitCode {
 
     let opts = RunOptions {
         filter: args.filter.clone(),
+        dump_smb: args.dump_smb.clone(),
     };
 
     let jobs = goldens::jobs::resolve(args.jobs.unwrap_or(1)).min(wanted.len());
