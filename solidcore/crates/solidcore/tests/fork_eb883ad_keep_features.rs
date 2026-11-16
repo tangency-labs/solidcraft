@@ -234,6 +234,10 @@ fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
 /// 7.8e-16. The Runge-Kutta figures at 1e-7 were 8.4e-12 to 4.5e-11 off. The prisms, the
 /// r 1.9 boss and hole and the pocket astride the contact line move by nothing in #16735's
 /// gap closure here, and the prism boss and pocket differ by exactly their two prisms' 160.
+/// The comparisons above are of the Runge-Kutta figures. With these the prism boss is 3.8e-7
+/// above the fork's (no longer bit for bit), the pocket astride the contact line 1.05e-6
+/// below the fork's 5e8c9c1 figure, and the r 1.9 boss and hole move by -2.0e-7 and +3.5e-7,
+/// onto their closed forms to within the rounding of the offsets quoted above (about 1e-8).
 ///
 /// `was` is the figure before `brep_volume` closed the tolerant edges' gaps (#16735); where it
 /// differs, the move is checked to be that integrator's leak (`support/volume_leak.rs`).
@@ -296,8 +300,20 @@ fn cone_pit(k: &mut Kernel, block: Brep) -> Result<Brep> {
 #[test]
 fn cylinders_keep_their_pinned_volumes() {
     assert_pinned(cylinder_boss, 8.0, 23528.165527389272, 23528.16549340516, 9);
-    assert_pinned(cylinder_hole, 8.0, 23402.501834781691, 23402.501787261564, 9);
-    assert_pinned(cylinder_boss, 1.9, 24031.843347866376, 24031.843347866376, 9);
+    assert_pinned(
+        cylinder_hole,
+        8.0,
+        23402.501834781691,
+        23402.501787261564,
+        9,
+    );
+    assert_pinned(
+        cylinder_boss,
+        1.9,
+        24031.843347866376,
+        24031.843347866376,
+        9,
+    );
     assert_pinned(
         cylinder_hole,
         1.9,
@@ -439,8 +455,8 @@ fn a_boss_astride_the_contact_line_is_refused_as_the_fork() {
     assert!(rounded_with(astride, 8.0).is_err());
 }
 
-/// A pocket astride the contact line stands, as the fork. This figure is
-/// the fork's at 5e8c9c1: this round is a cliff overflow, trimmed at its creases since step 6
+/// A pocket astride the contact line stands, as the fork. Its figure was the fork's at
+/// 5e8c9c1 (with Runge-Kutta trim pieces; now 1.05e-6 below it, see [`assert_pinned`]): this round is a cliff overflow, trimmed at its creases since step 6
 /// (WR-695), which runs none of keep features (23371.292359325398 at eb883ad).
 #[test]
 fn a_pocket_astride_the_contact_line_matches_the_fork() {

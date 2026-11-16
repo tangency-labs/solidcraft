@@ -733,8 +733,8 @@ struct IsoLine<'a> {
 ///
 /// # Errors
 ///
-/// Those of the trim's evaluation, of [`surface_knots_inside`] and of the inner
-/// integration.
+/// Those of the trim's evaluation (and a non-finite trim point or tangent), of
+/// [`surface_knots_inside`] and of the inner integration.
 fn trim_integrand(
     k: &Kernel,
     iso: &IsoLine<'_>,
@@ -751,6 +751,13 @@ fn trim_integrand(
             "the trim has no point or tangent",
         ));
     };
+    // a non-finite trim point would bisect to the depth bound and fail as step control
+    if !(p0.x.is_finite() && p0.y.is_finite() && p1.x.is_finite()) {
+        return Err(SolidError::mass_failed(
+            OP,
+            "the trim's point or tangent is not finite",
+        ));
+    }
     dy.fill(0.0);
     if p1.x == 0.0 {
         return Ok(());
@@ -2741,6 +2748,41 @@ mod tests {
             b.edgeuses().iter().any(|(_, u)| u.uv_trim_curve.is_some()),
             "the trims are made on the box itself"
         );
+    }
+    /// A trim whose point is not finite is refused as such at once, not bisected to the
+    /// depth bound and reported as step control.
+    #[test]
+    fn a_non_finite_trim_point_is_refused_by_name() {
+        let k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_box(
+            &mut Kernel::default(),
+            Point3::ZERO,
+            1.0,
+            1.0,
+            1.0,
+        )
+        .unwrap();
+        let f = *faces(&b).unwrap().first().unwrap();
+        let surface = crate::topology::face::p2::surface(&b, f).unwrap().unwrap();
+        let layout = PrecisePropertyLayout::new(PPF_AREA);
+        let scale = vec![1.0; layout.num_components];
+        let iso = IsoLine {
+            surface,
+            origin: Point3::ZERO,
+            thickness: 0.0,
+            layout: &layout,
+            accuracy: 1e-10,
+            scale: &scale,
+        };
+        let trim = Curve::from(crate::curve::line::Line::from_points(
+            Point3::new(0.5, f64::NAN, 0.0),
+            Point3::new(0.5, 1.0, 0.0),
+            2,
+        ));
+        let mut scratch = vec![0.0; layout.num_components + 1];
+        let mut dy = vec![0.0; layout.num_components];
+        let err = trim_integrand(&k, &iso, &trim, 0.0, 0.5, &mut scratch, &mut dy).unwrap_err();
+        assert!(err.to_string().contains("not finite"), "{err}");
     }
     fn no_attributes() -> AttributeStore {
         AttributeStore::default()

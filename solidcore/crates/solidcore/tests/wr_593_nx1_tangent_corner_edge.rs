@@ -128,7 +128,7 @@ fn residue_round_with_the_fix() {
 
 #[test]
 fn exact_round_builds() {
-    // main's volume, bit-identical with and without the fix; the closed form holds
+    // the volume is bit-identical with and without the fix; the closed form holds
     // to the round's approximation, as for the residue round. It was 3581.9837276735275
     // until `brep_volume` closed tolerant edges' gaps (#16735): the move is checked within
     // the old integrator's leak bound. Since the trim pieces integrate by Gauss-Kronrod
