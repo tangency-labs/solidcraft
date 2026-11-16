@@ -956,7 +956,7 @@ impl Dialog {
             }
             "solid.extrude" => Dialog::new(
                 Kind::Extrude {
-                    distance: length_default(s, "10"),
+                    distance: extrude_start_distance(app),
                     direction: 0,
                     operation: usize::from(has_bodies),
                     auto_op: true,
@@ -4582,6 +4582,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     if applied && d.editing.is_none() {
         remember(app, &d);
+        if let Some(distance) = remembered_extrude_distance(app, &d) {
+            app.preferences.extrude_last_distance = distance;
+        }
     }
     // Cancel while computing: the result goes (its worker stops at its next feature).
     if cancel && !applied && app.applying.take().is_some() {
@@ -5149,6 +5152,39 @@ fn fillet_kind(size: &str, chamfer: bool) -> Kind {
 /// number would.
 pub(crate) fn length_default(s: &Session, number: &str) -> String {
     crate::length_input::default(&s.doc, number)
+}
+
+/// The distance a new Extrude dialog opens with (`extrude_start`): 10 in the design's unit, as
+/// before, unless the preference asks for the last new extrude's distance or a typed one. A value
+/// that isn't a usable length (none remembered yet, a custom entry that doesn't read) gives the 10.
+pub(crate) fn extrude_start_distance(app: &SolveApp) -> String {
+    use crate::prefs::ExtrudeStart;
+    let p = &app.preferences;
+    let wanted = match p.extrude_start {
+        ExtrudeStart::Fixed => None,
+        ExtrudeStart::LastUsed => Some(p.extrude_last_distance.trim()),
+        ExtrudeStart::Custom => Some(p.extrude_custom_distance.trim()),
+    };
+    match wanted {
+        Some(text) if usable_extrude_distance(app, text).is_some() => text.to_string(),
+        _ => length_default(&app.session, "10"),
+    }
+}
+
+/// `text` as a length in mm, when it is one an extrude can start at (finite, not zero).
+fn usable_extrude_distance(app: &SolveApp, text: &str) -> Option<f64> {
+    let v = app.session.doc.eval(text, ValueKind::Length).ok()?;
+    (v.is_finite() && v.abs() > 1e-9).then_some(v)
+}
+
+/// The distance a new (not edited) extrude was applied with, in mm, for `extrude_start`
+/// `last_used`; none where its extent isn't a plain distance (Through All, To Object).
+pub(crate) fn remembered_extrude_distance(app: &SolveApp, d: &Dialog) -> Option<String> {
+    let Kind::Extrude { distance, all, .. } = &d.kind else { return None };
+    if d.editing.is_some() || *all || to_object_on(&d.inputs) {
+        return None;
+    }
+    usable_extrude_distance(app, distance).map(|v| format!("{v} mm"))
 }
 
 /// A new Solid Fillet's radius: the size the tool ships with (2 mm), shown in the design's unit
