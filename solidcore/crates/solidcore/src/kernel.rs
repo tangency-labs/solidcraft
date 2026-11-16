@@ -33,11 +33,12 @@
 //! their value for the rest of the process; those that change results live on the
 //! [`Kernel`] as latches (e.g. [`Kernel::fillet_point_step`]), so each kernel starts
 //! unlatched and a difftest runner can seed the latch with the value the C++ process
-//! already holds.
+//! already holds. Kernels that stand in for one process together share its value
+//! ([`Kernel::process_fillet_point_step`]).
 
 use core::cell::{Cell, RefCell};
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::error::SolidError;
 use crate::geom::context::Context;
@@ -993,6 +994,16 @@ pub struct Kernel {
     /// (the kernel stays `Send`). Difftest runners seed it with the value the C++
     /// process has latched; see [`Kernel::latch_fillet_point_step`].
     pub fillet_point_step: Cell<Option<f64>>,
+    /// The step of the process this kernel stands in for, when it is one of several that do
+    /// (a pool of kernels, each running calls side by side): `None` for a kernel of its own,
+    /// whose latch is its alone. Every kernel of the pool is handed the one cell, so the
+    /// first latch on any of them settles the step under the cell's lock, and every latch
+    /// after it, on any of them and whenever that kernel was made or taken, gets that step
+    /// ([`Kernel::latch_fillet_point_step`]), as upstream's one function static does. The
+    /// cell is `'static` because the step lives as long as the process, as upstream's does;
+    /// the kernel only borrows it, so it never learns who owns it, and a kernel copy (one
+    /// made for caches) shares it by copying the reference.
+    pub process_fillet_point_step: Option<&'static OnceLock<f64>>,
     /// The upstream undefined-behaviour conditions (their `plan/upstream-issues.md`
     /// ids, e.g. `"UB-175"`) that operations on this kernel met and went past with the
     /// port's defined semantics, each listed once in the order first met. Upstream's
@@ -1107,6 +1118,7 @@ impl Kernel {
             caches: Caches::default(),
             context: Context::default(),
             fillet_point_step: Cell::new(None),
+            process_fillet_point_step: None,
             upstream_ub_passed: Vec::new(),
             memoize_curve_caches: !cfg!(feature = "curve-memo-off"),
             fixes: UpstreamFixes::default(),
@@ -1193,14 +1205,29 @@ impl Kernel {
     }
 
     /// `static double sdStaticStep = first;`: the latched value of
-    /// [`Kernel::fillet_point_step`], latching `first` when nothing is latched yet.
+    /// [`Kernel::fillet_point_step`], latching `first` when nothing is latched yet: the
+    /// process's step when the kernel shares one ([`Kernel::process_fillet_point_step`]),
+    /// settled to `first` if this is the first latch of the process.
     #[must_use]
     pub fn latch_fillet_point_step(&self, first: f64) -> f64 {
         if let Some(step) = self.fillet_point_step.get() {
             return step;
         }
-        self.fillet_point_step.set(Some(first));
-        first
+        let step = self
+            .process_fillet_point_step
+            .map_or(first, |process| *process.get_or_init(|| first));
+        self.fillet_point_step.set(Some(step));
+        step
+    }
+
+    /// The step a fillet point evaluation on this kernel takes, once one is latched: the
+    /// kernel's own latch, else the process's ([`Kernel::process_fillet_point_step`]).
+    #[must_use]
+    pub fn latched_fillet_point_step(&self) -> Option<f64> {
+        self.fillet_point_step.get().or_else(|| {
+            self.process_fillet_point_step
+                .and_then(|process| process.get().copied())
+        })
     }
 }
 
@@ -1346,6 +1373,22 @@ mod tests {
         assert_eq!(k.latch_fillet_point_step(1.0e-3), 1.0e-5);
         k.fillet_point_step.set(Some(1.0e-3));
         assert_eq!(k.latch_fillet_point_step(1.0e-5), 1.0e-3);
+    }
+
+    /// Kernels sharing a process step settle one: the first latch on either is the step of
+    /// both, read before the other latches and kept when it does. A kernel of its own
+    /// latches its own.
+    #[test]
+    fn kernels_sharing_a_process_step_settle_one() {
+        static PROCESS: OnceLock<f64> = OnceLock::new();
+        let (mut a, mut b) = (Kernel::default(), Kernel::default());
+        a.process_fillet_point_step = Some(&PROCESS);
+        b.process_fillet_point_step = Some(&PROCESS);
+        assert_eq!(b.latched_fillet_point_step(), None);
+        assert_eq!(a.latch_fillet_point_step(1.0e-5), 1.0e-5);
+        assert_eq!(b.latched_fillet_point_step(), Some(1.0e-5));
+        assert_eq!(b.latch_fillet_point_step(1.0e-3), 1.0e-5);
+        assert_eq!(Kernel::default().latch_fillet_point_step(1.0e-3), 1.0e-3);
     }
 
     #[test]
