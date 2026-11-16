@@ -38,7 +38,7 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
     crate::print_face_ui::sync(&mut app.session, &app.preferences);
     #[cfg(not(target_arch = "wasm32"))]
     if app.saving.is_none() && app.file_picker.is_none() && !app.file_load_holds() {
-        let mut copy = app.session.scratch();
+        let mut copy = app.session.scratch_for_save();
         // The copy has no file: the command saves to this session's (and names the design after it).
         copy.path.clone_from(&app.session.path);
         // This is the user's own Save: only this path may sign with the keyring.
