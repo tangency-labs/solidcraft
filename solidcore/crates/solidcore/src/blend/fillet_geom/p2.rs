@@ -2245,7 +2245,7 @@ impl FilletBrep {
         }; 2];
         let pairs = [(fs1, rail_index1), (fs2, rail_index2)];
         for (slot, (fs, index)) in rails.iter_mut().zip(pairs) {
-            let other = if index == 0 { 1 } else { 0 };
+            let other = usize::from(index == 0);
             let eu = solver_edgeuse(fs, index, OP)?;
             let e = eu1::edge(target, eu)?
                 .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
