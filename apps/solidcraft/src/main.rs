@@ -1668,7 +1668,7 @@ fn startup_step(step: &'static str, detail: &str) {
 }
 
 /// The renderer settings: with `cpu`, the software adapter (WARP, lavapipe, llvmpipe). The
-/// backends come from `startup::choose_backends` (on Windows D3D12 first, and only the backend
+/// backends come from `startup::choose_backends` (on Windows Vulkan first, and only the backend
 /// in use is started); `preference` is `graphics.json`'s `backend`.
 fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuConfiguration {
     // One frame in flight, as eframe's own default (`NativeOptions::default`): egui-wgpu's
