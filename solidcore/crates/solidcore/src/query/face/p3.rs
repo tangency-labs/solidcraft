@@ -500,38 +500,27 @@ pub fn calculate_tight_bounding_box_into(
     } // end loop on Vertices
 
     // Edges:
-    for e in face_edges(b, f)? {
+    let edges = face_edges(b, f)?;
+    let has_edges = !edges.is_empty();
+    for e in edges {
         // Get this Edge's tight box
         let e_bbox = qe::calculate_tight_bounding_box(k, b, e)?.unwrap_or_default();
         face_bbox = face_bbox.union(&e_bbox);
     } // end loop on Edges
 
-    // Set output to what we have so far.
-    *out = face_bbox;
-
-    // Now the surface.
-    // If it's a plane, then we're done.
-    if surface_is_planar(k, b, f, surface, EFF_ZERO)? {
-        return Ok(());
-    }
-
-    // First check the approximate box.
-    let uv_domain = b.face(f)?.uv_domain;
-    let srf_bbox = surface_bounding_box(k, b, f, surface, &uv_domain)?;
-    if srf_bbox.is_contained_by(&face_bbox, 0.0) {
-        return Ok(());
-    }
-
-    // Not upstream: a face with no vertex and no edge (its trim was smaller than the
-    // tolerance) leaves the box so far empty. The search below stands on that box: it
-    // passes over a cell that is monotone, or wholly outside the face, because the edges
-    // already hold the extreme. With no edges that premise fails, and the empty box's
-    // inverted bounds would come back as points (+-1e20 on every axis). The face's points
-    // are the surface's over the face's domain, so each side is that domain's own bound as
-    // the search bounds a cell it leaves unsolved (`unsolved_cell_top`): the control-point
-    // hull of the surface's subpatch over the domain plus its rounding, else the surface's
-    // loose box over it.
-    if is_empty_box(&face_bbox) {
+    // Not upstream: a face with no edge (its trim was smaller than the tolerance, or a
+    // loop of a lone vertex) has a box so far of its vertices at most. The search below
+    // stands on that box: it passes over a cell that is monotone, or wholly outside the
+    // face, because the edges already hold the extreme. With no edges that premise fails:
+    // an empty box's inverted bounds would come back as points (+-1e20 on every axis), and
+    // a vertex's point would cut the face short. A plane's early return below would leave
+    // the box empty too. The face's points are the surface's over the face's domain, so
+    // each side is that domain's own bound as the search bounds a cell it leaves unsolved
+    // (`unsolved_cell_top`): the control-point hull of the surface's subpatch over the
+    // domain plus its rounding, else the surface's loose box over it; the vertices are
+    // unioned in.
+    if !has_edges {
+        let uv_domain = b.face(f)?.uv_domain;
         let patch = cell_patch(k, surface, &uv_domain)?;
         let top = |dir: Vec3| -> Result<f64> {
             let hull = patch.as_ref().and_then(|p| patch_hull_max(p, dir));
@@ -547,7 +536,28 @@ pub fn calculate_tight_bounding_box_into(
             -top(Vec3::new(0.0, -1.0, 0.0))?,
             -top(Vec3::new(0.0, 0.0, -1.0))?,
         );
-        *out = Extent3d::from_points(min, max);
+        let hull_box = Extent3d::from_points(min, max);
+        *out = if is_empty_box(&face_bbox) {
+            hull_box
+        } else {
+            face_bbox.union(&hull_box)
+        };
+        return Ok(());
+    }
+
+    // Set output to what we have so far.
+    *out = face_bbox;
+
+    // Now the surface.
+    // If it's a plane, then we're done.
+    if surface_is_planar(k, b, f, surface, EFF_ZERO)? {
+        return Ok(());
+    }
+
+    // First check the approximate box.
+    let uv_domain = b.face(f)?.uv_domain;
+    let srf_bbox = surface_bounding_box(k, b, f, surface, &uv_domain)?;
+    if srf_bbox.is_contained_by(&face_bbox, 0.0) {
         return Ok(());
     }
 
@@ -1166,7 +1176,7 @@ fn unsolved_cell_top(
     } else {
         Err(SolidError::invalid_input(
             OP_TIGHT,
-            "a trimmed-face cell left at the search's limits has no finite bound",
+            "a face cell the tight box cannot solve (one left at the search's limits, or a face without edges) has no finite bound",
         ))
     }
 }
@@ -3648,6 +3658,17 @@ mod tests {
     /// every axis.
     #[test]
     fn tight_box_of_a_face_without_edges_is_its_surfaces_box() {
+        edgeless_face_box_holds_its_surface(&crowned_height_field(0.0));
+    }
+
+    /// The same for a plane, which the box's planar early return used to leave empty.
+    #[test]
+    fn tight_box_of_a_planar_face_without_edges_is_its_planes_box() {
+        let plane = Plane::from_normal(Vec3::new(0.0, 0.0, 2.0), Vec3::new(0.0, 0.0, 1.0));
+        edgeless_face_box_holds_its_surface(&Surface::from(plane));
+    }
+
+    fn edgeless_face_box_holds_its_surface(surface: &Surface) {
         use crate::topology::brep::p2::ArenaNotifyState;
         use crate::topology::brep::p8::{create_face_from_surface, FaceBuildEnv};
         let mut k = Kernel::default();
@@ -3657,7 +3678,6 @@ mod tests {
             crate::geom::tol::USE_DEFAULT,
         )
         .unwrap();
-        let surface = crowned_height_field(0.0);
         let domain = Extent2d::from_bounds(0.5, 0.5, 0.500_001, 0.500_001);
         let f = {
             let mut state = ArenaNotifyState::new(&b);
