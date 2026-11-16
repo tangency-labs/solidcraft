@@ -64,10 +64,10 @@ fn kernel() -> Kernel {
     k
 }
 
-fn stepped_block(k: &mut Kernel) -> Brep {
-    let cs: Vec<Curve> = PROFILE
+fn stepped_block(k: &mut Kernel, profile: &[[f64; 2]]) -> Brep {
+    let cs: Vec<Curve> = profile
         .iter()
-        .zip(PROFILE.iter().cycle().skip(1))
+        .zip(profile.iter().cycle().skip(1))
         .map(|(a, b)| {
             Curve::from(
                 create_line_segment(Vec3::new(a[0], 0.0, a[1]), Vec3::new(b[0], 0.0, b[1]))
@@ -108,8 +108,12 @@ enum Outcome {
 }
 
 fn round_top_front(r: f64) -> Outcome {
+    round_top_front_of(&PROFILE, r)
+}
+
+fn round_top_front_of(profile: &[[f64; 2]], r: f64) -> Outcome {
     let mut k = kernel();
-    let mut b = stepped_block(&mut k);
+    let mut b = stepped_block(&mut k, profile);
     let e = edge_between(
         &k,
         &b,
@@ -155,6 +159,38 @@ fn a_round_past_its_side_edge_end_is_cut_by_the_end_face() {
         match round_top_front(r) {
             Outcome::Built(v) => assert!(
                 (v - want).abs() < 1e-6 * BLOCK,
+                "r {r}: volume {v}, closed form {want}"
+            ),
+            Outcome::Refused(why) => panic!("r {r}: refused: {why}"),
+        }
+    }
+}
+
+/// The stepped block sheared by x' = x - z + 12: its riser G runs from (20,0,12) down to
+/// P = (22,0,10), the plane x + z = 32, oblique to the edge. A round of radius r has its rail
+/// on F at z = 12 - r, which meets G's plane at x = 20 + r: past P once r > 2 (at r = 3,
+/// (23,0,9), where the plane square to the edge at the vertex, x = 20, holds (20,0,9), short
+/// of P along the side). The end is cut by G's plane and the start by the left face's plane
+/// x + z = 12, parallel to it 20 apart along x, so the round takes off its straight section
+/// over 20 as on the unsheared block: `r^2 (1 - pi/4) 20`.
+const SHEARED: [[f64; 2]; 6] = [
+    [12.0, 0.0],
+    [52.0, 0.0],
+    [42.0, 10.0],
+    [22.0, 10.0],
+    [20.0, 12.0],
+    [0.0, 12.0],
+];
+
+#[test]
+fn a_round_past_an_oblique_end_face_is_cut_by_its_plane() {
+    // the sheared block's volume: the step's 40 x 10 parallelogram and the 20 x 2 one above
+    let block = (40.0 * 10.0 + 20.0 * 2.0) * DEPTH;
+    for r in [1.5, 3.0] {
+        let want = block - straight(r);
+        match round_top_front_of(&SHEARED, r) {
+            Outcome::Built(v) => assert!(
+                (v - want).abs() < 1e-6 * block,
                 "r {r}: volume {v}, closed form {want}"
             ),
             Outcome::Refused(why) => panic!("r {r}: refused: {why}"),
