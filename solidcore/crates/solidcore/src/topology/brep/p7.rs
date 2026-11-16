@@ -1475,9 +1475,11 @@ fn make_face_with_curves_transfer_impl(
                         }
                     } else {
                         let ivl = uv_curve.natural_interval();
-                        surface
-                            .lift_curve(k, uv_domain, &uv_curve, &ivl, zone_tol / 4.0, false)?
-                            .curve
+                        Some(
+                            surface
+                                .lift_curve(k, uv_domain, &uv_curve, &ivl, zone_tol / 4.0, false)?
+                                .curve,
+                        )
                     };
                     if new3d.is_some() {
                         to_check.push(s3d.len());
