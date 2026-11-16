@@ -99,6 +99,18 @@ pub struct Hole {
     pub why: Option<String>,
 }
 
+/// Why a repair that found no gap, hole or face SMLib refuses does nothing
+/// ([`KernelError::Repair`]): SMLib's full check of the part decides which.
+#[derive(Clone, Debug, PartialEq, thiserror::Error)]
+pub enum RepairRefusal {
+    /// The check passes: the part needs no repair.
+    #[error("nothing to repair: SMLib takes the part, its check passes and it has no gaps or holes")]
+    NothingToRepair,
+    /// The check fails the part, at the tests it names, for nothing the repair fixes.
+    #[error("SMLib's check fails the part, and none of it is what the repair fixes (faces SMLib refuses, gaps, holes): {0}")]
+    CheckFails(crate::validation::CheckFailure),
+}
+
 /// What a repair did.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RepairReport {
@@ -153,11 +165,16 @@ pub fn repair(body: &Body, opts: &RepairOptions) -> Result<(Body, RepairReport)>
     // copy, kept only when the check fails fewer tests and no new kind).
     // The heal runs the check itself and gives the part back when it passes.
     let healed = if body.smlib().is_ok() {
-        // a heal that cannot run leaves the repair to the steps below
-        crate::tolerance_heal::heal_tolerance_defects(body).unwrap_or_else(|e| {
-            log::debug!(target: "repair", "the tolerance heal could not run: {e}");
-            None
-        })
+        match crate::tolerance_heal::heal_tolerance_defects(body) {
+            Ok(healed) => healed,
+            // a stopped heal stops the repair: the steps below would stop too
+            Err(e @ KernelError::Heal(crate::HealFailure::Stopped)) => return Err(e),
+            // a heal that cannot run leaves the repair to the steps below
+            Err(e) => {
+                log::debug!(target: "repair", "the tolerance heal could not run: {e}");
+                None
+            }
+        }
     } else {
         None
     };
@@ -230,12 +247,11 @@ pub fn repair(body: &Body, opts: &RepairOptions) -> Result<(Body, RepairReport)>
         if holes.is_empty() {
             // SMLib takes the part, and it is whole: its check says whether the operations on it
             // will take their results, so "nothing to repair" is said only when it passes.
-            return Err(match crate::validation::failing_check(&current).map_err(KernelError::Failed)? {
-                None => invalid("nothing to repair: SMLib takes the part, its check passes and it has no gaps or holes"),
-                Some(check) => KernelError::Failed(format!(
-                    "SMLib's check fails the part, and none of it is what the repair fixes (faces SMLib refuses, gaps, holes): {check}"
-                )),
-            });
+            return Err(match crate::validation::failing_check(&current)? {
+                None => RepairRefusal::NothingToRepair,
+                Some(check) => RepairRefusal::CheckFails(check),
+            }
+            .into());
         }
         return Err(invalid(format!("nothing sewn: the free edges bound holes ({}); patch them to close the part", holes.join("; "))));
     }
@@ -636,6 +652,8 @@ mod tests {
         let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
         let err = repair(&b, &RepairOptions { gap: 0.2, patch_holes: true }).unwrap_err().to_string();
         assert!(err.contains("nothing to repair"), "{err}");
+        // #17689: typed, as the refusal when the check fails is.
+        assert_eq!(repair(&b, &RepairOptions { gap: 0.2, patch_holes: true }).unwrap_err(), KernelError::Repair(RepairRefusal::NothingToRepair));
         for gap in [0.0, -1.0, 2.0, f64::NAN, f64::INFINITY] {
             assert!(repair(&b, &RepairOptions { gap, patch_holes: false }).is_err(), "{gap}");
         }
@@ -654,15 +672,16 @@ mod tests {
         assert!(bad.record().edges.iter().all(|e| e.uses.len() == 2), "it is closed");
         assert_eq!((bad.face_count(), bad.edge_count(), bad.vertex_count()), (6, 12, 8), "a box's topology");
         let check = bad.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
-        assert!(!check.is_valid());
-        let err = repair(&bad, &RepairOptions { gap: 0.2, patch_holes: true }).unwrap_err().to_string();
-        assert!(!err.contains("nothing to repair"), "{err}");
-        assert!(
-            err.contains(&format!(
-                "SMLib's check fails the part, and none of it is what the repair fixes (faces SMLib refuses, gaps, holes): {}",
-                crate::validation::check_summary(&check)
-            )),
-            "{err}"
+        let failure = crate::validation::CheckFailure::of(&check).expect("the check fails it");
+        let err = repair(&bad, &RepairOptions { gap: 0.2, patch_holes: true }).unwrap_err();
+        assert_eq!(err, KernelError::Repair(RepairRefusal::CheckFails(failure.clone())));
+        let text = err.to_string();
+        assert!(!text.contains("nothing to repair"), "{text}");
+        assert_eq!(
+            text,
+            format!(
+                "the operation failed: SMLib's check fails the part, and none of it is what the repair fixes (faces SMLib refuses, gaps, holes): {failure}"
+            )
         );
     }
 }

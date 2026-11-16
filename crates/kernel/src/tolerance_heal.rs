@@ -50,17 +50,45 @@ impl ToleranceHeal {
     }
 }
 
+/// Why [`heal_tolerance_defects`] gave no answer ([`KernelError::Heal`]). Either way the body
+/// stands as it was: a heal that did not finish says nothing about the body.
+#[derive(Clone, Debug, PartialEq, thiserror::Error)]
+pub enum HealFailure {
+    /// The token over this thread's work ([`solidcraft_smlib::stop`]) stopped it.
+    #[error("the heal was stopped")]
+    Stopped,
+    /// The heal, or the check it runs, failed, and this is why.
+    #[error("the heal could not run: {0}")]
+    CouldNotRun(String),
+}
+
 /// `body` healed of its tolerance-scale defects (module docs) and what was done, or `None`
 /// when there is nothing the heal can prove or its result would not be better (the body as it
 /// is then stands). A mesh body, or one solidcore cannot convert, is `None`.
 ///
+/// The heal runs under the token over this thread's work ([`solidcraft_smlib::stop::token`]),
+/// which solidcore-ops polls in its kernel's long loops, as SMLib's own calls do: work stopped
+/// part way stops in the heal too.
+///
 /// # Errors
-/// The heal's failures ([`KernelError::Failed`]) and the healed record's.
+/// [`KernelError::Heal`]: [`HealFailure::Stopped`] when the token stops it,
+/// [`HealFailure::CouldNotRun`] for the heal's other failures; [`KernelError::Internal`] for a
+/// panic in it; and the healed record's.
 pub fn heal_tolerance_defects(body: &Body) -> Result<Option<(Body, ToleranceHeal)>> {
     let Some((ops, order)) = body.ops_body() else {
         return Ok(None);
     };
-    let (healed, report) = solidcore_ops::heal::heal_tolerance_defects(ops, order).map_err(|e| KernelError::Failed(format!("heal: {e}")))?;
+    let heal = || solidcore_ops::heal::heal_tolerance_defects(ops, order);
+    let healed = match solidcraft_smlib::stop::token() {
+        Some(token) => solidcore_ops::cancel::within(&token, heal),
+        None => heal(),
+    };
+    let (healed, report) = healed.map_err(|e| match e {
+        solidcore_ops::Error::Cancelled => KernelError::Heal(HealFailure::Stopped),
+        // a panic the session caught stays the kernel's internal error, as SMLib's do
+        solidcore_ops::Error::Internal(m) => KernelError::Internal(format!("heal: {m}")),
+        e => KernelError::Heal(HealFailure::CouldNotRun(e.to_string())),
+    })?;
     let Some(healed) = healed else {
         log::debug!(target: "repair", "tolerance heal not kept: {:?}", report.why_not);
         return Ok(None);

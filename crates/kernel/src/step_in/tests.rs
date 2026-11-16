@@ -322,7 +322,7 @@ fn parallel_body_preparation_reports_errors_in_place_and_preserves_placement() {
     // The second item is not in the file.
     let jobs: Vec<_> = [solid, 999_999_999, solid, solid]
         .into_iter()
-        .map(|item| parallel::Job { source: parallel::Source::Item { item, units }, placement, check_mesh: true })
+        .map(|item| parallel::Job { source: parallel::Source::Item { item, units }, placement, check_mesh: true, check: true })
         .collect();
     let serial = parallel::bodies(&ex, &jobs, 1);
     let threaded = parallel::bodies(&ex, &jobs, 4);
@@ -787,7 +787,7 @@ fn a_part_smlibs_check_fails_is_reported_at_import_by_name() {
     assert_eq!((body.face_count(), body.edge_count(), body.vertex_count()), (6, 13, 9), "the block's topology as the file writes it");
     let check = body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
     assert!(!check.is_valid(), "the check fails it");
-    let summary = crate::validation::check_summary(&check);
+    let summary = crate::validation::CheckFailure::of(&check).unwrap().to_string();
     let issue = imp.report.issues.iter().find(|i| i.kind == IssueKind::NeedsRepair).unwrap_or_else(|| panic!("{:?}", imp.warnings));
     assert_eq!(issue.detail, format!("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: {summary}"));
     assert!(imp.warnings.contains(&issue.detail), "{:?}", imp.warnings);
@@ -804,6 +804,116 @@ fn a_part_smlibs_check_fails_is_reported_at_import_by_name() {
     assert_eq!((b.face_count(), b.edge_count(), b.vertex_count()), (6, 13, 9), "the same topology with the edge on its face");
     assert!(clean.bodies[0].body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap().is_valid());
     assert!(clean.report.issues.iter().all(|i| i.kind != IssueKind::NeedsRepair), "{:?}", clean.warnings);
+}
+
+/// `block` (one solid `#101` in representation `#60`, as [`bezier_block`] writes it) as a part
+/// placed twice in an assembly: once where the file defines it, and once 100 mm along x by a
+/// CARTESIAN_TRANSFORMATION_OPERATOR_3D that scales it by `(sx, sy, sz)` (non-uniform when they
+/// differ).
+fn with_scaled_instance(block: &str, (sx, sy, sz): (f64, f64, f64)) -> String {
+    let rep = "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);\n";
+    assert!(block.contains(rep));
+    let mut t = block.replace(rep, "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101,#65),#20);\n").replace(TAIL, "");
+    t += "#8=PRODUCT_DEFINITION_CONTEXT('part definition',#9,'design');\n#9=APPLICATION_CONTEXT('');\n";
+    t += &product(50, "Block");
+    t += &product(70, "Assembly");
+    t += "#61=SHAPE_DEFINITION_REPRESENTATION(#54,#60);\n#65=AXIS2_PLACEMENT_3D('',#66,$,$);\n#66=CARTESIAN_POINT('',(0.,0.,0.));\n";
+    t += "#80=SHAPE_REPRESENTATION('',(#81),#20);\n#81=AXIS2_PLACEMENT_3D('',#82,$,$);\n#82=CARTESIAN_POINT('',(0.,0.,0.));\n";
+    t += "#88=SHAPE_DEFINITION_REPRESENTATION(#74,#80);\n#67=CARTESIAN_POINT('',(100.,0.,0.));\n";
+    let scaled = if sx == sy && sy == sz {
+        format!("CARTESIAN_TRANSFORMATION_OPERATOR_3D('','',$,$,#67,{sx:.17E},$)")
+    } else {
+        format!("CARTESIAN_TRANSFORMATION_OPERATOR_3D_NON_UNIFORM('','',$,$,#67,{sx:.17E},$,{sy:.17E},{sz:.17E})")
+    };
+    for (k, placement) in [(0u64, "ITEM_DEFINED_TRANSFORMATION('','',#65,#81)".to_string()), (1, scaled)] {
+        let n = 600 + k * 10;
+        t += &format!("#{n}=NEXT_ASSEMBLY_USAGE_OCCURRENCE('{k}','Block:{k}','',#70,#50,$);\n");
+        t += &format!("#{}=PRODUCT_DEFINITION_SHAPE('','',#{n});\n#{}={placement};\n", n + 1, n + 2);
+        t += &format!(
+            "#{}=(REPRESENTATION_RELATIONSHIP('','',#60,#80)REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(#{})SHAPE_REPRESENTATION_RELATIONSHIP());\n",
+            n + 3,
+            n + 2
+        );
+        t += &format!("#{}=CONTEXT_DEPENDENT_SHAPE_REPRESENTATION(#{},#{});\n", n + 4, n + 3, n + 1);
+    }
+    t += TAIL;
+    t
+}
+
+/// #17689 review: the check at import is of each part as placed, as operations take it. A
+/// placement that scales the part maps its geometry without its tolerances, so the part's own
+/// check does not speak for it: the block with its edge lifted 0.2 µm passes SMLib's check as
+/// the file defines it, and fails it stretched 100 times along z. The import says so for the
+/// stretched instance. A rigid placement is one class with the part (checked once); a uniform
+/// scale is a class of its own.
+#[test]
+fn a_placement_that_scales_a_part_is_checked_as_placed() {
+    let z_extent = |b: &Body| {
+        let m = measure(b).unwrap();
+        m.bbox.max.z - m.bbox.min.z
+    };
+    let label = "solid 'Bloco' as its placement scales, shears or mirrors it: needs repair before it can be modelled: SMLib's check fails it: ";
+    let imp = step_import(&with_scaled_instance(&lifted_bezier_block(2e-4), (1.0, 1.0, 100.0))).unwrap();
+    assert_eq!(imp.bodies.len(), 2, "{:?}", imp.warnings);
+    let (part, stretched) = (&imp.bodies[0].body, &imp.bodies[1].body);
+    for b in [part, stretched] {
+        assert_eq!((b.face_count(), b.edge_count(), b.vertex_count()), (6, 13, 9), "the block's topology");
+    }
+    assert!((z_extent(part) - 10.0).abs() < 1e-9 && (z_extent(stretched) - 1000.0).abs() < 1e-6, "the second instance is the stretched one");
+    assert_eq!(crate::validation::failing_check(part).unwrap(), None, "the part as the file defines it passes the check");
+    let failure = crate::validation::failing_check(stretched).unwrap().expect("stretched, it fails the check");
+    let checked = |w: &[String]| -> Vec<String> {
+        let mut c: Vec<String> = w.iter().filter(|w| w.contains("SMLib's check")).cloned().collect();
+        c.sort();
+        c
+    };
+    // (The import's other notes, such as the gaps the stretched edges have, are not the check's.)
+    assert_eq!(checked(&imp.warnings), [format!("{label}{failure}")]);
+    // The block lifted 2 µm fails as the file defines it: placed again rigidly (a translation),
+    // the same check speaks for that instance, once; placed again scaled 10 times, that instance
+    // is checked too, and says so.
+    let fails = lifted_bezier_block(2e-3);
+    let rigid = step_import(&with_scaled_instance(&fails, (1.0, 1.0, 1.0))).unwrap();
+    assert_eq!(rigid.bodies.len(), 2, "{:?}", rigid.warnings);
+    let own = crate::validation::failing_check(&rigid.bodies[0].body).unwrap().expect("the lifted block fails the check");
+    assert_eq!(crate::validation::failing_check(&rigid.bodies[1].body).unwrap().as_ref(), Some(&own), "moved, it fails the same tests");
+    assert_eq!(checked(&rigid.warnings), [format!("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: {own}")]);
+    let scaled = step_import(&with_scaled_instance(&fails, (10.0, 10.0, 10.0))).unwrap();
+    assert_eq!(scaled.bodies.len(), 2, "{:?}", scaled.warnings);
+    assert!((z_extent(&scaled.bodies[1].body) - 100.0).abs() < 1e-9);
+    let large = crate::validation::failing_check(&scaled.bodies[1].body).unwrap().expect("scaled, it still fails");
+    let mut want = vec![format!("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: {own}"), format!("{label}{large}")];
+    want.sort();
+    assert_eq!(checked(&scaled.warnings), want);
+}
+
+/// #17689 review: the check at import runs on a copy it owns, so the token over the import's
+/// work stops it, and the import says it was stopped (the import then fails as cancelled). A
+/// token stopped before the import stops SMLib's read of the part first, so the check is stopped
+/// here on a part already made, as the workers do.
+#[test]
+fn a_stopped_import_stops_in_the_check() {
+    let text = lifted_bezier_block(3e-3);
+    let imp = step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 1);
+    let body = imp.bodies[0].body.clone();
+    let part = std::sync::Arc::new(parallel::Part { file_faces: 6, face_origin: vec![0; body.face_count()], body, closed: true, refused: None });
+    let ex = p21::parse(&text).unwrap();
+    let jobs: Vec<_> = [IDENTITY, translation([10.0, 0.0, 0.0])]
+        .into_iter()
+        .map(|placement| parallel::Job { source: parallel::Source::Oriented(part.clone()), placement, check_mesh: false, check: true })
+        .collect();
+    let checks = |made: Vec<parallel::Prepared>| -> Vec<parallel::PlacedCheck> {
+        made.into_iter().map(|m| m.ok().and_then(|m| m.check).expect("placed, with its check")).collect()
+    };
+    let stop = solidcraft_smlib::stop::Stop::new();
+    stop.stop();
+    for c in checks(stop.within(|| parallel::bodies(&ex, &jobs, 1))) {
+        assert!(matches!(c, parallel::PlacedCheck::Stopped), "the check stops with the work");
+    }
+    for c in checks(parallel::bodies(&ex, &jobs, 1)) {
+        assert!(matches!(c, parallel::PlacedCheck::Fails(_)), "unstopped, the lifted block fails the check");
+    }
 }
 
 fn context(id: u64, unit: &str) -> String {
@@ -4152,18 +4262,15 @@ fn hair_step_body(step: f64, tol: f64) -> Body {
 /// part's check passes, every face left keeps its own file face, and the import notes the heal.
 #[test]
 fn an_imported_part_whose_check_fails_is_healed_where_it_is_read() {
-    use super::parallel::{Note, Part, heal};
+    use super::parallel::{Healed, Note, Part, heal};
     let body = hair_step_body(3e-4, 1e-3);
     let source = body.record().clone();
-    let check = crate::validation::failing_check(&body).unwrap();
-    assert!(check.is_some());
+    assert!(crate::validation::failing_check(&body).unwrap().is_some());
     let faces = body.face_count();
     assert_eq!(faces, 8);
     let origin: Vec<u64> = (100..100 + faces as u64).collect();
-    let mut part = Part { body, closed: true, file_faces: faces, face_origin: origin.clone(), refused: None, check };
-    let mut read = Vec::new();
-    heal(&mut part, &mut read, 7);
-    assert_eq!(part.check, None);
+    let mut part = Part { body, closed: true, file_faces: faces, face_origin: origin.clone(), refused: None };
+    let read = heal(&mut part, 7);
     assert_eq!(part.body.face_count(), 7);
     assert_eq!(crate::validation::failing_check(&part.body).unwrap(), None);
     // the riser (the record's third face, file face 102) is the one face gone
@@ -4191,16 +4298,14 @@ fn an_imported_part_whose_check_fails_is_healed_where_it_is_read() {
         let off = (o1[0] - o0[0]) * n0[0] + (o1[1] - o0[1]) * n0[1] + (o1[2] - o0[2]) * n0[2];
         assert!(dot.abs() >= 1.0 - 1e-12 && off.abs() <= 1e-9, "face {i} from file face {o}: {dot} {off}");
     }
-    let [Note::Repaired(note)] = &read[..] else { panic!("one Repaired note: {}", read.len()) };
+    let Healed::Kept(Note::Repaired(note)) = &read else { panic!("one Repaired note") };
     assert!(note.contains("2 edges shorter than their tolerance collapsed") && note.contains("1 sliver faces"), "{note}");
 
     // a part whose check passes is left as it is, with no note
     let clean = hair_step_body(3e-3, 1e-3);
     assert_eq!(crate::validation::failing_check(&clean).unwrap(), None);
-    let mut part = Part { body: clean, closed: true, file_faces: 8, face_origin: origin.clone(), refused: None, check: None };
-    let mut read = Vec::new();
-    heal(&mut part, &mut read, 7);
-    assert!(read.is_empty());
+    let mut part = Part { body: clean, closed: true, file_faces: 8, face_origin: origin.clone(), refused: None };
+    assert!(matches!(heal(&mut part, 7), Healed::NotKept));
     assert_eq!(part.face_origin, origin);
 }
 
@@ -4219,4 +4324,100 @@ fn repair_heals_a_hair_step_that_fails_the_check() {
     assert_eq!(crate::validation::failing_check(&out).unwrap(), None);
     let (v0, v1) = (measure(&body).unwrap().volume, measure(&out).unwrap().volume);
     assert!((v1 - v0).abs() <= 601.0 * healed.largest_bound, "{v0} {v1}");
+}
+
+/// #17689: the heal changes the part every instance shares, so it is decided by the part's own
+/// check, never by a placement that scales it. The block with its edge lifted 0.2 µm passes the
+/// check as the file defines it and fails it stretched 100 times along z: whichever instance
+/// the import reads the part at, the stretched one is reported as placed, nothing is healed, and
+/// the rigid instance is the part exactly as read. Read at the stretched instance, the part's
+/// own check decides (it passes: no heal) and the job's check is of the body as placed.
+#[test]
+fn a_scaled_instance_that_fails_as_placed_heals_nothing() {
+    let block = lifted_bezier_block(2e-4);
+    let alone = step_import(&block).unwrap();
+    assert_eq!(alone.bodies.len(), 1);
+    let read = alone.bodies[0].body.record().clone();
+    assert_eq!(crate::validation::failing_check(&alone.bodies[0].body).unwrap(), None);
+    let z_extent = |b: &Body| {
+        let m = measure(b).unwrap();
+        m.bbox.max.z - m.bbox.min.z
+    };
+    let label = "solid 'Bloco' as its placement scales, shears or mirrors it: needs repair before it can be modelled: SMLib's check fails it: ";
+    let rigid_first = with_scaled_instance(&block, (1.0, 1.0, 100.0));
+    // The same assembly with the two placements swapped: the stretched instance comes first.
+    let scaled_first = rigid_first.replace("#602=", "#699=").replace("#612=", "#602=").replace("#699=", "#612=");
+    for (text, stretched_at) in [(rigid_first, 1), (scaled_first, 0)] {
+        let imp = step_import(&text).unwrap();
+        assert_eq!(imp.bodies.len(), 2, "{:?}", imp.warnings);
+        let (stretched, rigid) = (&imp.bodies[stretched_at].body, &imp.bodies[1 - stretched_at].body);
+        assert!((z_extent(stretched) - 1000.0).abs() < 1e-6 && (z_extent(rigid) - 10.0).abs() < 1e-9, "instance {stretched_at} is the stretched one");
+        assert!(imp.warnings.iter().all(|w| !w.contains("healed")), "{:?}", imp.warnings);
+        assert_eq!(rigid.record(), &read, "the rigid instance is the part as read");
+        assert_eq!((rigid.face_count(), rigid.edge_count(), rigid.vertex_count()), (6, 13, 9));
+        assert_eq!(crate::validation::failing_check(rigid).unwrap(), None);
+        let failure = crate::validation::failing_check(stretched).unwrap().expect("stretched, it fails the check");
+        let checked: Vec<&String> = imp.warnings.iter().filter(|w| w.contains("SMLib's check")).collect();
+        assert_eq!(checked, [&format!("{label}{failure}")]);
+    }
+
+    // The job that reads the part at the stretched placement: the part is checked where the
+    // file defines it (it passes), so nothing is healed, and the job's check is the stretched
+    // body's.
+    let ex = p21::parse(&block).unwrap();
+    let stretch: M4 = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 100.0, 0.0], [100.0, 0.0, 0.0, 1.0]];
+    assert!(check_class(&stretch).is_some());
+    let job =
+        parallel::Job { source: parallel::Source::Item { item: 101, units: Units::default() }, placement: stretch, check_mesh: false, check: true };
+    let made = parallel::prepare(&ex, &job).ok().expect("the block is read");
+    // The part as the same read makes it at the identity, where its check passes: not healed.
+    let at_identity = parallel::prepare(&ex, &parallel::Job { placement: IDENTITY, ..job }).ok().expect("the block is read");
+    assert!(matches!(at_identity.check, Some(parallel::PlacedCheck::Passes)));
+    assert_eq!(made.part.body.record(), at_identity.part.body.record(), "the part as read, not healed");
+    assert_eq!(made.part.body.face_count(), 6);
+    assert!(made.read.as_ref().is_some_and(|r| r.iter().all(|n| !matches!(n, parallel::Note::Repaired(m) if m.contains("healed")))));
+    let Some(parallel::PlacedCheck::Fails(failure)) = made.check else { panic!("the stretched body fails as placed") };
+    assert_eq!(Some(failure), crate::validation::failing_check(&made.body).unwrap());
+
+    // A part whose own check fails is healed even when it is read at a stretched placement:
+    // the part's check decides, and the instance is placed and checked again afterwards.
+    let hair = hair_step_body(3e-4, 1e-3);
+    let mut part = parallel::Part { closed: true, file_faces: 8, face_origin: (0..8).collect(), refused: None, body: hair };
+    let mut notes = Vec::new();
+    let done = parallel::decide_heal(&mut part, &mut notes, &stretch, 7).ok().expect("placed");
+    assert!(done.is_none(), "healed: placed and checked again");
+    assert_eq!(part.body.face_count(), 7);
+    assert_eq!(crate::validation::failing_check(&part.body).unwrap(), None);
+    assert!(matches!(&notes[..], [parallel::Note::Repaired(n)] if n.contains("healed SMLib's check failures")));
+}
+
+/// #17689: a heal is stopped by the token over the import's work (solidcore-ops' calls run under
+/// it), and a stopped heal changes nothing and stops the import: the part stays as read, no
+/// heal is noted, and the job's check says it was stopped. Repair stops with it too.
+#[test]
+fn a_stopped_heal_changes_nothing() {
+    use super::parallel::{Healed, Part, PlacedCheck, decide_heal, heal};
+    let hair = hair_step_body(3e-4, 1e-3);
+    let source = hair.record().clone();
+    assert!(crate::validation::failing_check(&hair).unwrap().is_some());
+    let stop = solidcraft_smlib::stop::Stop::new();
+    stop.stop();
+    assert_eq!(stop.within(|| crate::heal_tolerance_defects(&hair)).err(), Some(KernelError::Heal(crate::HealFailure::Stopped)));
+    let mut part = Part { closed: true, file_faces: 8, face_origin: (0..8).collect(), refused: None, body: hair.clone() };
+    assert!(matches!(stop.within(|| heal(&mut part, 7)), Healed::Stopped));
+    assert_eq!(part.body.record(), &source);
+    assert_eq!(part.face_origin, (0..8).collect::<Vec<u64>>());
+    // At the read, the check that decides the heal stops first: an unknown result heals nothing.
+    let mut notes = Vec::new();
+    for m in [IDENTITY, translation([10.0, 0.0, 0.0])] {
+        let done = stop.within(|| decide_heal(&mut part, &mut notes, &m, 7)).ok().expect("placed");
+        assert!(matches!(done, Some((_, PlacedCheck::Stopped))));
+    }
+    assert!(notes.is_empty());
+    assert_eq!(part.body.record(), &source);
+    let repaired = stop.within(|| crate::repair(&hair, &crate::RepairOptions { gap: 0.01, patch_holes: false }));
+    assert_eq!(repaired.err(), Some(KernelError::Heal(crate::HealFailure::Stopped)));
+    // Not stopped, the same heal is kept.
+    assert!(matches!(heal(&mut part, 7), Healed::Kept(_)));
+    assert_eq!(part.body.face_count(), 7);
 }
