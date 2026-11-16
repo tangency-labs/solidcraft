@@ -3,7 +3,8 @@
 //!
 //! A 40 x 40 x 10 plate with an r2 through hole at x = 5 has its side face x = 0 moved to
 //! x = 3: the hole wall (x 3..7) is then tangent to the moved side at (3, 20), so the
-//! rebuilt top face has loops that touch without crossing. The extended offset fails with `SM_ERR_OFFSET_WALLS_TOUCH` (1042), and `LocalOperation` passes that on.
+//! rebuilt top face has loops that touch without crossing. The extended offset fails with
+//! `SM_ERR_OFFSET_WALLS_TOUCH` (1042), and `LocalOperation` passes that on.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

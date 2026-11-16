@@ -33,12 +33,13 @@
 //! kept, reversed, where they are the cavity's floor) is part of the routine (WR-345
 //! addendum): it adds the original body to the routine's inputs for its point tests.
 //!
-//! Not in the fork: a stretch from vertex to vertex (a whole edge use no crossing cuts) is
-//! not taken for a stretch too short to build, though a closed edge's two ends meet (the
-//! fork refuses an uncut hole circle beside a crossing as three loops at one point). Where
-//! the offset's results are not merged, a face whose loops cross is refused
-//! ([`crate::error::offset::LoopCrossing::Unmerged`]): only the merge cuts the walls the
-//! crossing loops come from where they pass through each other.
+//! Not in the fork: a loop of one edge use that no crossing cuts is not taken for a stretch
+//! too short to build, though its closed curve's two ends meet (the fork refuses an uncut
+//! hole circle beside a crossing as three loops at one point). Where
+//! the offset's results are not merged and it builds walls (a solid's offset, the local
+//! operation's included, or a sheet thickened), a face whose loops
+//! cross is refused ([`crate::error::offset::LoopCrossing::Unmerged`]): only the merge cuts
+//! the walls the crossing loops come from where they pass through each other.
 //!
 //! Not in the fork (solidcraft#16983): a face of one loop is resolved as well. Where the
 //! offsets of the faces either side of a face cross over each other (a wall thicker than
@@ -68,6 +69,7 @@ use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
+use crate::query::api_queries::brep_is_manifold_solid;
 use crate::query::brep::BrepQuery;
 use crate::query::r#loop::contains_uv_point;
 use crate::surface::surface::p1::{map_to_2d, zone_tol_3d};
@@ -532,6 +534,32 @@ fn edge_closest_distance(k: &Kernel, b: &Brep, e: EdgeId, point: Point3) -> Resu
         .map(|solution| solution.start.solution_value))
 }
 
+/// (not in the fork) Whether a stretch whose ends are `distance` apart is too short to
+/// build (`LoopCrossing::ThreeAtOnePoint`): its ends lie within `tol_3d`, unless it starts
+/// and ends at the same node, a vertex (`< 0`). That is a loop of one edge use that no
+/// crossing cuts, whole and as it was built, whose closed curve's two ends meet. A stretch
+/// that ends at a crossing, or runs between two vertices, is tested as before. NaN is too
+/// short.
+fn stretch_too_short(from: i64, to: i64, distance: f64, tol_3d: f64) -> bool {
+    let whole_loop = from < 0 && from == to;
+    !whole_loop && distance.partial_cmp(&tol_3d) != Some(core::cmp::Ordering::Greater)
+}
+
+/// (not in the fork) Whether an offset whose face's loops cross is refused as
+/// `LoopCrossing::Unmerged`: its results are not merged, and it builds walls: a sheet
+/// thickened (`create_offset_solid`) or a body that is a manifold solid (`is_solid`, asked
+/// only then).
+fn refuses_unmerged(
+    merge_results: bool,
+    create_offset_solid: bool,
+    is_solid: impl FnOnce() -> Result<bool>,
+) -> Result<bool> {
+    if merge_results {
+        return Ok(false);
+    }
+    Ok(create_offset_solid || is_solid()?)
+}
+
 impl OffsetExecutive {
     /// `ResolveCrossingLoops` (fork, not upstream): rebuilds every offset face whose
     /// loops cross one another. Each loop of an offset face is made of the offsets of
@@ -714,8 +742,15 @@ impl OffsetExecutive {
         // cuts them there. The unmerged path only stitches the offset faces, so the walls
         // stay whole: the stitch encloses no region (the face rebuilt) or the face keeps
         // loops that cross (`SmFace` test #38, the face left as it is). No unmerged offset
-        // is valid here, and it is refused as such.
-        if !self.merge_results() {
+        // with walls is valid here, and it is refused as such. Walls there are where the
+        // body offset is a solid (its faces' offsets meet along its edges) or a sheet is
+        // thickened (side walls along its open edges); a sheet's plain offset has none, and
+        // the rebuilt face stands as a sheet of its own. The local operation (always
+        // unmerged) is no exception: its offset faces are stitched alike before they are
+        // moved into the body.
+        if refuses_unmerged(self.merge_results(), self.create_offset_solid(), || {
+            brep_is_manifold_solid(original)
+        })? {
             return Err(unresolved(LoopCrossing::Unmerged));
         }
 
@@ -758,14 +793,8 @@ impl OffsetExecutive {
                 let curve = edge_curve(b, e)?;
                 let from_pt = curve.evaluate_point(kernel, lo)?;
                 let to_pt = curve.evaluate_point(kernel, hi)?;
-                // (not in the fork) a stretch from vertex to vertex is a whole edge use no
-                // crossing cuts, the face's own edge: its ends are the edge's, which meet on
-                // a closed curve (a hole's circle, a loop of one edge). Only a stretch that
-                // ends at a crossing can be too short, two crossings or a crossing and a
-                // vertex at one point.
-                let whole_edge = from_node < 0 && to_node < 0;
                 if hi.partial_cmp(&lo) != Some(core::cmp::Ordering::Greater)
-                    || (!whole_edge && from_pt.distance(to_pt) <= tol_3d)
+                    || stretch_too_short(from_node, to_node, from_pt.distance(to_pt), tol_3d)
                 {
                     return Err(unresolved(LoopCrossing::ThreeAtOnePoint));
                 }
@@ -1444,5 +1473,42 @@ impl OffsetExecutive {
             }
         }
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The length test still refuses what it is for: a stretch ending at a crossing, or
+    /// running between two vertices, whose ends lie within the tolerance, and NaN. Only an
+    /// uncut loop of one edge use (the same vertex node at both ends) passes over it.
+    #[test]
+    fn only_an_uncut_loop_of_one_edge_passes_the_length_test() {
+        let tol = 0.01;
+        // a loop of one closed edge use, uncut: its ends meet
+        assert!(!stretch_too_short(-3, -3, 0.0, tol));
+        // a real defect still caught: ends at crossings, a crossing and a vertex, two
+        // vertices of an open edge, all within the tolerance
+        assert!(stretch_too_short(0, 1, 0.005, tol));
+        assert!(stretch_too_short(-3, 2, 0.01, tol));
+        assert!(stretch_too_short(2, -3, 0.0, tol));
+        assert!(stretch_too_short(-2, -3, 0.005, tol));
+        assert!(stretch_too_short(0, 1, f64::NAN, tol));
+        // long enough
+        assert!(!stretch_too_short(0, 1, 0.02, tol));
+        assert!(!stretch_too_short(-2, -3, 0.02, tol));
+    }
+
+    /// The refusal applies to unmerged offsets that build walls and to nothing else.
+    #[test]
+    fn unmerged_refusal_needs_walls_and_no_merge() {
+        let solid = || Ok(true);
+        let sheet = || Ok(false);
+        assert!(refuses_unmerged(false, false, solid).unwrap());
+        assert!(refuses_unmerged(false, true, sheet).unwrap());
+        assert!(!refuses_unmerged(false, false, sheet).unwrap());
+        assert!(!refuses_unmerged(true, true, solid).unwrap());
+        assert!(!refuses_unmerged(true, false, solid).unwrap());
     }
 }

@@ -180,8 +180,8 @@ fn flag_on_keeps_only_the_cavity() {
     assert!((v - 638.75).abs() <= 1e-9 * 638.75, "{v}");
 }
 
-/// With the SolidCraft set's offset fixes that touch this path as well (WR-345's crossing
-/// loops, WR-455's one-pass stitch), the flag gives the same shell.
+/// With the SolidCraft set's offset fixes that touch this path as well (WR-455's one-pass
+/// stitch; WR-345's crossing loops are always resolved now), the flag gives the same shell.
 #[test]
 fn flag_on_with_offset_fixes() {
     let mut fixes = keep_cavity();
