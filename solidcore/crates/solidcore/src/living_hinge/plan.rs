@@ -42,7 +42,7 @@ pub fn frame_box(loops: &[Vec<NearEdge>]) -> FrameBox {
                 let at = |a: f64| (center.0 + radius * a.cos(), center.1 + radius * a.sin());
                 add(at(start));
                 add(at(start + sweep));
-                for quarter in 0..4 {
+                for quarter in 0_i32..4 {
                     let a = f64::from(quarter) * FRAC_PI_2;
                     if sweeps(start, sweep, a) {
                         add(at(a));

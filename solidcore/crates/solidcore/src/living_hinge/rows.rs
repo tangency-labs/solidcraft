@@ -217,12 +217,8 @@ fn one_claim_per_slot<'a>(
     all.sort_by_key(|claim| claim.0);
     let mut out: Vec<(i64, usize, Side)> = Vec::new();
     for group in all.chunk_by(|a, b| a.0 == b.0) {
-        let best = group
-            .iter()
-            .fold(None::<&(i64, usize, Side, f64)>, |best, claim| match best {
-                Some(b) if b.3 <= claim.3 => Some(b),
-                _ => Some(claim),
-            });
+        // `min_by` keeps the first of equals: the lower end on a tie.
+        let best = group.iter().min_by(|a, b| a.3.total_cmp(&b.3));
         out.extend(best.map(|claim| (claim.0, claim.1, claim.2)));
     }
     out
