@@ -391,11 +391,9 @@ fn tolerance_volume(k: &Kernel, b: &Brep) -> f64 {
     v
 }
 
-/// The part, with the first rim half chamfered by `offsets` when given (the definition
-/// build with `definition`).
-fn part(offsets: Option<(f64, f64)>, definition: bool) -> (Kernel, Brep) {
+/// The part, with the first rim half chamfered by `offsets` when given.
+fn part(offsets: Option<(f64, f64)>) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.fillet_round_as_definition = definition;
     let mut b = cut_cylinder(&mut k);
     if let Some(offsets) = offsets {
         let before = p1::faces(&b, None).unwrap().len();
@@ -417,7 +415,7 @@ const EQUAL: f64 = 1.443_730_684_954_035_7;
 /// edge's gap.
 #[test]
 fn issue_16735_the_original_part_is_its_closed_form() {
-    let (k, mut b) = part(None, false);
+    let (k, mut b) = part(None);
     let exact = 250.0 * 5.0_f64.sqrt() * PI;
     let open = tolerance_volume(&k, &b);
     let v = volume_to(&k, &mut b, 1e-10);
@@ -451,12 +449,8 @@ fn volume_to(k: &Kernel, b: &mut Brep, accuracy: f64) -> f64 {
 /// leak differently.
 #[test]
 fn issue_16735_the_volume_does_not_depend_on_the_origin() {
-    for (offsets, definition) in [
-        (None, false),
-        (Some((1.0, 2.0)), false),
-        (Some((EQUAL, EQUAL)), false),
-    ] {
-        let (k, mut b) = part(offsets, definition);
+    for offsets in [None, Some((1.0, 2.0)), Some((EQUAL, EQUAL))] {
+        let (k, mut b) = part(offsets);
         let mut seen: Vec<(f64, Vec3)> = Vec::new();
         for o in [
             Point3::new(0.0, 0.0, 0.0),
@@ -488,33 +482,30 @@ fn issue_16735_the_volume_does_not_depend_on_the_origin() {
 
 /// #16735: the half chamfers' volumes against #16726's by their definitions
 /// (1743.4242016449 and 1741.1795726555, converged to 6e-8).
-/// - The definition build's faces are the definitions, so its volume is theirs to the
-///   volume its tolerances leave open plus that convergence (1e-7).
-/// - The build without the flag fits the definitions to the distance d measured in
-///   #16653's test, so its volume is theirs to d A: 3.3e-4 and 7.6e-4 (MEASURED there).
+/// The chamfer's faces are the definitions, so its volume is theirs to the volume its
+/// tolerances leave open plus that convergence (1e-7). (The build that fitted the
+/// definitions to a distance d, bounded by d A, went with `fillet_round_as_definition`,
+/// #16580.)
 ///
 /// They read 2.4e-4 to 1.9e-3 low before.
 #[test]
 fn issue_16735_the_half_chamfers_match_their_definitions() {
-    for (offsets, by_definitions, d_area) in [
-        ((1.0, 2.0), 1_743.424_201_644_9, 3.3e-4),
-        ((EQUAL, EQUAL), 1_741.179_572_655_5, 7.6e-4),
+    for (offsets, by_definitions) in [
+        ((1.0, 2.0), 1_743.424_201_644_9),
+        ((EQUAL, EQUAL), 1_741.179_572_655_5),
     ] {
-        for definition in [true, false] {
-            let (k, mut b) = part(Some(offsets), definition);
-            let open = tolerance_volume(&k, &b);
-            let v = volume_to(&k, &mut b, 1e-10);
-            let bound = if definition { open + 1e-7 } else { d_area };
-            eprintln!(
-                "{offsets:?} definition {definition}: {v} against {by_definitions} ({:e}), \
-                 bound {bound:e}",
-                v - by_definitions
-            );
-            assert!(
-                (v - by_definitions).abs() <= bound,
-                "{offsets:?} definition {definition}: {v} against {by_definitions}"
-            );
-        }
+        let (k, mut b) = part(Some(offsets));
+        let open = tolerance_volume(&k, &b);
+        let v = volume_to(&k, &mut b, 1e-10);
+        let bound = open + 1e-7;
+        eprintln!(
+            "{offsets:?}: {v} against {by_definitions} ({:e}), bound {bound:e}",
+            v - by_definitions
+        );
+        assert!(
+            (v - by_definitions).abs() <= bound,
+            "{offsets:?}: {v} against {by_definitions}"
+        );
     }
 }
 

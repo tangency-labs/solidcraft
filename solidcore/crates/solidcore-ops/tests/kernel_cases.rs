@@ -1522,8 +1522,7 @@ fn moved_from_the_rig(result: &[Slot], rig: f64, got: f64) -> Result<(), String>
         return Err(format!("{} result bodies, not one", result.len()));
     };
     let bytes = s.body.to_smb(true).map_err(|x| format!("to_smb: {x}"))?;
-    // the case's own fixes: the reader refuses what they write otherwise (a round kept as its
-    // definition, `fillet_round_as_definition`, writes a procedural blend surface)
+    // the case's own fixes: the reader refuses what they write otherwise
     let mut k = solidcore::Kernel::default();
     for name in session::fixes() {
         let flag = k
