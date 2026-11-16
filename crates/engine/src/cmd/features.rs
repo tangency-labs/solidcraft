@@ -206,7 +206,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("presspull")
         .key("Q")
-        .params("face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]…] and distance (a fillet); body?: the body the face or edges are on (for edges, as for solid.fillet)"),
+        .params("face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]…] and distance (a fillet); body?: the body the face or edges are on (for edges, as for solid.fillet); face_body?: the body a flat face is on, used when body is omitted"),
     CommandSpec::new("solid.move", "Move/Copy", crate::checked!("solid.move", move_bodies))
         .at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch)
         .contract(&MOVE_CONTRACT).output(output_schema_for::<MoveResult>)
@@ -904,6 +904,13 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
     let changed: Vec<&str> =
         st.bodies.iter().filter(|b| b.feature != id && old.get(b.name.as_str()).is_some_and(|o| !o.same(&b.body))).map(|b| b.name.as_str()).collect();
     let removed: Vec<&str> = before.bodies.iter().map(|b| b.name.as_str()).filter(|n| !now.contains(n)).collect();
+    let pieces: Vec<(String, String)> = st
+        .bodies
+        .iter()
+        .filter(|b| !old.contains_key(b.name.as_str()))
+        .filter_map(|b| b.split_from.clone().map(|from| (b.name.clone(), from)))
+        .collect();
+    carry_looks(s, &pieces);
     let fname = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
     // A warning (a reference found again elsewhere, a reduced radius) is part of
     // the reply: a script or an agent sees it without asking the timeline (#616).
@@ -936,6 +943,32 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
 }
 
 type FaceProfile = (u64, Option<ProfileSel>, Option<String>);
+
+/// Give each new piece a cut or intersect split off a body (`(piece, body)`) that body's
+/// physical material and appearance, so it is still made of what the body was. A piece that
+/// already has its own (kept under its name from before) keeps it.
+fn carry_looks(s: &mut Session, pieces: &[(String, String)]) {
+    let needs = |piece: &str, from: &str| {
+        (!s.doc.materials.contains_key(piece) && s.doc.materials.contains_key(from))
+            || (!s.doc.appearances.bodies.contains_key(piece) && s.doc.appearances.bodies.contains_key(from))
+    };
+    if !pieces.iter().any(|(piece, from)| needs(piece, from)) {
+        return;
+    }
+    let doc = s.doc_mut();
+    for (piece, from) in pieces {
+        if !doc.materials.contains_key(piece)
+            && let Some(material) = doc.materials.get(from).cloned()
+        {
+            doc.materials.insert(piece.clone(), material);
+        }
+        if !doc.appearances.bodies.contains_key(piece)
+            && let Some(look) = doc.appearances.bodies.get(from).cloned()
+        {
+            doc.appearances.bodies.insert(piece.clone(), look);
+        }
+    }
+}
 
 fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.extrude";
@@ -2117,7 +2150,16 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
         _ => Expr::new(format!("-({distance})")),
     };
     let (dist, dir, op) = if d > 0.0 { (distance, "positive", "join") } else { (flipped, "negative", "cut") };
-    extrude(s, &json!({"face": face, "distance": dist, "direction": dir, "operation": op}))
+    let mut q = json!({"face": face, "distance": dist, "direction": dir, "operation": op});
+    // Match the frame mapper's precedence so the face point and body name stay together.
+    if let Some(body) = p.get("body").or_else(|| p.get("face_body")).filter(|body| body.is_string()) {
+        q["face_body"] = body.clone();
+        q["targets"] = json!([body]);
+    }
+    extrude(s, &q).map_err(|error| match error {
+        EngineError::BadParams { msg, .. } => bad(cmd, msg),
+        other => other,
+    })
 }
 
 fn fillet(s: &mut Session, p: &Value) -> Result<Value> {

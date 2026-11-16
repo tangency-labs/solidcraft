@@ -18,6 +18,43 @@ use solidcore_record::brep::{check_curve, Budget, Curve, Natural, MAX_SPLINE_DEG
 use crate::session::run;
 use crate::{Error, Result};
 
+/// Which way round the line through `origin` along `axis` `curve` turns over `interval` of its
+/// parameter, as the kernel proves it ([`solidcore::nurbs::certificate::turn_about_axis`]):
+/// `Some(1.0)` counter-clockwise seen from the tip of `axis`, `Some(-1.0)` clockwise, `None`
+/// when that is not proved (the curve turns back or stands still about the line somewhere, or
+/// the bound cannot tell). Any knots the record takes.
+///
+/// # Errors
+/// [`Error::Argument`] for a curve that is not a valid spline or rational spline, or a
+/// coordinate or interval end that is not finite; the kernel's status otherwise (an interval
+/// that is not increasing).
+pub fn turn_about_axis(
+    curve: &Curve,
+    interval: [f64; 2],
+    origin: [f64; 3],
+    axis: [f64; 3],
+) -> Result<Option<f64>> {
+    let nurb = net_of(curve)?;
+    if !origin
+        .iter()
+        .chain(&axis)
+        .chain(&interval)
+        .all(|x| x.is_finite())
+    {
+        return Err(Error::Argument);
+    }
+    let ([ox, oy, oz], [ax, ay, az]) = (origin, axis);
+    let (o, a) = (
+        solidcore::Point3::new(ox, oy, oz),
+        solidcore::Vec3::new(ax, ay, az),
+    );
+    run("curve_knots::turn_about_axis", |_| {
+        Ok(Ok(solidcore::nurbs::certificate::turn_about_axis(
+            &nurb, o, a, interval,
+        )?))
+    })?
+}
+
 /// `curve` with the knot `t` inserted once: the same curve, one control point more.
 ///
 /// # Errors

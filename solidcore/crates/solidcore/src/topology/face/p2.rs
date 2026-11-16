@@ -55,16 +55,14 @@
 //!   [`SolidError::InvalidInput`] for an index outside it (upstream writes out of
 //!   bounds).
 //! - **Statuses ignored upstream** (`ComputeUVPoint` in `sm_AreConnected` and
-//!   `sm_FixUVTrimCurves`, the vertex/edge evaluations of `sm_FixUVTrimCurves`,
-//!   `GetEnds`, the surface evaluations and the
-//!   `CalculateUVDomainFromUVTrimCurves` of `GetPointsInFace`) are
-//!   ignored; [`SolidError::Unported`] still propagates. A failed `ComputeUVPoint`
-//!   leaves the caller's default point ([`Point2::UNDEF`]); a failed `DropPoint` is
-//!   no drop point; a failed evaluation keeps the previous value (initially
-//!   [`Vec3::UNDEF`]).
-//!   With the opt-in `Kernel::fixes.query_statuses_pass_on` (WR-663) `sm_AreConnected`
-//!   shows ends whose UV points cannot be computed not connected, as the fork
-//!   (tangency-labs/smlib 6997962).
+//!   `sm_FixUVTrimCurves`, the vertex/edge evaluations and drops of
+//!   `sm_FixUVTrimCurves`, `GetEnds`, the surface evaluations and the
+//!   `CalculateUVDomainFromUVTrimCurves` of `GetPointsInFace`). The port returns the
+//!   statuses the fork passes on (`SER`) and `sm_AreConnected` shows ends whose UV
+//!   points cannot be computed not connected, as the fork (WR-663, tangency-labs/smlib
+//!   6997962); the others stay ignored ([`SolidError::Unported`] still propagates): a
+//!   failed `DropPoint` is no drop point, a failed evaluation keeps the previous value
+//!   (initially [`Vec3::UNDEF`]).
 //! - **`sm_FixUVTrimCurves` opt-in fix** (WR-255, tangency-labs/solidcore#959/#570, the
 //!   fork's tangency-labs/smlib@5af7070). Upstream drops the vertex's UV point onto
 //!   each of the two curves, `Trim`s the curve there and `EditParameterization`s it back
@@ -139,7 +137,7 @@
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::CurveKind;
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, EntityRef, Result, SolidError};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::a_object;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -211,13 +209,6 @@ pub const fn is_kind_of(t: i64) -> bool {
     } else {
         topo::is_kind_of(t)
     }
-}
-
-/// A status SMLib drops and the fork passes on (`SER`, tangency-labs/smlib 6997962):
-/// returned with the opt-in [`crate::kernel::UpstreamFixes::query_statuses_pass_on`],
-/// handed on to the site's own ignore otherwise.
-fn pass<T>(k: &Kernel, r: Result<T>) -> Result<Result<T>> {
-    crate::error::passed_on(r, k.fixes.query_statuses_pass_on)
 }
 
 fn null(reason: &'static str) -> SolidError {
@@ -1051,11 +1042,11 @@ fn normalized_evaluate_uv(k: &Kernel, b: &mut Brep, eu: EdgeuseId, t: f64) -> Re
     Ok(eu3::normalized_evaluate(k, b, eu, t, true, false, true)?.point)
 }
 
-/// `pEU->GetOrCreateUVTrimCurve(rpUVCurve)` (its status is ignored; the curve is then
-/// dereferenced).
+/// `pEU->GetOrCreateUVTrimCurve(rpUVCurve)` (its status is ignored upstream and passed
+/// on by the fork; the curve is then dereferenced).
 fn get_or_create_uv_trim_curve(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<Curve> {
     let fetch = eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
-    let _ = pass(k, fetch.status)?;
+    fetch.status?;
     eu1::uv_trim_curve(b, eu)?
         .0
         .cloned()
@@ -1282,19 +1273,15 @@ pub fn are_connected(
     let vu2 =
         eu1::vertexuse(b, eu2)?.ok_or_else(|| null("AreConnected: edge use without vertex use"))?;
 
-    // FALSE = don't make UVTrimCurve, if missing use GlobalSolve (statuses ignored; with
-    // the opt-in fix ends whose UV points cannot be computed are not shown connected,
-    // tangency-labs/smlib 6997962)
-    let uv1 = ignored(vu1::compute_uv_point(k, b, vu1, false))?;
-    if uv1.is_none() && k.fixes.query_statuses_pass_on {
+    // FALSE = don't make UVTrimCurve, if missing use GlobalSolve (statuses ignored
+    // upstream; ends whose UV points cannot be computed are not shown connected, as the
+    // fork, tangency-labs/smlib 6997962)
+    let Some(uv1) = ignored(vu1::compute_uv_point(k, b, vu1, false))? else {
         return Ok(out);
-    }
-    let uv2 = ignored(vu1::compute_uv_point(k, b, vu2, false))?;
-    if uv2.is_none() && k.fixes.query_statuses_pass_on {
+    };
+    let Some(uv2) = ignored(vu1::compute_uv_point(k, b, vu2, false))? else {
         return Ok(out);
-    }
-    let uv1 = uv1.unwrap_or(Point2::UNDEF);
-    let uv2 = uv2.unwrap_or(Point2::UNDEF);
+    };
     let gap_u = (uv2.x - uv1.x).abs();
     let gap_v = (uv2.y - uv1.y).abs();
 
@@ -1587,20 +1574,17 @@ fn internal_point<B: QueryBrep>(k: &Kernel, b: B, f: FaceId) -> Result<Point3> {
                 (Point2::new(u, v_min), Point2::new(u, v_max))
             };
 
-            // classify the target UVLine (status ignored; passed on with the opt-in fix,
+            // classify the target UVLine (status ignored upstream; passed on as the fork,
             // tangency-labs/smlib 6997962)
-            ignore_status(pass(
+            B::classify_uv_line(
                 k,
-                B::classify_uv_line(
-                    k,
-                    f,
-                    &mut uv_objects,
-                    start,
-                    end,
-                    src_zone_tol_3d,
-                    &mut classification,
-                ),
-            )?)?;
+                f,
+                &mut uv_objects,
+                start,
+                end,
+                src_zone_tol_3d,
+                &mut classification,
+            )?;
 
             // when intervals were found in the face
             for ivl in classification.intervals() {
@@ -1748,19 +1732,14 @@ pub fn points_in_face(
         let u_inc = 1.0 / ((trim_curve_cnt + 1) as f64);
 
         // set search range to face boundary domain
-        // (status ignored upstream: on a failure the output is still the face's UV
-        // domain, which CalculateUVDomainFromUVTrimCurves sets first)
-        let trim_uv_domain = match pass(k, calculate_uv_domain_from_uv_trim_curves(k, b, f))? {
-            Ok(d) => d,
-            Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => b.face(f)?.uv_domain,
-        };
+        // (status ignored upstream, where a failure still outputs the face's UV domain;
+        // passed on as the fork, tangency-labs/smlib 6997962)
+        let trim_uv_domain = calculate_uv_domain_from_uv_trim_curves(k, b, f)?;
         let srf_dom = surf.natural_uv_domain_with_nurb(k)?;
-        // (SmExtent2d::Intersect leaves the output unchanged when disjoint)
-        let uv_dom =
-            pass(k, srf_dom.intersect(&trim_uv_domain))?.unwrap_or_else(|_| Extent2d::new());
-        // SetMinMax status ignored
-        let _ = pass(k, u_interval.set_min_max(uv_dom.min().x, uv_dom.max().x))?;
+        // (SmExtent2d::Intersect fails when disjoint; status passed on as the fork)
+        let uv_dom = srf_dom.intersect(&trim_uv_domain)?;
+        // SetMinMax status passed on as the fork
+        u_interval.set_min_max(uv_dom.min().x, uv_dom.max().x)?;
 
         // create isoParameter UVTrimCurve - we'll keep reusing it until done
         let uv_start = dom.evaluate(u_inc, 0.0);
@@ -1835,28 +1814,20 @@ pub fn points_in_face(
                 for kk in 0..smp_cnt {
                     let v_dither = if point_count > 1 { rand_dither(k) } else { 0.0 };
                     let v_norm = ((kk + 1) as f64 + v_dither) / ((smp_cnt + 1) as f64);
-                    // status ignored: the point keeps its default value
-                    let uv_point = pass(k, crv.evaluate_point(k, ivl.interval.evaluate(v_norm)))?
-                        .unwrap_or(Vec3::UNDEF);
+                    // status ignored upstream (the point keeps its default value);
+                    // passed on as the fork
+                    let uv_point = crv.evaluate_point(k, ivl.interval.evaluate(v_norm))?;
                     out.uv.push(Point2::new(*u_param, uv_point.y));
                 }
             }
         }
     }
 
-    // arrive here after picking a sUV Pnts to evaluate - set outputs (statuses ignored)
-    let mut pnt = Vec3::UNDEF;
-    let mut nrm = Vec3::UNDEF;
+    // arrive here after picking a sUV Pnts to evaluate - set outputs (statuses ignored
+    // upstream, passed on as the fork)
     for &uv in &out.uv {
-        if let Some(p) = ignored(pass(k, surf.evaluate_point(k, uv))?)? {
-            pnt = p;
-        }
-        if let Some(n) = ignored(pass(
-            k,
-            surf.evaluate_normal(k, uv, Side::Left, Side::Left),
-        )?)? {
-            nrm = n;
-        }
+        let pnt = surf.evaluate_point(k, uv)?;
+        let nrm = surf.evaluate_normal(k, uv, Side::Left, Side::Left)?;
         out.pv.push(pnt);
         out.pv.push(nrm);
     }
@@ -3215,33 +3186,24 @@ pub fn fix_uv_trim_curves_notified(
         .ok_or_else(|| null("FixUVTrimCurves: edge use without vertex use"))?;
     let uv_vertex = match vu1::vertex_face_gap(k, b, vu, false)? {
         Some(gap) => gap.face_uv,
-        None => ignored(pass(k, vu1::compute_uv_point(k, b, vu, true))?)?.unwrap_or(Point2::UNDEF),
+        // (status ignored upstream, passed on as the fork, tangency-labs/smlib 6997962)
+        None => vu1::compute_uv_point(k, b, vu, true)?,
     };
     let uv_vertex_3d = Point3::new(uv_vertex.x, uv_vertex.y, 0.0);
 
-    // project Vertex drop point to 3d through surface (statuses ignored)
+    // project Vertex drop point to 3d through surface (statuses ignored upstream, passed
+    // on as the fork)
     let surf = surface_deref(b, curr_face)?;
-    let surf_vertex = ignored(pass(k, surf.evaluate_point(k, uv_vertex))?)?.unwrap_or(Vec3::UNDEF);
-    let _ = ignored(pass(
-        k,
-        surf.evaluate_normal(k, uv_vertex, Side::Left, Side::Left),
-    )?)?;
+    let surf_vertex = surf.evaluate_point(k, uv_vertex)?;
+    surf.evaluate_normal(k, uv_vertex, Side::Left, Side::Left)?;
 
     // UVGap sizes
     let uv_curr_edge_gap = uv_vertex_3d.distance(uv_curr);
     let uv_prev_edge_gap = uv_vertex_3d.distance(uv_prev);
 
-    // edge end points (statuses ignored)
-    let curr_edge_point = ignored(pass(
-        k,
-        edge_curve(b, curr_edge)?.evaluate_point(k, t_curr),
-    )?)?
-    .unwrap_or(Vec3::UNDEF);
-    let prev_edge_point = ignored(pass(
-        k,
-        edge_curve(b, prev_edge)?.evaluate_point(k, t_prev),
-    )?)?
-    .unwrap_or(Vec3::UNDEF);
+    // edge end points (statuses ignored upstream, passed on as the fork)
+    let curr_edge_point = edge_curve(b, curr_edge)?.evaluate_point(k, t_curr)?;
+    let prev_edge_point = edge_curve(b, prev_edge)?.evaluate_point(k, t_prev)?;
 
     // Vertex/SurfVertex and EdgeEnd/SurfVertex gaps (the out-of-tolerance branch only
     // warns upstream)
@@ -3253,38 +3215,33 @@ pub fn fix_uv_trim_curves_notified(
     // drop sUVVertex to each UVTrimCurve, trim there and stretch back (upstream). The
     // opt-in WR-255 fix (#959/#570) skips this and only moves the end points below.
     if !k.fixes.uv_trim_corner_end_points_only {
-        let curr_drop = ignored(pass(
+        // (drop statuses ignored upstream, passed on as the fork)
+        let curr_drop = held_curve(b, curr_holder)?.drop_point(
             k,
-            held_curve(b, curr_holder)?.drop_point(
-                k,
-                &curr_ivl,
-                uv_vertex_3d,
-                None,
-                1.1 * (EFF_ZERO + uv_curr_edge_gap),
-                Some(t_curr),
-                SolverOperation::Intersect,
-            ),
-        )?)?;
-        let prev_drop = ignored(pass(
+            &curr_ivl,
+            uv_vertex_3d,
+            None,
+            1.1 * (EFF_ZERO + uv_curr_edge_gap),
+            Some(t_curr),
+            SolverOperation::Intersect,
+        )?;
+        let prev_drop = held_curve(b, prev_holder)?.drop_point(
             k,
-            held_curve(b, prev_holder)?.drop_point(
-                k,
-                &prev_ivl,
-                uv_vertex_3d,
-                None,
-                1.1 * (EFF_ZERO + uv_prev_edge_gap),
-                Some(t_prev),
-                SolverOperation::Intersect,
-            ),
-        )?)?;
-        if let Some(d) = curr_drop.filter(|d| d.success) {
-            let t_curr_new = d.parameter;
+            &prev_ivl,
+            uv_vertex_3d,
+            None,
+            1.1 * (EFF_ZERO + uv_prev_edge_gap),
+            Some(t_prev),
+            SolverOperation::Intersect,
+        )?;
+        if curr_drop.success {
+            let t_curr_new = curr_drop.parameter;
             if !are_same(t_curr, t_curr_new) {
                 let mut trim_ivl = Extent1d::new();
                 if eu1::orientation(b, eu_current)? == OrientType::Same {
-                    let _ = pass(k, trim_ivl.set_min_max(t_curr_new, curr_ivl.max()))?;
+                    trim_ivl.set_min_max(t_curr_new, curr_ivl.max())?;
                 } else {
-                    let _ = pass(k, trim_ivl.set_min_max(curr_ivl.min(), t_curr_new))?;
+                    trim_ivl.set_min_max(curr_ivl.min(), t_curr_new)?;
                 }
                 if !are_same(trim_ivl.min(), trim_ivl.max()) {
                     // SmTol::GetZoneTol3d(curve) follows its actual holder's edge.
@@ -3305,14 +3262,14 @@ pub fn fix_uv_trim_curves_notified(
                 }
             }
         }
-        if let Some(d) = prev_drop.filter(|d| d.success) {
-            let t_prev_new = d.parameter;
+        if prev_drop.success {
+            let t_prev_new = prev_drop.parameter;
             if !are_same(t_prev, t_prev_new) {
                 let mut trim_ivl = Extent1d::new();
                 if eu1::orientation(b, eu_previous)? == OrientType::Same {
-                    let _ = pass(k, trim_ivl.set_min_max(prev_ivl.min(), t_prev_new))?;
+                    trim_ivl.set_min_max(prev_ivl.min(), t_prev_new)?;
                 } else {
-                    let _ = pass(k, trim_ivl.set_min_max(t_prev_new, prev_ivl.max()))?;
+                    trim_ivl.set_min_max(t_prev_new, prev_ivl.max())?;
                 }
                 if !are_same(trim_ivl.min(), trim_ivl.max()) {
                     // The previous curve can likewise be held by another edge use.

@@ -5754,11 +5754,27 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
             let Some(fu) = self.target.face(face)?.faceuse else {
                 continue;
             };
+            // a plane face, whose one closed edge's blend closing to a point is a cone
+            // with its apex on the face (#17198)
+            let planar = crate::topology::face::p2::surface(self.target, face)?.is_some_and(|s| {
+                matches!(s.kind(), crate::surface::surface::SurfaceKind::Plane(_))
+            });
             for lu in eu::faceuse_loopuses(self.target, fu, false, None)? {
                 // The loop closes to a point when every edge of it has a point rail on
                 // the face; it ends in that point when some blend there meets the face
                 // at an angle.
                 let edges = loopuse::edges(self.target, lu, None)?;
+                // Not the fork's (#17198): a plane face bounded by one closed edge (a
+                // cylinder's top) whose blend's rail on it is a point, by the same
+                // test as a round's (the dome's), is taken whole by a cone whose apex
+                // is that point: the blend meets the face there in a point, not along
+                // an edge, so nothing of the face is left to meet at an angle
+                let one_closed_edge = planar
+                    && edges.len() == 1
+                    && match edges.first().copied().flatten() {
+                        Some(e) => crate::topology::edge::is_closed(self.target, e)?,
+                        None => false,
+                    };
                 let mut closes_to_a_point = !edges.is_empty();
                 let mut all_tangent = true;
                 for edge in edges {
@@ -5773,7 +5789,7 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                         break;
                     }
                 }
-                if closes_to_a_point && !all_tangent {
+                if closes_to_a_point && !all_tangent && !one_closed_edge {
                     return Ok(false);
                 }
             }
@@ -7763,124 +7779,136 @@ mod tests {
     }
 
     #[test]
-    fn create_corners_consults_the_vertex_diagnostics_fix() {
-        for fix in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.fillet_vertex_error_diagnostics = fix;
-            let mut body = pentagonal_pyramid(&mut k);
-            let apex = crate::topology::brep::p1::vertices(&body, None)
-                .unwrap()
-                .into_iter()
-                .find(|vertex| crate::topology::vertex::point(&body, *vertex).unwrap().z > 1.0)
-                .unwrap();
-            let side_edges = crate::topology::brep::p1::edges(&body, None)
-                .unwrap()
-                .into_iter()
-                .filter(|edge| {
-                    crate::topology::edge::vertices(&body, *edge, None)
-                        .unwrap()
-                        .iter()
-                        .flatten()
-                        .any(|vertex| *vertex == apex)
-                })
-                .collect::<Vec<_>>();
-            assert_eq!(side_edges.len(), 5);
-            let apex_point = crate::topology::vertex::point(&body, apex).unwrap();
-            let mut session = FilletSession::new(&mut k, &mut body).unwrap();
-            session
-                .prepare_constant_radius_edges(&mut k, &side_edges[..3], 0.5, 1, 1, 1.0)
-                .unwrap();
-            session.create_corners(&k, None).unwrap();
-            // The three base corners are made; the apex keeps its pending entry.
-            assert_eq!(session.fillet_corners().unwrap().len(), 3);
-            let error = session.error_info();
-            if fix {
-                assert_eq!(error.code, FilletErrorType::CornerUnsupported as i32);
-                assert_eq!(error.status, FilStatus::Failure as i32);
-                assert_eq!(error.comment, "Corner case not implemented");
-                assert_eq!(
-                    error.vertex,
-                    Some(FilletObject::Topology(
-                        FilletBody::Target,
-                        EntityRef::Vertex(apex)
-                    ))
-                );
-                assert_eq!(error.location, Some(apex_point));
-            } else {
-                // Pinned default: the vertex note records nothing.
-                assert_eq!(error.code, 0);
-                assert_eq!(error.vertex, None);
-                assert_eq!(error.location, None);
-                assert_eq!(error.comment, "<no comment>\n");
-            }
-        }
+    fn create_corners_notes_the_unsupported_vertex() {
+        let mut k = Kernel::default();
+        let mut body = pentagonal_pyramid(&mut k);
+        let apex = crate::topology::brep::p1::vertices(&body, None)
+            .unwrap()
+            .into_iter()
+            .find(|vertex| crate::topology::vertex::point(&body, *vertex).unwrap().z > 1.0)
+            .unwrap();
+        let side_edges = crate::topology::brep::p1::edges(&body, None)
+            .unwrap()
+            .into_iter()
+            .filter(|edge| {
+                crate::topology::edge::vertices(&body, *edge, None)
+                    .unwrap()
+                    .iter()
+                    .flatten()
+                    .any(|vertex| *vertex == apex)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(side_edges.len(), 5);
+        let apex_point = crate::topology::vertex::point(&body, apex).unwrap();
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &side_edges[..3], 0.5, 1, 1, 1.0)
+            .unwrap();
+        session.create_corners(&k, None).unwrap();
+        // The three base corners are made; the apex keeps its pending entry.
+        assert_eq!(session.fillet_corners().unwrap().len(), 3);
+        let error = session.error_info();
+        assert_eq!(error.code, FilletErrorType::CornerUnsupported as i32);
+        assert_eq!(error.status, FilStatus::Failure as i32);
+        assert_eq!(error.comment, "Corner case not implemented");
+        assert_eq!(
+            error.vertex,
+            Some(FilletObject::Topology(
+                FilletBody::Target,
+                EntityRef::Vertex(apex)
+            ))
+        );
+        assert_eq!(error.location, Some(apex_point));
     }
 
     #[test]
-    fn do_fillet_keeps_the_missing_corner_note_or_the_same_later_failure() {
-        for (fix, stale_note) in [(false, false), (false, true), (true, false)] {
+    fn do_fillet_keeps_the_missing_corner_note_through_the_later_failure() {
+        let mut k = Kernel::default();
+        let mut body = pentagonal_pyramid(&mut k);
+        let apex = crate::topology::brep::p1::vertices(&body, None)
+            .unwrap()
+            .into_iter()
+            .find(|vertex| crate::topology::vertex::point(&body, *vertex).unwrap().z > 1.0)
+            .unwrap();
+        let side_edges = crate::topology::brep::p1::edges(&body, None)
+            .unwrap()
+            .into_iter()
+            .filter(|edge| {
+                crate::topology::edge::vertices(&body, *edge, None)
+                    .unwrap()
+                    .iter()
+                    .flatten()
+                    .any(|vertex| *vertex == apex)
+            })
+            .collect::<Vec<_>>();
+        let apex_point = crate::topology::vertex::point(&body, apex).unwrap();
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &side_edges[..3], 0.5, 1, 1, 1.0)
+            .unwrap();
+        let result = session.do_fillet(&mut k);
+        // The later stage's own failure is returned.
+        assert_eq!(
+            result.as_ref().err().and_then(SolidError::upstream_status),
+            Some(1001),
+            "{result:?}"
+        );
+        let error = session.error_info();
+        assert_eq!(error.code, FilletErrorType::CornerUnsupported as i32);
+        assert_eq!(error.status, FilStatus::Failure as i32);
+        assert_eq!(error.comment, "Corner case not implemented");
+        assert_eq!(
+            error.vertex,
+            Some(FilletObject::Topology(
+                FilletBody::Target,
+                EntityRef::Vertex(apex)
+            ))
+        );
+        assert_eq!(error.location, Some(apex_point));
+    }
+
+    /// A missing-corner note left on the session before `do_fillet` is not this call's:
+    /// a later failure of a fillet with no unsupported corner reports exactly the error
+    /// info it reports without the stale note. The case's failure is not a no-room
+    /// refusal, so the snapshot of the note (not the no-room guard) is what keeps the
+    /// stale note out.
+    #[test]
+    fn do_fillet_does_not_keep_a_stale_missing_corner_note() {
+        let run = |stale: bool| {
             let mut k = Kernel::default();
-            k.fixes.fillet_vertex_error_diagnostics = fix;
-            let mut body = pentagonal_pyramid(&mut k);
-            let apex = crate::topology::brep::p1::vertices(&body, None)
-                .unwrap()
-                .into_iter()
-                .find(|vertex| crate::topology::vertex::point(&body, *vertex).unwrap().z > 1.0)
-                .unwrap();
-            let side_edges = crate::topology::brep::p1::edges(&body, None)
-                .unwrap()
-                .into_iter()
-                .filter(|edge| {
-                    crate::topology::edge::vertices(&body, *edge, None)
-                        .unwrap()
-                        .iter()
-                        .flatten()
-                        .any(|vertex| *vertex == apex)
-                })
-                .collect::<Vec<_>>();
-            let apex_point = crate::topology::vertex::point(&body, apex).unwrap();
+            let mut body =
+                crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+                    .unwrap();
+            let edge = crate::topology::brep::p1::edges(&body, None).unwrap()[0];
             let mut session = FilletSession::new(&mut k, &mut body).unwrap();
             session
-                .prepare_constant_radius_edges(&mut k, &side_edges[..3], 0.5, 1, 1, 1.0)
+                .prepare_constant_radius_edges(&mut k, &[edge], STALE_CASE_RADIUS, 1, 1, 1.0)
                 .unwrap();
-            if stale_note {
-                // Disabling the policy must not preserve a note from an earlier
-                // opt-in operation instead of the current stage's own diagnostic.
+            if stale {
                 session.executive.error.code = FilletErrorType::CornerUnsupported as i32;
+                session.executive.error.comment = "a stale note".into();
             }
             let result = session.do_fillet(&mut k);
-            // The later stage's failure is the same with the fix on and off.
-            assert_eq!(
-                result.as_ref().err().and_then(SolidError::upstream_status),
-                Some(1001),
-                "{result:?}"
-            );
-            let error = session.error_info();
-            if fix {
-                assert_eq!(error.code, FilletErrorType::CornerUnsupported as i32);
-                assert_eq!(error.status, FilStatus::Failure as i32);
-                assert_eq!(error.comment, "Corner case not implemented");
-                assert_eq!(
-                    error.vertex,
-                    Some(FilletObject::Topology(
-                        FilletBody::Target,
-                        EntityRef::Vertex(apex)
-                    ))
-                );
-                assert_eq!(error.location, Some(apex_point));
-            } else {
-                // Pinned default: the later stage's own error info, unchanged.
-                assert_eq!((error.code, error.status), (4, 10));
-                assert_eq!(error.comment, "Fillet Surface Computation Failure");
-                assert_eq!((error.vertex, error.location), (None, None));
-            }
-        }
+            assert!(result.is_err(), "stale {stale}: {result:?}");
+            let e = session.error_info();
+            (e.code, e.comment.clone(), e.no_room, e.vertex)
+        };
+        let baseline = run(false);
+        // the fillet surface computation failure (code 4): neither a no-room refusal nor
+        // an unsupported corner
+        assert_eq!(baseline.0, 4, "{baseline:?}");
+        assert_eq!(baseline.2, None, "{baseline:?}");
+        assert_eq!(run(true), baseline);
     }
+
+    /// The radius of [`do_fillet_does_not_keep_a_stale_missing_corner_note`]'s round on one
+    /// edge of the unit cube: five times the faces, so the fillet surface fails (code 4,
+    /// not a no-room refusal) and the edge has no corner to note.
+    const STALE_CASE_RADIUS: f64 = 5.0;
 
     #[test]
     fn a_no_room_refusal_after_an_unsupported_corner_names_no_stale_site() {
         let mut k = Kernel::default();
-        k.fixes.fillet_vertex_error_diagnostics = true;
         let mut body = pentagonal_pyramid(&mut k);
         let apex = crate::topology::brep::p1::vertices(&body, None)
             .unwrap()

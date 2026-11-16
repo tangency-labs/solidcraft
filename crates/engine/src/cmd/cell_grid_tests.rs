@@ -341,3 +341,24 @@ fn keepout_clip_is_checked() {
     assert!(cut(&mut s, json!({"through_all": true, "keepout_clip": "x"})).is_err());
     assert!(cut(&mut s, json!({"through_all": true, "margin": 1, "keepout_clip": "free"})).is_err());
 }
+
+#[test]
+fn snap_inset_leaves_a_thicker_rim_and_needs_snap() {
+    let build = |extra: Value| {
+        let mut s = plate(62.0, 3.0);
+        let mut p = json!({"sketch": "Field", "shape": "hexagon", "size": 8, "web": 2, "through_all": true, "clip": "snap"});
+        for (k, v) in extra.as_object().cloned().unwrap_or_default() {
+            p[k] = v;
+        }
+        let r = s.execute("solid.cell_grid", &p);
+        (r.map(|_| volume(&s)), s)
+    };
+    let (plain, _) = build(json!({}));
+    let (same, _) = build(json!({"snap_inset": 0}));
+    let (inset, _) = build(json!({"snap_inset": 1}));
+    assert_eq!(plain.as_ref().unwrap(), same.as_ref().unwrap());
+    assert!(inset.unwrap() > plain.unwrap() + 1.0, "an inset cuts fewer cells");
+    assert!(build(json!({"snap_inset": 1, "clip": "free"})).0.is_err());
+    assert!(build(json!({"snap_inset": 1.5})).0.is_err());
+    assert!(build(json!({"snap_inset": -1})).0.is_err());
+}

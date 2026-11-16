@@ -858,6 +858,9 @@ pub struct PressPullParams {
     /// The body the face or edges are on. Default: found from the points.
     #[serde(default)]
     pub body: Option<String>,
+    /// The body the flat face is on, when `body` is omitted. Disambiguates touching faces.
+    #[serde(default)]
+    pub face_body: Option<String>,
 }
 
 /// A fillet's or chamfer's face was pressed or pulled: the feature it belongs to changed size.
