@@ -98,8 +98,8 @@ pub enum Piece {
     Line {
         to: GridPoint,
     },
-    /// A circular arc of at most a quarter turn, of `radius` steps, turning clockwise (y up) when
-    /// `clockwise`.
+    /// A circular arc of about a quarter turn (a little more once its ends are rounded onto the
+    /// grid or a sliver merged in; never a half), of `radius` steps, clockwise (y up) when `clockwise`.
     Arc {
         radius: i64,
         clockwise: bool,

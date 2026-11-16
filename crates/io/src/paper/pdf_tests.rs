@@ -279,6 +279,59 @@ fn arcs_are_cubics_within_a_ten_thousandth_of_a_millimetre() {
     }
 }
 
+/// An arc the walk gives as a quarter turn can turn a little more once its ends are rounded onto the
+/// grid: it is still written, in cubics of at most a quarter turn each, and an arc past a half turn,
+/// which the walk never gives, is refused. (Found, with the fix, by @DevonHope on #9647.)
+#[test]
+fn an_arc_a_little_over_a_quarter_turn_is_written() {
+    for radius in [10.0, 1e3, 1e7] {
+        let n = cubics_for(radius, FRAC_PI_2 + 1e-6).unwrap();
+        assert!(n >= 2, "{radius}: {n}");
+        assert!(cubics_for(radius, FRAC_PI_2).is_some_and(|n| n <= 64), "{radius}");
+    }
+    assert!(cubics_for(10.0, std::f64::consts::PI + 0.1).is_none());
+    assert!(cubics_for(10.0, f64::NAN).is_none());
+}
+
+/// Every cubic of `content` lies on the circle of `radius` round `c`, within the arc tolerance.
+fn on_the_circle(content: &str, c: Vec2, radius: f64) {
+    for cubic in cubics(content) {
+        for k in 0..=32 {
+            let off = (bezier(cubic, f64::from(k) / 32.0).dist(c) - radius).abs();
+            assert!(off <= ARC_TOLERANCE_MM, "r {radius}: {off} mm off at {k}/32");
+        }
+    }
+}
+
+/// A Ø16 hole, walked onto the grid, can give arc pieces a hair over a quarter turn: their ends are
+/// rounded to 10 nm. Such a circle is still written, on the circle (a drilled plate's view failed
+/// with "an arc needs too many cubics" before).
+#[test]
+fn a_circle_whose_rounded_pieces_turn_past_a_quarter_is_written() {
+    let mut over = 0;
+    for i in 0..60 {
+        let c = p(50.0 + f64::from(i) * 3.7e-6, 50.0 + f64::from(i) * 5.3e-6);
+        let circle = scene(p(100.0, 100.0), vec![stroke(vec![Seg2::Arc { center: c, radius: 8.0, start: 0.3, sweep: TAU }], true, 0.35, None)]);
+        let prepared = circle.prepare().unwrap();
+        for group in &prepared.on_grid(Grid::TEN_NANOMETRES).unwrap().groups {
+            for item in &group.items {
+                if let solidcraft_geom::paper::GridItem::Stroke { path, .. } = item {
+                    let mut at = path.start;
+                    for piece in &path.pieces {
+                        if let Seg2::Arc { sweep, .. } = piece.seg(at) {
+                            over += usize::from(sweep.abs() > FRAC_PI_2 + 1e-9);
+                        }
+                        at = piece.to();
+                    }
+                }
+            }
+        }
+        let (bytes, _) = paper_pdf(&prepared, &NONE).unwrap_or_else(|e| panic!("centre {i}: {e}"));
+        on_the_circle(&content(&bytes), c, 8.0);
+    }
+    assert!(over > 0, "no circle here gave a piece past a quarter turn: the test doesn't reach the case");
+}
+
 /// Strokes and fills are painted as SVG and PNG paint them: butt caps, miter joins, a miter limit
 /// of 4, each width and dash pattern set once until it changes, a closed outline closed, fills
 /// even-odd.

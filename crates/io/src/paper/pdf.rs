@@ -376,15 +376,17 @@ impl Content {
     }
 }
 
-/// How many equal cubics keep an arc of `radius` steps and `sweep` (at most a quarter turn) within
-/// the tolerance. The 4/3·tan(θ/4) cubic of a θ arc strays at most r·(2/27)·sin⁶(θ/4)/cos²(θ/4)
-/// from it, outward; each control point rounded onto the grid moves the curve at most half a
-/// step's diagonal more.
+/// How many equal cubics keep an arc of `radius` steps and `sweep` (at most a half turn, see
+/// [`Piece::Arc`]) within the tolerance, each spanning at most a quarter turn. The 4/3·tan(θ/4)
+/// cubic of a θ arc strays at most r·(2/27)·sin⁶(θ/4)/cos²(θ/4) from it, outward; each control
+/// point rounded onto the grid moves the curve at most half a step's diagonal more.
 fn cubics_for(radius: f64, sweep: f64) -> Option<usize> {
     let tolerance = ARC_TOLERANCE_MM * Grid::TEN_NANOMETRES.per_mm() - std::f64::consts::FRAC_1_SQRT_2;
     let strays = |theta: f64| radius * (2.0 / 27.0) * (theta / 4.0).sin().powi(6) / (theta / 4.0).cos().powi(2);
-    (sweep.is_finite() && sweep.abs() <= FRAC_PI_2 + 1e-9 && radius.is_finite())
-        .then(|| (1..=64).find(|&n| strays(sweep.abs() / n as f64) <= tolerance))
+    // A quarter turn or less starts at one cubic, as it always has, so those arcs write the same bytes.
+    let least = (sweep.abs() / FRAC_PI_2 - 1e-9).ceil().max(1.0);
+    (sweep.is_finite() && sweep.abs() <= std::f64::consts::PI + 1e-9 && radius.is_finite())
+        .then(|| (least as usize..=128).find(|&n| strays(sweep.abs() / n as f64) <= tolerance))
         .flatten()
 }
 
