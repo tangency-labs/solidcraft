@@ -460,7 +460,9 @@ fn side(k: &mut Kernel, body: &Body, spec: &Spec, flip: bool) -> SolidResult<Out
 
 /// `smlib_split_body`: the manifold solid `body` cut in two by the tool: the part behind the
 /// surface (its normal points away) and the part in front. A side left empty is `None`
-/// (`SMLIB_ERR_NO_CUT`); a body that is no manifold solid is [`Error::NotSolid`].
+/// (`SMLIB_ERR_NO_CUT`), and so is a tool that ends inside the body: it only nicks it, and a
+/// part that is no manifold solid is no cut ([`both_sides`] with `whole`); a body that is no
+/// manifold solid is [`Error::NotSolid`].
 pub(crate) fn split_body(body: &Body, spec: &Spec) -> Result<Option<(Body, Body)>> {
     if body.0.is_poisoned() {
         return Err(Error::Internal("smlib_split_body: the body was left unfinished by an earlier panic".to_owned()));
@@ -471,7 +473,7 @@ pub(crate) fn split_body(body: &Body, spec: &Spec) -> Result<Option<(Body, Body)
             Ok(None) => {}
             Err(e) => return Ok(Err(e)),
         }
-        both_sides(k, body, false, |k, flip| side(k, body, spec, flip))
+        both_sides(k, body, true, |k, flip| side(k, body, spec, flip))
     })??;
     Ok(r.map(|(b, f)| (Body::new(b), Body::new(f))))
 }

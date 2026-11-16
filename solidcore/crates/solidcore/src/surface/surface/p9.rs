@@ -21,8 +21,10 @@
 //! over the surface itself (the `SmSurface` body, with the caller's approximation
 //! tolerance). Iso extraction is exact for B-splines, so the tolerance has no
 //! numerical effect for that kind.
-//! Failed tessellations retain the empty parameter array;
-//! unported errors are propagated even where upstream ignores a status.
+//! A failed tessellation or closed-curve continuity evaluation is passed on as the
+//! fork does (WR-663, tangency-labs/smlib 21dcf69), and a leaf outside the domain or
+//! interval of interest has no answers; unported errors are propagated even where
+//! upstream ignores a status.
 
 use std::borrow::Cow;
 
@@ -32,7 +34,7 @@ use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p3::{local_curve_intersect, PointSolveOptions};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::iso_curve::IsoCurve;
-use crate::error::{ignored, ignored_or_pass_on, Result, SolidError};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -206,13 +208,11 @@ fn tessellate(
     angle: f64,
     max_side: f64,
 ) -> Result<Vec<f64>> {
-    // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-    Ok(ignored_or_pass_on(
-        curve.tessellate_by_bisection(k, interval, chord, angle, max_side),
-        k.fixes.query_statuses_pass_on,
-    )?
-    .map(|t| t.parameters)
-    .unwrap_or_default())
+    // (status ignored upstream; passed on as the fork does, WR-663,
+    // tangency-labs/smlib 21dcf69)
+    Ok(curve
+        .tessellate_by_bisection(k, interval, chord, angle, max_side)?
+        .parameters)
 }
 
 fn check_count(n: usize) -> Result<()> {
@@ -845,13 +845,12 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
         if self.uv_domain.max().y <= domain.max().y {
             v_conts[1] = ContinuityType::Discontinuous;
         }
-        // with the opt-in fix a branch outside the domain or interval of interest has no
-        // answers (WR-663, tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        // a branch outside the domain or interval of interest has no answers, as the
+        // fork (WR-663, tangency-labs/smlib 21dcf69)
         if !domain.is_contained_by(&self.uv_domain, EFF_ZERO) {
             domain = match domain.intersect(&self.uv_domain) {
                 Ok(d) => d,
-                Err(e) if pass && !e.is_unported_or_cancelled() => return Ok(false),
+                Err(e) if !e.is_unported_or_cancelled() => return Ok(false),
                 Err(e) => return Err(e),
             };
             if crate::geom::tol::are_same(domain.max().x, domain.min().x)
@@ -869,7 +868,7 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
         if !interval.is_contained_by(&self.interval, EFF_ZERO) {
             interval = match interval.intersect(&self.interval) {
                 Ok(i) => i,
-                Err(e) if pass && !e.is_unported_or_cancelled() => return Ok(false),
+                Err(e) if !e.is_unported_or_cancelled() => return Ok(false),
                 Err(e) => return Err(e),
             };
             if crate::geom::tol::are_same(interval.max(), interval.min()) {
@@ -889,22 +888,21 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
                 .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?
                 .is_closed(k, &natural, 0.0)?
         {
-            let continuity = ignored_or_pass_on(
-                crate::curve::curve::p2::evaluate_continuity(
-                    k,
-                    self.curve
-                        .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?,
-                    natural.min(),
-                    false,
-                    self.curve
-                        .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?,
-                    natural.max(),
-                    true,
-                    0.5,
-                ),
-                pass,
+            // (status ignored upstream; passed on as the fork does, WR-663,
+            // tangency-labs/smlib 21dcf69)
+            let continuity = crate::curve::curve::p2::evaluate_continuity(
+                k,
+                self.curve
+                    .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?,
+                natural.min(),
+                false,
+                self.curve
+                    .ok_or_else(|| SolidError::surface_missing(OP, "the solver's curve"))?,
+                natural.max(),
+                true,
+                0.5,
             )?
-            .map_or(ContinuityType::Discontinuous, |c| c.continuity);
+            .continuity;
             if crate::geom::tol::is_zero(interval.min() - natural.min()) {
                 t_conts[0] = continuity;
             }
