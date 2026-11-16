@@ -2366,9 +2366,7 @@ mod tests {
         use crate::nurbs::math::CPoint;
         use crate::nurbs::srf_basic::Surface as NurbSurface;
 
-        let mut k = Kernel::default();
-        // as SolidCraft's kernel runs
-        k.fixes.bspline_trim_keeps_rational_end_spans = true;
+        let k = Kernel::default();
         let net = [0.0, 0.25, 0.5, 0.75, 1.0]
             .iter()
             .map(|&x| vec![CPoint::new(x, 0.0, 0.0, 1.0), CPoint::new(x, 1.0, 0.0, 1.0)])
