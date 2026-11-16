@@ -247,7 +247,7 @@ pub use sweep_path::{RailFit, SweepControl, SweepOrientation, sweep_path, sweep_
 pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at, material_in_ring};
 pub use topo::{TopoCounts, merged_topology, seam_flags, whole_edge};
 pub use tspline::tspline_sheet;
-pub use validation::{KeptCheck, Validation, check_kept, detach_kept, validating};
+pub use validation::{KeptCheck, Validation, check_kept, check_summary, detach_kept, failing_check, validating};
 pub use validity::{SmlibCheck, Validity, smlib_dump_dir, validity};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]

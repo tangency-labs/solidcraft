@@ -759,6 +759,49 @@ fn a_micro_edge_on_a_bezier_with_a_tiny_knot_span_keeps_the_block() {
     assert!(e.contains("knot resolution is 1e-12"), "{e}");
 }
 
+/// [`bezier_block`] (split at 1 µm) with its first edge's curve, which the micro edge and the
+/// rest of that edge share, lifted `lift` mm off the bottom face's plane: the reader gives both
+/// edges the gap as their tolerance, which SMLib takes as a part, but its check refuses those
+/// tolerances against the body's.
+pub(super) fn lifted_bezier_block(lift: f64) -> String {
+    bezier_block("20.", 1e-3)
+        .lines()
+        .map(|l| match l.rsplit_once(',') {
+            Some((head, _)) if ["#1000=", "#1001=", "#1002=", "#1003="].iter().any(|p| l.starts_with(p)) => format!("{head},{lift:.17E}));\n"),
+            _ => format!("{l}\n"),
+        })
+        .collect()
+}
+
+#[test]
+fn a_part_smlibs_check_fails_is_reported_at_import_by_name() {
+    // #17689: a part SMLib takes but its check fails came in silently, and every boolean on it
+    // was refused later. The import now runs the check and says so, naming the part.
+    let text = lifted_bezier_block(2e-3);
+    // The engine's tests read the same block from the regression file.
+    assert_eq!(text, include_str!("../../../../tests/step-regressions/block_edge_off_its_face.step"));
+    let imp = step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let body = &imp.bodies[0].body;
+    assert!(body.smlib_refusal().is_none(), "SMLib takes the part");
+    let check = body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
+    assert!(!check.is_valid(), "the check fails it");
+    let summary = crate::validation::check_summary(&check);
+    let issue = imp.report.issues.iter().find(|i| i.kind == IssueKind::NeedsRepair).unwrap_or_else(|| panic!("{:?}", imp.warnings));
+    assert_eq!(issue.detail, format!("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: {summary}"));
+    assert!(imp.warnings.contains(&issue.detail), "{:?}", imp.warnings);
+    assert!(summary.starts_with(&format!("{} failed tests: ", check.failures)), "{summary}");
+    // Each test the check failed is named once, with how many times it failed.
+    for line in check.text.lines().filter(|l| l.contains("Test #")) {
+        let name = &line[..line.find(" (").unwrap()];
+        assert_eq!(summary.matches(name).count(), 1, "{name} in {summary}");
+    }
+    // The block as written (its edge on the plane) passes the check, and no warning says otherwise.
+    let clean = step_import(&lifted_bezier_block(0.0)).unwrap();
+    assert!(clean.bodies[0].body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap().is_valid());
+    assert!(clean.report.issues.iter().all(|i| i.kind != IssueKind::NeedsRepair), "{:?}", clean.warnings);
+}
+
 fn context(id: u64, unit: &str) -> String {
     format!(
         "#{id}=(GEOMETRIC_REPRESENTATION_CONTEXT(3)GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#{}))GLOBAL_UNIT_ASSIGNED_CONTEXT((#{},#{}))REPRESENTATION_CONTEXT('',''));\n#{}=UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-6),#{},'','');\n#{}={unit};\n#{}=(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.));\n",

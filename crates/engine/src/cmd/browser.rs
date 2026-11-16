@@ -1779,6 +1779,40 @@ mod tests {
         assert!(err.contains("no body `KB (K:9)`"), "{err}");
     }
 
+    /// #17689: a STEP part SMLib takes but whose check fails. The import says so, naming it; a
+    /// join on it is refused saying the part already failed the check; and Repair runs the same
+    /// check, saying what fails rather than that there is nothing to repair. The block's edge
+    /// curve lies 2 µm off its face (tests/step-regressions/README.md).
+    #[test]
+    fn a_step_part_the_check_fails_is_named_at_import_at_the_join_and_by_repair() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-17689-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("block.step");
+        std::fs::write(&path, include_str!("../../../../tests/step-regressions/block_edge_off_its_face.step")).unwrap();
+        let mut s = Session::default();
+        let r = run(&mut s, "file.insert_step", json!({"path": path.to_string_lossy()}));
+        assert_eq!(r["created_bodies"], json!(["Bloco"]), "{r}");
+        let warnings: Vec<String> = r["warnings"].as_array().unwrap().iter().map(|w| w.as_str().unwrap().to_string()).collect();
+        assert!(
+            warnings.iter().any(|w| w.starts_with("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: ")),
+            "{warnings:?}"
+        );
+        // A box joined to it at its far corner: the default each_feature check refuses the result,
+        // and the message says the part failed the check before the join.
+        let err = s
+            .execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [18, 28, 8], "operation": "join", "targets": ["Bloco"]}))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("body `Bloco` (it already failed SMLib's check before this feature): "), "{err}");
+        assert!(err.contains("SMLib's check refuses the result"), "{err}");
+        // Repair: refused with the check's failures, nothing added.
+        let n = s.doc.features.len();
+        let err = s.execute("body.repair", &json!({"body": "Bloco"})).unwrap_err().to_string();
+        assert!(err.contains("SMLib's check fails the part") && !err.contains("nothing to repair"), "{err}");
+        assert_eq!(s.doc.features.len(), n);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn repair_part_patches_a_missing_face_as_one_undoable_feature() {
         let mut s = Session::default();

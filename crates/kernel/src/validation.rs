@@ -199,6 +199,36 @@ fn verdict(what: &str, check: std::result::Result<solidcraft_smlib::CheckReport,
     }
 }
 
+/// SMLib's check of a body as an operation on it takes it ([`Body::smlib`], at every test): the
+/// check's summary ([`check_summary`]) when it fails, `None` when it passes or is not SMLib's to
+/// make (a mesh body, one SMLib refuses outright: [`Body::smlib_refusal`] says why). A check that
+/// cannot run is `Err` with why.
+pub fn failing_check(body: &Body) -> std::result::Result<Option<String>, String> {
+    if body.is_mesh() || body.smlib_refusal().is_some() {
+        return Ok(None);
+    }
+    let check = body.smlib().map_err(|e| e.to_string())?.check(solidcraft_smlib::CheckLevel::All).map_err(|e| format!("check: {e}"))?;
+    Ok((!check.is_valid()).then(|| check_summary(&check)))
+}
+
+/// A failed check in a line: how many tests failed, then each test that failed once, with how
+/// many times it failed (`3 failed tests: SmEdge::Test #7 Bad Edge Length: less than edge tolerance
+/// (×2); SmLoop::Test #2 Bad Loop Orient`), in the order the check first reported them. Each
+/// failure's own values stay in the check's text.
+pub fn check_summary(check: &solidcraft_smlib::CheckReport) -> String {
+    let mut tests: Vec<(&str, usize)> = Vec::new();
+    for line in check.text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        // The test's name ends where its values or its owner start.
+        let name = [line.find(" ("), line.find(" [owner")].into_iter().flatten().min().map_or(line, |end| line.get(..end).unwrap_or(line)).trim_end();
+        match tests.iter_mut().find(|(t, _)| *t == name) {
+            Some((_, n)) => *n += 1,
+            None => tests.push((name, 1)),
+        }
+    }
+    let listed: Vec<String> = tests.iter().map(|(t, n)| if *n > 1 { format!("{t} (×{n})") } else { (*t).to_string() }).collect();
+    format!("{} failed tests: {}", check.failures, listed.join("; "))
+}
+
 /// [`check_result`] of a step's result nobody else reads, which it takes: the token over this
 /// thread's work stops it ([`solidcraft_smlib::Brep::check_owned`]).
 fn check_result_owned(r: solidcraft_smlib::Brep, how: Checked) -> std::result::Result<solidcraft_smlib::CheckReport, String> {

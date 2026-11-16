@@ -123,7 +123,8 @@ pub enum IssueKind {
     OpenBody,
     /// Faces of the part could not be meshed and are not shown.
     FacesNotShown,
-    /// SMLib refuses the part: modelling operations on it fail until it is repaired.
+    /// SMLib refuses the part, or takes it but its check fails it: modelling operations on it
+    /// fail until it is repaired.
     NeedsRepair,
     /// Something was repaired on the way (edges split at a pole, faces turned, gaps covered).
     Repaired,
@@ -999,12 +1000,17 @@ impl Reader {
                     };
                     // A part SMLib refuses cannot be modelled on: found now (its first instance,
                     // sent as an operation would send it), not at the first operation.
-                    if self.modelling_checked.insert(item)
-                        && let Some(refused) = body.smlib_refusal()
-                    {
-                        let at = refused.face.map(|f| format!(" (face {})", f + 1)).unwrap_or_default();
-                        let msg = format!("solid '{name}': needs repair before it can be modelled: {}{at}", refused.why);
-                        self.note(IssueKind::NeedsRepair, Some(item), usize::from(refused.face.is_some()), msg);
+                    // A part SMLib takes but whose check fails is found now too: every operation
+                    // that checks its result (booleans, sweeps, blends) refuses it until then.
+                    if self.modelling_checked.insert(item) {
+                        if let Some(refused) = body.smlib_refusal() {
+                            let at = refused.face.map(|f| format!(" (face {})", f + 1)).unwrap_or_default();
+                            let msg = format!("solid '{name}': needs repair before it can be modelled: {}{at}", refused.why);
+                            self.note(IssueKind::NeedsRepair, Some(item), usize::from(refused.face.is_some()), msg);
+                        } else if let Some(check) = &part.check {
+                            let msg = format!("solid '{name}': needs repair before it can be modelled: SMLib's check fails it: {check}");
+                            self.note(IssueKind::NeedsRepair, Some(item), 0, msg);
+                        }
                     }
                     self.bodies.push(ImportedBody {
                         name,

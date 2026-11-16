@@ -29,6 +29,11 @@ pub(super) struct Part {
     /// No B-rep could be made of the whole solid, and this is why: the body is a surface body of
     /// the faces that read ([`surface_part`]).
     pub refused: Option<String>,
+    /// SMLib's check of the body, as an operation on it takes it, fails, and this is its summary
+    /// ([`crate::validation::failing_check`]): operations that check their results refuse them
+    /// until the body is repaired. Checked once, when the part is read; not for a part made of
+    /// surfaces.
+    pub check: Option<String>,
 }
 
 /// A prepared instance.
@@ -74,7 +79,13 @@ pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
     let (part, read) = match &job.source {
         Source::Oriented(part) => (part.clone(), None),
         Source::Item { item, units } => {
-            let (part, read) = smlib_part(ex, *item, *units).or_else(|refused| surface_part(ex, *item, *units, refused))?;
+            let (mut part, read) = smlib_part(ex, *item, *units).or_else(|refused| surface_part(ex, *item, *units, refused))?;
+            if part.refused.is_none() {
+                part.check = solidcraft_profile::scope("import", "step.check", || crate::validation::failing_check(&part.body)).unwrap_or_else(|e| {
+                    log::debug!(target: "step", "the check of item #{item} could not run: {e}");
+                    None
+                });
+            }
             (Arc::new(part), Some(read))
         }
     };
@@ -149,7 +160,7 @@ fn solid_part(solid: &solidcore_step::topology::Solid) -> std::result::Result<Pa
         smlib_body(r).map_err(|f| Failure { msg: name_record_face(&f.msg, &solid.face_origin), ..f })?
     };
     let face_origin = of_record.iter().map(|f| solid.face_origin.get(*f).copied()).collect::<Option<Vec<u64>>>().ok_or_else(renumbered)?;
-    Ok(Part { body, closed: !solid.sheet, file_faces: solid.face_origin.len(), face_origin, refused: None })
+    Ok(Part { body, closed: !solid.sheet, file_faces: solid.face_origin.len(), face_origin, refused: None, check: None })
 }
 
 fn renumbered() -> Failure {
@@ -369,7 +380,7 @@ fn stitched_part(pieces: &[(u64, Body)], file_faces: usize, refused: &str) -> cr
     }
     // One face read alone is the sheet: nothing to stitch it to.
     if let [(face, body)] = pieces {
-        return Ok(Part { body: body.clone(), closed: false, file_faces, face_origin: vec![*face], refused: Some(refused.to_string()) });
+        return Ok(Part { body: body.clone(), closed: false, file_faces, face_origin: vec![*face], refused: Some(refused.to_string()), check: None });
     }
     let tol = 10.0 * pieces.iter().map(|(_, b)| b.record().tolerance).fold(0.0, f64::max);
     let bodies: Vec<&Body> = pieces.iter().map(|(_, b)| b).collect();
@@ -387,7 +398,7 @@ fn stitched_part(pieces: &[(u64, Body)], file_faces: usize, refused: &str) -> cr
         .filter(|o| o.len() == body.face_count())
         .ok_or_else(|| KernelError::Failed("a stitched face from no one face".into()))?;
     let closed = !body.is_surface();
-    Ok(Part { body, closed, file_faces, face_origin, refused: Some(refused.to_string()) })
+    Ok(Part { body, closed, file_faces, face_origin, refused: Some(refused.to_string()), check: None })
 }
 
 /// Prepare `jobs`, the results in the jobs' order. Solids still to read and orient (the slow

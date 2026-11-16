@@ -777,7 +777,7 @@ mod tests {
             let v = crate::measure(&cup).unwrap().volume;
             assert!((v - expected).abs() < 1e-6 * expected, "{v} vs {expected}");
             let imported = crate::step_import(&crate::step_export(&[&cup], "regularized rounded shell").unwrap()).unwrap();
-            assert!(imported.warnings.is_empty());
+            assert!(imported.warnings.is_empty(), "{:?}", imported.warnings);
             let copy = &imported.bodies[0].body;
             // The certified planar walls come back from STEP as one full-height face each.
             for (axis, coordinate) in [(Vec3::X, width / 2.), (-Vec3::X, width / 2.), (Vec3::Y, 30.), (-Vec3::Y, 30.)] {
