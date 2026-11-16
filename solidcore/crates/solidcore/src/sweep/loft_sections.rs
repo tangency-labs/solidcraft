@@ -278,7 +278,7 @@ fn controls(s: &Seg2) -> Vec<Point2> {
         Seg2::Arc { .. } => Vec::new(),
         Seg2::Cubic { p0, p1, p2, p3 } => vec![p0, p1, p2, p3],
         Seg2::Conic { a, apex, b, .. } => vec![a, apex, b],
-        Seg2::Bezier { n, p } => p.get(..usize::from(n)).unwrap_or(p.as_slice()).to_vec(),
+        Seg2::Bezier { n, p } => p.get(..=usize::from(n)).unwrap_or(p.as_slice()).to_vec(),
     }
 }
 
@@ -3246,6 +3246,107 @@ mod tests {
             p3: p(1.0, 1.0),
         };
         assert_eq!(tangent(&point, 0.0), p(1.0, 0.0));
+    }
+
+    /// Three 40 x 20 rectangles whose first has the bottom `bottom` from (0, 0) to (40, 0), the
+    /// second a line and the third its bottom in two halves: the vertex (20, 0) of the third
+    /// section is carried through the second's line, cut at 0.5, to the first's `bottom`, and
+    /// lands at half its length (where the pairing of a line beside a curve puts a vertex left
+    /// alone), not at its parameter 0.5.
+    fn carried_cut_lands_at_half_the_length(bottom: Seg2) {
+        let first = vec![
+            bottom,
+            line((40.0, 0.0), (40.0, 20.0)),
+            line((40.0, 20.0), (0.0, 20.0)),
+            line((0.0, 20.0), (0.0, 0.0)),
+        ];
+        let plain = poly(&[(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)]);
+        let halves = poly(&[
+            (0.0, 0.0),
+            (20.0, 0.0),
+            (40.0, 0.0),
+            (40.0, 20.0),
+            (0.0, 20.0),
+        ]);
+        let m =
+            match_loft_sections(&[at(0.0, first), at(10.0, plain), at(20.0, halves)], 100).unwrap();
+        sound(&m);
+        let k = starts(&m[2])
+            .iter()
+            .position(|q| dist(*q, p(20.0, 0.0)) < 1e-12)
+            .unwrap();
+        for (i, s) in m.iter().enumerate() {
+            assert_eq!(s.segs.len(), 5, "section {i}");
+        }
+        let (before, after) = (&m[0].segs[(k + 4) % 5], &m[0].segs[k]);
+        assert!(
+            dist(before.start(), p(0.0, 0.0)) < 1e-12 && dist(after.end(), p(40.0, 0.0)) < 1e-12
+        );
+        let whole = length(&bottom);
+        let share = length(before) / whole;
+        assert!(
+            (share - 0.5).abs() < 1e-9,
+            "the carried vertex is at {share} of the length, at {:?}",
+            after.start()
+        );
+        assert!((length(before) + length(after) - whole).abs() < 1e-9 * whole);
+        let at_half = bottom.point_at(0.5);
+        assert!(
+            dist(after.start(), at_half) > 1e-3,
+            "the case cannot tell a share of length from a parameter"
+        );
+    }
+
+    /// [`carried_cut_lands_at_half_the_length`] on a cubic whose length is not proportional to its
+    /// parameter, with no control points repeated.
+    #[test]
+    fn a_cut_carried_to_a_cubic_lands_at_its_share_of_the_length() {
+        carried_cut_lands_at_half_the_length(Seg2::Cubic {
+            p0: p(0.0, 0.0),
+            p1: p(5.0, -8.0),
+            p2: p(12.0, -3.0),
+            p3: p(40.0, 0.0),
+        });
+    }
+
+    /// [`carried_cut_lands_at_half_the_length`] on a conic (a rational quadratic, apex off centre).
+    #[test]
+    fn a_cut_carried_to_a_conic_lands_at_its_share_of_the_length() {
+        carried_cut_lands_at_half_the_length(Seg2::Conic {
+            a: p(0.0, 0.0),
+            apex: p(8.0, -10.0),
+            b: p(40.0, 0.0),
+            w: 2.0,
+        });
+    }
+
+    /// A [`Seg2::Bezier`] whose first two control points coincide leaves towards the first one
+    /// apart (the review), not along the chord, and one whose last two coincide arrives from the
+    /// last one apart. The unused tail after `p[n]` is filled with a far point it must not reach.
+    #[test]
+    fn a_bezier_with_repeated_end_control_points_has_its_limiting_tangent() {
+        let bezier = |q: &[(f64, f64)]| {
+            let mut c = [p(99.0, -99.0); crate::prism::profile::MAX_BEZIER_CTRL];
+            for (i, &(x, y)) in q.iter().enumerate() {
+                c[i] = p(x, y);
+            }
+            Seg2::Bezier {
+                n: (q.len() - 1) as u8,
+                p: c,
+            }
+        };
+        let leaving = bezier(&[
+            (0.0, 0.0),
+            (0.0, 0.0),
+            (0.0, 10.0),
+            (10.0, 10.0),
+            (20.0, 10.0),
+        ]);
+        let t = tangent(&leaving, 0.0);
+        assert!(dist(t, p(0.0, 1.0)) < 1e-12, "{t:?}");
+        let arriving = bezier(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (10.0, 10.0)]);
+        let t = tangent(&arriving, 1.0);
+        assert!(dist(t, p(0.0, 1.0)) < 1e-12, "{t:?}");
     }
 
     /// Two cuts of one conic land on the conic at their own parameters: the conic from (0, 0)
