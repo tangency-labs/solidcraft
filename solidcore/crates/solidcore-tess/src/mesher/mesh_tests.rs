@@ -290,6 +290,54 @@ fn a_box_on_the_mesh_path_keeps_its_angle_and_its_side() {
     assert_closed(&w, "box");
 }
 
+/// The kernel rig's `booleans/4431-tapered-text-cut-over-block-edge`, its body `Body1` as
+/// SolidCraft exports it (frozen in `tests/data`). Its face 330 is a spline sliver 1 mm long and
+/// 7e-5 mm wide at its base, tapering to a side collapsed to one point (a pole, within its
+/// vertices' tolerance of 2e-5 mm). Its top quarter is narrower than that reach, so the node of
+/// its loop below the pole, 0.25 mm from it, is a pole too by the kernel's classifier: the pole
+/// caps took only the pole's copies as a cap and refused the face ("a pole next to another pole
+/// on its loop"). Meshed at SolidCraft's export spec (a chord of 1/5000 of its size), it meshes:
+/// the run of pole nodes is one cap, every face has triangles, nothing folds, and the body's
+/// mesh is closed.
+#[test]
+fn a_sliver_narrower_than_its_pole_reach_meshes_on_the_mesh_path() {
+    let b = crate::fixtures::fixture("rig_tapered_text_cut_over_block_edge");
+    // SolidCraft's size of the body (`Body::size`): the box diagonal of its vertices and of each
+    // edge's points at a quarter, a half and three quarters of its interval.
+    let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    let mut add = |p: [f64; 3]| {
+        for k in 0..3 {
+            lo[k] = lo[k].min(p[k]);
+            hi[k] = hi[k].max(p[k]);
+        }
+    };
+    for v in &b.vertices {
+        add(v.point);
+    }
+    for e in &b.edges {
+        let curve = solidcore_convert::curve(e.parameters()).expect("the edge's curve");
+        let c = solidcore::eval::CurveEval::new(&curve).expect("evaluates");
+        let [t0, t1] = e.interval;
+        for i in 1..4 {
+            let p = c.point(t0 + (t1 - t0) * f64::from(i) / 4.0).expect("on the curve");
+            add([p.x, p.y, p.z]);
+        }
+    }
+    let size = length(sub(P::new(hi[0], hi[1], hi[2]), P::new(lo[0], lo[1], lo[2])));
+    let spec = MeshSpec::chord(crate::MeshTolerance::export_of(size).chord);
+    let (plan, _) = meshed(&b, &spec, size, None);
+    let (m, refused) = plan.evaluate();
+    assert!(refused.is_empty(), "{refused:?}");
+    let mut faces: Vec<u32> = m.tri_face.clone();
+    faces.sort_unstable();
+    faces.dedup();
+    assert_eq!(faces.len(), b.faces.len(), "every face has triangles");
+    assert_nothing_folds(&m, "sliver body");
+    let (w, refused) = plan.welded();
+    assert!(refused.is_empty(), "{refused:?}");
+    assert_closed(&w, "sliver body");
+}
+
 /// A cylinder's wall, shaped by its triangles in 3D, keeps 20 degrees (FieldCraft's trial at
 /// e728f90e: 0.08 degrees on a cylinder's side, shaped in (u, v) and then flipped toward the
 /// surface's normals as the display is).

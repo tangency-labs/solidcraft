@@ -1576,21 +1576,26 @@ struct PoleCap {
     /// The loop it is on (index into the face's loops).
     lp: usize,
     /// Its boundary nodes, in loop order: one, or its copies where the planner split the free
-    /// parameter there ([`polygons`]).
+    /// parameter there ([`polygons`]), and every node next to them that is a pole too: where a
+    /// face narrows to less than the reach, a stretch of its boundary is within the reach of one
+    /// collapsed side ([`pole_caps`]).
     copies: Vec<usize>,
     /// The boundary nodes before and after them in the loop.
     before: usize,
     after: usize,
 }
 
-/// The poles of the surface `s` on a face's boundary loops (`uvs` in `ranges`, at the 3D points
-/// `fixed`), as the display finds them ([`poles::Face::pole`], within `reach`): each run of
+/// The poles of the surface `s` on a face's boundary loops (`uvs` in `ranges`), as the display
+/// finds them ([`poles::Face::pole`], within `reach`): each run of
 /// boundary nodes at one pole, with the nodes either side. The parameters collapse there, so a
 /// triangulation in (u, v) meets the pole along a side that is one point in 3D, and its
 /// triangles crowd and fold toward it. The mesh path fans each pole's cap from the pole instead
-/// ([`cap_ring`], [`cap_fan`]). An error where a pole's neighbour on its loop is a pole too: no
-/// ring lies between them.
-fn pole_caps(s: &poles::Face, uvs: &[[f64; 2]], fixed: &[Vec3], ranges: &[std::ops::Range<usize>], reach: f64) -> std::result::Result<Vec<PoleCap>, String> {
+/// ([`cap_ring`], [`cap_fan`]). A run is every pole node in a row: the copies of one point, and
+/// where the face is narrower than the reach along a stretch of its boundary (a sliver tapering
+/// to a collapsed side), the nodes of that stretch, each within the reach of a collapsed line
+/// of the surface, whatever its point. No ring could lie between two of them, so they are one
+/// cap, fanned from the run.
+fn pole_caps(s: &poles::Face, uvs: &[[f64; 2]], ranges: &[std::ops::Range<usize>], reach: f64) -> std::result::Result<Vec<PoleCap>, String> {
     let is_pole = |k: usize| uvs.get(k).is_some_and(|q| (0..2).any(|d| s.pole(*q, d, reach)));
     let mut caps = Vec::new();
     for (lp, r) in ranges.iter().enumerate() {
@@ -1599,23 +1604,24 @@ fn pole_caps(s: &poles::Face, uvs: &[[f64; 2]], fixed: &[Vec3], ranges: &[std::o
             continue;
         }
         let at = |k: usize| r.start + k % n;
+        let pole: Vec<bool> = (0..n).map(|k| is_pole(at(k))).collect();
+        let pole_at = |k: usize| pole.get(k % n).copied().unwrap_or(false);
+        if pole.iter().all(|p| *p) {
+            return Err(format!("a loop of {n} nodes all at one pole"));
+        }
         for k in 0..n {
-            // A run starts at a pole node whose predecessor is not one of its copies.
-            let same = |a: usize, b: usize| is_pole(a) && is_pole(b) && fixed.get(a) == fixed.get(b);
-            if !is_pole(at(k)) || same(at(k + n - 1), at(k)) {
+            // A run starts at a pole node whose predecessor is not a pole.
+            if !pole_at(k) || pole_at(k + n - 1) {
                 continue;
             }
             let mut copies = vec![at(k)];
-            while copies.len() < n && same(at(k + copies.len() - 1), at(k + copies.len())) {
+            while copies.len() < n && pole_at(k + copies.len()) {
                 copies.push(at(k + copies.len()));
             }
             if copies.len() + 2 > n {
                 return Err(format!("a loop of {n} nodes all at one pole"));
             }
             let (before, after) = (at(k + n - 1), at(k + copies.len()));
-            if is_pole(before) || is_pole(after) {
-                return Err("a pole next to another pole on its loop: no ring lies between them".into());
-            }
             caps.push(PoleCap { lp, copies, before, after });
         }
     }
@@ -1677,18 +1683,48 @@ fn ring_reach(tol: f64, side: f64, turn: f64, n: usize) -> f64 {
 /// (`reach`): the sides from them to the pole, each to be split on its edge at [`RING_ROOM`] of
 /// the reach, so the next plan's ring passes there. Empty where the ring may pass through them.
 fn ring_too_far(cap: &PoleCap, fixed: &[Vec3], reach: f64) -> Vec<SplitSide> {
-    let Some(&c0) = cap.copies.first() else { return Vec::new() };
-    let (Some(&pole), Some(&before), Some(&after)) = (fixed.get(c0), fixed.get(cap.before), fixed.get(cap.after)) else { return Vec::new() };
+    // The sides into and out of the run: from the node before it to its first node, and from its
+    // last node to the one after it (one point where the run is a pole's copies).
+    let (Some(&c0), Some(&cm)) = (cap.copies.first(), cap.copies.last()) else { return Vec::new() };
+    let (Some(&first), Some(&last), Some(&before), Some(&after)) = (fixed.get(c0), fixed.get(cm), fixed.get(cap.before), fixed.get(cap.after)) else {
+        return Vec::new();
+    };
     let mut out = Vec::new();
-    let (db, da) = (pole.dist(before), pole.dist(after));
+    let (db, da) = (first.dist(before), last.dist(after));
     let at = RING_ROOM * reach;
     if db > reach {
-        out.push(SplitSide { from: before, to: pole, at: vec![1.0 - at / db] });
+        out.push(SplitSide { from: before, to: first, at: vec![1.0 - at / db] });
     }
     if da > reach {
-        out.push(SplitSide { from: pole, to: after, at: vec![at / da] });
+        out.push(SplitSide { from: last, to: after, at: vec![at / da] });
     }
     out
+}
+
+/// Where the ring of `cap` (straight in (u, v) from the node before the pole to the one after it)
+/// would not lie inside the face: a node of the rest of its loop, across the ring's span, on the
+/// ring or on the pole's side of it (a pole's face of three sides whose third side, straight in
+/// (u, v), has nodes between the two it ends at: the ring runs along that side, and the rest of
+/// the face has no area). The sides from those two nodes to the pole, each to be split at its
+/// middle on its edge, so the next plan's ring passes inside. Empty where the ring lies inside.
+fn ring_off_boundary(cap: &PoleCap, uvs: &[[f64; 2]], fixed: &[Vec3], ranges: &[std::ops::Range<usize>]) -> Vec<SplitSide> {
+    let (Some(&c0), Some(&cm)) = (cap.copies.first(), cap.copies.last()) else { return Vec::new() };
+    let (Some(&a), Some(&b), Some(&p), Some(r)) = (uvs.get(cap.before), uvs.get(cap.after), uvs.get(c0), ranges.get(cap.lp)) else { return Vec::new() };
+    let ab = [b[0] - a[0], b[1] - a[1]];
+    let across = |q: [f64; 2]| ab[0] * (q[1] - a[1]) - ab[1] * (q[0] - a[0]);
+    let along = |q: [f64; 2]| ab[0] * (q[0] - a[0]) + ab[1] * (q[1] - a[1]);
+    let (pole_side, span) = (across(p), along(b));
+    let cuts = r.clone().filter(|k| *k != cap.before && *k != cap.after && !cap.copies.contains(k)).filter_map(|k| uvs.get(k).copied()).any(|q| {
+        let t = along(q);
+        t > 0.0 && t < span && !(across(q) * pole_side < 0.0)
+    });
+    if !cuts {
+        return Vec::new();
+    }
+    let (Some(&first), Some(&last), Some(&before), Some(&after)) = (fixed.get(c0), fixed.get(cm), fixed.get(cap.before), fixed.get(cap.after)) else {
+        return Vec::new();
+    };
+    vec![SplitSide { from: before, to: first, at: vec![0.5] }, SplitSide { from: last, to: after, at: vec![0.5] }]
 }
 
 /// The inner nodes of the ring of `cap`: the line in (u, v) from the boundary node before the
@@ -1748,8 +1784,13 @@ fn cap_ring(s: &EvalSurface, cap: &PoleCap, uvs: &[[f64; 2]], fixed: &[Vec3], to
             })
             .collect()
     };
-    let least = ring_segments(turn, std::f64::consts::FRAC_PI_2);
-    let mut n = ring_segments(turn, min_angle);
+    // A run of poles at more than one point is fanned from each of its points in turn, each to
+    // its share of the ring ([`cap_fan`]): the ring has an inner node, so no triangle of it has
+    // two boundary nodes in a row and the ring's end, which lie on one boundary curve.
+    let points = cap.copies.windows(2).filter(|w| matches!(w, [a, b] if fixed.get(*a) != fixed.get(*b))).count() + 1;
+    let fewest = if points > 1 { 2 } else { 1 };
+    let least = ring_segments(turn, std::f64::consts::FRAC_PI_2).max(fewest);
+    let mut n = ring_segments(turn, min_angle).max(fewest);
     let mut ring = nodes(n)?;
     // Fewer while a neighbour pair's angle at the pole in 3D falls short of the spec's.
     while n > least && ring.windows(2).any(|w| matches!(w, [x, y] if edges::turn(x.2 - pole, y.2 - pole) < min_angle)) {
@@ -1773,24 +1814,47 @@ fn cap_ring(s: &EvalSurface, cap: &PoleCap, uvs: &[[f64; 2]], fixed: &[Vec3], to
 }
 
 /// The fan of a pole's cap: the triangles from the pole's `copies` (boundary nodes, in loop
-/// order) to the ring `ring` (from the node before the pole to the one after it), in the
-/// numbering of `uv`, counter-clockwise in (u, v): the first copy to every ring segment but the
-/// last, the copies to the ring's last inner node (triangles with two corners at the pole, which
-/// the planner leaves out, so the fan covers the cap in (u, v)), and the last copy to the last
-/// segment. `None` where a triangle has no area in (u, v).
-fn cap_fan(copies: &[usize], ring: &[usize], uv: &[[f64; 2]]) -> Option<Vec<[u32; 3]>> {
+/// order, at the points `pos`) to the ring `ring` (from the node before the pole to the one after
+/// it), in the numbering of `uv`, counter-clockwise in (u, v). The copies at one point: the first
+/// copy to every ring segment but the last, the copies to the ring's last inner node (triangles
+/// with two corners at the pole, which the planner leaves out, so the fan covers the cap in
+/// (u, v)), and the last copy to the last segment. A run at several points (a stretch of the
+/// boundary within the reach of a collapsed side) is fanned the same way from each point in
+/// turn, each to an even share of the ring's inner nodes, the step from one point to the next
+/// a triangle on the inner node where they meet. `None` where a triangle has no area in (u, v),
+/// or a run at several points has a ring with no inner node.
+fn cap_fan(copies: &[usize], ring: &[usize], uv: &[[f64; 2]], pos: &[Vec3]) -> Option<Vec<[u32; 3]>> {
     let id = |k: usize| u32::try_from(k).ok();
-    let (&c0, &cm) = (copies.first()?, copies.last()?);
+    let groups: Vec<&[usize]> = copies.chunk_by(|a, b| pos.get(*a) == pos.get(*b)).collect();
+    let cm = *copies.last()?;
     let m = ring.len().checked_sub(1)?;
-    let last = *ring.get(m.checked_sub(1)?)?;
+    let inner_last = m.checked_sub(1)?;
+    let p = groups.len();
+    if p > 1 && inner_last < 1 {
+        return None;
+    }
+    // The ring node where each point's fan ends and the next one's starts: the last inner node
+    // for the last point, and the inner nodes shared evenly before it.
+    let end = |g: usize| if g + 1 >= p { inner_last } else { 1 + g * inner_last.saturating_sub(1) / (p - 1).max(1) };
     let mut tris: Vec<[usize; 3]> = Vec::new();
-    for k in 0..m.saturating_sub(1) {
-        tris.push([c0, *ring.get(k)?, *ring.get(k + 1)?]);
+    let mut from = 0;
+    for (g, run) in groups.iter().enumerate() {
+        let (&first, &last_copy) = (run.first()?, run.last()?);
+        let to = end(g);
+        for k in from..to {
+            tris.push([first, *ring.get(k)?, *ring.get(k + 1)?]);
+        }
+        let at = *ring.get(to)?;
+        for w in run.windows(2) {
+            let (&a, &b) = (w.first()?, w.get(1)?);
+            tris.push([a, b, at]);
+        }
+        if let Some(next) = groups.get(g + 1) {
+            tris.push([last_copy, *next.first()?, at]);
+        }
+        from = to;
     }
-    for w in copies.windows(2) {
-        let (&a, &b) = (w.first()?, w.get(1)?);
-        tris.push([a, b, last]);
-    }
+    let last = *ring.get(inner_last)?;
     tris.push([cm, last, *ring.get(m)?]);
     tris.into_iter()
         .map(|[a, b, c]| {
@@ -1933,7 +1997,7 @@ fn plan_face(
         // by the rings instead. Nodes are numbered: the boundary's, the rings', then the ones
         // refinement adds.
         let nb = uvs.len();
-        let caps = pole_caps(s, &uvs, &fixed, &ranges, reach).map_err(|why| fail(&why))?;
+        let caps = pole_caps(s, &uvs, &ranges, reach).map_err(|why| fail(&why))?;
         // A ring through boundary nodes farther from the pole than a ring may lie would have
         // chords off the surface by more than the tolerance at the fan's angle: the edges take
         // nodes at the ring's reach first, and the face is planned again ([`plan_at`]).
@@ -1943,7 +2007,8 @@ fn plan_face(
                 .map(|cap| {
                     let (turn, pole, _, _) = ring_turn(s, cap, &uvs, &fixed)?;
                     let reach = ring_reach(tol, size::local(h, shape.size_at, pole), turn, ring_segments(turn, shape.min_angle.to_radians()));
-                    Ok(ring_too_far(cap, &fixed, reach))
+                    let far = ring_too_far(cap, &fixed, reach);
+                    Ok(if far.is_empty() { ring_off_boundary(cap, &uvs, &fixed, &ranges) } else { far })
                 })
                 .collect::<std::result::Result<Vec<Vec<SplitSide>>, String>>()
                 .map_err(|why| fail(&why))?
@@ -1972,7 +2037,7 @@ fn plan_face(
             }
             // The ring from the node before the pole to the one after it.
             let ring_ids: Vec<usize> = std::iter::once(cap.before).chain(first..nodes.len()).chain(std::iter::once(cap.after)).collect();
-            fan.extend(cap_fan(&cap.copies, &ring_ids, &nodes).ok_or_else(|| fail("a pole's cap cannot be fanned in (u, v)"))?);
+            fan.extend(cap_fan(&cap.copies, &ring_ids, &nodes, &pos).ok_or_else(|| fail("a pole's cap cannot be fanned in (u, v)"))?);
             ring_sides.extend(ring_ids.windows(2).filter_map(|w| Some((u32::try_from(*w.first()?).ok()?, u32::try_from(*w.get(1)?).ok()?))));
             if let Some(run) = runs.get_mut(cap.lp) {
                 // Started at the node after the pole, the loop ends with the node before it and
