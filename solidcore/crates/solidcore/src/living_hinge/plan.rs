@@ -10,7 +10,8 @@ use super::lattice::{FrameBox, Lattice};
 use super::near::{sweeps, NearEdge};
 use super::rows::plan_rows_zoned;
 use super::spans::{clean_ends, row_spans, row_zone};
-use super::{LivingHingeError, LivingHingePlan, LivingHingeSpec};
+use super::{LivingHingeError, LivingHingePlan, LivingHingeSpec, CHORD};
+use crate::prism::profile::{Loop2, Seg2};
 
 /// The box of `loops` in the frame; an arc counts its ends and the points where it is furthest
 /// along `u` or `v`. Empty loops give an inverted box, which the lattice refuses.
@@ -52,6 +53,42 @@ pub fn frame_box(loops: &[Vec<NearEdge>]) -> FrameBox {
         }
     }
     b
+}
+
+/// A loop of the plate's or the area's outline as near edges (design 6.4): lines and arcs as they
+/// are, a conic or a Bézier as its chords, each within [`CHORD`] of the curve. `None` when a curve
+/// cannot be followed that closely. The flag tells whether any chord stands for a curve: its
+/// reaches are then to be widened by [`CHORD`].
+pub fn near_loop(lp: &Loop2) -> Option<(Vec<NearEdge>, bool)> {
+    let mut out = Vec::with_capacity(lp.segs.len());
+    let mut chorded = false;
+    for seg in &lp.segs {
+        match *seg {
+            Seg2::Line { a, b } => out.push(NearEdge::Line((a.x, a.y), (b.x, b.y))),
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            } => out.push(NearEdge::Arc {
+                center: (center.x, center.y),
+                radius,
+                start,
+                sweep,
+            }),
+            Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => {
+                let points = crate::cell_grid::flatten(seg, CHORD)?;
+                chorded = true;
+                out.extend(
+                    points
+                        .iter()
+                        .zip(points.iter().skip(1))
+                        .map(|(p, q)| NearEdge::Line((p.x, p.y), (q.x, q.y))),
+                );
+            }
+        }
+    }
+    Some((out, chorded))
 }
 
 /// Plans the slots of the area `field` in the plate `plate`, both closed loops in the hinge frame

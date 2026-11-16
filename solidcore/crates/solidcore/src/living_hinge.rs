@@ -39,7 +39,7 @@ mod tests;
 
 pub use crate::cell_grid::{MAX_CELLS as MAX_SLOTS, MAX_COORD, MIN_SIZE};
 pub use near::{clean_crossing, component, near_set, near_union, outside, NearEdge};
-pub use plan::{frame_box, plan};
+pub use plan::{frame_box, near_loop, plan};
 pub use rows::{plan_rows, plan_rows_zoned, RowSpan};
 pub use spans::{chain_ids, clean_ends, row_crossings, row_spans, row_zone};
 
@@ -51,6 +51,9 @@ pub const G1_TOL: f64 = 1e-6;
 /// The shallowest crossing (radians, 60 degrees) a slot runs out through: the wedge of material
 /// beside it is then no sharper than an equilateral corner.
 pub const MIN_CROSSING: f64 = std::f64::consts::FRAC_PI_3;
+/// How closely a conic or a Bézier edge is followed by its chords (mm, design 12): a chord stands
+/// for the curve with its reach widened by this.
+pub const CHORD: f64 = 1e-3;
 /// How far inside its reach a slot may come and still be kept (mm): a rounding, not room.
 pub const GRAZE: f64 = 1e-9;
 

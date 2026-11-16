@@ -625,3 +625,46 @@ fn a_slot_over_a_strip_runs_out_at_the_end_nearer_its_centre() {
     let tie = one_row(&s, 5.0, &[(0.0, 10.0)]);
     assert_ends(&row_ends(&tie, 0), &[(-1.4, 8.6, RunOut)]);
 }
+
+#[test]
+fn a_loop_becomes_lines_arcs_and_chords() {
+    use crate::math::Vec2;
+    use crate::prism::profile::{Loop2, Seg2};
+    // A straight cubic from (0, 0) to (3, 0), a half circle about (1.5, 0) back to (0, 0).
+    let lp = Loop2 {
+        segs: vec![
+            Seg2::Cubic {
+                p0: Vec2::new(0.0, 0.0),
+                p1: Vec2::new(1.0, 0.0),
+                p2: Vec2::new(2.0, 0.0),
+                p3: Vec2::new(3.0, 0.0),
+            },
+            Seg2::Arc {
+                center: Vec2::new(1.5, 0.0),
+                radius: 1.5,
+                start: 0.0,
+                sweep: std::f64::consts::PI,
+            },
+        ],
+    };
+    let (edges, chorded) = near_loop(&lp).unwrap();
+    assert!(chorded);
+    let (last, chords) = edges.split_last().unwrap();
+    assert!(chords.len() >= 2);
+    assert!(
+        matches!(chords.first(), Some(NearEdge::Line((x, y), _)) if close(*x, 0.0) && close(*y, 0.0))
+    );
+    assert!(
+        matches!(chords.last(), Some(NearEdge::Line(_, (x, y))) if close(*x, 3.0) && close(*y, 0.0))
+    );
+    assert!(matches!(last, NearEdge::Arc { radius, .. } if close(*radius, 1.5)));
+    let line = Loop2 {
+        segs: vec![Seg2::Line {
+            a: Vec2::new(0.0, 0.0),
+            b: Vec2::new(1.0, 2.0),
+        }],
+    };
+    let (edges, chorded) = near_loop(&line).unwrap();
+    assert!(!chorded);
+    assert_eq!(edges, vec![NearEdge::Line((0.0, 0.0), (1.0, 2.0))]);
+}
