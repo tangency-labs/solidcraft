@@ -545,7 +545,7 @@ pub trait OffsetExecutive<O> {
         let _ = offset_face;
     }
     /// Not upstream (WR-346): whether any inset face's offset collapsed (a convex round
-    /// thinner than the wall); `false` unless `Kernel::fixes.offset_collapsed_rounds_mated`.
+    /// thinner than the wall).
     fn has_collapsed_faces(&self) -> bool {
         false
     }
@@ -560,8 +560,7 @@ pub trait OffsetExecutive<O> {
     fn offset_edgeuse(&self, original: O) -> Option<O>;
     /// Not upstream (WR-344 refinement, tangency-labs/solidcore#1795): `EdgeuseOffset`
     /// could not mate the offsets of `original`'s edge (`MateEdges` failed, which upstream
-    /// only reports), so the merge must still intersect them; called only with
-    /// `Kernel::fixes.offset_extended_edges_mated`. The default ignores it.
+    /// only reports), so the merge must still intersect them. The default ignores it.
     fn note_unmated_edgeuse(&mut self, original: O) {
         let _ = original;
     }
@@ -5652,7 +5651,7 @@ impl OffsetGeometryCreation {
             };
             // Not upstream (WR-344 refinement, #1795): the merge must still intersect the
             // offsets of an edge that could not be mated
-            if mated.is_none() && k.fixes.offset_extended_edges_mated {
+            if mated.is_none() {
                 executive.note_unmated_edgeuse(original_edgeuse);
             }
             return Ok(out);

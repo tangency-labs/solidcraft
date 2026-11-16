@@ -40,14 +40,9 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.corner_patch_face_side_twist = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_knife_edge_rounds = true;
-    k.fixes.offset_extended_edges_mated = true;
-    k.fixes.thicken_planar_side_walls = true;
     k.fixes.keep_operand_uv_trims = true;
     k.fixes.geometric_g2_continuity = true;
-    k.fixes.ellipse_step_interval_checks = true;
     k.fixes.good_drop_result_distances_in_order = true;
-    k.fixes.cylinder_rebuild_mean_radius = true;
-    k.fixes.nurb_cylinder_inside_out_frame = true;
     k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.revolve_holed_profile_void = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
@@ -56,7 +51,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.local_operation_box_holds_new_surfaces = true;
     k.fixes.local_operation_refuses_loose_tangent_edges = true;
     k.fixes.local_operation_step_walls = true;
-    k.fixes.offset_collapsed_rounds_mated = true;
     k.fixes.revolution_round_offset_collapses = true;
     k.fixes.uv_trim_corner_end_points_only = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
@@ -65,7 +59,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.classify_edge_interval = true;
-    k.fixes.ellipse_trim_seam_lines_span_cone_height = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
     k.fixes.found_torus_sphere_keep_tested_nurb = true;

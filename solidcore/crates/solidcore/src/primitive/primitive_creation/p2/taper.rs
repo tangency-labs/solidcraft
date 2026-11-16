@@ -34,11 +34,11 @@ use super::{as_bspline, PrimitiveCreationAccess};
 use crate::curve::composite_curve::{
     CompositeCurve, OffsetCornerType, OffsetDirection, OffsetMapAttribute, OffsetParams,
 };
-use crate::curve::curve::p3::{compute_crvs_normal, crvs_fix_gaps};
+use crate::curve::curve::p3::{compute_crvs_normal_written, crvs_fix_gaps};
 use crate::curve::curve::p4::fix_chain_curves_list;
 use crate::curve::curve::p5::crvs_cleanup;
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, ignored, passed_on, Result, SolidError};
+use crate::error::{ignore_status, ignored, passed_on, status_passed_on, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -277,8 +277,9 @@ fn taper(
 
     if normal.length_squared() < 0.00001 {
         // compute the normal from curve sample points (zeroed before it can fail)
-        *normal = ignored(passed_on(compute_crvs_normal(a.kernel(brep)?, &input), p)?)?
-            .unwrap_or(Vec3::ZERO);
+        let (written, status) = compute_crvs_normal_written(a.kernel(brep)?, &input)?;
+        status_passed_on(status, p)?;
+        *normal = written;
         // snap curves to Z axis when close
         if normal.z > 0.98 {
             normal.x = 0.0;
@@ -292,8 +293,8 @@ fn taper(
         }
     } else {
         // check that the curves order conforms to the specified input normal
-        let computed = ignored(passed_on(compute_crvs_normal(a.kernel(brep)?, &input), p)?)?
-            .unwrap_or(Vec3::ZERO);
+        let (computed, status) = compute_crvs_normal_written(a.kernel(brep)?, &input)?;
+        status_passed_on(status, p)?;
         let angle = ignored(passed_on(computed.angle_between(*normal), p)?)?.unwrap_or(0.0);
         if (angle - PI).abs() < 0.0001 {
             // reverse all the curves, then rechain them
