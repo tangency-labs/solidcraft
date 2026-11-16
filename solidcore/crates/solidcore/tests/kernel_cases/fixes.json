@@ -93,6 +93,7 @@
   "box_face_failures_propagate",
   "fillet_removal_takes_ring_fillets",
   "boolean_union_refuses_solid_leak",
+  "simple_coincidence_crossing_is_point",
   "surface_parallel_to_vector_checks",
   "fillet_round_as_definition",
   "fillet_overflow_trim_at_creases",

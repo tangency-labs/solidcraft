@@ -853,6 +853,20 @@ pub struct UpstreamFixes {
     pub face_tight_box_searches_trim: bool,
     /// `SmBrep::DeleteTopologicalVertex` joins an edge whose curve is a curve on a B-spline-kind surface along a UV line of constant u or v (the seam an extrusion leaves on its wall) as that surface's iso curve over the edge, the same curve exactly, so the seam of a full-turn face that a union runs on through a covered face is one edge (WR-598; the fork's tangency-labs/smlib@829b982). Upstream casts the curve's copy to `SmBSplineCurve` and dereferences the null; without the flag the port leaves the vertex in place (the routine's silent `SM_ERR`).
     pub delete_vertex_joins_seam_iso_curve: bool,
+    /// `SmCurve::SimpleCoincidenceChecker` returns a candidate coincidence range whose curves'
+    /// separation points to opposite sides at its two ends (both separations longer than
+    /// `SM_EFF_ZERO` scaled by the ends' size) as the one crossing `LocalCurveIntersect`
+    /// finds inside it, started where the separation taken as linear between the ends
+    /// vanishes (`SM_ERR` when none is found). Upstream returns the range: two equal circles
+    /// a little apart graze within tolerance over a stretch set by the subdivision, and the
+    /// range becomes a tiny edge, so a ring unioned with a half-annulus prism whose r 5 walls
+    /// are 1e-4 apart is non-manifold and at 1e-3 not a solid (WR-647, #1979; the fork's
+    /// tangency-labs/smlib@c2e3d9d). A range whose separation keeps one side without
+    /// vanishing (two curves running close within tolerance without touching, or a
+    /// tangency) is the one point where the curves come nearest (`LocalCurveSolve`
+    /// minimum from the range's middle); only curves whose separation vanishes coincide
+    /// over a range (the fork's 04b42b4).
+    pub simple_coincidence_crossing_is_point: bool,
     /// `SmPrimitiveCreation::CreateBox` returns the status of each face it makes (a plane that cannot be made, a face whose making fails even after the face was made, such as a box far smaller than the tolerance whose top face closes up on its bottom one) and of its `StitchAndOrient`, and makes no face on a side of zero extent. Upstream drops every one of those statuses and returns success with whatever faces were made (WR-596; the fork's tangency-labs/smlib@0df62c8, 35008b1 and 449c81c, `AddBoxFace`).
     pub box_face_failures_propagate: bool,
     /// `SmBrep::DeleteFilletFace` removes a ring fillet (a round all the way round a boss's foot or rim: two closed tangent rails, one vertex each, and at most one seam) with the fork's `SmRingFilletRemoval`: the sharp edge is the intersection of the two tangent faces' surfaces within their natural domains (an exact circle for a boss), the tangent face's seam runs on to it along its line, and the rails become it; a removal that would need a surface or a curved edge continued past its domain is refused before the B-rep changes. Upstream takes four-sided fillets only, and fails on a ring (WR-605; SolidCraft change, tangency-labs/smlib 52bfef0, with 661f79c).

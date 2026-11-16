@@ -137,6 +137,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.face_tight_box_searches_trim = true;
     f.ssi_low_angle_start_on_probation = true;
     f.fillet_variable_span_follows_fillet = true;
+    f.simple_coincidence_crossing_is_point = true;
     f.fillet_trim_status = true;
     f.brep_edit_statuses_pass_on = true;
     f.query_statuses_pass_on = true;

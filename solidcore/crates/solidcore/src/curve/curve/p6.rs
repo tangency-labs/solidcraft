@@ -77,14 +77,15 @@
 //!   `curve.curve_p5`) is told whether the solution's first object is its `this`
 //!   curve: the split solutions name `[this, other]`, so it is when the coincidence
 //!   check split the other curve, or `this` and the other are the same curve.
-//! - **Crossing, not a range (WR-647).** [`Curve::simple_coincidence_checker`] returns a
-//!   range whose separation changes sides between its ends as the crossing inside it
-//!   (the fork's tangency-labs/smlib@c2e3d9d), and one whose separation keeps one side
-//!   without vanishing as the point where the curves come nearest (the fork's 04b42b4).
-//!   Upstream returns the range.
-//! - **Statuses passed on (WR-663).** With the opt-in
-//!   `Kernel::fixes.query_statuses_pass_on` the statuses SMLib drops are passed on, as the
-//!   fork (tangency-labs/smlib 8311f8e): `CalculateBoundingBox`'s samples, interval and
+//! - **Crossing, not a range (opt-in).** With
+//!   `Kernel::fixes.simple_coincidence_crossing_is_point`,
+//!   [`Curve::simple_coincidence_checker`] returns a range whose separation changes
+//!   sides between its ends as the crossing inside it (WR-647; the fork's
+//!   tangency-labs/smlib@c2e3d9d), and one whose separation keeps one side without
+//!   vanishing as the point where the curves come nearest (the fork's 04b42b4). Off, it
+//!   is upstream's.
+//! - **Statuses passed on (WR-663).** The statuses SMLib drops are passed on, as the
+//!   fork (tangency-labs/smlib 8311f8e):`CalculateBoundingBox`'s samples, interval and
 //!   boxes, `CurveMaxDistanceBetween`'s knots, `DeformToEndPointTargets`' drops (a target
 //!   that does not drop is `SM_ERR`) and `ConvertTo2D` (before the UV curve is replaced);
 //!   `IsPlanar` is `FALSE` without its box.
@@ -93,19 +94,16 @@
 //!   line/line check) samples the interval midpoints (`per = 0.5`) instead of dividing
 //!   `0 / 0 = NaN` as upstream does.
 
-use crate::curve::curve::knots_ignoring_status;
 use crate::curve::curve::p1::{ApproximateCurveOptions, GlobalPointSolveOptions};
 use crate::curve::curve::p2::{
-    at, ignored_or_soft, snap_sol_to_specified_endpoint, Curve, CurveKind, CurvePropertyType, Soft,
+    at, snap_sol_to_specified_endpoint, Curve, CurveKind, CurvePropertyType,
 };
 use crate::curve::curve::p3::{local_curve_intersect, PointSolveOptions};
 use crate::curve::curve::p5::{
     is_point_solution_across_closed_seam_boundary, local_property_analysis,
 };
 use crate::curve::curve_cache::CurveCache;
-use crate::error::{
-    ignore_or_pass_on, ignore_status, ignored, ignored_or_pass_on, passed_on, Result, SolidError,
-};
+use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{
@@ -259,16 +257,13 @@ pub fn calculate_bounding_box_base(
     let mut rel_t1 = 0.0;
     let num_derivs = usize::from(want_tangents);
     let mut pt_der = [Vec3::UNDEF, Vec3::UNDEF];
-    // (the statuses below are ignored upstream and passed on with the opt-in fix,
+    // (the statuses below are ignored upstream and passed on as the fork,
     // tangency-labs/smlib 8311f8e)
-    let pass_on = k.fixes.query_statuses_pass_on;
     let sample = |t: f64, pt_der: &mut [Vec3; 2]| -> Result<()> {
-        // nonZeroTangent values (status ignored)
-        let r = curve.evaluate(k, t, num_derivs, false, true);
-        if let Some(v) = ignored_or_pass_on(r, pass_on)? {
-            for (dst, src) in pt_der.iter_mut().zip(v) {
-                *dst = src;
-            }
+        // nonZeroTangent values
+        let v = curve.evaluate(k, t, num_derivs, false, true)?;
+        for (dst, src) in pt_der.iter_mut().zip(v) {
+            *dst = src;
         }
         Ok(())
     };
@@ -290,10 +285,7 @@ pub fn calculate_bounding_box_base(
         if ii >= NUM_SPANS - 1 {
             rel_t1 = 1.0;
         }
-        ignore_or_pass_on(
-            sub_ivl.set_min_max(interval.evaluate(rel_t0), interval.evaluate(rel_t1)),
-            pass_on,
-        )?;
+        sub_ivl.set_min_max(interval.evaluate(rel_t0), interval.evaluate(rel_t1))?;
 
         let pt0 = pt1;
         sample(sub_ivl.max(), &mut pt_der)?;
@@ -399,7 +391,7 @@ pub fn calculate_bounding_box_base(
     let mut bbox = Extent3d::new();
     if req.normal {
         let p0 = point(0)?;
-        ignore_or_pass_on(bbox.set_min_max(p0, p0), pass_on)?;
+        bbox.set_min_max(p0, p0)?;
     }
 
     // init pseudobox
@@ -430,7 +422,7 @@ pub fn calculate_bounding_box_base(
             // use basis vectors based on selected sample points
             let v2 = point(l3)? - point(l2)?;
             let [b1, b2, b3] = v1.make_unit_ortho_vectors(Some(v2))?;
-            ignore_or_pass_on(pseudo.set_basis(b1, b2, b3), pass_on)?;
+            pseudo.set_basis(b1, b2, b3)?;
         }
     }
 
@@ -630,20 +622,17 @@ impl Curve {
     /// # Errors
     ///
     /// [`SolidError::Unported`] from [`Curve::calculate_bounding_box`] (whose other
-    /// failures leave the default box, as upstream ignores the status).
+    /// failures show the curve not planar, as the fork; upstream ignores the status).
     pub fn is_planar(&self, k: &Kernel, tol: f64) -> Result<Planar> {
         let req = BoundingBoxRequest {
             normal: false,
             pseudo: true,
             polar: false,
         };
-        let boxes = ignored_or_soft(
-            self.calculate_bounding_box(k, &self.natural_interval(), req, true),
-            k.fixes.query_statuses_pass_on,
-        )?;
-        // with the opt-in fix a curve that cannot be boxed is not shown planar; its
-        // outputs are not written (tangency-labs/smlib 8311f8e)
-        let Soft::Kept(boxes) = boxes else {
+        let boxes = ignored(self.calculate_bounding_box(k, &self.natural_interval(), req, true))?;
+        // as the fork, a curve that cannot be boxed is not shown planar; its outputs are
+        // not written (tangency-labs/smlib 8311f8e)
+        let Some(boxes) = boxes else {
             return Ok(Planar {
                 is_planar: false,
                 point: Vec3::UNDEF,
@@ -651,7 +640,7 @@ impl Curve {
                 deviation: crate::math::UNDEF_DOUBLE,
             });
         };
-        let pseudo = boxes.and_then(|b| b.pseudo).unwrap_or_else(PseudoBox::new);
+        let pseudo = boxes.pseudo.unwrap_or_else(PseudoBox::new);
         Ok(pseudo.is_planar(tol))
     }
 
@@ -1097,17 +1086,13 @@ impl Curve {
         // there are a large number of knots.
         if num_samples == 0 {
             do_precise = true;
-            // (statuses ignored; passed on with the opt-in fix, tangency-labs/smlib
+            // (statuses ignored upstream; passed on as the fork, tangency-labs/smlib
             // 8311f8e)
-            let pass_on = k.fixes.query_statuses_pass_on;
-            let knots =
-                knots_ignoring_status(passed_on(self.knots_with_status(k, None), pass_on)?)?
-                    .0
-                    .len();
-            let other_knots =
-                knots_ignoring_status(passed_on(other.knots_with_status(k, None), pass_on)?)?
-                    .0
-                    .len();
+            let mine = self.knots_with_status(k, None)?;
+            mine.status?;
+            let theirs = other.knots_with_status(k, None)?;
+            theirs.status?;
+            let (knots, other_knots) = (mine.knots.len(), theirs.knots.len());
             num_samples = 22 + knots as u64 + other_knots as u64;
         }
 
@@ -1354,16 +1339,17 @@ impl Curve {
     /// point (one drop or a tiny parameter range: the better end), two points (the
     /// first and last drops when the curves separate by more than `tol` between them,
     /// or either range is degenerate), or one coincident range. `objects` name this
-    /// curve and `other` in the solutions. A range whose separation changes sides is
-    /// the one crossing inside it, and one whose separation keeps one side without
-    /// vanishing is the one point where the curves come nearest (WR-647).
+    /// curve and `other` in the solutions. With
+    /// `Kernel::fixes.simple_coincidence_crossing_is_point` (WR-647) a range whose
+    /// separation changes sides is the one crossing inside it, and one whose separation
+    /// keeps one side without vanishing is the one point where the curves come nearest.
     ///
     /// # Errors
     ///
-    /// Those of the evaluations, [`Curve::local_point_solve`],
-    /// [`Curve::curve_max_distance_between`], [`local_curve_intersect`] and
-    /// [`Curve::local_curve_solve`], and `SM_ERR` when either of the last two finds no
-    /// point.
+    /// Those of the evaluations, [`Curve::local_point_solve`] and
+    /// [`Curve::curve_max_distance_between`]; with the WR-647 opt-in, those of
+    /// [`local_curve_intersect`] and [`Curve::local_curve_solve`], and `SM_ERR` when
+    /// either finds no point.
     pub fn simple_coincidence_checker<O: Copy>(
         &self,
         k: &Kernel,
@@ -1557,92 +1543,82 @@ impl Curve {
         // the interval's ends the curves cross inside it: the answer is that crossing,
         // as a curve/curve intersection finds it, not a range. A separation that
         // vanishes to numeric zero has no side (WR-647, fork c2e3d9d).
-        let this_a = self.evaluate_point(k, first.0)?;
-        let this_b = self.evaluate_point(k, last.0)?;
-        let other_a = other.evaluate_point(k, first.1)?;
-        let other_b = other.evaluate_point(k, last.1)?;
-        // The side is taken across this curve, its tangent's component removed. An end
-        // of one curve that runs past the other's end drops onto that end, and the
-        // pair's difference then points along the curves, forward at one end and back at
-        // the other, for two curves that lie on each other; upstream took that for a
-        // crossing.
-        let separation_a = self.across_tangent(k, first.0, other_a - this_a)?;
-        let separation_b = self.across_tangent(k, last.0, other_b - this_b)?;
-        let scaled_zero = EFF_ZERO * (1.0 + max2(this_a.max_dimension(), this_b.max_dimension()));
-        if separation_a.length() > scaled_zero
-            && separation_b.length() > scaled_zero
-            && separation_a.dot(separation_b) < 0.0
-        {
-            // start where the separation, taken as linear between the ends, vanishes
-            let (da, db) = (separation_a.length(), separation_b.length());
-            let w = da / (da + db);
-            let found = local_curve_intersect(
-                k,
-                self,
-                &ivl_t1,
-                other,
-                &ivl_t2,
-                tol,
-                first.0 + w * (last.0 - first.0),
-                first.1 + w * (last.1 - first.1),
-            )?;
-            let Some(cross) = found else {
-                // curves change sides but no crossing found
-                return Err(SolidError::curve_failed(
-                    "curve::simple_coincidence_checker (crossing)",
-                    "the curves change sides but no crossing was found",
-                ));
-            };
-            return Ok(vec![pair_solution(
-                objects,
-                (cross.my_param, cross.other_param, cross.deviation),
-                None,
-            )]);
-        }
+        if k.fixes.simple_coincidence_crossing_is_point {
+            let this_a = self.evaluate_point(k, first.0)?;
+            let this_b = self.evaluate_point(k, last.0)?;
+            let other_a = other.evaluate_point(k, first.1)?;
+            let other_b = other.evaluate_point(k, last.1)?;
+            // The side is taken across this curve, its tangent's component removed. An end
+            // of one curve that runs past the other's end drops onto that end, and the
+            // pair's difference then points along the curves, forward at one end and back at
+            // the other, for two curves that lie on each other; upstream took that for a
+            // crossing.
+            let separation_a = self.across_tangent(k, first.0, other_a - this_a)?;
+            let separation_b = self.across_tangent(k, last.0, other_b - this_b)?;
+            let scaled_zero =
+                EFF_ZERO * (1.0 + max2(this_a.max_dimension(), this_b.max_dimension()));
+            if separation_a.length() > scaled_zero
+                && separation_b.length() > scaled_zero
+                && separation_a.dot(separation_b) < 0.0
+            {
+                // start where the separation, taken as linear between the ends, vanishes
+                let (da, db) = (separation_a.length(), separation_b.length());
+                let w = da / (da + db);
+                let found = local_curve_intersect(
+                    k,
+                    self,
+                    &ivl_t1,
+                    other,
+                    &ivl_t2,
+                    tol,
+                    first.0 + w * (last.0 - first.0),
+                    first.1 + w * (last.1 - first.1),
+                )?;
+                let Some(cross) = found else {
+                    // curves change sides but no crossing found
+                    return Err(SolidError::curve_failed(
+                        "curve::simple_coincidence_checker (crossing)",
+                        "the curves change sides but no crossing was found",
+                    ));
+                };
+                return Ok(vec![pair_solution(
+                    objects,
+                    (cross.my_param, cross.other_param, cross.deviation),
+                    None,
+                )]);
+            }
 
-        // The separation keeps one side but does not vanish: the curves don't coincide,
-        // they approach each other (a tangency, or two curves running close without
-        // touching). The contact is where they come nearest, a point; only curves whose
-        // separation vanishes coincide over a range (fork 04b42b4, case 3e).
-        if distance_between > scaled_zero {
-            let (found, mut nearest) = self.local_curve_solve(
-                k,
-                &ivl_t1,
-                other,
-                &ivl_t2,
-                SolverOperation::Minimize,
-                tol,
-                None,
-                None,
-                [ivl_t1.evaluate(0.5), ivl_t2.evaluate(0.5)],
-                objects,
-            )?;
-            if !found {
-                // curves within tolerance but no nearest point found
-                return Err(SolidError::curve_failed(
-                    "curve::simple_coincidence_checker (nearest)",
-                    "the curves are within tolerance but no nearest point was found",
-                ));
+            // The separation keeps one side but does not vanish: the curves don't coincide,
+            // they approach each other (a tangency, or two curves running close without
+            // touching). The contact is where they come nearest, a point; only curves whose
+            // separation vanishes coincide over a range (fork 04b42b4, case 3e).
+            if distance_between > scaled_zero {
+                let (found, mut nearest) = self.local_curve_solve(
+                    k,
+                    &ivl_t1,
+                    other,
+                    &ivl_t2,
+                    SolverOperation::Minimize,
+                    tol,
+                    None,
+                    None,
+                    [ivl_t1.evaluate(0.5), ivl_t2.evaluate(0.5)],
+                    objects,
+                )?;
+                if !found {
+                    // curves within tolerance but no nearest point found
+                    return Err(SolidError::curve_failed(
+                        "curve::simple_coincidence_checker (nearest)",
+                        "the curves are within tolerance but no nearest point was found",
+                    ));
+                }
+                nearest.num_variables = 2;
+                nearest.num_objects = 2;
+                nearest.solution_type = SolutionType::SingleValue;
+                nearest.objects[0] = objects[0];
+                nearest.objects[1] = objects[1];
+                return Ok(vec![nearest]);
             }
-            // The minimum of the separation over the range is at a stationary point inside
-            // it or at an end. The local solve from the range's middle finds a stationary
-            // point, which can be where the curves are farthest apart (a separation that
-            // bulges between the ends); an end nearer than it is the nearer point. (A NaN
-            // value keeps the end: the comparison is written so NaN does not win.)
-            let solved = nearest.start.solution_value;
-            let nearer_end = if first.2 <= last.2 { first } else { last };
-            if !matches!(
-                solved.partial_cmp(&nearer_end.2),
-                Some(core::cmp::Ordering::Less | core::cmp::Ordering::Equal)
-            ) {
-                return Ok(vec![pair_solution(objects, nearer_end, None)]);
-            }
-            nearest.num_variables = 2;
-            nearest.num_objects = 2;
-            nearest.solution_type = SolutionType::SingleValue;
-            nearest.objects[0] = objects[0];
-            nearest.objects[1] = objects[1];
-            return Ok(vec![nearest]);
         }
 
         // add 1 coincident intersection to solution array
@@ -2373,35 +2349,30 @@ impl Curve {
             if surface.approx_eq(k, curve.surface())? {
                 let ends = curve.uv_curve().ends(k)?;
                 let domain = surface.natural_uv_domain_with_nurb(k)?;
-                let drop_target = |target: Option<Point3>,
-                                   current: Point3|
-                 -> Result<Option<Point3>> {
-                    let Some(target) = target else {
-                        return Ok(None);
-                    };
-                    let options = crate::surface::surface::p5::DropPointOptions {
-                        guess_uv: Some(crate::math::Vec2::new(current.x, current.y)),
-                        ..Default::default()
-                    };
-                    // (status ignored; with the opt-in fix a failed drop is passed on
-                    // and a target that does not drop onto the surface has no UV
-                    // point, SM_ERR, tangency-labs/smlib 8311f8e)
-                    let pass_on = k.fixes.query_statuses_pass_on;
-                    let dropped = ignored_or_pass_on(
-                        surface.drop_point::<crate::surface::surface::p4::NoObject>(
+                let drop_target =
+                    |target: Option<Point3>, current: Point3| -> Result<Option<Point3>> {
+                        let Some(target) = target else {
+                            return Ok(None);
+                        };
+                        let options = crate::surface::surface::p5::DropPointOptions {
+                            guess_uv: Some(crate::math::Vec2::new(current.x, current.y)),
+                            ..Default::default()
+                        };
+                        // (status ignored upstream; as the fork a failed drop is passed on
+                        // and a target that does not drop onto the surface has no UV
+                        // point, SM_ERR, tangency-labs/smlib 8311f8e)
+                        let dropped = surface.drop_point::<crate::surface::surface::p4::NoObject>(
                             k, target, &domain, &options,
-                        ),
-                        pass_on,
-                    )?;
-                    if pass_on && !dropped.as_ref().is_some_and(|d| d.success) {
-                        return Err(SolidError::curve_failed(
-                            OP_DEFORM,
-                            "the point did not drop onto the surface",
-                        ));
-                    }
-                    let uv = dropped.map_or(crate::math::Vec2::UNDEF, |result| result.result_uv);
-                    Ok(Some(Point3::new(uv.x, uv.y, 0.0)))
-                };
+                        )?;
+                        if !dropped.success {
+                            return Err(SolidError::curve_failed(
+                                OP_DEFORM,
+                                "the point did not drop onto the surface",
+                            ));
+                        }
+                        let uv = dropped.result_uv;
+                        Ok(Some(Point3::new(uv.x, uv.y, 0.0)))
+                    };
                 let start = drop_target(tgt_start, ends.start)?;
                 let end = drop_target(tgt_end, ends.end)?;
                 let (start, end) = if orientation
@@ -2429,13 +2400,10 @@ impl Curve {
                     InValueType::Same,
                 )?;
                 if let Some(mut replacement) = replacement {
-                    // (status ignored; passed on with the opt-in fix before the UV
+                    // (status ignored upstream; passed on as the fork before the UV
                     // curve is replaced, so a failure leaves it as it was,
                     // tangency-labs/smlib 8311f8e)
-                    ignore_or_pass_on(
-                        replacement.convert_to_2d(k),
-                        k.fixes.query_statuses_pass_on,
-                    )?;
+                    replacement.convert_to_2d(k)?;
                     curve.set_uv_curve(replacement)?;
                 }
                 return Ok(None);
@@ -2589,12 +2557,8 @@ mod tests {
         // tangency-labs/smlib 8311f8e (SmCurve::IsPlanar, CalculateBoundingBox): a
         // curve that cannot be boxed is not shown planar; the box passes on its
         // evaluations. Upstream reads the default box, which is planar.
-        // Discriminating.
         let c = Curve::from(BSplineCurve::new(3));
-        let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        assert!(c.is_planar(&off, EFF_ZERO).unwrap().is_planar);
+        let on = Kernel::default();
         assert!(!c.is_planar(&on, EFF_ZERO).unwrap().is_planar);
     }
 
