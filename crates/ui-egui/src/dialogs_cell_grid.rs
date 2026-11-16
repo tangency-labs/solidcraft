@@ -21,6 +21,9 @@ use solidcraft_engine::{
 const SHAPES: [&str; 5] = ["hexagon", "square", "triangle", "circle", "polygon"];
 const DOT_GRIDS: [&str; 2] = ["hexagonal", "square"];
 const CLIPS: [&str; 3] = ["whole", "snap", "free"];
+/// The keep-outs' clip: the first choice leaves `keepout_clip` out (the same as the field's clip),
+/// the others are [`CLIPS`] one place on.
+const KEEPOUT_CLIPS: [Option<&str>; 4] = [None, Some("whole"), Some("snap"), Some("free")];
 const DIRECTIONS: [&str; 3] = ["positive", "negative", "symmetric"];
 /// The inputs, in order: the profiles (their sketch and keep-outs), the bodies, the anchor.
 const PROFILES_INPUT: usize = 0;
@@ -50,6 +53,10 @@ pub struct CellGrid {
     pub direction: usize,
     /// An index into [`CLIPS`].
     pub clip: usize,
+    /// An index into [`KEEPOUT_CLIPS`]: what a keep-out's edge does to the cells it crosses.
+    pub keepout_clip: usize,
+    /// With snapped cells, how many whole grid rows each straight field edge moves in.
+    pub snap_inset: String,
     /// The clearance to the edges, with whole cells only.
     pub margin: String,
     pub angle: String,
@@ -67,6 +74,8 @@ impl Default for CellGrid {
             depth: "2 mm".into(),
             direction: 0,
             clip: 1,
+            keepout_clip: 0,
+            snap_inset: "0".into(),
             margin: "0 mm".into(),
             angle: "0 deg".into(),
         }
@@ -77,6 +86,17 @@ impl CellGrid {
     /// Circle and polygon cells sit on a dot grid; the other shapes tile the plane.
     fn on_dots(&self) -> bool {
         matches!(SHAPES.get(self.shape), Some(&"circle" | &"polygon"))
+    }
+
+    /// The command takes a margin with whole cells only, at the field's edge and at the keep-outs:
+    /// snapped and trimmed cells meet the edge.
+    fn takes_margin(&self) -> bool {
+        CLIPS.get(self.clip) == Some(&"whole") && matches!(KEEPOUT_CLIPS.get(self.keepout_clip), Some(None | Some("whole")))
+    }
+
+    /// The command moves the field's edges in by whole rows with snapped cells only.
+    fn takes_snap_inset(&self) -> bool {
+        CLIPS.get(self.clip) == Some(&"snap")
     }
 }
 
@@ -134,8 +154,17 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut CellGrid, _: &[SelInput])
         &mut c.clip,
         &[app.tr("ui.cell_grid.whole"), app.tr("ui.snap"), app.tr("ui.cell_grid.free")],
     );
-    // The command takes a margin with whole cells only: snapped and trimmed cells meet the edge.
-    if CLIPS.get(c.clip) == Some(&"whole") {
+    choice_row(
+        ui,
+        app.tr("ui.cell_grid.keepout_clip"),
+        "cell_grid_keepout_clip",
+        &mut c.keepout_clip,
+        &[app.tr("ui.cell_grid.same_as_clip"), app.tr("ui.cell_grid.whole"), app.tr("ui.snap"), app.tr("ui.cell_grid.free")],
+    );
+    if c.takes_snap_inset() {
+        enter |= expr_row(ui, app.tr("ui.cell_grid.snap_inset"), &mut c.snap_inset);
+    }
+    if c.takes_margin() {
         enter |= expr_row(ui, app.tr("Margin"), &mut c.margin);
     }
     enter |= expr_row(ui, app.tr("ui.angle"), &mut c.angle);
@@ -172,7 +201,14 @@ pub fn commands(app: &SolveApp, c: &CellGrid, inputs: &[SelInput], extra: &Map<S
         } else {
             args.insert("depth".into(), json!(c.depth));
         }
-        if CLIPS.get(c.clip) == Some(&"whole") && !c.margin.trim().is_empty() {
+        if let Some(Some(keepout_clip)) = KEEPOUT_CLIPS.get(c.keepout_clip) {
+            args.insert("keepout_clip".into(), json!(keepout_clip));
+        }
+        // 0 is the command's default: left out, a feature without an inset stays as it was.
+        if c.takes_snap_inset() && !matches!(c.snap_inset.trim(), "" | "0") {
+            args.insert("snap_inset".into(), json!(c.snap_inset));
+        }
+        if c.takes_margin() && !c.margin.trim().is_empty() {
             args.insert("margin".into(), json!(c.margin));
         }
         let bodies = crate::selection::items(inputs, BODIES_INPUT).body_names();
@@ -213,6 +249,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         angle,
         anchor,
         clip,
+        keepout_clip,
+        snap_inset,
         margin,
         depth,
         through_all,
@@ -249,6 +287,13 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             Clip::Snap => 1,
             Clip::Free => 2,
         },
+        keepout_clip: match keepout_clip {
+            None => 0,
+            Some(Clip::Whole) => 1,
+            Some(Clip::Snap) => 2,
+            Some(Clip::Free) => 3,
+        },
+        snap_inset: snap_inset.as_ref().map_or(defaults.snap_inset, |e| shown_expr(e, ValueKind::Unitless)),
         margin: margin.as_ref().map_or(defaults.margin, length),
         angle: angle.as_ref().map_or(defaults.angle, |e| shown_expr(e, ValueKind::Angle)),
     };
