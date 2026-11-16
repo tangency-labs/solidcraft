@@ -1791,8 +1791,9 @@ pub struct ProtoVertex {
     /// so our vertices stand for its curve (WR-306, opt-in).
     absorbed_proto_edge: bool,
     /// Not upstream (#16637): the computed points (positions and object points) of the
-    /// vertex definitions combined away at this proto vertex, and the attached curve ends
-    /// evaluated when it combined them, which every write of its position covers
+    /// vertex definitions combined away at this proto vertex, the attached curve ends
+    /// evaluated when it combined them, and the points of the definitions that remained
+    /// when it moved, which every write of its position covers
     /// ([`ProtoVertex::set_position`]).
     absorbed_points: Vec<Point3>,
     /// Not upstream (#16637): a point to absorb here (of a definition combined away or an
@@ -1810,8 +1811,9 @@ impl ProtoVertex {
     }
 
     /// Not upstream (#16637): the computed points (positions and object points) of the
-    /// vertex definitions combined away at this proto vertex, and the attached curve ends
-    /// evaluated when it combined them.
+    /// vertex definitions combined away at this proto vertex, the attached curve ends
+    /// evaluated when it combined them, and the points of the definitions that remained
+    /// when it moved.
     #[must_use]
     pub fn absorbed_points(&self) -> &[Point3] {
         &self.absorbed_points
@@ -1865,9 +1867,14 @@ impl ProtoVertex {
 
     /// Sets the position (through `GetPosition`'s reference). Not upstream (#16637): the
     /// tolerance then grows to cover every absorbed point from there
-    /// ([`ProtoVertex::cover_absorbed`]); with none absorbed it is upstream's write.
+    /// ([`ProtoVertex::cover_absorbed`]); with none absorbed it is upstream's write. A
+    /// vertex that absorbed points is not moved to a non-finite position, from which no
+    /// distance to them could be measured: it stays where it is, still covering them.
     pub fn set_position(&mut self, position: Point3) {
-        self.position = position;
+        let finite = position.x.is_finite() && position.y.is_finite() && position.z.is_finite();
+        if finite || self.absorbed_points.is_empty() {
+            self.position = position;
+        }
         self.cover_absorbed();
     }
 
@@ -3121,7 +3128,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             };
             let count = self.pv(Some(pv))?.vertex_defs.len() as f64;
             let p = self.pv_mut(pv)?;
-            p.position += (new - old) / count;
+            // (#16637: through `set_position`, so a vertex that absorbed definitions keeps
+            // covering them)
+            p.set_position(p.position + (new - old) / count);
             p.tol = max2(p.tol, vd_tol);
         }
         Ok(())
