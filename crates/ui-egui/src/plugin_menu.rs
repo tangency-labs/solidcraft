@@ -642,9 +642,7 @@ impl EntryDialog {
             Problem::Invalid(label) => solidcraft_ui_text::format("ui.plugin_dialog_invalid", &[("field", &label)]),
         })?;
         // A picked or pasted folder does not add a grant. Run uses the install grant's check.
-        if let Err(error) = directories_allowed(app, &self.plugin.id, fields, &value) {
-            return Err(error);
-        }
+        directories_allowed(app, &self.plugin.id, fields, &value)?;
         Ok(value)
     }
 }

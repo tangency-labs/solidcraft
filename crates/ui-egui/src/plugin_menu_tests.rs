@@ -402,7 +402,7 @@ fn a_directory_field_browses_a_folder_and_an_outside_folder_stays_ungranted() {
     h.step(&json!({"widget": browse})).unwrap();
     h.frames(2);
     assert_eq!(folder_text(&h), picked, "the picked folder is the field value");
-    assert!(h.widgets(&picked).len() >= 1, "the text box shows the picked folder, so paste can replace it");
+    assert!(!h.widgets(&picked).is_empty(), "the text box shows the picked folder, so paste can replace it");
     let fields = h.app.plugin_menu.dialog().unwrap().fields.clone().unwrap();
     assert_eq!(params(&fields), Ok(json!({"folder": picked})), "that path is the value sent to the plugin");
     let err = run(&mut h.app).unwrap_err();
