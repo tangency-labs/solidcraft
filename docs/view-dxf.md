@@ -77,7 +77,10 @@ an `ARC`, so a milling or CAD program can pick them as circles. A ring only coun
 its lines sag from the circle by no more than the `tolerance` (twice, for rounding); a polygon with
 few sides, such as a hexagon, stays as lines. Points closer than a hundredth of the `tolerance` are
 treated as one point, so the top and bottom edges of a hole are written once. Dashed hidden lines
-and every other line stay as they are. The default is `curves: "lines"`.
+and every other line stay as they are. The command's own default is `curves: "lines"`, so scripts and files made earlier do not change. The
+Export Current View as DXF dialog has a "Write circles and arcs as CIRCLE and ARC" choice, on by
+default and remembered as the `view_dxf_curves` preference (`ui.prefs`), which sends `curves: "arcs"`;
+turning it off sends `curves: "lines"` and writes the rings as lines again (#17917).
 The result also includes `stats`: placed body and shared mesh counts, source triangle count,
 retained mesh bytes, worker limit, candidate segment count, occlusion work, and preparation,
 projection and occlusion times in milliseconds. These timings exclude STEP import and DXF
