@@ -264,6 +264,14 @@ fn child() {
         "install_twice" => {
             install(dir.clone(), build());
         }
+        // An update is closing the app, and its installer ends the process before the clean-exit
+        // path runs. A command still lands in the journal after the marker, as it can while the
+        // quit flow saves designs.
+        "closing_for_update" => {
+            mark_closing_for_update();
+            s.execute("solid.box", &json!({"length": 1, "width": 2, "height": 3})).unwrap();
+            std::process::abort();
+        }
         _ => {}
     }
     end_session();
@@ -475,6 +483,22 @@ fn a_clean_exit_whose_journal_cannot_be_removed_is_not_reported_as_an_unclean_ex
     assert!(out.contains("FRESH []"), "{out}");
     let reports = list(&d);
     assert!(reports.is_empty(), "{reports:?}");
+    let _ = fs::remove_dir_all(&d);
+}
+
+/// An update closes the app, and its installer kills the process before the clean-exit path
+/// runs. The journal says the session was closed for the update, so the next start files no
+/// unclean-exit report for the old version (#17890).
+#[test]
+fn a_session_closed_for_an_update_is_not_reported_as_an_unclean_exit() {
+    let d = fresh_dir("closing-for-update");
+    let (out, ok) = run_child(&d, "closing_for_update");
+    assert!(!ok, "the child was killed by the installer, not by a panic: {out}");
+    // The next start, after the update, finds the journal but must not report the old session.
+    let (out, ok) = run_child(&d, "none");
+    assert!(ok, "{out}");
+    assert!(out.contains("FRESH []"), "{out}");
+    assert!(list(&d).is_empty(), "{:?}", list(&d));
     let _ = fs::remove_dir_all(&d);
 }
 

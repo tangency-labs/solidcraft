@@ -935,6 +935,9 @@ fn poll_install(app: &mut SolveApp) {
                 _ => (program.clone(), args.clone()),
             });
             app.updater.graphics_restart = false;
+            // The installer can end this process before the clean-exit path runs. Say in the
+            // journal that the update closed us, so the next start files no crash for this build.
+            solidcraft_engine::crash::mark_closing_for_update();
             crate::documents::request_quit(app);
         }
         Ok(install::Outcome::Opened(dmg)) => {
@@ -955,6 +958,7 @@ pub fn restart(app: &mut SolveApp) {
     if let Some(Ok(install::Outcome::Restart(program))) = &app.updater.installed {
         app.updater.launch = Some((program.clone(), Vec::new()));
         app.updater.graphics_restart = false;
+        solidcraft_engine::crash::mark_closing_for_update();
         crate::documents::request_quit(app);
     }
 }

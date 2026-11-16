@@ -482,6 +482,19 @@ pub fn end_session() {
     }
 }
 
+/// This session is being closed so an update can take its place. The installer may end this
+/// process before the clean-exit path runs (a Windows installer replacing the executable, an
+/// AppImage relaunch killing the old process), so say so in the journal now: the next start must
+/// not file an unclean-exit report for a session the update closed on purpose. The journal stays,
+/// and a crash before the process ends is still reported by the panic hook; only the "died
+/// without a clean exit" report is skipped.
+pub fn mark_closing_for_update() {
+    let Some(s) = STATE.get() else { return };
+    if let Ok(mut j) = s.journal.lock() {
+        j.record(&json!({ "closing": "update" }));
+    }
+}
+
 /// The panic hook. Returns true when the panic was recorded for a command or the kernel (which
 /// will catch it), so the default "thread panicked" message is not printed.
 fn hook(info: &std::panic::PanicHookInfo<'_>) -> bool {
@@ -879,6 +892,9 @@ struct JournalRead {
     recent: Vec<Value>,
     complete: bool,
     reported: bool,
+    /// The session was closed for an update: no unclean-exit report at the next start. Sticky, so
+    /// commands run while the update is closing the app do not undo the marker.
+    closed_for_update: bool,
     /// The latest startup step and how many milliseconds after the start it began.
     phase: Option<(String, u64)>,
     /// The renderer, once known.
@@ -907,6 +923,9 @@ fn read_journal_file(mut file: File) -> JournalRead {
         if i == 0 {
             r.header = v;
             continue;
+        }
+        if v.get("closing").and_then(Value::as_str) == Some("update") {
+            r.closed_for_update = true;
         }
         // Startup steps and the renderer say nothing about whether the run was reported.
         if v.get("phase").is_none() && v.get("environment").is_none() {
@@ -973,7 +992,7 @@ fn unclean_exit(dir: &Path, build: &Build, journal: &Path) {
     let j = read_journal(journal);
     let (native_file, dump_file) = native_paths_for(journal);
     let native = fs::read(&native_file).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).filter(Value::is_object);
-    if j.reported {
+    if j.reported || j.closed_for_update {
         return;
     }
     let was = j.header.get("version").and_then(Value::as_str).unwrap_or("?");
