@@ -19,8 +19,9 @@
 //! arrays in between). No recursion; the golden-section loop is bounded at 80 steps as
 //! the fork's is. Each piece's deviation is certified against its parent
 //! (`piece_deviation`) instead of copied: it grows by the bound on the move of `Trim`'s
-//! end-span cleanup, and stays the parent's when the piece is the parent's restriction to
-//! rounding; a curve whose reshaped piece cannot be bounded is left unsplit.
+//! end-span cleanup, and stays the parent's when that move is at most
+//! `EFF_ZERO (1 + scale)` (rounding, or a cleanup below that size); a curve whose
+//! reshaped piece cannot be bounded is left unsplit.
 
 use crate::blend::fillet_section::interval::Ivl;
 use crate::curve::curve::{Curve, CurveKind};
@@ -74,12 +75,17 @@ fn singular_sine(
 /// of deviation `deviation`. The split ([`Curve::create_by_split_curve`], `Trim`) may drop
 /// an end span shorter than the zone tolerance (`N_CrvRemoveDegenSegs`), which reshapes
 /// the piece; [`piece_moves_at_most`] bounds, at every parameter, how far the piece lies
-/// from the parent, and the deviation grows by that bound, rounded up. A bound within
-/// `EFF_ZERO (1 + max |coordinate|)` is the split's rounding, and the deviation stays the
-/// parent's (bit for bit, as the fork copies it). `None` when the piece cannot be bounded
-/// (it is rational or not a B-spline) and it lacks a knot of the parent inside its
-/// interval: it may be reshaped by an unknown amount. Without a dropped knot the piece is
-/// the parent's restriction, and keeps the parent's deviation.
+/// from the parent, and the deviation grows by that bound, rounded up. A move up to
+/// `EFF_ZERO (1 + max |coordinate|)` is not recorded, and the deviation stays the parent's
+/// (bit for bit, as the fork copies it): that is the split's rounding, but it can also be
+/// a real cleanup of an end span shorter than that (a cut within about `1e-13` of a knot),
+/// so the recorded deviation may understate the move by up to that amount. `None` when
+/// the piece cannot be bounded (it is rational or not a B-spline) and it lacks a knot of
+/// the parent inside its interval: it may be reshaped by an unknown amount. A piece that
+/// keeps every parent knot inside its interval keeps the parent's deviation without a
+/// certificate. That is argued from `N_CrvRemoveDegenSegs`, not checked: the cleanup
+/// rescales or drops the interior knot bounding the span it drops, so a reshaped piece
+/// loses a parent knot value, and the knot-end trim is a pure restriction.
 ///
 /// The deviation is the 3D curve's only: the UV curves' move under the same cleanup is
 /// not recorded (as for the joins of `join_through_tangent_points`, #17210).
