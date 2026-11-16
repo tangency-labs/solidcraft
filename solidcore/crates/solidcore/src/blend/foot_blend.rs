@@ -278,7 +278,9 @@ fn foot_on(
 }
 
 /// The fit tolerance a weld bead's section face is built to: 0.01 mm, far below what a weld
-/// can be made or measured to. The feet themselves are solved to rounding at their stations
+/// can be made or measured to. It is checked at samples (the midpoints between stations,
+/// [`FootBlend::section_face`]), not proved: a sampled check, not a bound, until the face's
+/// certificate follows. The feet themselves are solved to rounding at their stations
 /// (Newton converges quadratically, so that costs a step or two); this tolerance sets how
 /// many stations the face between them needs, which is where the time goes.
 pub const WELD_FIT_TOLERANCE: f64 = 0.01;
@@ -293,9 +295,10 @@ impl FootBlend {
     /// (bulging away from the root for a positive sagitta), and through those sections a
     /// rational net, `u` the leader's parameter over the edge's interval, `v` from foot 1 (0)
     /// to foot 2 (1). The arcs are interpolated in homogeneous form (cubic in `u`) at stations
-    /// on each of the leader's knots (at least four), doubled between them until the net holds the feet and the sections' middles
-    /// between its stations within `tol`. Exact at its stations; between them a fit within
-    /// `tol`, not yet certified.
+    /// on each of the leader's knots (at least four), doubled between them until, at the
+    /// midpoint between each two stations, the net holds the feet, the section's middle and
+    /// the root within `tol`. Exact at its stations; between them that is a **sampled** check
+    /// at one point per interval, not a bound: nothing is certified yet.
     ///
     /// # Errors
     ///
@@ -362,7 +365,8 @@ impl FootBlend {
             }
             let (face, feet) = net_through_rows(&stations, &rows, sagitta)?;
             let root = through_at(&roots, &stations)?;
-            // between the stations: the feet, the sections' middles and the root
+            // sampled, not proved: at the midpoint between each two stations, the feet, the
+            // section's middle and the root
             let mut worst = 0.0_f64;
             for pair in stations.windows(2) {
                 let &[lo, hi] = pair else { continue };

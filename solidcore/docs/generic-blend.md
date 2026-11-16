@@ -83,7 +83,7 @@ The section joins the two rails. It is one of three kinds, chosen by its order n
 
 | n | section | surface |
 |---|---|---|
-| 0 | the chord | the chamfer |
+| 0 | the chord, or the circular arc over it at a sagitta h | the chamfer (h = 0), a weld bead's section (h ≠ 0) |
 | 1 | the circle of the ball between the rails | the exact canal surface, the envelope of the balls [35] |
 | 2 to 4 | the Gⁿ section | Hartmann's blend between the rails [14, 17] |
 
@@ -91,6 +91,15 @@ The section joins the two rails. It is one of three kinds, chosen by its order n
 
 *Figure 2. The section family on one cross-section, both rails set back s: chord (n = 0), circle
 (n = 1), order-2 section (n = 2, drawn without thumbweight).*
+
+**The order-0 section may bulge.** Its chord can carry a sagitta h: the circular arc between the
+rails whose middle stands h off the chord's middle, away from the edge for h > 0 (convex) and towards
+it for h < 0 (concave); the chord is h = 0. This is a weld bead's section
+(`surface::procedural_blend::bead::BeadDefinition`). With c the chord and β1, β2 the angles at
+which the chord leaves the faces, a concave arc stays off the faces below (c/2) tan(min βi / 2) and
+a convex one below (c/2) tan((π − max βi) / 2) (`BeadDefinition::bound`); a convex arc past
+(c/2) tan((π/2 − max βi) / 2) leans back over its toe (`BeadDefinition::overhang_bound`). Between
+planes along a straight edge it is a circular cylinder, an exact class (§4).
 
 **The circle (n = 1)** is the default round. It is stored as an exact rational circle: the rational
 quadratic arc with middle weight cos(θ/2), θ the angle between the contact normals [6, 7]. It is
@@ -484,7 +493,9 @@ rolling ball on a surface with rational offsets along a rational rail is rationa
 degrees with the two rails as boundary are in [27], and the variable-radius cylinder and cone cases
 in [24]. A pair whose offsets happen to touch at one radius is not taken as exact unless proved for
 that radius. Between planes, the Gⁿ section is rational too (the feet are linear), and a Gⁿ section
-with rotational symmetry is that section revolved; both are stored as rational surfaces.
+with rotational symmetry is that section revolved; both are stored as rational surfaces. Between
+planes the chord is the plane through the feet, and the chord with a sagitta (§2.2) the circular
+cylinder through the feet's lines; both are exact, stored with bound 0.
 
 ## 5. Design decisions that shape behaviour
 
