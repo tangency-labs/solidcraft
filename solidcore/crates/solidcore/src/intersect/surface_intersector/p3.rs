@@ -2120,6 +2120,8 @@ fn surface_drop_and_trim_curve<O: Copy + PartialEq>(
 mod tests {
     use super::*;
     use crate::geom::vector3d::Vec3;
+    use crate::nurbs::crv_basic::Curve as NurbCurve;
+    use crate::nurbs::math::{CPoint, NOW};
     use crate::surface::plane::Plane;
 
     fn plane(o: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Surface {
@@ -2479,6 +2481,20 @@ mod tests {
         )
         .unwrap();
         let out = run(Curve::from(bulge), TsectCurveType::Crossing);
+        assert_eq!(out.curve_types, [TsectCurveType::Crossing]);
+        // a cubic on the boundary at its ends and its middle, 3 tol off it at a quarter:
+        // z = 64 tol t (t - 1/2) (t - 1), Bernstein coefficients 64 tol (0, 1/6, -1/6, 0)
+        let z = 64.0 * tol / 6.0;
+        let pw = [(0.0, 0.0), (1.0 / 3.0, z), (2.0 / 3.0, -z), (1.0, 0.0)]
+            .iter()
+            .map(|&(s, z)| CPoint::new(0.2 + 0.1 * s, 0.5, z, NOW))
+            .collect();
+        let knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let wave = NurbCurve::new(pw, 3, knots).expect("cubic");
+        let wave = Curve::from(BSplineCurve::from_nurb(wave, 3, false));
+        let off = wave.evaluate_point(k, 0.25).unwrap().z;
+        assert!((off - 3.0 * tol).abs() < 1e-3 * tol, "{off}");
+        let out = run(wave, TsectCurveType::Crossing);
         assert_eq!(out.curve_types, [TsectCurveType::Crossing]);
         // a tangent curve along the boundary is no crossing
         let out = run(line(at, [0.3, 0.5, 0.5 * tol]), TsectCurveType::Tangent);
