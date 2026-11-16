@@ -607,6 +607,15 @@ fn a_pole_run_at_more_points_than_inner_nodes_is_fanned() {
     assert_fan_covers(&tris, &ring, &[10, 11, 12], &uv);
 }
 
+/// A run that bends toward the ring past what its share of the ring can see would fan into
+/// overlapping triangles: it is not fanned.
+#[test]
+fn a_pole_run_bending_toward_its_ring_is_not_fanned_over_itself() {
+    let run = [[0.3, 1.0], [0.5, 0.1], [0.7, 1.0]];
+    let (uv, pos) = cap_case(&run);
+    assert!(cap_fan(&[10, 11, 12], &[0, 2, 4, 5], &uv, &pos).is_none());
+}
+
 /// A run at two points needs an inner node on its ring; copies of one point do not.
 #[test]
 fn a_pole_run_at_two_points_needs_an_inner_ring_node() {
@@ -644,6 +653,8 @@ fn a_pole_ring_is_moved_only_off_a_boundary_it_meets() {
     assert_eq!(on.len(), 2, "a node on the ring");
     assert!(on.iter().all(|s| s.at == [0.5]));
     assert_eq!(ring_hits(&below, &[[0.5, 0.3], [0.6, 0.4], [0.4, 0.4]], [0.5, 1.0]).len(), 2, "a hole on the pole's side");
+    // Its upper nodes past the ring's ends, its lower one across it: only its sides cross.
+    assert_eq!(ring_hits(&below, &[[-0.1, 0.2], [1.1, 0.2], [0.5, -0.1]], [0.5, 1.0]).len(), 2, "a hole reaching over the ring");
     assert!(ring_hits(&[[0.5, 0.0]], &[], [0.5, f64::NAN]).is_empty(), "no pole side: no split");
     assert!(ring_hits(&[[0.5, 0.0]], &[], [0.5, 0.0]).is_empty(), "the pole on the ring line: no split");
 }

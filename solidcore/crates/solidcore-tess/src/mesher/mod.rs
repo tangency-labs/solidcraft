@@ -1703,7 +1703,8 @@ fn ring_too_far(cap: &PoleCap, fixed: &[Vec3], reach: f64) -> Vec<SplitSide> {
 
 /// Where the ring of `cap` (straight in (u, v) from the node before the pole to the one after it)
 /// would not lie inside the face: a node of any of the face's loops (`ranges`), across the ring's
-/// span, on the ring or on the pole's side of it, or a node of the run itself on the other side
+/// span, on the ring or on the pole's side of it, a side of a loop crossing the ring inside its
+/// span, or a node of the run itself on the other side
 /// (a pole's face of three sides whose third side, straight in (u, v), has nodes between the two
 /// it ends at: the ring runs along that side, and the rest of the face has no area). The pole's
 /// side is that of the run's node farthest from the ring line. The sides from those two nodes to
@@ -1723,11 +1724,28 @@ fn ring_off_boundary(cap: &PoleCap, uvs: &[[f64; 2]], fixed: &[Vec3], ranges: &[
         return Vec::new();
     }
     let crossed = run.iter().any(|&x| x * pole_side < 0.0);
-    let cuts = crossed
-        || ranges.iter().flat_map(|r| r.clone()).filter(|k| *k != cap.before && *k != cap.after && !cap.copies.contains(k)).filter_map(|k| uvs.get(k).copied()).any(|q| {
-            let t = along(q);
-            t > 0.0 && t < span && !(across(q) * pole_side < 0.0)
-        });
+    let ours = |k: usize| k == cap.before || k == cap.after || cap.copies.contains(&k);
+    let inside = |t: f64| t > 0.0 && t < span;
+    let near = || ranges.iter().flat_map(|r| r.clone()).filter(|k| !ours(*k)).filter_map(|k| uvs.get(k).copied()).any(|q| inside(along(q)) && !(across(q) * pole_side < 0.0));
+    // A side of a loop that crosses the ring inside its span, though both its ends lie past the
+    // ring's ends or across it (a hole reaching over the ring between its nodes). Sides with an
+    // end at the ring's ends or on the run are the cap's own.
+    let over = || {
+        ranges.iter().any(|r| {
+            let n = r.len();
+            (0..n).any(|k| {
+                let (i, j) = (r.start + k, r.start + (k + 1) % n);
+                let (Some(&p), Some(&q)) = (uvs.get(i), uvs.get(j)) else { return false };
+                let (x, y) = (across(p), across(q));
+                if ours(i) || ours(j) || !(x * y < 0.0) {
+                    return false;
+                }
+                let f = x / (x - y);
+                inside(along([p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f]))
+            })
+        })
+    };
+    let cuts = crossed || near() || over();
     if !cuts {
         return Vec::new();
     }
@@ -1831,8 +1849,9 @@ fn cap_ring(s: &EvalSurface, cap: &PoleCap, uvs: &[[f64; 2]], fixed: &[Vec3], to
 /// (u, v)), and the last copy to the last segment. A run at several points (a stretch of the
 /// boundary within the reach of a collapsed side) is fanned the same way from each point in
 /// turn, each to an even share of the ring's inner nodes, the step from one point to the next
-/// a triangle on the inner node where they meet. `None` where a triangle has no area in (u, v),
-/// or a run at several points has a ring with no inner node.
+/// a triangle on the inner node where they meet. `None` where a triangle has no area in (u, v)
+/// or turns against the cap's polygon (the fan would overlap itself), or a run at several points
+/// has a ring with no inner node.
 fn cap_fan(copies: &[usize], ring: &[usize], uv: &[[f64; 2]], pos: &[Vec3]) -> Option<Vec<[u32; 3]>> {
     let id = |k: usize| u32::try_from(k).ok();
     let groups: Vec<&[usize]> = copies.chunk_by(|a, b| pos.get(*a) == pos.get(*b)).collect();
@@ -1858,20 +1877,34 @@ fn cap_fan(copies: &[usize], ring: &[usize], uv: &[[f64; 2]], pos: &[Vec3]) -> O
         let at = *ring.get(to)?;
         for w in run.windows(2) {
             let (&a, &b) = (w.first()?, w.get(1)?);
-            tris.push([a, b, at]);
+            tris.push([b, a, at]);
         }
         if let Some(next) = groups.get(g + 1) {
-            tris.push([last_copy, *next.first()?, at]);
+            tris.push([*next.first()?, last_copy, at]);
         }
         from = to;
     }
     let last = *ring.get(inner_last)?;
     tris.push([cm, last, *ring.get(m)?]);
+    // Every triangle above runs the way the cap's polygon does (the ring from its start to its
+    // end, then the run back). The cap's polygon is simple, so triangles that all turn its way
+    // and share their sides as a fan does cover it exactly once: a triangle turning the other way
+    // (a run bending toward the ring past what its share of the ring can see) means an overlap,
+    // and the cap is not fanned.
+    let polygon: Vec<usize> = ring.iter().copied().chain(copies.iter().rev().copied()).collect();
+    let mut whole = 0.0;
+    for (k, &i) in polygon.iter().enumerate() {
+        let (p, q) = (*uv.get(i)?, *uv.get(*polygon.get((k + 1) % polygon.len())?)?);
+        whole += p[0] * q[1] - q[0] * p[1];
+    }
+    if !(whole.abs() > 0.0) {
+        return None;
+    }
     tris.into_iter()
         .map(|[a, b, c]| {
             let (qa, qb, qc) = (*uv.get(a)?, *uv.get(b)?, *uv.get(c)?);
             let area = (qb[0] - qa[0]) * (qc[1] - qa[1]) - (qb[1] - qa[1]) * (qc[0] - qa[0]);
-            if !(area.abs() > 0.0) {
+            if !(area * whole > 0.0) {
                 return None;
             }
             Some(if area > 0.0 { [id(a)?, id(b)?, id(c)?] } else { [id(a)?, id(c)?, id(b)?] })
