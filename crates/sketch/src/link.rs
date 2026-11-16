@@ -206,6 +206,15 @@ pub fn sketch_axis_geom(name: &str) -> Option<LinkGeom> {
     Some(LinkGeom::Line(Vec2::ZERO - u * SKETCH_AXIS_HALF, u * SKETCH_AXIS_HALF))
 }
 
+/// A source sketch's component frame relative to the author when a link was made.
+/// The document keeps source geometry live while assembly motion leaves this relationship fixed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SketchPlacement {
+    pub sketch: u64,
+    pub placement: [[f64; 4]; 4],
+}
+
 /// One link and its state.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Link {
@@ -213,6 +222,8 @@ pub struct Link {
     #[serde(default)]
     pub kind: LinkKind,
     pub source: LinkSource,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sketch_placements: Vec<SketchPlacement>,
     /// Persistent model face identity, resolved by the document before geometry refresh.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub face_name: Option<String>,
@@ -780,6 +791,7 @@ impl Sketch {
         }
         let id = self.fresh("j")?;
         self.links.push(Link {
+            sketch_placements: Vec::new(),
             id: id.clone(),
             kind,
             source,

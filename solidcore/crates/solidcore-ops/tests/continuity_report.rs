@@ -1,7 +1,9 @@
 //! #3142: the edge-continuity check and edge combs through ops, on record order, against closed
 //! forms: a box's edges are G0 right angles; a round of radius r between two of its faces meets
 //! each tangentially (G1), its curvature jumping by 1 / r; a cylinder's circles have teeth of
-//! length 1 / R pointing at the axis.
+//! length 1 / R pointing at the axis. Separate sheets: where their boundary edges meet, each
+//! seam measured as the same pair sewn into one body measures it; sheets apart have none; a seam
+//! over part of an edge runs over that part only.
 
 #![allow(
     clippy::unwrap_used,
@@ -13,8 +15,10 @@
 mod common;
 
 use common::edge_at;
-use solidcore_ops::continuity::{ContinuityTolerances, G1AllAlong};
-use solidcore_ops::{blend, make_box, make_cylinder, Blend, Corners};
+use solidcore_ops::continuity::{sheet_seams, ContinuityTolerances, G1AllAlong, SeamReport};
+use solidcore_ops::stitch::sew;
+use solidcore_ops::sweep::{loft, Curve};
+use solidcore_ops::{blend, make_box, make_cylinder, Blend, Body, Corners, Error, Order};
 
 /// SolidCraft's tolerances, the caller's: a micron, a degree, 1/100 mm and a tenth of that
 /// again per millimetre twice.
@@ -109,4 +113,186 @@ fn a_cylinder_s_circles_comb_towards_the_axis() {
         }
     }
     assert_eq!(circles, 2, "the top and bottom circles");
+}
+
+/// The sheet skinned through lines along x from `x[0]` to `x[1]`, one at each `(y, z)`.
+fn skinned(x: [f64; 2], sections: &[(f64, f64)]) -> (Body, Order) {
+    let lines: Vec<Vec<Curve>> = sections
+        .iter()
+        .map(|&(y, z)| {
+            vec![Curve::Line {
+                start: [x[0], y, z],
+                end: [x[1], y, z],
+            }]
+        })
+        .collect();
+    let body = loft(&lines, 2, false).unwrap();
+    let (_, order) = body.to_record().unwrap();
+    (body, order)
+}
+
+/// The largest of each order's measures over a seam's stations.
+fn worst(s: &SeamReport) -> [f64; 3] {
+    let mut w = [0.0_f64; 3];
+    for st in &s.stations {
+        w[0] = w[0].max(st.gap_mm);
+        w[1] = w[1].max(st.normal_angle_rad);
+        w[2] = w[2].max(st.curvature_jump_per_mm);
+    }
+    w
+}
+
+/// The zone within which boundary edges count as meeting: a hundredth of a millimetre.
+const ZONE: f64 = 1e-2;
+
+/// A flat sheet up to y = 0 and a sheet bending up from it (z = 0, 1, 4 at y = 0, 10, 20),
+/// skinned to share the line y = z = 0 from x = 0 to 10, the second either way across: one
+/// seam, G0, measured as the same two sewn into one body measure it.
+#[test]
+fn two_sheets_sharing_an_edge_meet_in_one_seam_measured_as_when_sewn() {
+    let flat = skinned([0.0, 10.0], &[(-20.0, 0.0), (-10.0, 0.0), (0.0, 0.0)]);
+    let up = [(0.0, 0.0), (10.0, 1.0), (20.0, 4.0)];
+    let reversed: Vec<_> = up.iter().rev().copied().collect();
+    for sections in [up.to_vec(), reversed] {
+        let bent = skinned([0.0, 10.0], &sections);
+        let r = sheet_seams(
+            &[(&flat.0, &flat.1), (&bent.0, &bent.1)],
+            ZONE,
+            9,
+            tolerances(),
+        )
+        .unwrap();
+        assert_eq!(r.seams.len(), 1, "{r:?}");
+        assert!(r.unproved.is_empty() && r.unmeasured.is_empty(), "{r:?}");
+        let seam = &r.seams[0];
+        assert_eq!(seam.sheets, [0, 1]);
+        assert_eq!(seam.report.edge, seam.edges[0]);
+        assert_eq!(seam.along, [[0.0, 1.0]; 2], "the whole of both edges");
+        assert_eq!(seam.report.stations.len(), 9);
+        for st in &seam.report.stations {
+            assert!(
+                st.point[1].abs() <= 1e-12 && st.point[2].abs() <= 1e-12,
+                "{st:?}"
+            );
+            assert!(st.gap_mm <= 1e-12, "{st:?}");
+        }
+        assert!(seam.report.order_at_stations >= Some(0), "G0: {seam:?}");
+
+        let sewn = sew(&[&flat.0, &bent.0], ZONE).unwrap();
+        let (_, order) = sewn.body.to_record().unwrap();
+        let whole = sewn
+            .body
+            .continuity_report(&order, &[], 9, tolerances())
+            .unwrap();
+        assert_eq!(whole.seams.len(), 1, "{whole:?}");
+        let joined = &whole.seams[0];
+        assert_eq!(seam.report.order_at_stations, joined.order_at_stations);
+        let (w, j) = (worst(&seam.report), worst(joined));
+        for o in 0..3 {
+            assert!((w[o] - j[o]).abs() <= 1e-9, "G{o}: {w:?} apart, {j:?} sewn");
+        }
+        // the proof of G1 all along runs on one edge between two face uses
+        assert!(
+            matches!(seam.report.g1_all_along, G1AllAlong::NotDecided(_)),
+            "{seam:?}"
+        );
+    }
+}
+
+/// Two sheets whose nearest edges are half a millimetre apart do not meet at a hundredth.
+#[test]
+fn sheets_half_a_millimetre_apart_have_no_seam() {
+    let a = skinned([0.0, 10.0], &[(-20.0, 0.0), (-10.0, 0.0), (0.0, 0.0)]);
+    let b = skinned([0.0, 10.0], &[(0.5, 0.0), (10.0, 0.0), (20.0, 0.0)]);
+    let r = sheet_seams(&[(&a.0, &a.1), (&b.0, &b.1)], ZONE, 9, tolerances()).unwrap();
+    assert!(r.seams.is_empty() && r.unproved.is_empty(), "{r:?}");
+}
+
+/// A sheet along y = 0 from x = 0 to 10 and one from x = 5 to 15 share x = 5 to 10: one seam
+/// over that half of each edge, its stations from x = 5 to 10; the corners where the other
+/// edges touch the shared line are points, not seams.
+#[test]
+fn sheets_sharing_half_an_edge_meet_over_that_half() {
+    let a = skinned([0.0, 10.0], &[(-20.0, 0.0), (-10.0, 0.0), (0.0, 0.0)]);
+    let b = skinned([5.0, 15.0], &[(0.0, 0.0), (10.0, 0.0), (20.0, 0.0)]);
+    let r = sheet_seams(&[(&a.0, &a.1), (&b.0, &b.1)], ZONE, 9, tolerances()).unwrap();
+    assert_eq!(r.seams.len(), 1, "{r:?}");
+    assert!(r.unproved.is_empty() && r.unmeasured.is_empty(), "{r:?}");
+    let seam = &r.seams[0];
+    let half = |[s, e]: [f64; 2]| {
+        let (lo, hi) = (s.min(e), s.max(e));
+        ((lo - 0.5).abs() <= 1e-12 && (hi - 1.0).abs() <= 1e-12)
+            || (lo.abs() <= 1e-12 && (hi - 0.5).abs() <= 1e-12)
+    };
+    assert!(half(seam.along[0]) && half(seam.along[1]), "{seam:?}");
+    let xs: Vec<f64> = seam.report.stations.iter().map(|st| st.point[0]).collect();
+    assert_eq!(xs.len(), 9);
+    let (lo, hi) = xs
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), &x| {
+            (l.min(x), h.max(x))
+        });
+    assert!(
+        (lo - 5.0).abs() <= 1e-9 && (hi - 10.0).abs() <= 1e-9,
+        "{xs:?}"
+    );
+    for st in &seam.report.stations {
+        assert!(st.point[1].abs() <= 1e-12, "{st:?}");
+        assert!(st.gap_mm <= 1e-12 && st.normal_angle_rad <= 1e-12, "{st:?}");
+    }
+    assert_eq!(
+        seam.report.order_at_stations,
+        Some(4),
+        "one plane: {seam:?}"
+    );
+}
+
+/// Hostile input is refused: a zone or a tolerance not finite and positive, a station count
+/// out of range, fewer than two sheets, a sheet given twice.
+#[test]
+fn hostile_sheet_seam_input_is_refused() {
+    let a = skinned([0.0, 10.0], &[(-20.0, 0.0), (-10.0, 0.0), (0.0, 0.0)]);
+    let b = skinned([0.0, 10.0], &[(0.0, 0.0), (10.0, 0.0), (20.0, 0.0)]);
+    let both = [(&a.0, &a.1), (&b.0, &b.1)];
+    for zone in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(
+            sheet_seams(&both, zone, 9, tolerances()).unwrap_err(),
+            Error::Argument,
+            "{zone}"
+        );
+    }
+    for stations in [0, 2, 258, usize::MAX] {
+        assert_eq!(
+            sheet_seams(&both, ZONE, stations, tolerances()).unwrap_err(),
+            Error::Argument
+        );
+    }
+    let mut bad = tolerances();
+    bad.curvature_per_mm = f64::NAN;
+    assert_eq!(
+        sheet_seams(&both, ZONE, 9, bad).unwrap_err(),
+        Error::Argument
+    );
+    bad = tolerances();
+    bad.gap_mm = -1.0;
+    assert_eq!(
+        sheet_seams(&both, ZONE, 9, bad).unwrap_err(),
+        Error::Argument
+    );
+    assert_eq!(
+        sheet_seams(&both[..1], ZONE, 9, tolerances()).unwrap_err(),
+        Error::Argument
+    );
+    assert_eq!(
+        sheet_seams(&[], ZONE, 9, tolerances()).unwrap_err(),
+        Error::Argument
+    );
+    assert_eq!(
+        sheet_seams(&[(&a.0, &a.1), (&a.0, &a.1)], ZONE, 9, tolerances()).unwrap_err(),
+        Error::Argument
+    );
+    // an order of another body: an answer or a refusal, never a panic
+    let boxed = make_box([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+    let (_, box_order) = boxed.to_record().unwrap();
+    let _ = sheet_seams(&[(&a.0, &box_order), (&b.0, &b.1)], ZONE, 9, tolerances());
 }
