@@ -141,6 +141,7 @@ use crate::intersect::point_class::{
 use crate::kernel::Kernel;
 use crate::math::{max2, min3, Point2, Point3, Vec3, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_surface::BSplineSurface;
+use crate::nurbs::b_spline_surface::BSplineSurfaceForm;
 use crate::nurbs::b_spline_surface::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -928,16 +929,28 @@ fn cell_patch(k: &Kernel, surface: &Surface, cell: &Extent2d) -> Result<Option<B
     let Some(base) = patch_base(k, surface)? else {
         return Ok(None);
     };
-    // The surface is the image of its natural domain: it has no point past it, so the
-    // face's points in `cell` are the surface's over `cell` intersected with that domain,
-    // the rectangle CopySubPatch extracts (it takes the same intersection). That
-    // intersection is the cell the patch must cover; it is exact (min/max, no tolerance).
-    // A face's domain can overhang its surface's: WR-660's swept cap has a face domain
-    // from u -2.6100000000000123 on a surface whose domain starts at -2.610000000000012,
-    // and comparing the patch with the unintersected cell refused every cell on that side.
+    // A B-spline surface's evaluation (`Evaluate`) clamps a parameter past its natural
+    // domain onto it, unless the surface is in power-basis form or evaluates out of bounds
+    // (`b_spline_surface_n_lib`'s `evaluate_impl`). When it clamps, the surface has no point
+    // past its domain: the face's points in `cell` are the surface's over `cell`
+    // intersected with that domain. That rectangle is what CopySubPatch extracts (it
+    // takes the same intersection), so it is the cell the patch must cover. It is exact
+    // (min/max, no tolerance). A face's domain can overhang its surface's: WR-660's swept
+    // cap has a face domain from u -2.6100000000000123 on a surface whose domain starts at
+    // -2.610000000000012, and comparing the patch with the raw cell refused every cell on
+    // that side. Any other surface (an extrapolating B-spline, or a kind evaluated other
+    // than through its base) keeps the raw cell, which a patch short of it does not decide.
     // A cell disjoint from the domain has no subpatch (as before: CopySubPatch fails).
-    let Ok(cell) = base.natural_uv_domain().intersect(cell) else {
-        return Ok(None);
+    let clamps = matches!(surface.kind(), SurfaceKind::BSpline(_))
+        && base.form() != BSplineSurfaceForm::Polynomial
+        && !base.is_out_of_bounds_enabled();
+    let cell = if clamps {
+        let Ok(inside) = base.natural_uv_domain().intersect(cell) else {
+            return Ok(None);
+        };
+        inside
+    } else {
+        *cell
     };
     let cell = &cell;
     // CopySubPatch snaps to knots: a patch short of the cell says nothing about the rest.
@@ -1153,7 +1166,8 @@ fn loose_top(
 /// A bound on `S . dir` over a cell [`face_directed_max`] leaves at its limits unsolved or
 /// with control points (#13753):
 /// its subpatch's control-point hull (`hull`, from [`patch_hull_max`]) raised by the
-/// subpatch's rounding ([`sub_patch_rounding`]); without a subpatch, or when that rounding
+/// subpatch's rounding ([`sub_patch_rounding`]) and, for a procedural blend, by its net's
+/// certified distance from its definition; without a subpatch, or when that rounding
 /// has no finite bound (a weight not positive, a NaN or an overflow anywhere in the base's
 /// net), the surface's loose box over the cell ([`loose_top`]), the bound the search
 /// already takes for an unsolved cell without a subpatch.
@@ -1172,10 +1186,17 @@ fn unsolved_cell_top(
     hull: Option<f64>,
     dir: Vec3,
 ) -> Result<f64> {
+    // A procedural blend's base is its net, which lies within the definition's certified
+    // bound of the surface (`|B - S| <= bound`); its evaluation answers from the
+    // definition where the net does not, so the net's hull bounds S raised by that bound.
+    let net_gap = match surface.kind() {
+        SurfaceKind::ProceduralBlend(pb) => pb.def.bound,
+        _ => 0.0,
+    };
     let rounded = match hull {
         Some(hull) => patch_base(k, surface)?
             .and_then(sub_patch_rounding)
-            .map(|rounding| hull + rounding)
+            .map(|rounding| hull + rounding + net_gap)
             .filter(|top| top.is_finite()),
         None => None,
     };
@@ -3655,6 +3676,55 @@ mod tests {
         assert!(top >= 1e100, "loose top {top}");
     }
 
+    /// A procedural blend's base is its net, which lies within the definition's certified
+    /// bound of the surface its evaluation answers from: a cell bounded by the net's hull
+    /// is raised by that bound as well as by the hull's rounding.
+    #[test]
+    fn a_procedural_blends_hull_is_raised_by_its_nets_bound() {
+        use crate::surface::procedural_blend::{BlendDefinitionInput, ProceduralBlend};
+        let square = |z: f64| {
+            BSplineSurface::create_bilinear_surface(
+                Point3::new(0.0, 0.0, z),
+                Point3::new(10.0, 0.0, z),
+                Point3::new(0.0, 10.0, z),
+                Point3::new(10.0, 10.0, z),
+            )
+            .unwrap()
+        };
+        let line = || {
+            crate::nurbs::b_spline_curve::BSplineCurve::create_line_segment(
+                3,
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(1.0, 0.0, 0.0),
+            )
+            .unwrap()
+        };
+        let (s0, s1) = (Surface::from(square(0.0)), Surface::from(square(1.0)));
+        let (leader, seed0, seed1) = (line(), line(), line());
+        let bound = 1e-3;
+        let input = BlendDefinitionInput {
+            supports: [&s0, &s1],
+            sides: [1.0, 1.0],
+            offsets: [2.0, 2.0],
+            law: None,
+            order: 1,
+            thumbweight: 0.0,
+            leader: &leader,
+            seeds: [&seed0, &seed1],
+            bound,
+            chamfer: None,
+        };
+        let k0 = Kernel::default();
+        let pb = ProceduralBlend::create(&k0, &square(0.5), &input, |_, w| w < 1.0).unwrap();
+        let rounding = sub_patch_rounding(pb.net()).unwrap();
+        let blend = Surface::from(pb);
+        let (k, b, f) = crowned_trimmed_face(0.0);
+        let lb: LazyBrep<'_> = (&b).into();
+        let cell = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let top = unsolved_cell_top(&k, &lb, f, &blend, &cell, Some(0.5), Vec3::Z).unwrap();
+        assert!(top >= 0.5 + rounding + bound, "top {top}");
+    }
+
     /// The surface's global maximum lies inside the trim (no peak outside): the face's
     /// extreme 4, as upstream's global solve gives it.
     #[test]
@@ -3665,7 +3735,8 @@ mod tests {
 
     /// WR-660's swept cap: a cell past its surface's domain (by one ulp, or by more) has
     /// the surface's points over its intersection with that domain, and the subpatch over
-    /// that intersection decides it; a cell clear of the domain has no subpatch.
+    /// that intersection decides it; a cell clear of the domain has no subpatch, and nor
+    /// has a cell past the domain of a surface that evaluates out of bounds.
     #[test]
     fn a_cell_past_its_surfaces_domain_is_decided_on_the_part_inside_it() {
         let k = Kernel::default();
@@ -3682,6 +3753,15 @@ mod tests {
         );
         let clear = Extent2d::from_bounds(21.0, -20.0, 22.0, 20.0);
         assert!(cell_patch(&k, &surface, &clear).unwrap().is_none());
+        // Evaluating out of bounds, the surface extrapolates past its domain: the
+        // subpatch over the intersection does not hold those points, so it decides nothing.
+        let SurfaceKind::BSpline(bs) = surface.kind() else {
+            panic!("a B-spline");
+        };
+        bs.set_out_of_bounds_enabled_in_place(true);
+        assert!(cell_patch(&k, &surface, &cell).unwrap().is_none());
+        let inside = Extent2d::from_bounds(-20.0, -20.0, -5.0, 20.0);
+        assert!(cell_patch(&k, &surface, &inside).unwrap().is_some());
     }
 
     /// A face made over a UV domain far smaller than the tolerance has no vertex and no
