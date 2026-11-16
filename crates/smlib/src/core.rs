@@ -87,7 +87,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.bspline_trim_preserves_uv_spans = true;
     f.boolean_vertex_by_best_crossing = true;
     f.classify_edge_interval = true;
-    f.degenerate_proto_edge_in_one_vertex = true;
     f.new_edge_vertex_tolerance_covers_gap = true;
     f.point_solve_keeps_triangle_guess = true;
     f.imprint_extends_edge_to_proto_vertex = true;

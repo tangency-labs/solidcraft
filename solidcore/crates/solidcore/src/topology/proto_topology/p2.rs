@@ -78,12 +78,15 @@
 //!   whole curve stays within its ends' reach of the definition (a certain hull of the
 //!   curve, `curve_piece_within`); a curve that leaves it is refused. The `SM_ERR` trigger
 //!   is confirmed on the C++ build (WR-214); the failing body is Rust-measured.
-//! - **Opt-in fix (WR-306, #1058).** With `Kernel::fixes.degenerate_proto_edge_in_one_vertex`,
-//!   [`ProtoTopologyManager::resolve_proto_edge`] treats a proto edge from a proto vertex
-//!   back to itself whose curve ends find one vertex definition as degenerate below twice
-//!   the proto vertex's containment radius (`ContainsPoint`'s), not twice its own
-//!   tolerance, and marks the proto vertex as having absorbed it; the Boolean's
-//!   `ImprintIntersections` then fits that vertex to its edges (the SMLib fork's fix).
+//! - **Not upstream (WR-306, #1058).** [`ProtoTopologyManager::resolve_proto_edge`] also
+//!   treats a proto edge from a proto vertex back to itself as degenerate when its curve
+//!   ends find one vertex definition and every definition's curve provably lies within that
+//!   definition's tolerance of its position (a certified hull, `curve_piece_within`), and
+//!   marks the proto vertex as having absorbed it; the Boolean's `ImprintIntersections`
+//!   then fits that vertex to its edges. The SMLib fork's fix bounded the curve's length by
+//!   twice the proto vertex's containment radius instead, which is at least the capture
+//!   distance (0.01 in the Boolean), so it absorbed real closed curves (a circle of radius
+//!   1e-3) and replaced upstream's `2 * m_dTol` test instead of adding to it.
 //! - **Opt-in fix (WR-579, #1517).** With `Kernel::fixes.proto_edge_splits_at_captured_vertices`,
 //!   [`ProtoTopologyManager::resolve_proto_edge`] splits a proto edge from a proto vertex
 //!   back to itself whose curve ends find two of its definitions at each other definition
@@ -157,7 +160,6 @@ use crate::math::{max2, max3, max4, min2, Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::math::gamma;
-use crate::query::face::p2::proto_vertex_containment_radius;
 use crate::surface::surface::exact_pieces::{common_trim_interval, trim_unsnapped};
 use crate::surface::surface::p2::SurfaceKind;
 use crate::topology::brep::p5::{make_edge_in_face_in, EdgeInFace};
@@ -2129,6 +2131,44 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         Ok(())
     }
 
+    /// Not upstream (WR-306, #1058): whether the proto edge from `start` back to itself,
+    /// with first curve `int_curve` and definitions `eds`, is a speck its vertex holds.
+    /// That needs both of `int_curve`'s ends to find one vertex definition of `start`,
+    /// and every definition's curve, over its own interval, to lie within that
+    /// definition's tolerance of its position, decided on a certified hull of the curve
+    /// ([`curve_piece_within`]). The vertex made from that definition then stands for
+    /// the whole curve. A curve with no certain hull, or one reaching past the
+    /// tolerance, is not absorbed: the capture distance, which only says how far apart
+    /// definitions are merged, never decides it.
+    fn curve_inside_one_vertex(
+        &self,
+        k: &Kernel,
+        brep: &impl ProtoBrep<O>,
+        start: Option<ProtoVertexId>,
+        int_curve: &Curve,
+        eds: &[EdgeDefId],
+    ) -> Result<bool> {
+        let ends = int_curve.ends(k)?;
+        let start = self.pv_live(start)?;
+        let Some(vd0) = self.closest_vertex_definition(start, ends.start)? else {
+            return Ok(false);
+        };
+        if self.closest_vertex_definition(start, ends.end)? != Some(vd0) {
+            return Ok(false);
+        }
+        let v0 = self.vd_ref(vd0)?;
+        let (centre, reach) = (v0.position(), v0.tolerance(k));
+        for &ed in eds {
+            let d = self.ed_ref(ed)?;
+            let ivl = d.xsect_interval();
+            let curve = curve_of(brep, d.xsect_curve_3d())?;
+            if !curve_piece_within(curve, &ivl, centre, reach) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     /// Resolves the proto edge `pe` (`Resolve`). A proto edge from a proto vertex to
     /// itself loses its definitions when its first curve is shorter than twice its
     /// tolerance; when it is longer with ends farther apart than that, the start proto
@@ -2170,28 +2210,15 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             let int_curve = curve_of(brep, self.ed_ref(first)?.xsect_curve_3d())?;
             let (len, _) = int_curve.approximate_length(k, &pe_ivl, 5, false)?;
 
-            // WR-306 (opt-in): ends that find one vertex definition become one vertex in
-            // each B-rep, so a curve shorter than the proto vertex's containment ball is
-            // wide is that vertex, not a closed edge on it. Ends on two vertex definitions
-            // keep upstream's test against our own tolerance.
-            let absorb = k.fixes.degenerate_proto_edge_in_one_vertex;
-            let degenerate_len = if absorb {
-                let ends = int_curve.ends(k)?;
-                let start = self.pv_live(start)?;
-                let vd0 = self.closest_vertex_definition(start, ends.start)?;
-                if vd0 == self.closest_vertex_definition(start, ends.end)? {
-                    let pv = self
-                        .proto_vertex(start)
-                        .ok_or(dangling("proto vertex is deleted"))?;
-                    2.0 * proto_vertex_containment_radius(self, pv)
-                } else {
-                    2.0 * pe_tol
-                }
-            } else {
-                2.0 * pe_tol
-            };
+            // Not upstream (WR-306, #1058): a curve whose ends find one vertex definition
+            // and that provably lies within that definition's tolerance is that vertex,
+            // not a closed edge on it. Upstream's test against twice our own tolerance
+            // stays as it is.
+            let short = len < 2.0 * pe_tol;
+            let absorb =
+                !short && self.curve_inside_one_vertex(k, &*brep, start, int_curve, &eds)?;
 
-            if len < degenerate_len {
+            if short || absorb {
                 if absorb {
                     // The edges that end on our proto vertex end on our curve, up to its
                     // length away from the vertex: ImprintIntersections fits the vertex
@@ -4137,15 +4164,16 @@ mod tests {
 
     #[test]
     fn resolve_self_loop_inside_one_vertex_is_absorbed() {
-        // tangency-labs/solidcore#1058 (WR-306): both ends of the 5e-5 curve find the one
-        // vertex definition, and the 0.01 capture distance makes the proto vertex's
-        // containment ball far wider than the curve: with the opt-in the proto edge is
-        // that vertex (dropped, the proto vertex marked); without it, upstream's split.
-        for absorb in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.degenerate_proto_edge_in_one_vertex = absorb;
+        // tangency-labs/solidcore#1058 (WR-306): both ends of the line find the one vertex
+        // definition (tolerance 1e-4), and the 0.01 capture distance makes the proto
+        // vertex's containment ball far wider than either line. The 5e-5 line lies within
+        // the definition's tolerance, so the proto edge is that vertex (dropped, the proto
+        // vertex marked). The 5e-4 line reaches past it: a real curve, which the capture
+        // distance alone never absorbs, so upstream's split runs.
+        for (length, absorbed) in [(5e-5, true), (5e-4, false)] {
+            let k = Kernel::default();
             let mut geo = Geo::default();
-            geo.curves.push(line([0.0, 0.0, 0.0], [5e-5, 0.0, 0.0]));
+            geo.curves.push(line([0.0, 0.0, 0.0], [length, 0.0, 0.0]));
             let c0 = H(0, ClassObjectKind::Curve);
             let mut m = manager();
             m.set_capture_distance(0.01);
@@ -4153,7 +4181,7 @@ mod tests {
             let pv = m.new_proto_vertex(p, 1e-5).unwrap();
             m.add_proto_vertex(pv);
             let (pc1, pc2) = (region_pc(R0), region_pc(R1));
-            let vd = VertexDefinition::new(&k, &geo, &pc1, &pc2, p, 1e-5, 1e-9, None).unwrap();
+            let vd = VertexDefinition::new(&k, &geo, &pc1, &pc2, p, 1e-4, 1e-9, None).unwrap();
             let vd = m.insert_vertex_definition(vd).unwrap();
             m.add_vertex_definition(pv, vd).unwrap();
 
@@ -4167,8 +4195,13 @@ mod tests {
             let pe = m
                 .create_proto_edge(&k, &mut geo, Some(pv), Some(pv), &cc, &ci1, &cc, &ci2)
                 .unwrap();
+            let pe_tol = m.proto_edge(pe).unwrap().raw_tolerance();
+            assert!(
+                length >= 2.0 * pe_tol,
+                "{length:e} is past upstream's short test"
+            );
             let result = m.resolve_proto_edge(&k, &mut geo, pe);
-            if absorb {
+            if absorbed {
                 assert_eq!(
                     result.unwrap().len(),
                     1,
@@ -4183,6 +4216,18 @@ mod tests {
                 assert!(!m.proto_vertex(pv).unwrap().absorbed_proto_edge());
             }
         }
+    }
+
+    /// The hull bound is met on the whole curve: a line from the vertex is inside a reach
+    /// longer than it, not one shorter, and a NaN reach never holds it.
+    #[test]
+    fn curve_inside_one_vertex_needs_the_whole_hull_within_the_tolerance() {
+        let near = line([0.0, 0.0, 0.0], [5e-5, 0.0, 0.0]);
+        let ivl = near.natural_interval();
+        let o = Point3::new(0.0, 0.0, 0.0);
+        assert!(curve_piece_within(&near, &ivl, o, 1e-4));
+        assert!(!curve_piece_within(&near, &ivl, o, 4e-5));
+        assert!(!curve_piece_within(&near, &ivl, o, f64::NAN));
     }
 
     #[test]

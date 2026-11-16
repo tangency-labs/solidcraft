@@ -36,7 +36,6 @@
   "boolean_vertex_by_best_crossing",
   "proto_edge_splits_at_captured_vertices",
   "classify_edge_interval",
-  "degenerate_proto_edge_in_one_vertex",
   "new_edge_vertex_tolerance_covers_gap",
   "found_torus_sphere_keep_tested_nurb",
   "point_solve_keeps_triangle_guess",

@@ -61,10 +61,10 @@
 //! - **Passed-on statuses (WR-658).** The statuses SMLib drops are returned, as the
 //!   fork returns them, except a tolerance update refused as too small, which is a
 //!   no-op (`tolerance_updated`).
-//! - **Opt-in fix (WR-306, #1058).** With `Kernel::fixes.degenerate_proto_edge_in_one_vertex`,
-//!   `ImprintIntersections` fits each final vertex of a proto vertex that absorbed a
-//!   degenerate proto edge to its edges (`IntersectorBrep::vertex_update_edge_intervals`)
-//!   and raises the pair's tolerances to cover each other (the SMLib fork's fix).
+//! - **Not upstream (WR-306, #1058).** `ImprintIntersections` fits each final vertex of a
+//!   proto vertex that absorbed a degenerate proto edge to its edges
+//!   (`IntersectorBrep::vertex_update_edge_intervals`) and raises the pair's tolerances to
+//!   cover each other (the SMLib fork's fix).
 //! - **Intersection trims (issue #489).** `FaceFaceIntersect` supplies a copy of
 //!   each classification's current UV curve to `MakeEdgeInFace`. Upstream passes
 //!   null here and projects the 3D curve again. The copy keeps the intersection's
@@ -2311,50 +2311,48 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
         }
 
-        // WR-306 (opt-in, the SMLib fork's fix): a proto vertex that absorbed a degenerate
+        // Not upstream (WR-306, the SMLib fork's fix): a proto vertex that absorbed a degenerate
         // proto edge (`resolve_proto_edge`) is one vertex for a curve that ran a little way
         // through it, so the edges ending there end on that curve, not on the vertex's
         // point. Fit each such vertex to its edges, as CombineCoincidentVertices does when
         // it squeezes a short edge away. Its two vertices, one in each B-rep, will be
         // related as one, so each tolerance also covers the other's.
-        if k.fixes.degenerate_proto_edge_in_one_vertex {
-            let pvs = mgr.proto_vertices().to_vec();
-            for pv in pvs {
-                let proto_vertex = mgr
-                    .proto_vertex(pv)
-                    .ok_or(dangling("proto vertex is deleted"))?;
-                if !proto_vertex.absorbed_proto_edge() {
-                    continue;
-                }
-                let vds = proto_vertex.vertex_definitions().to_vec();
-                for vd in vds {
-                    let def = mgr
-                        .vertex_def(vd)
-                        .ok_or(dangling("vertex definition is deleted"))?;
-                    let vtx = [def.final_vertex(1), def.final_vertex(2)];
-                    for v in vtx.into_iter().flatten() {
-                        if brep.vertex_brep(v)?.is_none() {
-                            continue;
-                        }
-                        // Record the first problem.
-                        record(brep.vertex_update_edge_intervals(k, v), ret)?;
-                    }
-                    let [Some(v0), Some(v1)] = vtx else {
+        let pvs = mgr.proto_vertices().to_vec();
+        for pv in pvs {
+            let proto_vertex = mgr
+                .proto_vertex(pv)
+                .ok_or(dangling("proto vertex is deleted"))?;
+            if !proto_vertex.absorbed_proto_edge() {
+                continue;
+            }
+            let vds = proto_vertex.vertex_definitions().to_vec();
+            for vd in vds {
+                let def = mgr
+                    .vertex_def(vd)
+                    .ok_or(dangling("vertex definition is deleted"))?;
+                let vtx = [def.final_vertex(1), def.final_vertex(2)];
+                for v in vtx.into_iter().flatten() {
+                    if brep.vertex_brep(v)?.is_none() {
                         continue;
-                    };
-                    let p0 = ClassGeometry::classification_vertex_point(&*brep, v0)
-                        .ok_or(dangling("vertex has no point"))?;
-                    let p1 = ClassGeometry::classification_vertex_point(&*brep, v1)
-                        .ok_or(dangling("vertex has no point"))?;
-                    let apart = p0.distance(p1);
-                    let tol0 = ProtoBrep::topology_tolerance(&*brep, v0)
-                        .ok_or(dangling("vertex has no tolerance"))?;
-                    let tol1 = ProtoBrep::topology_tolerance(&*brep, v1)
-                        .ok_or(dangling("vertex has no tolerance"))?;
-                    // Will set it only if larger.
-                    brep.set_topology_tolerance(k, v0, tol1 + 2.0 * apart, true, true)?;
-                    brep.set_topology_tolerance(k, v1, tol0 + 2.0 * apart, true, true)?;
+                    }
+                    // Record the first problem.
+                    record(brep.vertex_update_edge_intervals(k, v), ret)?;
                 }
+                let [Some(v0), Some(v1)] = vtx else {
+                    continue;
+                };
+                let p0 = ClassGeometry::classification_vertex_point(&*brep, v0)
+                    .ok_or(dangling("vertex has no point"))?;
+                let p1 = ClassGeometry::classification_vertex_point(&*brep, v1)
+                    .ok_or(dangling("vertex has no point"))?;
+                let apart = p0.distance(p1);
+                let tol0 = ProtoBrep::topology_tolerance(&*brep, v0)
+                    .ok_or(dangling("vertex has no tolerance"))?;
+                let tol1 = ProtoBrep::topology_tolerance(&*brep, v1)
+                    .ok_or(dangling("vertex has no tolerance"))?;
+                // Will set it only if larger.
+                brep.set_topology_tolerance(k, v0, tol1 + 2.0 * apart, true, true)?;
+                brep.set_topology_tolerance(k, v1, tol0 + 2.0 * apart, true, true)?;
             }
         }
 
