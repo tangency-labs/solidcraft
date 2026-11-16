@@ -10,6 +10,7 @@
 //! | [`curve_plane_crossings`]                             | (not upstream)                 |
 //! | [`intersect_surfaces`]                                | `SmApiIntersectSurfaces`       |
 //! | [`intersect_surfaces_within`]                         | (not upstream)                 |
+//! | `refuse_points_where_a_plane_crosses` (private)       | (not upstream)                 |
 //! | [`intersect_faces`], [`FaceBodies`], [`Intersections`] | `SmApiIntersectFaces`         |
 //! | [`intersect_breps`], [`BrepOperands`]                 | `SmApiIntersectBreps`          |
 //! | [`intersect_curve_surface`], [`CurveHits`]            | `SmApiIntersectCurveSurface`   |
@@ -43,14 +44,21 @@
 //! through the B-rep's [`BrepFaceServices`], so it reaches the face's trimmed cache as
 //! upstream's does through `GetFace()`; there the curve is a [`CurveFaceObject`] (a free
 //! curve with its natural interval). `SM_ASSERT_VALID` and the
-//! `SM_DEBUG_CODE` drawing are not ported.
+//! `SM_DEBUG_CODE` drawing are not ported. Not upstream (tangency-labs/solidcraft#17720):
+//! [`intersect_surfaces`] and [`intersect_surfaces_within`] refuse a result of touching
+//! points only, any farther from the surfaces than the other surface's own tolerance
+//! (and than the caller's tolerance of [`intersect_surfaces_within`], when larger),
+//! between a plane and a surface the plane crosses
+//! ([`IntersectFailure::PointsWhereAPlaneCrosses`]); upstream returns the points.
 
 use crate::curve::curve::Curve;
+use crate::error::intersect::IntersectFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::eval::Frame;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
+use crate::geom::extent3d::Extent3d;
 use crate::geom::solution_array::{
     ObjectKind, SolutionArray, SolutionEnd, SolutionObject, SolutionType,
 };
@@ -58,11 +66,12 @@ use crate::geom::tol::{zone_tol3d, USE_DEFAULT};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::point_class::PointClassType;
+use crate::intersect::surface_intersector::p1::SurfaceIntersector;
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::query::brep::{BrepFaceServices, CurveFaceObject, CurveFaceServices};
 use crate::surface::plane::Plane;
-use crate::surface::surface::Surface;
+use crate::surface::surface::{Surface, SurfaceIntersection, SurfaceKind, TsectCurveType};
 use crate::surface::surface_cache::face_context::FaceQueries;
 use crate::topology::brep::planar_section::{
     create_planar_section_curves, PlanarSectionOptions, SectionOutputs,
@@ -259,7 +268,10 @@ pub fn curve_crossings(
 ///
 /// # Errors
 ///
-/// In the status: `SM_ERR` when there is no intersection curve; those of the surface
+/// In the status: `SM_ERR` when there is no intersection curve;
+/// [`IntersectFailure::PointsWhereAPlaneCrosses`] (with no curves) when one surface is a
+/// plane, the intersection found only touching points, and the plane provably crosses the
+/// other surface (not upstream, which reports the points); those of the surface
 /// intersection.
 pub fn intersect_surfaces(
     k: &Kernel,
@@ -310,7 +322,171 @@ pub fn intersect_surfaces_within(
             Ok(())
         }
     });
+    if status.is_ok() {
+        let surfaces = [surface1, surface2];
+        let domains = [&domain1, &domain2];
+        if let Err(e) =
+            refuse_points_where_a_plane_crosses(k, surfaces, domains, approx_tol_3d, &result)
+        {
+            return (Vec::new(), Err(e));
+        }
+    }
     (result.curves_3d, status)
+}
+
+/// The witness grid of [`refuse_points_where_a_plane_crosses`]: the other surface is
+/// evaluated at `(i / N, j / N)` of its domain, `0 <= i, j <= N`.
+const CROSSING_WITNESS_STEPS: u32 = 16;
+
+/// How far, relative to the size of the points involved, a witness must lie from the
+/// plane: far above the rounding of the surface's evaluation and of the signed distance.
+const CROSSING_WITNESS_REL: f64 = 1e-9;
+
+/// Not upstream (tangency-labs/solidcraft#17720): refuses a result of touching points
+/// only between a plane and a surface the plane crosses.
+///
+/// With one operand a plane, the signed distance `f(uv) = n . (S(uv) - O)` of the other
+/// surface `S` is continuous on its rectangular domain. A point of the grid with `f`
+/// above the witness margin and one with `f` below minus it show that the zero set of
+/// `f` separates them in the domain, so it holds a continuum, not isolated points. When
+/// the other surface's box lies over the plane's domain, every zero is a point of both
+/// surfaces, so the intersection has a curve. Touching points are still an answer when
+/// each lies within the other surface's own tolerance of both surfaces (its deviation),
+/// as for a crossing curve smaller than that tolerance, or within `approx_tol_3d` when
+/// the caller gives a larger one (an answer at the size the caller asked for); a point
+/// farther apart than both is the wrong answer, and the result is refused. The grid
+/// only finds witnesses: a result with no witness on one side is kept as before, as is
+/// one whose tolerances cannot be computed.
+///
+/// # Errors
+///
+/// [`IntersectFailure::PointsWhereAPlaneCrosses`] when the result is touching points
+/// only and the plane crosses the other surface.
+fn refuse_points_where_a_plane_crosses(
+    k: &Kernel,
+    surfaces: [&Surface; 2],
+    domains: [&Extent2d; 2],
+    approx_tol_3d: Option<f64>,
+    result: &SurfaceIntersection,
+) -> Result<()> {
+    let only_touching = !result.curve_types.is_empty()
+        && result
+            .curve_types
+            .iter()
+            .all(|t| *t == TsectCurveType::Touching);
+    if !only_touching {
+        return Ok(());
+    }
+    let (plane_at, plane) = match (surfaces[0].kind(), surfaces[1].kind()) {
+        (SurfaceKind::Plane(p), _) => (0, p),
+        (_, SurfaceKind::Plane(p)) => (1, p),
+        _ => return Ok(()),
+    };
+    let other_at = 1 - plane_at;
+    let (Some(&plane_surface), Some(&other), Some(&plane_domain), Some(&other_domain)) = (
+        surfaces.get(plane_at),
+        surfaces.get(other_at),
+        domains.get(plane_at),
+        domains.get(other_at),
+    ) else {
+        return Ok(());
+    };
+    let (origin, normal, _) = plane.is_planar();
+
+    // every point of the other surface lies over the plane's domain: its box's corners
+    // project strictly inside the plane's parameter rectangle (orthogonal axes)
+    let Ok(boxes) = other.calculate_bounding_box(k, other_domain, [true, false, false], false)
+    else {
+        return Ok(());
+    };
+    let Some(other_box) = boxes.normal_box.filter(Extent3d::is_defined) else {
+        return Ok(());
+    };
+    let corner = |s: f64, t: f64| plane_surface.evaluate_point(k, plane_domain.evaluate(s, t));
+    let (Ok(c00), Ok(c10), Ok(c01)) = (corner(0.0, 0.0), corner(1.0, 0.0), corner(0.0, 1.0)) else {
+        return Ok(());
+    };
+    let (du, dv) = (c10 - c00, c01 - c00);
+    let (du2, dv2) = (du.dot(du), dv.dot(dv));
+    if !(du2 > 0.0 && dv2 > 0.0) {
+        return Ok(());
+    }
+    for corner_at in 0..8u32 {
+        let q = other_box.evaluate(
+            f64::from(corner_at & 1),
+            f64::from((corner_at >> 1) & 1),
+            f64::from((corner_at >> 2) & 1),
+        );
+        let (a, b) = ((q - c00).dot(du) / du2, (q - c00).dot(dv) / dv2);
+        // (written so that NaN keeps the result)
+        let inside = a > CROSSING_WITNESS_REL
+            && a < 1.0 - CROSSING_WITNESS_REL
+            && b > CROSSING_WITNESS_REL
+            && b < 1.0 - CROSSING_WITNESS_REL;
+        if !inside {
+            return Ok(());
+        }
+    }
+
+    // a witness on each side of the plane
+    let mut sides = [false, false];
+    let n = f64::from(CROSSING_WITNESS_STEPS);
+    for i in 0..=CROSSING_WITNESS_STEPS {
+        for j in 0..=CROSSING_WITNESS_STEPS {
+            let uv = other_domain.evaluate(f64::from(i) / n, f64::from(j) / n);
+            let Ok(p) = other.evaluate_point(k, uv) else {
+                continue;
+            };
+            let f = normal.dot(p - origin);
+            let margin = CROSSING_WITNESS_REL * (p.length() + origin.length());
+            if f > margin {
+                sides[0] = true;
+            } else if f < -margin {
+                sides[1] = true;
+            }
+        }
+    }
+    if sides != [true, true] {
+        return Ok(());
+    }
+
+    // (a tolerance that cannot be computed keeps the result, as the checks above do)
+    let Ok(other_first) =
+        SurfaceIntersector::new(k, other, other_domain, plane_surface, plane_domain, false)
+    else {
+        return Ok(());
+    };
+    let surface_tolerance = other_first.this_approx_tol_3d;
+    // a point within the other surface's own tolerance of both surfaces is an answer at
+    // that surface's size (a crossing curve smaller than the tolerance, as at a cone's
+    // apex), and one within the caller's tolerance is an answer at the size the caller
+    // asked for; only points farther apart than both are refused (a NaN deviation is
+    // not within)
+    let accepted = match approx_tol_3d {
+        Some(t) if t > surface_tolerance => t,
+        _ => surface_tolerance,
+    };
+    let within = result.deviations.len() == result.curve_types.len()
+        && result.deviations.iter().all(|d| *d <= accepted);
+    if within {
+        return Ok(());
+    }
+    let [s1, s2] = surfaces;
+    let [d1, d2] = domains;
+    let tolerance = match approx_tol_3d {
+        Some(t) => t,
+        None => match SurfaceIntersector::new(k, s1, d1, s2, d2, false) {
+            Ok(si) => si.this_approx_tol_3d,
+            Err(_) => return Ok(()),
+        },
+    };
+    Err(SolidError::intersect(
+        OP_SURFACES,
+        IntersectFailure::PointsWhereAPlaneCrosses {
+            tolerance,
+            surface_tolerance,
+        },
+    ))
 }
 
 /// The curves and points of [`intersect_faces`] and [`intersect_breps`].

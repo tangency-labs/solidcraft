@@ -356,7 +356,8 @@ pub struct SaveMeshResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub print_faces: Vec<String>,
     /// With `slicer` or `lay_on_print_faces` only: a warning for each body that has a print face but
-    /// was saved as it lies.
+    /// was saved as it lies, and for each face the mesh path left short of its smallest angle or
+    /// chord tolerance (led by its body's name).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
     /// With `slicer` only: what happened when the file was handed over.

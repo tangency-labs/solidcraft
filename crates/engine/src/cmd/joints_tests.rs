@@ -274,6 +274,56 @@ fn two_cubes() -> Session {
 }
 
 #[test]
+fn unground_reports_a_joint_whose_origin_was_removed() {
+    let mut s = two_cubes();
+    let b = occ(&s, "B");
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
+    run(&mut s, "solid.box", json!({"length": 6, "width": 6, "height": 3, "corner": [22, 2, -2], "operation": "join", "name": "Foot"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let joint = run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "name": "Foot joint", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, -2]}}),
+    )["joint"]
+        .clone();
+    run(&mut s, "timeline.suppress", json!({"feature": "Foot"}));
+    let before = s.doc.occurrences.iter().find(|o| o.id == b).unwrap().transform;
+    let reply = run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": false}));
+    assert_eq!(reply["grounded"], false);
+    assert_eq!(reply["errors"][0]["joint"], joint, "{reply}");
+    assert_eq!(reply["errors"][0]["name"], "Foot joint", "{reply}");
+    assert!(reply["errors"][0]["why"].as_str().unwrap().contains("no longer exists"), "{reply}");
+    assert_eq!(reply["moved"], json!([]), "{reply}");
+    assert_eq!(reply["transform"], json!(before), "{reply}");
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == b).unwrap().transform, before);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.occurrences.iter().find(|o| o.id == b).unwrap().grounded);
+}
+
+#[test]
+fn unground_reports_the_solved_placement_and_moves() {
+    let mut s = two_cubes();
+    let b = occ(&s, "B");
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
+    run(&mut s, "joint.create", json!({"type": "rigid", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 0]}}));
+    super::solve_counts::take();
+    let reply = run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": false}));
+    assert_eq!(reply["moved"], json!(["B:1"]), "{reply}");
+    assert_eq!(reply["errors"], json!([]), "{reply}");
+    assert_eq!(reply["conflicts"], json!([]), "{reply}");
+    assert_eq!(reply["transform"], json!(s.doc.occurrences.iter().find(|o| o.id == b).unwrap().transform));
+    assert!(near(place(&s, "B", Vec3::new(25., 5., 0.)), Vec3::new(5., 5., 10.)));
+    assert_eq!(super::solve_counts::take(), (1, 0), "unground and refresh share one placement solve");
+    // An already placed part does not need to move. That is not a failed placement.
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
+    let settled = run(&mut s, "occurrence.ground", json!({"occurrence": b}));
+    assert_eq!(settled["moved"], json!([]), "{settled}");
+    assert_eq!(settled["errors"], json!([]), "{settled}");
+    assert_eq!(settled["conflicts"], json!([]), "{settled}");
+    assert_eq!(settled["transform"], reply["transform"]);
+}
+
+#[test]
 fn slider_limits_clamp() {
     let mut s = two_cubes();
     // B's bottom face onto A's top face (faces meet), sliding along their common normal.
@@ -304,6 +354,112 @@ fn slider_limits_clamp() {
         .unwrap_or_default();
     run(&mut s, "parameters.change", json!({"name": h, "expression": "15"}));
     assert!(near(place(&s, "B", Vec3::new(25.0, 5.0, 0.0)), Vec3::new(5.0, 5.0, 19.0)), "{:?}", place(&s, "B", Vec3::new(25.0, 5.0, 0.0)));
+}
+
+/// X and Y remain separate from A's saved snap, so a reopened joint can edit either one.
+#[test]
+fn lateral_joint_offsets_reopen_edit_independently_and_undo() {
+    let mut s = two_cubes();
+    let result = run(
+        &mut s,
+        "joint.create",
+        json!({"type":"rigid", "name":"Offset joint", "flip":true, "angle":0,
+            "a":{"occurrence":"A", "point":[5,5,10], "z":[0,0,1], "x":[1,0,0]},
+            "b":{"occurrence":"B", "point":[25,5,0], "z":[0,0,1], "x":[1,0,0]},
+            "offset_x":"10 mm", "offset_y":"30 mm", "offset":30}),
+    );
+    assert_eq!(result["errors"], json!([]), "{result}");
+    let original_a = s.doc.assembly.joints[0].a.clone();
+    let probe = Vec3::new(25.0, 5.0, 0.0);
+    assert!(near(place(&s, "B", probe), Vec3::new(15.0, 35.0, 40.0)));
+    let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    let mut reopened = Session::new(doc);
+    assert_eq!(reopened.doc.assembly.joints[0].offset_xy, [10.0, 30.0]);
+    let before = reopened.doc.assembly.joints[0].clone();
+    run(&mut reopened, "joint.edit", json!({"joint":"Offset joint", "offset_x":"-2 mm"}));
+    assert_eq!(reopened.doc.assembly.joints[0].offset_xy, [-2.0, 30.0]);
+    assert_eq!(reopened.doc.assembly.joints[0].a, original_a);
+    assert!(near(place(&reopened, "B", probe), Vec3::new(3.0, 35.0, 40.0)));
+    for command in ["joint.list", "joint.inspect"] {
+        let report = run(&mut reopened, command, json!({}));
+        assert_eq!(report["joints"][0]["offset_xy"], json!([-2.0, 30.0]), "{report}");
+        let frame = if command == "joint.list" { &report["joints"][0]["frame_a"] } else { &report["joints"][0]["a"]["frame"] };
+        assert_eq!(frame["origin"], json!([3.0, 35.0, 10.0]), "{report}");
+    }
+    run(&mut reopened, "edit.undo", json!({}));
+    assert_eq!(reopened.doc.assembly.joints[0], before);
+    assert!(near(place(&reopened, "B", probe), Vec3::new(15.0, 35.0, 40.0)));
+    run(&mut reopened, "joint.edit", json!({"joint":"Offset joint", "offset_y":0}));
+    assert_eq!(reopened.doc.assembly.joints[0].offset_xy, [10.0, 0.0]);
+    assert!(near(place(&reopened, "B", probe), Vec3::new(15.0, 5.0, 40.0)));
+}
+
+/// A rotated attachment uses its own X/Y axes, and turning a hinge leaves its offset pivot fixed.
+#[test]
+fn lateral_joint_offsets_follow_the_attachment_axes_and_keep_the_hinge_pivot() {
+    let mut s = two_cubes();
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type":"revolute", "name":"Hinge", "flip":true, "angle":0,
+            "a":{"occurrence":"A", "point":[5,5,10], "z":[1,0,0], "x":[0,0,1]},
+            "b":{"occurrence":"B", "point":[25,5,0], "z":[1,0,0], "x":[0,0,1]},
+            "offset_x":2, "offset_y":3, "offset":4}),
+    );
+    // A's local x is world +Z, its y is world -Y, and its z is world +X.
+    let pivot = Vec3::new(9.0, 2.0, 12.0);
+    let point = Vec3::new(25.0, 5.0, 0.0);
+    assert!(near(place(&s, "B", point), pivot), "{:?}", place(&s, "B", point));
+    let before = place(&s, "B", point + Vec3::Z) - pivot;
+    run(&mut s, "joint.drive", json!({"joint":"Hinge", "value":90}));
+    assert!(near(place(&s, "B", point), pivot), "the lateral pivot must not orbit");
+    let after = place(&s, "B", point + Vec3::Z) - pivot;
+    assert!((before.len() - 1.0).abs() < 1e-9 && (after.len() - 1.0).abs() < 1e-9);
+    assert!(before.dot(after).abs() < 1e-9, "the off-axis point turns 90 degrees");
+}
+
+/// Older files saved X/Y in an explicit A frame and have no recoverable separate offset values.
+#[test]
+fn legacy_joint_frames_keep_their_baked_lateral_position() {
+    let mut s = two_cubes();
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type":"rigid", "name":"Legacy", "flip":true, "angle":0,
+            "a":{"occurrence":"A", "frame":{"origin":[15,35,10],"z":[0,0,1],"x":[1,0,0]}},
+            "b":{"occurrence":"B", "point":[25,5,0], "z":[0,0,1], "x":[1,0,0]}, "offset":30}),
+    );
+    let before = s.doc.assembly.joints[0].clone();
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    saved["assembly"]["joints"][0].as_object_mut().unwrap().remove("offset_xy");
+    let doc = solidcraft_doc::Document::from_json(&saved.to_string()).unwrap();
+    let mut reopened = Session::new(doc);
+    assert_eq!(reopened.doc.assembly.joints[0], before);
+    run(&mut reopened, "joint.edit", json!({"joint":"Legacy", "offset_x":0,"offset_y":0,"offset":30}));
+    assert_eq!(reopened.doc.assembly.joints[0].a, before.a);
+    assert!(near(place(&reopened, "B", Vec3::new(25.0, 5.0, 0.0)), Vec3::new(15.0, 35.0, 40.0)));
+}
+
+/// An invalid lateral value must refuse the entire edit, including other valid changes.
+#[test]
+fn invalid_lateral_joint_offsets_leave_the_design_unchanged() {
+    let mut s = two_cubes();
+    let params = json!({"type":"rigid", "name":"Seat", "a":{"occurrence":"A","point":[0,0,0]},
+        "b":{"occurrence":"B","point":[20,0,0]}, "offset_x":2,"offset_y":3});
+    run(&mut s, "joint.create", params.clone());
+    for key in ["offset_x", "offset_y"] {
+        for value in [json!(null), json!(true), json!([]), json!({}), json!(1e9), json!("1e200 mm"), json!("30 deg"), json!("missing_parameter")] {
+            let before = s.doc.to_json();
+            let mut edit = json!({"joint":"Seat", "name":"Wrong", "offset":12});
+            edit[key] = value.clone();
+            assert!(s.execute("joint.edit", &edit).is_err(), "{edit}");
+            assert_eq!(s.doc.to_json(), before, "failed edit changed the design");
+            let mut create = params.clone();
+            create[key] = value;
+            assert!(s.execute("joint.create", &create).is_err(), "{create}");
+            assert_eq!(s.doc.to_json(), before, "failed creation changed the design");
+        }
+    }
 }
 
 #[test]
@@ -692,11 +848,11 @@ fn a_to_object_extrude_to_another_component_moves_rigidly_with_its_slider() {
     }
 }
 
-/// The design as the last release saved it, before the pending changes: its format number one
-/// back and no list of the changes it has, so each pending step runs as it opens.
+/// The design as it was saved before the format that pins a To Object extrude's placements
+/// (format 57, `v57/extrude-to-object-keeps-picked-placements.rs`): that step runs as it opens,
+/// whatever changes are pending after it, and no list of the changes it has says otherwise.
 fn as_last_release_saved(file: &mut Value) {
-    let number = file["format"].as_str().and_then(|f| f.rsplit('/').next()).and_then(|n| n.parse::<u32>().ok()).unwrap_or(1);
-    file["format"] = json!(format!("solidcraft/{}", number.saturating_sub(1)));
+    file["format"] = json!("solidcraft/56");
     if let Some(o) = file.as_object_mut() {
         o.remove("format_pending");
     }

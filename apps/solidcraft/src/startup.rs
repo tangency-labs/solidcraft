@@ -345,11 +345,12 @@ pub const WGPU_BACKEND_ENV: &str = "WGPU_BACKEND";
 /// The graphics backends to start with, or `None` to leave it to wgpu (`WGPU_BACKEND`, or all
 /// the backends it was built with).
 ///
-/// On Windows, D3D12 comes first, then Vulkan, then OpenGL, and only the first one with a
-/// hardware adapter is started at all. wgpu would otherwise start Vulkan, D3D12 and OpenGL
-/// together and prefer Vulkan, and starting Vulkan loads every installed Vulkan driver: Intel's
-/// (`igvk64.dll`) crashed SolidCraft at startup that way, inside the driver, before anything
-/// could be reported. D3D12 is Windows' own graphics API, the one its drivers are tested with.
+/// On Windows, Vulkan comes first, then D3D12, then OpenGL, and only the first one with a
+/// hardware adapter is started at all (never several APIs together). Vulkan is the open API the
+/// other systems use too; under D3D12, AMD's Ryzen integrated graphics lost the device or froze
+/// the machine while opening a design (#1789: 0.11.0, on Vulkan, worked; 0.12.0, on D3D12 first,
+/// did not). Where Vulkan has no card (older Intel graphics, virtual machines, Remote Desktop)
+/// D3D12 is next, and a Vulkan device that fails to start falls back to D3D12 ([`fallback_backend`]).
 /// `has_hardware(backends)` says whether those backends have an adapter that isn't software
 /// (it is only asked about the backends being tried, one at a time).
 ///
@@ -391,7 +392,8 @@ pub const RETRY_BACKEND_ENV: &str = "SOLIDCRAFT_STARTUP_BACKEND";
 /// Why this launch is using a fallback, carried to the new process for status and Preferences.
 pub const FALLBACK_NOTE_ENV: &str = "SOLIDCRAFT_GRAPHICS_FALLBACK";
 
-/// A handled startup failure tries each remaining Windows API once, then software rendering.
+/// A handled startup failure tries each remaining Windows API once (after Vulkan, D3D12), then
+/// software rendering (WARP, which is D3D12's).
 /// An explicit environment choice is final, including when software rendering was requested.
 pub fn fallback_backend(windows: bool, explicit: bool, cpu: bool, failed: eframe::wgpu::Backends) -> Option<&'static str> {
     if explicit || cpu {
@@ -400,7 +402,13 @@ pub fn fallback_backend(windows: bool, explicit: bool, cpu: bool, failed: eframe
     if windows {
         let last = WINDOWS_ORDER.iter().rposition(|backend| failed.intersects(*backend));
         if let Some(next) = last.and_then(|i| WINDOWS_ORDER.get(i + 1)) {
-            return Some(if *next == eframe::wgpu::Backends::VULKAN { "vulkan" } else { "gl" });
+            return Some(if *next == eframe::wgpu::Backends::DX12 {
+                "dx12"
+            } else if *next == eframe::wgpu::Backends::VULKAN {
+                "vulkan"
+            } else {
+                "gl"
+            });
         }
     }
     Some("cpu")
@@ -436,7 +444,7 @@ pub fn float_depth_everywhere(options: &eframe::egui_wgpu::WgpuConfiguration) ->
 }
 
 /// The order backends are tried in on Windows.
-pub const WINDOWS_ORDER: [eframe::wgpu::Backends; 3] = [eframe::wgpu::Backends::DX12, eframe::wgpu::Backends::VULKAN, eframe::wgpu::Backends::GL];
+pub const WINDOWS_ORDER: [eframe::wgpu::Backends; 3] = [eframe::wgpu::Backends::VULKAN, eframe::wgpu::Backends::DX12, eframe::wgpu::Backends::GL];
 
 /// Whether `backends` (started on their own, nothing else) have a hardware adapter.
 pub fn has_hardware_adapter(backends: eframe::wgpu::Backends) -> bool {
@@ -972,7 +980,7 @@ mod tests {
 
     #[test]
     fn settings_that_do_not_read_are_moved_aside_and_good_ones_stay() {
-        let keys = ["solidcraft.prefs", "solvecraft.prefs"];
+        let keys = ["solidcraft.prefs"];
         let d = scratch("check");
         // Good files (and an empty one) stay where they are.
         std::fs::write(d.join("app.ron"), r#"{"solidcraft.prefs": "{\"grid\":true}", "egui": "(anything)"}"#).unwrap();
@@ -982,7 +990,7 @@ mod tests {
         // Damaged RON, preferences that aren't JSON, a truncated graphics.json, non-UTF-8 bytes.
         for (name, text) in [
             ("app.ron", b"{\"solidcraft.prefs\": \"{\\\"gr".as_slice()),
-            ("app.ron", br#"{"solvecraft.prefs": "not json"}"#.as_slice()),
+            ("app.ron", br#"{"solidcraft.prefs": "not json"}"#.as_slice()),
             ("graphics.json", br#"{"msaa":"#.as_slice()),
             ("graphics.json", b"\xff\xfe\x00".as_slice()),
         ] {
@@ -1029,7 +1037,7 @@ mod tests {
     }
 
     #[test]
-    fn windows_starts_d3d12_first_and_vulkan_only_when_d3d12_has_no_gpu() {
+    fn windows_starts_vulkan_first_and_d3d12_only_when_vulkan_has_no_gpu() {
         use eframe::wgpu::Backends;
         let probe = |with: &'static [Backends]| {
             move |b: Backends| {
@@ -1037,33 +1045,34 @@ mod tests {
                 with.contains(&b)
             }
         };
-        // D3D12 works: Vulkan and OpenGL are never even asked about (starting Vulkan loads
-        // its drivers, which is what crashed).
+        // Vulkan works: D3D12 and OpenGL are never even asked about (one API's drivers loaded).
         let mut asked = Vec::new();
         let chosen = choose_backends(true, false, false, None, |b| {
             asked.push(b);
-            b == Backends::DX12
+            b == Backends::VULKAN
         });
-        assert_eq!(chosen, Some(Backends::DX12));
-        assert_eq!(asked, [Backends::DX12]);
-        // Everything works: still D3D12 alone.
-        assert_eq!(choose_backends(true, false, false, None, probe(&[Backends::DX12, Backends::VULKAN, Backends::GL])), Some(Backends::DX12));
-        // No D3D12 hardware adapter: Vulkan, else OpenGL, else D3D12's software adapter (WARP).
-        assert_eq!(choose_backends(true, false, false, None, probe(&[Backends::VULKAN, Backends::GL])), Some(Backends::VULKAN));
+        assert_eq!(chosen, Some(Backends::VULKAN));
+        assert_eq!(asked, [Backends::VULKAN]);
+        // Everything works: still Vulkan alone.
+        assert_eq!(choose_backends(true, false, false, None, probe(&[Backends::DX12, Backends::VULKAN, Backends::GL])), Some(Backends::VULKAN));
+        // No Vulkan hardware adapter (older Intel, VMs, Remote Desktop): D3D12, else OpenGL, else
+        // D3D12's software adapter (WARP).
+        assert_eq!(choose_backends(true, false, false, None, probe(&[Backends::DX12, Backends::GL])), Some(Backends::DX12));
         assert_eq!(choose_backends(true, false, false, None, probe(&[Backends::GL])), Some(Backends::GL));
         assert_eq!(choose_backends(true, false, false, None, probe(&[])), Some(Backends::DX12));
-        // `auto` and blanks are the default order.
-        assert_eq!(choose_backends(true, false, false, Some(" auto "), probe(&[Backends::DX12])), Some(Backends::DX12));
+        // `auto` and blanks are the default order; a chosen API always wins.
+        assert_eq!(choose_backends(true, false, false, Some(" auto "), probe(&[Backends::VULKAN, Backends::DX12])), Some(Backends::VULKAN));
         assert_eq!(choose_backends(true, false, false, Some(""), probe(&[Backends::GL])), Some(Backends::GL));
+        assert_eq!(choose_backends(true, false, false, Some("dx12"), probe(&[Backends::VULKAN, Backends::DX12])), Some(Backends::DX12));
     }
 
     #[test]
     fn failed_windows_backends_fall_back_in_order_and_stop_after_software() {
         use eframe::wgpu::Backends as B;
-        assert_eq!(fallback_backend(true, false, false, B::DX12), Some("vulkan"));
-        assert_eq!(fallback_backend(true, false, false, B::VULKAN), Some("gl"));
+        assert_eq!(fallback_backend(true, false, false, B::VULKAN), Some("dx12"), "a Vulkan device that fails: D3D12");
+        assert_eq!(fallback_backend(true, false, false, B::DX12), Some("gl"));
         assert_eq!(fallback_backend(true, false, false, B::GL), Some("cpu"));
-        assert_eq!(fallback_backend(true, false, true, B::DX12), None);
+        assert_eq!(fallback_backend(true, false, true, B::VULKAN), None);
         assert_eq!(fallback_backend(true, false, false, B::DX12 | B::VULKAN), Some("gl"));
         assert_eq!(fallback_backend(false, false, false, B::VULKAN), Some("cpu"));
         let note = fallback_note("", B::DX12, "vulkan", "egui_pipeline\n0x80070057");

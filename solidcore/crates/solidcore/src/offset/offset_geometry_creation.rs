@@ -99,12 +99,14 @@
 //!   [`SolidError::InvalidInput`] with [`UNDEFINED_UPSTREAM`] as operation, which tells
 //!   it apart from a callee's real `SM_ERR_INVALID_INPUT`; the statuses upstream
 //!   ignores are ignored whatever they are, except these and [`SolidError::Unported`].
-//! - **Opt-in (WR-530, #402).** With `Kernel::fixes.local_operation_refuses_loose_tangent_edges`,
-//!   in a local operation ([`OffsetExecutive::is_local_operation`]) `ExtendTrimEdges`
+//! - **Loose tangent edges (WR-530, #402, not upstream).** In a local operation ([`OffsetExecutive::is_local_operation`]) `ExtendTrimEdges`
 //!   fails when the lifted edge drops onto the other extended surface farther than ten
-//!   times `max(edge tolerance, approximation tolerance)`, and `EdgeuseOffset` passes
-//!   that failure on (the fork's tangency-labs/smlib@23c5b0a).
-//! - **Opt-in (WR-530 addendum).** With `Kernel::fixes.local_operation_step_walls`, a
+//!   times `max(edge tolerance, approximation tolerance)`
+//!   ([`OffsetFailure::LooseTangentEdge`]), and `EdgeuseOffset` passes that refusal on
+//!   (the fork's tangency-labs/smlib@23c5b0a); any other failure of `ExtendTrimEdges` is
+//!   only reported, as upstream's (the fork's passed every failure on, refusing a lone
+//!   disc's lamina edge).
+//! - **Step walls (WR-530 addendum).** A
 //!   local operation's tangent edge whose two faces stay parallel but apart (one moved
 //!   along its normal) gets the ruled step wall between the two offset edges instead of
 //!   the extension (the fork's 5d428ae, 90aabff); `EdgeuseOffset::closing_wall` marks it.
@@ -175,6 +177,7 @@ use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_standard_solver::p1::CircularCrossSectionFsg;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::{Curve, CurveKind, ELLIPSE_TYPE, LINE_TYPE};
+use crate::curve::curve::p4::is_closed_base;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::error::offset::OffsetFailure;
 use crate::error::{EntityRef, Failure, Reason, Result, SolidError, SM_ERR_NULL_POINTER};
@@ -324,6 +327,18 @@ fn unique_cone_meeting(k: &Kernel, first: &Surface, second: &Surface) -> Result<
         .all(|(x, y)| exact::is_zero(&exact::sub(x, y))))
 }
 
+/// When [`OffsetGeometryCreation::replace_edge_curves`]'s shortcut keeps an edge whose
+/// curve's ends match the new curve's.
+#[derive(Clone, Copy)]
+enum KeepOld {
+    /// Always (upstream).
+    OnMatchingEnds,
+    /// As decided by the caller (not upstream: `MateEdges`, whose new curve is the surfaces'
+    /// intersection, keeps an offset edge only where it is proved on both surfaces; see
+    /// [`OffsetGeometryCreation::replace_edge_curves_in`]).
+    Decided(bool),
+}
+
 /// A dereference of a null pointer or a cast that fails upstream (undefined
 /// behaviour): `InvalidInput` with [`UNDEFINED_UPSTREAM`] as operation.
 const fn dangling(reason: &'static str) -> SolidError {
@@ -362,6 +377,15 @@ fn is_tangent_end_off_curve(e: &SolidError) -> bool {
     matches!(
         e.failure().map(|f| &f.reason),
         Some(Reason::Offset(OffsetFailure::TangentEndOffCurve))
+    )
+}
+
+/// Whether `e` is the refusal of a tangent edge whose new faces no longer meet along it
+/// ([`OffsetFailure::LooseTangentEdge`]).
+fn is_loose_tangent_edge(e: &SolidError) -> bool {
+    matches!(
+        e.failure().map(|f| &f.reason),
+        Some(Reason::Offset(OffsetFailure::LooseTangentEdge { .. }))
     )
 }
 
@@ -433,7 +457,7 @@ pub struct EdgeuseOffset<O> {
     pub trim_orientations: Vec<OrientType>,
     /// `rSelfIntersections` (never filled: the self-intersection block is `#if 0`).
     pub self_intersections: SsiData<O>,
-    /// Not upstream (`*pbOptClosingWall`, opt-in `Kernel::fixes.local_operation_step_walls`,
+    /// Not upstream (`*pbOptClosingWall`, the WR-530 addendum's step walls,
     /// fork tangency-labs/smlib 5d428ae): `surface` is a step wall, which spans the gap
     /// between two edges and is never extended (as a lamina side wall).
     pub closing_wall: bool,
@@ -533,7 +557,7 @@ pub trait OffsetExecutive<O> {
         let _ = offset_face;
     }
     /// Not upstream (WR-346): whether any inset face's offset collapsed (a convex round
-    /// thinner than the wall); `false` unless `Kernel::fixes.offset_collapsed_rounds_mated`.
+    /// thinner than the wall).
     fn has_collapsed_faces(&self) -> bool {
         false
     }
@@ -548,8 +572,7 @@ pub trait OffsetExecutive<O> {
     fn offset_edgeuse(&self, original: O) -> Option<O>;
     /// Not upstream (WR-344 refinement, tangency-labs/solidcore#1795): `EdgeuseOffset`
     /// could not mate the offsets of `original`'s edge (`MateEdges` failed, which upstream
-    /// only reports), so the merge must still intersect them; called only with
-    /// `Kernel::fixes.offset_extended_edges_mated`. The default ignores it.
+    /// only reports), so the merge must still intersect them. The default ignores it.
     fn note_unmated_edgeuse(&mut self, original: O) {
         let _ = original;
     }
@@ -772,7 +795,7 @@ pub trait OffsetBrep<O>: ProtoGeometry<O> {
     /// `SmEdgeuse::GetFaceuse` (`topology::edgeuse::p1::faceuse`).
     fn edgeuse_faceuse(&self, eu: O) -> Result<Option<O>>;
     /// `SmEdgeuse::GetOrientation` (`topology::edgeuse::p1::orientation`), read only by
-    /// the opt-in step walls (`Kernel::fixes.local_operation_step_walls`); an
+    /// the step walls (WR-530 addendum); an
     /// implementation that does not provide it fails there.
     ///
     /// # Errors
@@ -1283,6 +1306,65 @@ fn curve_of<O: ClassObject>(geometry: &impl ClassGeometry<O>, h: O) -> Result<&C
     geometry
         .curve(h)
         .ok_or(dangling("curve handle cannot be resolved"))
+}
+
+/// The other parameter of the point at `t` on `curve` when the curve is closed
+/// ([`Curve::is_closed`] within `tol`) and the point is its seam (within `tol` of the end of
+/// the curve's interval nearer `t`): the other end. `None` for an open curve or a point off
+/// the seam, which have one parameter only.
+///
+/// # Errors
+///
+/// Those of [`Curve::is_closed`] and of the two evaluations.
+fn seam_twin(k: &Kernel, curve: &Curve, t: f64, tol: f64) -> Result<Option<f64>> {
+    let ivl = curve.natural_interval();
+    if !curve.is_closed(k, &ivl, tol)? {
+        return Ok(None);
+    }
+    let (near, far) = if t - ivl.min() <= ivl.max() - t {
+        (ivl.min(), ivl.max())
+    } else {
+        (ivl.max(), ivl.min())
+    };
+    let on_seam = distance(curve.evaluate_point(k, t)?, curve.evaluate_point(k, near)?) <= tol;
+    Ok(on_seam.then_some(far))
+}
+
+/// Not upstream (WR-673, #2174): whether the point of `curve` at `t` is the first trim
+/// point (at `t_first`) again, reached round a closed curve: the curve is closed over
+/// its natural interval, and over the span from `t_first` to `t` its ends lie within
+/// `tol` of each other while its middle does not (`SmCurve::IsClosed` on that span),
+/// so the span runs round the curve back to its start. A short open edge whose second
+/// point lies within `tol` of its first is no such span (its middle is near both ends,
+/// or the curve is not closed): that point stays a candidate.
+///
+/// # Errors
+///
+/// Those of [`Curve::is_closed`] and [`is_closed_base`].
+pub fn is_first_point_again(
+    k: &Kernel,
+    curve: &Curve,
+    t_first: f64,
+    t: f64,
+    tol: f64,
+) -> Result<bool> {
+    if !curve.is_closed(k, &curve.natural_interval(), tol)? {
+        return Ok(false);
+    }
+    let span = Extent1d::from_min_max(smos_min(t_first, t), smos_max(t_first, t));
+    is_closed_base(k, curve, &span, tol)
+}
+
+/// Not upstream (WR-530): whether a tangent edge's new curve, dropped onto the other
+/// face's new surface, lands `max_drop_to_surf` from it, past `meet_tol`: the faces no
+/// longer meet along the edge. A drop (or limit) that is not a number is no evidence that
+/// they meet, so it is loose too: only a drop within the limit passes.
+fn drop_is_loose(max_drop_to_surf: f64, meet_tol: f64) -> bool {
+    // `!(max_drop_to_surf <= meet_tol)`, spelled without a negated partial comparison
+    !matches!(
+        max_drop_to_surf.partial_cmp(&meet_tol),
+        Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+    )
 }
 
 /// The surface behind `h` (a dereference upstream).
@@ -2591,14 +2673,11 @@ impl OffsetGeometryCreation {
                         )?);
                     }
                     // SetCanonical's status is ignored upstream (fork 4803d6d: `SER`)
-                    let set = placement.set_canonical(
+                    placement.set_canonical(
                         placement.origin(),
                         ref_frame.z_axis(),
                         ref_frame.x_axis(),
-                    );
-                    if k.fixes.brep_edit_statuses_pass_on {
-                        set?;
-                    }
+                    )?;
                 }
             } // end 1 bounding edge check
 
@@ -2957,7 +3036,8 @@ impl OffsetGeometryCreation {
     /// upstream, solidcraft#16983; see [`TrimmedEdge`]): an inverted edge's new curve runs
     /// against the edge use's (or the original edge use's) curve, from the image of the
     /// edge's start vertex to the image of its end vertex, and is set even where its ends
-    /// are the edge curve's ends in reverse order.
+    /// are the edge curve's ends in reverse order. A curve whose ends match is kept as
+    /// upstream keeps it ([`KeepOld::OnMatchingEnds`]).
     ///
     /// # Errors
     ///
@@ -2970,6 +3050,88 @@ impl OffsetGeometryCreation {
         curve_3d: Option<O>,
         uv_curve: Option<O>,
         opt_orig_edgeuse: Option<O>,
+        inverted: bool,
+    ) -> Result<ReplaceEdgeCurves> {
+        Self::replace_edge_curves_in(
+            k,
+            brep,
+            edgeuse,
+            curve_3d,
+            uv_curve,
+            opt_orig_edgeuse,
+            KeepOld::OnMatchingEnds,
+            inverted,
+        )
+    }
+
+    /// Whether [`Self::replace_edge_curves_in`]'s shortcut would keep `edgeuse`'s edge
+    /// against the candidate `curve_3d` in `MateEdges` (not upstream): its curve's ends match
+    /// the candidate's within the edge tolerance (either way round) and it is proved within
+    /// that tolerance of both `surfaces`
+    /// ([`crate::offset::curve_on_surfaces::curve_on_surfaces`]).
+    fn keeps_old_edge<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &impl OffsetBrep<O>,
+        edgeuse: O,
+        curve_3d: O,
+        surfaces: [&Surface; 2],
+    ) -> Result<bool> {
+        let edge = brep
+            .edgeuse_edge(edgeuse)?
+            .ok_or(dangling("edge use without edge"))?;
+        let eu_curve = brep
+            .edge_curve(edge)?
+            .ok_or(dangling("edge without curve"))?;
+        let edge_ivl = brep.edge_interval(edge)?;
+        let edge_tol = brep.edge_tolerance(edge)?;
+        let old = curve_of(brep, eu_curve)?;
+        let (s, e) = (
+            old.evaluate_point(k, edge_ivl.min())?,
+            old.evaluate_point(k, edge_ivl.max())?,
+        );
+        let new = curve_of(brep, curve_3d)?;
+        let ivl = new.natural_interval();
+        let (cs, ce) = (
+            new.evaluate_point(k, ivl.min())?,
+            new.evaluate_point(k, ivl.max())?,
+        );
+        let ends = (distance(s, cs) < edge_tol && distance(e, ce) < edge_tol)
+            || (distance(s, ce) < edge_tol && distance(e, cs) < edge_tol);
+        Ok(ends
+            && crate::offset::curve_on_surfaces::curve_on_surfaces(
+                k, old, edge_ivl, surfaces, edge_tol,
+            )?)
+    }
+
+    /// [`Self::replace_edge_curves`], with `keep` choosing when a curve whose ends match the
+    /// edge curve's leaves the edge as it is. Upstream always keeps it: that is sound where
+    /// the candidate is the edge's own curve extended or trimmed (`ExtendTrimEdges`, the
+    /// shell-tangent rails), as two such curves with the same ends are the same curve. Not
+    /// upstream: `MateEdges`'s candidate is a different curve, the two surfaces'
+    /// intersection, and matching ends say nothing about the old edge's interior: where the
+    /// faces are tangent at both vertices and meet at an angle between them (a loft's ruling
+    /// edge), each face's own offset edge ends at the intersection's ends but leaves it in
+    /// between (by up to 0.032 for the hood corner sheet of
+    /// `tests/issue_1502_thicken_rim_halves.rs` thickened by 2), and keeping them leaves the
+    /// two offset faces apart along the edge. So `MateEdges` keeps each offset edge of the
+    /// pair only where [`Self::keeps_old_edge`] holds for it (proved within its tolerance of
+    /// both extended surfaces by [`crate::offset::curve_on_surfaces::curve_on_surfaces`]:
+    /// closed form on planes and cones, interval bounds on B-spline nets and their
+    /// offsets), and otherwise installs the intersection, upstream's own path for ends that
+    /// do not match. Each use decides alone, as upstream, so one use of a pair can keep its
+    /// old curve while the other installs the intersection. A kept edge is proved within
+    /// its tolerance of both surfaces; an installed intersection is upstream's surface
+    /// intersection and is not certified here. `inverted` is as for
+    /// [`Self::replace_edge_curves_oriented`]: an inverted edge never takes the shortcut.
+    #[allow(clippy::too_many_arguments)] // `ReplaceEdgeCurves`, the choice and the orientation
+    fn replace_edge_curves_in<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        edgeuse: O,
+        curve_3d: Option<O>,
+        uv_curve: Option<O>,
+        opt_orig_edgeuse: Option<O>,
+        keep: KeepOld,
         inverted: bool,
     ) -> Result<ReplaceEdgeCurves> {
         // locals
@@ -2999,10 +3161,19 @@ impl OffsetGeometryCreation {
             let curve_start = curve_of(brep, c3)?.evaluate_point(k, c3_ivl.min())?;
             let curve_end = curve_of(brep, c3)?.evaluate_point(k, c3_ivl.max())?;
 
+            // (not upstream: where asked, the pair's joint decision, see `KeepOld`)
+            let keep_old = |_: &mut _| -> Result<bool> {
+                Ok(match keep {
+                    KeepOld::OnMatchingEnds => true,
+                    KeepOld::Decided(keep) => keep,
+                })
+            };
+
             // low work - Edgesuse->Curve and 3DCurve start and end Points are within tol
             if !inverted
                 && distance(edgeuse_start, curve_start) < edge_tol
                 && distance(edgeuse_end, curve_end) < edge_tol
+                && keep_old(brep)?
             {
                 // No change in ends of curve - don't bother using the inputs - delete them and get out.
                 out.delete_3d_curve = true;
@@ -3014,6 +3185,7 @@ impl OffsetGeometryCreation {
             if !inverted
                 && distance(edgeuse_start, curve_end) < edge_tol
                 && distance(edgeuse_end, curve_start) < edge_tol
+                && keep_old(brep)?
             {
                 // No change in ends of curve - just delete the curves and get out
                 out.delete_3d_curve = true;
@@ -3047,24 +3219,19 @@ impl OffsetGeometryCreation {
             let t2 = pv2.get(1).copied().ok_or(dangling("tangent missing"))?;
             // (not upstream) an inverted edge's curve runs the other way
             if (t1.dot(t2) < 0.0) != inverted {
-                // Opposite orientation - reverse 3DCurve and UVCurve (statuses ignored)
+                // Opposite orientation - reverse 3DCurve and UVCurve (statuses ignored
+                // upstream; passed on here, WR-658)
                 let ivl = curve_of(brep, c3)?.natural_interval();
                 let c = brep
                     .curve_mut(c3)
                     .ok_or(dangling("curve handle cannot be resolved"))?;
-                let _ = ignore_soft(crate::error::passed_on(
-                    c.reverse_parameterization(k, &ivl),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                c.reverse_parameterization(k, &ivl)?;
                 let uv = uv_curve.ok_or(dangling("null UV curve reversed"))?;
                 let ivl = curve_of(brep, uv)?.natural_interval();
                 let c = brep
                     .curve_mut(uv)
                     .ok_or(dangling("curve handle cannot be resolved"))?;
-                let _ = ignore_soft(crate::error::passed_on(
-                    c.reverse_parameterization(k, &ivl),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                c.reverse_parameterization(k, &ivl)?;
             } // end Edge and Input curve running in opposite directions check
 
             // set input curves as Edge geometry (deleting the pre-existing curve and the
@@ -3546,27 +3713,23 @@ impl OffsetGeometryCreation {
                 face_solutions.push((solutions.len(), solutions.len()));
                 for sol in sols2.as_slice() {
                     // (neither status is checked upstream: a failed evaluation leaves its
-                    // output at SmPoint3d's SM_UNDEF_DOUBLE default)
+                    // output at SmPoint3d's SM_UNDEF_DOUBLE default; passed on here, WR-658)
                     let undef = Vec3::new(UNDEF_DOUBLE, UNDEF_DOUBLE, UNDEF_DOUBLE);
-                    let pv = ignore_soft(crate::error::passed_on(
-                        curve_of(brep, curve_3d)?.evaluate(k, sol.start.param(0)?, 1, true, true),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    let pv = curve_of(brep, curve_3d)?.evaluate(
+                        k,
+                        sol.start.param(0)?,
+                        1,
+                        true,
+                        true,
+                    )?;
                     let uv = Point2::new(sol.start.param(1)?, sol.start.param(2)?);
-                    let normal = ignore_soft(crate::error::passed_on(
-                        surface_of(brep, ext_surface)?.evaluate_normal(
-                            k,
-                            uv,
-                            Side::Left,
-                            Side::Left,
-                        ),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?
-                    .unwrap_or(undef);
-                    let tangent = pv
-                        .and_then(|pv| pv.get(1).copied())
-                        .unwrap_or(undef)
-                        .unitize_or_z();
+                    let normal = surface_of(brep, ext_surface)?.evaluate_normal(
+                        k,
+                        uv,
+                        Side::Left,
+                        Side::Left,
+                    )?;
+                    let tangent = pv.get(1).copied().unwrap_or(undef).unitize_or_z();
                     let angle_rad = tangent.angle_between(normal)?;
                     let angle_deg = angle_rad * 180.0 / PI;
                     // Four-face vertex splitting (WR-666, the fork's
@@ -3638,34 +3801,51 @@ impl OffsetGeometryCreation {
 
             // search every solution for the one closest to the BaseVertex to use as the trimPoint
             let base_point = brep.vertex_point(base_vertex)?;
-            // `Kernel::fixes.offset_open_edge_second_trim_point` (WR-673, #2174; the fork's
+            // Not upstream (WR-673, #2174; the fork's
             // tangency-labs/smlib@7ee0876): an open edge's second trim point is where its
-            // other vertex goes, never the first trim point again. On a closed 3D curve
-            // (the whole offset circle lifted for half a sphere cap's rim) the first point's
-            // twin across the curve's seam is another parameter but the same point: taken,
-            // it gave the half edge the whole circle and the loop a gap.
-            let open_second = k.fixes.offset_open_edge_second_trim_point
-                && i == 1
-                && !brep.edge_is_closed(base_edge)?;
-            let first = if open_second {
-                Some(curve_of(brep, curve_3d)?.evaluate_point(k, trim_ivl.min())?)
-            } else {
-                None
-            };
+            // other vertex goes, never the first trim point again reached round a closed 3D
+            // curve. On a closed 3D curve (the whole offset circle lifted for half a sphere
+            // cap's rim) the first point's twin across the curve's seam is another parameter
+            // but the same point: taken, it gave the half edge the whole circle and the loop
+            // a gap. Only that twin is passed over ([`is_first_point_again`]): an open edge
+            // that is short now keeps its real second point, however near the first.
+            let open_second = i == 1 && !brep.edge_is_closed(base_edge)?;
             let same_tol = 10.0 * self.this_approx_tol_3d;
-            let first_again = |pnt: Point3| first.is_some_and(|f| distance(pnt, f) <= same_tol);
+            let first_again = |t: f64| -> Result<bool> {
+                if !open_second {
+                    return Ok(false);
+                }
+                is_first_point_again(k, curve_of(brep, curve_3d)?, trim_ivl.min(), t, same_tol)
+            };
+            // (not upstream, #14062) a closed edge's second trim point is its one vertex
+            // again: where that point is the seam of a closed 3D curve (a loft's floor circle
+            // offset, its seam at the vertex) it has the curve's two ends as parameters, and
+            // the edge runs all the way round from one to the other. The solutions may give
+            // only one of them, the first trim point, which `are_same` below excludes: its
+            // twin is the second, taken within the tolerance that decides "the same point"
+            // for an open edge (`first_again`).
+            let closed_second = i == 1 && brep.edge_is_closed(base_edge)?;
             let mut found_at = None;
+            let mut found_twin = false;
             for (ix, sol) in solutions.as_slice().iter().enumerate() {
                 let t = sol.start.param(0)?;
-                let pnt = curve_of(brep, curve_3d)?.evaluate_point(k, t)?;
+                let twin = if closed_second {
+                    seam_twin(k, curve_of(brep, curve_3d)?, t, same_tol)?
+                } else {
+                    None
+                };
+                for (t, is_twin) in std::iter::once((t, false)).chain(twin.map(|t| (t, true))) {
+                    let pnt = curve_of(brep, curve_3d)?.evaluate_point(k, t)?;
 
-                // search for the best solution
-                let dist_moved = distance(pnt, base_point);
-                if dist_moved < found_dist && !are_same(t, trim_ivl.min()) && !first_again(pnt) {
-                    found_param = t;
-                    found_dist = dist_moved;
-                    found = true;
-                    found_at = Some(ix);
+                    // search for the best solution
+                    let dist_moved = distance(pnt, base_point);
+                    if dist_moved < found_dist && !are_same(t, trim_ivl.min()) && !first_again(t)? {
+                        found_param = t;
+                        found_dist = dist_moved;
+                        found = true;
+                        found_at = Some(ix);
+                        found_twin = is_twin;
+                    }
                 }
 
                 // If solution is a range, e.g. coincident curves, check m_vEnd
@@ -3674,12 +3854,12 @@ impl OffsetGeometryCreation {
                     let pnt = curve_of(brep, curve_3d)?.evaluate_point(k, t)?;
                     let dist_moved = distance(pnt, base_point);
 
-                    if dist_moved < found_dist && !are_same(t, trim_ivl.min()) && !first_again(pnt)
-                    {
+                    if dist_moved < found_dist && !are_same(t, trim_ivl.min()) && !first_again(t)? {
                         found_param = t;
                         found_dist = dist_moved;
                         found = true;
                         found_at = Some(ix);
+                        found_twin = false;
                     }
                 }
             }
@@ -3709,6 +3889,7 @@ impl OffsetGeometryCreation {
                     tan_tol_deg,
                 )? {
                     found_param = param;
+                    found_twin = false;
                     cut = true;
                 }
             }
@@ -3726,6 +3907,12 @@ impl OffsetGeometryCreation {
             if let Some(c) = cuts.get_mut(i) {
                 *c = cut;
             }
+            // (#14062) the second trim point is the first one's twin: the edge is the whole
+            // curve, end to end, not from a first point the solutions give within their
+            // tolerance of the seam, which would leave that bit of the turn out
+            if found_twin {
+                trim_ivl = curve_of(brep, curve_3d)?.natural_interval();
+            }
         } // end iter twice
 
         // (not upstream) whether the trim points come in the base edge use's order: an
@@ -3734,12 +3921,10 @@ impl OffsetGeometryCreation {
         // its vertex or taken from a mated neighbour's vertex says nothing of a crossing.
         // Only in an inward shell with faces opened (a rib thinner than two walls), at an
         // edge between two faces, where the faces that turn inside out with it are
-        // resolved before the merge (`offset_resolve_crossing_loops`, which drops their
-        // inverted regions); elsewhere (a solid offset, a sheet's thickening, a lamina
-        // edge, the fix off) an edge whose vertex moves past its other end is refused as
-        // vanishing, as before.
-        let inverted = k.fixes.offset_resolve_crossing_loops
-            && executive.inset()
+        // resolved before the merge (`resolve_crossing_loops`, which drops their inverted
+        // regions); elsewhere (a solid offset, a sheet's thickening, a lamina edge) an edge
+        // whose vertex moves past its other end is refused as vanishing, as before.
+        let inverted = executive.inset()
             && !executive.shell_faces().is_empty()
             && other_base_edgeuse.is_some()
             && cuts == [true, true]
@@ -3848,7 +4033,8 @@ impl OffsetGeometryCreation {
     /// one concave; a lamina, tangent or shell-less edge counts as neither) and each of
     /// the two adjacent faces (`face_solutions`, ranges of `solutions`) has a cut nearest
     /// the vertex (not the start already chosen, nor, on an open edge's second end, the
-    /// first trim point again), and the two cuts are apart, the one nearer along the
+    /// first trim point again round a closed curve, [`is_first_point_again`]), and the two
+    /// cuts are apart, the one nearer along the
     /// curve to where the base edge's middle drops onto it. `None` keeps the nearest.
     #[allow(clippy::too_many_arguments)]
     fn first_cut_from_far_end<O: ClassObject + SolutionObject>(
@@ -3865,15 +4051,10 @@ impl OffsetGeometryCreation {
         face_solutions: &[(usize, usize)],
         tan_tol_deg: f64,
     ) -> Result<Option<f64>> {
-        // an open edge's second trim point is never the first one again
+        // an open edge's second trim point is never the first one again reached round a
+        // closed 3D curve (WR-673, [`is_first_point_again`], as in `trim_extended_edge_ends`)
         let open_second = i == 1 && !brep.edge_is_closed(base_edge)?;
-        let first = if open_second {
-            Some(curve_of(brep, curve_3d)?.evaluate_point(k, trim_ivl.min())?)
-        } else {
-            None
-        };
         let same_tol = 10.0 * self.this_approx_tol_3d;
-        let first_again = |pnt: Point3| first.is_some_and(|f| distance(pnt, f) <= same_tol);
 
         let mut convex = true;
         let mut concave = true;
@@ -3933,7 +4114,17 @@ impl OffsetGeometryCreation {
                 let t = sol.start.param(0)?;
                 let pnt = curve_of(brep, curve_3d)?.evaluate_point(k, t)?;
                 let dist = distance(pnt, base_point);
-                if dist < best && !are_same(t, trim_ivl.min()) && !first_again(pnt) {
+                if dist < best
+                    && !are_same(t, trim_ivl.min())
+                    && !(open_second
+                        && is_first_point_again(
+                            k,
+                            curve_of(brep, curve_3d)?,
+                            trim_ivl.min(),
+                            t,
+                            same_tol,
+                        )?)
+                {
                     best = dist;
                     if let (Some(p), Some(f)) = (face_param.get_mut(ff), face_found.get_mut(ff)) {
                         *p = t;
@@ -4464,17 +4655,28 @@ impl OffsetGeometryCreation {
                 true,
                 None,
             )?;
-            // Opt-in (WR-530, #402; the fork's tangency-labs/smlib@23c5b0a): the edge is
+            // Not upstream (WR-530, #402; the fork's tangency-labs/smlib@23c5b0a): the edge is
             // lifted onto one face's new surface and dropped onto the other's. Faces offset
             // alike stay tangent, so the drop lands on the edge; when only one of them got a
             // new surface (a local operation moving a face beside a blend, or one piece of a
             // split face), the drop crosses the gap between them and the faces no longer
             // meet there
-            if k.fixes.local_operation_refuses_loose_tangent_edges && executive.is_local_operation()
-            {
+            if executive.is_local_operation() {
                 let meet_tol = 10.0 * smos_max(off_tol, self.this_approx_tol_3d());
-                if dropped.max_drop_to_surf > meet_tol {
-                    return Err(sm_err(OP_EXTEND));
+                let max_drop_to_surf = dropped.max_drop_to_surf;
+                if drop_is_loose(max_drop_to_surf, meet_tol) {
+                    // the edge of the input, named for the refusal where the handle names
+                    // one (error context only)
+                    let edge = match brep.topology_entity(edge) {
+                        Some((_, EntityRef::Edge(e))) => Some(e),
+                        _ => None,
+                    };
+                    let reason = OffsetFailure::LooseTangentEdge {
+                        edge,
+                        max_drop_to_surf,
+                        meet_tol,
+                    };
+                    return Err(Failure::new(OP_EXTEND, reason).into_error());
                 }
             }
             let uv_curves = dropped.uv_curves;
@@ -5061,27 +5263,39 @@ impl OffsetGeometryCreation {
         let copy_3d = curve_of(brep, curve_3d_found)?.copy(k)?;
         let copy_3d_h = store_curve(brep, copy_3d)?;
 
-        // when appropriate - change the pOffsetEdgeuse geometry
-        Self::replace_edge_curves_oriented(
+        // when appropriate - change the pOffsetEdgeuse geometry (not upstream: an offset
+        // edge whose ends match is kept only when proved on both extended surfaces, see
+        // `replace_edge_curves_in`; an inverted edge never keeps its curve, so it is not
+        // checked)
+        let keep = KeepOld::Decided(
+            !inverted && Self::keeps_old_edge(k, brep, offset_edgeuse, curve_3d_found, [&s1, &s2])?,
+        );
+        Self::replace_edge_curves_in(
             k,
             brep,
             offset_edgeuse,
             Some(curve_3d_found),
             Some(uv_curve1_found),
             Some(edgeuse),
+            keep,
             inverted,
         )?;
 
         // when appropriate - change the pOtherOffsetEdgeuse geometry
         // GWC:BUG?? These two Edgeuses point to the same edge - these two calls should
         //           have the same 3DCurve. It's ok: At this point they do not (yet) point to the same edge.
-        Self::replace_edge_curves_oriented(
+        let keep = KeepOld::Decided(
+            !inverted
+                && Self::keeps_old_edge(k, brep, other_offset_edgeuse, copy_3d_h, [&s1, &s2])?,
+        );
+        Self::replace_edge_curves_in(
             k,
             brep,
             other_offset_edgeuse,
             Some(copy_3d_h),
             Some(uv_curve2_found),
             Some(other_edgeuse),
+            keep,
             inverted,
         )?;
         if inverted {
@@ -5134,8 +5348,8 @@ impl OffsetGeometryCreation {
         )
     }
 
-    /// Not upstream (`IsStepAcrossEdge`, fork tangency-labs/smlib 5d428ae, opt-in
-    /// `Kernel::fixes.local_operation_step_walls`): whether the faces of two offset edge
+    /// Not upstream (`IsStepAcrossEdge`, fork tangency-labs/smlib 5d428ae, the WR-530
+    /// addendum's step walls): whether the faces of two offset edge
     /// uses of one tangent edge stayed parallel across it but apart. At each of 11 samples
     /// along the first edge use the nearest point of the other's edge must lie farther
     /// than the edges meet within (`10 * max(edge tolerances, this_approx_tol_3d)`) and the
@@ -5254,7 +5468,7 @@ impl OffsetGeometryCreation {
     }
 
     /// Not upstream (`CreateStepWall`, fork tangency-labs/smlib 5d428ae and 90aabff,
-    /// opt-in `Kernel::fixes.local_operation_step_walls`): the ruled wall between two
+    /// the WR-530 addendum's step walls): the ruled wall between two
     /// offset edge uses whose faces lie apart ([`Self::is_step_across_edge`]), stored and
     /// returned as a handle. The rails are the two edges' trimmed NURBS curves; a rail
     /// whose weights are all one value (to `SM_EFF_ZERO` relative) is made non-rational
@@ -5416,15 +5630,11 @@ impl OffsetGeometryCreation {
             let tan_sec = !executive.crosses_at(original_edgeuse)
                 && brep.edgeuse_is_tangent_sector(k, original_edgeuse, tan_tol_deg)?;
 
-            // Not upstream (opt-in `Kernel::fixes.local_operation_step_walls`, fork
+            // Not upstream (WR-530 addendum, fork
             // tangency-labs/smlib 5d428ae): a local operation that moved only one of two
             // tangent faces along its normal leaves them parallel, one step apart: a wall
             // between their edges closes the body.
-            if k.fixes.local_operation_step_walls
-                && tan_sec
-                && !lamina
-                && executive.is_local_operation()
-            {
+            if tan_sec && !lamina && executive.is_local_operation() {
                 if let (Some(off), Some(other_off)) = (offset_edgeuse, other_offset_edgeuse) {
                     if self.is_step_across_edge(k, brep, off, other_off)? {
                         out.surface = Some(self.create_step_wall(k, brep, off, other_off)?);
@@ -5446,14 +5656,15 @@ impl OffsetGeometryCreation {
                     other_offset_edgeuse,
                     mark,
                 );
-                // Opt-in (WR-530): a local operation has no later step that would close
-                // the gap: it fails
-                if k.fixes.local_operation_refuses_loose_tangent_edges
-                    && executive.is_local_operation()
-                {
-                    extended?;
-                } else {
-                    let _ = ignore_soft(extended)?;
+                // Not upstream (WR-530): in a local operation, an edge whose faces no
+                // longer meet along it ([`OffsetFailure::LooseTangentEdge`]) has no later
+                // step that would close the gap: it fails. Any other problem is only
+                // reported, as upstream's
+                match extended {
+                    Err(e) if is_loose_tangent_edge(&e) => return Err(e),
+                    r => {
+                        let _ = ignore_soft(r)?;
+                    }
                 }
                 return Ok(out);
             }
@@ -5487,7 +5698,7 @@ impl OffsetGeometryCreation {
             };
             // Not upstream (WR-344 refinement, #1795): the merge must still intersect the
             // offsets of an edge that could not be mated
-            if mated.is_none() && k.fixes.offset_extended_edges_mated {
+            if mated.is_none() {
                 executive.note_unmated_edgeuse(original_edgeuse);
             }
             return Ok(out);
@@ -5786,16 +5997,11 @@ impl OffsetGeometryCreation {
             )?;
             // when Rail1Curve StartPoint dropped to CenterLine
             if dropped.success {
-                // Trim CenterLine to Start dropPoint (both statuses ignored; the trim may
-                // snap sCenterIvl by tol to existing knots)
-                let _ = ignore_soft(crate::error::passed_on(
-                    center_ivl.set_min_max(dropped.parameter, center_ivl.max()),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
-                let _ = ignore_soft(crate::error::passed_on(
-                    center_line.trim(k, &mut center_ivl, TrimMode::Notify),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                // Trim CenterLine to Start dropPoint (both statuses ignored upstream and
+                // passed on here, WR-658; the trim may snap sCenterIvl by tol to existing
+                // knots)
+                center_ivl.set_min_max(dropped.parameter, center_ivl.max())?;
+                center_line.trim(k, &mut center_ivl, TrimMode::Notify)?;
             }
         } // end Rail1/CenterLine StartPoint gapSize check
 
@@ -5825,14 +6031,8 @@ impl OffsetGeometryCreation {
             // when Rail1Curve EndPoint dropped to CenterLine
             if dropped.success {
                 // Trim CenterLine to End dropPoint
-                let _ = ignore_soft(crate::error::passed_on(
-                    center_ivl.set_min_max(center_ivl.min(), dropped.parameter),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
-                let _ = ignore_soft(crate::error::passed_on(
-                    center_line.trim(k, &mut center_ivl, TrimMode::Notify),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                center_ivl.set_min_max(center_ivl.min(), dropped.parameter)?;
+                center_line.trim(k, &mut center_ivl, TrimMode::Notify)?;
             }
         } // end Rail1/CenterLine EndPoint gapSize check
 
@@ -6830,15 +7030,12 @@ impl<O: ClassObject + SolutionObject> LocalOperationGeometryCreation<O> {
                 .face_surface(face)?
                 .ok_or(dangling("face without surface"))?;
             let old_domain = surface_of(brep, sur)?.natural_uv_domain_with_nurb(k)?;
-            // Reparameterize's status is ignored
+            // Reparameterize's status is ignored upstream; passed on here (WR-658)
             {
                 let s = brep
                     .surface_mut(new_surface)
                     .ok_or(dangling("surface handle cannot be resolved"))?;
-                let _ = ignore_soft(crate::error::passed_on(
-                    s.reparameterize(k, &old_domain),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                s.reparameterize(k, &old_domain)?;
             }
             // Copy pS, when possible as an analytic surface (the listed surface is deleted)
             let mut analytic = surface_of(brep, new_surface)?.copy_and_add_analytics(k)?;
@@ -6870,6 +7067,97 @@ mod tests {
         assert_eq!(smallest_tolerance(&[f64::NAN, 1e-5]), None);
         assert_eq!(smallest_tolerance(&[1e-5, f64::NAN]), None);
         assert_eq!(smallest_tolerance(&[]), None);
+    }
+
+    /// WR-673: an open edge's second trim point is passed over only where it is the first
+    /// trim point again, reached round a closed 3D curve (its twin across the seam). An
+    /// open edge whose real second point lies within the "same point" tolerance of the
+    /// first keeps it, on an open curve and on a closed one alike: a test of the distance
+    /// alone (the guard as first retired) passed both over and left the edge with no
+    /// second point.
+    #[test]
+    fn a_short_open_edge_keeps_its_second_trim_point() {
+        let k = Kernel::default();
+        let tol = 1e-5;
+        // an open line: its second point 4e-6 along, within the tolerance of the first
+        let line = Curve::from(
+            BSplineCurve::create_line_segment(
+                3,
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(1.0, 0.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let ivl = line.natural_interval();
+        let (t0, t) = (ivl.min(), ivl.evaluate(4e-6));
+        let near = distance(
+            line.evaluate_point(&k, t0).unwrap(),
+            line.evaluate_point(&k, t).unwrap(),
+        );
+        assert!(near > 0.0 && near <= tol, "{near}");
+        assert!(!is_first_point_again(&k, &line, t0, t, tol).unwrap());
+
+        // a closed circle of radius 10: the seam twin of its start is the first point
+        // again; a point 5e-6 along the circle from the start is a real second point
+        let circle = Curve::from(
+            crate::curve::ellipse::Ellipse::new_circle(
+                &k,
+                Point3::new(1.0, 2.0, 3.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Extent1d::from_min_max(0.0, 360.0),
+                10.0,
+                &crate::curve::ellipse::EllipseOptions::default(),
+            )
+            .unwrap(),
+        );
+        let ivl = circle.natural_interval();
+        let (t0, twin) = (ivl.min(), ivl.max());
+        let same = distance(
+            circle.evaluate_point(&k, t0).unwrap(),
+            circle.evaluate_point(&k, twin).unwrap(),
+        );
+        assert!(same <= tol, "{same}");
+        assert!(is_first_point_again(&k, &circle, t0, twin, tol).unwrap());
+        assert!(is_first_point_again(&k, &circle, twin, t0, tol).unwrap());
+        let step = 5e-6 / (10.0 * 2.0 * PI) * (ivl.max() - ivl.min());
+        let short = t0 + step;
+        let near = distance(
+            circle.evaluate_point(&k, t0).unwrap(),
+            circle.evaluate_point(&k, short).unwrap(),
+        );
+        assert!(near > 0.0 && near <= tol, "{near}");
+        assert!(!is_first_point_again(&k, &circle, t0, short, tol).unwrap());
+        // a point half way round is not the first point at all
+        assert!(!is_first_point_again(&k, &circle, t0, ivl.evaluate(0.5), tol).unwrap());
+
+        // an open half circle whose ends are apart: never the first point again
+        let arc = Curve::from(
+            crate::curve::ellipse::Ellipse::new_circle(
+                &k,
+                Point3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Extent1d::from_min_max(0.0, 180.0),
+                10.0,
+                &crate::curve::ellipse::EllipseOptions::default(),
+            )
+            .unwrap(),
+        );
+        let ivl = arc.natural_interval();
+        assert!(!is_first_point_again(&k, &arc, ivl.min(), ivl.min() + step / 2.0, tol).unwrap());
+    }
+
+    /// WR-530: a tangent edge's drop passes only within its limit; a drop or limit that
+    /// is not a number refuses the edge as loose rather than passing it.
+    #[test]
+    fn a_drop_that_is_not_a_number_is_loose() {
+        assert!(!drop_is_loose(0.0, 1e-4));
+        assert!(!drop_is_loose(1e-4, 1e-4));
+        assert!(drop_is_loose(1.000_000_1e-4, 1e-4));
+        assert!(drop_is_loose(f64::NAN, 1e-4));
+        assert!(drop_is_loose(0.0, f64::NAN));
+        assert!(drop_is_loose(f64::INFINITY, 1e-4));
     }
 
     /// #17210: a saddle `z = x y` and the plane `z = 0` are tangent at the origin, where the

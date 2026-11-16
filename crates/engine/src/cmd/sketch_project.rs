@@ -173,6 +173,19 @@ fn source(s: &Session, v: &Value, cmd: &str) -> Result<LinkSource> {
             if Some(f.id) == s.active_sketch {
                 return Err(bad(cmd, "a sketch cannot project its own geometry"));
             }
+            if let Some(target) = sketch_store::active(s)
+                && let (Some(source_index), Some(target_index)) = (s.doc.feature_index(f.id), s.doc.feature_index(target))
+                && source_index > target_index
+            {
+                return Err(bad(
+                    cmd,
+                    format!(
+                        "sketch `{}` comes after this sketch in the timeline, so its geometry cannot be used here. \
+                         Move the source sketch earlier if its dependencies allow, or use a sketch after it.",
+                        f.name
+                    ),
+                ));
+            }
             if let Some(c) = curve {
                 return Ok(LinkSource::SketchCurve { sketch: f.id, curve: c.to_string() });
             }
