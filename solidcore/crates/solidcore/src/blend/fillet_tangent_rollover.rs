@@ -836,9 +836,9 @@ fn face_binormal(
     Ok(None)
 }
 
-/// The point of edge `e` at the station of `m` along the unit `d` (its point square to `d`
-/// through `m`) when it is a line parallel to `d` (within [`DIR_TOL`]) whose span along `d`
-/// covers that of the points `ends` (within `tol`), else `None`.
+/// The point of edge `e` at the station of `m` along the unit `d` (where it meets the plane
+/// square to `d` through `m`) when it is a line parallel to `d` (within [`DIR_TOL`]) whose
+/// span along `d` covers that of the points `ends` (within `tol`), else `None`.
 ///
 /// # Errors
 ///
@@ -873,7 +873,13 @@ fn full_span_line(
     if !(r0.min(r1) <= a.min(b) + tol && r0.max(r1) >= a.max(b) - tol) {
         return Ok(None);
     }
-    Ok(Some(point + d * (m - point).dot(d)))
+    // where the line meets the plane square to `d` through `m`, along its own direction (within
+    // DIR_TOL of `d`, so the divisor is within 1e-18 of +-1)
+    let across = fd.dot(d);
+    if !(across.abs() > 0.5) {
+        return Ok(None);
+    }
+    Ok(Some(point + fd * ((m - point).dot(d) / across)))
 }
 
 /// The nearest point to `point` on the smooth edge a rail rolled over: where a ball of radius 0
