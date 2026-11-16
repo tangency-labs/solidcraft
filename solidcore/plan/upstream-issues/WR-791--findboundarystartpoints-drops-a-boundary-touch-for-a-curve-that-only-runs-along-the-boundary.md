@@ -6,14 +6,14 @@
   curve traced from that start point covers it. solidcore `intersect/surface_intersector/p3.rs`
   `find_boundary_start_points_body`, `add_deferred_touching_points`.
 - **What happens:** a surface's boundary curve touches the other surface at one point, and the boundary curve's
-  solve with the other surface finds that point (one surface straight along the boundary, the other curving away
-  from it to second order, so the two stay within the tolerance of each other for a short stretch). The other
-  surface's boundary gives a start point on the same point. When that start point lands just inside the domain,
-  the tracer follows the near contact along the boundary and returns a short crossing curve that never leaves
-  the tolerance band of the boundary curve; the touching point is dropped for it. An edge on that curve cuts from
-  the face a sliver narrower than the tolerance along its boundary edge, and the boolean keeps or drops a whole
-  corner of the result with it. Whether the start point lands inside depends on the last bits of the solve, so
-  the same construction at different sizes gives different bodies.
+  solve with the other surface gives that point (here a short range, refined to one: one surface straight along the
+  boundary, the other curving away from it to second order, so the two stay within the tolerance of each other for
+  a short stretch). The other surface's boundary gives a start point on the same point. When that start point lands
+  just inside the domain, the tracer follows the near contact along the boundary and returns a short crossing curve
+  that never leaves the tolerance band of the boundary curve; the touching point is dropped for it. An edge on that
+  curve cuts from the face a sliver narrower than the tolerance along its boundary edge, and the boolean keeps or
+  drops a whole corner of the result with it. Whether the start point lands inside depends on the last bits of the
+  solve, so the same construction at different sizes gives different bodies.
 - **Trigger:** a half pipe along x from -40 to 40 (the region 23 ≤ r ≤ 25, z ≥ 0 of the YZ plane, closed below
   z = 0 by two half discs of radius 1.0000125) cut by a ring from z = -h to h (an 84 × 54 rectangle less a rounded
   rectangle whose sides y = ±25 and x = ±40 are joined by arcs of radius 24 about (±16, ±1)). A cap cylinder of
@@ -28,8 +28,8 @@
   `a_symmetric_cut_through_a_half_pipe_is_the_same_for_every_length_past_it` (h = 30, 36.65, 36.75, 50 and
   250: 10015.883451427 mm³, 10 faces, 28 edges and 20 vertices at each).
 - **Fix (always on, no flag):** the touching point is kept aside (WR-51 addendum of 2026-11-16) and, at the end
-  of `DoIntersection`, every curve through it that stays within the tolerance of the boundary curve it lies on
-  over its whole length (both ends drop onto the boundary curve within the tolerance, and
-  `CurveMaxDistanceBetween` over the stretch between them is below it) is removed; the touching point takes its
-  place (`SurfaceIntersector::runs_along_boundary`). Test:
-  `intersect::surface_intersector::p3::tests::a_curve_along_the_boundary_of_a_deferred_contact_gives_way_to_it`.
+  of `DoIntersection`, every crossing curve (type crossing or near tangent) through it that stays within the
+  tolerance of the boundary curve it lies on (each distinct knot of the curve and each midpoint between two of
+  them drops onto the boundary curve closer than the tolerance) is removed; the touching point takes its place
+  (`SurfaceIntersector::runs_along_boundary`). Tangent, coincident and region boundary curves stay. Test:
+  `intersect::surface_intersector::p3::tests::a_crossing_curve_along_the_boundary_of_a_deferred_contact_gives_way_to_it`.

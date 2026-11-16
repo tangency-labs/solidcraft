@@ -60,8 +60,8 @@
 //! - **Touching points on a start point** (not upstream). `FindBoundaryStartPoints`
 //!   drops a touching point on a start point for good; here it is kept aside, and
 //!   `DoIntersection` adds it at the end when no curve found covers it
-//!   ([`SurfaceIntersector::add_deferred_touching_points`]). A curve through it that
-//!   runs along the boundary curve it lies on is that touch and gives way to it
+//!   ([`SurfaceIntersector::add_deferred_touching_points`]). A crossing curve through
+//!   it that runs along the boundary curve it lies on is that touch and gives way to it
 //!   ([`SurfaceIntersector::runs_along_boundary`]).
 //! - **Dead code.** The face edge branch of `FindBoundaryStartPoints`
 //!   (`static constexpr bGWCAddEdgeThroughPoints = FALSE`: target curves beyond the
@@ -130,6 +130,8 @@ const OP_NEXT: &str = "intersect::surface_intersector::p3::SurfaceIntersector::c
 const OP_UPDATE: &str =
     "intersect::surface_intersector::p3::SurfaceIntersector::update_tsect_point";
 const OP_TEST: &str = "intersect::surface_intersector::p3::SurfaceIntersector::test_point";
+const OP_ALONG: &str =
+    "intersect::surface_intersector::p3::SurfaceIntersector::runs_along_boundary";
 
 /// The step to a pole of [`SurfaceIntersector::pole_corner_step`] (not upstream) and the
 /// degenerate boundary it reaches.
@@ -739,17 +741,17 @@ impl SurfaceIntersector<'_> {
     /// 2785, gave no curve at all. A point whose surface points are not within the
     /// tolerance is no contact and stays dropped.
     ///
-    /// A curve through a contact that runs along the boundary curve the contact lies on
-    /// ([`SurfaceIntersector::runs_along_boundary`]) is that contact, not a crossing
-    /// (not upstream; #11749): it is removed and the touching point takes its place.
-    /// The boundary curve's own solve with the other surface found only the point
-    /// there, so along the curve the surfaces meet within the tolerance where one of
-    /// them curves away from the boundary to second order and the other does not. Such
-    /// a curve is traced when the start point on the contact lands just inside the
-    /// domain (1.4e-12 inside a half pipe's cap, against 3e-15 outside it at another
-    /// length of the same cut). An edge on it would cut from the face a sliver along its
-    /// boundary edge narrower than the tolerance, and the boolean kept or dropped a whole
-    /// corner of the cut with it.
+    /// A crossing curve (type crossing or near tangent) through a contact that runs along
+    /// the boundary curve the contact lies on ([`SurfaceIntersector::runs_along_boundary`])
+    /// is that contact (not upstream; #11749): it is removed and the touching point takes
+    /// its place. The boundary curve's own solve with the other surface gave a point
+    /// there (a single solution, or a range shorter than a hundredth of the boundary
+    /// refined to one), and the curve never leaves the tolerance of that boundary: an
+    /// edge on it would cut from the face a sliver along its boundary edge narrower than
+    /// the tolerance. Such a curve is traced when the start point on the contact lands
+    /// just inside the domain (1.4e-12 inside a half pipe's cap, against 3e-15 outside
+    /// it at another length of the same cut), and the boolean kept or dropped a whole
+    /// corner of the cut with it. Tangent, coincident and region boundary curves stay.
     ///
     /// # Errors
     ///
@@ -770,13 +772,16 @@ impl SurfaceIntersector<'_> {
             if !contact {
                 continue;
             }
-            // the curves through the point that run along its boundary curve are the point
+            // the crossing curves through the point that run along its boundary curve
+            // are the point
             let mut along = Vec::new();
             for (ii, c) in out.curves_3d.iter().enumerate() {
-                if out.curve_types.get(ii) == Some(&TsectCurveType::Touching) {
-                    continue;
-                }
-                if self.is_point_on_curve(k, d.point, core::slice::from_ref(c), None)?
+                let crossing = matches!(
+                    out.curve_types.get(ii),
+                    Some(TsectCurveType::Crossing | TsectCurveType::NearTangent)
+                );
+                if crossing
+                    && self.is_point_on_curve(k, d.point, core::slice::from_ref(c), None)?
                     && self.runs_along_boundary(k, c, &d.boundary)?
                 {
                     along.push(ii);
@@ -794,16 +799,15 @@ impl SurfaceIntersector<'_> {
     }
 
     /// True when `curve` stays within `this_approx_tol_3d` of `boundary` over its whole
-    /// length: both its ends drop onto `boundary` within the tolerance, and the largest
-    /// gap between it and the stretch of `boundary` between those drops
-    /// ([`Curve::curve_max_distance_between`], sampled by the knots and refined) is
-    /// below the tolerance. False when a drop or the gap cannot be found.
+    /// length: each of its distinct knots in its interval (its ends among them) and
+    /// each midpoint between two of them drops onto `boundary` closer than the
+    /// tolerance. False when one is farther, or a drop fails or finds nothing.
     ///
     /// # Errors
     ///
     /// [`SolidError::Unported`] and a cancellation.
     fn runs_along_boundary(&self, k: &Kernel, curve: &Curve, boundary: &Curve) -> Result<bool> {
-        match self.boundary_gap_below_tolerance(k, curve, boundary) {
+        match self.samples_near_boundary(k, curve, boundary) {
             Ok(along) => Ok(along),
             Err(e) if e.is_unported_or_cancelled() => Err(e),
             Err(_) => Ok(false),
@@ -812,17 +816,25 @@ impl SurfaceIntersector<'_> {
 
     /// The test of [`SurfaceIntersector::runs_along_boundary`], with every failure an
     /// error.
-    fn boundary_gap_below_tolerance(
-        &self,
-        k: &Kernel,
-        curve: &Curve,
-        boundary: &Curve,
-    ) -> Result<bool> {
+    fn samples_near_boundary(&self, k: &Kernel, curve: &Curve, boundary: &Curve) -> Result<bool> {
         let tol = self.this_approx_tol_3d;
         let ivl = curve.natural_interval();
         let b_ivl = boundary.natural_interval();
-        let mut ends = [0.0; 2];
-        for (end, t) in ends.iter_mut().zip([ivl.min(), ivl.max()]) {
+        let (knots, _) = curve.knots(k, Some(&ivl))?;
+        let mut ts = vec![ivl.min()];
+        ts.extend(
+            knots
+                .into_iter()
+                .filter(|&t| t > ivl.min() && t < ivl.max()),
+        );
+        ts.push(ivl.max());
+        let mids: Vec<f64> = ts
+            .iter()
+            .zip(ts.iter().skip(1))
+            .map(|(a, b)| (a + b) / 2.0)
+            .collect();
+        for t in ts.into_iter().chain(mids) {
+            k.check_cancelled(OP_ALONG)?;
             let p = curve.evaluate_point(k, t)?;
             let drop =
                 boundary.drop_point(k, &b_ivl, p, None, tol, None, SolverOperation::Minimize)?;
@@ -830,20 +842,8 @@ impl SurfaceIntersector<'_> {
             if !within {
                 return Ok(false);
             }
-            *end = drop.parameter;
         }
-        // the boundary's stretch runs with the curve or against it
-        let [t0, t1] = ends;
-        let (start, end) = if t0 <= t1 {
-            (ivl.min(), ivl.max())
-        } else {
-            (ivl.max(), ivl.min())
-        };
-        let mut stretch = Extent1d::from_value(t0);
-        stretch.add_value(t1);
-        let gap =
-            boundary.curve_max_distance_between(k, &stretch, curve, start, end, 0, Some(tol))?;
-        Ok(gap.distance < tol)
+        Ok(true)
     }
 
     /// The tail of a boundary point solution (single value or small range): the
@@ -2417,12 +2417,13 @@ mod tests {
         assert_eq!((uv.x, uv.y), (0.2, 0.5));
     }
 
-    /// #11749: a curve through a deferred contact that runs within the tolerance along
-    /// the contact's boundary curve is the contact and gives way to its touching point;
-    /// a curve through it that leaves the boundary, even only by twice the tolerance at
-    /// its far end, is a crossing and covers it.
+    /// #11749: a crossing curve through a deferred contact that runs within the tolerance
+    /// along the contact's boundary curve, either way round, is the contact and gives way
+    /// to its touching point. A curve through it that leaves the boundary stays and covers
+    /// it: by twice the tolerance at its far end, by 0.1, or by 0.012 in its middle with
+    /// both ends on the boundary. A tangent curve along the boundary stays too.
     #[test]
-    fn a_curve_along_the_boundary_of_a_deferred_contact_gives_way_to_it() {
+    fn a_crossing_curve_along_the_boundary_of_a_deferred_contact_gives_way_to_it() {
         let k = &Kernel::default();
         let (a, b) = two_planes();
         let mut si = intersector(k, &a, &b);
@@ -2438,31 +2439,50 @@ mod tests {
             tsp,
             boundary: line([0.0, 0.5, 0.0], [1.0, 0.5, 0.0]),
         };
-        let crossing_curve = |c: Curve| {
+        let mut run = |c: Curve, ty: TsectCurveType| {
             let mut out = TsectCurves::default();
             out.curves_3d.push(c);
             for uv in &mut out.uv_curves {
                 uv.push(line([0.2, 0.5, 0.0], [0.3, 0.5, 0.0]));
             }
-            out.curve_types.push(TsectCurveType::Crossing);
+            out.curve_types.push(ty);
             out.deviations.push(0.0);
-            out
-        };
-        // at most half the tolerance from the boundary: the touching point
-        let mut out = crossing_curve(line(at, [0.3, 0.5, 0.5 * tol]));
-        si.deferred_touching = vec![contact.clone()];
-        si.add_deferred_touching_points(k, &mut out).unwrap();
-        assert_eq!(out.curve_types, [TsectCurveType::Touching]);
-        assert_eq!(out.uv_curves.map(|uv| uv.len()), [1, 1]);
-        let p = out.curves_3d[0].evaluate_point(k, 0.0).unwrap();
-        assert_eq!(p, Vec3::from_array(at));
-        // leaving the boundary: the curve stays and covers the point
-        for far in [2.0 * tol, 0.1] {
-            let mut out = crossing_curve(line(at, [0.3, 0.5, far]));
             si.deferred_touching = vec![contact.clone()];
             si.add_deferred_touching_points(k, &mut out).unwrap();
+            assert!(si.deferred_touching.is_empty());
+            out
+        };
+        // at most half the tolerance from the boundary, either way round: the point
+        for c in [
+            line(at, [0.3, 0.5, 0.5 * tol]),
+            line([0.3, 0.5, 0.5 * tol], at),
+        ] {
+            let out = run(c, TsectCurveType::Crossing);
+            assert_eq!(out.curve_types, [TsectCurveType::Touching]);
+            assert_eq!(out.uv_curves.map(|uv| uv.len()), [1, 1]);
+            let p = out.curves_3d[0].evaluate_point(k, 0.0).unwrap();
+            assert_eq!(p, Vec3::from_array(at));
+        }
+        let out = run(line(at, [0.3, 0.5, 0.5 * tol]), TsectCurveType::NearTangent);
+        assert_eq!(out.curve_types, [TsectCurveType::Touching]);
+        // leaving the boundary: the curve stays and covers the point
+        for far in [2.0 * tol, 0.1] {
+            let out = run(line(at, [0.3, 0.5, far]), TsectCurveType::Crossing);
             assert_eq!(out.curve_types, [TsectCurveType::Crossing], "{far}");
         }
+        // both ends on the boundary, the middle 0.0118 off it
+        let bulge = BSplineCurve::create_arc_from_points(
+            Vec3::new(0.25, 0.5, -0.1),
+            Vec3::from_array(at),
+            Vec3::new(0.3, 0.5, 0.0),
+            crate::nurbs::b_spline_curve::p1::NurbCircleParam::Quadratic,
+        )
+        .unwrap();
+        let out = run(Curve::from(bulge), TsectCurveType::Crossing);
+        assert_eq!(out.curve_types, [TsectCurveType::Crossing]);
+        // a tangent curve along the boundary is no crossing
+        let out = run(line(at, [0.3, 0.5, 0.5 * tol]), TsectCurveType::Tangent);
+        assert_eq!(out.curve_types, [TsectCurveType::Tangent]);
     }
 
     #[test]
