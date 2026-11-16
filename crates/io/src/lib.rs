@@ -1,4 +1,4 @@
-//! File formats. Designs use JSON or versioned containers (`.sc`; `.solidcraft` and `.solvecraft` still open); the authoritative
+//! File formats. Designs use JSON or versioned containers (`.sc`; `.solidcraft` still opens); the authoritative
 //! document rebuilds on load and optional display caches remain provisional. Bodies export
 //! as STL (binary or ASCII), OBJ, STEP and 3MF, and assemblies as URDF ([`urdf()`]); STEP, IGES,
 //! FreeCAD and Rhino files import as a base feature (see [`step_import_feature`]), 3MF and
@@ -69,7 +69,7 @@ pub use gerber::{GerberLayer, GerberOutline, read_gerber_layer, read_gerber_outl
 pub use gerber_set::{
     BOARD_EXTENSIONS, BoardJob, GerberSet, MAX_SET_FILES, SetFile, SetRole, classify_set, is_zip_path, read_gerber_set, zip_entries,
 };
-pub use legacy_dir::{APP_ID, LEGACY_APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
+pub use legacy_dir::{APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
 pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
 pub use svg::{decode_svg, read_svg, svg_nothing_to_import, svg_sheet};
@@ -104,9 +104,9 @@ pub const DESIGN_EXT: &str = "sc";
 /// The design extensions of earlier releases, newest first. Compatibility shim
 /// (docs/compatibility.md): such files still open everywhere a design opens, and Save keeps
 /// writing an opened file under its own name; new designs are saved as [`DESIGN_EXT`].
-pub const LEGACY_DESIGN_EXTS: [&str; 2] = ["solidcraft", "solvecraft"];
+pub const LEGACY_DESIGN_EXTS: [&str; 1] = ["solidcraft"];
 /// Every extension a design file may have, current first.
-pub const DESIGN_EXTS: [&str; 3] = [DESIGN_EXT, LEGACY_DESIGN_EXTS[0], LEGACY_DESIGN_EXTS[1]];
+pub const DESIGN_EXTS: [&str; 2] = [DESIGN_EXT, LEGACY_DESIGN_EXTS[0]];
 
 /// Is this extension (without the dot) one a design file may have (`sc` or a legacy one), any case?
 pub fn is_design_ext(ext: &str) -> bool {
@@ -1699,13 +1699,13 @@ mod tests {
         assert!(step_import_feature(&[0xff, 0xfe, 0x00], "x.step").is_err());
         assert!(Format::from_name("a.dwg").is_err());
         // Compatibility shim: the legacy design extensions are still designs.
-        assert_eq!(Format::from_name("old.solvecraft").unwrap(), Format::Design);
+        assert!(Format::from_name("old.solvecraft").is_err(), "the pre-rename extension is no longer a name we know; its files open by content");
         assert_eq!(Format::from_name("older.solidcraft").unwrap(), Format::Design);
         assert_eq!(Format::from_name("new.sc").unwrap(), Format::Design);
         assert_eq!(Format::from_name("NEW.SC").unwrap(), Format::Design);
-        assert!(is_design_path("/d/old.SOLVECRAFT") && is_design_path("older.solidcraft") && is_design_path("new.sc") && !is_design_path("a.step"));
+        assert!(!is_design_path("/d/old.SOLVECRAFT") && is_design_path("older.solidcraft") && is_design_path("new.sc") && !is_design_path("a.step"));
         assert_eq!(DESIGN_EXT, "sc");
-        assert_eq!(DESIGN_EXTS, ["sc", "solidcraft", "solvecraft"], "new extension first, then every older one");
+        assert_eq!(DESIGN_EXTS, ["sc", "solidcraft"], "new extension first, then every older one");
         assert!(read_stl(&[0u8; 10]).is_err());
         let mut fake = vec![0u8; 84];
         fake[80..84].copy_from_slice(&u32::MAX.to_le_bytes());

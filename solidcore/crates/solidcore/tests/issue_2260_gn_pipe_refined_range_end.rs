@@ -77,7 +77,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_variable_span_follows_fillet",
     "found_torus_sphere_keep_tested_nurb",
     "geometric_g2_continuity",
-    "good_drop_result_distances_in_order",
     "join_touching_loops",
     "keep_operand_uv_trims",
     "linear_sweep_arc_is_cylinder",

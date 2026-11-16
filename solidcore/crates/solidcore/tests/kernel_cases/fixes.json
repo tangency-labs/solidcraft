@@ -14,7 +14,6 @@
   "degen_param_tiebreak_uses_actual_param",
   "proto_vertex_miss_is_false",
   "surface_continuity_checks_last_v_knot",
-  "good_drop_result_distances_in_order",
   "local_surface_intersect_guards_max_boundary_retry",
   "revolve_analytic_profile_faces",
   "revolve_holed_profile_void",
