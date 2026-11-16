@@ -62,6 +62,33 @@ fn revolves_that_end_on_the_axis_along_a_curve_have_their_volume() {
     }
 }
 
+/// A flat plate with a spline-shaped rim (#17516): a sketch solver leaves the spline's end a few
+/// nanometres past the axis where it meets a line running down the axis. A whole turn about that
+/// axis has the volume of the same profile with the end exactly on it, whichever side the end is.
+#[test]
+fn a_spline_ending_a_hair_off_the_axis_revolves_as_if_on_it() {
+    let rim = |x: f64| {
+        let top = Vec2::new(x, 8.5);
+        region(vec![
+            line((0.0, 0.0), (50.0, 0.0)),
+            line((50.0, 0.0), (50.0, 2.4)),
+            Seg2::Cubic { p0: Vec2::new(50.0, 2.4), p1: Vec2::new(35.0, 2.4), p2: Vec2::new(16.0, 8.5), p3: top },
+            Seg2::Line { a: top, b: Vec2::new(0.0, 2.4) },
+            line((0.0, 2.4), (0.0, 0.0)),
+        ])
+    };
+    let volume = |x: f64| {
+        let body = revolve(&Plane::XY, &[rim(x)], Vec2::ZERO, Vec2::new(0.0, 1.0), TAU).unwrap().pop().unwrap();
+        assert!(body.validity().is_empty(), "end at x {x}: {:?}", body.validity());
+        measure(&body).unwrap().volume
+    };
+    let on = volume(0.0);
+    for x in [-3.8e-9, 3.8e-9] {
+        let got = volume(x);
+        assert!((got - on).abs() < 1e-6 * on, "end at x {x}: {got} instead of {on}");
+    }
+}
+
 #[test]
 fn a_half_slot_revolved_about_a_centreline_in_a_face_cuts_it() {
     let plate = box_solid(Vec3::ZERO, Vec3::new(40.0, 20.0, 10.0)).unwrap();

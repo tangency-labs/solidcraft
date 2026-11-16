@@ -200,7 +200,10 @@ fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec
             return Err(KernelError::Invalid("the profile crosses the revolve axis".into()));
         }
         // Points on the axis (within solver tolerance) go exactly onto it, so the sweep does not
-        // create hair-thin faces.
+        // create hair-thin faces. A curve's end control points are its ends, so they go too
+        // (#17516): a spline end the solver left a few nanometres off the axis no longer met the
+        // line snapped onto it, and its surface had a tiny circle there where a pole belongs.
+        // An arc keeps its ends: they follow from its centre and angles.
         let snap = |p: Vec2| {
             let along = (p - axis_origin).dot(d);
             let q = axis_origin + d * along;
@@ -209,6 +212,17 @@ fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec
         let snap_loop = |l: &NumberedLoop| {
             l.map_segs(|s| match *s {
                 Seg2::Line { a, b } => Seg2::Line { a: snap(a), b: snap(b) },
+                Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic { p0: snap(p0), p1, p2, p3: snap(p3) },
+                Seg2::Conic { a, apex, b, w } => Seg2::Conic { a: snap(a), apex, b: snap(b), w },
+                Seg2::Bezier { n, mut p } => {
+                    if let Some(first) = p.first_mut() {
+                        *first = snap(*first);
+                    }
+                    if let Some(last) = p.get_mut(usize::from(n)) {
+                        *last = snap(*last);
+                    }
+                    Seg2::Bezier { n, p }
+                }
                 arc => arc,
             })
         };
