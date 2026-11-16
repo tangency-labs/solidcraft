@@ -6,7 +6,7 @@
 //! cylinder itself (WR-633), in arc spans that stop at the closed turn (WR-650).
 //!
 //! SolidCraft runs it with its whole preset of fixes on; the round of the mitred corners
-//! needs `fillet_mitre_gap_patch` and `fillet_mitre_concave_face_corners` (without them
+//! needs the WR-644 gap patch and `fillet_mitre_concave_face_corners` (without them
 //! the level 2 check reports `SmSurfOfRevolution` test 7, and 3.8e-4 of the volume is
 //! missing), and with `offset_extension_as_itself` off the fillet fails (status 8).
 //!
@@ -176,7 +176,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_mitre_concave_face_corners = true;
-    k.fixes.fillet_mitre_gap_patch = true;
     k.fixes.fillet_nx1_tangent_side_edge = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_point_step_per_point = true;

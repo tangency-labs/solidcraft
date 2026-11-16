@@ -142,7 +142,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     // The fork's commits in `SMLIB_REV` 2fc375f, ported to solidcore since.
     f.offset_extension_as_itself = true;
     f.fillet_mitre_concave_face_corners = true;
-    f.fillet_mitre_gap_patch = true;
     f.good_drop_result_distances_in_order = true;
     f.face_tight_box_searches_trim = true;
     f.ssi_low_angle_start_on_probation = true;
@@ -156,7 +155,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ssi_proto_topology_statuses_pass_on = true;
     f.analytic_inversion_answers_apart = true;
     f.fillet_statuses_pass_on = true;
-    f.fillet_corner_per_vertex_fan = true;
     f.fillet_rail_trim_at_near_knot = true;
     f.offset_keep_cavity_regions = true;
     f.ellipse_step_interval_checks = true;
