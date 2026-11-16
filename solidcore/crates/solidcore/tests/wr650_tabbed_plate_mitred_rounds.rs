@@ -177,7 +177,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_trim_status = true;
     k.fixes.fillet_variable_span_follows_fillet = true;
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
-    k.fixes.good_drop_result_distances_in_order = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
     k.fixes.join_touching_loops = true;
     k.fixes.keep_operand_uv_trims = true;

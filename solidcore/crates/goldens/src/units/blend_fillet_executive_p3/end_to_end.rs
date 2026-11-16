@@ -800,6 +800,8 @@ fn run_rust(
         }
         Err(error) => values.push(status(error)?),
     }
+    // (a soundness probe's measure of the result: nothing unless capture is on)
+    crate::soundness::measure(&mut body);
     Ok(values)
 }
 /// Configure one actual retained corner between native corner creation and filleting.
@@ -2057,5 +2059,61 @@ mod wr457_certificates {
         let hi = corner.iter().map(|c| c.1).fold(f64::INFINITY, f64::min);
         eprintln!("mixed corners: their contribution in [{lo}, {hi}]");
         assert!(lo <= hi, "the mixed corners differ: {corner:?}");
+    }
+}
+
+/// WR-56 (#17467): the two rows it moved, `source-file-6_sided_corner-all-edges` and
+/// `source-file-nurb_box-all-edges`, round every edge of a B-spline body. Their mass
+/// properties did not move (bit for bit), and their topology and geometry records hold the
+/// same values in another order (the same body, its entities numbered differently).
+/// Each body is certified: `check_brep` Level 2 reports nothing, it is one manifold solid
+/// of positive volume, and its volume is enclosed ([`enclose_volume`]; asked for a relative
+/// width of 1e-7, the budget stops it at 2.3e-6 and 1.2e-5, asserted under 2e-5); the
+/// row's volume (the mass integrator's) lies in the enclosure.
+///
+/// [`enclose_volume`]: solidcore::mass::enclosure::enclose_volume
+#[cfg(test)]
+mod wr56_certificates {
+    use crate::UnitDiff;
+    use solidcore::mass::enclosure::VolumeSign;
+
+    #[test]
+    fn the_moved_rounds_are_valid_solids_with_enclosed_volumes() {
+        for name in [
+            "source-file-6_sided_corner-all-edges",
+            "source-file-nurb_box-all-edges",
+        ] {
+            let case = crate::case::regression_case(&super::super::Runner, name);
+            crate::soundness::start_enclosing(1e-7);
+            let row = super::super::Runner.run_rust(&case);
+            let found = crate::soundness::take();
+            let row = row.unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            assert_eq!(found.len(), 1, "{name}: one result body");
+            let s = &found[0];
+            assert!(s.sound(), "{name}: {}", s.line());
+            assert_eq!(s.manifold, Some(true), "{name}: {}", s.line());
+            assert!(matches!(s.volume, Some(VolumeSign::Positive(_))), "{name}: {}", s.line());
+            let e = match &s.enclosure {
+                Some(Ok(e)) => *e,
+                other => panic!("{name}: no enclosure: {other:?}"),
+            };
+            // the enclosure is certified whatever width its budget reached
+            eprintln!("{name}: enclosure {e:?}, relative width {:e}", (e.hi - e.lo) / e.hi);
+            assert!(e.hi - e.lo <= 2e-5 * e.hi, "{name}: {e:?} is wider than 2e-5");
+            let mass = row.values.get("mass_properties").expect("mass properties");
+            let volume = *mass.get(1).expect("volume");
+            eprintln!(
+                "{name}: volume in [{}, {}], row {volume}; {}",
+                e.lo,
+                e.hi,
+                s.line()
+            );
+            assert!(
+                e.lo <= volume && volume <= e.hi,
+                "{name}: row volume {volume} not in [{}, {}]",
+                e.lo,
+                e.hi
+            );
+        }
     }
 }
