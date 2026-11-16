@@ -102,7 +102,8 @@ fn switch_type(app: &SolveApp, d: &mut Dialog, m: usize) {
     if let Some(i) = d.inputs.first_mut() {
         i.items = bodies;
     }
-    for key in ["pivot", "origin", "order"] {
+    // A kept turn (`axis`, `angle`, `origin`) is in `chain` now; keeping it would turn twice.
+    for key in ["pivot", "origin", "order", "axis", "angle"] {
         d.extra.remove(key);
     }
     d.active = if bodies_empty(d) { 0 } else { 1.min(d.inputs.len() - 1) };
@@ -911,12 +912,18 @@ fn step(app: &SolveApp, d: &Dialog) -> Result<Step, String> {
             }
         }
         ROTATE => {
-            let Some((o, a)) = items(d, 1).first().and_then(|s| axis_line(app, d, s)) else {
-                return Ok(Step::Needs("select an axis, a straight or circular edge, or a cylinder, cone or torus face first".into()));
-            };
+            if let Some((axis, origin)) = kept_axis(&d.inputs, &d.extra) {
+                // An edited turn's own axis and pivot, as stored (#17560).
+                p["origin"] = origin.clone();
+                p["axis"] = axis.clone();
+            } else {
+                let Some((o, a)) = items(d, 1).first().and_then(|s| axis_line(app, d, s)) else {
+                    return Ok(Step::Needs("select an axis, a straight or circular edge, or a cylinder, cone or torus face first".into()));
+                };
+                p["origin"] = num(o);
+                p["axis"] = json!([a.x, a.y, a.z]);
+            }
             ang(app, angle)?;
-            p["origin"] = num(o);
-            p["axis"] = json!([a.x, a.y, a.z]);
             p["angle"] = json!(angle);
             // A body's edge or round face is kept as a reference, so the turn follows it when an
             // earlier step moves the body (#17974).
@@ -977,6 +984,31 @@ fn modelled_axis(app: &SolveApp, s: &Sel) -> Option<(Vec3, Vec3)> {
     e.iter().all(|p| (*p - a).cross(dir).len() < 1e-6 * (1.0 + (b - a).len())).then_some((a, dir))
 }
 
+/// The axis an edited Rotate keeps while no other is picked (#17560): its direction and its
+/// pivot as stored, the pivot's expressions included.
+fn kept_axis<'a>(inputs: &[SelInput], extra: &'a serde_json::Map<String, Value>) -> Option<(&'a Value, &'a Value)> {
+    if !crate::selection::items(inputs, 1).is_empty() || inputs.get(1).is_none_or(|i| i.accept != AXIS_PICKS) {
+        return None;
+    }
+    Some((extra.get("axis")?, extra.get("origin")?))
+}
+
+/// [`kept_axis`] as a line in the world: a point on it and its direction.
+fn kept_axis_line(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
+    let (axis, origin) = kept_axis(&d.inputs, &d.extra)?;
+    let [ax, ay, az]: [f64; 3] = serde_json::from_value(axis.clone()).ok()?;
+    let [ox, oy, oz]: [String; 3] = serde_json::from_value(origin.clone()).ok()?;
+    Some((Vec3::new(len(app, &ox).ok()?, len(app, &oy).ok()?, len(app, &oz).ok()?), Vec3::new(ax, ay, az)))
+}
+
+/// Under Rotate's Angle row, while an edited turn keeps its own axis: says so (#17560).
+pub fn kept_axis_note(ui: &mut egui::Ui, inputs: &[SelInput], extra: &serde_json::Map<String, Value>) {
+    if kept_axis(inputs, extra).is_some() {
+        let text = solidcraft_ui_text::tr("dialog.move_kept_axis");
+        ui.add(egui::Label::new(egui::RichText::new(text).color(solidcraft_theme::Tokens::get().text_dim)).wrap());
+    }
+}
+
 /// Where the triad sits: the pivot carried by the move so far, on the bodies for an edited
 /// move's kept turn (Free Move and Translate only).
 pub fn triad(app: &SolveApp, d: &Dialog) -> Option<gizmo::Triad> {
@@ -999,7 +1031,10 @@ pub(crate) fn rotation_axis(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> 
         return None;
     }
     let centre = bodies_center(app, d)?;
-    let (origin, axis) = axis_line(app, d, items(d, 1).first()?)?;
+    let (origin, axis) = match items(d, 1).first() {
+        Some(s) => axis_line(app, d, s)?,
+        None => kept_axis_line(app, d)?,
+    };
     let axis = axis.normalized()?;
     Some((origin + axis * (centre - origin).dot(axis), axis))
 }
@@ -1141,13 +1176,24 @@ pub fn for_feature(
         }
         axis = solidcraft_engine::doc::apply_vector(frame, axis);
     }
+    let world = [Vec3::X, Vec3::Y, Vec3::Z].iter().position(|w| axis.cross(*w).len() < 1e-9 && axis.dot(*w) > 0.0);
+    let still = translate.iter().all(|e| doc.eval(e, ValueKind::Length).is_ok_and(|v| v.abs() < 1e-12));
+    let mode = if angle.is_some() && world.is_none() && still { ROTATE } else { FREE };
     let [x, y, z] = translate.map(String::from);
-    let mut k = kind(FREE, doc);
-    if let Kind::Move { x: kx, y: ky, z: kz, rx, ry, rz, .. } = &mut k {
+    let mut k = kind(mode, doc);
+    if let (Some(a), Kind::Move { angle: ka, .. }) = (angle, &mut k)
+        && mode == ROTATE
+    {
+        // One turn about an axis that is not X, Y or Z: Rotate shows its angle as typed, and keeps
+        // the stored axis and pivot until another axis is picked (#17560). Free Move could show it
+        // only as three angles that make the same turn, losing an expression such as `-tent`.
+        *ka = a.to_string();
+        d.extra.insert("axis".into(), json!([axis.x, axis.y, axis.z]));
+        d.extra.insert("origin".into(), json!(origin.unwrap_or_else(|| solidcraft_engine::doc::point_expr(Vec3::ZERO))));
+    } else if let Kind::Move { x: kx, y: ky, z: kz, rx, ry, rz, .. } = &mut k {
         (*kx, *ky, *kz) = (x, y, z);
         if let Some(a) = angle {
             let dir = axis;
-            let world = [Vec3::X, Vec3::Y, Vec3::Z].iter().position(|w| dir.cross(*w).len() < 1e-9 && dir.dot(*w) > 0.0);
             match world {
                 Some(0) => *rx = a.to_string(),
                 Some(1) => *ry = a.to_string(),
@@ -1174,7 +1220,7 @@ pub fn for_feature(
         }
     }
     d.kind = k;
-    d.inputs = inputs(FREE);
+    d.inputs = inputs(mode);
     if let Some(inp) = d.inputs.first_mut() {
         inp.items = bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
     }
