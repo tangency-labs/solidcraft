@@ -27,8 +27,9 @@ pub struct PartsLibraryParams {
 #[schemars(deny_unknown_fields)]
 pub struct PartsInsertParams {
     /// The family, as `parts.library` lists it: socket_head_cap_screw, button_head_cap_screw,
-    /// countersunk_socket_screw, hex_bolt, hex_nut, washer, set_screw, dowel_pin, bearing, hex_cap_screw_inch,
-    /// hex_nut_inch, washer_sae or washer_uss.
+    /// countersunk_socket_screw, hex_bolt, hex_nut, washer, set_screw, dowel_pin, bearing, hex_bolt_gost,
+    /// socket_head_cap_screw_gost, set_screw_gost, hex_nut_gost, hex_nut_thin_gost, washer_gost,
+    /// washer_large_gost, dowel_pin_gost, hex_cap_screw_inch, hex_nut_inch, washer_sae or washer_uss.
     #[serde(deserialize_with = "family")]
     pub family: String,
     /// The size, as `parts.library` lists it: `M6`, `608` for a bearing, `1/2-13 UNC` for an

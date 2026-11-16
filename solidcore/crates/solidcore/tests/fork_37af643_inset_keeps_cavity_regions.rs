@@ -180,14 +180,11 @@ fn flag_on_keeps_only_the_cavity() {
     assert!((v - 638.75).abs() <= 1e-9 * 638.75, "{v}");
 }
 
-/// With the SolidCraft set's offset fixes that touch this path as well (WR-345's crossing
-/// loops, WR-455's one-pass stitch), the flag gives the same shell.
+/// The offset fixes SolidCraft ran with on this path (WR-345's crossing loops, WR-455's
+/// stitch) are the default now: with the flag the shell is the same.
 #[test]
 fn flag_on_with_offset_fixes() {
-    let mut fixes = keep_cavity();
-    fixes.offset_resolve_crossing_loops = true;
-    fixes.offset_stitch_at_body_tolerance = true;
-    fixes.offset_extended_edges_mated = true;
+    let fixes = keep_cavity();
     let (manifold, v) = shell(&fixes, 2.5);
     assert!(manifold);
     assert!((v - 638.75).abs() <= 1e-9 * 638.75, "{v}");

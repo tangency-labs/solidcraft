@@ -30,7 +30,7 @@ pub(super) fn extrude(
     regions: &[Region2],
     height: f64,
 ) -> Result<Brep> {
-    check_regions(regions.iter(), PROFILE_TOLERANCE)
+    check_regions(regions.iter(), PROFILE_TOLERANCE, k.tolerances.zone_tol_3d)
         .map_err(|_| invalid("invalid reconstructed profile"))?;
     // These profiles contain fitted circular arcs, certified before the sweep. Use the
     // kernel's existing exact cylinder construction for those arcs, as Convert Mesh did
@@ -62,7 +62,7 @@ pub(super) fn intersection_area(
     b: &Region2,
     tolerance: f64,
 ) -> Result<f64> {
-    check_regions([a, b].into_iter(), tolerance)
+    check_regions([a, b].into_iter(), tolerance, k.tolerances.zone_tol_3d)
         .map_err(|_| invalid("invalid profile for mesh loop certification"))?;
     let frame = Frame {
         origin: [0., 0., 0.],

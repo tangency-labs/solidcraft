@@ -303,11 +303,13 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ("viewport_section_status", "Section", "prefs.viewport_section_status_help"),
                     ("viewport_status_details", "prefs.graphics_page.live_details", "prefs.viewport_status_details_help"),
                     ("viewport_status_summary", "prefs.graphics_page.fold_items", "prefs.viewport_status_summary_help"),
+                    ("escape_closes_analyses", "prefs.graphics_page.escape_closes", "prefs.escape_closes_analyses_help"),
                 ] {
                     let value = match id {
                         "viewport_analysis_status" => &mut app.preferences.viewport_analysis_status,
                         "viewport_section_status" => &mut app.preferences.viewport_section_status,
                         "viewport_status_details" => &mut app.preferences.viewport_status_details,
+                        "escape_closes_analyses" => &mut app.preferences.escape_closes_analyses,
                         _ => &mut app.preferences.viewport_status_summary,
                     };
                     let response = ui_kit::choice_chip(
@@ -359,6 +361,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("prefs:preview_tint_new_faces", tint_new.rect);
             let cut_tint = setting::cut_preview_tint(app, ui).backing_on_hover_text(app.tr("prefs.cut_preview_tint_help"));
             crate::scenario::publish_target("prefs:cut_preview_tint", cut_tint.rect);
+            let hidden_edges = setting::show_selected_hidden_edges(app, ui).backing_on_hover_text(app.tr("prefs.show_selected_hidden_edges_help"));
+            crate::scenario::publish_target("prefs:show_selected_hidden_edges", hidden_edges.rect);
             let reference =
                 setting::reference_geometry_through_bodies(app, ui).backing_on_hover_text(app.tr("settings.reference_geometry_through_bodies_help"));
             crate::scenario::publish_target("dialog:Show reference geometry through bodies", reference.rect);

@@ -1949,3 +1949,172 @@ impl UnitDiff for Runner {
         rust(&case.parse()?)
     }
 }
+
+#[cfg(test)]
+mod representational_continuity_tests {
+    use super::*;
+    use solidcore::surface::b_spline_volume::VolumeParam;
+
+    /// The lowest representational class among a B-spline direction's interior knots
+    /// (`C^(deg - mult)`, discontinuous when `mult > deg` (#17549);
+    /// `CInfinity` past `C3`, the enum's limit), counted straight from its knot vector; the
+    /// ends are not continuities of the volume (WR-49). `CInfinity` when the direction
+    /// has no interior knot, or fewer than two distinct knots.
+    fn lowest_interior(deg: usize, knots: &[f64]) -> ContinuityType {
+        let mut mults: Vec<usize> = Vec::new();
+        let mut last = None;
+        for &t in knots {
+            match (last, mults.last_mut()) {
+                (Some(l), Some(m)) if l == t => *m += 1,
+                _ => mults.push(1),
+            }
+            last = Some(t);
+        }
+        let mut min = ContinuityType::CInfinity;
+        let n = mults.len();
+        for &m in mults.iter().take(n.saturating_sub(1)).skip(1) {
+            let c = match deg.checked_sub(m) {
+                None => ContinuityType::Discontinuous,
+                Some(0) => ContinuityType::C0,
+                Some(1) => ContinuityType::C1,
+                Some(2) => ContinuityType::C1C2,
+                Some(3) => ContinuityType::C1C2C3,
+                _ => ContinuityType::CInfinity,
+            };
+            if (c as i32) < (min as i32) {
+                min = c;
+            }
+        }
+        min
+    }
+
+    fn below_g1(c: ContinuityType) -> bool {
+        (c as i32) < (ContinuityType::G1 as i32)
+    }
+
+    /// The 10 rows WR-49's retirement moves in this unit.
+    const MOVED: [&str; 10] = [
+        "gen0872",
+        "gen0962",
+        "gen1523",
+        "r2_hdn_bs111",
+        "r2_hdn_bs222r",
+        "r2_hdn_bs321",
+        "r2_hdn_bs_deg_gt_hi",
+        "r2_hdn_bs_flatknot",
+        "r2_hdn_bs_huge",
+        "r2_hdn_bs_tiny",
+    ];
+
+    /// One direction of the record: `(unaligned, min_cont, number of params)`.
+    type Dir = (bool, ContinuityType, usize);
+
+    /// Replays every `HasDiscontinuities` case that reaches the representational path
+    /// (`geometric == false`, or a geometric call without a record on a volume with next
+    /// maps, whose next maps upstream tests with `false`) exactly as the runner calls it (a record first made unaligned, passed only when
+    /// the case asks for it) and checks the whole `put_disc` record and the result
+    /// against the closed form:
+    ///
+    /// - The head's simple map resets the record (`Init`). A B-spline head then fills
+    ///   each direction with its distinct knots (`GetKnots`, which WR-49 does not
+    ///   touch) and its lowest interior class, `C^(deg - mult)` counted from the raw
+    ///   knot vector; the ends are not continuities of the volume (WR-49). Any other
+    ///   head leaves the direction aligned, `CInfinity`, with no params. The simple map
+    ///   reports discontinuities when a direction is below `G1`, but leaves the record's
+    ///   own flag as `Init` set it (`false`).
+    /// - With a next map, the record's flag becomes the combined result (the simple
+    ///   map's or the next maps').
+    /// - The next maps have discontinuities exactly when one of their B-spline maps has
+    ///   a direction below `G1` (no other kind has any). Then every direction is reset
+    ///   to unaligned `C0` with no params and the record has discontinuities.
+    /// - The record's own lowest continuity stays `CInfinity`: the head's simple map
+    ///   never lowers it, so neither does the minimum taken with the next maps'.
+    /// - Without the record, it keeps the unaligned state the runner made.
+    #[test]
+    fn representational_discontinuities_are_the_interior_knots() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: MIN_GENERATED,
+        };
+        let k = Kernel::default();
+        let mut checked: Vec<String> = Vec::new();
+        for c in Runner.cases(&ctx).unwrap() {
+            let Ok(Inputs::HasDisc {
+                vol,
+                want,
+                geometric,
+            }) = c.parse::<Inputs>()
+            else {
+                continue;
+            };
+            let Ok(v) = build(&vol) else {
+                continue;
+            };
+            let has_next = v.next_map().is_some();
+            // a geometric call reaches the representational path only through the next
+            // maps of a call without a record (upstream passes `false` down then)
+            if geometric && (want || !has_next) {
+                continue;
+            }
+            let mut d = Discontinuities3d::new();
+            d.set_unaligned();
+            let r = v
+                .has_discontinuities(&k, want.then_some(&mut d), geometric)
+                .unwrap();
+            let lowest = |m: &MapIn| -> Option<[ContinuityType; 3]> {
+                let bs = m.bs.as_ref().filter(|_| m.kind == 3)?;
+                Some([0, 1, 2].map(|e| lowest_interior(bs.deg[e], &bs.knots[e])))
+            };
+            let below = |dirs: [ContinuityType; 3]| dirs.into_iter().any(below_g1);
+            let head = vol.first().and_then(lowest);
+            let head_has = if geometric {
+                // the head's geometric test, a path WR-49 does not touch
+                v.has_discontinuities_simple(&k, None, true).unwrap()
+            } else {
+                head.is_some_and(below)
+            };
+            let next_has = vol.iter().skip(1).filter_map(lowest).any(below);
+            assert_eq!(r, head_has || next_has, "{}", c.name);
+            let got: (bool, ContinuityType, [Dir; 3]) = (
+                d.has_discontinuities,
+                d.min_continuity,
+                [&d.u, &d.v, &d.w].map(|e| (e.unaligned, e.min_cont, e.params.len())),
+            );
+            let want_rec: (bool, ContinuityType, [Dir; 3]) = if !want {
+                (
+                    true,
+                    ContinuityType::C0,
+                    [(true, ContinuityType::C0, 0); 3],
+                )
+            } else if next_has {
+                (
+                    true,
+                    ContinuityType::CInfinity,
+                    [(true, ContinuityType::C0, 0); 3],
+                )
+            } else if let Some(dirs) = head {
+                let VolumeKind::BSpline(b) = v.kind() else {
+                    panic!("{}: the head is not a B-spline volume", c.name);
+                };
+                let params = [VolumeParam::U, VolumeParam::V, VolumeParam::W]
+                    .map(|p| b.knots(p, None).unwrap().0.len());
+                (
+                    has_next && head_has,
+                    ContinuityType::CInfinity,
+                    [0, 1, 2].map(|e| (false, dirs[e], params[e])),
+                )
+            } else {
+                (
+                    false,
+                    ContinuityType::CInfinity,
+                    [(false, ContinuityType::CInfinity, 0); 3],
+                )
+            };
+            assert_eq!(got, want_rec, "{}", c.name);
+            checked.push(c.name.clone());
+        }
+        for m in MOVED {
+            assert!(checked.iter().any(|c| c == m), "moved row {m} not replayed");
+        }
+    }
+}

@@ -1,0 +1,44 @@
+{
+  "ar": {
+    "ui.panel_host.move_tab_bottom": "نقل علامة التبويب إلى الأسفل",
+    "ui.panel_host.move_tab_floating": "تعويم علامة التبويب",
+    "ui.panel_host.move_tab_left": "نقل علامة التبويب إلى اليسار",
+    "ui.panel_host.move_tab_right": "نقل علامة التبويب إلى اليمين"
+  },
+  "de": {
+    "ui.panel_host.move_tab_bottom": "Tab nach unten verschieben",
+    "ui.panel_host.move_tab_floating": "Tab schwebend lösen",
+    "ui.panel_host.move_tab_left": "Tab nach links verschieben",
+    "ui.panel_host.move_tab_right": "Tab nach rechts verschieben"
+  },
+  "en": {
+    "ui.panel_host.move_tab_bottom": "Move tab to bottom",
+    "ui.panel_host.move_tab_floating": "Float tab",
+    "ui.panel_host.move_tab_left": "Move tab to left",
+    "ui.panel_host.move_tab_right": "Move tab to right"
+  },
+  "he": {
+    "ui.panel_host.move_tab_bottom": "העברת הכרטיסייה למטה",
+    "ui.panel_host.move_tab_floating": "הצפת הכרטיסייה",
+    "ui.panel_host.move_tab_left": "העברת הכרטיסייה שמאלה",
+    "ui.panel_host.move_tab_right": "העברת הכרטיסייה ימינה"
+  },
+  "ja": {
+    "ui.panel_host.move_tab_bottom": "タブを下へ移動",
+    "ui.panel_host.move_tab_floating": "タブをフローティング",
+    "ui.panel_host.move_tab_left": "タブを左へ移動",
+    "ui.panel_host.move_tab_right": "タブを右へ移動"
+  },
+  "vi": {
+    "ui.panel_host.move_tab_bottom": "Chuyển thẻ xuống dưới",
+    "ui.panel_host.move_tab_floating": "Thả nổi thẻ",
+    "ui.panel_host.move_tab_left": "Chuyển thẻ sang trái",
+    "ui.panel_host.move_tab_right": "Chuyển thẻ sang phải"
+  },
+  "zh": {
+    "ui.panel_host.move_tab_bottom": "将标签页移到底部",
+    "ui.panel_host.move_tab_floating": "浮动标签页",
+    "ui.panel_host.move_tab_left": "将标签页移到左侧",
+    "ui.panel_host.move_tab_right": "将标签页移到右侧"
+  }
+}

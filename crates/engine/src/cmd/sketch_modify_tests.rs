@@ -1656,6 +1656,29 @@ fn transform_scales_dimension_formulas_once_and_keeps_unselected_dimensions() {
     assert!(close(s.doc.eval(height["param"].as_str().unwrap(), length).unwrap(), 60.0), "dependent dimensions scale only once");
 }
 
+/// #17315: Transform turns, scales and moves a text as a unit, the way Move turns it, instead of
+/// refusing its outline points as projected. The text stays one editable text.
+#[test]
+fn transform_turns_scales_and_moves_a_text_as_a_unit() {
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.text", json!({"text": "I", "at": [10, 0], "height": 10}));
+    let link = r["link"].as_str().unwrap().to_string();
+    let curves = ids(&r["curves"]);
+    let before = s.doc.to_json();
+    // Twice as big and a quarter turn about the origin, then 5 along x: (10, 0) goes to (5, 20).
+    let out = run(&mut s, "sketch.transform", json!({"entities": curves, "factor": 2, "angle": 90, "center": [0, 0], "translate": [5, 0]}));
+    assert!(!ids(&out["curves"]).is_empty(), "{out}");
+    let sk = sketch(&s);
+    let Some(LinkSource::Text { at, height, angle, .. }) = sk.link(&link).map(|l| l.source.clone()) else {
+        panic!("the text keeps its link: {:?}", sk.links);
+    };
+    assert!(at.dist(Vec2::new(5.0, 20.0)) < 1e-9, "{at:?}");
+    assert!(close(height, 20.0), "{height}");
+    assert!(close(angle, std::f64::consts::FRAC_PI_2), "{angle}");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before, "one undo restores the text");
+}
+
 /// #14411: Scale takes the driving dimensions of what it scales with it, as Transform does: a
 /// 40 × 20 rectangle filleted r5, scaled 2× about the origin, is 80 × 40 with r10 corners, not a
 /// skewed shape the solver bent to keep the old radius.
@@ -5756,6 +5779,64 @@ fn trim_whole_source_keeps_its_offsets_and_unrelated_associations() {
     assert_eq!(sk.offset_distance(other_output), Some(3.0));
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(s.doc.to_json(), doc_before);
+}
+
+/// #7390: trimming a circle or arc that has an offset copy, or trimming the copy, failed with
+/// "an offset source vanished or changed shape" (the source) or was refused (the copy). The trim
+/// now releases the offset first, as for lines: the cut happens, the copy keeps its centre and
+/// its gap to the source, that gap stays driven by the offset's parameter, and one undo puts
+/// everything back.
+#[test]
+fn trim_cuts_a_circle_or_arc_with_an_offset_and_keeps_the_gap_driving() {
+    let radius = |s: &Session, id: &str| {
+        let sk = sketch(s);
+        sk.radius(sk.curve_index(id).unwrap()).unwrap()
+    };
+    let round = |s: &Session, id: &str| {
+        let sk = sketch(s);
+        matches!(sk.curves[sk.curve_index(id).unwrap()].kind, CurveKind::Arc { .. } | CurveKind::Circle { .. })
+    };
+    let circle = || json!({"command": "sketch.circle.center", "params": {"center": [0, 0], "radius": 10}});
+    let arc = || json!({"command": "sketch.arc.center_point", "params": {"center": [0, 0], "start": [10, 0], "end": [-10, 0]}});
+    // The circles lose their lower half; the arcs (the upper half) the piece at their start,
+    // below the line at y = 5 (it crosses the source at 30° and the copy at about 24.6°).
+    for (source, cutter, at_source, at_copy) in
+        [(circle(), [[-20.0, 0.0], [20.0, 0.0]], [0.0, -10.0], [0.0, -12.0]), (arc(), [[-20.0, 5.0], [20.0, 5.0]], [9.659, 2.588], [11.818, 2.084])]
+    {
+        for trim_copy_first in [false, true] {
+            let mut s = new_sketch();
+            let src = ids(&run(&mut s, source["command"].as_str().unwrap(), source["params"].clone())["curves"])[0].clone();
+            let offset = run(&mut s, "sketch.offset", json!({"curves": [src], "distance": "2 mm", "side": [0, 30], "chain": false}));
+            let copy = ids(&offset["curves"])[0].clone();
+            let parameter = offset["param"].as_str().unwrap().to_string();
+            assert!((radius(&s, &copy) - 12.0).abs() < 1e-7, "{source}: the copy is outside");
+            run(&mut s, "sketch.line", json!({"points": cutter, "connect": false, "infer": false}));
+            let before = s.doc.to_json();
+            let picks = if trim_copy_first { [(&copy, at_copy), (&src, at_source)] } else { [(&src, at_source), (&copy, at_copy)] };
+            for (n, (id, at)) in picks.into_iter().enumerate() {
+                let r = run(&mut s, "sketch.trim", json!({"curve": id, "at": at}));
+                assert_eq!(r["sketch"]["solved"], json!(true), "{source} {id}: {r}");
+                if n == 0 {
+                    assert_eq!(ids(&r["result"]["offset_released"]), std::slice::from_ref(&copy), "{source} {id}: {r}");
+                    assert!(sketch(&s).offsets.is_empty(), "{source}: the association is released");
+                    let undone = s.doc.to_json();
+                    run(&mut s, "edit.undo", json!({}));
+                    assert_eq!(s.doc.to_json(), before, "{source} {id}: one undo restores the offset");
+                    run(&mut s, "edit.redo", json!({}));
+                    assert_eq!(s.doc.to_json(), undone);
+                }
+                assert!(round(&s, &src) && round(&s, &copy), "{source} {id}: both stay round");
+                assert!((radius(&s, &copy) - radius(&s, &src) - 2.0).abs() < 1e-7, "{source} {id}: the gap is kept");
+            }
+            let sk = sketch(&s);
+            for id in [&src, &copy] {
+                let CurveKind::Arc { c: centre, .. } = sk.curves[sk.curve_index(id).unwrap()].kind else { panic!("{source} {id}: cut into an arc") };
+                assert!(sk.points[centre].pos.dist(Vec2::ZERO) < 1e-7, "{source} {id}: the centre stays");
+            }
+            run(&mut s, "parameters.change", json!({"name": parameter, "expression": "3 mm"}));
+            assert!((radius(&s, &copy) - radius(&s, &src) - 3.0).abs() < 1e-7, "{source}: the parameter still drives the gap");
+        }
+    }
 }
 
 /// All pick orders retain driving distances through repeated trims, dragging, parameter edits and native reload.

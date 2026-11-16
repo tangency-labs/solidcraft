@@ -160,6 +160,7 @@ mod tests {
                 condition: RuleCondition::Suppression { feature: 3, value: false },
                 effect: RuleEffect::DriveParameter { parameter: "d1".into(), expression: "d2 * 2 + d1".into() },
             }],
+            ..Default::default()
         };
         let original = table.clone();
         let maps = ConfigCloneMaps {

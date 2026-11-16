@@ -40,11 +40,13 @@
       }
     },
     {
-      "error": "the blend is larger than its faces allow at the edge at (-8.179, -5.754, 20.000): the blends take the whole of a face they roll on; the largest distance that fits is 9.989999999999993",
       "inputs": [
         "b5"
       ],
       "op": "chamfer_sides",
+      "outputs": [
+        "b6"
+      ],
       "params": {
         "distance": 10.0,
         "edges": {
@@ -86,33 +88,47 @@
       }
     }
   ],
-  "case": "2893-chamfer-two-distances-across-the-whole-top-refused",
+  "case": "2893-chamfer-two-distances-across-the-whole-top-is-a-cone",
   "expected": {
-    "method": "10 across the top reaches the axis: the cone would end in a point: no chamfer of the rim between the top and the wall has those sizes, so the right answer is a refusal saying why",
-    "outcome": "refused",
-    "refusal": "larger than",
+    "bbox": {
+      "max": [
+        10,
+        10,
+        20
+      ],
+      "min": [
+        -10,
+        -10,
+        0
+      ]
+    },
+    "body_count": 1,
+    "faces": 3,
+    "method": "The chamfer's line in (rho, z) runs from (0, 20) on the axis to (10, 17) on the wall, so the top is taken whole and the cone ends in a point on the axis (the owner's ruling of 2026-10-30 (d7): a chamfer that reaches a rim builds). The result is the cone from the tip at z = 20 down to r 10 at z = 17 on top of the cylinder r 10 from z = 17 to z = 0: pi r^2 h / 3 + pi r^2 h = pi 100 3 / 3 + pi 100 17 = 100 pi + 1700 pi = 1800 pi = 5654.866776. Faces: the cone, the wall and the bottom: 3.",
     "source": "analytic",
     "sources": [
       "tangency-labs/solidcraft#2893"
     ],
-    "what": "the top rim of a cylinder r10 x 20 chamfered 10 across the top and 3 down the wall: refused"
+    "volume_mm3": 5654.8667764616275,
+    "what": "the top rim of a cylinder r10 x 20 chamfered 10 across the top (the whole radius) and 3 down the wall: builds a cone to the centre"
   },
   "expressible": true,
   "operation_expressible": true,
   "outcome": {
-    "engine_error": "step 2 (solid.chamfer): not supported yet: the chamfer is larger than the faces beside its edges allow, at the edge at (-8.179, -5.754, 20.000): the blends take the whole of a face they roll on; the largest distance that fits is 9.99 mm",
-    "kernel_error": "the blend is larger than its faces allow at the edge at (-8.179, -5.754, 20.000): the blends take the whole of a face they roll on; the largest distance that fits is 9.989999999999993",
-    "ran": false
+    "ran": true,
+    "raw_counts": {
+      "edges": 4,
+      "faces": 3,
+      "vertices": 3
+    }
   },
-  "records": "2893-chamfer-two-distances-across-the-whole-top-refused.bodies.json.gz",
-  "result": [],
-  "rig": {
-    "error": null,
-    "known_failing": null,
-    "measured": null,
-    "refused_with": "step 2 (solid.chamfer): not supported yet: the chamfer is larger than the faces beside its edges allow, at the edge at (-8.179, -5.754, 20.000): the blends take the whole of a face they roll on; the largest distance that fits is 9.99 mm",
-    "status": "pass"
-  },
+  "records": "2893-chamfer-two-distances-across-the-whole-top-is-a-cone.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b6"
+    }
+  ],
   "sources": [
     "tangency-labs/solidcraft#2893"
   ],
@@ -124,6 +140,6 @@
     "chamfer_sides"
   ],
   "ungraded": [],
-  "what": "the top rim of a cylinder r10 x 20 chamfered 10 across the top and 3 down the wall: refused",
+  "what": "the top rim of a cylinder r10 x 20 chamfered 10 across the top (the whole radius) and 3 down the wall: builds a cone to the centre",
   "why_not": []
 }

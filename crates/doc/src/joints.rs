@@ -1186,6 +1186,45 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
         let on_part = resolve_origin(doc, st, &JointOrigin::new(o.part(), o.snap.clone()))?;
         return Ok(mat_mul(&inside_transform(doc, o)?, &on_part));
     }
+    // A face, edge or round face is found by searching the bodies' triangles, and its frame does
+    // not depend on the joint's values: kept for as long as the component's bodies are the same.
+    if matches!(o.snap, Snap::FaceCenter { .. } | Snap::Edge { .. } | Snap::CircleCenter { .. }) {
+        let kept = origin_key(doc, st, o);
+        if let Some((key, bodies)) = &kept
+            && let Some(found) = st.origin_frames.get(key, bodies)
+        {
+            return Ok(found);
+        }
+        let made = resolve_snap(doc, st, o)?;
+        st.origin_frames.note_resolved();
+        if let Some((key, bodies)) = kept {
+            st.origin_frames.put(key, made, bodies);
+        }
+        return Ok(made);
+    }
+    resolve_snap(doc, st, o)
+}
+
+/// What [`ModelState::origin_frames`] keys an origin by: its definition, its component, and each
+/// body of the component's identity and offset, with the bodies themselves to check a hit
+/// against. `None` when a body has no identity to key by.
+fn origin_key(doc: &Document, st: &ModelState, o: &JointOrigin) -> Option<((String, u64, Vec<u64>), Vec<solidcraft_kernel::Body>)> {
+    use std::hash::{Hash, Hasher};
+    let comp = component_of(doc, o.part()).ok()?;
+    let (mut bodies, mut kept) = (Vec::new(), Vec::new());
+    for b in component_bodies(doc, st, comp) {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        b.name.hash(&mut h);
+        doc.model_body_offset(b).iter().flat_map(|m| m.iter().flatten()).for_each(|v| v.to_bits().hash(&mut h));
+        bodies.push(b.geometry_key()?);
+        bodies.push(h.finish());
+        kept.push(b.body.clone());
+    }
+    Some(((format!("{:?}", o.snap), comp, bodies), kept))
+}
+
+/// [`resolve_origin`] of an origin on one part, from the bodies.
+fn resolve_snap(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<Mat> {
     let bad = || DocError::Invalid("joint origin: degenerate frame".into());
     match &o.snap {
         Snap::Frame { origin, z, x } => frame(*origin, *z, *x).ok_or_else(bad),
