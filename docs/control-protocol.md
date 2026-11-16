@@ -765,6 +765,58 @@ sends it a line whenever the active design changes (#6985):
   ask `document.revision` for the design now. A `control.subscribe` that timed out or failed did
   not subscribe the connection: send it again.
 
+### Example: driving a hinge and reading its angle (#17909)
+
+A local tool can set a joint's value and read it back, including after someone moves the joint
+in the window. This example uses the repository's hinge fixture,
+`apps/solidcraft-cli/tests/corpus/joints-hinge.solidcraft`. It has two leaves, `LeafA` (grounded)
+and `LeafB`, joined by a revolute joint named `Hinge`. Open the fixture by its full path (the first
+request carries the connection's [token](#token)), then give the hinge limits of 0 to 90°:
+
+```text
+{"id":1,"method":"engine.execute","params":{"command":"doc.open","params":{"path":"/path/to/solidcraft/apps/solidcraft-cli/tests/corpus/joints-hinge.solidcraft"}},"token":"…"}
+{"id":2,"method":"engine.execute","params":{"command":"joint.limits","params":{"joint":"Hinge","min":0,"max":90}}}
+```
+
+To be told when the angle changes, subscribe first. Every change to the design, such as a drive
+from this tool or OK in Drive Joints in the window, is then followed by a `design.changed` line:
+
+```text
+{"id":3,"method":"control.subscribe"}
+→ {"id":3,"ok":true,"result":{"document_id":"…","revision":7}}
+```
+
+Drive the hinge with `joint.drive`. `value` is in degrees, or it can be an expression such as
+`"45 deg"`. `quiet: true` leaves out the solver's degrees-of-freedom report. The reply gives the
+value the joint ended at:
+
+```text
+{"id":4,"method":"engine.execute","params":{"command":"joint.drive","params":{"joint":"Hinge","value":45,"quiet":true}}}
+→ {"id":4,"ok":true,"result":{"joint":1,"moved":true,"values":[{"name":"angle","value":45.0,"unit":"deg","limits":[0.0,90.0]}],"requested":[{"name":"angle","value":45.0,"unit":"deg","limits":[0.0,90.0]}],"stopped_by_contact":null,"stopped_by_loop":null,"conflicts":[],"errors":[]}}
+{"event":"design.changed","params":{"document_id":"…","revision":8}}
+```
+
+A value outside the limits is clamped to them. `held` then says which value ended up somewhere
+other than requested, and why:
+
+```text
+{"id":5,"method":"engine.execute","params":{"command":"joint.drive","params":{"joint":"Hinge","value":120,"quiet":true}}}
+→ {"id":5,"ok":true,"result":{"joint":1,"moved":true,"values":[{"name":"angle","value":90.0,"unit":"deg","limits":[0.0,90.0]}],"requested":[{"name":"angle","value":120.0,"unit":"deg","limits":[0.0,90.0]}],"held":[{"name":"angle","requested":120.0,"value":90.0,"unit":"deg","why":"angle is held to its limits, 0 to 90 deg"}],"stopped_by_contact":null,"stopped_by_loop":null,"conflicts":[],"errors":[]}}
+```
+
+`joint.inspect` only reads the design, so it adds no undo step. Use it to read the angle at any
+time, for example after a `design.changed` line. The joint's `values` hold the angle (other fields
+left out here):
+
+```text
+{"id":6,"method":"engine.execute","params":{"command":"joint.inspect","params":{"joint":"Hinge"}}}
+→ {"id":6,"ok":true,"result":{"joints":[{"id":1,"name":"Hinge","type":"revolute","dofs":["angle"],"values":[{"name":"angle","value":90.0,"unit":"deg","limits":[0.0,90.0]}],…}]}}
+```
+
+While Drive Joints is open in the window, its preview does not change the design. `joint.inspect`
+still reads the last value set, and no event is sent until the dialog's OK stores the new angle.
+The joint id `1` comes from the fixture. The revisions are only examples.
+
 ### Slow commands and the window (#1989)
 
 With the preference **Preferences > AI > Keep the window responsive while agents run commands**
