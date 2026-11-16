@@ -608,7 +608,7 @@ fn plane_side(s: &Session, name: &str, occurrence: u64, cmd: &str) -> Result<sol
     let st = s.model.state();
     if let Some(c) = st.construct.iter().find(|c| c.name == trimmed) {
         if matches!(c.geom, solidcraft_doc::construct::ConstructGeom::Plane(_)) {
-            return Ok(solidcraft_doc::PlaneRef::Construction { feature: c.feature.into() });
+            return Ok(solidcraft_doc::PlaneRef::Construction { feature: c.feature.into(), placement: None });
         }
         return Err(bad(cmd, format!("`{trimmed}` is not a construction plane")));
     }
@@ -677,9 +677,11 @@ fn origin_from_name(s: &Session, name: &str, occurrence: Option<u64>, cmd: &str)
             if comp == 0 { 0 } else { s.doc.occurrence_of(comp).map(|o| o.id).unwrap_or(0) }
         });
         let snap = match &c.geom {
-            solidcraft_doc::construct::ConstructGeom::Plane(_) => {
-                Snap::Plane { plane: Box::new(solidcraft_doc::PlaneRef::Construction { feature: c.feature.into() }), pick: None, x: None }
-            }
+            solidcraft_doc::construct::ConstructGeom::Plane(_) => Snap::Plane {
+                plane: Box::new(solidcraft_doc::PlaneRef::Construction { feature: c.feature.into(), placement: None }),
+                pick: None,
+                x: None,
+            },
             solidcraft_doc::construct::ConstructGeom::Axis { .. } => {
                 Snap::Axis { axis: Box::new(solidcraft_doc::joints::AxisRef::construction(name_trim.to_string())), pick: None, x: None }
             }

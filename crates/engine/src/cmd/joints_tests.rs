@@ -26,6 +26,120 @@ fn near(a: Vec3, b: Vec3) -> bool {
     a.dist(b) < 1e-6
 }
 
+/// A knob built from a linked circle in a separate, grounded skeleton component.
+fn knob_from_linked_sketch(foreign_plane: bool) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"radius", "expression":"2 mm"}));
+    run(&mut s, "component.create", json!({"name":"Base", "grounded":true}));
+    run(&mut s, "solid.box", json!({"length":2, "width":2, "height":2, "body_name":"BaseBody"}));
+    run(&mut s, "component.create", json!({"name":"Skeleton", "parent":"root", "grounded":true}));
+    run(&mut s, "sketch.create", json!({"plane":"XY", "name":"Source"}));
+    run(&mut s, "sketch.circle.center", json!({"center":[10,0], "radius":2}));
+    run(&mut s, "sketch.dimension", json!({"entities":["c1"], "type":"radius", "value":"radius"}));
+    run(&mut s, "sketch.finish", json!({}));
+    if foreign_plane {
+        run(&mut s, "construct.plane.offset", json!({"base":"XY", "offset":0, "name":"SkeletonPlane"}));
+    }
+    run(&mut s, "component.create", json!({"name":"Knob", "parent":"root", "grounded":false}));
+    let plane = if foreign_plane { "SkeletonPlane" } else { "XY" };
+    run(&mut s, "sketch.create", json!({"plane":plane, "name":"Profile"}));
+    run(&mut s, "sketch.project", json!({"refs":[{"sketch":"Source", "curve":"c1"}], "projection_link":true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Profile", "distance":4, "operation":"new", "body_name":"KnobBody"}));
+    if foreign_plane {
+        run(&mut s, "sketch.create", json!({"plane":plane, "name":"Peg"}));
+        run(&mut s, "sketch.circle.center", json!({"center":[5,0], "radius":1}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch":"Peg", "distance":4, "operation":"new", "body_name":"PegBody"}));
+    }
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"type":"revolute", "name":"Hinge", "a":"Base", "b":"Knob",
+        "at":{"occurrence":"Base", "point":[0,0,0], "z":[0,0,1]}}),
+    );
+    s
+}
+
+fn check_linked_knob(s: &mut Session, center: [f64; 3], radius: f64) {
+    let measured = run(s, "inspect.measure", json!({"bodies":["KnobBody"]}));
+    let body = &measured["bodies"][0];
+    for (i, expected) in center.into_iter().enumerate() {
+        let actual = body["center_of_mass"][i].as_f64().unwrap();
+        assert!((actual - expected).abs() < 1e-6, "center[{i}]: {actual} != {expected}");
+    }
+    let volume = body["volume_mm3"].as_f64().unwrap();
+    assert!((volume - 4. * std::f64::consts::PI * radius * radius).abs() < 1e-6, "volume: {volume}");
+}
+
+#[test]
+fn linked_sketch_projection_moves_with_its_joint_and_keeps_source_edits() {
+    for foreign_plane in [false, true] {
+        let mut s = knob_from_linked_sketch(foreign_plane);
+        check_linked_knob(&mut s, [10., 0., 2.], 2.);
+        let result = run(&mut s, "joint.drive", json!({"joint":"Hinge", "value":90}));
+        assert_eq!(result["moved"], true);
+        check_linked_knob(&mut s, [0., 10., 2.], 2.);
+        run(&mut s, "parameters.change", json!({"name":"radius", "expression":"3 mm"}));
+        check_linked_knob(&mut s, [0., 10., 2.], 3.);
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        check_linked_knob(&mut reopened, [0., 10., 2.], 3.);
+        if foreign_plane {
+            let peg = run(&mut reopened, "inspect.measure", json!({"bodies":["PegBody"]}));
+            let center = &peg["bodies"][0]["center_of_mass"];
+            assert!(center[0].as_f64().unwrap().abs() < 1e-6, "{center}");
+            assert!((center[1].as_f64().unwrap() - 5.).abs() < 1e-6, "{center}");
+        }
+        run(&mut reopened, "joint.drive", json!({"joint":"Hinge", "value":180}));
+        check_linked_knob(&mut reopened, [-10., 0., 2.], 3.);
+    }
+}
+
+#[test]
+fn older_sketch_references_capture_the_saved_assembly_pose() {
+    for foreign_plane in [false, true] {
+        let mut s = knob_from_linked_sketch(foreign_plane);
+        run(&mut s, "joint.drive", json!({"joint":"Hinge", "value":90}));
+        let mut file: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+        as_last_release_saved(&mut file);
+        for feature in file["features"].as_array_mut().unwrap() {
+            if feature["type"] != "sketch" {
+                continue;
+            }
+            if let Some(plane) = feature.get_mut("plane").and_then(Value::as_object_mut) {
+                plane.remove("placement");
+            }
+            for link in feature.get_mut("sketch").and_then(|sketch| sketch.get_mut("links")).and_then(Value::as_array_mut).into_iter().flatten() {
+                link.as_object_mut().unwrap().remove("sketch_placements");
+            }
+        }
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&file.to_string()).unwrap());
+        // Older cold builds anchored the circle in world space. Preserve that saved shape,
+        // then move it rigidly relative to the pose at which the old file was saved.
+        check_linked_knob(&mut reopened, [10., 0., 2.], 2.);
+        run(&mut reopened, "joint.drive", json!({"joint":"Hinge", "value":180}));
+        check_linked_knob(&mut reopened, [0., 10., 2.], 2.);
+    }
+}
+
+#[test]
+fn pasting_a_captured_plane_and_its_sketch_applies_the_paste_transform_once() {
+    let mut s = knob_from_linked_sketch(true);
+    run(&mut s, "joint.drive", json!({"joint":"Hinge", "value":90}));
+    run(&mut s, "timeline.copy", json!({"features":["SkeletonPlane", "Peg"]}));
+    run(&mut s, "timeline.paste", json!({"component":"root", "translate":[2,3,0]}));
+    let id = s.doc.features.last().unwrap().id;
+    let check = |s: &Session| {
+        let state = s.model.state();
+        let ss = state.sketch(id).unwrap();
+        let solidcraft_sketch::CurveKind::Circle { c, .. } = ss.sketch.curves[0].kind else { panic!("expected circle") };
+        let center = ss.plane.to_world(ss.sketch.points[c].pos);
+        assert!(center.dist(Vec3::new(2., 8., 0.)) < 1e-6, "{center:?}");
+    };
+    check(&s);
+    check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
+}
+
 #[test]
 fn joint_creation_rejects_reversed_limits_without_changing_the_design() {
     for command in ["joint.create", "joint.as_built"] {

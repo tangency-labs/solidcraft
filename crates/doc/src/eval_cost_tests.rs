@@ -348,7 +348,7 @@ fn a_sketch_on_a_fixed_plane_costs_the_same_in_a_large_placed_design() {
     let planes = [
         PlaneRef::Origin { name: "XY".into() },
         PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "YZ".into() }), distance: "5 mm".into() },
-        PlaneRef::Construction { feature: plane.into() },
+        PlaneRef::Construction { feature: plane.into(), placement: None },
     ];
     for (k, plane) in planes.into_iter().enumerate() {
         let id = doc.add_feature(line_sketch(plane, Vec2::new(10.0, 1.0 + k as f64)), None).unwrap();
@@ -379,7 +379,7 @@ fn moving_a_construction_plane_moves_the_sketch_on_it() {
         plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: distance.into() },
     };
     let plane = doc.add_feature(offset("5 mm"), Some("Datum")).unwrap();
-    let sketch = doc.add_feature(line_sketch(PlaneRef::Construction { feature: plane.into() }, Vec2::new(10.0, 1.0)), None).unwrap();
+    let sketch = doc.add_feature(line_sketch(PlaneRef::Construction { feature: plane.into(), placement: None }, Vec2::new(10.0, 1.0)), None).unwrap();
     let mut model = Model::new();
     model.evaluate(&doc);
     assert!((model.state().sketch(sketch).unwrap().plane.origin.z - 5.0).abs() < 1e-9);

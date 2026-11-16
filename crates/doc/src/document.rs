@@ -85,7 +85,13 @@ pub enum PlaneRef {
         pivot: Option<Box<GeoRef>>,
     },
     /// A construction plane feature (by id).
-    Construction { feature: FeatureId },
+    Construction {
+        feature: FeatureId,
+        /// Source component to sketch component when a foreign plane was chosen. The plane's
+        /// geometry stays live, while later assembly motion leaves the sketch inside its part.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        placement: Option<crate::Mat>,
+    },
     /// `base` seen from its other side: the normal reversed by a half turn about the base's
     /// own x axis (y reversed), or about its y axis (x reversed) when `about_y`. A sketch
     /// started from behind a plane faces the viewer this way.
@@ -4912,15 +4918,27 @@ impl Document {
                 Plane::new(o, rot(b.x), rot(b.y)).ok_or_else(|| DocError::Invalid("degenerate plane".into()))
             }
             PlaneRef::Flipped { base, about_y } => Ok(self.resolve_plane_in(vals, base, depth + 1, component, st)?.flipped(*about_y)),
-            PlaneRef::Construction { feature } => {
+            PlaneRef::Construction { feature, placement } => {
+                if placement.as_ref().is_some_and(|matrix| !crate::is_placement(matrix)) {
+                    return Err(DocError::Invalid("invalid captured construction plane placement".into()));
+                }
                 // Evaluated already: as it came out.
                 if let Some(c) = st.and_then(|st| st.construct.iter().find(|c| c.feature == feature.0))
                     && let crate::construct::ConstructGeom::Plane(pl) = &c.geom
                 {
-                    return Ok(*pl);
+                    return match placement {
+                        Some(matrix) => crate::eval::placed_plane(matrix, pl),
+                        None => Ok(*pl),
+                    };
                 }
-                match self.feature(feature.0).map(|f| &f.kind) {
-                    Some(FeatureKind::ConstructionPlane { plane }) => self.resolve_plane_in(vals, plane, depth + 1, component, st),
+                match self.feature(feature.0) {
+                    Some(Feature { kind: FeatureKind::ConstructionPlane { plane }, component: owner, .. }) => {
+                        let resolved = self.resolve_plane_in(vals, plane, depth + 1, if placement.is_some() { *owner } else { component }, st)?;
+                        match placement {
+                            Some(matrix) => crate::eval::placed_plane(matrix, &resolved),
+                            None => Ok(resolved),
+                        }
+                    }
                     // A name that could not be resolved when an older design opened keeps id 0,
                     // which no feature has (#1134): the reference dangles, as it always did.
                     _ => {

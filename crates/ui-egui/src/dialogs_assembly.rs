@@ -427,7 +427,7 @@ pub(crate) fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
             let name = match plane.as_ref() {
                 solidcraft_engine::doc::PlaneRef::Origin { name } => Some(name.clone()),
                 solidcraft_engine::doc::PlaneRef::Datum { datum } => Some(datum.key()),
-                solidcraft_engine::doc::PlaneRef::Construction { feature } => {
+                solidcraft_engine::doc::PlaneRef::Construction { feature, .. } => {
                     let id = feature.0;
                     s.doc
                         .feature(id)
