@@ -7,7 +7,7 @@
 //! * **Replay.** The case's Rust side is run again. Its output, with every UV trim's
 //!   samples and every UV trim owner blinded ([`blinded_digest`]), has the digest recorded
 //!   for this branch, so the run is the row. With each listed moved value put back to main's
-//!   (280783a7e) value, it has the digest of main's output blinded alike: every value but the
+//!   (7d4445c0c) value, it has the digest of main's output blinded alike: every value but the
 //!   trims and the listed ones is main's, bit for bit.
 //! * **Soundness.** The result body passes `check_brep` level 2 and, a manifold solid, has a
 //!   volume proved positive ([`validation::soundness`]).
@@ -23,7 +23,10 @@
 //!   intervals); both values must, and the move is `closer` when this branch's is the
 //!   smaller, `equal` when the two differ by at most that distance's upper end (each
 //!   records the kernel default `1e-5` plus a measure of a gap that small), `farther`
-//!   otherwise.
+//!   otherwise. An edge's tolerance is classed alike against the most of its uses' trims'
+//!   certified bounds and its ends' distances to its vertices. A moved sample of a face's
+//!   surface (a fixed point of its natural domain) is classed as an edge's sample, against
+//!   that face alone.
 //!
 //! A `farther` move fails the test.
 //! Run: `cargo test --profile goldens -p goldens --lib operand_trim_rows -- --nocapture`.
@@ -62,6 +65,19 @@ fn curve_block(rec: &[f64], i: usize) -> usize {
     }
     let mut j = i + 3;
     for _ in 0..5 {
+        j += if rec[j] == 0.0 { 4 } else { 1 };
+    }
+    j - i
+}
+
+/// A record's surface block (`topology.brep_mirror`'s `surface_samples`): `-1`, or the
+/// type, the natural UV domain and nine samples, each `0, x, y, z` or `1`. Its length at `i`.
+fn surface_block(rec: &[f64], i: usize) -> usize {
+    if rec[i] == -1.0 {
+        return 1;
+    }
+    let mut j = i + 5;
+    for _ in 0..9 {
         j += if rec[j] == 0.0 { 4 } else { 1 };
     }
     j - i
@@ -257,6 +273,10 @@ enum Site {
     EdgeSample { e: usize, s: usize, c: usize },
     /// Coordinate `c` (3: the tolerance) of the vertex numbered `v` in the geometry record.
     Vertex { v: usize, c: usize },
+    /// Coordinate `c` of sample `s` of face `f`'s surface.
+    FaceSample { f: usize, s: usize, c: usize },
+    /// The tolerance of the edge numbered `e` in the geometry record (`graph`'s walk order).
+    EdgeTolerance { e: usize },
 }
 
 /// The site of blinded record index `i`.
@@ -286,19 +306,78 @@ fn record_site(rec: &[f64], i: usize) -> Site {
         let uses = rec[j] as usize;
         j += 1 + uses;
     }
-    panic!("record[{i}] is past the edges");
+    let faces = rec[j] as usize;
+    j += 1;
+    for f in 0..faces {
+        let n = surface_block(rec, j);
+        if i < j + n {
+            let mut at = j + 5;
+            for s in 0..9 {
+                if rec[at] == 0.0 {
+                    if i > at && i < at + 4 {
+                        return Site::FaceSample {
+                            f,
+                            s,
+                            c: i - at - 1,
+                        };
+                    }
+                    at += 4;
+                } else {
+                    at += 1;
+                }
+            }
+            panic!("record[{i}] is not a sample coordinate of face {f}");
+        }
+        j += n;
+    }
+    panic!("record[{i}] is past the faces");
 }
 
 /// The site of geometry index `i` (`graph`'s layout: vertex uses' UV, vertices' point and
 /// tolerance, faces, edges).
 fn geometry_site(ints: &[i64], i: usize) -> Site {
-    let (nvu, nv) = (ints[8] as usize, ints[9] as usize);
-    assert!(
-        i >= 2 * nvu && i < 2 * nvu + 4 * nv,
-        "geometry[{i}] is not a vertex's"
+    let (nf, ne, nvu, nv) = (
+        ints[3] as usize,
+        ints[7] as usize,
+        ints[8] as usize,
+        ints[9] as usize,
     );
+    assert!(i >= 2 * nvu, "geometry[{i}] is a vertex use's");
     let r = i - 2 * nvu;
-    Site::Vertex { v: r / 4, c: r % 4 }
+    if r < 4 * nv {
+        return Site::Vertex { v: r / 4, c: r % 4 };
+    }
+    let r = r - 4 * nv - 5 * nf;
+    assert!(
+        r < 3 * ne && r % 3 == 2,
+        "geometry[{i}] is not a vertex's or an edge's tolerance"
+    );
+    Site::EdgeTolerance { e: r / 3 }
+}
+
+/// An upper bound on how far `e`'s curve lies from its uses' trims' images (each trim
+/// certified, [`certify_brep`]) and its ends from its vertices: the most of these.
+fn edge_need(b: &Brep, certs: &[crate::trims_on_edges::TrimCertificate], e: EdgeId) -> f64 {
+    let mut need = 0.0_f64;
+    for c in certs.iter().filter(|c| c.edge == e) {
+        need = need.max(c.bound);
+    }
+    let rec = b.edge(e).unwrap();
+    let cn = curve_nurbs(rec.curve.as_ref().unwrap()).unwrap();
+    for v in &rec.vertices {
+        let at = b.vertex(*v).unwrap().point;
+        let mut nearest_end = f64::INFINITY;
+        for s in [rec.interval.min(), rec.interval.max()] {
+            let c = curve_derivs_over(&cn, Ivl::from(s), 0, None).unwrap()[0];
+            nearest_end = nearest_end.min(norm_hi(V3 {
+                x: c.x - Ivl::from(at.x),
+                y: c.y - Ivl::from(at.y),
+                z: c.z - Ivl::from(at.z),
+            }));
+        }
+        need = need.max(nearest_end);
+    }
+    round_up(need)
 }
 
 /// Certifies one row of a unit whose output is `topology.brep_mirror`'s record and `graph`
@@ -337,6 +416,11 @@ pub(crate) fn certify_row(
     let geometry = out.values.get("geometry").cloned().unwrap_or_default();
     let graph = out.ints.get("graph").cloned().unwrap_or_default();
     let edges = solidcore::topology::brep::p1::edges(b, None).unwrap();
+    let faces = solidcore::topology::brep::p1::faces(b, None).unwrap();
+    let walked_edges = crate::units::boolean_merge_p1::Canon::reachable(b)
+        .edges
+        .items;
+    let certs = certify_brep(&k, b).unwrap_or_else(|e| panic!("{name}: {e}"));
     let mut classes = Vec::new();
     // a point is classed once, all its moved coordinates put back together
     let mut done: Vec<(&str, usize)> = Vec::new();
@@ -371,6 +455,45 @@ pub(crate) fn certify_row(
                 touched.push(edges[e]);
                 let faces = edge_faces(b, edges[e]);
                 classes.push(point_class(&k, b, &faces, main, now));
+            }
+            Site::FaceSample { f, s, c } => {
+                // a sample of the face's own surface at a fixed point of its natural domain:
+                // main's and this branch's distance to the surface, enclosed
+                let start = i - c - 1;
+                if done.contains(&("record", start)) {
+                    continue;
+                }
+                done.push(("record", start));
+                let now = Point3::new(record[start + 1], record[start + 2], record[start + 3]);
+                let main = Point3::new(
+                    main_of("record", start + 1, now.x),
+                    main_of("record", start + 2, now.y),
+                    main_of("record", start + 3, now.z),
+                );
+                eprintln!("  face {f} sample {s}: main {main:?}, now {now:?}");
+                classes.push(point_class(&k, b, &faces[f..=f], main, now));
+            }
+            Site::EdgeTolerance { e } => {
+                let eid = walked_edges[e];
+                touched.push(eid);
+                let (m, n) = (main_of("geometry", i, geometry[i]), geometry[i]);
+                assert_eq!(b.edge(eid).unwrap().tolerance, n, "{name}: edge {e}");
+                let need = edge_need(b, &certs, eid);
+                assert!(
+                    m >= need && n >= need,
+                    "{name}: edge {e} tolerance {m:e} / {n:e} under {need:e}"
+                );
+                let class = if n < m {
+                    Class::Closer
+                } else if n - m <= need {
+                    Class::Equal
+                } else {
+                    Class::Farther
+                };
+                eprintln!(
+                    "  edge {e} tolerance: main {m:e}, now {n:e}, need at most {need:e}: {class:?}"
+                );
+                classes.push(class);
             }
             Site::Vertex { v, c } => {
                 let start = i - c;
@@ -423,7 +546,6 @@ pub(crate) fn certify_row(
     }
     // trims on the touched edges: every other value is the main's (the digests), its trims
     // read the same in the record
-    let certs = certify_brep(&k, b).unwrap_or_else(|e| panic!("{name}: {e}"));
     let mut held = 0;
     let mut untouched_off = 0;
     for c in &certs {
