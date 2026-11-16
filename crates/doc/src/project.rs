@@ -734,14 +734,19 @@ fn exact_edges(body: &crate::ModelBody, plane: &Plane, edges: &[usize]) -> Resul
     edges
         .iter()
         .map(|e| {
-            let projected = solidcore_ops::spline_projection::projected_edge(
-                body.body.record(),
-                plane,
-                *e,
-                body.body.planar_edges_tolerance(),
-                solidcraft_sketch::MAX_SPLINE_POINTS,
-                solidcraft_sketch::MAX_COORD,
-            )
+            let projected = if let Some(pieces) = body.body.cylinder_edge_projection(plane, *e) {
+                solidcore_ops::conic_projection::classify_pieces(plane, &pieces, solidcraft_sketch::MAX_SPLINE_POINTS, solidcraft_sketch::MAX_COORD)
+                    .map(Some)
+            } else {
+                solidcore_ops::spline_projection::projected_edge(
+                    body.body.record(),
+                    plane,
+                    *e,
+                    body.body.planar_edges_tolerance(),
+                    solidcraft_sketch::MAX_SPLINE_POINTS,
+                    solidcraft_sketch::MAX_COORD,
+                )
+            }
             .map_err(|e| DocError::Invalid(e.to_string()))?;
             match projected {
                 Some(geometry) => projection_links(geometry).map(Some),

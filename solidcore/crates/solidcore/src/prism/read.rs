@@ -683,6 +683,30 @@ pub fn planar_curves(
     tol: f64,
     work: &mut usize,
 ) -> Option<Vec<PlanarPiece>> {
+    read_curves(k, run, frame, tol, work, false)
+}
+
+/// Read only curves in a plane parallel to `frame`, including their trimmed spline nets.
+/// This keeps the parallel reader's eligibility separate from general projection.
+#[must_use]
+pub fn parallel_curves(
+    k: &Kernel,
+    run: &Run,
+    frame: &Frame,
+    tol: f64,
+    work: &mut usize,
+) -> Option<Vec<PlanarPiece>> {
+    read_curves(k, run, frame, tol, work, true)
+}
+
+fn read_curves(
+    k: &Kernel,
+    run: &Run,
+    frame: &Frame,
+    tol: f64,
+    work: &mut usize,
+    parallel_only: bool,
+) -> Option<Vec<PlanarPiece>> {
     // A failed analytic certificate must leave work for the exact spline form.
     let allowance = *work / 2;
     let mut analytic_work = allowance;
@@ -698,7 +722,7 @@ pub fn planar_curves(
             return Some(segs.into_iter().map(PlanarPiece::Seg).collect());
         }
     }
-    one_spline(k, run, frame, tol, work).map(|s| vec![PlanarPiece::Spline(s)])
+    one_spline(k, run, frame, tol, work, parallel_only).map(|s| vec![PlanarPiece::Spline(s)])
 }
 
 /// The run's net over its interval, the way it runs, as one clamped B-spline in `frame`.
@@ -708,6 +732,7 @@ fn one_spline(
     frame: &Frame,
     tol: f64,
     work: &mut usize,
+    parallel_only: bool,
 ) -> Option<PlanarSpline> {
     if !(tol.is_finite() && tol > 0.0) {
         return None;
@@ -754,6 +779,9 @@ fn one_spline(
         let v = project(p);
         let error = (v.x.abs() + v.y.abs() + v.z.abs() + o.length()) * f64::EPSILON * 256.0;
         if error > tol * 0.1 {
+            return None;
+        }
+        if parallel_only && (height(frame, v) - height(frame, first)).abs() + error > tol {
             return None;
         }
         let local = to_local(frame, v);

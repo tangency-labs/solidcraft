@@ -1642,9 +1642,12 @@ impl Body {
         if self.is_mesh() {
             return None;
         }
-        let faces = crate::history::edge_faces(&self.record);
-        self.projected_on_cylinder(plane, edge, faces.get(edge)?, self.planar_edges_tolerance())
-            .map(|segs| segs.into_iter().map(crate::PlanarPiece::Seg).collect())
+        let tol = self.planar_edges_tolerance();
+        if solidcore_ops::spline_projection::has_parallel_projection(&self.record, plane, edge, tol) {
+            return None;
+        }
+        let faces = crate::history::faces_of(self.record.edges.get(edge)?);
+        self.projected_on_cylinder(plane, edge, &faces, tol).map(|segs| segs.into_iter().map(crate::PlanarPiece::Seg).collect())
     }
 
     /// Edge `edge` projected on `plane` as the arc it covers of the circle of a cylinder it

@@ -342,6 +342,29 @@ pub fn project_curve(
     crate::prism::read::planar_curves(&k, &run, frame, tol, work)
 }
 
+/// Whether the selected native curve is readable in a plane parallel to `frame`.
+/// Uses the same trimmed-net and endpoint checks as projection, with the parallel guard.
+pub fn has_parallel_projection(
+    curve: &Curve,
+    interval: [f64; 2],
+    ends: [Vec3; 2],
+    frame: &Frame,
+    tol: f64,
+    work: &mut usize,
+) -> bool {
+    let k = crate::Kernel::default();
+    let Ok(native) = crate::curve::from_parameters::from_parameters(&k, curve, interval) else {
+        return false;
+    };
+    let run = Run {
+        curve: &native.curve,
+        interval: native.interval,
+        forward: true,
+        ends,
+    };
+    crate::prism::read::parallel_curves(&k, &run, frame, tol, work).is_some()
+}
+
 /// Preserve a full analytic ellipse's identity without interpreting its NURBS
 /// interval as angles. An open or partial selection keeps its exact spline form.
 pub fn full_ellipse_projection(
@@ -471,6 +494,55 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn parallel_projection_eligibility_follows_the_selected_spline_interval() {
+        let knots = vec![0., 0., 0., 0.5, 0.5, 1., 1., 1.];
+        let points = vec![
+            [0., 0., 0., 1.],
+            [1., 1., 0., 1.],
+            [2., 0., 0., 1.],
+            [3., -1., 1., 1.],
+            [4., 0., 1., 1.],
+        ];
+        let curve = Curve::RationalSpline {
+            knots: knots.clone(),
+            homogeneous: points.clone(),
+        };
+        let parallel = |c: &Curve, interval: [f64; 2]| {
+            has_parallel_projection(
+                c,
+                interval,
+                [at(c, interval[0]), at(c, interval[1])],
+                &frame(),
+                1e-6,
+                &mut 262_144,
+            )
+        };
+        assert!(
+            parallel(&curve, [0., 0.5]),
+            "the selected first span is parallel"
+        );
+        assert!(
+            !parallel(&curve, [0., 1.]),
+            "the later span leaves the plane"
+        );
+        assert!(
+            project(&curve, [0., 1.], true, &frame()).is_some(),
+            "general projection still preserves a nonplanar curve"
+        );
+        let planar = Curve::RationalSpline {
+            knots,
+            homogeneous: points
+                .into_iter()
+                .map(|[x, y, _, w]| [x, y, 7. * w, w])
+                .collect(),
+        };
+        assert!(
+            parallel(&planar, [0., 1.]),
+            "a shifted multi-span curve is parallel"
+        );
     }
 
     fn labelled_ellipse() -> (Curve, Curve) {

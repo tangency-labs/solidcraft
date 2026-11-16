@@ -517,7 +517,13 @@ fn same_geometry(a: &[(LCurve, Vec<Vec2>)], b: &[(LCurve, Vec<Vec2>)]) -> bool {
             (LCurve::Arc(..), LCurve::Arc(..)) => all(),
             (LCurve::Conic(.., ra), LCurve::Conic(.., rb)) => all() && close(*ra, *rb),
             (LCurve::Ellipse(.., ra), LCurve::Ellipse(.., rb)) => all() && close(*ra, *rb),
-            (LCurve::Spline(.., ca, da, pa, ka), LCurve::Spline(.., cb, db, pb, kb)) => ca == cb && da == db && pa == pb && ka == kb && all(),
+            (LCurve::Spline(.., ca, da, periodic_a, ka), LCurve::Spline(.., cb, db, periodic_b, kb)) => {
+                ca == cb
+                    && da == db
+                    && periodic_a == periodic_b
+                    && ka == kb
+                    && pa.iter().zip(pb).all(|(p, q)| p.dist(*q) <= f64::EPSILON * 64. * (1.0 + p.len().max(q.len())))
+            }
             _ => false,
         }
     };

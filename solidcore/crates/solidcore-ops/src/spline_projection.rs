@@ -106,6 +106,38 @@ pub fn project_edges(
         .collect()
 }
 
+/// Whether an edge can be read in a plane parallel to the target, before cylinder recognition.
+/// Invalid indices or an exhausted certificate budget are not readable.
+pub fn has_parallel_projection(
+    body: &solidcore_record::brep::Brep,
+    plane: &Plane,
+    index: usize,
+    tol: f64,
+) -> bool {
+    let Some(edge) = body.edges.get(index) else {
+        return false;
+    };
+    let at = |i: u32| {
+        body.vertices
+            .get(i as usize)
+            .map(|v| solidcore::Vec3::new(v.point[0], v.point[1], v.point[2]))
+    };
+    let (Some(a), Some(b)) = (at(edge.vertices[0]), at(edge.vertices[1])) else {
+        return false;
+    };
+    let Ok(curve) = convert::curve(edge.parameters()) else {
+        return false;
+    };
+    kernel::has_parallel_projection(
+        &curve,
+        edge.interval,
+        [a, b],
+        &convert::plane(plane),
+        tol,
+        &mut 262_144,
+    )
+}
+
 /// Project a circular native edge after its source plane and arc have been certified.
 ///
 /// # Errors
