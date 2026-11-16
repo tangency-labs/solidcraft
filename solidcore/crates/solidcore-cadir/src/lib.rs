@@ -129,6 +129,7 @@ struct Model<'a> {
     vertices: HashMap<&'a str, &'a cadmpeg_ir::topology::Vertex>,
     points: HashMap<&'a str, &'a cadmpeg_ir::topology::Point>,
     surfaces: HashMap<&'a str, &'a cadmpeg_ir::geometry::Surface>,
+    procedural_surfaces: HashMap<&'a str, &'a cadmpeg_ir::geometry::ProceduralSurface>,
     curves: HashMap<&'a str, &'a cadmpeg_ir::geometry::Curve>,
 }
 
@@ -150,6 +151,11 @@ impl<'a> Model<'a> {
             vertices: m.vertices.iter().map(|x| (x.id.as_str(), x)).collect(),
             points: m.points.iter().map(|x| (x.id.as_str(), x)).collect(),
             surfaces: m.surfaces.iter().map(|x| (x.id.as_str(), x)).collect(),
+            procedural_surfaces: m
+                .procedural_surfaces
+                .iter()
+                .map(|x| (x.id.as_str(), x))
+                .collect(),
             curves: m.curves.iter().map(|x| (x.id.as_str(), x)).collect(),
         }
     }
@@ -334,8 +340,12 @@ impl<'a> Builder<'_, 'a, '_> {
             .surfaces
             .get(face.surface.as_str())
             .ok_or_else(|| format!("face {id}: missing surface {}", face.surface))?;
-        let (surface, reversed) =
-            geometry::surface(&surface.geometry).map_err(|m| format!("face {id}: {m}"))?;
+        let read = match geometry::surface(&surface.geometry) {
+            Ok(Some(read)) => Ok(read),
+            Ok(None) => self.procedural(&surface.geometry),
+            Err(m) => Err(m),
+        };
+        let (surface, reversed) = read.map_err(|m| format!("face {id}: {m}"))?;
         let ids: Vec<&'a cadmpeg_ir::ids::LoopId> = face.loops.iter().collect();
         if ids.is_empty() {
             return Err(format!(
@@ -346,25 +356,76 @@ impl<'a> Builder<'_, 'a, '_> {
             FaceLoops::Classified { outer, .. } => ids.iter().position(|l| *l == outer),
             FaceLoops::Unspecified { .. } => None,
         };
-        // Bounds relative to the record surface's natural normal.
-        let side = (face.sense == Sense::Forward) != reversed;
         let mut bounds = Vec::new();
         for l in ids {
-            let mut bound = self
-                .bound(l.as_str(), origin)
-                .map_err(|m| format!("face {id}: {m}"))?;
-            if !side && let Bound::Edges(uses) = &mut bound {
-                uses.reverse();
-                for u in uses.iter_mut() {
-                    u.1 = !u.1;
+            bounds.push(
+                self.bound(l.as_str(), origin)
+                    .map_err(|m| format!("face {id}: {m}"))?,
+            );
+        }
+        // A surface whose record form depends on the face is made from its bounds as they run
+        // (about the face's normal), as the STEP reader makes it from its loops.
+        let (surface, reversed) = match surface {
+            geometry::FaceSurface::Record(s) => (s, reversed),
+            geometry::FaceSurface::Swept(definition) => {
+                let (s, turned) = self
+                    .asm
+                    .swept_surface(&definition, &bounds)
+                    .map_err(|m| format!("face {id}: {m}"))?;
+                (s, reversed != turned)
+            }
+        };
+        // Bounds relative to the record surface's natural normal.
+        let side = (face.sense == Sense::Forward) != reversed;
+        if !side {
+            for bound in &mut bounds {
+                if let Bound::Edges(uses) = bound {
+                    uses.reverse();
+                    for u in uses.iter_mut() {
+                        u.1 = !u.1;
+                    }
                 }
             }
-            bounds.push(bound);
         }
         Ok((
             self.asm.add_face(origin, surface, bounds, outer, side)?,
             side,
         ))
+    }
+
+    /// A procedural surface read by its definition: a linear sweep, extrusion or revolution of
+    /// its directrix ([`geometry::swept`]). Any other is refused, as one without a solved form.
+    fn procedural(
+        &mut self,
+        g: &cadmpeg_ir::geometry::SurfaceGeometry,
+    ) -> R<(geometry::FaceSurface, bool)> {
+        let unread = || {
+            geometry::unsupported(if g.solved().is_some() {
+                "a surface of a kind the producer did not state"
+            } else {
+                "a procedural surface without its solved form"
+            })
+        };
+        let Some(c) = g.procedural_construction() else {
+            return Err(unread());
+        };
+        let procedural = self
+            .model
+            .procedural_surfaces
+            .get(c.as_str())
+            .ok_or_else(|| format!("missing procedural surface {c}"))?;
+        let Some(directrix) = geometry::directrix(procedural.definition()) else {
+            return Err(unread());
+        };
+        let curve = self
+            .model
+            .curves
+            .get(directrix.as_str())
+            .ok_or_else(|| format!("missing curve {directrix}"))?;
+        let profile = geometry::curve(&curve.geometry)?
+            .ok_or_else(|| geometry::unsupported("a degenerate curve swept or revolved"))?;
+        let (definition, reversed) = geometry::swept(procedural.definition(), profile)?;
+        Ok((geometry::FaceSurface::Swept(definition), reversed))
     }
 
     /// Loop `id`: its coedges as edge uses in traversal order, those of collapsed edges left

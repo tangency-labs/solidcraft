@@ -17,17 +17,29 @@
 //! normal is the opposite. A NURBS surface's oriented normal is opposite `Pu × Pv` when CADIR says
 //! `normal_reversed`. A procedural carrier is read by the solved form the producer cached.
 //!
+//! A cone, and a procedural linear sweep or revolution with no solved form cached, have a record
+//! form that depends on the face on them: each is read as its definition ([`FaceSurface::Swept`])
+//! for the assembly to make the record surface from the face's boundary
+//! (`Assembly::swept_surface`), as the STEP reader does: a cone within the tolerance of its limit
+//! plane over the face is that plane, and a swept profile is bounded where the face needs it.
+//! CADIR's parameters on those surfaces decide their normal: a linear sweep and an extrusion run
+//! u along the directrix and v along the direction (∂directrix × direction, the definition's own
+//! normal, unless the extrusion says its directrix runs reversed); a revolution about an axis
+//! runs u round the axis and v along the directrix (∂angle × ∂directrix, the definition's own),
+//! and a native revolution does too when `transposed`, else the other way round.
+//!
 //! A placed carrier (`Transformed`) is its basis mapped by its affine placement, when that is a
 //! rotation and a uniform scale (with a move): frames turn, lengths scale and parameters are
 //! kept. A placement that shears, scales unevenly or mirrors is refused.
 
 use cadmpeg_ir::geometry::{
-    CurveGeometry, SolvedCurveGeometry, SolvedSurfaceGeometry, SurfaceGeometry,
+    CurveGeometry, ProceduralSurfaceDefinition, SolvedCurveGeometry, SolvedSurfaceGeometry,
+    SurfaceGeometry,
 };
 use cadmpeg_ir::units::OrthonormalFrame3;
 use solidcore::Vec3;
 use solidcore_record::brep::{Curve as BCurve, Frame, Surface as BSurface};
-use solidcore_step::assembly::{spline_curve, spline_surface};
+use solidcore_step::assembly::{SweptSurface, spline_curve, spline_surface};
 
 /// A reason a carrier is not read.
 pub(crate) type R<T> = Result<T, String>;
@@ -41,7 +53,7 @@ const MAX_PLACEMENTS: usize = 16;
 /// little as 1e-12 is refused.
 const SIMILARITY: f64 = 64.0 * f64::EPSILON;
 
-fn unsupported(what: impl std::fmt::Display) -> String {
+pub(crate) fn unsupported(what: impl std::fmt::Display) -> String {
     format!("not supported yet: {what}")
 }
 
@@ -448,19 +460,100 @@ fn solved_plain(g: &SolvedCurveGeometry) -> R<Option<BCurve>> {
     }))
 }
 
-/// A face's surface, and whether the record's natural normal is opposite CADIR's.
-pub(crate) fn surface(g: &SurfaceGeometry) -> R<(BSurface, bool)> {
-    let solved = g
-        .solved()
-        .ok_or_else(|| unsupported("a procedural surface without its solved form"))?;
-    solved_surface(solved, 0)
+/// A face's surface as the record takes it: a record surface, or a definition whose record form
+/// depends on the face, which the assembly makes from the face's boundary.
+#[derive(Clone, Debug)]
+pub(crate) enum FaceSurface {
+    Record(BSurface),
+    Swept(SweptSurface),
 }
 
-fn solved_surface(g: &SolvedSurfaceGeometry, depth: usize) -> R<(BSurface, bool)> {
+/// A face's surface, and whether the record's natural normal (a definition's own normal, for
+/// [`FaceSurface::Swept`]) is opposite CADIR's; `None` for a procedural surface with no solved
+/// form cached, or one of a kind the producer did not state, which is read by its definition
+/// ([`swept`]) where it has one.
+pub(crate) fn surface(g: &SurfaceGeometry) -> R<Option<(FaceSurface, bool)>> {
+    match g.solved() {
+        Some(SolvedSurfaceGeometry::Unknown { .. }) if g.procedural_construction().is_some() => {
+            Ok(None)
+        }
+        Some(solved) => solved_surface(solved, 0).map(Some),
+        None => Ok(None),
+    }
+}
+
+/// The curve a procedural linear sweep, extrusion or revolution moves, or `None` for another
+/// kind of procedural surface.
+pub(crate) fn directrix(d: &ProceduralSurfaceDefinition) -> Option<&cadmpeg_ir::ids::CurveId> {
+    match d {
+        ProceduralSurfaceDefinition::LinearSweep(c) => Some(c.directrix()),
+        ProceduralSurfaceDefinition::Extrusion(c) => Some(c.directrix()),
+        ProceduralSurfaceDefinition::AxisRevolution(c) => Some(c.directrix()),
+        ProceduralSurfaceDefinition::Revolution(c) => Some(c.directrix()),
+        _ => None,
+    }
+}
+
+/// A procedural linear sweep, extrusion or revolution of `profile` (its [`directrix`]) as the
+/// assembly's definition, and whether that definition's own normal is opposite CADIR's.
+pub(crate) fn swept(d: &ProceduralSurfaceDefinition, profile: Carrier) -> R<(SweptSurface, bool)> {
+    let profile = match profile {
+        Carrier::Curve { curve, .. } => curve,
+        Carrier::Parabola { .. } | Carrier::Hyperbola { .. } => {
+            return Err(unsupported("a parabola or hyperbola swept or revolved"));
+        }
+    };
+    let vector = |x: cadmpeg_ir::math::Vector3| [x.x, x.y, x.z];
+    Ok(match d {
+        ProceduralSurfaceDefinition::LinearSweep(c) => (
+            SweptSurface::LinearSweep {
+                profile,
+                direction: vector(c.direction().get()),
+            },
+            false,
+        ),
+        ProceduralSurfaceDefinition::Extrusion(c) => {
+            // A revision form's first flag runs the directrix the other way (cadmpeg's
+            // evaluator negates its parameter), which turns ∂directrix and the normal.
+            let reversed = c
+                .revision_form()
+                .and_then(|f| f.flags.first().copied())
+                .unwrap_or(false);
+            (
+                SweptSurface::LinearSweep {
+                    profile,
+                    direction: vector(c.direction().get()),
+                },
+                reversed,
+            )
+        }
+        ProceduralSurfaceDefinition::AxisRevolution(c) => (
+            SweptSurface::Revolution {
+                profile,
+                origin: point(c.axis_origin().get()),
+                axis: a(unit(&c.axis_direction())),
+            },
+            false,
+        ),
+        ProceduralSurfaceDefinition::Revolution(c) => (
+            SweptSurface::Revolution {
+                profile,
+                origin: point(c.axis_origin().get()),
+                axis: a(unit(&c.axis_direction())),
+            },
+            // u along the directrix and v round the axis, unless transposed: ∂directrix × ∂angle.
+            !*c.transposed(),
+        ),
+        _ => return Err(unsupported("a procedural surface of this kind")),
+    })
+}
+
+fn solved_surface(g: &SolvedSurfaceGeometry, depth: usize) -> R<(FaceSurface, bool)> {
+    let record = |s: BSurface, reversed: bool| (FaceSurface::Record(s), reversed);
     Ok(match g {
         SolvedSurfaceGeometry::Plane(p) => {
             let f = frame(point(p.origin().get()), p.frame());
-            (
+            record(
                 BSurface::Plane {
                     origin: f.origin,
                     u_axis: f.x_axis,
@@ -469,7 +562,7 @@ fn solved_surface(g: &SolvedSurfaceGeometry, depth: usize) -> R<(BSurface, bool)
                 false,
             )
         }
-        SolvedSurfaceGeometry::Cylinder(c) => (
+        SolvedSurfaceGeometry::Cylinder(c) => record(
             BSurface::Cylinder {
                 frame: frame(point(c.origin().get()), c.frame()),
                 radius: c.radius().get(),
@@ -490,21 +583,23 @@ fn solved_surface(g: &SolvedSurfaceGeometry, depth: usize) -> R<(BSurface, bool)
                 if !(radius > 0.0) {
                     return Err(unsupported("a cone of no angle and no radius"));
                 }
-                (BSurface::Cylinder { frame: f, radius }, false)
+                record(BSurface::Cylinder { frame: f, radius }, false)
             } else {
+                // Its record form depends on the face: the plane it nearly is, when the face
+                // stays within the tolerance of that.
                 (
-                    BSurface::Cone {
+                    FaceSurface::Swept(SweptSurface::Cone {
                         frame: f,
-                        radius_at_origin: radius,
+                        radius,
                         half_angle,
-                    },
+                    }),
                     false,
                 )
             }
         }
         SolvedSurfaceGeometry::Sphere(s) => {
             let r = s.radius().get();
-            (
+            record(
                 BSurface::Sphere {
                     frame: frame(point(s.center().get()), s.frame()),
                     radius: r.abs(),
@@ -520,7 +615,7 @@ fn solved_surface(g: &SolvedSurfaceGeometry, depth: usize) -> R<(BSurface, bool)
                 minor_radius: minor.abs(),
                 tube_start: 0.0,
             };
-            (torus, minor < 0.0)
+            record(torus, minor < 0.0)
         }
         SolvedSurfaceGeometry::Nurbs(n) => {
             let points: Vec<Vec<[f64; 3]>> = n
@@ -542,17 +637,30 @@ fn solved_surface(g: &SolvedSurfaceGeometry, depth: usize) -> R<(BSurface, bool)
                 &points,
                 weights.as_deref(),
             )?;
-            (surface, n.normal_reversed())
+            record(surface, n.normal_reversed())
         }
         SolvedSurfaceGeometry::Transformed(placed) => {
             if depth >= MAX_PLACEMENTS {
                 return Err("placed surfaces nested too deeply".into());
             }
             let (basis, reversed) = solved_surface(placed.basis(), depth + 1)?;
-            (
-                Similarity::of(placed.transform().rows3())?.surface(basis)?,
-                reversed,
-            )
+            let s = Similarity::of(placed.transform().rows3())?;
+            let placed = match basis {
+                FaceSurface::Record(b) => FaceSurface::Record(s.surface(b)?),
+                FaceSurface::Swept(SweptSurface::Cone {
+                    frame,
+                    radius,
+                    half_angle,
+                }) => FaceSurface::Swept(SweptSurface::Cone {
+                    frame: s.frame(&frame),
+                    radius: radius * s.scale(),
+                    half_angle,
+                }),
+                FaceSurface::Swept(_) => {
+                    return Err(unsupported("a placed linear sweep or revolution"));
+                }
+            };
+            (placed, reversed)
         }
         SolvedSurfaceGeometry::Polygonal(_) => return Err(unsupported("a polygonal surface")),
         SolvedSurfaceGeometry::Unknown { .. } => {

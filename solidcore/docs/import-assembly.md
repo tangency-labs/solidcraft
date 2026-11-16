@@ -31,7 +31,7 @@ What the record holds:
 - A circle swept along its axis is the cylinder it is, and a circle revolved in a plane through the axis the ring torus it is.
 - A cone that stays within the tolerance of the plane through its frame's origin across its axis, over the face's boundary points (and its apex, should the face hold the axis), is that plane: a cone a whisker short of a right angle, as some writers give a plane, has no area in its own parameters.
 
-The STEP reader reads its own surfaces of linear extrusion and of revolution, and its cones, by the same code.
+The STEP reader reads its own surfaces of linear extrusion and of revolution, and its cones, by the same code. The CADIR reader gives its cones this way, and its procedural linear sweeps, extrusions and revolutions that carry no solved form (STEP's swept surfaces and FreeCAD's, as cadmpeg reads them).
 
 
 ## What `finish` does
