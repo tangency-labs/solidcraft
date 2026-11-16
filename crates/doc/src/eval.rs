@@ -2404,6 +2404,9 @@ fn fixed_pattern(pattern: &crate::PatternKind) -> bool {
 fn fixed_plane(plane: &PlaneRef) -> bool {
     match plane {
         PlaneRef::Origin { .. } | PlaneRef::Custom { .. } | PlaneRef::Placed { .. } | PlaneRef::Construction { .. } => true,
+        // Turned about an edge or face of the model (or through a point of it): that geometry
+        // is read too, as `plane_reads_geometry` says.
+        PlaneRef::AtAngle { line: Some(_), .. } | PlaneRef::AtAngle { pivot: Some(_), .. } => false,
         PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => fixed_plane(base),
         _ => false,
     }

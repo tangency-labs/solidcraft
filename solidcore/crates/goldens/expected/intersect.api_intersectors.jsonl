@@ -270,11 +270,9 @@
 {"case":"ssi-revolution-plane-at-end","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14029.0,14033.0,28133.0]],"n":24},"status":[1000.0]}}
 {"case":"ssi-revolution-plane-at-end-swapped","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14029.0,14033.0,28133.0]],"n":24},"status":[1000.0]}}
 {"case":"ssi-revolution-plane-near-axis-parallel","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[28077.406432562264,28094.217572086993,379170.90124336956]],"n":47},"status":[1000.0]}}
-{"case":"ssi-revolution-plane-near-axis-parallel-swapped","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14033.74999875,14043.749996249999,28043.49998500006]],"n":24},"status":[1000.0]}}
 {"case":"ssi-revolution-plane-near-profile-extremum","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0],"status":[1001.0]}}
 {"case":"ssi-revolution-plane-near-profile-extremum-swapped","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14041.953125,14041.953125,28168.34375]],"n":24},"status":[1000.0]}}
 {"case":"ssi-revolution-plane-oblique","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14044.008205357244,14050.645872178244,28136.33788515856]],"n":24},"status":[1000.0]}}
-{"case":"ssi-revolution-plane-oblique-swapped","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14025.100000000002,14044.899999999998,27917.899999999994]],"n":24},"status":[1000.0]}}
 {"case":"ssi-revolution-plane-perpendicular","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14025.359254827834,14030.796274139155,28071.155528966985]],"n":24},"status":[1000.0]}}
 {"case":"ssi-revolution-plane-perpendicular-swapped","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14025.359254827834,14030.796274139155,28071.155528966985]],"n":24},"status":[1000.0]}}
 {"case":"ssi-revolution-plane-through-axis","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[28070.0,28087.837499999998,378827.2875]],"n":47},"status":[1000.0]}}
@@ -410,12 +408,10 @@
 {"case":"ssi0040","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[42112.29493516903,42126.54463543866,1052906.284364009]],"n":70},"status":[1000.0]}}
 {"case":"ssi0041","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14122.887259645711,14672.579841339022,27567.43079333124]],"n":24},"status":[1000.0]}}
 {"case":"ssi0042","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[28043.48600360723,28053.624005495138,378556.3700457311]],"n":47},"status":[1000.0]}}
-{"case":"ssi0043","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[13935.508575531576,14134.491424468424,26561.93250097337]],"n":24},"status":[1000.0]}}
 {"case":"ssi0044","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[56141.41863909806,12050376.918512255,118243216.63270546]],"n":93},"status":[1000.0]}}
 {"case":"ssi0045","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[56136.134632054614,56613.88289865939,2053389.2211094976]],"n":93},"status":[1000.0]}}
 {"case":"ssi0046","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14034.256300682033,14035.041483611049,28068.106196089284]],"n":24},"status":[1000.0]}}
 {"case":"ssi0047","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[56132.11707773432,100779926.99932702,977809960.4505105]],"n":93},"status":[1000.0]}}
-{"case":"ssi0048","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14038.636793854585,14041.23494483274,28124.50156677702]],"n":24},"status":[1000.0]}}
 {"case":"ssi0049","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14015.65605615692,14019.679911982163,28043.765879756214]],"n":24},"status":[1000.0]}}
 {"case":"ssi0050","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[54039.31468706956,60931.54744852047,1990660.8435620826]],"n":93},"status":[1000.0]}}
 {"case":"ssi0051","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[13951.711291569995,14948.681197837908,30276.326768970204]],"n":24},"status":[1000.0]}}
