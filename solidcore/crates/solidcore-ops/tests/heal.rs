@@ -3,7 +3,10 @@
 #![allow(
     clippy::unwrap_used,
     clippy::indexing_slicing,
-    clippy::cast_possible_truncation
+    clippy::cast_possible_truncation,
+    clippy::panic,
+    clippy::single_match_else,
+    clippy::disallowed_methods // the tests' closed-form oracles, not ops geometry
 )]
 
 use std::collections::HashMap;
@@ -31,6 +34,19 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
 fn unit(a: [f64; 3]) -> [f64; 3] {
     let n = dot(a, a).sqrt();
     [a[0] / n, a[1] / n, a[2] / n]
+}
+
+/// A planar record face's unit normal and a point of its plane.
+fn plane_of(face: &Face) -> ([f64; 3], [f64; 3]) {
+    let Surface::Plane {
+        origin,
+        u_axis,
+        v_axis,
+    } = face.surface
+    else {
+        panic!("not a plane: {:?}", face.surface)
+    };
+    (unit(cross(u_axis, v_axis)), origin)
 }
 
 /// Tolerances of a synthetic body: the body's, every edge's and every vertex's.
@@ -235,6 +251,12 @@ fn hair_step_box_with_cap(step: f64, tols: Tols) -> Record {
 /// four control points one point: a span of zero length. Its pcurves on both faces are the same
 /// spline in the faces' parameters.
 fn box_with_a_collapsed_spline_span(tols: Tols) -> Record {
+    box_with_a_short_spline_span(tols, 1e-9)
+}
+
+/// [`box_with_a_collapsed_spline_span`] whose middle piece's control points are `dt` apart in
+/// the line's parameter (the edge is 10 mm long, so `10 dt` mm apart).
+fn box_with_a_short_spline_span(tols: Tols, dt: f64) -> Record {
     let corners = [
         [0.0, 0.0, 0.0],
         [10.0, 0.0, 0.0],
@@ -270,9 +292,12 @@ fn box_with_a_collapsed_spline_span(tols: Tols) -> Record {
             a[2] + t * (b[2] - a[2]),
         ]
     };
-    let m = at(0.5);
-    let _ = m;
-    let (m0, m1, m2, m3) = (at(0.5), at(0.5 + 1e-9), at(0.5 + 2e-9), at(0.5 + 3e-9));
+    let (m0, m1, m2, m3) = (
+        at(0.5),
+        at(0.5 + dt),
+        at(0.5 + 2.0 * dt),
+        at(0.5 + 3.0 * dt),
+    );
     let points = vec![
         a,
         at(1.0 / 6.0),
@@ -394,6 +419,19 @@ fn heals(rec: &Record, counts: [usize; 3]) -> solidcore_ops::heal::HealReport {
     assert_eq!(sources.len(), counts[0]);
     assert!(sources.iter().all(|&f| f < rec.faces.len()));
     assert_eq!(healed.record.faces.len(), counts[0]);
+    // and each healed face lies on its own source face's plane (the heal moves no surface)
+    for (i, &src) in healed.face_source.iter().enumerate() {
+        let (n0, o0) = plane_of(&rec.faces[src]);
+        let (n1, o1) = plane_of(&healed.record.faces[i]);
+        assert!(
+            dot(n0, n1).abs() >= 1.0 - 1e-12,
+            "face {i} from {src}: {n0:?} {n1:?}"
+        );
+        assert!(
+            dot(sub(o1, o0), n0).abs() <= 1e-9,
+            "face {i} from {src}: off its plane"
+        );
+    }
     let healed = healed.body;
     assert!(healed.check(CheckLevel::All).unwrap().is_valid());
     assert_eq!(report.after.as_ref().map(|a| a.failures), Some(0));
@@ -510,6 +548,53 @@ fn a_spline_edge_with_a_piece_of_no_length_heals() {
     let report = heals(&rec, [6, 12, 8]);
     assert_eq!(report.cut_pieces, 1);
     assert_eq!((report.squeezed_edges, report.collapsed_faces), (0, 0));
+}
+
+/// The real-defect side of the cut's certificate: a middle piece the check calls one point
+/// (its control points 3e-7 mm apart, under the check's 1e-6) on an edge whose tolerance is
+/// 1e-8 is not cut, since cutting would move the curve farther than that tolerance; the
+/// refusal names the bound and the edge keeps its curve.
+#[test]
+fn a_piece_longer_than_its_edge_tolerance_is_not_cut() {
+    use solidcore::heal::tolerance_defects::{cut_degenerate_pieces, Healed, Refusal};
+    use solidcore::topology::brep::p3::edit_brep;
+    let tols = Tols {
+        body: 1e-9,
+        edge: 1e-8,
+        vertex: 1e-8,
+    };
+    let rec = box_with_a_short_spline_span(tols, 1e-8);
+    let mut k = solidcore::Kernel::default();
+    let (mut b, order) = solidcore_convert::brep::to_kernel(&mut k, &rec, true).unwrap();
+    let spline = rec
+        .edges
+        .iter()
+        .position(|e| matches!(e.curve, Curve::Spline { .. }))
+        .unwrap();
+    let e = order.edges[spline];
+    let knots = |b: &solidcore::topology::Brep| match solidcore::topology::edge::curve(b, e)
+        .unwrap()
+        .unwrap()
+        .kind()
+    {
+        solidcore::curve::curve::CurveKind::BSpline(s) => s.knots(None).unwrap(),
+        _ => panic!("the edge's curve is not a spline"),
+    };
+    let before = knots(&b);
+    let (healed, any) = edit_brep(&mut k, &mut b, |k, b, scope| {
+        let mut healed = Healed::default();
+        let any = cut_degenerate_pieces(k, b, scope.env, &mut healed)?;
+        Ok((healed, any))
+    })
+    .unwrap();
+    assert!(!any && healed.cut_pieces.is_empty(), "{healed:?}");
+    let [(edge, Refusal::PieceTooLong(bound))] = healed.refused_edges[..] else {
+        panic!("one PieceTooLong refusal: {healed:?}")
+    };
+    assert_eq!(edge, e);
+    // the piece's control points span 3e-7 mm: the bound is at least that, past 1e-8
+    assert!((3e-7 * (1.0 - 1e-6)..=1e-6).contains(&bound), "{bound}");
+    assert_eq!(knots(&b), before);
 }
 
 /// A body the check passes is given back as it is.

@@ -60,8 +60,7 @@ pub fn heal_tolerance_defects(body: &Body) -> Result<Option<(Body, ToleranceHeal
     let Some((ops, order)) = body.ops_body() else {
         return Ok(None);
     };
-    let (healed, report) = solidcraft_smlib::stop::unstoppable(|| solidcore_ops::heal::heal_tolerance_defects(ops, order))
-        .map_err(|e| KernelError::Failed(format!("heal: {e}")))?;
+    let (healed, report) = solidcore_ops::heal::heal_tolerance_defects(ops, order).map_err(|e| KernelError::Failed(format!("heal: {e}")))?;
     let Some(healed) = healed else {
         log::debug!(target: "repair", "tolerance heal not kept: {:?}", report.why_not);
         return Ok(None);

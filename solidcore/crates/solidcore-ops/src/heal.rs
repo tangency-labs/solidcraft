@@ -5,10 +5,12 @@
 //! decided on a certified bound and no tolerance grows).
 //!
 //! The recipe: the full check of the body, the heal on a copy, the full check of the copy. The
-//! copy is kept only when its check fails fewer tests than the body's and fails no test the
-//! body's check did not (a test counted by its owner's class and number), else the body is
-//! given back as it was, with why. The re-check only ever refuses: each edit is accepted on
-//! its own certificate, the check guards against what the edits did not foresee.
+//! copy is kept only when no edge or vertex tolerance grew, its check fails fewer tests than
+//! the body's, and it fails no kind of test (its owner's class and number) more often than the
+//! body's did; else the body is given back as it was, with why. The re-check only ever
+//! refuses: each edit is accepted on its own certificate, and the check guards against what the
+//! edits did not foresee. It counts failures by kind, not by entity, so a new failure that
+//! takes the place of one the heal removed, of the same kind, is not told apart.
 //!
 //! SMLib's own healer (`SmHealData`, `HealBrep`) is not used: on bodies whose edges are shorter
 //! than their stated tolerance its tolerance step resets every tolerance from a model-size
@@ -16,7 +18,7 @@
 //! old tolerances covered), and its degenerate-edge step finds short edges against the
 //! context's tolerance, not the edge's own.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use solidcore::heal::tolerance_defects::{heal_short_edges_and_slivers, Healed, Refusal};
 use solidcore::topology::brep::p3::{brep_copy_mapped, edit_brep};
@@ -69,17 +71,20 @@ pub struct HealReport {
     pub why_not: Option<String>,
 }
 
-/// A failed test's class: its reporting type and number (`SmEdge::Test #7`).
-fn classes(report: &CheckReport) -> BTreeSet<String> {
-    report
-        .text
-        .lines()
-        .filter_map(|l| {
-            let (owner, rest) = l.split_once("::Test #")?;
-            let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
-            (!digits.is_empty()).then(|| format!("{owner}::Test #{digits}"))
-        })
-        .collect()
+/// How many failures of each class (reporting type and number, `SmEdge::Test #7`) a check
+/// reports.
+fn classes(report: &CheckReport) -> BTreeMap<String, usize> {
+    let mut out = BTreeMap::new();
+    for l in report.text.lines() {
+        let Some((owner, rest)) = l.split_once("::Test #") else {
+            continue;
+        };
+        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        if !digits.is_empty() {
+            *out.entry(format!("{owner}::Test #{digits}")).or_insert(0) += 1;
+        }
+    }
+    out
 }
 
 fn refusal_text(r: &Refusal) -> String {
@@ -125,6 +130,9 @@ fn refusal_text(r: &Refusal) -> String {
         Refusal::CutOffFace(_, Some(g)) => format!(
             "the edge's curve, a piece of no length cut out, lies up to {g:e} mm off its face"
         ),
+        Refusal::CutEnd(d) => format!(
+            "the edge's curve, a piece of no length cut out, ends {d:e} mm from its vertex, past its tolerance"
+        ),
         Refusal::CutOffFace(_, None) => {
             "the edge's curve, a piece of no length cut out, has no certified bound to its face"
                 .into()
@@ -160,12 +168,13 @@ fn summarise(healed: &Healed, report: &mut HealReport) {
 /// `body` (its record faces in `order`, as [`Body::from_record`] gives it) healed of its
 /// tolerance-scale defects (module docs), or `None` (keep `body`) when it
 /// passes the full check, when nothing could be healed, or when the healed copy's check is not
-/// better (fewer failed tests, no new kind); the report says which and why. `body` is
-/// unchanged.
+/// better (fewer failed tests, no kind failed more often); the report says which and why.
+/// `body` is unchanged.
 ///
 /// # Errors
-/// [`Error::Argument`] for an `order` not of `body`; those of the check ([`Body::check`]), of
-/// the kernel's edits and of the record conversion.
+/// [`Error::Argument`] for an `order` not of `body`; [`Error::Cancelled`] when the caller's
+/// token stops it; those of the check ([`Body::check`]), of the copy and of the record
+/// conversion. A heal edit that fails otherwise is not an error: the body is kept, with why.
 pub fn heal_tolerance_defects(
     body: &Body,
     order: &Order,
@@ -219,6 +228,8 @@ pub fn heal_tolerance_defects(
             heal_short_edges_and_slivers(k, b, scope.env)
         }) {
             Ok(h) => h,
+            // a stopped heal is the caller's stop, never "not kept"
+            Err(e) if e.is_cancelled() => return Err(e),
             Err(e) => return Ok(Ok(Err(format!("the heal failed: {e}")))),
         };
         // an entity the heal removed is gone from its arena: nothing to compare
@@ -255,14 +266,16 @@ pub fn heal_tolerance_defects(
     }
     let candidate = Body::new(healed_brep);
     let after = candidate.check(CheckLevel::All)?;
+    let was = classes(&before);
     let new: Vec<String> = classes(&after)
-        .difference(&classes(&before))
-        .cloned()
+        .into_iter()
+        .filter(|(class, n)| *n > was.get(class).copied().unwrap_or(0))
+        .map(|(class, _)| class)
         .collect();
     report.after = Some(after.clone());
     if !new.is_empty() {
         report.why_not = Some(format!(
-            "the healed body fails tests the body did not: {}",
+            "the healed body fails more tests of a kind than the body: {}",
             new.join(", ")
         ));
         return Ok((None, report));

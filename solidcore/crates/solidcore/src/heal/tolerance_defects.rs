@@ -31,8 +31,9 @@
 //!   is accepted only when its whole distance from every face the edge bounds is certified
 //!   within half the edge's tolerance ([`crate::query::curve_surface_gap::curve_face_gap_bound`];
 //!   half: SMLib holds an edge's tolerance to at least twice its gap to its faces, and raises it
-//!   to that when a trim is attached), and its end within half the vertex's tolerance of `P`
-//!   ([`crate::heal::stitch::bounds::point_at_curve`]);
+//!   to that when a trim is attached), its end within half the vertex's tolerance of `P`
+//!   ([`crate::heal::stitch::bounds::point_at_curve`]), and its other end (which the trimmed
+//!   form may have snapped to a knot) within its own vertex's tolerance of that vertex;
 //! - a trim on a plane is made exactly: the plane's parameters are an affine map of space, so
 //!   the curve's control points mapped into them give the curve's projection onto the plane, on
 //!   the curve's own knots and weights. On any other surface SMLib's trim maker makes it
@@ -53,7 +54,7 @@
 //! Deviations: no recursion. One squeeze removes an edge, so the passes are bounded by the
 //! edge count, each at most [`MAX_EDGES`] edges; cancellation is polled per edge.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::Line;
@@ -110,7 +111,8 @@ pub enum Refusal {
     /// tolerance of one of its faces: the bound, or `None` when none could be found.
     NeighbourOffFace(EdgeId, FaceId, Option<f64>),
     /// An edge meeting the edge's vertices, re-ended, does not end within half the vertex's
-    /// tolerance of the new point: the bound.
+    /// tolerance of the new point, or its other end is not within its own vertex's tolerance
+    /// of that vertex: the bound.
     NeighbourEnd(EdgeId, f64),
     /// The new point is not certified within half the kept vertex's tolerance of a face
     /// around it (bounded by the gap of a re-ended edge's whole curve to that face): the bound.
@@ -132,6 +134,9 @@ pub enum Refusal {
     /// The edge's curve, a piece of no length cut out, is not certified within half its
     /// tolerance of one of its faces: the bound, or `None`.
     CutOffFace(FaceId, Option<f64>),
+    /// The edge's curve, a piece of no length cut out, does not end within its vertex's
+    /// tolerance of the vertex: the bound.
+    CutEnd(f64),
 }
 
 /// An edge squeezed into a vertex.
@@ -392,6 +397,24 @@ type Gaps = Vec<(FaceId, f64)>;
 /// An edge re-ended for a squeeze: the edge, its new curve and its certified face gaps.
 type ReEnded = (EdgeId, Curve, Vec<(FaceId, f64)>);
 
+/// Whether curve `c` at parameter `t` is certified within vertex `x`'s tolerance of its point:
+/// `Err(bound)` when it is not (infinite when no bound was found).
+fn end_on_vertex(
+    b: &Brep,
+    x: Option<VertexId>,
+    c: &Curve,
+    t: f64,
+) -> Result<std::result::Result<(), f64>> {
+    let Some(x) = x else {
+        return Err(invalid("an edge without its vertices"));
+    };
+    Ok(match bounds::point_at_curve(vertex::point(b, x)?, c, t) {
+        Ok(d) if within(d, vertex::tolerance(b, x)?) => Ok(()),
+        Ok(d) => Err(d),
+        Err(_) => Err(f64::INFINITY),
+    })
+}
+
 /// The new curve of each edge meeting `v` or `w` (but `e`), re-ended at `p` and certified
 /// (module docs); `Err(Refusal)` for the first that is not.
 fn certified_neighbours(
@@ -426,11 +449,20 @@ fn certified_neighbours(
             return Ok(Err(Refusal::NeighbourKind(n)));
         };
         let range = c.natural_interval();
-        let end = if at_start { range.min() } else { range.max() };
+        let (end, far, far_vertex) = if at_start {
+            (range.min(), range.max(), t)
+        } else {
+            (range.max(), range.min(), s)
+        };
         match bounds::point_at_curve(p, &c, end) {
             Ok(d) if d <= GAP_SHARE * vertex_tol => {}
             Ok(d) => return Ok(Err(Refusal::NeighbourEnd(n, d))),
             Err(_) => return Ok(Err(Refusal::NeighbourEnd(n, f64::INFINITY))),
+        }
+        // the trimmed form may snap its interval to a knot: its far end, unmoved, must still
+        // meet its own vertex within that vertex's tolerance
+        if let Err(d) = end_on_vertex(b, far_vertex, &c, far)? {
+            return Ok(Err(Refusal::NeighbourEnd(n, d)));
         }
         match face_gaps(k, b, n, &c)? {
             Ok(gaps) => {
@@ -652,9 +684,14 @@ pub fn collapse_short_edges(
         return Err(invalid("more edges than a heal pass takes"));
     }
     let mut any = false;
+    // After the first pass, only edges at a vertex the previous pass moved or re-ended an edge
+    // at are tried again: a refusal reads only the edges at its own two vertices, so any other
+    // would be refused the same way.
+    let mut dirty: Option<BTreeSet<VertexId>> = None;
     // each pass that continues removes an edge
     for _ in 0..=edges.len() {
         let mut squeezed = false;
+        let mut touched: BTreeSet<VertexId> = BTreeSet::new();
         for e in p1::edges(b, None)? {
             k.check_cancelled(OP)?;
             if b.edge(e).is_err() {
@@ -664,6 +701,12 @@ pub fn collapse_short_edges(
             let Some((v, w)) = ends(b, e)? else {
                 continue;
             };
+            if dirty
+                .as_ref()
+                .is_some_and(|d| !d.contains(&v) && !d.contains(&w))
+            {
+                continue;
+            }
             let d = bounds::points(vertex::point(b, v)?, vertex::point(b, w)?)?;
             if !within(d, edge::tolerance(b, e)?) {
                 continue;
@@ -675,6 +718,13 @@ pub fn collapse_short_edges(
             match collapse_short_edge(k, b, env, e, target)? {
                 Ok(s) => {
                     healed.refused_edges.retain(|(x, _)| *x != e);
+                    touched.insert(s.survivor);
+                    for (n, _) in &s.re_ended {
+                        if let (Some(a), Some(c)) = edge::start_end_vertices(b, *n)? {
+                            touched.insert(a);
+                            touched.insert(c);
+                        }
+                    }
                     healed.squeezed.push(s);
                     squeezed = true;
                 }
@@ -688,6 +738,7 @@ pub fn collapse_short_edges(
             break;
         }
         any = true;
+        dirty = Some(touched);
     }
     // edges since squeezed are not refused
     let live = p1::edges(b, None)?;
@@ -765,6 +816,11 @@ pub fn collapse_coincident_two_edge_faces(
     healed: &mut Healed,
 ) -> Result<bool> {
     let mut proved = Vec::new();
+    // Each proof reads the topology as it is now, so one round collapses only faces whose
+    // edges and faces no earlier proved face touches (two slivers sharing an edge would
+    // otherwise pair edges no proof covered); the rest wait for the next round, proved again.
+    let mut used_edges: BTreeSet<EdgeId> = BTreeSet::new();
+    let mut used_faces: BTreeSet<FaceId> = BTreeSet::new();
     for f in p1::faces(b, None)? {
         k.check_cancelled(OP)?;
         let Some(TwoEdgeFace {
@@ -776,6 +832,13 @@ pub fn collapse_coincident_two_edge_faces(
         else {
             continue;
         };
+        if used_faces.contains(&f)
+            || other.is_some_and(|g| used_faces.contains(&g))
+            || used_edges.contains(&keep)
+            || used_edges.contains(&gone)
+        {
+            continue;
+        }
         let tol = edge::tolerance(b, keep)?;
         if edge::tolerance(b, gone)? > tol {
             healed.refused_faces.push((f, Refusal::WouldGrow));
@@ -841,6 +904,10 @@ pub fn collapse_coincident_two_edge_faces(
         } else {
             None
         };
+        used_edges.insert(keep);
+        used_edges.insert(gone);
+        used_faces.insert(f);
+        used_faces.extend(other);
         proved.push((f, d, keep, gone_gaps, gaps));
     }
     if proved.is_empty() {
@@ -943,8 +1010,18 @@ fn cut_one_piece(nurb: &Nurbs, rational: bool) -> Result<Option<(Curve, f64)>> {
                 // with one positive weight the piece lies in the convex hull of its control
                 // points, all within the largest of their distances from the first
                 let mut bound = 0.0_f64;
+                let mut size = 0.0_f64;
                 for q in piece {
                     bound = bound.max(bounds::points(q0, point(q))?);
+                    let e = point(q);
+                    size = size.max(e.x.abs() + e.y.abs() + e.z.abs());
+                }
+                // a rational point is its homogeneous one divided by its weight, each
+                // coordinate rounded once (at most half an ulp of it): two such points are
+                // farther apart than their rounded copies by at most 2 eps of their sizes,
+                // which outward-rounding 4 eps covers
+                if rational {
+                    bound += 4.0 * f64::EPSILON * size;
                 }
                 let len = b_ - a;
                 let mut cpts: Vec<CPoint> = Vec::new();
@@ -1015,6 +1092,21 @@ pub fn cut_degenerate_pieces(
                     healed.refused_edges.push((e, Refusal::CutOffFace(f, gap)));
                     break;
                 }
+            }
+            // the trimmed form may snap its interval to a knot: both ends must still meet
+            // their vertices within the vertices' tolerances
+            let (s, t) = edge::start_end_vertices(b, e)?;
+            let range = c.natural_interval();
+            let mut off = None;
+            for (x, at) in [(s, range.min()), (t, range.max())] {
+                if let Err(d) = end_on_vertex(b, x, &c, at)? {
+                    off = Some(d);
+                    break;
+                }
+            }
+            if let Some(d) = off {
+                healed.refused_edges.push((e, Refusal::CutEnd(d)));
+                break;
             }
             edge::replace_3d_curve(b, e, Some(c), env)?;
             worst = worst.max(bound);

@@ -1,6 +1,13 @@
 //! Repair Part (#8371): a part SMLib refuses, or an open part that should be a solid, made into
 //! one SMLib takes, saying what changed face by face. In order:
 //!
+//! 0. A part SMLib takes whose full check fails has its tolerance-scale defects healed first
+//!    ([`crate::heal_tolerance_defects`]): edges shorter than their tolerance squeezed into one
+//!    vertex, which moves (within the tolerances the part already states) to where its edges
+//!    are re-ended exactly; sliver faces between coincident edges removed; curve pieces of no
+//!    length cut out. Each edit is certified and grows no tolerance. The healed part is kept
+//!    when its check fails fewer tests and no kind of test more often (not only when it
+//!    passes); a heal that cannot run is skipped and the steps below go on.
 //! 1. A face SMLib refuses on its own is rebuilt from its own surface, its geometry unchanged: a
 //!    cylinder, cone, sphere or torus face on a NURBS form SMLib rejects goes as the analytic
 //!    surface it is, which SMLib parameterises on its own form (the form's control net is the
@@ -13,7 +20,7 @@
 //!    made, and sewn in, when asked), planar only where the faces around it are that plane; where
 //!    they are curved the patch meets them tangent (G1). Extending the neighbours is not done.
 //!
-//! Nothing is moved: a face rebuilt keeps its surface, a sewn edge keeps its curve (SMLib keeps
+//! Past step 0, nothing is moved: a face rebuilt keeps its surface, a sewn edge keeps its curve (SMLib keeps
 //! one of the pair), a patch is a new face. What was done comes back in [`RepairReport`].
 //!
 //! When none of that applies, SMLib's full check (the one operations run on their results)

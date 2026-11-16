@@ -4154,6 +4154,7 @@ fn hair_step_body(step: f64, tol: f64) -> Body {
 fn an_imported_part_whose_check_fails_is_healed_where_it_is_read() {
     use super::parallel::{Note, Part, heal};
     let body = hair_step_body(3e-4, 1e-3);
+    let source = body.record().clone();
     let check = crate::validation::failing_check(&body).unwrap();
     assert!(check.is_some());
     let faces = body.face_count();
@@ -4169,6 +4170,27 @@ fn an_imported_part_whose_check_fails_is_healed_where_it_is_read() {
     let mut kept = part.face_origin.clone();
     kept.sort_unstable();
     assert_eq!(kept, [100, 101, 103, 104, 105, 106, 107]);
+    // each face keeps its own file face: it lies on that face's plane (the heal moves no
+    // surface; the two tops are parallel planes 3e-4 apart, so a swap is caught)
+    let plane = |f: &solidcore_record::brep::Face| match f.surface {
+        solidcore_record::brep::Surface::Plane { origin, u_axis, v_axis } => {
+            let n = [
+                u_axis[1] * v_axis[2] - u_axis[2] * v_axis[1],
+                u_axis[2] * v_axis[0] - u_axis[0] * v_axis[2],
+                u_axis[0] * v_axis[1] - u_axis[1] * v_axis[0],
+            ];
+            let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            ([n[0] / l, n[1] / l, n[2] / l], origin)
+        }
+        _ => panic!("not a plane: {:?}", f.surface),
+    };
+    let healed = part.body.record();
+    for (i, &o) in part.face_origin.iter().enumerate() {
+        let ((n0, o0), (n1, o1)) = (plane(&source.faces[(o - 100) as usize]), plane(&healed.faces[i]));
+        let dot = n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2];
+        let off = (o1[0] - o0[0]) * n0[0] + (o1[1] - o0[1]) * n0[1] + (o1[2] - o0[2]) * n0[2];
+        assert!(dot.abs() >= 1.0 - 1e-12 && off.abs() <= 1e-9, "face {i} from file face {o}: {dot} {off}");
+    }
     let [Note::Repaired(note)] = &read[..] else { panic!("one Repaired note: {}", read.len()) };
     assert!(note.contains("2 edges shorter than their tolerance collapsed") && note.contains("1 sliver faces"), "{note}");
 
