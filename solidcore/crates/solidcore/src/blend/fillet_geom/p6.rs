@@ -74,11 +74,12 @@
 //!   fillet's side is the chord from the rail to the other rail, square to the rail
 //!   ([`fillet_side_at_rail`]), not the fillet face's binormal there as upstream: the
 //!   face's binormal turns past the face's own plane for a section that leaves its rail
-//!   steeper than 90 degrees, and then pointed at the wrong piece. Where no piece has a
-//!   dot above the floor the trim fails as a defect, `BlendFailure::StageFailed` (upstream
-//!   deleted no piece and went on). A rail with no candidate piece at all (its edge uses on
-//!   none of the faces the main rail names) deletes none, as upstream.
-//!   [`inside_piece`] holds the choice.
+//!   steeper than 90 degrees, and then pointed at the wrong piece. Where the chord gives no
+//!   piece (a fillet edge across the fillet, such as a round's end on a corner ball, whose
+//!   chord lies in its section's plane) the face's binormal decides as before, and where
+//!   neither does no piece is deleted, as upstream. A rail with no candidate piece at all
+//!   (its edge uses on none of the faces the main rail names) deletes none, as upstream.
+//!   [`chosen_piece`] holds the choice.
 //! - **Statuses.** `SER`/`NER` failures are errors (`SM_ERR`, `SM_ERR_NULL_POINTER`);
 //!   ignored upstream statuses (curve and surface copies, `SetMinMax`, `Unitize`,
 //!   `EvaluatePoint` in `ShouldSwapFaces`) are ignored here too, except that
@@ -101,7 +102,6 @@ use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps, RolloverGue
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
-use crate::error::blend::BlendFailure;
 use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::context::{MarkLock, MarkType};
 use crate::geom::extent1d::Extent1d;
@@ -2470,8 +2470,6 @@ impl FilletBrep {
     /// # Errors
     ///
     /// `SM_ERR` when the fillet edge's midpoint does not drop onto the target edge;
-    /// [`BlendFailure::StageFailed`] (a defect) where the fillet's side at a rail cannot be
-    /// taken (no point on the other rail) or no piece of the original face lies on it;
     /// `SM_ERR_NULL_POINTER` without the target edge's curve;
     /// [`SolidError::InvalidInput`] without solver, rails, mark locks, the target
     /// context's mark lock, or a fillet edge without primary edge use or curve
@@ -2789,9 +2787,9 @@ impl FilletBrep {
                     pieces.push((index, bin2));
                 }
                 // The fillet's side at the rail is the chord to the other rail, square to
-                // this one ([`fillet_side_at_rail`]), not the fillet face's binormal; it is
-                // looked for only where there are pieces to choose from ([`chosen_piece`]).
-                let inside = chosen_piece(&pieces, || {
+                // this one ([`fillet_side_at_rail`]); where the chord has no side, the
+                // fillet face's binormal as before ([`chosen_piece`]).
+                let inside = chosen_piece(&pieces, fillet_eval.binormal, || {
                     Ok(self
                         .other_rail_point(k, geom, ii, mid_pnt)?
                         .and_then(|o| fillet_side_at_rail(mid_pnt, fillet_eval.tangent, o)))
@@ -3067,8 +3065,9 @@ fn roll_over_chain_start(
 /// a chamfer (under 90 degrees), but past 90 degrees for a convex section that leans back
 /// over its toe (a weld bead past its overhang bound), and its binormal then points into
 /// the other piece, which was deleted with the whole body behind it. Where
-/// `c . t_i` is not positive (faces tangent along the edge) the rule has no side, and the
-/// trim fails as a defect ([`inside_piece`]).
+/// `c . t_i` is not positive (faces tangent along the edge), or at a fillet edge across
+/// the fillet, whose chord lies in its section's plane, the rule has no side, and the
+/// face's binormal decides ([`chosen_piece`]).
 #[must_use]
 pub(crate) fn fillet_side_at_rail(at: Point3, tangent: Vec3, other: Point3) -> Option<Vec3> {
     let chord = other - at;
@@ -3099,31 +3098,36 @@ pub(crate) fn inside_piece(side: Vec3, pieces: &[(usize, Vec3)]) -> Option<usize
     inside
 }
 
-/// The piece the trim deletes along a rail, of `pieces` ([`inside_piece`]), with the
-/// fillet's `side` there asked for only when there is a piece to choose.
+/// The piece the trim deletes along a rail, of `pieces` ([`inside_piece`]): the one on
+/// the chord's side (`side`, [`fillet_side_at_rail`]), asked for only when there is a piece
+/// to choose; where the chord gives no piece, the one on the fillet face's `binormal`, the
+/// rule before the chord.
 ///
 /// No candidate piece (a rail whose edge uses lie on none of the faces the main rail names,
-/// as a rollover's other rail can) chooses none and deletes none, as before the chord rule;
-/// `side` is not asked. Otherwise no side (no point on the other rail: the pseudo B-rep's
-/// rails run the whole fillet) or no piece on that side (the chord square to the
-/// face: faces tangent along the edge) is a defect, `BlendFailure::StageFailed`, never a
-/// size that would build.
+/// as a rollover's other rail can) chooses none and deletes none; `side` is not asked. The
+/// chord gives no piece where no point of the other rail is found or the chord is square
+/// to the pieces: at a fillet edge that runs across the fillet rather than along it (the
+/// end of a round where it meets the next round's face, at a corner ball), whose other
+/// rail lies in the plane of its section. The binormal is right there: it fails only for
+/// a section that leaves a rail along the joint steeper than 90 degrees, where the chord
+/// has its side. Neither giving a piece chooses none, as before.
 fn chosen_piece(
     pieces: &[(usize, Vec3)],
+    binormal: Vec3,
     side: impl FnOnce() -> Result<Option<Vec3>>,
 ) -> Result<Option<usize>> {
     if pieces.is_empty() {
         return Ok(None);
     }
-    let defect = || SolidError::blend(OP_TRIM, BlendFailure::StageFailed);
-    let side = side()?.ok_or_else(defect)?;
-    Ok(Some(inside_piece(side, pieces).ok_or_else(defect)?))
+    let by_chord = side()?.and_then(|side| inside_piece(side, pieces));
+    Ok(by_chord.or_else(|| inside_piece(binormal, pieces)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::blend::fillet_solver::p1::FilletExecutiveRef;
+    use crate::error::blend::BlendFailure;
     use crate::error::{SM_ERR, SM_ERR_NULL_POINTER};
     use crate::geom::attribute::ObjectKey;
     use crate::geom::context::ALL_MARKS;
@@ -4086,7 +4090,7 @@ mod tests {
     }
 
     /// Faces tangent along the edge (the chord square to the face) and a chord along the rail
-    /// give no side: no piece is chosen, and the trim fails as a defect.
+    /// give no side: the chord chooses no piece.
     #[test]
     fn a_chord_square_to_the_face_or_along_the_rail_has_no_side() {
         let tangent = Vec3::new(0.0, 0.0, 1.0);
@@ -4107,20 +4111,56 @@ mod tests {
 
     /// A rail with no candidate piece (a rollover's other rail whose edge uses lie on none of
     /// the main rail's faces) chooses none and deletes none, as before the chord rule, and
-    /// never asks for the side, so it neither fails nor looks for the other rail. With pieces,
-    /// a missing side or no piece on it is `StageFailed`; a side picks its piece.
+    /// never asks for the side, so it neither fails nor looks for the other rail.
     #[test]
     fn a_rail_with_no_candidate_piece_deletes_none_and_does_not_fail() {
         let never = || -> Result<Option<Vec3>> { panic!("the side was asked for no piece") };
-        assert_eq!(chosen_piece(&[], never).unwrap(), None);
+        assert_eq!(chosen_piece(&[], INTO, never).unwrap(), None);
+    }
 
+    /// With pieces, the chord's side picks its piece even against the face's binormal; no
+    /// side, or a chord square to the pieces, leaves the choice to the binormal, and neither
+    /// giving a piece chooses none. None of these fails.
+    #[test]
+    fn the_chord_decides_and_the_binormal_only_where_the_chord_has_no_side() {
         let pieces = [(0, INTO), (2, -INTO)];
-        let no_side = chosen_piece(&pieces, || Ok(None)).unwrap_err();
-        assert_eq!(no_side.blend_failure(), Some(&BlendFailure::StageFailed));
         let square = Vec3::new(0.0, 1.0, 0.0);
-        let no_piece = chosen_piece(&pieces, || Ok(Some(square))).unwrap_err();
-        assert_eq!(no_piece.blend_failure(), Some(&BlendFailure::StageFailed));
-        assert_eq!(chosen_piece(&pieces, || Ok(Some(INTO))).unwrap(), Some(0));
-        assert_eq!(chosen_piece(&pieces, || Ok(Some(-INTO))).unwrap(), Some(2));
+        assert_eq!(
+            chosen_piece(&pieces, -INTO, || Ok(Some(INTO))).unwrap(),
+            Some(0)
+        );
+        assert_eq!(
+            chosen_piece(&pieces, INTO, || Ok(Some(-INTO))).unwrap(),
+            Some(2)
+        );
+        assert_eq!(chosen_piece(&pieces, -INTO, || Ok(None)).unwrap(), Some(2));
+        assert_eq!(
+            chosen_piece(&pieces, INTO, || Ok(Some(square))).unwrap(),
+            Some(0)
+        );
+        assert_eq!(
+            chosen_piece(&pieces, square, || Ok(Some(square))).unwrap(),
+            None
+        );
+    }
+
+    /// The end of a bottom round of radius 2 where it runs onto the next round at a tray's
+    /// corner (`issue_416_fillet_seam`): the fillet edge runs across the round, round its
+    /// arc at y = 2, and its other rail ends in the same plane, so the chord has no part
+    /// along the round's pieces (+y and -y); the fillet face's binormal (-y) takes the
+    /// piece the fillet lies over. The chord rule alone refused this tray.
+    #[test]
+    fn an_edge_across_the_fillet_takes_the_binormal_s_piece() {
+        let at = Point3::new(0.585_786_437_626_905_1, 2.0, 0.585_786_437_626_904_9);
+        let tangent = Vec3::new(-1.0, 0.0, 1.0);
+        let other = Point3::new(2.0, 2.0, 0.0);
+        let along = Vec3::new(0.0, 1.0, 0.0);
+        let pieces = [(0, along), (2, -along)];
+        let side = fillet_side_at_rail(at, tangent, other).unwrap();
+        assert_eq!(inside_piece(side, &pieces), None);
+        assert_eq!(
+            chosen_piece(&pieces, -along, || Ok(Some(side))).unwrap(),
+            Some(2)
+        );
     }
 }
