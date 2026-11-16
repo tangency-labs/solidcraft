@@ -134,6 +134,7 @@ fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> 
                 continue;
             }
             ObjectKind::Dimension => CheckedKind::Dimension,
+            ObjectKind::Sketch => CheckedKind::Sketch,
             ObjectKind::Note => CheckedKind::Note,
             ObjectKind::ViewLabel => CheckedKind::ViewLabel,
             ObjectKind::Balloon => CheckedKind::Balloon,

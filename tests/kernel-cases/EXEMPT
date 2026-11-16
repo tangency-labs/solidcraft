@@ -114,6 +114,9 @@ drawing.sheet.add                 a drawing: its tests in crates/engine/src/cmd/
 drawing.sheet.delete              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.sheet.reorder             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.sheet.set                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.sketch.create             sheet sketch lifecycle: its tests in crates/engine/src/cmd/drawing_tests.rs
+drawing.sketch.edit               sheet sketch lifecycle: its tests in crates/engine/src/cmd/drawing_tests.rs
+drawing.sketch.inspect            sheet sketch lifecycle: its tests in crates/engine/src/cmd/drawing_tests.rs
 drawing.status                    a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.symbol.define             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.symbol.delete             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs

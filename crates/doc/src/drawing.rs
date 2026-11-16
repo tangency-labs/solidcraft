@@ -23,6 +23,8 @@
 //!   (first or third angle) every projected view follows.
 //! - **Dimensions** on its views, each measuring named corners or edges of the view's model
 //!   ([`dimension`]).
+//! - **Sketches** authored on sheets, in paper millimetres, stored with the shared sketch payload
+//!   ([`SheetSketch`]) and independent of every model sketch and view scale.
 //! - **Balloons** on its views, each pointing at a placed part by a named edge of it ([`balloon`]).
 //! - **Images** on its sheets, each file kept once however many places it sits ([`image`]).
 //! - **Tables** on its sheets: parts lists and revision tables ([`table`]).
@@ -74,11 +76,14 @@ pub mod fields;
 pub mod fold;
 pub mod image;
 pub mod note;
+mod sketch;
 pub mod symbol;
 pub mod table;
 pub mod template;
 pub mod thread_lines;
 pub mod view;
+
+pub use sketch::{MAX_SHEET_SKETCHES, SheetSketch, SolvedSheetSketch};
 
 use balloon::Balloon;
 use by_id::ById;
@@ -189,6 +194,9 @@ pub struct Drawing {
     /// Behind an `Arc` as the sheets are, so an undo step shares it while it doesn't change.
     #[serde(default, skip_serializing_if = "no_revisions")]
     pub revisions: Arc<RevisionRecord>,
+    /// Authored sheet sketches, ordered by id on disk, with their original paper-mm payload.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", serialize_with = "sketch::serialize_sorted")]
+    pub sketches: Vec<Arc<SheetSketch>>,
     /// Set when a newer SolidCraft saved the file this came from.
     #[serde(skip)]
     pub newer_file: Option<Arc<NewerDrawing>>,
@@ -215,6 +223,7 @@ const RECORD_FIELDS: &[&str] = &[
     "balloons",
     "images",
     "sheet_images",
+    "sketches",
     "tables",
     "notes",
     "revisions",
@@ -410,6 +419,8 @@ pub struct OnSheet {
     pub tables: Vec<u64>,
     /// The notes on it and in its views.
     pub notes: Vec<u64>,
+    /// Authored sketches whose coordinates are in this sheet's paper frame.
+    pub sketches: Vec<u64>,
 }
 
 impl OnSheet {
@@ -422,6 +433,7 @@ impl OnSheet {
             && self.tags.is_empty()
             && self.tables.is_empty()
             && self.notes.is_empty()
+            && self.sketches.is_empty()
     }
 }
 
@@ -481,6 +493,7 @@ impl Drawing {
             symbols: ById::default(),
             revisions: Arc::default(),
             newer_file: None,
+            sketches: Vec::new(),
         };
         drawing.validate()?;
         Ok(drawing)
@@ -510,6 +523,7 @@ impl Drawing {
     fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> Result<Drawing> {
         DRAWING.check_numbers(&v, "properties")?;
         DRAWING.upgrade(&mut v, version, applied)?;
+        sketch::check_raw(&v).map_err(damaged)?;
         let mut d: Drawing = serde_json::from_value(v).map_err(damaged)?;
         d.sources.sort_by_key(|s| s.id);
         let (views, dimensions) = (std::mem::take(&mut d.views), std::mem::take(&mut d.dimensions));
@@ -520,6 +534,7 @@ impl Drawing {
         d.sheet_images.put_in_order();
         d.tables.put_in_order();
         d.notes.put_in_order();
+        d.sketches.sort_by_key(|record| record.id);
         d.symbols.put_in_order();
         d.validate().map_err(damaged)?;
         d.check_image_files().map_err(damaged)?;
@@ -577,6 +592,7 @@ impl Drawing {
     /// properties are kept as they came, and indenting them can make a drawing that read in
     /// under the limit save over it.
     pub fn to_json(&self) -> Result<String> {
+        self.validate()?;
         let unsaved = |e: serde_json::Error| DocError::Invalid(format!("drawing not saved: {e}"));
         let text = match &self.newer_file {
             None => serde_json::to_string_pretty(self).map_err(unsaved)?,
@@ -614,7 +630,7 @@ impl Drawing {
         self.view(id).is_some() || self.dimension(id).is_some() || self.balloons.by_id(id).is_some() || self.notes.by_id(id).is_some()
     }
 
-    /// What is on sheet `id`: its views and the dimensions and balloons in them, and the images placed on it.
+    /// What is on sheet `id`: its views and the dimensions and balloons in them, and the images and authored sketches placed on it.
     /// Each later kind of record on a sheet adds its own here, and goes with the sheet
     /// ([`Drawing::remove_sheet`]).
     pub fn on_sheet(&self, id: u64) -> OnSheet {
@@ -625,6 +641,8 @@ impl Drawing {
         on.tables = self.tables.iter().filter(|t| t.sheet == id).map(|t| t.id).collect();
         let in_views = |n: &Note| n.anchor.view().is_some_and(|v| on.views.binary_search(&v).is_ok());
         on.notes = self.notes.iter().filter(|n| n.anchor == Anchor::Sheet(id) || in_views(n)).map(|n| n.id).collect();
+        on.sketches = self.sketches.iter().filter(|record| record.sheet == id).map(|record| record.id).collect();
+        on.sketches.sort_unstable();
         on
     }
 
@@ -634,7 +652,7 @@ impl Drawing {
         let dimensions = self.dimensions.iter().filter(|d| views.binary_search(&d.view).is_ok()).map(|d| d.id).collect();
         let balloons = self.balloons.iter().filter(|b| views.binary_search(&b.view).is_ok()).map(|b| b.id).collect();
         let notes = self.notes.iter().filter(|n| n.anchor.view().is_some_and(|v| views.binary_search(&v).is_ok())).map(|n| n.id).collect();
-        OnSheet { views, dimensions, balloons, images: Vec::new(), tags: Vec::new(), tables: Vec::new(), notes }
+        OnSheet { views, dimensions, balloons, images: Vec::new(), tags: Vec::new(), tables: Vec::new(), notes, sketches: Vec::new() }
     }
 
     /// Takes sheet `id` out with everything on it ([`Drawing::on_sheet`]), and answers what that
@@ -667,11 +685,22 @@ impl Drawing {
         if !objects.tags.is_empty() {
             Arc::make_mut(&mut self.revisions).delete_tags(&objects.tags);
         }
+        self.sketches.retain(|s| objects.sketches.binary_search(&s.id).is_err());
+    }
+
+    /// Read only this drawing's sketch. Identical local sketch ids in another drawing are unrelated.
+    pub fn sheet_sketch(&self, id: u64) -> Option<&Arc<SheetSketch>> {
+        self.sketches.iter().find(|record| record.id == id)
     }
 
     /// Every object's id, of every kind: what a new id must differ from. Each later kind adds its
     /// own here.
     fn ids(&self) -> impl Iterator<Item = u64> {
+        self.object_ids()
+    }
+
+    /// The canonical current drawing-global namespace, also used across undo/redo.
+    pub fn object_ids(&self) -> impl Iterator<Item = u64> {
         std::iter::once(self.id)
             .chain(self.sources.iter().map(|s| s.id))
             .chain(self.sheets.iter().map(|s| s.id))
@@ -684,11 +713,20 @@ impl Drawing {
             .chain(self.notes.iter().map(|n| n.id))
             .chain(self.symbols.iter().map(|s| s.id))
             .chain(self.revisions.ids())
+            .chain(self.sketches.iter().map(|s| s.id))
     }
 
     /// The record's rules (the module's notes): what reading a drawing checks, and what every edit
     /// keeps.
     pub fn validate(&self) -> Result<()> {
+        self.validate_structure()?;
+        sketch::check_drawing(self)
+    }
+
+    /// Ownership/header checks also used before staging one sketch edit. Deep
+    /// payload validation remains at the full publication and file boundaries.
+    fn validate_structure(&self) -> Result<()> {
+        require(self.sketches.len() <= MAX_SHEET_SKETCHES, || "too many sheet sketches".into())?;
         require((1..=MAX_SHEETS).contains(&self.sheets.len()), || format!("a drawing has 1 to {MAX_SHEETS} sheets"))?;
         self.check_sources()?;
         check_name(&self.name, "the drawing's")?;
@@ -700,6 +738,10 @@ impl Drawing {
             // A length unit of the expression unit table, written as the table writes it.
             let length = unit.trim() == unit.as_str() && expr::unit_info(unit).is_some_and(|(kind, _)| kind == expr::Kind::Length);
             require(length, || "the drawing's unit is not a length unit (such as `mm` or `in`)".into())?;
+        }
+        let sheets: BTreeSet<_> = self.sheets.iter().map(|sheet| sheet.id).collect();
+        for record in &self.sketches {
+            require(sheets.contains(&record.sheet), || "sheet sketch owner does not exist in this drawing".into())?;
         }
         let mut seen = BTreeSet::new();
         for id in self.ids() {

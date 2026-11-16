@@ -30,8 +30,8 @@ pub(super) enum Tool {
 impl Tool {
     pub(super) fn for_command(id: &str) -> Option<Self> {
         match id {
-            "drawing.view.base.planned" => Some(Self::Base),
-            "drawing.view.projected.planned" => Some(Self::Projected),
+            "drawing.view.base" | "drawing.view.base.planned" => Some(Self::Base),
+            "drawing.view.projected" | "drawing.view.projected.planned" => Some(Self::Projected),
             "drawing.view.edit" => Some(Self::Edit(None)),
             "drawing.dimension" => Some(Self::Dimension(None)),
             "drawing.note" => Some(Self::Note),
@@ -71,7 +71,7 @@ fn segments(ui: &mut egui::Ui, label: &str, mut selected: usize, options: &[&str
 }
 
 fn pending(ui: &mut egui::Ui, label: &str) {
-    ui_kit::button(ui, label, Button::Enabled(false)).backing_on_disabled_hover_text(tr("ui.drawing_panel.planned"));
+    ui_kit::button(ui, label, ui_kit::Button::Enabled(false)).backing_on_disabled_hover_text(tr("ui.drawing_panel.planned"));
 }
 
 fn caption(ui: &mut egui::Ui, id: &'static str) {
@@ -467,7 +467,8 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
     ui_kit::row(ui, tr("ui.drawing_panel.size"), |ui| {
         ui_kit::dropdown_menu(ui, "drawing_sheet_size", &selected, |ui| {
             for size in PaperSize::ALL {
-                if ui.selectable_label(sheet.sheet.size == SheetSize::Standard(size), size_caption(size)).clicked() {
+                let caption = size_caption(size);
+                if ui_kit::list_picker(ui, &caption, &caption, sheet.sheet.size == SheetSize::Standard(size)).clicked() {
                     new_size = Some(size);
                 }
             }

@@ -66,6 +66,7 @@ impl FindingKind {
 #[serde(rename_all = "snake_case")]
 pub enum CheckedKind {
     View,
+    Sketch,
     Dimension,
     Balloon,
     Note,

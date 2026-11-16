@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use solidcraft_doc::drawing::view::ResolvedView;
 
-use super::{Annotation, Drawn, DrawnDimension, Lettering, SourceKey};
+use super::{Annotation, Drawn, DrawnDimension, DrawnSketch, Lettering, SketchContext, SourceInputs, SourceKey};
 
 /// Each closed drawing's last lines, by drawing.
 #[derive(Default)]
@@ -19,6 +19,16 @@ pub(super) struct KeptLines(BTreeMap<u64, Kept>);
 pub(super) struct Kept {
     pub(super) views: BTreeMap<u64, KeptView>,
     pub(super) dimensions: BTreeMap<u64, KeptDimension>,
+    pub(super) sketches: BTreeMap<u64, KeptSketch>,
+}
+
+/// The authored sketch's last marks and the definitions used to solve them. Neither
+/// the definitions nor the drawing-only context holds a document or a world state.
+#[derive(Clone)]
+pub(super) struct KeptSketch {
+    pub(super) source: Arc<SourceInputs>,
+    pub(super) context: Arc<SketchContext>,
+    pub(super) drawn: DrawnSketch,
 }
 
 /// A view's last lines: drawn as `view` drew, from a world state that showed `shows`.

@@ -1,7 +1,7 @@
 //! `drawing.export` (#4890 A7): one sheet of the open drawing written out from its scene
 //! ([`crate::drawing_scene::build`]), the scene the sheet page draws, so a file shows what the page
 //! does: SVG, or PNG at a chosen dpi and colour. DXF comes with the shared DXF writer (#5319). A
-//! sheet with a view that failed, an image that won't decode or a picture that can't be drawn isn't
+//! sheet with a view or sketch that failed, an image that won't decode or a picture that can't be drawn isn't
 //! written; the refusal names them. Without a path the reply holds the document, as text or as
 //! base64. Both can be on a blue paper (#10679).
 
@@ -16,7 +16,7 @@ use solidcraft_io::paper::{DPI, PaperColour, PngColour, PngOptions};
 
 use super::CommandSpec;
 use crate::drawing_pictures::SheetPictures;
-use crate::drawing_scene::{Status, sheet_id};
+use crate::drawing_scene::{SketchStatus, Status, sheet_id};
 use crate::params::bad;
 use crate::schema::drawing_export::{ExportColour, ExportFormat, ExportParams, ExportReport, ExportResult};
 use crate::schema::{TypedContract, output_schema_for};
@@ -34,7 +34,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Export Sheet", cr
     .doc_only()
     .contract(&CONTRACT)
     .output(output_schema_for::<ExportResult>)
-    .params("sheet: id or name; format?: svg (default) | png (dxf is not supported yet); path?: a file with the format's extension (else the reply holds the document: its text as svg, its base64 as data for png, at most 64 MiB); png only: dpi?: 25 to 2400 (default the sheet's own), colour?: grey (default) | black_white | rgb | transparent; paper?: white (default) | blueprint | prussian_blue, whose png is rgb → {sheet, format, bytes, path | svg | data, report: {widths_snapped, pieces_merged, pixels?: [width, height]}, views: [{view, status: drawn|placeholder|failed, reason?, stats?}]}. The sheet as drawing.scene draws it: its drawing border, each image on it, then each view's lines, then its parts lists and revision tables, then its title block's lines. Refused, naming them, while any view on the sheet failed or any image won't decode; a placeholder view draws nothing. A view of another configuration evaluates a copy of the design; the design is unchanged.")];
+    .params("sheet: id or name; format?: svg (default) | png (dxf is not supported yet); path?: a file with the format's extension (else the reply holds the document: its text as svg, its base64 as data for png, at most 64 MiB); png only: dpi?: 25 to 2400 (default the sheet's own), colour?: grey (default) | black_white | rgb | transparent; paper?: white (default) | blueprint | prussian_blue, whose png is rgb → {sheet, format, bytes, path | svg | data, report: {widths_snapped, pieces_merged, pixels?: [width, height]}, views: [{view, status: drawn|placeholder|failed, reason?, stats?}]}. The sheet as drawing.scene draws it: its drawing border, each image on it, then each view's lines, then its parts lists and revision tables, then its title block's lines. Refused, naming them, while any view or sketch on the sheet failed or any image won't decode; a placeholder view draws nothing. A view of another configuration evaluates a copy of the design; the design is unchanged.")];
 
 /// A document held for the reply, refused once it passes `limit` bytes: a larger one goes to a file.
 struct Held {
@@ -99,8 +99,23 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
             _ => None,
         })
         .collect();
+    let failed_sketches: Vec<String> = built
+        .sketches
+        .iter()
+        .filter_map(|sketch| match &sketch.status {
+            SketchStatus::Failed(why) => Some(format!("{} ({why})", ids::encode(sketch.sketch))),
+            SketchStatus::Drawn => None,
+        })
+        .collect();
+    let mut failures = Vec::new();
     if !failed.is_empty() {
-        return Err(bad(CMD, format!("not written: views on the sheet failed: {}", failed.join(", "))));
+        failures.push(format!("views on the sheet failed: {}", failed.join(", ")));
+    }
+    if !failed_sketches.is_empty() {
+        failures.push(format!("sketches on the sheet failed: {}", failed_sketches.join(", ")));
+    }
+    if !failures.is_empty() {
+        return Err(bad(CMD, format!("not written: {}", failures.join("; "))));
     }
     let prepared = built.scene.prepare().map_err(|e| bad(CMD, e.to_string()))?;
     let pictures = SheetPictures::new(s, &d, sheet).map_err(|e| bad(CMD, e))?;
@@ -142,6 +157,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         balloons: super::drawing_scene::balloon_results(built.balloons),
         tables: super::drawing_scene::table_results(built.tables),
         out_of_date: built.out_of_date.iter().map(|id| ids::encode(*id)).collect(),
+        sketches: built.sketches.into_iter().map(Into::into).collect(),
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))

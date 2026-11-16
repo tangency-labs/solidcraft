@@ -246,6 +246,7 @@ fn sheet_backdrop_is_a_screen_only_preference() {
 /// Every choice, in either theme, stands off the stage behind it, and White is never pure white.
 #[test]
 fn every_sheet_colour_stands_off_the_backdrop() {
+    crate::test_support::host_data();
     for t in [Tokens::light(), Tokens::dark()] {
         for dark in [false, true] {
             for colour in SheetColour::ALL {
@@ -345,6 +346,40 @@ fn the_plate_sheet_draws_its_lines_and_text() {
     }
     assert_eq!(page(&mut h)["views"].as_array().unwrap().len(), 2);
     assert!(page(&mut h)["views"].as_array().unwrap().iter().all(|v| v["status"] == "drawn" && v["words"] == json!([])));
+}
+
+/// A final synchronous sketch solve is painted in the frame that completes it, without another
+/// pointer event or an extra layout pass to make the finished marks visible.
+#[test]
+fn a_single_sheet_sketch_is_painted_when_its_last_step_finishes() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.ctx.options_mut(|options| options.max_passes = 1.try_into().unwrap());
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let drawing = h.app.run("drawing.create", json!({})).unwrap();
+    crate::drawing_workspace::enter(&mut h.app, true).unwrap();
+    h.frames(2);
+    let made = h.app.run("drawing.sketch.create", json!({"owner": drawing["sheets"][0]["id"]})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[15, 25], [65, 25]], "infer": false})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let (doc, undo) = (h.app.session.doc.to_json(), h.app.session.undo.len());
+    h.frame();
+    let sheet = active_sheet(&h.app).unwrap();
+    let current = drawing_scene::extract(&mut h.app.session, sheet).unwrap();
+    assert!(current.stale_sketches.is_empty(), "the single sketch has finished");
+    assert!(
+        current
+            .scene
+            .groups
+            .iter()
+            .any(|group| { group.kind == ObjectKind::Sketch && json!(solidcraft_engine::doc::ids::encode(group.object)) == made["sketch"] })
+    );
+    let marks = h.app.drawing_workspace.page.marks.as_ref().unwrap();
+    assert_eq!(marks.generation, current.generation, "the page painted the completed scene in this frame");
+    assert!(marks.marks.iter().any(|mark| matches!(mark, Mark::Line { points, .. }
+        if points.as_slice() == [Vec2::new(15.0, 25.0), Vec2::new(65.0, 25.0)])));
+    assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), (doc, undo));
 }
 
 /// A view's state is in words beside it: one whose settings changed says it needs an update until it

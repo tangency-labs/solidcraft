@@ -1435,15 +1435,15 @@ impl JsonSchema for SceneResult {
         "ViewPaperScene".into()
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        paper_scene_schema(generator, &[ObjectKind::View], false)
+        paper_scene_schema::<PathSegResult>(generator, &[ObjectKind::View], false)
     }
 }
 
 /// A paper scene's schema ([`solidcraft_geom::paper::Scene`]): its groups of `kinds`, each holding
 /// strokes, and fills, pictures, text and its fonts too when it is a `whole_sheet`'s.
-pub(super) fn paper_scene_schema(generator: &mut SchemaGenerator, kinds: &[ObjectKind], whole_sheet: bool) -> Schema {
+pub(super) fn paper_scene_schema<S: JsonSchema>(generator: &mut SchemaGenerator, kinds: &[ObjectKind], whole_sheet: bool) -> Schema {
     let point = json!({"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2});
-    let segment = generator.subschema_for::<PathSegResult>();
+    let segment = generator.subschema_for::<S>();
     // A dashed stroke's pattern, as `solidcraft_geom::paper::Dashes` checks it; a solid one has none.
     let dashes = json!({
         "type": "object",
