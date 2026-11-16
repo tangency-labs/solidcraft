@@ -136,7 +136,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "surface_continuity_checks_last_v_knot",
     "surface_parallel_to_vector_checks",
     "sweep_statuses_pass_on",
-    "taper_tangent_corner_planes",
     "thicken_planar_side_walls",
     "transform_model_size_from_body_box",
     "transform_scales_each_tolerance",
