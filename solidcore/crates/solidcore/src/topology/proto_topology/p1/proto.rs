@@ -2201,7 +2201,7 @@ pub struct ProtoTopologyManager<O> {
     /// to itself whose curve leaves its ends' reach of a definition on a vertex; the
     /// Boolean returns it once every proto edge is resolved
     /// ([`ProtoTopologyManager::take_self_loop_refusal`]).
-    self_loop_refusal: Option<crate::error::SolidError>,
+    self_loop_refusal: Option<SolidError>,
 }
 
 fn push_store<T>(store: &mut Vec<Option<T>>, item: T) -> Result<u32> {
@@ -2296,12 +2296,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// Takes the refusal a proto edge from a proto vertex back to itself left
     /// (WR-214): its curve leaves its ends' reach of a definition on a vertex, so it can be
     /// neither split nor dropped. Not upstream.
-    pub fn take_self_loop_refusal(&mut self) -> Option<crate::error::SolidError> {
+    pub fn take_self_loop_refusal(&mut self) -> Option<SolidError> {
         self.self_loop_refusal.take()
     }
 
     /// Records the first such refusal (WR-214).
-    pub(crate) fn note_self_loop_refusal(&mut self, refusal: crate::error::SolidError) {
+    pub(crate) fn note_self_loop_refusal(&mut self, refusal: SolidError) {
         if self.self_loop_refusal.is_none() {
             self.self_loop_refusal = Some(refusal);
         }
