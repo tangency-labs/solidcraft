@@ -131,9 +131,14 @@ fn exact_round_builds() {
     // main's volume, bit-identical with and without the fix; the closed form holds
     // to the round's approximation, as for the residue round. It was 3581.9837276735275
     // until `brep_volume` closed tolerant edges' gaps (#16735): the move is checked within
-    // the old integrator's leak bound.
+    // the old integrator's leak bound. It was 3581.9837215948937 until a swapped face's trims
+    // were transposed exactly (WR-729), which moves no edge, vertex or surface and the volume
+    // by two last bits. One of the trims it moves is a straight trim of constant v with ends
+    // symmetric in u: now exactly so (u 0.21252021271196553 and 0.7874797872880345 sum to 1,
+    // both at v 0.35626010635598276), where the mirror left its ends' v an ulp apart and
+    // their u summing to 1 - 1.9e-16.
     let v = fillet(0.0).unwrap();
-    let pinned = 3_581.983_721_594_893_7_f64;
+    let pinned = 3_581.983_721_594_893_f64;
     assert_eq!(v.to_bits(), pinned.to_bits(), "{v} vs {pinned}");
     let (k, mut body) = filleted(0.0).unwrap();
     volume_leak::assert_moved_by_the_old_leak(&k, &mut body, 3_581.983_727_673_527_5, v, 1e-6);

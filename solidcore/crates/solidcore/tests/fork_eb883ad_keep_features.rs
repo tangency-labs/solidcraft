@@ -226,7 +226,11 @@ fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
 /// Integrating the faces on their surfaces continued where their trims leave the domain
 /// moved the r 8 cylinder boss and hole, cone boss and pit, 19 degree lean, prism boss and
 /// pocket and r 1.9 hole by one more last bit; the prisms and the r 1.9 hole are back on
-/// their figures from before.)
+/// their figures from before. Transposing a swapped face's trims exactly, where they were
+/// mirrored through a rounded matrix (WR-729), moves trim coordinates by up to an ulp and no
+/// edge, vertex or surface: the r 8 cylinder hole and cone pit by two last bits, the prism
+/// pocket, r 1.9 hole and 19 degree lean by one; each stays as far from its closed form as
+/// before to within 1e-11, against the 2e-7 to 6e-7 the integration leaves.)
 ///
 /// `was` is the figure before `brep_volume` closed the tolerant edges' gaps (#16735); where it
 /// differs, the move is checked to be that integrator's leak (`support/volume_leak.rs`).
@@ -289,15 +293,9 @@ fn cone_pit(k: &mut Kernel, block: Brep) -> Result<Brep> {
 #[test]
 fn cylinders_keep_their_pinned_volumes() {
     assert_pinned(cylinder_boss, 8.0, 23528.165527753492, 23528.16549376938, 9);
-    assert_pinned(cylinder_hole, 8.0, 23402.501835298488, 23402.50178777836, 9);
+    assert_pinned(cylinder_hole, 8.0, 23402.501835298488, 23402.50178777837, 9);
     assert_pinned(cylinder_boss, 1.9, 24031.84334806833, 24031.84334806833, 9);
-    assert_pinned(
-        cylinder_hole,
-        1.9,
-        23906.179641369188,
-        23906.179641369188,
-        9,
-    );
+    assert_pinned(cylinder_hole, 1.9, 23906.179641369188, 23906.17964136919, 9);
 }
 
 /// Planar walls: each crease is an exact section.
@@ -308,7 +306,7 @@ fn prisms_keep_their_pinned_volumes() {
         prism_pocket,
         8.0,
         23389.896259952173,
-        23389.896259952173,
+        23389.896259952176,
         12,
     );
 }
@@ -317,7 +315,7 @@ fn prisms_keep_their_pinned_volumes() {
 #[test]
 fn cones_keep_their_pinned_volumes() {
     assert_pinned(cone_boss, 8.0, 23501.985588856085, 23501.98555487197, 11);
-    assert_pinned(cone_pit, 8.0, 23427.54088939281, 23427.54082824641, 9);
+    assert_pinned(cone_pit, 8.0, 23427.54088939281, 23427.540828246416, 9);
 }
 
 /// A boss's walls count as upright within the fillet's angular tolerance: at 19 degrees off they
@@ -336,7 +334,7 @@ fn a_boss_leaning_past_the_angular_tolerance_is_refused_as_the_fork() {
         let c = create_cone(k, Point3::new(20.0, 4.0, 20.0), 2.0, 1.0, 1.0)?;
         boolean_union(k, block, c)
     }
-    assert_pinned(lean_19, 8.0, 23486.59179069601, 23486.59175105623, 11);
+    assert_pinned(lean_19, 8.0, 23486.59179069601, 23486.591751056232, 11);
     for steep in [lean_30 as Feature, lean_45] {
         assert!(rounded_with(steep, 8.0).is_err());
     }
