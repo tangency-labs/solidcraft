@@ -626,7 +626,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
         "Offset" if command == "frame.end_cap" => Role::CheckBox,
         "Through all" if command == "solid.cell_grid" => Role::CheckBox,
-        "Clip" | "Dot grid" if command == "solid.cell_grid" => Role::ComboBox,
+        "Clip" | "Keep-out clip" | "Dot grid" if command == "solid.cell_grid" => Role::ComboBox,
         "Animate" => Role::Button,
         "Ratio" if command.starts_with("joint.") && command != "joint.motion_link" => return None,
         _ => Role::TextInput,
@@ -845,24 +845,57 @@ form_case!(move_copy, "solid.move", ["Move Type", "X Distance", "Y Distance", "Z
 form_case!(rib, "solid.rib", ["Direction", "Thickness", "Depth"]);
 form_case!(web, "solid.web", ["Direction", "Thickness", "Depth"]);
 form_case!(emboss, "solid.emboss", ["Depth", "Type"]);
-form_case!(cell_grid, "solid.cell_grid", ["Shape", "Cell size", "Web", "Through all", "Depth", "Direction", "Clip", "Angle"]);
+form_case!(
+    cell_grid,
+    "solid.cell_grid",
+    ["Shape", "Cell size", "Web", "Through all", "Depth", "Direction", "Clip", "Keep-out clip", "Inset rows", "Angle"]
+);
 
 /// The rows that come and go with the choices: Sides for polygon cells, Dot grid for circle and
-/// polygon cells, Margin with whole cells only.
+/// polygon cells, Inset rows with snapped cells, Margin with whole cells at the field and the
+/// keep-outs only.
 #[test]
 fn cell_grid_form_shows_the_rows_of_the_chosen_shape_and_clip() {
-    // Indices into the dialog's shapes (hexagon, square, triangle, circle, polygon) and clips (whole, snap, free).
-    let cell = |shape: usize, clip: usize| {
+    // Indices into the dialog's shapes (hexagon, square, triangle, circle, polygon), clips (whole,
+    // snap, free) and keep-out clips (same as clip, whole, snap, free).
+    let cell = |shape: usize, clip: usize, keepout_clip: usize| {
         move |d: &mut Dialog| {
             if let Kind::CellGrid(c) = &mut d.kind {
-                (c.shape, c.clip) = (shape, clip);
+                (c.shape, c.clip, c.keepout_clip) = (shape, clip, keepout_clip);
             }
         }
     };
-    let always = ["Shape", "Cell size", "Web", "Through all", "Depth", "Direction", "Clip", "Angle"];
-    check_form_with("solid.cell_grid", &[&always[..], &["Sides", "Dot grid", "Margin"]].concat(), &[], cell(4, 0));
-    check_form_with("solid.cell_grid", &[&always[..], &["Dot grid"]].concat(), &["Sides", "Margin"], cell(3, 1));
-    check_form_with("solid.cell_grid", &always, &["Sides", "Dot grid", "Margin"], cell(0, 2));
+    let always = ["Shape", "Cell size", "Web", "Through all", "Depth", "Direction", "Clip", "Keep-out clip", "Angle"];
+    check_form_with("solid.cell_grid", &[&always[..], &["Sides", "Dot grid", "Margin"]].concat(), &["Inset rows"], cell(4, 0, 0));
+    check_form_with("solid.cell_grid", &[&always[..], &["Margin"]].concat(), &["Inset rows"], cell(0, 0, 1));
+    check_form_with("solid.cell_grid", &always, &["Margin", "Inset rows"], cell(0, 0, 2));
+    check_form_with("solid.cell_grid", &[&always[..], &["Dot grid", "Inset rows"]].concat(), &["Sides", "Margin"], cell(3, 1, 0));
+    check_form_with("solid.cell_grid", &always, &["Sides", "Dot grid", "Margin", "Inset rows"], cell(0, 2, 3));
+}
+
+/// The keep-outs' clip is sent only when it differs from "same as clip", and the snap inset only
+/// with snapped cells and when it is not the default 0.
+#[test]
+fn cell_grid_sends_the_keepout_clip_and_the_snap_inset() {
+    let mut h = Harness::new();
+    let sketch = h.app.run("sketch.create", json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 40]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.cell_grid").unwrap();
+    d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    let sent = |d: &Dialog| apply_commands(&h.app, d).unwrap()[0].1.clone();
+    let p = sent(&d);
+    assert!(p.get("keepout_clip").is_none() && p.get("snap_inset").is_none(), "{p}");
+    if let Kind::CellGrid(c) = &mut d.kind {
+        (c.clip, c.keepout_clip, c.snap_inset) = (1, 3, "2".into());
+    }
+    let p = sent(&d);
+    assert_eq!((p.get("keepout_clip"), p.get("snap_inset")), (Some(&json!("free")), Some(&json!("2"))), "{p}");
+    if let Kind::CellGrid(c) = &mut d.kind {
+        c.clip = 2;
+    }
+    let p = sent(&d);
+    assert!(p.get("snap_inset").is_none(), "{p}");
 }
 
 /// Cell Grid fills one sketch: a box over two sketches keeps the last sketch's profiles, as
@@ -935,6 +968,36 @@ fn cell_grid_edit_refills_every_stored_value() {
     let again = h.app.session.doc.find_feature("CellGrid2").unwrap().kind.clone();
     // The first feature took the sketch's profiles by default, the dialog names the picked one:
     // the region is the same, the way the record writes it may differ.
+    let without_profiles = |k: &FeatureKind| {
+        let mut v = serde_json::to_value(k).unwrap();
+        if let Some(o) = v.as_object_mut() {
+            o.remove("profiles");
+        }
+        v
+    };
+    assert_eq!(without_profiles(&again), without_profiles(&kind));
+}
+
+/// Edit Feature refills the keep-outs' clip and the snap inset, and OK makes the same feature.
+#[test]
+fn cell_grid_edit_refills_the_keepout_clip_and_the_snap_inset() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 62, "width": 62, "height": 3, "body_name": "Plate"})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Field"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [62, 62]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let stored = json!({
+        "sketch": "Field", "size": "6 mm", "web": "1.5 mm", "depth": "2 mm", "clip": "snap", "keepout_clip": "whole",
+        "snap_inset": "1", "targets": ["Plate"],
+    });
+    h.app.run("solid.cell_grid", stored).unwrap();
+    let kind = h.app.session.doc.find_feature("CellGrid1").unwrap().kind.clone();
+    let (Kind::CellGrid(c), inputs, extra) = crate::dialogs_cell_grid::for_feature(&h.app, &kind).unwrap() else { panic!() };
+    assert_eq!((c.clip, c.keepout_clip, c.snap_inset.as_str()), (1, 1, "1"), "{c:?}");
+    let commands = crate::dialogs_cell_grid::commands(&h.app, &c, &inputs, &extra).unwrap();
+    let [(id, p)] = commands.as_slice() else { panic!("{commands:?}") };
+    h.app.run(id, p.clone()).unwrap();
+    let again = h.app.session.doc.find_feature("CellGrid2").unwrap().kind.clone();
     let without_profiles = |k: &FeatureKind| {
         let mut v = serde_json::to_value(k).unwrap();
         if let Some(o) = v.as_object_mut() {
