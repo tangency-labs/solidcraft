@@ -9769,11 +9769,11 @@ fn tapered_reach(
     taper: f64,
     corner: Option<kernel::DraftCorner>,
 ) -> Result<f64> {
-    let n = ss.plane.normal();
     let far_side = |body: &Body| -> Result<f64> {
         let bb = body.exact_bounds().map_err(|e| DocError::Invalid(e.to_string()))?;
-        let (c, half) = (bb.center(), bb.size() * 0.5);
-        Ok(sign * (ss.plane.height(c) - base) + half.x * n.x.abs() + half.y * n.y.abs() + half.z * n.z.abs())
+        let [lo, hi] = solidcore_ops::affine::span_along(bb.min.into(), bb.max.into(), ss.plane.origin.into(), ss.plane.normal().into())
+            .map_err(|e| DocError::Invalid(e.to_string()))?;
+        Ok(if sign > 0.0 { hi - base } else { base - lo })
     };
     let through = far_side(&target.body)?.max(len) + target.body.size() * 0.05 + 1.0 + to_offset.abs();
     extrude_within_reach([base, base + sign * through])?;
