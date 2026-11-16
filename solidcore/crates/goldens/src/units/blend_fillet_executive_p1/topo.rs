@@ -172,18 +172,25 @@ mod tests {
         let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
             .unwrap()
             .lines();
-        // main's failures for this input, and no other kind
+        // the failure kinds main reports for this input, each once (one loop, edge and
+        // vertex), and no other
         let known = [
-            "SmTrimmingTools::Test #1 ",
-            "SmBrep::Test #59 ",
-            "SmBrep::Test #82 ",
-            "AssertValid skipped: ValidatePointers failed",
+            ("SmTrimmingTools::Test #1 ", 1),
+            ("SmBrep::Test #59 ", 1),
+            ("SmBrep::Test #82 ", 1),
+            ("AssertValid skipped: ValidatePointers failed", 1),
         ];
         for line in &lines {
             assert!(
-                known.iter().any(|kind| line.starts_with(kind)),
+                known.iter().any(|(kind, _)| line.starts_with(kind)),
                 "a failure main does not have: {line}"
             );
         }
+        let counts: Vec<usize> = known
+            .iter()
+            .map(|(kind, _)| lines.iter().filter(|l| l.starts_with(kind)).count())
+            .collect();
+        let expected: Vec<usize> = known.iter().map(|&(_, n)| n).collect();
+        assert_eq!(counts, expected, "{lines:#?}");
     }
 }

@@ -108,7 +108,7 @@ use crate::nurbs::basis_basic::SpanMaxima;
 use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::geom::dist_cpt_cpt_homo;
 use crate::nurbs::knots::{Basis, KnotVector, Side, MAX_DEGREE as KNOT_MAX_DEGREE};
-use crate::nurbs::math::{pascal_entry, pascal_triangle, CPoint, BIGD, NOW, NOZ};
+use crate::nurbs::math::{gamma, pascal_entry, pascal_triangle, CPoint, BIGD, NOW, NOZ};
 
 /// `GW_MAX_DEGREE`: size of the fixed scratch arrays; degrees must stay below it.
 pub const MAX_DEGREE: usize = 32;
@@ -2230,7 +2230,7 @@ pub(crate) fn crv_hull_points(cur: &Curve, ivl: &Extent1d) -> Option<Vec<(Vec3, 
             let e = if c.w == NOW {
                 0.0
             } else {
-                crate::nurbs::math::gamma(1) * q.x.abs().max(q.y.abs()).max(q.z.abs())
+                gamma(1) * q.x.abs().max(q.y.abs()).max(q.z.abs())
             };
             Some((q, e))
         })
@@ -2301,6 +2301,165 @@ pub(crate) fn piece_slack(cpts: impl IntoIterator<Item = CPoint>, levels: usize)
         wmax = wmax.max(w);
     }
     let slack = 16.0 * levels as f64 * f64::EPSILON * scale * (wmax / wmin);
+    slack.is_finite().then_some(slack)
+}
+
+/// The Euclidean point of a control point for the evaluation bounds below (a missing `z`
+/// is `0`, as [`crv_eval`] maps it) and its weight (`1` when non-rational); `None` for a
+/// coordinate not finite or a weight not finite and positive.
+fn speed_point(cw: CPoint) -> Option<(Vec3, f64)> {
+    let z = if cw.z == NOZ { 0.0 } else { cw.z };
+    let (p, w) = if cw.w == NOW {
+        (Vec3::new(cw.x, cw.y, z), 1.0)
+    } else if cw.w.is_finite() && cw.w > 0.0 {
+        (Vec3::new(cw.x / cw.w, cw.y / cw.w, z / cw.w), cw.w)
+    } else {
+        return None;
+    };
+    (p.x.is_finite() && p.y.is_finite() && p.z.is_finite()).then_some((p, w))
+}
+
+/// Whether `cur` is a continuous clamped curve whose point evaluation is the curve: degree
+/// at least 1, knots finite and non-decreasing, both ends clamped (the evaluation returns
+/// the end control points there) and no interior knot repeated more than `p` times.
+fn is_continuous_clamped(cur: &Curve) -> bool {
+    let (p, n) = (cur.degree(), cur.n());
+    let knots = cur.knots();
+    if p == 0 || nonempty_spans(knots, p, n).is_none() || !is_clamped(knots, p) {
+        return false;
+    }
+    let (Some(&first), Some(&last)) = (knots.get(p), n.checked_add(1).and_then(|i| knots.get(i)))
+    else {
+        return false;
+    };
+    !knots.windows(p + 1).any(|w| match (w.first(), w.last()) {
+        (Some(&a), Some(&b)) => a == b && first < a && a < last,
+        _ => false,
+    })
+}
+
+/// Not upstream: an upper bound on the speed `|c'(t)|` of the curve for every `t` in
+/// `ivl` clamped to the natural domain (where [`crv_eval`]'s callers clamp evaluation,
+/// the curve is constant past it), from the control points of the knot spans that meet
+/// it. No sampling:
+///
+/// * polynomial: on span `[U[s], U[s+1]]`, `c' = sum N[j+1, p-1] Q[j]` over `j` in
+///   `s-p..s`, `Q[j] = p (P[j+1] - P[j]) / (U[j+p+1] - U[j+1])` (a zero denominator
+///   belongs to a zero basis function), and the basis sums to one, so the largest
+///   `|Q[j]|` bounds the speed;
+/// * rational (weights positive): `c' = sum N'[i] w[i] (P[i] - c) / W` over the span's
+///   points, `W >= w_min` (a convex combination of their weights), `|P[i] - c| <= D` (the
+///   points' diameter: `c` is in their hull), and `sum |N'[i]| <= 2 p / h` with `h` the
+///   shortest non-empty span met (each `N[j, p-1]` that is not zero there has a support
+///   holding that span), so `|c'| <= 2 p (w_max / w_min) D / h`.
+///
+/// Rounding: a difference, a distance (`γ_4`), a product and a quotient give each `|Q|`
+/// to within `γ_8` of itself; the diameter's points are each off by `γ_1` of their
+/// largest coordinate `M` (the division by the weight), covered by adding `4 γ_2 M`; the
+/// result is widened by `1 + γ_8` for the final products.
+///
+/// `None`, meaning no certified bound, unless `cur` is continuous and clamped (see
+/// `is_continuous_clamped`), every point of the spans met is finite with a positive
+/// weight, and `ivl` is finite. Parts of `ivl` past the knots, where the clamped curve
+/// is evaluated at its end, are bounded by the end's span.
+#[must_use]
+pub(crate) fn crv_speed_bound(cur: &Curve, ivl: &Extent1d) -> Option<f64> {
+    if !is_continuous_clamped(cur) {
+        return None;
+    }
+    let (p, n) = (cur.degree(), cur.n());
+    let knots = cur.knots();
+    let (first, last) = (*knots.get(p)?, *knots.get(n.checked_add(1)?)?);
+    // past the knots a clamped curve is evaluated at its end (constant, speed 0), so
+    // each end of `ivl` is clamped into the domain: an interval wholly past one end
+    // becomes that end, whose spans' bound covers it
+    if !(ivl.min().is_finite() && ivl.max().is_finite()) {
+        return None;
+    }
+    let (lo, hi) = (
+        ivl.min().max(first).min(last),
+        ivl.max().min(last).max(first),
+    );
+    if !(lo.is_finite() && hi.is_finite() && lo <= hi) {
+        return None;
+    }
+    let mut range: Option<(usize, usize)> = None;
+    let mut shortest = f64::INFINITY;
+    for i in nonempty_spans(knots, p, n)? {
+        let (a, b) = (*knots.get(i)?, *knots.get(i + 1)?);
+        if a <= hi && b >= lo {
+            let first_point = i.checked_sub(p)?;
+            range = Some(range.map_or((first_point, i), |(f, l)| (f.min(first_point), l.max(i))));
+            shortest = shortest.min(b - a);
+        }
+    }
+    let (i0, i1) = range?;
+    let points: Vec<(Vec3, f64)> = cur
+        .cpts()
+        .get(i0..=i1)?
+        .iter()
+        .map(|&c| speed_point(c))
+        .collect::<Option<_>>()?;
+    let pf = p as f64;
+    let rational = cur.cpts().get(i0..=i1)?.iter().any(|c| c.w != NOW);
+    let bound = if rational {
+        let (mut w_min, mut w_max, mut size, mut diameter) =
+            (f64::INFINITY, 0.0_f64, 0.0_f64, 0.0_f64);
+        for (a, wa) in &points {
+            w_min = w_min.min(*wa);
+            w_max = w_max.max(*wa);
+            size = size.max(a.x.abs()).max(a.y.abs()).max(a.z.abs());
+            for (b, _) in &points {
+                diameter = diameter.max(a.distance(*b));
+            }
+        }
+        2.0 * pf * (w_max / w_min) * (diameter + 4.0 * gamma(2) * size) / shortest
+    } else {
+        let mut largest = 0.0_f64;
+        for (j, pair) in points.windows(2).enumerate() {
+            let (Some((a, _)), Some((b, _))) = (pair.first(), pair.last()) else {
+                return None;
+            };
+            let gap = *knots.get(i0 + j + p + 1)? - *knots.get(i0 + j + 1)?;
+            if gap > 0.0 {
+                largest = largest.max(pf * b.distance(*a) / gap);
+            }
+        }
+        largest
+    };
+    let bound = bound * (1.0 + gamma(8));
+    (bound.is_finite() && bound >= 0.0).then_some(bound)
+}
+
+/// Not upstream: a bound on the error of each coordinate of the point the evaluation
+/// returns at any parameter ([`crv_eval`] inside the domain, an end control point at an
+/// end): [`piece_slack`]'s `16 levels eps M (w_max / w_min)` with `2p + 2` levels, `M`
+/// the largest coordinate of all control points (a missing `z` is `0`).
+///
+/// Derivation: the basis recursion runs `p` levels; each value is `saved + N (r / d)`
+/// with `r`, `d = r + l` and the quotient, product and sum each rounded once, all terms
+/// non-negative, so a level adds at most `6 eps` relative; the weighted sum of the
+/// `p + 1` homogeneous points adds `γ_{p+2}` of `w_max M`, and the division by the
+/// computed weight (at least `w_min` up to the same relative error) at most doubles the
+/// relative error and multiplies it by `w_max / w_min`. In all at most `2 (7p + 3) eps M
+/// w_max / w_min`, within `16 (2p + 2) eps M w_max / w_min`.
+///
+/// `None` as [`crv_speed_bound`] for a curve that is not continuous and clamped or has
+/// a point not finite or a weight not positive.
+#[must_use]
+pub(crate) fn crv_point_error(cur: &Curve) -> Option<f64> {
+    if !is_continuous_clamped(cur) {
+        return None;
+    }
+    let (mut size, mut w_min, mut w_max) = (0.0_f64, f64::INFINITY, 0.0_f64);
+    for &c in cur.cpts() {
+        let (q, w) = speed_point(c)?;
+        size = size.max(q.x.abs()).max(q.y.abs()).max(q.z.abs());
+        w_min = w_min.min(w);
+        w_max = w_max.max(w);
+    }
+    let levels = cur.degree().checked_mul(2)?.checked_add(2)?;
+    let slack = 16.0 * levels as f64 * f64::EPSILON * size * (w_max / w_min);
     slack.is_finite().then_some(slack)
 }
 

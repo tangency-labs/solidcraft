@@ -954,6 +954,7 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore::curve::curve::p8::curves_stay_within;
 
     #[test]
     fn coincidence_splits_stop_at_the_call_bound() {
@@ -1043,134 +1044,29 @@ mod tests {
     /// The solution parameters `(t1, t2)` of each `gci` case whose answer
     /// `move_contacts_to_curve_ends` (WR-455) changed when it became the default, as they
     /// were before (point solutions, then both ends of each range, in record order).
-    const OLD_CONTACTS: [(&str, &[[f64; 2]]); 19] = [
-        ("gen0170", &[[0.10293145096888041, 0.031106245991575233]]),
+    const OLD_CONTACTS: [(&str, &[[f64; 2]]); 21] = [
+        ("cov_gci_same_cubic_tiny_overlap_split_range", &[[0.5000001, 0.5000001000000001], [0.5, 0.5]]),
+        ("gen0170",&[[0.10293145096888041, 0.031106245991575233]]),
         ("gen0220", &[[0.0, 1.0], [0.125, 0.6733602207082353], [0.25, 0.0]]),
         ("gen0230", &[[0.7605265560887936, 0.08238745303667289]]),
         ("gen0648", &[[0.11942085598003092, 0.16260333259519716]]),
         ("gen0842", &[[0.9441013506215542, 0.19953048265572657], [1.0, 0.21302593458524718]]),
         ("gen0908", &[[0.25, 2.394693425867854], [0.9375, 0.8719219599388043], [1.0, 0.79640986421498]]),
-        ("gen0961", &[[0.0, 0.0], [0.046875, 0.0390625], [0.0390625, 0.046875], [0.8022318947836394, 0.8022336608299793], [0.8022318947836394, 0.8869989118761008]]),
         ("gen1129", &[[0.5, 0.5242050870766283], [0.625, 0.5961358649703274], [0.6632103192347607, 0.5961358649703274]]),
         ("gen1229", &[[0.7876313347539292, 5.366572686344663]]),
         ("gen1290", &[[0.5430830025804114, 0.3493738175301483], [0.5625, 0.8592424072925322], [0.5651686847757508, 0.8731142755790283]]),
-        ("gen1928", &[[4.996225869481043, 0.532331997056718], [6.370210839904233, 0.3439000040339467]]),
+        ("gen1765", &[[0.7386392440093962, 0.9793042473447834]]),
+        ("gen1928",&[[4.996225869481043, 0.532331997056718], [6.370210839904233, 0.3439000040339467]]),
         ("gen2013", &[[4.346141525285653, 0.4911440119946375], [4.548536339158071, 0.6065392749467079]]),
         ("gen2170", &[[0.055671431092715926, 2.1443561827736546]]),
-        ("gen2279", &[[0.0, 0.07814605425275784], [0.0625, 0.08013287428747595], [0.1875, 0.08586129379790076], [0.3478671618863374, 0.09506073108283451]]),
+        ("gen2269", &[[-1.1667157446583754, -1.1667157446583754], [-0.2697971714248598, -0.2697971714248598]]),
+        ("gen2279",&[[0.0, 0.07814605425275784], [0.0625, 0.08013287428747595], [0.1875, 0.08586129379790076], [0.3478671618863374, 0.09506073108283451]]),
         ("gen2286", &[[0.9217885018468838, 0.7349578489826648], [1.0, 0.743593012780076]]),
         ("gen2505", &[[0.6520361039435884, -4.186100806676266], [0.840165745577176, -4.184956949731657]]),
         ("gen2606", &[[0.2298402861503189, 0.200803245287278]]),
         ("gen2724", &[[0.0, 2.23606797749979], [0.9218890386400843, 1.194633585732046], [0.9375, 0.9966224852840858], [0.96875, 0.8195222745983808]]),
         ("gen2762", &[[11.231621107741898, 0.7454085959345986]]),
     ];
-
-    /// An upper bound on the speed `|c'(t)|` of curve `c` (built from input `ci`) for every
-    /// `t` between `lo` and `hi`, from the curve's own data: no sampling.
-    ///
-    /// * Hermite (a cubic): `c'` is a quadratic, so its Bernstein coefficients on
-    ///   `[lo, hi]` (from `c'` at both ends and the middle) bound it (convex hull).
-    /// * Line: `c'` is constant.
-    /// * Polynomial B-spline: `c'` is the B-spline of degree `p - 1` with control points
-    ///   `p (P[i+1] - P[i]) / (u[i+p+1] - u[i+1])` (nonzero spans only), so the largest of
-    ///   them bounds it.
-    /// * Rational B-spline (positive weights): `c' = sum N'[i] w[i] (P[i] - c) / W`, and
-    ///   the same derivative identity gives `|c'| <= 2 p (w_max / w_min) D / min_span`
-    ///   with `D` the control polygon's diameter (`c` lies in its hull, `W >= w_min`).
-    ///
-    /// A clamped B-spline evaluated past its ends stays at its end point (speed 0), so the
-    /// bound holds there too; one with out-of-bounds evaluation errors there instead, and
-    /// the `unwrap` fails the test rather than passing an unbounded stretch. The Hermite
-    /// and line bounds use evaluated derivatives; the widening (`1e-9` relative plus
-    /// `1e-12`) covers their rounding and is a margin, not a derived error bound.
-    fn speed_bound(k: &Kernel, ci: &CurveIn, c: &Curve, lo: f64, hi: f64) -> f64 {
-        let d1 = |t: f64| c.evaluate(k, t, 1, true, false).unwrap()[1];
-        let b = match resolve(ci).unwrap() {
-            CurveIn::Hermite(_) => {
-                let (c0, c2) = (d1(lo), d1(hi));
-                let c1 = d1(0.5 * (lo + hi)) * 2.0 - (c0 + c2) * 0.5;
-                c0.length().max(c1.length()).max(c2.length())
-            }
-            CurveIn::Line(_) => d1(lo).length(),
-            CurveIn::Bspline(bs) => {
-                let rational = bs.cpts.iter().any(|q| q[3] != NOW);
-                let pt = |q: &[f64; 4]| {
-                    let z = if q[2] == NOZ { 0.0 } else { q[2] };
-                    if q[3] == NOW {
-                        Vec3::new(q[0], q[1], z)
-                    } else {
-                        Vec3::new(q[0] / q[3], q[1] / q[3], z / q[3])
-                    }
-                };
-                let pts: Vec<Vec3> = bs.cpts.iter().map(pt).collect();
-                let p = bs.p as f64;
-                let spans: Vec<(usize, f64)> = (0..pts.len() - 1)
-                    .map(|i| (i, bs.u[i + bs.p + 1] - bs.u[i + 1]))
-                    .filter(|&(_, d)| d > 0.0)
-                    .collect();
-                if rational {
-                    assert!(bs.cpts.iter().all(|q| q[3] > 0.0), "positive weights");
-                    let w = bs.cpts.iter().map(|q| q[3]);
-                    let (w_min, w_max) = (w.clone().fold(f64::MAX, f64::min), w.fold(0.0, f64::max));
-                    let diam = pts
-                        .iter()
-                        .flat_map(|a| pts.iter().map(move |b| a.distance(*b)))
-                        .fold(0.0, f64::max);
-                    let min_span = spans.iter().map(|s| s.1).fold(f64::MAX, f64::min);
-                    2.0 * p * (w_max / w_min) * diam / min_span
-                } else {
-                    spans
-                        .iter()
-                        .map(|&(i, d)| p * pts[i + 1].distance(pts[i]) / d)
-                        .fold(0.0, f64::max)
-                }
-            }
-            CurveIn::Circle(_) => unreachable!("resolved"),
-        };
-        b * (1.0 + 1e-9) + 1e-12
-    }
-
-    /// Whether `a(t1)` and `b(t2)` stay within `tol` of each other along the whole straight
-    /// parameter path from `s` to `e` (so both curves run within `tol` of each other
-    /// between the two contacts). Certified, not sampled: with `f` the distance along the
-    /// path and `lip` its Lipschitz bound (the speed bounds times the parameter steps), `f`
-    /// on a step of length `h` between grid values `f0` and `f1` is at most
-    /// `(f0 + f1) / 2 + lip h / 2`; the grid refines until every step's bound, plus a
-    /// rounding margin of `1e-9` of the coordinates, is within `tol`.
-    fn path_within(
-        k: &Kernel,
-        (a, ai): (&Curve, &CurveIn),
-        (b, bi): (&Curve, &CurveIn),
-        s: [f64; 2],
-        e: [f64; 2],
-        tol: f64,
-    ) -> bool {
-        let sa = speed_bound(k, ai, a, s[0].min(e[0]), s[0].max(e[0]));
-        let sb = speed_bound(k, bi, b, s[1].min(e[1]), s[1].max(e[1]));
-        let lip = sa * (e[0] - s[0]).abs() + sb * (e[1] - s[1]).abs();
-        let at = |l: f64| {
-            let pa = a.evaluate_point(k, s[0] + l * (e[0] - s[0])).unwrap();
-            let pb = b.evaluate_point(k, s[1] + l * (e[1] - s[1])).unwrap();
-            let scale = 1.0 + pa.length().max(pb.length());
-            (pa.distance(pb), 1e-9 * scale)
-        };
-        let mut n = 16_usize;
-        while n <= 1 << 22 {
-            let h = 1.0 / n as f64;
-            let mut prev = at(0.0);
-            let ok = (1..=n).all(|i| {
-                let cur = at(i as f64 * h);
-                let bound = 0.5 * (prev.0 + cur.0) + 0.5 * lip * h + prev.1.max(cur.1);
-                prev = cur;
-                bound <= tol
-            });
-            if ok {
-                return true;
-            }
-            n *= 4;
-        }
-        false
-    }
 
     /// Every changed `gci` answer is certified (closed-form bounds, no sampling):
     ///
@@ -1179,7 +1075,8 @@ mod tests {
     ///    (plus a rounding margin; a range's interior is not certified here);
     /// 2. each solution reported before is either still reported, or joined to one now
     ///    reported (a point, or an end of a range) by a stretch over which the curves stay
-    ///    within `tol` of each other ([`path_within`]), so it is the same contact, now
+    ///    within `tol` of each other (the library's `curves_stay_within`, the certificate
+    ///    the move itself now runs), so it is the same contact, now
     ///    named at the end it runs on to (or merged with the solution already there).
     #[test]
     fn contacts_at_curve_ends_are_certified() {
@@ -1216,18 +1113,16 @@ mod tests {
             }
             for &[t1, t2] in &now {
                 assert!(inside(t1, *ivl1) && inside(t2, *ivl2), "{name}: {t1} {t2}");
-                let pa = a.evaluate_point(&k, t1).unwrap();
-                let pb = b.evaluate_point(&k, t2).unwrap();
-                let margin = 1e-9 * (1.0 + pa.length().max(pb.length()));
-                let d = pa.distance(pb);
-                assert!(d + margin <= *tol, "{name}: ({t1}, {t2}) apart {d} > {tol}");
+                // a path of no length: the node's own certified distance bound
+                let within = curves_stay_within(&k, &a, &b, [t1, t2], [t1, t2], *tol).unwrap();
+                assert!(within, "{name}: ({t1}, {t2}) not certified within {tol}");
             }
             for &s in old {
                 let kept = now.iter().any(|e| e == &s);
                 let joined = kept
                     || now
                         .iter()
-                        .any(|&e| path_within(&k, (&a, c1), (&b, bi), s, e, *tol));
+                        .any(|&e| curves_stay_within(&k, &a, &b, s, e, *tol).unwrap());
                 assert!(joined, "{name}: old solution {s:?} joins none of {now:?}");
             }
         }
@@ -1251,6 +1146,48 @@ mod tests {
             .collect()
     }
 
+    /// WR-455 regression: one cubic on `[0, 0.5000001]` against itself on `[0.5, 1]`
+    /// overlaps in a tiny range, and the solver adds a point `(0.5, 0.5000001)` beside it.
+    /// The certified move took that point onto the range's end `(0.5000001, 0.5000001)`,
+    /// and the later passes turned the short range into points at both its ends, so the
+    /// contact at `0.5000001` was reported twice (three points, the first and last
+    /// equal). The move now drops a solution landing exactly on a contact another
+    /// solution names. With no point beside it the range is kept: the overlap is
+    /// reported as the one range it is, from `(0.5, 0.5)` to `(0.5000001, 0.5000001)`,
+    /// whose ends are the two points reported before the move (main's answer), and the
+    /// curves stay within the tolerance along it (certified).
+    #[test]
+    fn a_move_onto_a_named_contact_does_not_report_it_twice() {
+        let name = "cov_gci_same_cubic_tiny_overlap_split_range";
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        let case = cases.iter().find(|c| c.name == name).unwrap();
+        let op: OpIn = case.parse().unwrap();
+        let out = rust(&op).unwrap();
+        assert_eq!(out.ints["status"], vec![0]);
+        let sols = solutions(&out.values["out"]);
+        let range = f64::from(SolutionType::RangeOfValues as i32);
+        assert_eq!(
+            sols,
+            vec![(
+                range,
+                [0.0, 1.0],
+                [0.5, 0.5],
+                Some([0.5000001, 0.5000001000000001])
+            )]
+        );
+        let OpIn::Gci { c1, c2, tol, .. } = &op;
+        let a = build(c1).unwrap();
+        let b = build(c2.as_ref().unwrap()).unwrap();
+        let k = Kernel::default();
+        let within =
+            curves_stay_within(&k, &a, &b, [0.5, 0.5], [0.5000001, 0.5000001000000001], *tol);
+        assert!(within.unwrap(), "the range is a coincidence within {tol}");
+    }
+
     /// WR-455 regression: the move to curve ends is not run on a self intersection. There
     /// the stretch test compares the curve with itself and always passes, and the move
     /// carried a closed Hermite curve's seam `(0, 1)` onto the trivial diagonal, where it
@@ -1263,8 +1200,10 @@ mod tests {
     /// WR-455 regression: a contact whose drop lands on its own parameter (a one-point
     /// stretch on the drop curve) is not moved. gen2153 intersects a closed Hermite curve
     /// on `[0, 1]` with a copy on `[-0.088, 0.457]`: the end of the first, `t1 = 1`, meets
-    /// the copy's start; the gap test could not measure the one-point stretch and passed
-    /// the move of `t1` across the whole turn to 0.
+    /// the copy's start; the sampled gap test could not measure the one-point stretch and
+    /// passed the move of `t1` across the whole turn to 0. The certified path test refuses
+    /// it with no special case: the path from `(1, 0)` to `(0, 0)` runs the whole turn
+    /// against the copy's one start point, which the curve leaves.
     #[test]
     fn one_point_drop_stretch_does_not_move_the_contact() {
         let pts = points_of("gen2153");

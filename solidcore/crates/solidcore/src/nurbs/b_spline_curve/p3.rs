@@ -15,6 +15,7 @@
 //! | [`BSplineCurve::join_with`]                       | `JoinWith`                             |
 //! | [`BSplineCurve::subdivide_at_discontinuity`]      | `SubdivideAtDiscontinuity`             |
 //! | [`BSplineCurve::trim_gap`], [`GapFix`]            | `TrimGap`                              |
+//! | [`BSplineCurve::trim_gap_intersection`], [`GapIntersection`], [`GapCurves`] | the first half of `TrimGap` |
 //! | [`BSplineCurve::assert_valid`]                    | `AssertValid`                          |
 //! | [`BSplineCurve::assert_no_periodic_jump`], [`assert_no_periodic_jump_of`] | `AssertNoPeriodicJump` |
 //! | `is_zero_speed_tangent_end`, `zero_speed_radius_stretch` (private; fork, WR-668) | `sm_IsZeroSpeedTangentEnd`, `sm_ZeroSpeedRadiusStretch` |
@@ -215,7 +216,7 @@ impl SolutionObject for GapCurve {
 }
 
 /// `SmCurve::GlobalCurveIntersect` of `curve0` over `ivl0` with `curve1` over `ivl1`
-/// at tolerance `tol`: the solutions' types and start ends. The status is ignored
+/// at tolerance `tol`: the solutions' types, start ends and end ends. The status is ignored
 /// upstream: a failed intersection gives no solutions here (upstream keeps those found
 /// before the failure); [`SolidError::Unported`] is passed on.
 fn global_curve_intersect(
@@ -225,7 +226,7 @@ fn global_curve_intersect(
     curve1: &BSplineCurve,
     ivl1: &Extent1d,
     tol: f64,
-) -> Result<Vec<(SolutionType, SolutionEnd)>> {
+) -> Result<Vec<(SolutionType, SolutionEnd, SolutionEnd)>> {
     let c0 = Curve::from(curve0.clone());
     let c1 = Curve::from(curve1.clone());
     let opts = CurveIntersectOptions {
@@ -243,9 +244,40 @@ fn global_curve_intersect(
     Ok(found.map_or_else(Vec::new, |sols| {
         sols.as_slice()
             .iter()
-            .map(|s| (s.solution_type, s.start))
+            .map(|s| (s.solution_type, s.start, s.end))
             .collect()
     }))
+}
+
+/// What the intersection step of [`BSplineCurve::trim_gap`]
+/// ([`BSplineCurve::trim_gap_intersection`]) found.
+#[derive(Debug)]
+pub enum GapIntersection {
+    /// The closest ends are farther apart than `d_min` (`trim_gap` returns `false`).
+    TooLarge,
+    /// The closest ends are within `SM_EFF_ZERO` squared: no gap (`trim_gap` returns
+    /// `true`).
+    NoGap,
+    /// An evaluation or extension failed (`trim_gap` returns `false`).
+    Failed,
+    /// The extended curves and their intersection.
+    Intersected(Box<GapCurves>),
+}
+
+/// The extended curves of [`BSplineCurve::trim_gap`] and their intersection.
+#[derive(Debug)]
+pub struct GapCurves {
+    /// This curve and the other, each extended past its end at the gap.
+    pub curves: [BSplineCurve; 2],
+    /// The intersection tolerance: five times the squared gap, as upstream.
+    pub tolerance: f64,
+    /// The solutions of the intersection: type, start and end (a range's end; a point
+    /// solution's end is unset).
+    pub solutions: Vec<(SolutionType, SolutionEnd, SolutionEnd)>,
+    /// Per curve, whether the gap is at its start, and whether at its end.
+    pub ends: [[bool; 2]; 2],
+    /// Per curve, its start and end points before the extension.
+    pub end_points: [[Point3; 2]; 2],
 }
 
 /// The property `SmCurve::GlobalPropertyAnalysis` minimizes.
@@ -1359,24 +1391,21 @@ impl BSplineCurve {
         Ok(resulting_curves)
     }
 
-    /// Closes a gap below `d_min` between the closest ends of this curve and `other`
-    /// (`TrimGap`): both curves are extended (G1, by 3% of their domain) past those
-    /// ends and intersected, and the end control points are moved per `fix` (to the
-    /// intersection, or to one curve's end). `false` when the gap is too large or the
-    /// extensions do not intersect; `true` when there was no gap or it was closed.
+    /// The intersection step of [`BSplineCurve::trim_gap`], which `trim_gap` runs before
+    /// it moves any end: the closest ends of this curve and `other`, both curves extended
+    /// (G1, by 3% of their domain) past them, and the extensions intersected at five times
+    /// the gap. Not upstream as a function (the first half of `TrimGap`); made public so
+    /// that a check of the contacts `trim_gap` uses runs this very step.
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] when the intersection of the extended curves reaches
-    /// an unported unit; `InvalidInput` when an
-    /// end point cannot be compared (NaN) or an extension is missing (upstream crashes).
-    pub fn trim_gap(
-        &mut self,
+    /// As [`BSplineCurve::trim_gap`].
+    pub fn trim_gap_intersection(
+        &self,
         k: &Kernel,
-        other: &mut Self,
-        fix: GapFix,
+        other: &Self,
         d_min: f64,
-    ) -> Result<bool> {
+    ) -> Result<GapIntersection> {
         // only close gap if less than dMin
         let d_min_sq = d_min * d_min;
 
@@ -1386,19 +1415,19 @@ impl BSplineCurve {
             ($r:expr) => {
                 match ignored($r)? {
                     Some(v) => v,
-                    None => return Ok(false),
+                    None => return Ok(GapIntersection::Failed),
                 }
             };
         }
 
         // curve 0 start and end points
-        let mut extent0 = self.natural_interval();
+        let extent0 = self.natural_interval();
         let t0size = extent0.max() - extent0.min();
         let s0 = or_unfixed!(self.evaluate_point(extent0.min()));
         let e0 = or_unfixed!(self.evaluate_point(extent0.max()));
 
         // curve 1 start and end points
-        let mut extent1 = other.natural_interval();
+        let extent1 = other.natural_interval();
         let t1size = extent1.max() - extent1.min();
         let s1 = or_unfixed!(other.evaluate_point(extent1.min()));
         let e1 = or_unfixed!(other.evaluate_point(extent1.max()));
@@ -1412,10 +1441,10 @@ impl BSplineCurve {
 
         // Test if Gap is greater than dMin
         if dmin > d_min_sq {
-            return Ok(false); // gap is too large to fix
+            return Ok(GapIntersection::TooLarge); // gap is too large to fix
         }
         if dmin < EFF_ZERO {
-            return Ok(true); // curves have no gap
+            return Ok(GapIntersection::NoGap); // curves have no gap
         }
 
         // figure out which end points to move
@@ -1451,32 +1480,82 @@ impl BSplineCurve {
         if end1 {
             curve1e = or_unfixed!(extend(other, extent1.max() + 0.03 * t1size));
         }
-        let (Some(mut curve0e), Some(mut curve1e)) = (curve0e, curve1e) else {
+        let (Some(curve0e), Some(curve1e)) = (curve0e, curve1e) else {
             return Err(invalid(OP_GAP, "curve extension missing"));
         };
 
         // intersect the extended curves
+        let tolerance = dmin * 5.0;
         let solutions = global_curve_intersect(
             k,
             &curve0e,
             &curve0e.natural_interval(),
             &curve1e,
             &curve1e.natural_interval(),
-            dmin * 5.0,
+            tolerance,
         )?;
+        Ok(GapIntersection::Intersected(Box::new(GapCurves {
+            curves: [curve0e, curve1e],
+            tolerance,
+            solutions,
+            ends: [[start0, end0], [start1, end1]],
+            end_points: [[s0, e0], [s1, e1]],
+        })))
+    }
 
+    /// Closes a gap below `d_min` between the closest ends of this curve and `other`
+    /// (`TrimGap`): both curves are extended (G1, by 3% of their domain) past those
+    /// ends and intersected ([`BSplineCurve::trim_gap_intersection`]), and the end control
+    /// points are moved per `fix` (to the intersection, or to one curve's end). `false`
+    /// when the gap is too large or the extensions do not intersect; `true` when there
+    /// was no gap or it was closed.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] when the intersection of the extended curves reaches
+    /// an unported unit; `InvalidInput` when an
+    /// end point cannot be compared (NaN) or an extension is missing (upstream crashes).
+    pub fn trim_gap(
+        &mut self,
+        k: &Kernel,
+        other: &mut Self,
+        fix: GapFix,
+        d_min: f64,
+    ) -> Result<bool> {
+        // each failed step leaves the gap unfixed (returns 0), as the fork has it
+        // (tangency-labs/smlib 8843967); upstream goes on with unset values
+        macro_rules! or_unfixed {
+            ($r:expr) => {
+                match ignored($r)? {
+                    Some(v) => v,
+                    None => return Ok(false),
+                }
+            };
+        }
+
+        let GapCurves {
+            curves: [mut curve0e, mut curve1e],
+            solutions,
+            ends: [[start0, end0], [start1, end1]],
+            end_points: [[s0, e0], [s1, e1]],
+            ..
+        } = match self.trim_gap_intersection(k, other, d_min)? {
+            GapIntersection::TooLarge | GapIntersection::Failed => return Ok(false),
+            GapIntersection::NoGap => return Ok(true),
+            GapIntersection::Intersected(g) => *g,
+        };
         // failure - the extended curves don't intersect
         if solutions.is_empty() {
             return Ok(false);
         }
 
         // for every intersection
-        for (solution_type, start) in &solutions {
+        for (solution_type, start, _) in &solutions {
             if *solution_type == SolutionType::SingleValue {
                 let t0 = start.param(0)?; // 1st curve intersection param
                 let t1 = start.param(1)?; // 2nd curve intersection param
-                extent0 = curve0e.natural_interval();
-                extent1 = curve1e.natural_interval();
+                let extent0 = curve0e.natural_interval();
+                let extent1 = curve1e.natural_interval();
 
                 // Trim the domain of the two curves to the intersection
                 let tmin0 = if start0 { t0 } else { extent0.min() };
@@ -1495,8 +1574,8 @@ impl BSplineCurve {
         }
 
         // Now lets average the two trimmed endpoints
-        extent0 = curve0e.natural_interval(); // after trimming
-        extent1 = curve1e.natural_interval();
+        let extent0 = curve0e.natural_interval(); // after trimming
+        let extent1 = curve1e.natural_interval();
 
         let mut p0 = Vec3::UNDEF;
         let mut p1 = Vec3::UNDEF;

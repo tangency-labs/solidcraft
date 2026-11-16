@@ -1856,7 +1856,7 @@ mod tests {
     /// became the default: the contacts `(t0, t1)` (each point and both ends of each
     /// range) of each intersection `trim_gap` runs (one per gap closed, in order), as
     /// they were before.
-    const OLD_CLEANUP_CONTACTS: [(&str, &[&[[f64; 2]]]); 3] = [
+    const OLD_CLEANUP_CONTACTS: [(&str, &[&[[f64; 2]]]); 5] = [
         (
             "gen0268",
             &[
@@ -1868,12 +1868,21 @@ mod tests {
                 &[[1.0, 0.0], [1.03, 0.0009998624435600132]],
             ],
         ),
+        ("gen0428", &[&[[1.0188312146625207, -0.03]]]),
         (
             "gen0434",
             &[&[
                 [0.944428706258473, 0.48757684235417414],
                 [0.9586502567855791, 0.0],
                 [0.9586862008791938, -0.03],
+            ]],
+        ),
+        (
+            "gen2239",
+            &[&[
+                [0.9125913931343632, 0.3333333333333333],
+                [1.0, 0.0],
+                [1.0161097229422875, -0.03],
             ]],
         ),
         (
