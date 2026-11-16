@@ -161,7 +161,10 @@ fn wr_450_box_minus_rational_cylinder_is_valid_only_with_the_fix() {
             assert_eq!(check.assert_valid, Some(true));
         } else {
             // upstream: the copies' other parameterization puts the trims up to 0.78 off
-            // their edges, which take tolerances to cover it
+            // their edges, which take tolerances to cover it: the line at x = -14 and
+            // (#6748: the box's top and bottom, parallel to the circles, cut the cylinder in
+            // its exact section, whose UV curves lie in the B-spline's parameters) the
+            // arcs at z = -14 and z = 14, each edge's test 59 and its vertices' test 82
             assert!(worst_edge > 0.5, "{worst_edge}");
             assert!(!check.is_valid());
             assert_eq!(check.assert_valid, None, "ValidatePointers fails");
@@ -169,6 +172,10 @@ fn wr_450_box_minus_rational_cylinder_is_valid_only_with_the_fix() {
                 failures,
                 [
                     (labels::BREP_TYPE, 59),
+                    (labels::BREP_TYPE, 59),
+                    (labels::BREP_TYPE, 59),
+                    (labels::BREP_TYPE, 82),
+                    (labels::BREP_TYPE, 82),
                     (labels::BREP_TYPE, 82),
                     (labels::BREP_TYPE, 82)
                 ],
