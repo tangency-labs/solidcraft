@@ -265,7 +265,7 @@ fn close(p: [f64; 3], q: [f64; 3]) -> bool {
 fn a_ray_through_a_tube_hits_its_nearer_side_with_the_face_and_uv() {
     all_fixes();
     let (b, record, order) = tube();
-    for direction in [[1.0, 0.0, 0.0], [2.5, 0.0, 0.0]] {
+    for direction in [[1.0, 0.0, 0.0], [2.5, 0.0, 0.0], [1e200, 0.0, 0.0]] {
         let hit = b
             .face_hit_by_ray(&order, [-20.0, 3.0, 4.0], direction)
             .unwrap()

@@ -112,7 +112,7 @@ use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::intersect::topology_solver::p1::TopologySolver;
 use crate::intersect::topology_solver::p2::TopologySolveOptions;
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE};
+use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, SQRT3};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::knots::Side;
 use crate::query::edge as qe;
@@ -556,12 +556,14 @@ pub struct Ray {
 }
 
 impl Ray {
-    /// The ray from `origin` along `direction`, made unit ([`Vec3::unitize`]).
+    /// The ray from `origin` along `direction`, made unit at any finite length: the direction
+    /// is first divided by its largest absolute coordinate, so its squared length neither
+    /// overflows nor underflows, then made unit ([`Vec3::unitize`]).
     ///
     /// # Errors
     ///
-    /// [`SolidError::InvalidInput`] for a coordinate that is not finite or a direction of no
-    /// length (shorter than `SM_EFF_ZERO`, [`Vec3::unitize`]'s refusal).
+    /// [`SolidError::InvalidInput`] for a coordinate that is not finite, or a direction of no
+    /// length: one whose length is below `SM_EFF_ZERO` ([`EFF_ZERO`]).
     pub fn new(origin: Point3, direction: Vec3) -> Result<Self> {
         let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
         if !(finite(origin) && finite(direction)) {
@@ -570,9 +572,26 @@ impl Ray {
                 "a coordinate that is not finite",
             ));
         }
-        let direction = direction
-            .unitize()
-            .map_err(|_| SolidError::invalid_input(OP_RAY, "a direction of no length"))?;
+        let no_length = || SolidError::invalid_input(OP_RAY, "a direction of no length");
+        let scale = direction
+            .x
+            .abs()
+            .max(direction.y.abs())
+            .max(direction.z.abs());
+        // `scale` is the length to within a factor of sqrt 3, so this also refuses the zero
+        // direction before it divides.
+        if scale * SQRT3 < EFF_ZERO {
+            return Err(no_length());
+        }
+        let scaled = direction / scale;
+        // `scaled` has a coordinate of magnitude 1: its length is in [1, sqrt 3].
+        if scale * scaled.length() < EFF_ZERO {
+            return Err(no_length());
+        }
+        let direction = scaled.unitize().map_err(|_| no_length())?;
+        if !(finite(direction) && (direction.length() - 1.0).abs() <= EFF_ZERO) {
+            return Err(no_length());
+        }
         Ok(Self { origin, direction })
     }
 
@@ -774,8 +793,9 @@ impl<'a> BrepQuery<'a> {
     /// ray (`GlobalLineIntersect`) inside the face's trim, at the B-rep's zone tolerance
     /// ([`brep_zone_tol_3d`]) plus the face's own, and no farther behind the origin than the
     /// solve's zero. The first is the hit of least distance; of hits at the same distance (a
-    /// ray through an edge meets each of its faces there) the solve's first. A sheet is hit
-    /// from either side. The solve may make missing UV trim curves on `b`, as a ray fire does.
+    /// ray through an edge meets each of its faces there) the solve's first. Its distance is
+    /// clamped at 0 (a hit within the solve's zero behind the origin is at the origin), while
+    /// its point stays the surface's point. A sheet is hit from either side. The solve may make missing UV trim curves on `b`, as a ray fire does.
     ///
     /// # Errors
     ///
@@ -822,7 +842,7 @@ impl<'a> BrepQuery<'a> {
             face,
             uv,
             point: surface.evaluate_point(k, uv)?,
-            distance: solution.start.solution_value,
+            distance: solution.start.solution_value.max(0.0),
         }))
     }
 
@@ -1701,6 +1721,27 @@ mod tests {
             Point3::ZERO,
             Vec3::new(0.0, f64::INFINITY, 0.0)
         )));
+    }
+
+    /// A ray's direction is made unit whatever its finite length: (1e200, 0, 0), whose squared
+    /// length overflows, is the unit +x; one shorter than `EFF_ZERO`, such as (1e-200, 0, 0) or
+    /// (1e-13, 0, 0), is refused, while (2e-12, 0, 0) is a ray along +x.
+    #[test]
+    fn a_ray_direction_is_unit_at_any_finite_length_and_refused_below_zero() {
+        let unit = |d: Vec3| Ray::new(Point3::ZERO, d).map(|r| r.direction());
+        let x = Vec3::new(1.0, 0.0, 0.0);
+        assert_eq!(unit(Vec3::new(1e200, 0.0, 0.0)), Ok(x));
+        assert_eq!(unit(Vec3::new(-1e300, 0.0, 0.0)), Ok(-x));
+        let huge = unit(Vec3::new(1e308, 1e308, 0.0)).unwrap();
+        let half = core::f64::consts::FRAC_1_SQRT_2;
+        assert!(
+            (huge - Vec3::new(half, half, 0.0)).length() < 1e-15,
+            "{huge:?}"
+        );
+        assert!((unit(Vec3::new(2e-12, 0.0, 0.0)).unwrap() - x).length() < 1e-15);
+        let refused = |d: Vec3| matches!(unit(d), Err(SolidError::InvalidInput { .. }));
+        assert!(refused(Vec3::new(1e-200, 0.0, 0.0)));
+        assert!(refused(Vec3::new(1e-13, 0.0, 0.0)));
     }
 
     /// A query keeps the face caches its ray solves build (upstream keeps them on the
