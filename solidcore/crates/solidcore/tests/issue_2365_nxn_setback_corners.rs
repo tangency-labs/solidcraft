@@ -51,8 +51,10 @@ use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::{edge, EdgeId, VertexId};
 use solidcore::{Brep, Kernel, SolidError};
 
-/// SolidCraft's fixes (`tests/kernel_cases/fixes.json`, which now includes
-/// `closed_smooth_pole_tangent_limit`, the flag the rig run also turned on).
+/// SolidCraft's whole preset (`tests/kernel_cases/fixes.json`). That includes
+/// `closed_smooth_pole_tangent_limit`, which the rig run also turned on, and since the
+/// file matches `core::fixes()`, `face_swap_uv_transposes_trims`, `fillet_chamfer_corner` and
+/// `brep_ray_classifies_current_trims`. Every value here is unchanged under them.
 fn solidcraft_fixes() -> Kernel {
     Kernel {
         fixes: solidcraft_fixes::solidcraft_fixes(),
