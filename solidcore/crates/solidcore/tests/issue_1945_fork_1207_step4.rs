@@ -55,7 +55,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.check_loop_projected_seam_ends = true;
     k.fixes.edge_check_orders_tangent_faces = true;
     k.fixes.ellipse_step_interval_checks = true;
-    k.fixes.good_drop_result_distances_in_order = true;
     k.fixes.torus_check_spindle_apex = true;
     k.fixes.cylinder_rebuild_mean_radius = true;
     k.fixes.nurb_cylinder_inside_out_frame = true;

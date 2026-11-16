@@ -29,7 +29,6 @@
   "edge_check_orders_tangent_faces",
   "ellipse_step_interval_checks",
   "surface_continuity_checks_last_v_knot",
-  "good_drop_result_distances_in_order",
   "volume_lift_third_derivative_terms",
   "drop_curve_v_domain_degeneracy",
   "torus_check_spindle_apex",

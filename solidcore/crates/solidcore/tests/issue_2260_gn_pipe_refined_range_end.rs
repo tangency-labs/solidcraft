@@ -106,7 +106,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_vertex_error_diagnostics",
     "found_torus_sphere_keep_tested_nurb",
     "geometric_g2_continuity",
-    "good_drop_result_distances_in_order",
     "imprint_extends_edge_to_proto_vertex",
     "imprint_reuses_coincident_face_edge",
     "internal_pole_row_through_knot",

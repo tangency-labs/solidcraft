@@ -1,0 +1,16 @@
+Updates: WR-56
+
+#### WR-56 (update, 2026-11-16). `good_drop_result_distances_in_order` is removed
+
+`sm_GoodDropResult` now always measures the guess and result distances each to its own point. It takes a local result as the foot only when the gap's components along the unit tangents sum under the local solve's tight tolerance `SM_EFF_ZERO (1 + max|P|)`, and it refuses an interior result with either component over that tolerance (the fork's tangency-labs/smlib@0b4de8c / eaa998a). The flag is gone. SolidCraft already ran with it on, so the app's behaviour does not change. Removed: the field `UpstreamFixes::good_drop_result_distances_in_order`, SolidCraft's preset line, its entry in `fixes.json` and the `issue_2260` flag list, and every test setting of it.
+
+- **The left-out case, goldens `surface.surface_p5` gen0494, is a correct refusal.**
+  - The case is an `SM_SO_INTERSECT` drop, from a guess, of a point 7.6e-5 from an apex (a whole row of poles) and 3.36e-5 off the surface. The intersection tolerance is 2e-5.
+  - The local solve stops at the foot next to the apex. There `|S_v|` is 7.7e-5, so the gap's component along the unit `S_v` is 5.7e-11, over the tight tolerance 2.5e-12. The drop therefore goes on to the global solve, which finds no intersection.
+  - The same drop without a guess gives the same answer on every path. Upstream's 1e-4 foot test turned the foot into a successful intersection only when the drop had that guess.
+  - A convex-hull bound over the surface's Bezier patches shows that every point of the surface is at least 3.3e-5 from the point, so no intersection exists within 2e-5.
+  - A minimise drop from the same guess still returns the foot, at the distance the global solve finds.
+  - An alternative was measured and rejected: taking the local solve's own "converged" verdict as the foot test, which there includes `InvertPointNearSingularity`. It kept gen0494's success, but it accepted a point 0.342 from the target in place of the 0.0061 foot (gen1376, a minimise drop next to another apex).
+- **The guess and the result are measured with one evaluation.** Upstream measures the guess point with `EvaluatePoint` and the result point with `Evaluate1stDerivatives`, and the two can round one ulp apart. With the distances in order, that refused a local result at the guess itself, whose distance came out 1.4e-17 larger (goldens `surface.surface_p7` gen1133). The guess point now comes from `Evaluate1stDerivatives` too.
+- **Results:** the goldens rows that move, and their attribution by leave-one-out, are in the pull request.
+- **Tests:** `surface::surface::p7::tests::wr56_a_result_at_its_guess_is_not_farther_than_it` covers gen1133. `surface::surface::p7::tests::wr56_intersect_drop_from_a_guess_answers_as_without_one` covers gen0494: the refusal with and without the guess, the minimise drop's foot, and the distance bound. The three existing WR-56 unit tests keep their fixed-path assertions. `a_drop_from_a_guess_does_not_take_a_stalled_local_solve` now compares the drop with the stalled result's distance directly.
