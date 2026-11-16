@@ -48,6 +48,19 @@
 //!   crossing cylinders, whose offsets continued as themselves are whole circles, hold the
 //!   round of each crossing) let a guess away from the corner solve onto the other ball. The
 //!   rest of upstream's guesses follow unchanged.
+//! - **Two rails' crossing starts from their crossing to second order (#17511, not
+//!   upstream).** `CalcRailIntRail`'s guess is not the midpoint of the points twice the radius
+//!   along each edge: on an edge that turns within twice the radius (a quarter circle of radius
+//!   10 rounded 8) that midpoint lies by the edge's far end, and the solve found the rails'
+//!   other crossing, a ball past the edge's end. Each rail is taken as its edge's osculating
+//!   circle at the common vertex (a line for a straight edge, its span from the vertex where
+//!   the edge's curve runs on into the next edge's), offset as far as the round's centre stands
+//!   off the side face (the side's offset surface, so a concave edge's rail lies outside it);
+//!   the guess is their crossing ahead of the vertex along both nearest the rails' points at
+//!   the vertex, else the midpoint of those points (a concave corner, or rails that run on into
+//!   each other) (`rails_crossing`). For straight and circular edges on a plane between square
+//!   faces the crossing ahead is the exact one; where the edges run on tangent at the vertex (a
+//!   concave arc into a straight edge) only the curvature places it.
 //! - **Rails rolled over a smooth far edge, the whole length (#15767, solidcore-native).** A
 //!   solver's rail rolled before the trace onto the face beyond a smooth far edge of its face
 //!   (`FilletSolver::rolled_faces`, [`crate::blend::fillet_tangent_rollover`]) has its section's
@@ -1938,34 +1951,142 @@ fn as_edgeuse(obj: Option<EntityRef>, op: &'static str) -> Result<Option<Edgeuse
     }
 }
 
-/// The surface of a target face (`pFace->GetSurface()`, dereferenced).
-/// Where the two lines in a face that run at distances `d[i]` from a vertex `vertex` along
-/// the unit in-face normals `n[i]` of its two edges cross: the point `vertex + a n[0] + b n[1]`
-/// with `(p - vertex) . n[i] = d[i]`. Written as `s (n0 + n1) / (1 + c) + t (n0 - n1) / (1 - c)`
-/// with `c = n0 . n1`, `s` the mean and `t` half the difference of the distances, so equal
-/// distances (a constant-radius corner) divide by `1 + c` alone and stay exact as the edges
-/// approach a straight run. `None` where the lines are parallel: normals opposite (`c = -1`), or
-/// equal with different distances (`c = 1`, `t != 0`).
-fn offset_lines_crossing(vertex: Point3, n: [Vec3; 2], d: [f64; 2]) -> Option<Point3> {
-    let [n0, n1] = n;
-    let c = n0.dot(n1);
-    let s = 0.5 * (d[0] + d[1]);
-    let t = 0.5 * (d[0] - d[1]);
-    let plus = 1.0 + c;
-    if plus == 0.0 {
-        return None;
-    }
-    let mut p = vertex + (n0 + n1) * (s / plus);
-    if t != 0.0 {
-        let minus = 1.0 - c;
-        if minus == 0.0 {
-            return None;
-        }
-        p = p + (n0 - n1) * (t / minus);
-    }
-    (p.x.is_finite() && p.y.is_finite() && p.z.is_finite()).then_some(p)
+/// One rail of a corner, to second order at the common vertex: where the filleted edge leaves the
+/// vertex (`point`), its unit direction leaving it (`leaving`), the unit direction in the common
+/// face from the edge to the rail (`binormal`), the edge's curvature in the face along it
+/// (`curvature`, positive where the edge turns towards the rail) and the rail's distance from the
+/// edge (`offset`).
+#[derive(Debug, Clone, Copy)]
+struct RailAtVertex {
+    point: Point3,
+    leaving: Vec3,
+    binormal: Vec3,
+    curvature: f64,
+    offset: f64,
 }
 
+/// A rail's osculating circle at the vertex in a plane frame, as the generalised circle
+/// `k |X - q|^2 - 2 (X - q) . b = 0`: its point at the vertex `q`, the unit normal `b` towards
+/// its centre side, its curvature `k` (`0` for a line) and the unit direction it leaves the
+/// vertex along (`leaving`).
+#[derive(Debug, Clone, Copy)]
+struct PlaneRail {
+    q: Point2,
+    b: Point2,
+    k: f64,
+    leaving: Point2,
+}
+
+impl PlaneRail {
+    fn value(self, x: Point2) -> f64 {
+        let d = x - self.q;
+        self.k * d.dot(d) - 2.0 * d.dot(self.b)
+    }
+}
+
+/// Where the rails of two rounds meeting at a vertex cross, to second order: each rail is its
+/// edge's osculating circle (a line where the edge is straight) offset into the face, the
+/// round's contact line with the face for a straight or circular edge on a plane exactly. Of
+/// their crossings (two for a circle) the one ahead of the vertex along both rails and nearest
+/// their points at the vertex is taken. The other is a ball past an edge's end (#17511) or,
+/// where the edges run on tangent at the vertex, behind both. Where no crossing lies ahead
+/// along both (a concave corner, whose rails cross behind the vertex, or rails that run on
+/// into each other, as round a rim split into arcs) the guess is the midpoint of the rails'
+/// points at the vertex, which those rails meet at or next to.
+fn rails_crossing(rails: [RailAtVertex; 2]) -> Point3 {
+    let [r0, r1] = rails;
+    let at_vertex = |r: RailAtVertex| r.point + r.binormal * r.offset;
+    let mid = (at_vertex(r0) + at_vertex(r1)) * 0.5;
+    let origin = r0.point;
+    let (eu, ev) = (r0.leaving, r0.binormal);
+    let to2 = |w: Vec3| Point2::new(w.dot(eu), w.dot(ev));
+    let plane = |r: RailAtVertex| -> Option<PlaneRail> {
+        // the rail's curvature: the edge's over the offset's shrink, its direction reversed
+        // where the offset passes the edge's centre (none where it shrinks to a point)
+        let shrink = 1.0 - r.curvature * r.offset;
+        if shrink == 0.0 {
+            return None;
+        }
+        let leaving = to2(r.leaving) * shrink.signum();
+        Some(PlaneRail {
+            q: to2(at_vertex(r) - origin),
+            b: to2(r.binormal),
+            k: r.curvature / shrink,
+            leaving,
+        })
+    };
+    let (Some(p0), Some(p1)) = (plane(r0), plane(r1)) else {
+        return mid;
+    };
+    let m = to2(mid - origin);
+    let best = plane_rail_crossings(p0, p1)
+        .into_iter()
+        .flatten()
+        .filter(|x| {
+            x.x.is_finite()
+                && x.y.is_finite()
+                && (*x - p0.q).dot(p0.leaving) > 0.0
+                && (*x - p1.q).dot(p1.leaving) > 0.0
+        })
+        .min_by(|a, b| a.distance(m).total_cmp(&b.distance(m)));
+    match best {
+        Some(x) => origin + eu * x.x + ev * x.y,
+        None => mid,
+    }
+}
+
+/// The crossings of two generalised circles in the plane ([`PlaneRail`]): at most two, none
+/// for coincident, parallel or apart ones.
+fn plane_rail_crossings(a: PlaneRail, b: PlaneRail) -> [Option<Point2>; 2] {
+    let cross = |u: Point2, v: Point2| u.x * v.y - u.y * v.x;
+    // b.k a - a.k b is linear: X . w = h
+    let w = (a.q - b.q) * (a.k * b.k) + a.b * b.k - b.b * a.k;
+    let h =
+        0.5 * (a.k * b.k * (a.q.dot(a.q) - b.q.dot(b.q))) + b.k * a.q.dot(a.b) - a.k * b.q.dot(b.b);
+    if a.k == 0.0 && b.k == 0.0 {
+        // two lines: X . a.b = a.q . a.b and X . b.b = b.q . b.b
+        let det = cross(a.b, b.b);
+        if det == 0.0 {
+            return [None, None];
+        }
+        let (ha, hb) = (a.q.dot(a.b), b.q.dot(b.b));
+        let x = Point2::new(
+            (ha * b.b.y - hb * a.b.y) / det,
+            (a.b.x * hb - b.b.x * ha) / det,
+        );
+        return [Some(x), None];
+    }
+    let ww = w.dot(w);
+    if ww == 0.0 {
+        return [None, None];
+    }
+    // the line X = x0 + t m, met with the rail of the larger curvature (where one rail is a
+    // line, the line is that rail and the other is the circle it meets)
+    let x0 = w * (h / ww);
+    let m = Point2::new(-w.y, w.x) * (1.0 / ww.sqrt());
+    let c = if a.k.abs() >= b.k.abs() { a } else { b };
+    let d = x0 - c.q;
+    let qa = c.k;
+    let qb = 2.0 * (c.k * d.dot(m) - m.dot(c.b));
+    let qc = c.value(x0);
+    if qa == 0.0 {
+        if qb == 0.0 {
+            return [None, None];
+        }
+        return [Some(x0 + m * (-qc / qb)), None];
+    }
+    let disc = qb * qb - 4.0 * qa * qc;
+    if disc < 0.0 {
+        return [None, None];
+    }
+    // the root of the larger magnitude first, the other from the product (no cancellation)
+    let big = -0.5 * (qb + qb.signum() * disc.sqrt());
+    let t0 = big / qa;
+    let t1 = if big == 0.0 { 0.0 } else { qc / big };
+    [Some(x0 + m * t0), Some(x0 + m * t1)]
+}
+
+/// The surface of a target face (`pFace->GetSurface()`, dereferenced).
 fn face_surface<'b>(
     target: &'b Brep,
     face: Option<FaceId>,
@@ -2110,14 +2231,21 @@ impl FilletBrep {
         // where an edge turns within that length (a round of 8 on a quarter circle of
         // radius 10, #17511), both points lie far from the vertex and the solve converges to
         // the rails' other crossing, a ball that touches one edge's face past its end. Here
-        // the guess is where the rails' first-order lines at the vertex cross: each rail
-        // runs along its edge's tangent, its fillet radius into the face along the edge
-        // use's binormal ([`offset_lines_crossing`]), exact for straight edges on a plane
-        // and the crossing nearest the vertex otherwise.
-        let mut feet = [(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.0), 0.0); 2];
+        // the guess is where the rails cross to second order at the vertex
+        // ([`rails_crossing`]): each its edge's osculating circle (a line where the edge is
+        // straight) offset into the face as far as the round's centre stands off the side
+        // face, the crossing ahead of the vertex along both. That is the crossing itself for
+        // straight and circular edges on a plane between faces square to it.
+        let mut rails = [RailAtVertex {
+            point: Point3::new(0.0, 0.0, 0.0),
+            leaving: Vec3::new(0.0, 0.0, 0.0),
+            binormal: Vec3::new(0.0, 0.0, 0.0),
+            curvature: 0.0,
+            offset: 0.0,
+        }; 2];
         let pairs = [(fs1, rail_index1), (fs2, rail_index2)];
-        for (slot, (fs, index)) in feet.iter_mut().zip(pairs) {
-            let offset_distance = solver_surface(fs, index, OP)?.offset_distance().abs();
+        for (slot, (fs, index)) in rails.iter_mut().zip(pairs) {
+            let other = if index == 0 { 1 } else { 0 };
             let eu = solver_edgeuse(fs, index, OP)?;
             let e = eu1::edge(target, eu)?
                 .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
@@ -2127,31 +2255,65 @@ impl FilletBrep {
                 .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's vertex use"))?;
             let pv = vertexuse_unit::vertex(target, vu)?;
             let orient = eu1::orientation(target, eu)?;
-            // the edge's end at the common vertex
-            let vertex_param = if (pv == cp_vertex && orient == OrientType::Same)
-                || (pv != cp_vertex && orient == OrientType::Opposite)
-            {
-                ivl.min()
-            } else {
-                ivl.max()
-            };
+            // the edge's end at the common vertex, and whether it leaves it forwards
+            let from_min = (pv == cp_vertex && orient == OrientType::Same)
+                || (pv != cp_vertex && orient == OrientType::Opposite);
+            let vertex_param = if from_min { ivl.min() } else { ivl.max() };
             let fetch = get_or_create_uv_trim_curve(k, target, eu, false, false, true)?;
             fetch.status?;
-            let at_vertex = evaluate_binormal(
-                k,
-                target,
-                eu,
-                vertex_param,
-                false,
-                &BinormalOptions::default(),
-            )?;
-            *slot = (at_vertex.point, at_vertex.binormal, offset_distance);
+            let curve = edge::curve(target, e)?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+            // the span the edge runs along from the vertex (the flag picks the span that starts
+            // at the parameter; an edge's curve can run on past its end, into the next edge's)
+            let pv = curve.evaluate(k, vertex_param, 2, from_min, true)?;
+            let (Some(&at), Some(&d1), Some(&d2)) = (pv.first(), pv.get(1), pv.get(2)) else {
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the edge's curve gives no second derivative at the vertex",
+                ));
+            };
+            // the way the edge leaves the vertex: towards its middle
+            let unit = d1.unitize()?;
+            let mid = curve.evaluate_point(k, ivl.mid())?;
+            let leaving = if unit.dot(mid - at) < 0.0 {
+                -unit
+            } else {
+                unit
+            };
+            // the rail lies where the ball's centre stands over the common face: the centre lies
+            // on the side face's offset surface, whose point over the vertex is the vertex moved
+            // by the offset, taken within the common face
+            let side = solver_surface(fs, other, OP)?;
+            let uv_at = |srf: &Surface| -> Result<Point2> {
+                let domain = srf.natural_uv_domain_with_nurb(k)?;
+                let dropped =
+                    srf.drop_point::<NoObject>(k, at, &domain, &DropPointOptions::default())?;
+                if !dropped.success {
+                    return Err(SolidError::blend_failed(
+                        OP,
+                        "the vertex drops onto a face of the corner nowhere",
+                    ));
+                }
+                Ok(dropped.result_uv)
+            };
+            let side_offset = side.evaluate_point(k, uv_at(side.base_surface())?)? - at;
+            let common = face_surface(target, face, OP)?;
+            let common_normal =
+                common.evaluate_normal(k, uv_at(common)?, Side::Left, Side::Left)?;
+            let in_face = side_offset - common_normal * side_offset.dot(common_normal);
+            let offset = in_face.length();
+            let binormal = in_face.unitize()?;
+            // the edge's curvature towards the rail side (either direction of travel)
+            let curvature = (d2 - unit * d2.dot(unit)).dot(binormal) / d1.dot(d1);
+            *slot = RailAtVertex {
+                point: at,
+                leaving,
+                binormal,
+                curvature,
+                offset,
+            };
         }
-        let [(vertex_pnt, binormal1, d1), (_, binormal2, d2)] = feet;
-        let crossing = offset_lines_crossing(vertex_pnt, [binormal1, binormal2], [d1, d2])
-            .ok_or_else(|| {
-                SolidError::blend_failed(OP, "the filleted edges are parallel at the vertex")
-            })?;
+        let crossing = rails_crossing(rails);
         let face_srf = face_surface(target, face, OP)?;
         let face_domain = face_srf.natural_uv_domain_with_nurb(k)?;
         let dropped = face_srf.drop_point::<NoObject>(
@@ -2163,7 +2325,7 @@ impl FilletBrep {
         if !dropped.success {
             return Err(SolidError::blend_failed(
                 OP,
-                "the rails' first-order crossing drops onto the face nowhere",
+                "the rails' crossing drops onto the face nowhere",
             ));
         }
         let uv_guess = dropped.result_uv;
