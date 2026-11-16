@@ -18,7 +18,8 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    clippy::indexing_slicing
+    clippy::indexing_slicing,
+    clippy::cast_precision_loss
 )]
 
 #[path = "support/volume_leak.rs"]
@@ -30,11 +31,14 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
-use solidcore::math::{Point3, Vec3};
+use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::p1::{
     BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
 };
 use solidcore::primitive::api_primitives::create_box;
+use solidcore::surface::surface::p2::PLANE_TYPE;
+use solidcore::topology::brep::p1::faces;
+use solidcore::topology::face::p2 as face;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
@@ -274,14 +278,17 @@ fn a_cliff_overflows_variable_round_holds_its_law_on_its_touch_circles() {
     // 5.2e-12, 3.0e-11): checked within this body's own old leak bound, live.
     //
     // Every row is checked against the closed form (`closed`, as
-    // `wr631_cliff_overflow_construction`), from this body's live figures only: its closed
-    // region differs from the solid it bounds only inside its edges' tubes and vertices'
-    // balls, `sum pi tol^2 L + sum 4/3 pi tol^3` (#16735's derivation), when every strip and
-    // fan lies within its stored tolerance (asserted below); plus the volume's quadrature
-    // share at 1e-8 (twice its difference from the volume at 1e-10); plus the closed form's
-    // own spread ([`CLOSED_FORM_SPREAD`]). ARGUED, not proven: the strips' widths are sampled
-    // (`volume_leak`), the quadrature share is an estimate, and the closed form is
-    // quadrature too.
+    // `wr631_cliff_overflow_construction`, checked against `cliff_closed_form`), from this
+    // body's live figures only. The body's round is a B-spline skin through the balls'
+    // circles, not their cone: it keeps the volume between skin and cone (`skin_off_its_cone`;
+    // 2 -> 11, 20, 30, 50: -2.30e-7, -2.73e-7, +9.95e-8, -2.890e-6), which is taken off the
+    // difference. What is left, its closed region against the solid it bounds, differs only
+    // inside its edges' tubes and vertices' balls, `sum pi tol^2 L + sum 4/3 pi tol^3`
+    // (#16735's derivation), when every strip and fan lies within its stored tolerance
+    // (asserted below); plus the volume's quadrature share at 1e-8 (twice its difference from
+    // the volume at 1e-10); plus the closed form's own spread ([`CLOSED_FORM_SPREAD`]).
+    // ARGUED, not proven: the strips' widths are sampled (`volume_leak`), the quadrature
+    // share is an estimate, and the skin's volume off the cone is a sampled sum.
     for (r0, r1, fork, want, pinned, closed) in [
         (
             2.0,
@@ -343,20 +350,185 @@ fn a_cliff_overflows_variable_round_holds_its_law_on_its_touch_circles() {
         if pinned {
             assert!(rel(v, want) < 1e-12, "{r0} -> {r1}: {v} vs {want}");
         }
-        let bound = l.new_bound + 2.0 * (v - l.volume).abs() + CLOSED_FORM_SPREAD;
+        // `closed` is the cone's own volume to its print's half ulp (PROVEN: the section's
+        // closed form, `cliff_closed_form`, to 1e-11)
+        let exact = cliff_closed_form(r0, r1);
         assert!(
-            (v - closed).abs() <= bound,
-            "{r0} -> {r1}: {v} vs the closed form {closed}, off {:e} past {bound:e}",
-            (v - closed).abs()
+            (closed - exact).abs() <= 5e-10,
+            "{r0} -> {r1}: the closed form is {exact}, not {closed}"
+        );
+        let bound = l.new_bound + 2.0 * (v - l.volume).abs() + CLOSED_FORM_SPREAD;
+        // the round's skin is a B-spline through the balls' circles, not their cone: the body
+        // differs from the closed form by the volume between the two, which the bound does not
+        // hold (2 -> 50: -2.890e-6, the skin 1.1e-8 deep at most). MEASURED: a midpoint sum,
+        // whose grid halved moves it by under 1% of the bound
+        let skin = skin_off_its_cone(&k, &b, r0, r1, 800);
+        let skin_half = skin_off_its_cone(&k, &b, r0, r1, 400);
+        eprintln!("{r0} -> {r1}: skin off its cone {skin:e} (grid halved {skin_half:e})");
+        assert!(
+            (skin - skin_half).abs() < 1e-2 * bound,
+            "{r0} -> {r1}: {skin} vs {skin_half}"
+        );
+        assert!(
+            (v - closed - skin).abs() <= bound,
+            "{r0} -> {r1}: {v} vs the closed form {closed} and the skin's {skin:e}, off {:e} past {bound:e}",
+            (v - closed - skin).abs()
         );
         // this body moved from #16737's closed volume within its own old leak
         volume_leak::assert_moved_by_the_old_leak(&k, &mut b, want, v, 1e-8);
     }
 }
 
+/// The signed distance of `p` from the balls' cone of the linear law `r0` to `r1` along the
+/// cliff round's edge (x = 0, z = 30, y from 0 to 20): positive outside the cone.
+fn off_the_cone(p: Point3, r0: f64, r1: f64) -> f64 {
+    let k = (r1 - r0) / 20.0;
+    let m = (1.0 + 2.0 * k * k).sqrt();
+    // the apex (r = 0), and the axis towards the growing balls
+    let apex = Point3::new(0.0, -r0 / k, 30.0);
+    let axis = Vec3::new(k.abs(), k.signum(), -k.abs()) * (1.0 / m);
+    let (sin, cos) = (k.abs() / m, (1.0 + k * k).sqrt() / m);
+    let w = p - apex;
+    let along = w.dot(axis);
+    (w - axis * along).length() * cos - along * sin
+}
+
+/// The volume between the cliff round's skin (its one face on no plane) and the balls' cone,
+/// inside the box: `sum off_the_cone |S_u x S_v| du dv` over the midpoints of an `n x n` grid
+/// of the skin's domain (positive where the skin keeps more than the balls).
+fn skin_off_its_cone(k: &Kernel, b: &Brep, r0: f64, r1: f64, n: usize) -> f64 {
+    let mut skins = faces(b, None).unwrap().into_iter().filter(|&f| {
+        !face::surface(b, f)
+            .unwrap()
+            .unwrap()
+            .is_kind_of(PLANE_TYPE)
+            .unwrap()
+    });
+    let f = skins.next().expect("the round");
+    assert!(skins.next().is_none(), "one round");
+    let s = face::surface(b, f).unwrap().unwrap();
+    let d = s.natural_uv_domain_if_built();
+    let (lo, hi) = (d.min(), d.max());
+    let (du, dv) = ((hi.x - lo.x) / n as f64, (hi.y - lo.y) / n as f64);
+    let at = |u: f64, v: f64| s.evaluate_point(k, Point2::new(u, v)).unwrap();
+    let mut sum = 0.0;
+    for i in 0..n {
+        for j in 0..n {
+            let (u, v) = (lo.x + (i as f64 + 0.5) * du, lo.y + (j as f64 + 0.5) * dv);
+            let p = at(u, v);
+            if !(0.0..=10.0).contains(&p.x)
+                || !(0.0..=20.0).contains(&p.y)
+                || !(0.0..=30.0).contains(&p.z)
+            {
+                continue;
+            }
+            let (hu, hv) = (1e-6 * (hi.x - lo.x), 1e-6 * (hi.y - lo.y));
+            let su = (at(u + hu, v) - at(u - hu, v)) * (0.5 / hu);
+            let sv = (at(u, v + hv) - at(u, v - hv)) * (0.5 / hv);
+            sum += off_the_cone(p, r0, r1) * su.cross(sv).length() * du * dv;
+        }
+    }
+    sum
+}
+
+/// The cliff round's volume in closed form: the box 10 x 20 x 30 less, in each plane y across
+/// the edge, the corner its balls' cone leaves. With `u = x`, `v = 30 - z` and the law
+/// `r = r0 + c y`, the balls `(u - r)^2 + (y - t)^2 + (v - r)^2 <= r(t)^2` cover a point when
+/// the least over t of that quadratic in t is at most 0; that least is 0 on the conic
+/// `m (u^2 + v^2 - 2 r0 (u + v) + r0^2 + y^2) = (c (u + v) + y - r0 c)^2`, `m = 1 + c^2`, whose
+/// branch nearer the corner is
+/// `v = h(u) = (r0 m + c w) - sqrt((r0 m + c w)^2 - m ((u - r0)^2 + y^2) + w^2)`,
+/// `w = c u + y - r0 c`. It touches v = 0 at u = r(y) and, by its symmetry in u and v, u = 0
+/// at v = r(y), falling between them. So the corner's area is `int_0^min(10, r) min(30, h)`,
+/// and h = 30 at u = h(30) when r > 30 (on these laws the arc leaves the bottom before the far
+/// face: asserted). Gauss-Legendre on the pieces between the kinks r = 10 and r = 30, with
+/// `u = s^2` taking out h's square root at u = 0; 4 and 8 panels of 20 points agree to 1e-11
+/// (asserted). A 50-digit evaluation of the same integrals gives 5802.443145422674,
+/// 5503.887121530622, 5184.057273580749 and 4693.608889859801 for 2 -> 11, 20, 30, 50, and
+/// the cone's 11956.222426735870 (as [`CONE_VOLUME`]).
+fn cliff_closed_form(r0: f64, r1: f64) -> f64 {
+    let (a, b) = (cliff_corner(r0, r1, 4), cliff_corner(r0, r1, 8));
+    assert!((a - b).abs() < 1e-11, "{a} vs {b}");
+    6000.0 - b
+}
+
+/// The volume of the corner [`cliff_closed_form`] takes off, on `panels` panels per piece.
+fn cliff_corner(r0: f64, r1: f64, panels: usize) -> f64 {
+    let (w_far, h_bottom, len) = (10.0, 30.0, 20.0);
+    let c = (r1 - r0) / len;
+    let m = 1.0 + c * c;
+    let h = |u: f64, y: f64| {
+        let w = c * u + y - r0 * c;
+        let b = r0 * m + c * w;
+        b - (b * b - m * ((u - r0).powi(2) + y * y) + w * w)
+            .max(0.0)
+            .sqrt()
+    };
+    let (x, wt) = gauss_legendre(20);
+    let quad = |f: &dyn Fn(f64) -> f64, a: f64, b: f64| {
+        let step = (b - a) / panels as f64;
+        let mut sum = 0.0;
+        for p in 0..panels {
+            let mid = a + (p as f64 + 0.5) * step;
+            for (xi, wi) in x.iter().zip(&wt) {
+                sum += wi * 0.5 * step * f(mid + 0.5 * step * xi);
+            }
+        }
+        sum
+    };
+    let area = |y: f64| {
+        let r = r0 + c * y;
+        let top = r.min(w_far);
+        let on_s = |s: f64| h(s * s, y) * 2.0 * s;
+        if r <= h_bottom {
+            quad(&on_s, 0.0, top.sqrt())
+        } else {
+            let u30 = h(h_bottom, y);
+            assert!(u30 < top, "the arc meets the far face's bottom edge");
+            h_bottom * u30 + quad(&on_s, u30.sqrt(), top.sqrt())
+        }
+    };
+    let mut cuts = vec![0.0, len];
+    for lim in [w_far, h_bottom] {
+        let y = (lim - r0) / c;
+        if y > 0.0 && y < len {
+            cuts.push(y);
+        }
+    }
+    cuts.sort_by(f64::total_cmp);
+    cuts.windows(2).map(|p| quad(&area, p[0], p[1])).sum()
+}
+
+/// The `n` point Gauss-Legendre rule on [-1, 1] (Newton on the Legendre polynomial).
+fn gauss_legendre(n: usize) -> (Vec<f64>, Vec<f64>) {
+    let mut x = Vec::new();
+    let mut w = Vec::new();
+    for i in 1..=n {
+        let mut z = (std::f64::consts::PI * (i as f64 - 0.25) / (n as f64 + 0.5)).cos();
+        let mut dp = 1.0;
+        for _ in 0..100 {
+            let (mut p0, mut p1) = (1.0, z);
+            for j in 2..=n {
+                let jf = j as f64;
+                (p0, p1) = (p1, ((2.0 * jf - 1.0) * z * p1 - (jf - 1.0) * p0) / jf);
+            }
+            dp = n as f64 * (z * p1 - p0) / (z * z - 1.0);
+            let dz = p1 / dp;
+            z -= dz;
+            if dz.abs() < 1e-16 {
+                break;
+            }
+        }
+        x.push(z);
+        w.push(2.0 / ((1.0 - z * z) * dp * dp));
+    }
+    (x, w)
+}
+
 /// The closed forms' own spread: `wr631_cliff_overflow_construction`'s Gauss-Legendre
 /// quadrature at 5 and 10 panels along the edge agree to 1e-9, printed to 1e-9 (half an
-/// ulp of the print, 5e-10, added). ARGUED: the agreement is observed, not bounded.
+/// ulp of the print, 5e-10, added). Each is within 3.8e-10 of [`cliff_closed_form`]
+/// (asserted to 5e-10), so this holds with room.
 const CLOSED_FORM_SPREAD: f64 = 1.5e-9;
 
 /// A variable round with a curvature-continuous section (`SmApiVariableRadiusFillet` with
