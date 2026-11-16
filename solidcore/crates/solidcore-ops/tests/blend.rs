@@ -2337,7 +2337,9 @@ fn a_round_on_a_bar_swept_along_a_wide_arc_is_not_refused_as_cutting_the_part() 
         solidcore_ops::sweep::sweep_placed(&profile, &path, SweepFrame::Translate, true).unwrap();
     assert!(rel(volume(&b), w * h * 30.0) < 1e-9, "{}", volume(&b));
     let e = edge_at(&b, [15.0, 0.0, c - big]);
-    blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled).unwrap();
+    // `blend` rounds `b` in place (its result names the faces it made, not a new body)
+    let made = blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled).unwrap();
+    assert!(!made.made.is_empty());
     let area = (1.0 - PI / 4.0) * r * r;
     let d = r * (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI);
     let want = w * h * 30.0 - area * (big - d) * theta - 2.0 * area * 15.0 * d / c;
