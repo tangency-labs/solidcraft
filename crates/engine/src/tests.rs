@@ -5652,7 +5652,8 @@ fn tapered_extrude_of_a_profile_mixing_lines_and_an_arc() {
 /// 10.085 at −15°; the hole's 10.019 at +5°, 10.292 at −5°). Joined to the ball (4188.790)
 /// it adds just that. At −15° the outside would close at z 14.9 and at +5° the hole at z 17.1,
 /// both inside the ball: the tools only run as far as they must. A circle r 12 at −10° is wider
-/// than the ball where it starts and meets it at z_c 16.022, still narrowing.
+/// than the ball where it starts and meets it at z_c 16.022, still narrowing; at −20° at z_c
+/// 13.095, closing at z 32.97 above the ball.
 #[test]
 fn tapered_extrude_to_a_curved_face_ends_on_it() {
     let (b, c, big_r) = (1.5, 20.0, 10.0);
@@ -5681,7 +5682,13 @@ fn tapered_extrude_to_a_curved_face_ends_on_it() {
         let posts: &[(f64, f64, f64)] = if hole {
             &[(4.0, 5.0, 631.703987706579), (4.0, -5.0, 285.63157703482165)]
         } else {
-            &[(4.0, 5.0, 669.1892253335005), (4.0, -5.0, 408.1381918962213), (4.0, -15.0, 241.3566646562573), (12.0, -10.0, 4765.092818474139)]
+            &[
+                (4.0, 5.0, 669.1892253335005),
+                (4.0, -5.0, 408.1381918962213),
+                (4.0, -15.0, 241.3566646562573),
+                (12.0, -10.0, 4765.092818474139),
+                (12.0, -20.0, 3612.7398353298513),
+            ]
         };
         for &(a, deg, post) in posts {
             let taper = format!("{deg} deg");
