@@ -258,7 +258,7 @@ fn eval_and_inspect_reject_invalid_options_before_script_execution_or_reporting(
 #[test]
 fn cli_loads_both_design_encodings_by_contents() {
     let dir = Scratch::new();
-    for extension in ["sc", "solidcraft", "solvecraft", "json"] {
+    for extension in ["sc", "solidcraft", "json"] {
         let saved = dir.0.join(format!("box.{extension}"));
         json_output(cli().arg("run").arg(dir.script()).arg("--save").arg(&saved).output().unwrap());
         let bytes = std::fs::read(&saved).unwrap();
@@ -587,8 +587,8 @@ fn results_without_script_still_fail() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("--results needs a script"));
 }
 
-/// Compatibility shim (docs/compatibility.md): a design saved before the rename, with the
-/// legacy extension and format tag, still opens; re-saving writes the current tag.
+/// A design saved before the rename, with the old extension and format tag, still opens by its
+/// contents; re-saving writes the current tag.
 #[test]
 fn legacy_extension_and_format_tag_still_open() {
     let dir = Scratch::new();
@@ -610,6 +610,10 @@ fn legacy_extension_and_format_tag_still_open() {
     json_output(cli().args(["run", "--in"]).arg(&resaved).arg(dir.script()).arg("--save").arg(&current).output().unwrap());
     assert_eq!(body_count(&current), 3);
     assert!(solidcraft_engine::io::is_design_container(&std::fs::read(&current).unwrap()), "a .sc file is a design container");
+    // The pre-rename extension is no longer ours, but a container saved under it opens by contents.
+    let legacy_container = dir.0.join("container.solvecraft");
+    std::fs::copy(&current, &legacy_container).unwrap();
+    assert_eq!(body_count(&legacy_container), 3);
 }
 
 /// `snapshot` starts from `--in` as `run` does (its script runs on that design), and refuses an

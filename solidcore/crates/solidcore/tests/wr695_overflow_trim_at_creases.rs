@@ -16,6 +16,7 @@
 )]
 
 use solidcore::blend::fillet_executive::session::FilletSession;
+use solidcore::blend::fillet_standard_solver::p1::FilletLaw;
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -26,7 +27,7 @@ use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
-use solidcore::topology::{edge, EdgeId};
+use solidcore::topology::{edge, vertex, EdgeId};
 use solidcore::{Brep, Kernel};
 
 /// The cliff overflow's flags (as `wr631_cliff_overflow_construction`), the trim at the
@@ -343,4 +344,128 @@ fn cube_round_past_both_faces() {
         CLOSED_REL,
         5,
     );
+}
+
+/// The variable round, linear `r0` to `r1`, on the 10 x 20 x 30 box's top edge at x = 0, its
+/// volume, face, edge and vertex counts and the largest gap between an edge's curve and
+/// its vertices. `along_edge`: `fillet_overflow_crease_along_edge` on too.
+fn variable_round(
+    trim: bool,
+    along_edge: bool,
+    r0: f64,
+    r1: f64,
+) -> (f64, (usize, usize, usize), f64) {
+    let mut k = kernel(trim);
+    k.fixes.fillet_overflow_crease_along_edge = along_edge;
+    let mut b = box_10_20_30(&mut k);
+    let e = edge_between(&k, &b, p(0.0, 0.0, 30.0), p(0.0, 20.0, 30.0));
+    let mut session = FilletSession::new(&mut k, &mut b).unwrap();
+    session
+        .prepare_variable_radius_edges(&mut k, &[e], r0, FilletLaw::linear(r0, r1, None), 1, 1)
+        .unwrap();
+    session
+        .do_fillet(&mut k)
+        .unwrap_or_else(|e| panic!("{r0} -> {r1} (trim {trim}): {e}"));
+    drop(session);
+    assert!(
+        is_manifold_solid(&b).unwrap(),
+        "{r0} -> {r1}: not a manifold solid"
+    );
+    let mut gap = 0.0_f64;
+    for e in b.edges().ids().collect::<Vec<_>>() {
+        let ivl = edge::interval(&b, e).unwrap();
+        let c = edge::curve(&b, e).unwrap().unwrap();
+        let (s, t) = (
+            c.evaluate_point(&k, ivl.min()).unwrap(),
+            c.evaluate_point(&k, ivl.max()).unwrap(),
+        );
+        let (sv, ev) = edge::start_end_vertices(&b, e).unwrap();
+        let (sp, ep) = (
+            vertex::point(&b, sv.unwrap()).unwrap(),
+            vertex::point(&b, ev.unwrap()).unwrap(),
+        );
+        gap = gap.max(s.distance(sp).min(s.distance(ep)));
+        gap = gap.max(t.distance(sp).min(t.distance(ep)));
+    }
+    let counts = (
+        b.faces().ids().count(),
+        b.edges().ids().count(),
+        b.vertices().ids().count(),
+    );
+    let built = (volume(&k, &mut b), counts, gap);
+    b.use_arena_naming().unwrap();
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{r0} -> {r1}: check_brep: {lines:?}");
+    built
+}
+
+/// #17673: the variable round past the box's top (`wr631_cliff_overflow_construction`'s
+/// case and closed forms, Gauss-Legendre to 1e-9), trimmed at its creases, from either
+/// end. The creases meet the sheet's end section at its corners: each crease now ends
+/// where the section's edge crosses the crease's face, and both are fitted to a
+/// thousandth of the body's tolerance, so every edge's curve runs to its own vertices
+/// (the end section's stopped 1.1e-5 short of them) and the volume holds the closed form
+/// to 1e-7 (it was 1.3e-7 off from r 50 to 2). The face, edge and vertex counts are the
+/// subtraction's.
+#[test]
+fn a_variable_round_past_a_box_top_trimmed_at_its_creases_keeps_its_closed_form() {
+    for (r1, closed) in [
+        (11.0, 5_802.443_145_423),
+        (20.0, 5_503.887_121_531),
+        (30.0, 5_184.057_273_581),
+        (50.0, 4_693.608_889_860),
+    ] {
+        for (r0, r1) in [(2.0, r1), (r1, 2.0)] {
+            let (_, faces, _) = variable_round(false, false, r0, r1);
+            let (v, n, gap) = variable_round(true, false, r0, r1);
+            assert!(
+                (v - closed).abs() <= 1e-7 * closed,
+                "{r0} -> {r1}: volume {v} against {closed} (rel {})",
+                (v - closed).abs() / closed
+            );
+            assert_eq!(
+                n, faces,
+                "{r0} -> {r1}: the subtraction's faces, edges, vertices"
+            );
+            assert!(
+                gap <= 1e-12,
+                "{r0} -> {r1}: an edge's curve {gap} off its vertices"
+            );
+        }
+    }
+}
+
+/// #17673 review: the same rounds and checks with `fillet_overflow_crease_along_edge` on
+/// as well. A crease piece run on to its end along an edge of the face takes in the runs
+/// that fix also splits the sheet along; each such run is split along once (in the piece),
+/// so the merge is given no overlapping curves.
+#[test]
+fn a_variable_round_past_a_box_top_trimmed_at_its_creases_with_creases_along_edges_keeps_its_closed_form(
+) {
+    for (r1, closed) in [
+        (11.0, 5_802.443_145_423),
+        (20.0, 5_503.887_121_531),
+        (30.0, 5_184.057_273_581),
+        (50.0, 4_693.608_889_860),
+    ] {
+        for (r0, r1) in [(2.0, r1), (r1, 2.0)] {
+            let (_, faces, _) = variable_round(false, true, r0, r1);
+            let (v, n, gap) = variable_round(true, true, r0, r1);
+            assert!(
+                (v - closed).abs() <= 1e-7 * closed,
+                "{r0} -> {r1}: volume {v} against {closed} (rel {})",
+                (v - closed).abs() / closed
+            );
+            assert_eq!(
+                n, faces,
+                "{r0} -> {r1}: the subtraction's faces, edges, vertices"
+            );
+            assert!(
+                gap <= 1e-12,
+                "{r0} -> {r1}: an edge's curve {gap} off its vertices"
+            );
+        }
+    }
 }

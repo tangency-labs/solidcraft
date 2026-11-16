@@ -255,6 +255,9 @@ pub(crate) fn remember_file(s: &Session, key: &str) -> Option<egui::ColorImage> 
 fn remember_at(s: &Session, key: &str, #[cfg(not(target_arch = "wasm32"))] identity: Option<std::path::PathBuf>) -> Option<egui::ColorImage> {
     #[cfg(target_arch = "wasm32")]
     let _ = key;
+    // Off the window's thread: the app may still be setting up the renderer that draws it (#1210).
+    #[cfg(not(target_arch = "wasm32"))]
+    solidcraft_engine::capture::wait_for_renderer(std::time::Duration::from_secs(60));
     let img = thumbnail(s)?;
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(path) = identity.filter(|p| cache_path(key).as_ref() == Some(p)) {
@@ -774,12 +777,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         id: "home",
         name: app.tr("ui.start_page").into(),
         interactive,
-        back: start_page::Back {
+        back: Some(start_page::Back {
             template: app.tr("home.back").into(),
             document: app.session.doc.name.as_str().into(),
             shortcut: "Esc".into(),
             chosen: FileAction::Back,
-        },
+            // The File view handles Escape above, after its own windows and questions.
+            escape: false,
+        }),
         rail: rail(app),
         title: match app.home.section {
             Section::Start => app.tr_label("Start").into(),

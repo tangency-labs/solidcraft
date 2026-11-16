@@ -162,6 +162,7 @@ use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, 
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+use crate::nurbs::certificate::{on_circle, OnCircle};
 use crate::nurbs::knots::Side;
 use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
 use crate::surface::plane::Plane;
@@ -184,6 +185,7 @@ const OP_STEP: &str = "surface::surface::p1::StepSurface";
 const OP_CACHE: &str = "surface::surface::p1::validate_surface_cache";
 const OP_IVL: &str = "surface::surface::p1::find_uv_curve_ivl_in_domain";
 const OP_BOX: &str = "surface::surface::p1::Surface::calculate_bounding_box";
+const OP_REV_COLLAPSE: &str = "surface::surface::p1::Surface::revolution_offset_collapses";
 
 /// Why a polar box of a curve-bounded or STEP surface is refused.
 pub(crate) const POLAR_RECURSION: &str = "SmSurface::CalculateBoundingBox of a polar box on a curve-bounded or STEP surface recurses without bound upstream (plan/upstream-issues.md UB-84)";
@@ -2612,16 +2614,15 @@ impl Surface {
             SurfaceKind::Plane(p) => Ok(Some(Self::from(
                 p.create_offset_surface(k, signed_offset_distance)?,
             ))),
-            // `Kernel::fixes.revolution_round_offset_collapses` (WR-567): an offset that
-            // shrinks the generatrix arc onto its centre or past it is no surface
+            // (WR-567): an offset that shrinks the generatrix arc onto its centre or past
+            // it is no surface
             SurfaceKind::SurfOfRevolution(s)
-                if k.fixes.revolution_round_offset_collapses
-                    && self.revolution_offset_collapses(
-                        k,
-                        s,
-                        signed_offset_distance,
-                        approx_tol_3d,
-                    )? =>
+                if self.revolution_offset_collapses(
+                    k,
+                    s,
+                    signed_offset_distance,
+                    approx_tol_3d,
+                )? =>
             {
                 Ok(None)
             }
@@ -2661,10 +2662,9 @@ impl Surface {
 
     /// Not upstream (`SmSurface::OffsetCollapses`, WR-464): whether the offset by
     /// `signed_offset_distance` shrinks a cone, cylinder, sphere or torus onto its spine
-    /// (radius below `tol`), the only case where [`Self::create_offset_surface`] gives no
-    /// surface. With `Kernel::fixes.revolution_round_offset_collapses` (WR-567) also a
-    /// surface of revolution of one circular arc moved in past the arc's radius
-    /// (`revolution_offset_collapses`). `false` for every other surface.
+    /// (radius below `tol`), or a surface of revolution of one circular arc onto the arc's
+    /// centre or past it (`revolution_offset_collapses`, WR-567): the cases where
+    /// [`Self::create_offset_surface`] gives no surface. `false` for every other surface.
     ///
     /// # Errors
     ///
@@ -2695,7 +2695,7 @@ impl Surface {
             SurfaceKind::Torus(s) => s.offset_collapses(signed_offset_distance, tol),
             // the fork's SmBallPatch::OffsetCollapses (f8e6709)
             SurfaceKind::BallPatch(s) => s.offset_collapses(k, signed_offset_distance, tol),
-            SurfaceKind::SurfOfRevolution(s) if k.fixes.revolution_round_offset_collapses => {
+            SurfaceKind::SurfOfRevolution(s) => {
                 self.revolution_offset_collapses(k, s, signed_offset_distance, tol)?
             }
             _ => false,
@@ -2705,17 +2705,24 @@ impl Surface {
     /// Not upstream (the fork's `SmSurfOfRevolution::OffsetCollapses`, WR-567): whether
     /// the offset by `signed_offset_distance` shrinks this surface of revolution `s`
     /// onto its spine or past it. Its generatrix is one circular arc of radius `r`
-    /// (`IsArc(9, tol)`, `r > tol`; a fillet's round along a circular edge), and the
-    /// offset leaves a radius `r - d (N . k) r` below `tol`, with `k` the curvature
+    /// (`IsArc(9, tol)` nominates the circle, `r > tol`; a fillet's round along a
+    /// circular edge), proved over the whole generatrix ([`generatrix_on_circle`]), and the
+    /// offset leaves a radius `r - d sign(N . k)` below `tol`, with `k` the curvature
     /// vector of the generatrix-direction iso-curve (the arc revolved: `|k| = 1/r`,
     /// pointing at the arc's centre) and `N` the surface normal, both at the middle of
-    /// the natural UV domain. A failed arc test or evaluation, or a pole there, is
-    /// `false`.
+    /// the natural UV domain: only the side is read there, the amount is the circle's. A
+    /// failed arc test or evaluation, a generatrix point proved off the circle, or a pole
+    /// there, is `false`.
     ///
     /// # Errors
     ///
     /// [`SolidError::Unported`] from the arc test or the evaluations; those of the
-    /// natural UV domain.
+    /// natural UV domain; `Unsupported` for a generatrix that is neither proved on the
+    /// circle its samples nominate nor off it (it comes to the tolerance's edge, or has no
+    /// exact NURB form to bound, its NURB not made yet, or more pieces than
+    /// [`on_circle`]'s bound), whose curvature where the side is read is not within half of
+    /// the circle's (NaN or zero included), or (not a circle) whose own radius there would
+    /// decide the collapse the other way: the offset is refused, not dropped.
     fn revolution_offset_collapses(
         &self,
         k: &Kernel,
@@ -2727,11 +2734,25 @@ impl Surface {
         let Some(gen) = s.gen_curve() else {
             return Ok(false);
         };
-        let Some(Some((_, radius, _, _))) = ignored_surface_result(gen.is_arc(k, 9, tol))? else {
+        let Some(Some((frame, radius, _, _))) = ignored_surface_result(gen.is_arc(k, 9, tol))?
+        else {
             return Ok(false);
         };
         if radius <= tol {
             return Ok(false);
+        }
+        // the samples only nominate the circle: the whole generatrix is proved on it, a
+        // point off it is a witness that it is no arc, and neither is a refusal (no face
+        // is dropped on a sampled arc, solidcraft#17790's review)
+        match generatrix_on_circle(gen, &frame, radius, tol)? {
+            OnCircle::Within => {}
+            OnCircle::Outside(_) => return Ok(false),
+            OnCircle::Unproved => {
+                return Err(SolidError::Unsupported {
+                    operation: OP_REV_COLLAPSE,
+                    reason: "the generatrix is neither proved on its circle nor off it",
+                })
+            }
         }
 
         // the curvature of the generatrix direction's iso-curve, at the middle of the domain
@@ -2754,10 +2775,41 @@ impl Surface {
         }
         let curvature = (d2 - d1 * (d2.dot(d1) / speed_sq)) / speed_sq;
 
-        // radius r - d (N . k) r: N . k r is +1 where the normal points at the centre, -1
-        // away from it
+        // N . k r is +1 where the normal points at the centre, -1 away from it: only its
+        // sign is taken from this one point. The amount is the proved circle's radius: the
+        // offset leaves r - d sign(N . k). A generatrix proved only within `tol` of the
+        // circle can bend by far more than `tol` relative to it, so the curvature read here
+        // decides nothing; where its own radius 1 / |N . k| would answer the other way, or
+        // its side is not clearly that of the circle, the offset is refused, never dropped
+        // on it (solidcraft#17907's review). A circle is its own curvature everywhere.
         let towards_centre = normal.dot(curvature) * radius;
-        Ok(radius - signed_offset_distance * towards_centre < tol)
+        let sign = if towards_centre < 0.0 { -1.0 } else { 1.0 };
+        // The side is taken only where the generatrix bends clearly as its circle does:
+        // within half of `±1`. Any band below 1 fixes the sign; half keeps the local radius
+        // within [2r/3, 2r] of the circle's, a same-side bend by a factor-of-two margin,
+        // while an exact arc's rounding (far below it) passes. A NaN or zero `N . k` (a
+        // degenerate normal or derivative, or a generatrix that does not bend along the
+        // normal) is refused, a circle's too: no side is read from it.
+        #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+        if !((towards_centre - sign).abs() <= 0.5) {
+            return Err(SolidError::Unsupported {
+                operation: OP_REV_COLLAPSE,
+                reason: "the generatrix bends unlike its circle where its side is read",
+            });
+        }
+        let collapses = radius - signed_offset_distance * sign < tol;
+        if is_exact_circle(gen) {
+            return Ok(collapses);
+        }
+        let local = radius / towards_centre.abs();
+        if (local - signed_offset_distance * sign < tol) != collapses {
+            return Err(SolidError::Unsupported {
+                operation: OP_REV_COLLAPSE,
+                reason:
+                    "the generatrix's curvature and its circle's radius disagree on the collapse",
+            });
+        }
+        Ok(collapses)
     }
 
     /// The silhouette curves of the surface over `uv_domain` for a parallel
@@ -4763,6 +4815,40 @@ fn ignored_trim_cache_result<T>(result: Result<T>) -> Result<Option<T>> {
 /// Control errors must leave the caller before it reads a fallback value.
 pub(super) fn ignored_surface_result<T>(r: Result<T>) -> Result<Option<T>> {
     ignored(r)
+}
+
+/// Whether `gen` is a circle: an ellipse of the circle class whose radii are equal (exactly:
+/// a circle-class ellipse whose radii differ is bounded as a NURB).
+fn is_exact_circle(gen: &Curve) -> bool {
+    matches!(gen.kind(), CurveKind::Ellipse(e) if e.is_circle_class() && e.x_radius() == e.y_radius())
+}
+
+/// Whether the generatrix `gen` lies within `tol` of the circle its arc test nominated
+/// (`frame`'s origin and Z axis, `radius`).
+///
+/// A circle (an [`crate::curve::ellipse::Ellipse`] of the circle class whose two radii are
+/// equal) is its own arc by definition: its arc test returns its own placement and radius,
+/// not a circle fitted to samples ([`crate::curve::ellipse::Ellipse::is_arc`]), so it is
+/// [`OnCircle::Within`] at any `tol`; its NURB only represents that circle, to rounding.
+/// Any other curve is bounded over its whole NURB ([`on_circle`]), and a curve without an
+/// exact NURB form is [`OnCircle::Unproved`].
+///
+/// # Errors
+///
+/// Those of [`on_circle`].
+fn generatrix_on_circle(
+    gen: &Curve,
+    frame: &crate::geom::axis2_placement::Axis2Placement,
+    radius: f64,
+    tol: f64,
+) -> Result<OnCircle> {
+    if is_exact_circle(gen) {
+        return Ok(OnCircle::Within);
+    }
+    match gen.b_spline_base().and_then(|b| b.gw_nurb()) {
+        Some(nurb) => on_circle(nurb, frame.origin(), frame.z_axis(), radius, tol),
+        None => Ok(OnCircle::Unproved),
+    }
 }
 
 #[cfg(test)]
