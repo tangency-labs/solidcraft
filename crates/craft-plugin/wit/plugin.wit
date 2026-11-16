@@ -1,8 +1,11 @@
 package craft:plugin@0.1.0;
 
-// Capability `commands@0.1`: every interface in this file. A plugin names it in its manifest's
-// `capabilities` list. Later capabilities (ui, viewport, formats, storage) arrive as their own
-// interfaces. While the version is 0.x, a minor version may break the one before it.
+// Capabilities are sets of the interfaces in this file. A plugin names the ones it needs in its
+// manifest's `capabilities` list:
+// - `commands@0.1`: types, commands, log, control, files, clock and entry (world `command-plugin`);
+// - `formats@0.1`: types, log, control, clock, source, design and importer (world `importer-plugin`).
+// Later capabilities (ui, viewport, storage) arrive as their own interfaces. While the version is
+// 0.x, a minor version may break the one before it.
 // App commands and their schemas are data; this world never names app types.
 interface types {
     type json = string;
@@ -44,6 +47,34 @@ interface entry {
     use types.{json, plugin-error};
     execute: func(entry: string, params: json) -> result<json, plugin-error>;
 }
+// The file an importer converts, read in chunks so each host call stays small.
+interface source {
+    use types.{plugin-error};
+    // The file being imported: its name, without folders, and its size in bytes.
+    record file-info { name: string, size: u64 }
+    // At most `len` bytes (up to 1 MiB) at `offset`; empty at the end of the file. `path` "" is the
+    // file being imported. Any other path is relative to that file's folder and needs the
+    // `input_folder` permission: an assembly reads its parts this way.
+    read: func(path: string, offset: u64, len: u32) -> result<list<u8>, plugin-error>;
+    // The size of a file, or none when there is no such file.
+    size: func(path: string) -> result<option<u64>, plugin-error>;
+    // The path as the folder spells it: `path` itself when it exists, else the one file whose name
+    // matches it ignoring case, else none. Needs `input_folder` for any path but "".
+    resolve: func(path: string) -> result<option<string>, plugin-error>;
+}
+// Where an importer writes its result: a SolidCraft design file, in order, at most 1 MiB per call.
+interface design {
+    use types.{plugin-error};
+    write: func(bytes: list<u8>) -> result<_, plugin-error>;
+}
+// What an importer exports: its manifest's importer entries, called by name.
+interface importer {
+    use types.{json, plugin-error};
+    use source.{file-info};
+    // Convert `file` with the entry's declared options. The design goes to `design.write`; the
+    // result is the loss report: what could not be carried over, as JSON.
+    import-file: func(entry: string, file: file-info, options: json) -> result<json, plugin-error>;
+}
 world command-plugin {
     import commands;
     import log;
@@ -51,4 +82,12 @@ world command-plugin {
     import files;
     import clock;
     export entry;
+}
+world importer-plugin {
+    import log;
+    import control;
+    import clock;
+    import source;
+    import design;
+    export importer;
 }

@@ -2161,6 +2161,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 deleted.extend(d);
             }
         }
+        // Not upstream (WR-214): a proto edge from a proto vertex back to itself that can
+        // be neither split nor dropped refuses the Boolean, though a proto edge's error
+        // only warns here.
+        if let Some(refusal) = mgr.take_self_loop_refusal() {
+            return Err(refusal);
+        }
 
         // Resolve OverlappingPEs (SE_MSG: the status only warns)
         if let Some(d) = ignore_soft(mgr.resolve_overlapping_proto_edges(k, brep, approx_tol))? {

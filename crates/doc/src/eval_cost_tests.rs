@@ -156,6 +156,7 @@ fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
         angle: 0.0,
         suppressed: false,
         exprs: Default::default(),
+        offset_xy: [0.0; 2],
         captured: None,
         constraint: None,
     });
@@ -347,7 +348,7 @@ fn a_sketch_on_a_fixed_plane_costs_the_same_in_a_large_placed_design() {
     let planes = [
         PlaneRef::Origin { name: "XY".into() },
         PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "YZ".into() }), distance: "5 mm".into() },
-        PlaneRef::Construction { feature: plane.into() },
+        PlaneRef::Construction { feature: plane.into(), placement: None },
     ];
     for (k, plane) in planes.into_iter().enumerate() {
         let id = doc.add_feature(line_sketch(plane, Vec2::new(10.0, 1.0 + k as f64)), None).unwrap();
@@ -378,7 +379,7 @@ fn moving_a_construction_plane_moves_the_sketch_on_it() {
         plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: distance.into() },
     };
     let plane = doc.add_feature(offset("5 mm"), Some("Datum")).unwrap();
-    let sketch = doc.add_feature(line_sketch(PlaneRef::Construction { feature: plane.into() }, Vec2::new(10.0, 1.0)), None).unwrap();
+    let sketch = doc.add_feature(line_sketch(PlaneRef::Construction { feature: plane.into(), placement: None }, Vec2::new(10.0, 1.0)), None).unwrap();
     let mut model = Model::new();
     model.evaluate(&doc);
     assert!((model.state().sketch(sketch).unwrap().plane.origin.z - 5.0).abs() < 1e-9);
@@ -2269,6 +2270,31 @@ fn a_tap_marking_still_searches_the_bodies_within_its_reach() {
         assert_eq!(threads[0].body, body);
         assert_eq!(threads[0].internal, internal);
     }
+}
+
+/// A tap marking in a part looks in that part's own bodies first: the bodies of other parts are
+/// in their own coordinates, so a part built alike has a face at the same point, and searching
+/// it too tessellated every such body for nothing.
+#[test]
+fn a_tap_marking_in_a_part_searches_that_parts_bodies_first() {
+    let mut doc = Document::new("parts");
+    let mut parts = Vec::new();
+    for name in ["A", "B"] {
+        let comp = doc.add_component(Some(name), 0).unwrap();
+        shaft(&mut doc, &format!("Shaft {name}"), Vec3::ZERO, 3.0, 6.0);
+        doc.features.last_mut().unwrap().component = comp;
+        parts.push(comp);
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let id = doc.add_feature(marking(Vec3::new(3.0, 0.0, 3.0)), None).unwrap();
+    doc.feature_mut(id).unwrap().component = parts[1];
+    let work = counted(|| model.evaluate(&doc));
+    assert_eq!(model.result(id).unwrap().error, None, "the marking builds");
+    assert_eq!(work.cylinder_search, 1, "only part B's shaft is searched");
+    let threads = &model.state().threads;
+    assert_eq!(threads.len(), 1);
+    assert_eq!(threads[0].body, "Shaft B");
 }
 
 /// A flat sheet of the default rule (2.5 mm steel) on a `w` x `h` rectangle from `corner` on XY.

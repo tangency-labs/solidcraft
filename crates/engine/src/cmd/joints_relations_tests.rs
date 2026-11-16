@@ -256,6 +256,7 @@ fn a_panel_full_of_parts_placed_by_relations_stays_solved() {
                 angle: 0.0,
                 suppressed: false,
                 exprs: Default::default(),
+                offset_xy: [0.0; 2],
                 captured: None,
                 constraint: None,
             };
@@ -833,4 +834,44 @@ fn a_rule_change_keeps_the_tag_where_joint_edit_drops_it() {
     assert!(near_z(block_z(&s), (10.0, 30.0)), "{:?}", block_z(&s));
     run(&mut s, "joint.edit", json!({"joint": "Mate1", "type": "planar"}));
     assert_eq!(rule(&s), Some((JointKind::Planar, None)));
+}
+
+/// Joint-only lateral parameters must not move the references kept by an assembly constraint.
+#[test]
+fn assembly_constraints_keep_their_reference_axes_when_given_lateral_offsets() {
+    for kind in ["concentric", "insert", "point_on_axis"] {
+        let mut s = Session::default();
+        for (name, base, height) in [("Shaft", [0, 0, 0], 20), ("Collar", [50, 10, 30], 10)] {
+            run(&mut s, "component.activate", json!({"component":"root"}));
+            run(&mut s, "component.create", json!({"name":name}));
+            run(&mut s, "solid.cylinder", json!({"base":base,"axis":[0,0,1],"radius":5,"height":height}));
+        }
+        let shaft = occ(&s, "Shaft");
+        run(&mut s, "occurrence.ground", json!({"occurrence":shaft,"grounded":true}));
+        let a = json!({"occurrence":"Shaft","circle":[5,0,20]});
+        let b = if kind == "point_on_axis" {
+            json!({"occurrence":"Collar","point":[50,10,30]})
+        } else {
+            json!({"occurrence":"Collar","circle":[55,10,30]})
+        };
+        // Default parameter checking is off. Unknown keys must keep their previous inert meaning.
+        let reply = constrain(&mut s, kind, a, b, json!({"name":"Seat","offset_x":12,"offset_y":-8}));
+        assert!(clean(&reply), "{reply}");
+        assert_eq!(s.doc.assembly.joints[0].offset_xy, [0.0; 2]);
+        let z = if kind == "insert" { 20.0 } else { 30.0 };
+        assert!(near(place(&s, "Collar", Vec3::new(50.0, 10.0, 30.0)), Vec3::new(0.0, 0.0, z), 1e-6));
+        let before = s.doc.to_json();
+        let joint_type = serde_json::to_value(s.doc.assembly.joints[0].kind).unwrap();
+        run(&mut s, "joint.edit", json!({"joint":"Seat","type":joint_type,"offset_x":0,"offset_y":0}));
+        assert_eq!(s.doc.to_json(), before, "unchanged dialog fields preserve the constraint");
+        for key in ["offset_x", "offset_y"] {
+            let mut edit = json!({"joint":"Seat","name":"Wrong"});
+            edit[key] = json!(1);
+            assert!(s.execute("joint.edit", &edit).is_err());
+            assert_eq!(s.doc.to_json(), before, "a refused lateral edit is atomic");
+        }
+        run(&mut s, "joint.edit", json!({"joint":"Seat","type":"rigid","offset_x":2,"offset_y":3}));
+        assert_eq!(s.doc.assembly.joints[0].constraint, None);
+        assert_eq!(s.doc.assembly.joints[0].offset_xy, [2.0, 3.0]);
+    }
 }

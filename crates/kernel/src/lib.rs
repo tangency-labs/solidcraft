@@ -164,13 +164,13 @@ pub use blend::{
     ChamferSide, FilletTurn, FitSearch, SETBACK_AT_LEAST, blend_edge_middles, blend_edges, chamfer, chamfer_carrying_face, chamfer_max,
     chamfer_max_why, chamfer_sides, chamfer_sides_carrying_face, fillet, fillet_each, fillet_g2, fillet_g2_corners, fillet_g2_with_g2_corners,
     fillet_least_setback, fillet_max, fillet_max_each, fillet_max_why, fillet_removing, fillet_setback, largest_fit_note, named_fit,
-    names_largest_fit, tangent_chain, tangent_chain_edges, with_fit_note, without_fit_note,
+    names_largest_fit, smooth_picks, tangent_chain, tangent_chain_edges, with_fit_note, without_fit_note,
 };
 pub use blend_corner::fillet_radii;
 pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
 pub use body::{
-    Body, COLOUR_NAME_MAX, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, MeshTolerance, Paint, PointClass,
-    Refusal, SurfaceKind, colour_name,
+    Body, COLOUR_NAME_MAX, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, MESH_MIN_ANGLE, MeshSpec,
+    MeshTolerance, Paint, PlanStats, PointClass, RayPick, Refusal, SurfaceKind, colour_name, placed_mesh,
 };
 pub use boundary::{Boundary, boundary_patch};
 pub use boundary_network::{BoundaryCurve, CurveSource, MAX_CHAIN_CURVES, MAX_EDGE_PICKS, boundary_join, boundary_surface};
@@ -187,7 +187,7 @@ pub use continuity_order::{Construction, Continuity};
 pub use corner_g2::{CURVATURE_SHARE, DEFAULT_SETBACK_FACTOR};
 pub use curvature_comb::{CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH, comb_edge_near, edge_comb, edge_distance, iso_comb};
 pub use delete_face::delete_faces;
-pub use distance::{BodyDistance, DistanceShape, body_distance};
+pub use distance::{BodyDistance, DistanceShape, Members, body_distance, edges_closest, point_closest};
 pub use draft_corners::{CornerFill, CornerOption, CornerRefusal, CornerReport, DraftCorner, draft_corners};
 pub use emboss::{cylinder_emboss_anchor, emboss_cylinder, emboss_cylinder_at, has_cylinder_emboss_wall, infer_cylinder_emboss};
 pub use fair::{
@@ -229,8 +229,8 @@ pub use step::{step_export, step_export_with_face_ids};
 /// The largest STEP text the importer parses; `solidcraft_io::limits` keeps it at the limit in force (#13329).
 pub use step_in::p21::{max_bytes as step_max_bytes, set_max_bytes as set_step_max_bytes};
 pub use step_in::{
-    ImportIssue, ImportReport, ImportedBody, IssueKind, StepImport, StepNode, StepReading, step_cache_alive, step_import, step_import_shared,
-    step_orientation_errors, step_validate,
+    ImportIssue, ImportReport, ImportedBody, IssueKind, LeftOut, StepImport, StepNode, StepReading, step_cache_alive, step_import,
+    step_import_shared, step_orientation_errors, step_validate,
 };
 pub use step_out::{ExportBody, ExportProduct, StepExport, StepHeader, step_export_bodies, step_export_bodies_with_face_ids, step_export_products};
 pub use surface_extend::{ExtendLimit, ExtendMode, ExtendOptions, extend_surface};
@@ -277,6 +277,7 @@ impl From<solidcore_tess::TessError> for KernelError {
             solidcore_tess::TessError::Invalid(m) => KernelError::Invalid(m),
             solidcore_tess::TessError::Failed(m) => KernelError::Failed(m),
             solidcore_tess::TessError::Internal(m) => KernelError::Internal(m),
+            e @ solidcore_tess::TessError::TooManyVertices { .. } => KernelError::TooLarge(e.to_string()),
         }
     }
 }

@@ -34,7 +34,7 @@ use crate::geom::vector3d::sqrt;
 use crate::kernel::Kernel;
 use crate::math::Vec3;
 use crate::nurbs::b_spline_curve::BSplineCurve;
-use crate::nurbs::math::{gamma, NOW, NOZ};
+use crate::nurbs::math::{gamma, CPoint, NOW, NOZ};
 
 const OP: &str = "blend::blend_corner::on_face::clear_of";
 
@@ -85,6 +85,95 @@ pub fn bezier_pieces(k: &Kernel, curve: &Curve) -> Result<Option<Vec<Vec<Hom>>>>
 ///
 /// As [`bezier_pieces`].
 pub fn bezier_spans(k: &Kernel, curve: &Curve) -> Result<Option<Vec<Span>>> {
+    let Some(base) = spline_base(k, curve)? else {
+        return Ok(None);
+    };
+    let Some(nurb) = base.nurb.as_ref() else {
+        return Ok(None);
+    };
+    let mut pieces = Vec::new();
+    for bez in nurb.decompose_bez()? {
+        let (Some(&a), Some(&b)) = (bez.knots().first(), bez.knots().last()) else {
+            return Ok(None);
+        };
+        let mut piece = Vec::new();
+        for cp in bez.cpts() {
+            let Some(h) = homogeneous(cp) else {
+                return Ok(None);
+            };
+            piece.push(h);
+        }
+        pieces.push(([a, b], piece));
+    }
+    Ok(Some(pieces))
+}
+
+/// How far each Euclidean point of the pieces [`bezier_pieces`] gives for `curve` can be
+/// from the exact one, over all of them; `None` where [`bezier_pieces`] gives none or the
+/// bound is not finite.
+///
+/// `decompose_bez` makes each point by levels of `alpha a + (1 - alpha) b`, one level per
+/// knot insertion, from points of earlier levels or copies of them, so a point is at most
+/// `D` levels from the B-spline's control points, `D` its degree times its knot count. The
+/// exact points of every level are convex combinations of the control points, within `M`,
+/// their largest homogeneous coordinate (the weight among them), and their weights at least
+/// `w`, the least weight. One level rounds `alpha` (a quotient of two knot differences) by
+/// `gamma(3)`, `1 - alpha` and the combination by `gamma(3)` and `gamma(2)` more, and adds
+/// at most `gamma(9) (M + e)` to its inputs' error `e`; after `D` levels a homogeneous
+/// coordinate is within `E = gamma(9 D) M`. A Euclidean coordinate `x / w` is then within
+/// `E (1 + P) / (w - E)` and its division's `gamma(1) P`, `P = M / w` bounding it, and a
+/// point within `sqrt 3` of that; `2` for `sqrt 3`, `gamma(8)` for the rounding of the bound.
+///
+/// # Errors
+///
+/// As [`bezier_pieces`].
+pub fn pieces_rounding(k: &Kernel, curve: &Curve) -> Result<Option<f64>> {
+    let Some(base) = spline_base(k, curve)? else {
+        return Ok(None);
+    };
+    let Some(nurb) = base.nurb.as_ref() else {
+        return Ok(None);
+    };
+    let (mut most, mut w_min) = (0.0f64, f64::INFINITY);
+    for cp in nurb.cpts() {
+        let Some(h) = homogeneous(cp) else {
+            return Ok(None);
+        };
+        most = h.iter().fold(most, |m, c| m.max(c.abs()));
+        w_min = w_min.min(h[3]);
+    }
+    let levels = nurb
+        .degree()
+        .checked_mul(nurb.knots().len())
+        .and_then(|d| d.checked_mul(9));
+    let Some(levels) = levels else {
+        return Ok(None);
+    };
+    let g = gamma(levels);
+    let e = g * most;
+    let p = most / w_min;
+    let r = 2.0 * (e * (1.0 + p) / (w_min - e) + gamma(1) * p) * (1.0 + gamma(8));
+    let bounded = (0.0..0.5).contains(&g) && w_min > e && r.is_finite();
+    Ok(bounded.then_some(r))
+}
+
+/// A control point as a homogeneous point; `None` for a planar (2D) one or one whose
+/// weight is not positive and finite.
+fn homogeneous(cp: &CPoint) -> Option<Hom> {
+    if cp.z == NOZ {
+        return None;
+    }
+    let h = if cp.w == NOW {
+        [cp.x, cp.y, cp.z, 1.0]
+    } else {
+        [cp.x, cp.y, cp.z, cp.w]
+    };
+    (h.iter().all(|c| c.is_finite()) && h[3] > 0.0).then_some(h)
+}
+
+/// The B-spline `curve` is built on ([`bezier_pieces`]); `None` for a curve of another kind
+/// or an ellipse whose B-spline cannot be made.
+fn spline_base<'a>(k: &Kernel, curve: &'a Curve) -> Result<Option<Cow<'a, BSplineCurve>>> {
     let base: Cow<'_, BSplineCurve> = match curve.kind() {
         CurveKind::BSpline(c) => Cow::Borrowed(c),
         CurveKind::Line(c) => c.base_with_nurb()?,
@@ -101,32 +190,7 @@ pub fn bezier_spans(k: &Kernel, curve: &Curve) -> Result<Option<Vec<Span>>> {
         CurveKind::Parabola(c) => Cow::Borrowed(c.base()),
         _ => return Ok(None),
     };
-    let Some(nurb) = base.nurb.as_ref() else {
-        return Ok(None);
-    };
-    let mut pieces = Vec::new();
-    for bez in nurb.decompose_bez()? {
-        let (Some(&a), Some(&b)) = (bez.knots().first(), bez.knots().last()) else {
-            return Ok(None);
-        };
-        let mut piece = Vec::new();
-        for cp in bez.cpts() {
-            if cp.z == NOZ {
-                return Ok(None);
-            }
-            let h = if cp.w == NOW {
-                [cp.x, cp.y, cp.z, 1.0]
-            } else {
-                [cp.x, cp.y, cp.z, cp.w]
-            };
-            if !h.iter().all(|c| c.is_finite()) || h[3] <= 0.0 {
-                return Ok(None);
-            }
-            piece.push(h);
-        }
-        pieces.push(([a, b], piece));
-    }
-    Ok(Some(pieces))
+    Ok(Some(base))
 }
 
 /// A piece on the stack: its homogeneous points, how many more times it may be halved, and
