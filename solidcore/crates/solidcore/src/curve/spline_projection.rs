@@ -545,6 +545,70 @@ mod tests {
         );
     }
 
+    #[test]
+    fn closed_circle_projects_as_one_circle_while_outline_keeps_two_halves() {
+        use std::f64::consts::{FRAC_1_SQRT_2, PI, TAU};
+        let circle = Curve::Circle {
+            frame: frame(),
+            radius: 2.,
+        };
+        let assert_whole = |c: &Curve, interval: [f64; 2], forward: bool| {
+            let pieces = project(c, interval, forward, &frame()).unwrap();
+            let [PlanarPiece::Seg(crate::prism::profile::Seg2::Arc { sweep, radius, .. })] =
+                pieces.as_slice()
+            else {
+                panic!("{pieces:?}")
+            };
+            assert!((*sweep - if forward { TAU } else { -TAU }).abs() < 1e-12);
+            assert!((*radius - 2.).abs() < 1e-12);
+        };
+        assert_whole(&circle, [0., TAU], true);
+        assert_whole(&circle, [0., TAU], false);
+        let pts = [
+            [2., 0.],
+            [2., 2.],
+            [0., 2.],
+            [-2., 2.],
+            [-2., 0.],
+            [-2., -2.],
+            [0., -2.],
+            [2., -2.],
+            [2., 0.],
+        ];
+        let rational = Curve::RationalSpline {
+            knots: vec![0., 0., 0., 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1., 1., 1.],
+            homogeneous: pts
+                .iter()
+                .enumerate()
+                .map(|(i, [x, y])| {
+                    let w = if i % 2 == 0 { 1. } else { FRAC_1_SQRT_2 };
+                    [x * w, y * w, 0., w]
+                })
+                .collect(),
+        };
+        assert_whole(&rational, [0., 1.], true);
+        assert_whole(&rational, [0., 1.], false);
+        let partial = project(&circle, [0., PI], true, &frame()).unwrap();
+        assert!(
+            matches!(partial.as_slice(), [PlanarPiece::Seg(crate::prism::profile::Seg2::Arc { sweep, .. })] if (*sweep-PI).abs()<1e-12)
+        );
+        let k = crate::Kernel::default();
+        let native =
+            crate::curve::from_parameters::from_parameters(&k, &circle, [0., TAU]).unwrap();
+        let ends = [at(&circle, 0.), at(&circle, TAU)];
+        let run = Run {
+            curve: &native.curve,
+            interval: native.interval,
+            forward: true,
+            ends,
+        };
+        let outline =
+            crate::prism::read::planar_pieces(&k, &run, &frame(), 1e-6, &mut 262_144, false)
+                .unwrap();
+        assert_eq!(outline.len(), 2);
+        assert!(outline.iter().all(|p| matches!(p, crate::prism::profile::Seg2::Arc { sweep, .. } if (*sweep-PI).abs()<1e-12)));
+    }
+
     fn labelled_ellipse() -> (Curve, Curve) {
         let definition = Curve::Ellipse {
             frame: frame(),

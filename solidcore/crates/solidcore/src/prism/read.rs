@@ -353,6 +353,18 @@ pub fn planar_pieces(
     work: &mut usize,
     each_span: bool,
 ) -> Option<Vec<Seg2>> {
+    read_pieces(k, run, frame, tol, work, each_span, false)
+}
+
+fn read_pieces(
+    k: &Kernel,
+    run: &Run,
+    frame: &Frame,
+    tol: f64,
+    work: &mut usize,
+    each_span: bool,
+    whole: bool,
+) -> Option<Vec<Seg2>> {
     if !(tol.is_finite() && tol > 0.0) {
         return None;
     }
@@ -403,7 +415,7 @@ pub fn planar_pieces(
     let proved = |work: &mut usize| {
         label
             .or_else(|| through_three(k, run, (ts, te), frame, a, tol))
-            .and_then(|(center, radius)| arc(&spans, center, radius, a, b, tol, error, work))
+            .and_then(|(center, radius)| arc(&spans, center, radius, a, b, tol, error, work, whole))
     };
     if a.distance(b) > tol
         && spans
@@ -471,6 +483,7 @@ fn arc(
     tol: f64,
     error: f64,
     work: &mut usize,
+    whole: bool,
 ) -> Option<Vec<Seg2>> {
     let mut sweep: f64 = 0.0;
     for span in spans {
@@ -494,6 +507,14 @@ fn arc(
     if a.distance(b) < tol {
         if (sweep.abs() - TAU).abs() > angular_tol {
             return None;
+        }
+        if whole {
+            return Some(vec![Seg2::Arc {
+                center,
+                radius,
+                start: principal(start),
+                sweep: sweep.signum() * TAU,
+            }]);
         }
         let h = sweep.signum() * PI;
         return Some(vec![
@@ -710,7 +731,7 @@ fn read_curves(
     // A failed analytic certificate must leave work for the exact spline form.
     let allowance = *work / 2;
     let mut analytic_work = allowance;
-    let analytic = planar_pieces(k, run, frame, tol, &mut analytic_work, false);
+    let analytic = read_pieces(k, run, frame, tol, &mut analytic_work, false, true);
     *work -= allowance - analytic_work;
     if let Some(segs) = analytic {
         let native_spline = matches!(run.curve.kind(), CurveKind::BSpline(_));
