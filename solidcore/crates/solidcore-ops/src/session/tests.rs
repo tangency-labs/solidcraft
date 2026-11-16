@@ -224,8 +224,8 @@ fn a_kernel_that_panicked_is_never_handed_to_another_call() {
     in_own_process(
         "session::tests::a_kernel_that_panicked_is_never_handed_to_another_call",
         || {
-            all_fixes();
             const MARK: &str = "pool marker";
+            all_fixes();
             let marked = |k: &Kernel| k.upstream_ub_passed.contains(&MARK);
             let idle_marked = || IDLE.lock().unwrap().iter().filter(|k| marked(k)).count();
 
