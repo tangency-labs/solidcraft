@@ -99,12 +99,14 @@
 //!   [`SolidError::InvalidInput`] with [`UNDEFINED_UPSTREAM`] as operation, which tells
 //!   it apart from a callee's real `SM_ERR_INVALID_INPUT`; the statuses upstream
 //!   ignores are ignored whatever they are, except these and [`SolidError::Unported`].
-//! - **Opt-in (WR-530, #402).** With `Kernel::fixes.local_operation_refuses_loose_tangent_edges`,
-//!   in a local operation ([`OffsetExecutive::is_local_operation`]) `ExtendTrimEdges`
+//! - **Loose tangent edges (WR-530, #402, not upstream).** In a local operation ([`OffsetExecutive::is_local_operation`]) `ExtendTrimEdges`
 //!   fails when the lifted edge drops onto the other extended surface farther than ten
-//!   times `max(edge tolerance, approximation tolerance)`, and `EdgeuseOffset` passes
-//!   that failure on (the fork's tangency-labs/smlib@23c5b0a).
-//! - **Opt-in (WR-530 addendum).** With `Kernel::fixes.local_operation_step_walls`, a
+//!   times `max(edge tolerance, approximation tolerance)`
+//!   ([`OffsetFailure::LooseTangentEdge`]), and `EdgeuseOffset` passes that refusal on
+//!   (the fork's tangency-labs/smlib@23c5b0a); any other failure of `ExtendTrimEdges` is
+//!   only reported, as upstream's (the fork's passed every failure on, refusing a lone
+//!   disc's lamina edge).
+//! - **Step walls (WR-530 addendum).** A
 //!   local operation's tangent edge whose two faces stay parallel but apart (one moved
 //!   along its normal) gets the ruled step wall between the two offset edges instead of
 //!   the extension (the fork's 5d428ae, 90aabff); `EdgeuseOffset::closing_wall` marks it.
@@ -175,6 +177,7 @@ use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_standard_solver::p1::CircularCrossSectionFsg;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::{Curve, CurveKind, ELLIPSE_TYPE, LINE_TYPE};
+use crate::curve::curve::p4::is_closed_base;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::error::offset::OffsetFailure;
 use crate::error::{EntityRef, Failure, Reason, Result, SolidError, SM_ERR_NULL_POINTER};
@@ -377,6 +380,15 @@ fn is_tangent_end_off_curve(e: &SolidError) -> bool {
     )
 }
 
+/// Whether `e` is the refusal of a tangent edge whose new faces no longer meet along it
+/// ([`OffsetFailure::LooseTangentEdge`]).
+fn is_loose_tangent_edge(e: &SolidError) -> bool {
+    matches!(
+        e.failure().map(|f| &f.reason),
+        Some(Reason::Offset(OffsetFailure::LooseTangentEdge { .. }))
+    )
+}
+
 /// `SmTArray::FindElement`.
 fn contains<O: PartialEq>(list: &[O], item: &O) -> bool {
     list.iter().any(|x| x == item)
@@ -445,7 +457,7 @@ pub struct EdgeuseOffset<O> {
     pub trim_orientations: Vec<OrientType>,
     /// `rSelfIntersections` (never filled: the self-intersection block is `#if 0`).
     pub self_intersections: SsiData<O>,
-    /// Not upstream (`*pbOptClosingWall`, opt-in `Kernel::fixes.local_operation_step_walls`,
+    /// Not upstream (`*pbOptClosingWall`, the WR-530 addendum's step walls,
     /// fork tangency-labs/smlib 5d428ae): `surface` is a step wall, which spans the gap
     /// between two edges and is never extended (as a lamina side wall).
     pub closing_wall: bool,
@@ -783,7 +795,7 @@ pub trait OffsetBrep<O>: ProtoGeometry<O> {
     /// `SmEdgeuse::GetFaceuse` (`topology::edgeuse::p1::faceuse`).
     fn edgeuse_faceuse(&self, eu: O) -> Result<Option<O>>;
     /// `SmEdgeuse::GetOrientation` (`topology::edgeuse::p1::orientation`), read only by
-    /// the opt-in step walls (`Kernel::fixes.local_operation_step_walls`); an
+    /// the step walls (WR-530 addendum); an
     /// implementation that does not provide it fails there.
     ///
     /// # Errors
@@ -1316,6 +1328,43 @@ fn seam_twin(k: &Kernel, curve: &Curve, t: f64, tol: f64) -> Result<Option<f64>>
     };
     let on_seam = distance(curve.evaluate_point(k, t)?, curve.evaluate_point(k, near)?) <= tol;
     Ok(on_seam.then_some(far))
+}
+
+/// Not upstream (WR-673, #2174): whether the point of `curve` at `t` is the first trim
+/// point (at `t_first`) again, reached round a closed curve: the curve is closed over
+/// its natural interval, and over the span from `t_first` to `t` its ends lie within
+/// `tol` of each other while its middle does not (`SmCurve::IsClosed` on that span),
+/// so the span runs round the curve back to its start. A short open edge whose second
+/// point lies within `tol` of its first is no such span (its middle is near both ends,
+/// or the curve is not closed): that point stays a candidate.
+///
+/// # Errors
+///
+/// Those of [`Curve::is_closed`] and [`is_closed_base`].
+pub fn is_first_point_again(
+    k: &Kernel,
+    curve: &Curve,
+    t_first: f64,
+    t: f64,
+    tol: f64,
+) -> Result<bool> {
+    if !curve.is_closed(k, &curve.natural_interval(), tol)? {
+        return Ok(false);
+    }
+    let span = Extent1d::from_min_max(smos_min(t_first, t), smos_max(t_first, t));
+    is_closed_base(k, curve, &span, tol)
+}
+
+/// Not upstream (WR-530): whether a tangent edge's new curve, dropped onto the other
+/// face's new surface, lands `max_drop_to_surf` from it, past `meet_tol`: the faces no
+/// longer meet along the edge. A drop (or limit) that is not a number is no evidence that
+/// they meet, so it is loose too: only a drop within the limit passes.
+fn drop_is_loose(max_drop_to_surf: f64, meet_tol: f64) -> bool {
+    // `!(max_drop_to_surf <= meet_tol)`, spelled without a negated partial comparison
+    !matches!(
+        max_drop_to_surf.partial_cmp(&meet_tol),
+        Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+    )
 }
 
 /// The surface behind `h` (a dereference upstream).
@@ -3829,22 +3878,22 @@ impl OffsetGeometryCreation {
 
             // search every solution for the one closest to the BaseVertex to use as the trimPoint
             let base_point = brep.vertex_point(base_vertex)?;
-            // `Kernel::fixes.offset_open_edge_second_trim_point` (WR-673, #2174; the fork's
+            // Not upstream (WR-673, #2174; the fork's
             // tangency-labs/smlib@7ee0876): an open edge's second trim point is where its
-            // other vertex goes, never the first trim point again. On a closed 3D curve
-            // (the whole offset circle lifted for half a sphere cap's rim) the first point's
-            // twin across the curve's seam is another parameter but the same point: taken,
-            // it gave the half edge the whole circle and the loop a gap.
-            let open_second = k.fixes.offset_open_edge_second_trim_point
-                && i == 1
-                && !brep.edge_is_closed(base_edge)?;
-            let first = if open_second {
-                Some(curve_of(brep, curve_3d)?.evaluate_point(k, trim_ivl.min())?)
-            } else {
-                None
-            };
+            // other vertex goes, never the first trim point again reached round a closed 3D
+            // curve. On a closed 3D curve (the whole offset circle lifted for half a sphere
+            // cap's rim) the first point's twin across the curve's seam is another parameter
+            // but the same point: taken, it gave the half edge the whole circle and the loop
+            // a gap. Only that twin is passed over ([`is_first_point_again`]): an open edge
+            // that is short now keeps its real second point, however near the first.
+            let open_second = i == 1 && !brep.edge_is_closed(base_edge)?;
             let same_tol = 10.0 * self.this_approx_tol_3d;
-            let first_again = |pnt: Point3| first.is_some_and(|f| distance(pnt, f) <= same_tol);
+            let first_again = |t: f64| -> Result<bool> {
+                if !open_second {
+                    return Ok(false);
+                }
+                is_first_point_again(k, curve_of(brep, curve_3d)?, trim_ivl.min(), t, same_tol)
+            };
             // (not upstream, #14062) a closed edge's second trim point is its one vertex
             // again: where that point is the seam of a closed 3D curve (a loft's floor circle
             // offset, its seam at the vertex) it has the curve's two ends as parameters, and
@@ -3867,8 +3916,7 @@ impl OffsetGeometryCreation {
 
                     // search for the best solution
                     let dist_moved = distance(pnt, base_point);
-                    if dist_moved < found_dist && !are_same(t, trim_ivl.min()) && !first_again(pnt)
-                    {
+                    if dist_moved < found_dist && !are_same(t, trim_ivl.min()) && !first_again(t)? {
                         found_param = t;
                         found_dist = dist_moved;
                         found = true;
@@ -3883,8 +3931,7 @@ impl OffsetGeometryCreation {
                     let pnt = curve_of(brep, curve_3d)?.evaluate_point(k, t)?;
                     let dist_moved = distance(pnt, base_point);
 
-                    if dist_moved < found_dist && !are_same(t, trim_ivl.min()) && !first_again(pnt)
-                    {
+                    if dist_moved < found_dist && !are_same(t, trim_ivl.min()) && !first_again(t)? {
                         found_param = t;
                         found_dist = dist_moved;
                         found = true;
@@ -4063,7 +4110,8 @@ impl OffsetGeometryCreation {
     /// one concave; a lamina, tangent or shell-less edge counts as neither) and each of
     /// the two adjacent faces (`face_solutions`, ranges of `solutions`) has a cut nearest
     /// the vertex (not the start already chosen, nor, on an open edge's second end, the
-    /// first trim point again), and the two cuts are apart, the one nearer along the
+    /// first trim point again round a closed curve, [`is_first_point_again`]), and the two
+    /// cuts are apart, the one nearer along the
     /// curve to where the base edge's middle drops onto it. `None` keeps the nearest.
     #[allow(clippy::too_many_arguments)]
     fn first_cut_from_far_end<O: ClassObject + SolutionObject>(
@@ -4080,15 +4128,10 @@ impl OffsetGeometryCreation {
         face_solutions: &[(usize, usize)],
         tan_tol_deg: f64,
     ) -> Result<Option<f64>> {
-        // an open edge's second trim point is never the first one again
+        // an open edge's second trim point is never the first one again reached round a
+        // closed 3D curve (WR-673, [`is_first_point_again`], as in `trim_extended_edge_ends`)
         let open_second = i == 1 && !brep.edge_is_closed(base_edge)?;
-        let first = if open_second {
-            Some(curve_of(brep, curve_3d)?.evaluate_point(k, trim_ivl.min())?)
-        } else {
-            None
-        };
         let same_tol = 10.0 * self.this_approx_tol_3d;
-        let first_again = |pnt: Point3| first.is_some_and(|f| distance(pnt, f) <= same_tol);
 
         let mut convex = true;
         let mut concave = true;
@@ -4148,7 +4191,17 @@ impl OffsetGeometryCreation {
                 let t = sol.start.param(0)?;
                 let pnt = curve_of(brep, curve_3d)?.evaluate_point(k, t)?;
                 let dist = distance(pnt, base_point);
-                if dist < best && !are_same(t, trim_ivl.min()) && !first_again(pnt) {
+                if dist < best
+                    && !are_same(t, trim_ivl.min())
+                    && !(open_second
+                        && is_first_point_again(
+                            k,
+                            curve_of(brep, curve_3d)?,
+                            trim_ivl.min(),
+                            t,
+                            same_tol,
+                        )?)
+                {
                     best = dist;
                     if let (Some(p), Some(f)) = (face_param.get_mut(ff), face_found.get_mut(ff)) {
                         *p = t;
@@ -4679,17 +4732,28 @@ impl OffsetGeometryCreation {
                 true,
                 None,
             )?;
-            // Opt-in (WR-530, #402; the fork's tangency-labs/smlib@23c5b0a): the edge is
+            // Not upstream (WR-530, #402; the fork's tangency-labs/smlib@23c5b0a): the edge is
             // lifted onto one face's new surface and dropped onto the other's. Faces offset
             // alike stay tangent, so the drop lands on the edge; when only one of them got a
             // new surface (a local operation moving a face beside a blend, or one piece of a
             // split face), the drop crosses the gap between them and the faces no longer
             // meet there
-            if k.fixes.local_operation_refuses_loose_tangent_edges && executive.is_local_operation()
-            {
+            if executive.is_local_operation() {
                 let meet_tol = 10.0 * smos_max(off_tol, self.this_approx_tol_3d());
-                if dropped.max_drop_to_surf > meet_tol {
-                    return Err(sm_err(OP_EXTEND));
+                let max_drop_to_surf = dropped.max_drop_to_surf;
+                if drop_is_loose(max_drop_to_surf, meet_tol) {
+                    // the edge of the input, named for the refusal where the handle names
+                    // one (error context only)
+                    let edge = match brep.topology_entity(edge) {
+                        Some((_, EntityRef::Edge(e))) => Some(e),
+                        _ => None,
+                    };
+                    let reason = OffsetFailure::LooseTangentEdge {
+                        edge,
+                        max_drop_to_surf,
+                        meet_tol,
+                    };
+                    return Err(Failure::new(OP_EXTEND, reason).into_error());
                 }
             }
             let uv_curves = dropped.uv_curves;
@@ -5361,8 +5425,8 @@ impl OffsetGeometryCreation {
         )
     }
 
-    /// Not upstream (`IsStepAcrossEdge`, fork tangency-labs/smlib 5d428ae, opt-in
-    /// `Kernel::fixes.local_operation_step_walls`): whether the faces of two offset edge
+    /// Not upstream (`IsStepAcrossEdge`, fork tangency-labs/smlib 5d428ae, the WR-530
+    /// addendum's step walls): whether the faces of two offset edge
     /// uses of one tangent edge stayed parallel across it but apart. At each of 11 samples
     /// along the first edge use the nearest point of the other's edge must lie farther
     /// than the edges meet within (`10 * max(edge tolerances, this_approx_tol_3d)`) and the
@@ -5481,7 +5545,7 @@ impl OffsetGeometryCreation {
     }
 
     /// Not upstream (`CreateStepWall`, fork tangency-labs/smlib 5d428ae and 90aabff,
-    /// opt-in `Kernel::fixes.local_operation_step_walls`): the ruled wall between two
+    /// the WR-530 addendum's step walls): the ruled wall between two
     /// offset edge uses whose faces lie apart ([`Self::is_step_across_edge`]), stored and
     /// returned as a handle. The rails are the two edges' trimmed NURBS curves; a rail
     /// whose weights are all one value (to `SM_EFF_ZERO` relative) is made non-rational
@@ -5643,15 +5707,11 @@ impl OffsetGeometryCreation {
             let tan_sec = !executive.crosses_at(original_edgeuse)
                 && brep.edgeuse_is_tangent_sector(k, original_edgeuse, tan_tol_deg)?;
 
-            // Not upstream (opt-in `Kernel::fixes.local_operation_step_walls`, fork
+            // Not upstream (WR-530 addendum, fork
             // tangency-labs/smlib 5d428ae): a local operation that moved only one of two
             // tangent faces along its normal leaves them parallel, one step apart: a wall
             // between their edges closes the body.
-            if k.fixes.local_operation_step_walls
-                && tan_sec
-                && !lamina
-                && executive.is_local_operation()
-            {
+            if tan_sec && !lamina && executive.is_local_operation() {
                 if let (Some(off), Some(other_off)) = (offset_edgeuse, other_offset_edgeuse) {
                     if self.is_step_across_edge(k, brep, off, other_off)? {
                         out.surface = Some(self.create_step_wall(k, brep, off, other_off)?);
@@ -5673,14 +5733,15 @@ impl OffsetGeometryCreation {
                     other_offset_edgeuse,
                     mark,
                 );
-                // Opt-in (WR-530): a local operation has no later step that would close
-                // the gap: it fails
-                if k.fixes.local_operation_refuses_loose_tangent_edges
-                    && executive.is_local_operation()
-                {
-                    extended?;
-                } else {
-                    let _ = ignore_soft(extended)?;
+                // Not upstream (WR-530): in a local operation, an edge whose faces no
+                // longer meet along it ([`OffsetFailure::LooseTangentEdge`]) has no later
+                // step that would close the gap: it fails. Any other problem is only
+                // reported, as upstream's
+                match extended {
+                    Err(e) if is_loose_tangent_edge(&e) => return Err(e),
+                    r => {
+                        let _ = ignore_soft(r)?;
+                    }
                 }
                 return Ok(out);
             }
@@ -7084,6 +7145,97 @@ mod tests {
         assert_eq!(smallest_tolerance(&[f64::NAN, 1e-5]), None);
         assert_eq!(smallest_tolerance(&[1e-5, f64::NAN]), None);
         assert_eq!(smallest_tolerance(&[]), None);
+    }
+
+    /// WR-673: an open edge's second trim point is passed over only where it is the first
+    /// trim point again, reached round a closed 3D curve (its twin across the seam). An
+    /// open edge whose real second point lies within the "same point" tolerance of the
+    /// first keeps it, on an open curve and on a closed one alike: a test of the distance
+    /// alone (the guard as first retired) passed both over and left the edge with no
+    /// second point.
+    #[test]
+    fn a_short_open_edge_keeps_its_second_trim_point() {
+        let k = Kernel::default();
+        let tol = 1e-5;
+        // an open line: its second point 4e-6 along, within the tolerance of the first
+        let line = Curve::from(
+            BSplineCurve::create_line_segment(
+                3,
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(1.0, 0.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let ivl = line.natural_interval();
+        let (t0, t) = (ivl.min(), ivl.evaluate(4e-6));
+        let near = distance(
+            line.evaluate_point(&k, t0).unwrap(),
+            line.evaluate_point(&k, t).unwrap(),
+        );
+        assert!(near > 0.0 && near <= tol, "{near}");
+        assert!(!is_first_point_again(&k, &line, t0, t, tol).unwrap());
+
+        // a closed circle of radius 10: the seam twin of its start is the first point
+        // again; a point 5e-6 along the circle from the start is a real second point
+        let circle = Curve::from(
+            crate::curve::ellipse::Ellipse::new_circle(
+                &k,
+                Point3::new(1.0, 2.0, 3.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Extent1d::from_min_max(0.0, 360.0),
+                10.0,
+                &crate::curve::ellipse::EllipseOptions::default(),
+            )
+            .unwrap(),
+        );
+        let ivl = circle.natural_interval();
+        let (t0, twin) = (ivl.min(), ivl.max());
+        let same = distance(
+            circle.evaluate_point(&k, t0).unwrap(),
+            circle.evaluate_point(&k, twin).unwrap(),
+        );
+        assert!(same <= tol, "{same}");
+        assert!(is_first_point_again(&k, &circle, t0, twin, tol).unwrap());
+        assert!(is_first_point_again(&k, &circle, twin, t0, tol).unwrap());
+        let step = 5e-6 / (10.0 * 2.0 * PI) * (ivl.max() - ivl.min());
+        let short = t0 + step;
+        let near = distance(
+            circle.evaluate_point(&k, t0).unwrap(),
+            circle.evaluate_point(&k, short).unwrap(),
+        );
+        assert!(near > 0.0 && near <= tol, "{near}");
+        assert!(!is_first_point_again(&k, &circle, t0, short, tol).unwrap());
+        // a point half way round is not the first point at all
+        assert!(!is_first_point_again(&k, &circle, t0, ivl.evaluate(0.5), tol).unwrap());
+
+        // an open half circle whose ends are apart: never the first point again
+        let arc = Curve::from(
+            crate::curve::ellipse::Ellipse::new_circle(
+                &k,
+                Point3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Extent1d::from_min_max(0.0, 180.0),
+                10.0,
+                &crate::curve::ellipse::EllipseOptions::default(),
+            )
+            .unwrap(),
+        );
+        let ivl = arc.natural_interval();
+        assert!(!is_first_point_again(&k, &arc, ivl.min(), ivl.min() + step / 2.0, tol).unwrap());
+    }
+
+    /// WR-530: a tangent edge's drop passes only within its limit; a drop or limit that
+    /// is not a number refuses the edge as loose rather than passing it.
+    #[test]
+    fn a_drop_that_is_not_a_number_is_loose() {
+        assert!(!drop_is_loose(0.0, 1e-4));
+        assert!(!drop_is_loose(1e-4, 1e-4));
+        assert!(drop_is_loose(1.000_000_1e-4, 1e-4));
+        assert!(drop_is_loose(f64::NAN, 1e-4));
+        assert!(drop_is_loose(0.0, f64::NAN));
+        assert!(drop_is_loose(f64::INFINITY, 1e-4));
     }
 
     /// The pieces of one cubic split apart and joined back again: the joint knot (full

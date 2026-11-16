@@ -43,15 +43,9 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.keep_operand_uv_trims = true;
     k.fixes.geometric_g2_continuity = true;
     k.fixes.proto_vertex_miss_is_false = true;
-    k.fixes.good_drop_result_distances_in_order = true;
     k.fixes.revolve_analytic_profile_faces = true;
-    k.fixes.revolve_holed_profile_void = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes.join_touching_loops = true;
-    k.fixes.local_operation_box_holds_new_surfaces = true;
-    k.fixes.local_operation_refuses_loose_tangent_edges = true;
-    k.fixes.local_operation_step_walls = true;
-    k.fixes.revolution_round_offset_collapses = true;
     k.fixes.uv_trim_corner_end_points_only = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
@@ -60,7 +54,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
-    k.fixes.point_solve_keeps_triangle_guess = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
     k.fixes.fillet_point_step_per_point = true;
     k.fixes.analytic_copy_keeps_parameterization = true;

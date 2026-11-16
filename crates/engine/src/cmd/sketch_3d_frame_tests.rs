@@ -1443,3 +1443,128 @@ fn a_plane_point_lift_keeps_the_3d_constraints() {
     near(fit(&held)[1], Vec3::new(23.0, 0.0, 0.0));
     near(fit(&held)[0], Vec3::new(10.0, 0.0, 0.0));
 }
+
+#[test]
+fn a_tangent_line_leaves_a_fixed_arc_along_its_end_and_a_loose_line_is_refused() {
+    // A quarter arc of radius 20 about the origin, from (20,0,0) round to (0,20,0), with a line
+    // into it along +Y and a line out of it drawn off true; Tangent turns the second one onto -X.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let d = 20.0 * std::f64::consts::FRAC_1_SQRT_2;
+    let into = run(&mut s, "sketch.line3d", json!({"points":[[20,-30,0],[20,0,0]]}))["curves"][0].as_str().unwrap().to_string();
+    let arc = run(&mut s, "sketch.arc3d", json!({"start":[20,0,0],"through":[d,d,0],"end":[0,20,0]}))["curves"][0].as_str().unwrap().to_string();
+    let out = run(&mut s, "sketch.line3d", json!({"points":[[0,20,0],[-30,25,3]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entities": [into, arc]}));
+    run(&mut s, "sketch.constraint.tangent", json!({"a": out, "b": arc}));
+    // The way out now runs along -X from the arc's end (its free end swung onto that line).
+    near(fit(&s, &out, 0), Vec3::new(0.0, 20.0, 0.0));
+    let end = fit(&s, &out, 1);
+    assert!((end.y - 20.0).abs() < 1e-7 && end.z.abs() < 1e-7 && end.x < -25.0, "{end:?}");
+    // A line not touching the arc has no tangent to take.
+    let loose = run(&mut s, "sketch.line3d", json!({"points":[[50,50,0],[60,50,0]]}))["curves"][0].as_str().unwrap().to_string();
+    let e = s.execute("sketch.constraint.tangent", &json!({"a": loose, "b": arc})).unwrap_err().to_string();
+    assert!(e.contains("meet"), "{e}");
+}
+
+#[test]
+fn relations_3d_square_up_a_frame_corner_and_hold_it_to_the_origin_planes() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    // Three legs from one corner, drawn roughly, and a second leg along the first.
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[100,4,2]]}));
+    let x = r["curves"][0].as_str().unwrap().to_string();
+    let y = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[3,80,5]]}))["curves"][0].as_str().unwrap().to_string();
+    let z = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[2,6,70]]}))["curves"][0].as_str().unwrap().to_string();
+    let far = run(&mut s, "sketch.line3d", json!({"points":[[0,60,3],[90,63,1]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{x}.start")}));
+    for leg in [&y, &z] {
+        run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{x}.start"), "b": format!("{leg}.start")}));
+    }
+    // x lies in XY; y square to x and in XY too; z square to both.
+    run(&mut s, "sketch.constraint.parallel", json!({"a": x, "b": "xy"}));
+    run(&mut s, "sketch.constraint.parallel", json!({"a": y, "b": "xy"}));
+    run(&mut s, "sketch.constraint.perpendicular", json!({"a": x, "b": y}));
+    run(&mut s, "sketch.constraint.perpendicular", json!({"a": x, "b": z}));
+    run(&mut s, "sketch.constraint.perpendicular", json!({"a": y, "b": z}));
+    // The far rail: parallel to x, as long as x, its start on XY.
+    run(&mut s, "sketch.constraint.parallel", json!({"a": far, "b": x}));
+    run(&mut s, "sketch.constraint.equal", json!({"a": far, "b": x}));
+    run(&mut s, "sketch.constraint.on_plane", json!({"point": format!("{far}.start"), "plane": "xy"}));
+    let (dx, dy, dz) = (fit(&s, &x, 1), fit(&s, &y, 1), fit(&s, &z, 1));
+    assert!(dx.z.abs() < 1e-7 && dy.z.abs() < 1e-7, "{dx:?} {dy:?}");
+    assert!(dx.dot(dy).abs() < 1e-6 && dx.dot(dz).abs() < 1e-6 && dy.dot(dz).abs() < 1e-6, "{dx:?} {dy:?} {dz:?}");
+    let (f0, f1) = (fit(&s, &far, 0), fit(&s, &far, 1));
+    assert!(f0.z.abs() < 1e-7);
+    assert!(((f1 - f0).len() - dx.len()).abs() < 1e-6 && (f1 - f0).cross(dx).len() < 1e-6 * dx.len() * (f1 - f0).len());
+    // A dimension to a plane: the upright's top 50 above XY. The far rail's end is already on
+    // XY (parallel to x, which lies in XY, from a start on it), so a height there is refused.
+    let h = run(&mut s, "sketch.dimension", json!({"entities": [format!("{z}.end"), "xy"], "value": 50}));
+    assert_eq!(h["type"], "plane_distance", "{h}");
+    assert!((fit(&s, &z, 1).z - 50.0).abs() < 1e-6);
+    assert!(s.execute("sketch.dimension", &json!({"entities": [format!("{far}.end"), "xy"], "value": 25})).is_err());
+    let e = s.execute("sketch.constraint.perpendicular", &json!({"a": x, "b": "xy"})).unwrap_err().to_string();
+    assert!(e.contains("only Parallel takes an origin plane") && e.contains("along_axis"), "{e}");
+}
+
+#[test]
+fn an_upright_set_to_80_degrees_to_xy_and_on_plane_take_plane_names_either_case() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    // Drawn lying in XY: the angle to it starts at 0.
+    let l = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,0,0]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{l}.start")}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": [l, "xy"], "value": "80 deg"}));
+    assert!((d["measured"].as_f64().unwrap() - 80.0).abs() < 1e-6, "{d}");
+    let top = fit(&s, &l, 1);
+    assert!((top.z / top.len() - 80f64.to_radians().sin()).abs() < 1e-9, "{top:?}");
+    let q = run(&mut s, "sketch.point3d", json!({"point":[3,4,5]}))["point"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.on_plane", json!({"point": q, "plane": "XY"}));
+    assert!(fit(&s, &q, 0).z.abs() < 1e-9);
+    // A line held on XY at both ends: each end moves straight down, as little as it can.
+    let w = run(&mut s, "sketch.line3d", json!({"points":[[0,10,5],[100,10,9]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.on_plane", json!({"points": [format!("{w}.start"), format!("{w}.end")], "plane": "xy"}));
+    near(fit(&s, &w, 0), Vec3::new(0.0, 10.0, 0.0));
+    near(fit(&s, &w, 1), Vec3::new(100.0, 10.0, 0.0));
+}
+
+#[test]
+fn a_paste_shifted_along_a_plane_keeps_the_distance_from_it_with_the_geometry() {
+    // A point 20 above XY by a dimension (its parameter `h`), a point on XZ; pasted 10 up and
+    // 5 along Y, each lands where the paste put it and stays there when solved.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY", "name": "Path"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let q = run(&mut s, "sketch.point3d", json!({"point":[3,4,20]}))["point"].as_str().unwrap().to_string();
+    let o = run(&mut s, "sketch.point3d", json!({"point":[7,0,6]}))["point"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.dimension", json!({"entities": [q, "xy"], "value": "h = 20"}));
+    run(&mut s, "sketch.constraint.on_plane", json!({"point": o, "plane": "xz"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "timeline.copy", json!({"features": ["Path"]}));
+    // Into another design.
+    let mut t = Session { foreign_copy: s.foreign_copy.clone(), ..Default::default() };
+    let pasted = run(&mut t, "timeline.paste", json!({"from_design": true, "translate": [0, 5, 10]}))["pasted"][0]["id"].as_u64().unwrap();
+    near(solved_fit(&t, pasted, &q, 0), Vec3::new(3.0, 9.0, 30.0));
+    near(solved_fit(&t, pasted, &o, 0), Vec3::new(7.0, 5.0, 16.0));
+    // The pasted distance still follows `h`: 25 above XY, plus the 10 the paste added.
+    let h = t.doc.params.iter().find(|p| !p.model).map(|p| p.name.clone()).unwrap();
+    run(&mut t, "parameters.change", json!({"name": h, "expression": "25 mm"}));
+    near(solved_fit(&t, pasted, &q, 0), Vec3::new(3.0, 9.0, 35.0));
+}
+
+#[test]
+fn a_driven_angle_to_a_plane_made_driving_keeps_the_side_the_line_is_on() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let l = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,0,5]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{l}.start")}));
+    let k = run(&mut s, "sketch.dimension", json!({"entities": [l, "xy"], "driven": true}))["constraint"].as_str().unwrap().to_string();
+    // The line is moved to run down at 30°; its driven angle reads 30°.
+    run(&mut s, "sketch.move3d", json!({"wire": l, "index": 1, "to": [8.660254037844386, 0, -5]}));
+    run(&mut s, "sketch.toggle_driven", json!({"constraint": k, "driven": false}));
+    let end = fit(&s, &l, 1);
+    assert!(end.z < 0.0 && (end.z / end.len() + 0.5).abs() < 1e-6, "still down at 30°: {end:?}");
+}

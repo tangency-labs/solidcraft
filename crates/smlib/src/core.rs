@@ -79,17 +79,14 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.keep_operand_uv_trims = true;
     f.proto_vertex_miss_is_false = true;
     f.revolve_analytic_profile_faces = true;
-    f.revolve_holed_profile_void = true;
     f.join_touching_loops = true;
     f.offset_analytic_mate_edges = true;
-    f.local_operation_refuses_loose_tangent_edges = true;
     f.uv_trim_corner_end_points_only = true;
     f.bspline_trim_preserves_uv_spans = true;
     f.boolean_vertex_by_best_crossing = true;
     f.classify_edge_interval = true;
     f.degenerate_proto_edge_in_one_vertex = true;
     f.new_edge_vertex_tolerance_covers_gap = true;
-    f.point_solve_keeps_triangle_guess = true;
     f.imprint_extends_edge_to_proto_vertex = true;
     f.fillet_point_step_per_point = true;
     f.analytic_copy_keeps_parameterization = true;
@@ -98,14 +95,11 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.curve_contacts_at_curve_ends = true;
     f.ssi_trace_tangent_curves_once = true;
     f.found_torus_sphere_keep_tested_nurb = true;
-    f.local_operation_box_holds_new_surfaces = true;
     f.shell_edges_on_analytics_exact = true;
     f.fillet_patch_keeps_fillet_edges = true;
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;
-    f.local_operation_step_walls = true;
     f.fillet_knife_edge_rounds = true;
-    f.revolution_round_offset_collapses = true;
     f.proto_edge_splits_at_captured_vertices = true;
     f.linear_sweep_arc_is_cylinder = true;
     f.fillet_trace_reaches_rails = true;
@@ -116,8 +110,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     // The fork's commits in `SMLIB_REV` 2fc375f, ported to solidcore since.
     f.offset_extension_as_itself = true;
     f.fillet_mitre_concave_face_corners = true;
-    f.good_drop_result_distances_in_order = true;
-    f.face_tight_box_searches_trim = true;
     f.ssi_low_angle_start_on_probation = true;
     f.fillet_variable_span_follows_fillet = true;
     f.simple_coincidence_crossing_is_point = true;
@@ -132,8 +124,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_exact_round_classes = true;
     f.offset_edges_keep_source_tolerance = true;
     f.surface_continuity_checks_last_v_knot = true;
-    f.offset_open_edge_second_trim_point = true;
-    f.surface_parallel_to_vector_checks = true;
     f.geometric_g2_continuity = true;
     f.degen_param_tiebreak_uses_actual_param = true;
     f.local_surface_intersect_guards_max_boundary_retry = true;

@@ -236,6 +236,7 @@ pub(crate) mod plugin_menu;
 mod plugin_slots;
 pub(crate) mod plugins;
 pub mod point_clouds;
+pub mod policy;
 pub mod prefs;
 pub mod prefs_notice;
 pub use solidcraft_ui_kit::prefs_window;
@@ -703,6 +704,9 @@ pub struct SolveApp {
     pub crashes: crash_ui::CrashUi,
     /// The update check and its window (`update`).
     pub updater: update::Updater,
+    /// What this computer's administrator set (`policy`). The host loads it at start; the default
+    /// is an unmanaged computer.
+    pub policy: policy::Policy,
     /// Safari's steps for installing the web app, while their window is open (`install`).
     pub install_steps: Option<install::Steps>,
     /// Toolbar buttons the user pinned, removed or reordered.
@@ -1030,6 +1034,7 @@ impl SolveApp {
             tickets: tickets::Tickets::new(),
             crashes: crash_ui::CrashUi::default(),
             updater: update::Updater::default(),
+            policy: policy::Policy::default(),
             install_steps: None,
             toolbar_custom: toolbar_custom::ToolbarCustom::default(),
             settings_profiles: settings_profiles::Profiles::default(),
@@ -1814,6 +1819,9 @@ impl SolveApp {
                 if id == "sketch.move" {
                     released_status(self, language, v);
                 }
+                if id == "occurrence.ground" {
+                    unground_joint_status(self, language, v);
+                }
                 if id == "file.new" {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);
@@ -1983,10 +1991,18 @@ impl SolveApp {
         }
         // Before the folder pick is cleared: a clicked Browser folder is what Show/Hide acts on.
         // With a menu open, this runs that menu's Show/Hide on what the menu is for.
-        if id == "ui.toggle_visibility" {
+        // Show/Hide (`browser.visibility`) started with nothing to act on, from a 3D mouse button,
+        // the command search or a key bound to it, does the same: it used to run with no
+        // parameters and answer "`visible` must be true or false" (#17912).
+        if matches!(id, "ui.toggle_visibility" | "browser.visibility") {
             if !context_menu::press_shortcut(self, "V") {
                 context_menu::toggle_visibility(self);
             }
+            return;
+        }
+        // Dialog OK runs OK in the open dialog and starts nothing (#17416).
+        if id == "ui.dialog_ok" {
+            dialogs::confirm(self);
             return;
         }
         self.tree.clear_folder_pick();
@@ -4164,6 +4180,30 @@ fn released_status(app: &mut SolveApp, language: solidcraft_ui_text::Locale, v: 
     let msg = language.format(id, &[("count", &count), ("names", &names.join(", "))]);
     app.set_status(msg, false);
     app.status_undo = true;
+}
+
+/// Grounding succeeds even when a joint has lost its origin or conflicts with another joint.
+/// Keep every reported issue in Messages without treating an unchanged placement as a failure.
+fn unground_joint_status(app: &mut SolveApp, language: solidcraft_ui_text::Locale, v: &Value) {
+    use i18n::LocaleNames;
+
+    if v.get("grounded").and_then(Value::as_bool) != Some(false) {
+        return;
+    }
+    let Some(id) = v.get("occurrence").and_then(Value::as_u64) else { return };
+    let occurrence = app.session.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.clone()).unwrap_or_else(|| id.to_string());
+    let occurrence = language.given_name(&occurrence);
+    for problem in ["errors", "conflicts"].iter().filter_map(|key| v.get(key).and_then(Value::as_array)).flatten() {
+        let (Some(joint), Some(reason)) = (problem.get("name").and_then(Value::as_str), problem.get("why").and_then(Value::as_str)) else {
+            continue;
+        };
+        let msg = language.format(
+            "joint.unground_issue",
+            &[("occurrence", &occurrence), ("joint", &language.given_name(joint)), ("reason", &language.diagnostic(reason))],
+        );
+        app.session.echo(msg.clone());
+        app.set_status(msg, false);
+    }
 }
 
 /// An edit in place command's result, saying when it waits for the end of the agent's turn.
