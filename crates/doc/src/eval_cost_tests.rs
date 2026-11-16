@@ -29,6 +29,7 @@ pub(super) struct Counts {
     pub digested: usize,
     pub mesh_digested: usize,
     pub joint_faces: usize,
+    pub faces_at: usize,
     pub measures: usize,
     pub body_searches: usize,
     pub feature_searches: usize,
@@ -48,6 +49,7 @@ thread_local! {
             digested: 0,
             mesh_digested: 0,
             joint_faces: 0,
+            faces_at: 0,
             measures: 0,
             body_searches: 0,
             feature_searches: 0,
@@ -223,6 +225,71 @@ fn an_edge_origin_measures_its_faces_once() {
         }
     });
     assert_eq!(work.joint_faces, 1, "a solve must not measure the faces again: {work:?}");
+}
+
+/// The summed area of `body`'s faces as [`ModelBody::faces_at`] measures them at `tol`.
+fn measured_area(body: &ModelBody, tol: f64) -> f64 {
+    body.faces_at(tol).unwrap().iter().map(|f| f.area).sum()
+}
+
+/// The viewport asks which faces a feature changed at every rebuild of its highlight: a body's
+/// faces are measured once per geometry and tolerance, snapshots share the measurement, and a
+/// replaced body never answers with the old one.
+#[test]
+fn face_measurements_are_made_once_per_body_and_tolerance() {
+    let mut state = ModelState::default();
+    state.bodies.push(ModelBody::new("Block".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap(), 0));
+    let snapshot = state.clone();
+    let work = counted(|| {
+        for _ in 0..8 {
+            assert_eq!(state.bodies[0].faces_at(0.01).unwrap().len(), 6);
+            assert!((measured_area(&state.bodies[0], 0.01) - 2200.0).abs() < 1e-6);
+            assert!((measured_area(&snapshot.bodies[0], 0.01) - 2200.0).abs() < 1e-6);
+        }
+    });
+    assert_eq!(work.faces_at, 1, "every rebuild and every snapshot shares one measurement: {work:?}");
+
+    // Another tolerance is another measurement, kept beside the first.
+    let work = counted(|| {
+        for tol in [0.02, 0.01, 0.02, 0.01] {
+            assert!((measured_area(&state.bodies[0], tol) - 2200.0).abs() < 1e-6);
+        }
+    });
+    assert_eq!(work.faces_at, 1, "{work:?}");
+
+    // Body is public; a clone's old measurement must never mask a direct replacement.
+    state.bodies[0].body = kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let work = counted(|| {
+        for _ in 0..3 {
+            assert!((measured_area(&state.bodies[0], 0.01) - 600.0).abs() < 1e-6);
+            assert!((measured_area(&snapshot.bodies[0], 0.01) - 2200.0).abs() < 1e-6);
+        }
+    });
+    assert_eq!(work.faces_at, 1, "only the replaced body is measured, and the snapshot keeps its own: {work:?}");
+}
+
+/// Face measurements take any tolerance and stay bounded: a hostile tolerance answers as the
+/// uncached measurement does, a body keeps [`super::FACES_KEPT`] measurements however many
+/// tolerances it is asked at, and a dropped one is made again with the same answer.
+#[test]
+fn face_measurements_are_bounded_and_take_any_tolerance() {
+    let body = ModelBody::new("Block".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap(), 0);
+    for tol in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, 0.0, 1e300] {
+        let direct = body.body.faces(tol).map(|faces| faces.len()).map_err(|e| e.to_string());
+        for _ in 0..2 {
+            let cached = body.faces_at(tol).map(|faces| faces.len()).map_err(|e| e.to_string());
+            assert_eq!(cached, direct, "tolerance {tol}");
+        }
+    }
+    for k in 1..=3 * super::FACES_KEPT {
+        assert_eq!(body.faces_at(k as f64 * 1e-3).unwrap().len(), 6);
+    }
+    assert_eq!(body.faces.lock().unwrap().len(), super::FACES_KEPT, "the measurements kept are bounded");
+    let work = counted(|| {
+        assert!((measured_area(&body, 1e-3) - 2200.0).abs() < 1e-6);
+        assert!((measured_area(&body, 1e-3) - 2200.0).abs() < 1e-6);
+    });
+    assert_eq!(work.faces_at, 1, "a dropped measurement is made again, once: {work:?}");
 }
 
 /// `parts` imported files of two boxes each, every one in its own component placed away from
@@ -1061,6 +1128,101 @@ fn saved_states_read_back_their_sketch_keys() {
     }
 }
 
+/// Synthetic states isolate cache storage from geometry: ids run backwards as they can after
+/// reordering a timeline, and a later state changes and then removes an earlier entry.
+fn model_with_named_face_points() -> (Document, Model) {
+    let mut doc = Document::new("Face points");
+    for i in 0..12 {
+        doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(f64::from(i) + 1.0, 1.0)), None).unwrap();
+    }
+    doc.features.reverse();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let first = doc.features[0].id;
+    let mut points = BTreeMap::new();
+    for (i, result) in model.results.iter_mut().enumerate() {
+        points.insert(result.id, vec![Vec3::new(i as f64, -0.0, 2.0)]);
+        if i == 6 {
+            points.insert(first, vec![Vec3::new(20.0, 0.0, -0.0)]);
+        }
+        if i == 9 {
+            points.remove(&first);
+        }
+        Arc::make_mut(&mut result.state).named_faces = points.clone();
+    }
+    (doc, model)
+}
+
+#[test]
+fn saved_states_keep_named_face_points_once_and_restore_each_states_values() {
+    let (doc, model) = model_with_named_face_points();
+    let saved = model.saved(&doc).unwrap();
+    assert_eq!(saved.records["named_faces"].as_array().unwrap().len(), 13, "each feature's points once, plus the changed entry");
+    let states = saved.records["states"].as_array().unwrap();
+    for state in states.iter().take(6) {
+        assert_eq!(state["named_faces"].as_array().unwrap().len(), 1, "backwards feature ids still form one compact run");
+    }
+    let points = |m: &Model| {
+        m.results
+            .iter()
+            .map(|r| {
+                r.state
+                    .named_faces
+                    .iter()
+                    .map(|(f, points)| (*f, points.iter().map(|p| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]).collect::<Vec<_>>()))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
+    let reopened = Model::adopt(&doc, &saved).unwrap();
+    assert_eq!(points(&reopened), points(&model), "each state keeps its own values, including signed zero");
+    let saved_again = reopened.saved(&doc).unwrap();
+    assert_eq!(points(&Model::adopt(&doc, &saved_again).unwrap()), points(&model));
+    let (thinned, _, _) = saved.thinned(&[], 0).unwrap();
+    assert_eq!(thinned.records["states"].as_array().unwrap().len(), 1);
+    assert_eq!(thinned.final_state().unwrap().named_faces, model.state().named_faces);
+}
+
+#[test]
+fn saved_named_face_points_refuse_missing_malformed_and_excessive_records() {
+    use serde_json::json;
+    let (doc, model) = model_with_named_face_points();
+    let saved = model.saved(&doc).unwrap();
+    let last = saved.records["states"].as_array().unwrap().len() - 1;
+    let check = |edit: &dyn Fn(&mut serde_json::Value)| {
+        let mut records = saved.records.clone();
+        edit(&mut records);
+        let hostile = SavedModel { records, bodies: saved.bodies.clone() };
+        assert!(hostile.final_state().is_err());
+        assert!(Model::adopt(&doc, &hostile).is_err());
+    };
+    check(&|r| {
+        r.as_object_mut().unwrap().remove("named_faces");
+    });
+    check(&|r| {
+        r["named_faces"][0][1][0][0] = json!(null);
+    });
+    check(&|r| {
+        r["states"][last]["named_faces"] = json!([[0, u64::MAX]]);
+    });
+    check(&|r| {
+        r["states"][last]["named_faces"] = json!([[13, 1]]);
+    });
+    check(&|r| {
+        r["states"][last]["named_faces"] = json!([[0, 1], [0, 1]]);
+    });
+    // Different entries for one feature are also ambiguous within one state.
+    check(&|r| {
+        r["named_faces"][1][0] = r["named_faces"][0][0].clone();
+        r["states"][last]["named_faces"] = json!([[0, 2]]);
+    });
+    // A small run list must not expand into millions of deeply cloned points.
+    check(&|r| {
+        r["named_faces"][0][1] = json!(vec![Vec3::ZERO; 1000]);
+        r["states"][last]["named_faces"] = json!(vec![[0, 1]; 50_000]);
+    });
+}
+
 /// The dirty check and autosave compare the whole document after every edit; a scanned
 /// part's shared triangles must not be read for that. A coordinate that equals nothing (not a
 /// number) shows whether the shared arrays were read: only reading them makes a mesh differ
@@ -1446,6 +1608,7 @@ fn marking(p: Vec3) -> FeatureKind {
         old_auto_size: false,
         additional_faces: Vec::new(),
         target_bodies: Vec::new(),
+        single_face_selection: false,
     }
 }
 

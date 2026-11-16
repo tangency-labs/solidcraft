@@ -113,7 +113,7 @@ use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::{
     at, Curve, CurveEvaluate, CurveKind, COMPOSITE_CURVE_TYPE, CURV_BASE_TYPE,
 };
-use crate::curve::curve::p3::compute_crvs_normal;
+use crate::curve::curve::p3::compute_crvs_normal_written;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve_cache::CurveCache;
 use crate::error::{ignored, Result, SolidError};
@@ -1871,8 +1871,7 @@ pub fn create_corner(
 
             // the plane normal of the two extensions (status ignored upstream)
             let pair = [c1, c2];
-            let plane_normal =
-                ignored(compute_crvs_normal(k, &pair))?.unwrap_or(Vec3::new(0.0, 0.0, 0.0));
+            let (plane_normal, _) = compute_crvs_normal_written(k, &pair)?;
             [c1, c2] = pair;
 
             let chamfer_vector = vertex_to_x.cross(plane_normal);

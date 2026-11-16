@@ -922,6 +922,32 @@ fn offset_plane_through_a_point_follows_the_point() {
     assert!(s.execute("construct.plane.offset", &json!({"base": "XY", "offset": 5, "through": {"vertex": [0, 0, 0]}})).is_err());
 }
 
+#[test]
+fn offset_plane_redefine_maps_world_geometry_into_its_owning_component() {
+    use solidcraft_doc::{FeatureKind, PlaneRef};
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name":"Part","grounded":false}));
+    run(&mut s, "occurrence.move", json!({"occurrence":"Part:1","translate":[20,30,40],"axis":[0,1,0],"angle":"90 deg"}));
+    let base = json!({"origin":[0,0,0],"x_dir":[0,1,0],"y_dir":[0,0,1]});
+    let made = run(&mut s, "construct.plane.offset", json!({"base":base,"offset":5,"name":"Side"}));
+    let id = made["feature"].as_u64().unwrap();
+    let FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { base: saved, .. } } = s.doc.feature(id).unwrap().kind.clone() else {
+        panic!("offset plane");
+    };
+    run(&mut s, "component.activate", json!({"component":0}));
+    run(&mut s, "timeline.redefine", json!({"feature":id,"command":"CONSTRUCT.PLANE.OFFSET","params":{"base":base,"offset":9}}));
+    let FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { base: edited, .. } } = &s.doc.feature(id).unwrap().kind else {
+        panic!("offset plane");
+    };
+    assert_eq!(edited, &saved, "the explicit base returns to the feature's local frame");
+    assert!(near(plane(&s, "Side").origin, Vec3::X * 9.));
+    assert!(near(plane(&s, "Side").normal(), Vec3::X));
+    run(&mut s, "timeline.redefine", json!({"feature":id,"command":"construct.plane.offset","params":{"base":base,"through":{"point":[17,20,30]}}}));
+    assert!(near(plane(&s, "Side").origin, Vec3::X * 17.));
+    assert!(near(plane(&s, "Side").normal(), Vec3::X));
+    assert_eq!(s.active_component, 0);
+}
+
 /// Hiding the placement a component is shown at hides its construction geometry too, as it
 /// hides its bodies and sketches.
 #[test]

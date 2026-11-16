@@ -122,7 +122,7 @@ fn the_window_keeps_drawing_and_moving_while_a_large_design_opens() {
         assert!(w.app.file_load.busy(), "frames finish before the file worker is released");
         assert!(std::sync::Arc::ptr_eq(&w.app.session.doc, &blank), "the old design stays intact");
     }
-    let bar = pos2(500.0, 17.0);
+    let bar = pos2(900.0, 17.0);
     let viewport = w.app.viewport.rect.map_or(pos2(800.0, 500.0), |r| r.center());
     let cmds = w.gesture(&[bar, bar + vec2(12.0, 4.0), bar + vec2(40.0, 10.0)]);
     assert!(cmds.iter().any(|c| matches!(c, ViewportCommand::StartDrag)), "the title bar drag was handled during the open");

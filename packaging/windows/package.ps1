@@ -35,7 +35,9 @@
 param(
   [ValidateSet('x64', 'x86', 'arm64')] [string] $Arch = 'x64',
   [switch] $SkipBuild,
-  [ValidateSet('all', 'stage', 'package')] [string] $Phase = 'all'
+  [ValidateSet('all', 'stage', 'package')] [string] $Phase = 'all',
+  # Only the portable zip (solidcraft.exe + the CLI): no MSI, no plain .exe. For test builds.
+  [switch] $PortableOnly
 )
 $ErrorActionPreference = 'Stop'
 $Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -137,6 +139,7 @@ if (-not (Test-Path $Icon)) { throw "Missing package icon: $Icon" }
 
 # ---- MSI ---------------------------------------------------------------------------------------
 $Msi = Join-Path $Dist "solidcraft-$Version-windows-$Arch.msi"
+if (-not $PortableOnly) {
 Invoke-Native 'wix build' {
   wix build (Join-Path $Root 'assets/platforms/windows/solidcraft.wxs') -arch $Arch `
     -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
@@ -149,6 +152,7 @@ Invoke-Native 'MSI shortcut icon validation (ICE50)' {
 }
 # wix writes its debug symbols (.wixpdb) next to the MSI; keep them out of the release assets.
 Remove-Item -Force -ErrorAction SilentlyContinue ([IO.Path]::ChangeExtension($Msi, '.wixpdb'))
+}
 
 # ---- portable zip ------------------------------------------------------------------------------
 $Portable = Join-Path $TargetDir "windows-package\solidcraft-$Version-windows-$Arch-portable"
@@ -161,8 +165,8 @@ Remove-Item -Force $Zip -ErrorAction SilentlyContinue
 Compress-Archive -Path $Portable -DestinationPath $Zip
 
 # ---- the app as a plain download (x64) ---------------------------------------------------------
-$Outputs = @($Msi, $Zip)
-if ($Arch -eq 'x64') {
+$Outputs = if ($PortableOnly) { @($Zip) } else { @($Msi, $Zip) }
+if ($Arch -eq 'x64' -and -not $PortableOnly) {
   $Exe = Join-Path $Dist "SolidCraft-$Version-windows-$Arch.exe"
   Copy-Item (Join-Path $Stage 'solidcraft.exe') $Exe
   $Outputs += $Exe

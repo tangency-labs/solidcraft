@@ -42,12 +42,13 @@
 //!   no NURBS form falls through to the 3D walk, as upstream's `Unknown` and failures
 //!   do; on this path `uv_bounds` still receives the samples of upstream's walk.
 //! - **Statuses.** `sm_AreConnected` and `IsDegenerate` of a
-//!   curve return values; ignored as upstream: the `Trim`, `EvaluatePoint` and
-//!   `Point3DClassify` calls of `FaceIntersect`, the `NormalizedEvaluate` /
-//!   `Evaluate1stDerivatives` / `PointClassify` of the quick check and the
-//!   `InsertTopologyIntersections` of `IsDegenerate`, the `SetUVTrimCurve` and
-//!   `sm_FixUVTrimCurves` of `CreateUVTrimCurves`; [`SolidError::Unported`] always
-//!   propagates. `CreateUVTrimCurves` reads the face domain, the surface poles and the
+//!   curve return values. Passed on as the fork does where upstream ignores them
+//!   (WR-663, tangency-labs/smlib 6997962): the `Trim`, `EvaluatePoint` and
+//!   `Point3DClassify` calls of `FaceIntersect` and the `sm_FixUVTrimCurves` of
+//!   `CreateUVTrimCurves`. Ignored as upstream: the `NormalizedEvaluate` /
+//!   `Evaluate1stDerivatives` / `PointClassify` of the quick check, the
+//!   `InsertTopologyIntersections` of `IsDegenerate` and the `SetUVTrimCurve` of
+//!   `CreateUVTrimCurves`; [`SolidError::Unported`] always propagates. `CreateUVTrimCurves` reads the face domain, the surface poles and the
 //!   natural domain before clearing the surface owner, as upstream.
 //! - **`FaceIntersect`'s classifications.** With lent B-reps ([`FaceBreps::One`] /
 //!   [`FaceBreps::Two`]) both `CurveOnClassify` calls run on the faces' own B-reps
@@ -157,13 +158,6 @@ pub use crate::topology::topology_traverser::has_lamina_edge;
 
 const OP: &str = "topology::face::p3";
 
-/// A status SMLib drops and the fork passes on (`SER`, tangency-labs/smlib 6997962):
-/// returned with the opt-in [`crate::kernel::UpstreamFixes::query_statuses_pass_on`],
-/// handed on to the site's own ignore otherwise.
-fn pass<T>(k: &Kernel, r: Result<T>) -> Result<Result<T>> {
-    crate::error::passed_on(r, k.fixes.query_statuses_pass_on)
-}
-
 fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
@@ -266,8 +260,8 @@ fn coincidence_check(
 
 /// `pFace->Point3DClassify(sPoint, tol, TRUE, sPC)` of a face of a B-rep lent mutably
 /// (the classification makes the face's trimmed cache and UV trim curves on it): the
-/// point's class. A failed classification leaves `SM_PC_UNKNOWN` (the status is ignored
-/// upstream); [`SolidError::Unported`] propagates.
+/// point's class. A failed classification is returned (upstream ignores its status and
+/// reads `SM_PC_UNKNOWN`; the fork passes it on, tangency-labs/smlib 6997962).
 fn point_3d_classify(
     k: &Kernel,
     b: &mut Brep,
@@ -276,19 +270,16 @@ fn point_3d_classify(
     tol: f64,
 ) -> Result<PointClassType> {
     let mut pc = PointClassification::<EntityRef>::new(tol);
-    ignore_status(pass(
+    crate::query::face::p1::point_3d_classify(
         k,
-        crate::query::face::p1::point_3d_classify(
-            k,
-            b,
-            f,
-            point,
-            tol,
-            true,
-            &mut pc,
-            crate::query::face::p1::Point3dClassifyOptions::default(),
-        ),
-    )?)?;
+        b,
+        f,
+        point,
+        tol,
+        true,
+        &mut pc,
+        crate::query::face::p1::Point3dClassifyOptions::default(),
+    )?;
     Ok(pc.point_class())
 }
 
@@ -716,7 +707,6 @@ impl LoopOrientationSampler<'_> {
             let mut prev_raw = previous.raw_uv;
             sample.shift = previous.shift;
             face2::check_seam_crossing(
-                self.k,
                 &mut prev_raw,
                 sample.raw_uv,
                 &self.surf_domain,
@@ -1399,22 +1389,18 @@ fn create_uv_trim_curves_body(
                         smos_max(b.edge(eu_edge)?.tolerance, b.edge(cw_edge)?.tolerance),
                     );
 
-                    // status ignored upstream
-                    let fixed = ignored(pass(
+                    // status ignored upstream, passed on by the fork
+                    let fixed = face2::fix_uv_trim_curves_notified(
                         k,
-                        face2::fix_uv_trim_curves_notified(
-                            k,
-                            b,
-                            eu,
-                            cw,
-                            v,
-                            tol_3d,
-                            uv_gap_size,
-                            &uv_domain,
-                            env.as_deref_mut(),
-                        ),
-                    )?)?
-                    .unwrap_or(false);
+                        b,
+                        eu,
+                        cw,
+                        v,
+                        tol_3d,
+                        uv_gap_size,
+                        &uv_domain,
+                        env.as_deref_mut(),
+                    )?;
 
                     if fixed {
                         uv_pnt0 = normalized_evaluate(k, b, eu, 0.0, true, false)?.0;
@@ -2647,8 +2633,9 @@ pub fn face_intersect_breps_cached(
                     }
                 };
                 let mut interval = fb.edge(e)?.interval;
-                // may snap sIvl by tol to existing knots (status ignored)
-                ignored(pass(k, new_crv.trim(k, &mut interval, TrimMode::Notify))?)?;
+                // may snap sIvl by tol to existing knots (status ignored upstream, passed
+                // on by the fork)
+                new_crv.trim(k, &mut interval, TrimMode::Notify)?;
                 curves_3d.push(new_crv);
                 uv_curves1.push(None);
                 uv_curves2.push(None);
@@ -2781,8 +2768,8 @@ pub fn face_intersect_breps_cached(
             let Some(points) = out.points_3d.as_mut() else {
                 continue;
             };
-            // status ignored upstream
-            let point = ignored(pass(k, curve.evaluate_point(k, 0.5))?)?.unwrap_or(Vec3::UNDEF);
+            // status ignored upstream, passed on by the fork
+            let point = curve.evaluate_point(k, 0.5)?;
             // `Point3DClassify` on both faces, in place on their own B-reps
             let pct1 = point_3d_classify(k, this_brep, f, point, this_zone_tol)?;
             let ob = other_brep.as_deref_mut().unwrap_or(&mut *this_brep);
