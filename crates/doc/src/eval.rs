@@ -4528,11 +4528,15 @@ fn apply_beside_sheet_cut(
 ) -> Result<()> {
     let effective = if targets.is_empty() { &f.participants } else { targets };
     let all = effective.len() == 1 && effective.first().is_some_and(|t| t == "*");
+    // Some sheet solids have already been cut, possibly by another pattern group. Preserve
+    // automatic surfaces before passing the rest as names, which would otherwise refuse them.
+    let skip_surfaces = op == Operation::Cut && (all || effective.is_empty());
     let rest: Vec<String> = st
         .bodies
         .iter()
         .filter(|b| {
             !handled.contains(&b.name)
+                && (!skip_surfaces || !b.is_surface())
                 && (all || if effective.is_empty() { b.component == f.component || b.feature == f.id } else { effective.contains(&b.name) })
         })
         .map(|b| b.name.clone())
@@ -4921,15 +4925,17 @@ fn apply_traced_with(
         return Ok(());
     }
     // A surface body is no solid to cut or intersect, including automatic targets (#17587).
-    // Keep Thicken's source surfaces intact. Other automatic cuts leave a surface alone only
-    // when exact bounds prove every tool is clear of it in its own frame. An intersect would
-    // delete even a distant surface.
+    // Automatic cuts with solid targets leave surfaces intact. Keep Thicken's sources too.
+    // Surface-only cuts leave a surface alone when exact bounds prove every tool is clear of
+    // it in its own frame. An intersect would delete even a distant surface.
     if matches!(op, Operation::Cut | Operation::Intersect) {
+        let cuts_solids = op == Operation::Cut && !named && target_idx.iter().any(|&i| state.bodies.get(i).is_some_and(ModelBody::is_closed));
         let mut untouched = std::collections::BTreeSet::new();
         for &i in &target_idx {
             if let Some(b) = state.bodies.get(i).filter(|b| b.is_surface()) {
-                // Thicken's source surfaces supply the tools and stay intact (#17587).
-                if !named && matches!(&f.kind, FeatureKind::Thicken { bodies, .. } if bodies.iter().any(|n| *n == b.name)) {
+                // Surface targets never block an automatic solid cut or lose faces to it.
+                // Thicken's source surfaces also stay intact for intersects (#17587).
+                if cuts_solids || (!named && matches!(&f.kind, FeatureKind::Thicken { bodies, .. } if bodies.iter().any(|n| *n == b.name))) {
                     untouched.insert(i);
                     continue;
                 }
