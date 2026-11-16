@@ -27,7 +27,7 @@ use solidcore::topology::brep::validation::{
 };
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::{Brep, EntityRef, Kernel, VertexId};
+use solidcore::{Brep, Kernel, VertexId};
 
 const SHEET: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -154,10 +154,7 @@ fn update_grows_a_moved_vertex_to_twice_its_largest_gap() {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,
