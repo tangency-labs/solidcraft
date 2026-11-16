@@ -192,7 +192,7 @@ fn registry(cli: Option<&str>) -> Result<Vec<Value>, String> {
         }
         None => {
             let mut c = crate::cargo();
-            c.args(["run", "-q", "--release", "-p", "solidcraft-cli", "--", "commands"]);
+            c.args(["run", "-q", "--profile", "ci", "-p", "solidcraft-cli", "--", "commands"]);
             c
         }
     };

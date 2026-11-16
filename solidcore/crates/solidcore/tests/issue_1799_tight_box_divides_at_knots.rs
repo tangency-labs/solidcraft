@@ -17,6 +17,10 @@
 //! (a cubic B-spline profile revolved a whole turn), its lower half cut away on one side by a
 //! boolean difference, then the body's tight box. The face's surface peaks at the cut-away
 //! bulge, outside the face; the face's own extreme is the upper bulge, inside it.
+//!
+//! #13753: a cell is set aside only on a bound that holds it, not on its solve's top. The
+//! chamfered peg's Mixed corner face dips beside its seam where the solve over its whole
+//! domain finds no point.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -31,7 +35,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::curve::line::Line;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent3d::Extent3d;
-use solidcore::math::{Point3, Vec3};
+use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::crv_basic::Curve as NurbCurve;
@@ -48,6 +52,7 @@ use solidcore::surface::surface::Surface;
 use solidcore::sweep::api_brep::create_rotational_sweep;
 use solidcore::topology::brep::p1::faces;
 use solidcore::topology::brep::p10::TrimType;
+use solidcore::topology::brep::sheet::sheet_on;
 use solidcore::Kernel;
 
 /// The arc's knots: three quarter spans, double interior knots at 1/3 and 2/3.
@@ -392,4 +397,294 @@ fn tight_box_cells_are_solved_on_their_own_subpatch() {
         read <= 50 * net,
         "control points read {read}, whole net {net}"
     );
+}
+
+/// The ramp's height over x: z = `RAMP_BEND` x^2.
+const RAMP_BEND: f64 = 0.02;
+/// The ramp's length along x.
+const RAMP_LENGTH: f64 = 10.0;
+/// Where the ramp is cut off: it is trimmed to x in 0.5..`RAMP_STOP`, across all of y.
+const RAMP_STOP: f64 = 6.3;
+
+/// A ramp like a thread's screw wall: a rational quadratic B-spline with `spans` knot spans
+/// along u (x from 0 to `RAMP_LENGTH`, uniform knots, every other weight 0.8) and one
+/// linear span across v (y from 0 to 1); its control points' heights are `RAMP_BEND` x^2
+/// of their x, so z rises along u and does not change across v.
+fn ramp(spans: usize) -> Surface {
+    let n = spans + 2;
+    let mut knots = vec![0.0; 3];
+    knots.extend((1..spans).map(|i| i as f64 / spans as f64));
+    knots.extend([1.0; 3]);
+    let net: Vec<Vec<CPoint>> = (0..n)
+        .map(|i| {
+            let w = if i % 2 == 1 { 0.8 } else { 1.0 };
+            let x = RAMP_LENGTH * i as f64 / (n - 1) as f64;
+            let z = RAMP_BEND * x * x;
+            [0.0, 1.0]
+                .iter()
+                .map(|&y| CPoint::new(x * w, y * w, z * w, w))
+                .collect()
+        })
+        .collect();
+    let nurb = NurbSurface::new(net, 2, 1, knots, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
+    Surface::from(BSplineSurface::from_nurb(nurb, false))
+}
+
+/// The ramp's height where its x is `x`, from the surface itself (x rises along u and z
+/// does not change across v): bisection on u.
+fn ramp_z_at(spans: usize, x: f64) -> f64 {
+    let k = Kernel::default();
+    let s = ramp(spans);
+    let at = |u: f64| s.evaluate_point(&k, Point2::new(u, 0.5)).unwrap();
+    let (mut a, mut b) = (0.0, 1.0);
+    for _ in 0..200 {
+        let m = 0.5 * (a + b);
+        if at(m).x < x {
+            a = m;
+        } else {
+            b = m;
+        }
+    }
+    at(0.5 * (a + b)).z
+}
+
+/// The ramp of `spans` spans trimmed to x in 0.5..`RAMP_STOP` (a rectangle projected down
+/// onto it, its long sides on the ramp's own sides y = 0 and y = 1, as a screw wall's
+/// trims run along its sides): its tight box and the control points the trim search's
+/// solves read.
+fn trimmed_ramp_box(spans: usize) -> (Extent3d, u64) {
+    let mut k = Kernel::default();
+    k.fixes.face_tight_box_searches_trim = true;
+    let corners = [
+        (0.5, 0.0),
+        (RAMP_STOP, 0.0),
+        (RAMP_STOP, 1.0),
+        (0.5, 1.0),
+        (0.5, 0.0),
+    ];
+    let pw = corners
+        .iter()
+        .map(|&(x, y)| CPoint::new(x, y, 5.0, 1.0))
+        .collect();
+    let knots = vec![0.0, 0.0, 0.25, 0.5, 0.75, 1.0, 1.0];
+    let window = Curve::from(BSplineCurve::from_nurb(
+        NurbCurve::new(pw, 1, knots).unwrap(),
+        3,
+        false,
+    ));
+    let b = trim_project_parallel(
+        &mut k,
+        TrimObject::Surface(Box::new(ramp(spans))),
+        &window,
+        Vec3::new(0.0, 0.0, -1.0),
+        Point3::new(3.0, 0.5, 0.0),
+        TrimType::KeepPoint,
+    )
+    .unwrap();
+    let fs = faces(&b, None).unwrap();
+    assert_eq!(fs.len(), 1);
+    k.work_counters.reset();
+    let bx = calculate_tight_bounding_box(&k, &b, fs[0]).unwrap();
+    (bx, k.work_counters.face_extreme_control_points())
+}
+
+/// #14460: a thread's screw wall (a knot every eighth of a turn along u, one span across v)
+/// took 1.2 s to box: its +z and -z extremes lie past the trim, and the cells along the
+/// trim stay undecided until they lie within one span along u (the monotone test of a
+/// rational patch). Each undecided cell was divided both ways, so v, which is one span,
+/// was halved at every level too and the cells along the trim doubled each level: as many
+/// cells as the wall has spans, each solved twice. A cell is now divided only the ways a
+/// knot lies inside it while either way has one.
+///
+/// Here: a rational ramp, z = 0.02 x^2 over its control points, one span across, trimmed to
+/// 0.5 <= x <= 6.3, its +z and -z (and +x, -x) extremes past the trim; with 16 and with 128
+/// spans along u. Its box is the trimmed ramp's (z from the ramp's height at x = 0.5 to
+/// that at x = 6.3, to the trim's projection tolerance). The control points the solves read
+/// (each solve reads its cell's net): before, 2,848 and 37,152, 143 times the 128-span
+/// ramp's net; now 728 and 4,872, 19 times it, the depth-0 solves over the whole net most
+/// of it.
+#[test]
+fn a_wall_one_span_across_is_divided_only_along_its_spans() {
+    let mut read = Vec::new();
+    for spans in [16, 128] {
+        let z = |x: f64| ramp_z_at(spans, x);
+        let (bx, n) = trimmed_ramp_box(spans);
+        for (what, got, want) in [
+            ("x min", bx.min().x, 0.5),
+            ("x max", bx.max().x, RAMP_STOP),
+            ("y min", bx.min().y, 0.0),
+            ("y max", bx.max().y, 1.0),
+            ("z min", bx.min().z, z(0.5)),
+            ("z max", bx.max().z, z(RAMP_STOP)),
+        ] {
+            assert!(
+                (got - want).abs() <= 1e-3,
+                "{spans} spans: {what}: {got}, want {want}"
+            );
+        }
+        eprintln!("{spans} spans: control points read {n}");
+        read.push((spans, n));
+    }
+    let [(few, read_few), (many, read_many)] = read[..] else {
+        panic!("two ramps");
+    };
+    let net = 2 * (many as u64 + 2);
+    assert!(
+        read_many <= 30 * net,
+        "{many} spans: control points read {read_many}, net {net}"
+    );
+    assert!(
+        read_many * few as u64 <= read_few * many as u64,
+        "control points read grow faster than the spans: {read_few} at {few}, {read_many} at {many}"
+    );
+}
+
+/// The Mixed corner's chamfer face of the peg case
+/// `fillets/report-peg-front-and-concave-chamfers-together-d2` (degrees 9 and 5, 91 x 6
+/// control points), as the case built it on 2026-11-05: its record's homogeneous net in
+/// `data/issue_13753_mixed_chamfer_face.json`. In the case it is a B-spline face open both
+/// ways too, so its search takes the same path.
+fn mixed_chamfer_face() -> Surface {
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/issue_13753_mixed_chamfer_face.json"
+    ))
+    .unwrap();
+    let data: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let floats = |v: &serde_json::Value| -> Vec<f64> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x.as_f64().unwrap())
+            .collect()
+    };
+    let net: Vec<Vec<CPoint>> = data["homogeneous"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            row.as_array()
+                .unwrap()
+                .iter()
+                .map(|p| {
+                    let h = floats(p);
+                    CPoint::new(h[0], h[1], h[2], h[3])
+                })
+                .collect()
+        })
+        .collect();
+    let (u, v) = (floats(&data["u_knots"]), floats(&data["v_knots"]));
+    let (p, q) = (u.len() - net.len() - 1, v.len() - net[0].len() - 1);
+    assert_eq!((p, q), (9, 5));
+    let nurb = NurbSurface::new(net, p, q, u, v).unwrap();
+    Surface::from(BSplineSurface::from_nurb(nurb, false))
+}
+
+/// #13753: the face on its own (a sheet over its whole domain) dips beside its side v = 1,
+/// which lies in y = 0, to y = -7.2151e-4 at (0.6979, 0.9655). The solve over the whole
+/// domain in -y gives (0, 1) at y = 0, the edges' value; a search that set the domain aside
+/// on it boxed the face to y min 0. Its box holds the dip to the search's resolution, 1e-6;
+/// its other sides are its edges' (x 32 to 40, y max 2, z 8 to 10).
+#[test]
+fn a_dip_the_whole_domain_solve_misses_is_inside_the_box() {
+    let mut k = Kernel::default();
+    k.fixes.face_tight_box_searches_trim = true;
+    let face = mixed_chamfer_face();
+    let dip = face
+        .evaluate_point(
+            &k,
+            Point2::new(0.697_941_702_278_245_9, 0.965_501_350_901_047_9),
+        )
+        .unwrap();
+    assert!(dip.y < -7.2e-4, "the dip: {dip:?}");
+    let (b, f) = sheet_on(&mut k, face, 1e-6).unwrap();
+    assert_eq!(
+        (
+            b.faces().len(),
+            b.edges().len(),
+            b.vertices().len(),
+            b.shells().len()
+        ),
+        (1, 4, 4, 1)
+    );
+    let bx = calculate_tight_bounding_box(&k, &b, f).unwrap();
+    assert!(
+        (bx.min().y - dip.y).abs() <= 1e-6,
+        "y min {}, the dip {}",
+        bx.min().y,
+        dip.y
+    );
+    assert_close("x min", bx.min().x, 32.0);
+    assert_close("x max", bx.max().x, 40.0);
+    assert_close("y max", bx.max().y, 2.0);
+    assert_close("z min", bx.min().z, 8.0);
+    assert_close("z max", bx.max().z, 10.0);
+}
+
+/// A quarter of a cylinder of radius 10 about z, from -30 to 60 degrees (one rational
+/// quadratic span along u), z = 10 v over [0, 1]: its greatest x, 10, runs along the whole
+/// line of angle 0 inside it, which no halving of u reaches.
+fn quarter_cylinder() -> Surface {
+    let (r, s) = (10.0, FRAC_1_SQRT_2);
+    let at = |deg: f64, scale: f64| {
+        let a = deg.to_radians();
+        (scale * a.cos(), scale * a.sin())
+    };
+    let ((x0, y0), (x1, y1), (x2, y2)) = (at(-30.0, r), at(15.0, r / s), at(60.0, r));
+    let arc = [(x0, y0, 1.0), (x1, y1, s), (x2, y2, 1.0)];
+    let net: Vec<Vec<CPoint>> = arc
+        .iter()
+        .map(|&(x, y, w)| {
+            [0.0, 10.0]
+                .iter()
+                .map(|&z| CPoint::new(x * w, y * w, z * w, w))
+                .collect()
+        })
+        .collect();
+    let nurb = NurbSurface::new(
+        net,
+        2,
+        1,
+        vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        vec![0.0, 0.0, 1.0, 1.0],
+    )
+    .unwrap();
+    Surface::from(BSplineSurface::from_nurb(nurb, false))
+}
+
+/// #13753: a face whose greatest value runs along a line inside it (a cylinder's, in x).
+/// Set aside only on their control points, the cells along that line are divided until
+/// their hull comes within 1e-6 of it; halved along the line too, they doubled at every
+/// depth, the search reached its cell limit, and the cells left on the stack counted with
+/// hulls far above the face. Divided only across the line, the box is the face's (x max 10
+/// to 1e-6) and the solves read few control points.
+#[test]
+fn a_ridge_along_a_face_is_divided_only_across_it() {
+    let mut k = Kernel::default();
+    k.fixes.face_tight_box_searches_trim = true;
+    let (b, f) = sheet_on(&mut k, quarter_cylinder(), 1e-6).unwrap();
+    assert_eq!(
+        (
+            b.faces().len(),
+            b.edges().len(),
+            b.vertices().len(),
+            b.shells().len()
+        ),
+        (1, 4, 4, 1)
+    );
+    k.work_counters.reset();
+    let bx = calculate_tight_bounding_box(&k, &b, f).unwrap();
+    let read = k.work_counters.face_extreme_control_points();
+    assert!((bx.max().x - 10.0).abs() <= 1e-6, "x max {}", bx.max().x);
+    assert!((bx.min().x - 5.0).abs() <= 1e-6, "x min {}", bx.min().x);
+    assert!((bx.min().y + 5.0).abs() <= 1e-6, "y min {}", bx.min().y);
+    assert!(
+        (bx.max().y - 10.0 * 60f64.to_radians().sin()).abs() <= 1e-6,
+        "y max {}",
+        bx.max().y
+    );
+    assert_close("z min", bx.min().z, 0.0);
+    assert_close("z max", bx.max().z, 10.0);
+    eprintln!("control points read {read}");
+    assert!(read <= 2000, "control points read {read}");
 }

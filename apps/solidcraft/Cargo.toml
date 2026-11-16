@@ -42,7 +42,9 @@ solidcraft-look = { workspace = true }
 solidcraft-ui-text = { workspace = true }
 solidcraft-theme = { workspace = true }
 solidcraft-space-mouse = { workspace = true }
-eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links"] }
+# "clipboard" is not a default here: eframe 0.37 builds egui-winit without it, and then every
+# Copy and Paste on the desktop silently does nothing (see src/clipboard_tests.rs).
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links", "clipboard"] }
 egui = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -88,6 +90,10 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 winreg = "0.56"
+# The vendored winit's quiet window move (nothing drawn while the window is dragged by its title
+# bar), set from Preferences > Layout's `windows_smooth_window_drag` (src/native_frame.rs; already
+# in the tree through eframe).
+winit = { version = "0.30", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = { version = "0.21.2", default-features = false }

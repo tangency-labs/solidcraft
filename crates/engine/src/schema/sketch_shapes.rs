@@ -146,8 +146,9 @@ impl JsonSchema for LinePoints {
 /// (what the design makes of it, such as a line that is not there, stays the handler's).
 fn snap_form(v: &Value) -> Option<bool> {
     let text = v.as_str();
-    let snapped =
-        text.is_some_and(|t| ["mid:", "on:", "vertex:"].iter().any(|k| t.starts_with(k))) || v.get("vertex").is_some() || v.get("on_edge").is_some();
+    let snapped = text.is_some_and(|t| ["mid:", "on:", "vertex:", "x:"].iter().any(|k| t.starts_with(k)))
+        || v.get("vertex").is_some()
+        || v.get("on_edge").is_some();
     if !snapped {
         return None;
     }
@@ -156,7 +157,7 @@ fn snap_form(v: &Value) -> Option<bool> {
     let vertex =
         v.get("vertex").and_then(params::vec3).is_some() || text.and_then(|t| t.strip_prefix("vertex:")).is_some_and(|t| finite3(&numbers(t)));
     let edge = v.get("on_edge").and_then(params::vec3).is_some();
-    let mid = text.is_some_and(|t| t.starts_with("mid:"));
+    let mid = text.is_some_and(|t| t.starts_with("mid:") || t.starts_with("x:"));
     let on = text
         .and_then(|t| t.strip_prefix("on:"))
         .and_then(|t| t.rsplit_once(':'))
@@ -177,7 +178,7 @@ impl<'de> Deserialize<'de> for PointOrSnap {
             Some(true) => return Ok(PointOrSnap(v)),
             Some(false) => {
                 return Err(D::Error::custom(whole(format!(
-                    "`point` {v} is not a snap it takes: \"mid:<line>\", \"on:<curve>:x,y\", \"vertex:x,y,z\", {{vertex: [x,y,z]}} or {{on_edge: [x,y,z]}}"
+                    "`point` {v} is not a snap it takes: \"mid:<line>\", \"on:<curve>:x,y\", \"x:<a>+<b>:x,y\", \"vertex:x,y,z\", {{vertex: [x,y,z]}} or {{on_edge: [x,y,z]}}"
                 ))));
             }
             None => {}
@@ -206,11 +207,11 @@ impl JsonSchema for PointOrSnap {
         let coordinate = generator.subschema_for::<LengthExpr>();
         let model = generator.subschema_for::<Point3>();
         json_schema!({
-            "description": "A point to make: [x, y] in mm (a coordinate may be an expression over the design's parameters: the point is then fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point), or a snap that makes it and holds it: \"mid:<line>\" (the line's midpoint), \"on:<curve>:x,y\" (on the curve, near x,y), \"vertex:x,y,z\" or {vertex: [x,y,z]} (a model vertex, projected) or {on_edge: [x,y,z]} (a point on a model edge, projected). An existing point's id is not taken.",
+            "description": "A point to make: [x, y] in mm (a coordinate may be an expression over the design's parameters: the point is then fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point), or a snap that makes it and holds it: \"mid:<line>\" (the line's midpoint), \"on:<curve>:x,y\" (on the curve, near x,y), \"x:<a>+<b>:x,y\" (at the crossing of two curves, near x,y), \"vertex:x,y,z\" or {vertex: [x,y,z]} (a model vertex, projected) or {on_edge: [x,y,z]} (a point on a model edge, projected). An existing point's id is not taken.",
             "anyOf": [
                 point,
                 {"type": "array", "items": coordinate, "minItems": 2, "maxItems": 2},
-                {"type": "string", "pattern": "^(mid:|on:|vertex:)"},
+                {"type": "string", "pattern": "^(mid:|on:|x:|vertex:)"},
                 {"type": "object", "properties": {"vertex": model}, "required": ["vertex"]},
                 {"type": "object", "properties": {"on_edge": model}, "required": ["on_edge"]}
             ]
@@ -533,33 +534,10 @@ pub struct ArcCenterPointParams {
     pub connect: Option<bool>,
 }
 
-/// A slot's `width`, as `slot_c2c` and `slot_overall` read it: a number above 1e-9 and below 1e9.
-/// A value that is missing, not a number or too small is the handler's one message.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SlotWidth(pub f64);
-
-impl<'de> Deserialize<'de> for SlotWidth {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        Value::deserialize(d)?
-            .as_f64()
-            .and_then(params::finite)
-            .filter(|w| *w > 1e-9)
-            .map(SlotWidth)
-            .ok_or_else(|| D::Error::custom(whole("`width` must be positive")))
-    }
-}
-
-impl JsonSchema for SlotWidth {
-    fn schema_name() -> Cow<'static, str> {
-        "SlotWidth".into()
-    }
-    fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({
-            "description": "The slot's width in mm: the distance between its two straight sides, and the diameter of its round ends. Positive.",
-            "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1e9
-        })
-    }
-}
+// A slot's `width`, as `slot_width` reads it for every slot command: a number, or text that is an
+// expression over the design's parameters (a diameter dimension on a round end, driven by them),
+// as a circle's radius is (#15857). Whether it is positive is the handler's to check.
+circle_size!(SlotWidth, "width", "A slot's `width`: a number or an expression.");
 
 /// Marks `p0`, `p1` and `width` required in a slot's schema. The types hold them as optional
 /// (`#[schemars(required)]` doesn't do this for a key with `serde(default)`), so that a call
@@ -584,7 +562,8 @@ pub struct SlotCenterToCenterParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PlainPoint")]
     pub p1: Option<PlainPoint>,
-    /// The width of the slot, in mm.
+    /// The width of the slot, in mm: a number, or an expression over the design's parameters,
+    /// which makes the width a dimension driven by them. Positive.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "SlotWidth")]
     pub width: Option<SlotWidth>,
@@ -610,7 +589,8 @@ pub struct SlotOverallParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PlainPoint")]
     pub p1: Option<PlainPoint>,
-    /// The width of the slot, in mm.
+    /// The width of the slot, in mm: a number, or an expression over the design's parameters,
+    /// which makes the width a dimension driven by them. Positive.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "SlotWidth")]
     pub width: Option<SlotWidth>,

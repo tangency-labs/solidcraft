@@ -1,0 +1,368 @@
+{
+  "base": "b0fba036bdc4d34335ed72b2b32d617f838094c4",
+  "measured_production_head": "b1153884028b8168d43af6411c1fb9bc5c1cacca",
+  "historical_after": "94ae5e1806a59af4322ec50fd81af232161a363f",
+  "scope": "Fresh rebased-after replay compared with historical after archives. This is not a fresh clean-b0fba control. The old gen0607 archive omitted status metadata beyond ints; its full fresh metadata is now retained.",
+  "cases": [
+    {
+      "unit": "blend.fillet_standard_solver_p2",
+      "case": "gen0336",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "error": true,
+        "deferred": true,
+        "rejected": true,
+        "topology": true,
+        "diagnostics": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [],
+      "all_floats_finite": true,
+      "float_count": 18
+    },
+    {
+      "unit": "curve.crv_on_surf",
+      "case": "gen0344",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "error": true,
+        "deferred": true,
+        "rejected": true,
+        "topology": true,
+        "diagnostics": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [],
+      "all_floats_finite": true,
+      "float_count": 2283
+    },
+    {
+      "unit": "curve.curve_p1",
+      "case": "gen0014",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "error": true,
+        "deferred": true,
+        "rejected": true,
+        "topology": true,
+        "diagnostics": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [],
+      "all_floats_finite": true,
+      "float_count": 7
+    },
+    {
+      "unit": "curve.curve_p3",
+      "case": "gen0101",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "error": true,
+        "deferred": true,
+        "rejected": true,
+        "topology": true,
+        "diagnostics": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [],
+      "all_floats_finite": true,
+      "float_count": 9
+    },
+    {
+      "unit": "curve.curve_p3",
+      "case": "gen0607",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [
+        "error",
+        "deferred",
+        "rejected",
+        "topology",
+        "diagnostics"
+      ],
+      "all_floats_finite": true,
+      "float_count": 9
+    },
+    {
+      "unit": "curve.curve_p6",
+      "case": "gen0210",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "error": true,
+        "deferred": true,
+        "rejected": true,
+        "topology": true,
+        "diagnostics": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [],
+      "all_floats_finite": true,
+      "float_count": 5
+    },
+    {
+      "unit": "curve.curve_p7",
+      "case": "gen2091",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "error": true,
+        "deferred": true,
+        "rejected": true,
+        "topology": true,
+        "diagnostics": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [],
+      "all_floats_finite": true,
+      "float_count": 120
+    },
+    {
+      "unit": "curve.curve_p7",
+      "case": "gen2538",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "error": true,
+        "deferred": true,
+        "rejected": true,
+        "topology": true,
+        "diagnostics": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [],
+      "all_floats_finite": true,
+      "float_count": 809
+    },
+    {
+      "unit": "curve.curve_p7",
+      "case": "gen2574",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "error": true,
+        "deferred": true,
+        "rejected": true,
+        "topology": true,
+        "diagnostics": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [],
+      "all_floats_finite": true,
+      "float_count": 94
+    },
+    {
+      "unit": "intersect.surface_intersector_p1",
+      "case": "gen1226",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "error": true,
+        "deferred": true,
+        "rejected": true,
+        "topology": true,
+        "diagnostics": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [],
+      "all_floats_finite": true,
+      "float_count": 702
+    },
+    {
+      "unit": "intersect.surface_intersector_p3",
+      "case": "gen0110",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "error": true,
+        "deferred": true,
+        "rejected": true,
+        "topology": true,
+        "diagnostics": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [],
+      "all_floats_finite": true,
+      "float_count": 3827
+    },
+    {
+      "unit": "intersect.surface_intersector_p3",
+      "case": "gen0396",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "error": true,
+        "deferred": true,
+        "rejected": true,
+        "topology": true,
+        "diagnostics": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [],
+      "all_floats_finite": true,
+      "float_count": 1289
+    },
+    {
+      "unit": "intersect.surface_intersector_p3",
+      "case": "gen0607",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "error": true,
+        "deferred": true,
+        "rejected": true,
+        "topology": true,
+        "diagnostics": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [],
+      "all_floats_finite": true,
+      "float_count": 1026
+    },
+    {
+      "unit": "intersect.surface_intersector_p3",
+      "case": "gen0703",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "error": true,
+        "deferred": true,
+        "rejected": true,
+        "topology": true,
+        "diagnostics": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [],
+      "all_floats_finite": true,
+      "float_count": 868
+    },
+    {
+      "unit": "surface.surf_of_extrusion_p2",
+      "case": "gen1140",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "error": true,
+        "deferred": true,
+        "rejected": true,
+        "topology": true,
+        "diagnostics": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [],
+      "all_floats_finite": true,
+      "float_count": 33
+    },
+    {
+      "unit": "surface.surface_p11",
+      "case": "gen0483",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "error": true,
+        "deferred": true,
+        "rejected": true,
+        "topology": true,
+        "diagnostics": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [],
+      "all_floats_finite": true,
+      "float_count": 0
+    },
+    {
+      "unit": "surface.surface_p2",
+      "case": "tc_parabolic_cylinders_crossing_node",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "error": true,
+        "deferred": true,
+        "rejected": true,
+        "topology": true,
+        "diagnostics": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [],
+      "all_floats_finite": true,
+      "float_count": 3157
+    },
+    {
+      "unit": "surface.surface_point_solve_p2",
+      "case": "gen0808",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "error": true,
+        "deferred": true,
+        "rejected": true,
+        "topology": true,
+        "diagnostics": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [],
+      "all_floats_finite": true,
+      "float_count": 8
+    },
+    {
+      "unit": "surface.surface_point_solve_p2",
+      "case": "rev_gen0057",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "error": true,
+        "deferred": true,
+        "rejected": true,
+        "topology": true,
+        "diagnostics": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [],
+      "all_floats_finite": true,
+      "float_count": 14
+    },
+    {
+      "unit": "surface.surface_point_solve_p3",
+      "case": "matrix_0267",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "error": true,
+        "deferred": true,
+        "rejected": true,
+        "topology": true,
+        "diagnostics": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [],
+      "all_floats_finite": true,
+      "float_count": 10
+    },
+    {
+      "unit": "surface.surface_point_solve_p3",
+      "case": "matrix_0337",
+      "matches_historical": {
+        "inputs": true,
+        "ints": true,
+        "error": true,
+        "deferred": true,
+        "rejected": true,
+        "topology": true,
+        "diagnostics": true,
+        "all_float_bits": true
+      },
+      "historically_unarchived_fields": [],
+      "all_floats_finite": true,
+      "float_count": 10
+    }
+  ],
+  "cases_identical_for_all_archived_fields": 21,
+  "all_floats_finite": true
+}

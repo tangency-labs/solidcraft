@@ -17,23 +17,36 @@
 //! | `floor_is_cavity` (private)                  | `sm_FloorIsCavity` (1b016ca)                   |
 //! | `outward_of_body` (private)                  | `sm_OutwardOfBody` (1b016ca)                   |
 //!
-//! Deviations: opt-in (`Kernel::fixes.offset_resolve_crossing_loops`, read by
-//! `do_extended_offset`). The reason a crossing is not resolved is the error's
-//! `operation` text instead of an `smos_ErrorMessage` report. `SmBrep::MakeFaceFromLoopOnFace`
-//! is not ported: a face that comes apart is built with one `MakeFaceWithCurves` per
-//! outer loop (each a sheet of its own, as the fork's `SplitDisconnectedShells` leaves
-//! them), and one that comes apart and keeps holes as well is not resolved
-//! (`SM_ERR_BAD_INTERSECTIONS`). No recursion; every loop is bounded by the face's
-//! edge uses and crossings. The fork's later a759622 ("an offset whose walls would meet
-//! is refused as such": every contact is examined before any crossing, and loops that
-//! touch without crossing fail with `SM_ERR_OFFSET_WALLS_TOUCH`) is a second opt-in,
-//! `Kernel::fixes.offset_walls_touch_refused`, read here; it has no effect without
-//! `offset_resolve_crossing_loops`, which runs this routine at all. With it off the
-//! routine is 6169ea1's (contacts checked as they are found, a touch reported as
-//! whichever crossing check fails first, `SM_ERR_BAD_INTERSECTIONS`).
+//! Deviations: always on (it was the opt-in `Kernel::fixes.offset_resolve_crossing_loops`
+//! until that flag was retired); called by `do_extended_offset`. The reason a crossing is
+//! not resolved is the error's `operation` text instead of an `smos_ErrorMessage` report.
+//! `SmBrep::MakeFaceFromLoopOnFace` is not ported: a face that comes apart is built with one
+//! `MakeFaceWithCurves` per outer loop (each a sheet of its own, as the fork's
+//! `SplitDisconnectedShells` leaves them), and one that comes apart and keeps holes as well
+//! is not resolved (`SM_ERR_BAD_INTERSECTIONS`). No recursion; every loop is bounded by the
+//! face's edge uses and crossings. The fork's later a759622 ("an offset whose walls would
+//! meet is refused as such": every contact is examined before any crossing, and loops that
+//! touch without crossing fail with `SM_ERR_OFFSET_WALLS_TOUCH`) is built in, not 6169ea1's
+//! routine (contacts checked as they are found, a touch reported as whichever crossing
+//! check fails first, `SM_ERR_BAD_INTERSECTIONS`).
 //! The fork's 1b016ca (regions the loops wind round the other way under an opening are
-//! kept, reversed, where they are the cavity's floor) is part of the same opt-in (WR-345
+//! kept, reversed, where they are the cavity's floor) is part of the routine (WR-345
 //! addendum): it adds the original body to the routine's inputs for its point tests.
+//!
+//! Not in the fork: a loop of one edge use that no crossing cuts is not taken for a stretch
+//! too short to build, though its closed curve's two ends meet (the fork refuses an uncut
+//! hole circle beside a crossing as three loops at one point). Where the offset's results
+//! are not merged (the local operation's included), a face whose loops cross is refused
+//! ([`crate::error::offset::LoopCrossing::Unmerged`]): only the merge cuts the walls the
+//! crossing loops come from where they pass through each other.
+//!
+//! Not in the fork (solidcraft#16983): a face of one loop is resolved as well. Where the
+//! offsets of the faces either side of a face cross over each other (a wall thicker than
+//! half a rib between them), the face's offset turns inside out, wholly (the rib's top) or
+//! in part (the end face across the rib, whose loop then crosses itself). The loop is cut
+//! where it crosses itself and closed into simple loops (`classify_one_loop`); those whose
+//! signed area is negative are regions turned inside out, kept reversed where they are the
+//! cavity's floor and dropped otherwise, by the same rule as fork 1b016ca's.
 
 use super::p1::OffsetExecutive;
 use super::p2::OffsetNotifications;
@@ -65,6 +78,8 @@ use crate::topology::brep::p7::{make_face_with_curves_with_kernel_context, FaceC
 use crate::topology::edge::{self, NotificationStores, NotifyState};
 use crate::topology::edgeuse::{p1 as eu, p3 as eu3};
 use crate::topology::face::p2 as face;
+use crate::topology::face::p3 as face3;
+use crate::topology::face::p3::uv_loop_orientation;
 use crate::topology::topology;
 use crate::topology::topology_traverser::face_edges;
 use crate::topology::{loopuse, vertexuse, Brep, EdgeId, EdgeuseId, FaceId, LoopId, LoopuseStart};
@@ -74,7 +89,6 @@ const OP: &str = "offset::offset_executive::crossing_loops::resolve_crossing_loo
 use crate::error::offset::{LoopCrossing, OffsetFailure, WallContact};
 use crate::error::Failure;
 // `SM_ERR_ASSERT_FAILURE`.
-use crate::error::SM_ERR_ASSERT_FAILURE;
 
 /// A stretch of a loop of an offset face between two of its crossings with other loops
 /// or the ends of its edge use, in the loop's direction (`sm_LoopStretch`).
@@ -99,6 +113,11 @@ struct LoopStretch {
     floor: bool,
     /// `sMid`: its middle point.
     mid: Point3,
+    /// (not upstream) its edge use runs with its edge.
+    same: bool,
+    /// (not upstream) of a face of one loop, the stretch it goes on to in the loop it
+    /// closes into (`classify_one_loop`), so that two loops through one crossing stay apart.
+    follows: Option<usize>,
 }
 
 /// A crossing of the loops of an offset face that is not resolved
@@ -222,6 +241,9 @@ fn loop_touches_at(dirs_a: &[Vec3], dirs_b: &[Vec3], normal: Vec3) -> Result<boo
 /// locals: the face's edge uses per loop, every edge use in loop order with its loop and
 /// UV trim curve, where each loop's edge uses start, and the 3D and UV tolerances.
 struct CrossingInputs<'a> {
+    /// (not upstream, solidcraft#16983) a face of one loop: the contacts sought are that
+    /// loop's with itself, of edge uses away from the vertices they share.
+    one_loop: bool,
     loop_edgeuses: &'a [Vec<EdgeuseId>],
     loop_of: &'a [usize],
     edgeuses: &'a [EdgeuseId],
@@ -244,10 +266,15 @@ fn cut_at_crossings_refusing_touch(
     cuts: &mut [Vec<(f64, i64)>],
 ) -> Result<i64> {
     let (edgeuses, uvs, loop_of, tol_3d) = (inp.edgeuses, inp.uvs, inp.loop_of, inp.tol_3d);
-    // Where edge uses of different loops meet, in UV space.
+    // Where edge uses of different loops meet, in UV space; of a face of one loop, where
+    // its edge uses meet away from the vertices they share.
     let mut contacts: Vec<LoopContact> = Vec::new();
     for aa in 0..edgeuses.len() {
-        let first_b = *at(inp.first_of_loop, *at(loop_of, aa)? + 1)?;
+        let first_b = if inp.one_loop {
+            aa + 1
+        } else {
+            *at(inp.first_of_loop, *at(loop_of, aa)? + 1)?
+        };
         for bb in first_b..edgeuses.len() {
             let (uv_a, uv_b) = (at(uvs, aa)?, at(uvs, bb)?);
             let solutions = uv_a.global_curve_intersect(
@@ -258,7 +285,21 @@ fn cut_at_crossings_refusing_touch(
                 inp.uv_tol,
                 &CurveIntersectOptions::<NoObject>::default(),
             )?;
+            let shared = if inp.one_loop {
+                shared_vertex_points(b, *at(edgeuses, aa)?, *at(edgeuses, bb)?)?
+            } else {
+                Vec::new()
+            };
             for solution in solutions.as_slice() {
+                // a single touch at a shared vertex is the loop's own corner; a run along
+                // from it still goes on to the refusal below
+                if !shared.is_empty() && solution.solution_type == SolutionType::SingleValue {
+                    let e_a = edge_of(b, *at(edgeuses, aa)?)?;
+                    let p = edge_curve(b, e_a)?.evaluate_point(kernel, solution.start.param(0)?)?;
+                    if shared.iter().any(|v| p.distance(*v) <= tol_3d) {
+                        continue;
+                    }
+                }
                 if solution.solution_type != SolutionType::SingleValue {
                     return Err(walls_touch(WallContact::RunAlong));
                 }
@@ -334,28 +375,124 @@ fn cut_at_crossings_refusing_touch(
     Ok(num_crossings)
 }
 
-fn assert_failure() -> SolidError {
-    SolidError::Upstream {
-        operation: OP,
-        code: SM_ERR_ASSERT_FAILURE,
-        entity: None,
+/// (not upstream, solidcraft#16983) The points of the vertices edge uses `a` and `b`
+/// share (consecutive edge uses of a loop meet at one, a loop of two at both).
+fn shared_vertex_points(b: &Brep, a: EdgeuseId, bb: EdgeuseId) -> Result<Vec<Point3>> {
+    let (e_a, e_b) = (edge_of(b, a)?, edge_of(b, bb)?);
+    let ends_a = [edge::start_vertex(b, e_a)?, edge::end_vertex(b, e_a)?];
+    let ends_b = [edge::start_vertex(b, e_b)?, edge::end_vertex(b, e_b)?];
+    let mut points = Vec::new();
+    for v in ends_a.into_iter().flatten() {
+        if ends_b.contains(&Some(v)) {
+            points.push(b.vertex(v)?.point);
+        }
     }
+    Ok(points)
 }
 
+/// (not upstream, solidcraft#16983) Sorts the stretches of a face of one loop into the
+/// loops they close into, and marks each kept (`keep`) or wound the other way (`floor`).
+/// The loop is cut where it crosses itself (`stretches`, in its order, each crossing
+/// passed twice); at a crossing a stretch goes on to the stretch leaving it on the other
+/// pass, so that each loop closed is simple, and each is kept where its certified signed
+/// area in UV ([`uv_loop_orientation`]) is positive and wound the other way where it is
+/// negative: a region of the face turned inside out, where the offsets of the faces
+/// beside it crossed over each other (a wall thicker than half a rib). A loop that
+/// crosses nowhere is one loop. Whether the loops so closed nest is not examined: the
+/// offset of one loop turned inside out in places makes them side by side.
+///
+/// # Errors
+///
+/// [`LoopCrossing::StretchUnclassified`] for a loop whose area has no certified sign or
+/// a stretch with no stretch to go on to; those of the trims.
+fn classify_one_loop(kernel: &Kernel, stretches: &mut [LoopStretch], uvs: &[Curve]) -> Result<()> {
+    let n = stretches.len();
+    // each stretch's successor: past a vertex of the loop the stretch after it, at a
+    // crossing the stretch leaving it on the other pass
+    let mut next = Vec::new();
+    // the stretch after each in the loop's order: the next one, the first after the last
+    let followers = (1..n).chain(core::iter::once(0));
+    for (stretch, follower) in stretches.iter().zip(followers) {
+        if stretch.end < 0 {
+            next.push(follower);
+            continue;
+        }
+        let other = (0..n)
+            .find(|&tt| tt != follower && stretches.get(tt).is_some_and(|t| t.start == stretch.end))
+            .ok_or_else(|| unresolved(LoopCrossing::StretchUnclassified))?;
+        next.push(other);
+    }
+    let mut done = vec![false; n];
+    for seed in 0..n {
+        if *at(&done, seed)? {
+            continue;
+        }
+        let mut chain = Vec::new();
+        let mut ss = seed;
+        while !*at(&done, ss)? {
+            *at_mut(&mut done, ss)? = true;
+            chain.push(ss);
+            ss = *at(&next, ss)?;
+        }
+        if ss != seed {
+            return Err(unresolved(LoopCrossing::StretchUnclassified));
+        }
+        let mut pieces = Vec::new();
+        let mut senses = Vec::new();
+        for &tt in &chain {
+            let stretch = at(stretches, tt)?;
+            let mut uv = at(uvs, stretch.uv)?.copy(kernel)?;
+            let mut ivl = Extent1d::from_min_max(stretch.lo, stretch.hi);
+            uv.trim(kernel, &mut ivl, TrimMode::Notify)?;
+            pieces.push(uv);
+            senses.push(stretch.same);
+        }
+        let orientation = uv_loop_orientation(kernel, &pieces, &senses, None)?;
+        let (keep, floor) = match orientation {
+            OrientType::Same => (true, false),
+            OrientType::Opposite => (false, true),
+            OrientType::Unknown => return Err(unresolved(LoopCrossing::StretchUnclassified)),
+        };
+        for &tt in &chain {
+            let follows = Some(*at(&next, tt)?);
+            let stretch = at_mut(stretches, tt)?;
+            stretch.keep = keep;
+            stretch.floor = floor;
+            stretch.follows = follows;
+        }
+    }
+    Ok(())
+}
+
+/// The UV trim curve of an edge use does not run over its edge's interval
+/// (`SM_ERR_ASSERT_FAILURE`).
+fn trim_interval_mismatch() -> SolidError {
+    SolidError::offset(
+        OP,
+        OffsetFailure::Inconsistent(
+            "an edge use's UV trim curve does not span its edge's interval",
+        ),
+    )
+}
+
+/// `value`, or `SM_ERR_NULL_POINTER` (upstream `NER`) for an entity or curve that is not
+/// there.
 fn required<T>(value: Option<T>) -> Result<T> {
-    value.ok_or_else(|| SolidError::null_pointer(OP))
+    value.ok_or_else(|| SolidError::offset_missing(OP, "an entity or curve of the offset face"))
 }
 
 fn at<T>(v: &[T], i: usize) -> Result<&T> {
-    v.get(i).ok_or_else(|| SolidError::null_pointer(OP))
+    v.get(i)
+        .ok_or_else(|| SolidError::offset_missing(OP, "an entry of the crossings' own lists"))
 }
 
 fn at_mut<T>(v: &mut [T], i: usize) -> Result<&mut T> {
-    v.get_mut(i).ok_or_else(|| SolidError::null_pointer(OP))
+    v.get_mut(i)
+        .ok_or_else(|| SolidError::offset_missing(OP, "an entry of the crossings' own lists"))
 }
 
 fn index_i64(i: usize) -> Result<i64> {
-    i64::try_from(i).map_err(|_| SolidError::null_pointer(OP))
+    i64::try_from(i).map_err(|_| SolidError::offset_missing(OP, "a node number for the edge use"))
 }
 
 /// The vertex node of edge use `k`: `-1 - k`.
@@ -395,6 +532,21 @@ fn edge_closest_distance(k: &Kernel, b: &Brep, e: EdgeId, point: Point3) -> Resu
         .map(|solution| solution.start.solution_value))
 }
 
+/// (not in the fork) Whether a stretch whose ends are `distance` apart is too short to
+/// build (`LoopCrossing::ThreeAtOnePoint`): its ends lie within `tol_3d`, unless it starts
+/// and ends at the same node, a vertex (`< 0`). That is a loop of one edge use that no
+/// crossing cuts, whole and as it was built, whose closed curve's two ends meet. A stretch
+/// that ends at a crossing, or runs between two vertices, is tested as before. A NaN
+/// distance or tolerance is too short, the whole loop's included.
+fn stretch_too_short(from: i64, to: i64, distance: f64, tol_3d: f64) -> bool {
+    let whole_loop = from < 0 && from == to;
+    match distance.partial_cmp(&tol_3d) {
+        None => true,
+        Some(core::cmp::Ordering::Greater) => false,
+        Some(_) => !whole_loop,
+    }
+}
+
 impl OffsetExecutive {
     /// `ResolveCrossingLoops` (fork, not upstream): rebuilds every offset face whose
     /// loops cross one another. Each loop of an offset face is made of the offsets of
@@ -406,8 +558,7 @@ impl OffsetExecutive {
     /// # Errors
     ///
     /// `SM_ERR_BAD_INTERSECTIONS` for crossings this does not resolve (see
-    /// `resolve_crossing_loops_of_face`); with `Kernel::fixes.offset_walls_touch_refused`,
-    /// `SM_ERR_OFFSET_WALLS_TOUCH` for loops that touch without crossing; those of the
+    /// `resolve_crossing_loops_of_face`); `SM_ERR_OFFSET_WALLS_TOUCH` for loops that touch without crossing; those of the
     /// evaluations, intersections and face construction.
     pub(super) fn resolve_crossing_loops(
         &mut self,
@@ -436,6 +587,11 @@ impl OffsetExecutive {
         let crate::error::Reason::Offset(refusal) = failure.reason else {
             return SolidError::Failed(failure);
         };
+        // a failed routine's status (not a refusal) is returned as it is, as it was before
+        // the routine described it
+        if refusal.replaces_upstream_status() {
+            return SolidError::Failed(failure);
+        }
         let input_face = match self.faceuse_to_faces.firsts(f).as_slice() {
             [fu] => eu::faceuse_face(original, *fu).ok().flatten(),
             _ => None,
@@ -450,7 +606,9 @@ impl OffsetExecutive {
     /// `ResolveCrossingLoopsOfFace` (fork, not upstream): when the loops of offset face
     /// `f` cross one another, replaces it with the face(s) of its surface inside the
     /// outer loop and outside every inner one, bounded by the stretches of the loops
-    /// between their crossings.
+    /// between their crossings. (not in the fork, solidcraft#16983) A face of one loop
+    /// that crosses itself, or winds round the other way, is replaced by the regions of
+    /// it that wind round the right way (see the module notes).
     ///
     /// The crossings are found in the face's UV space as `SmFace` test #38 finds them;
     /// every loop is cut there. A stretch of the outer loop bounds the face where it lies
@@ -496,7 +654,15 @@ impl OffsetExecutive {
             loops.push(required(b.loopuse(lu)?.loop_)?);
             loop_edgeuses.push(eu::loopuse_edgeuses(b, lu)?);
         }
-        if loops.len() < 2 {
+        // (not upstream, solidcraft#16983) a face of one loop: the loop crosses itself, or
+        // winds round the other way, where the face turned inside out
+        let one_loop = loops.len() == 1;
+        if loops.is_empty() {
+            return Ok(());
+        }
+        // (not upstream) only a face with an edge whose offset is inverted turns inside
+        // out (`TrimmedEdge`); every other face of one loop is left as it is
+        if one_loop && !self.inverted_faces.contains(&f) {
             return Ok(());
         }
 
@@ -513,7 +679,7 @@ impl OffsetExecutive {
                 let uv = required(eu::uv_trim_curve(b, edgeuse)?.0.cloned())?;
                 let e = edge_of(b, edgeuse)?;
                 if !uv.natural_interval().are_equal(&b.edge(e)?.interval, 0.0) {
-                    return Err(assert_failure());
+                    return Err(trim_interval_mismatch());
                 }
                 loop_of.push(ll);
                 edgeuses.push(edgeuse);
@@ -528,64 +694,48 @@ impl OffsetExecutive {
         // #38 finds them).
         // per edge use: (parameter, crossing)
         let mut cuts: Vec<Vec<(f64, i64)>> = vec![Vec::new(); edgeuses.len()];
-        let mut num_crossings: i64 = 0;
-        if kernel.fixes.offset_walls_touch_refused {
-            // Fork a759622: every contact is looked at before any crossing is resolved
-            // or refused.
-            num_crossings = cut_at_crossings_refusing_touch(
-                kernel,
-                b,
-                f,
-                &CrossingInputs {
-                    loop_edgeuses: &loop_edgeuses,
-                    loop_of: &loop_of,
-                    edgeuses: &edgeuses,
-                    uvs: &uvs,
-                    first_of_loop: &first_of_loop,
-                    tol_3d,
-                    uv_tol,
-                },
-                &mut cuts,
-            )?;
-        } else {
-            for aa in 0..edgeuses.len() {
-                let first_b = *at(&first_of_loop, *at(&loop_of, aa)? + 1)?;
-                for bb in first_b..edgeuses.len() {
-                    let (uv_a, uv_b) = (at(&uvs, aa)?, at(&uvs, bb)?);
-                    let solutions = uv_a.global_curve_intersect(
-                        kernel,
-                        &uv_a.natural_interval(),
-                        uv_b,
-                        &uv_b.natural_interval(),
-                        uv_tol,
-                        &CurveIntersectOptions::<NoObject>::default(),
-                    )?;
-                    for solution in solutions.as_slice() {
-                        if solution.solution_type != SolutionType::SingleValue {
-                            return Err(unresolved(LoopCrossing::RunAlong));
-                        }
-                        let t_a = solution.start.param(0)?;
-                        let t_b = solution.start.param(1)?;
-                        let e_a = edge_of(b, *at(&edgeuses, aa)?)?;
-                        let e_b = edge_of(b, *at(&edgeuses, bb)?)?;
-                        let p_a = edge_curve(b, e_a)?.evaluate_point(kernel, t_a)?;
-                        let p_b = edge_curve(b, e_b)?.evaluate_point(kernel, t_b)?;
-                        if p_a.distance(vertex_point(b, edge::start_vertex(b, e_a)?)?) <= tol_3d
-                            || p_a.distance(vertex_point(b, edge::end_vertex(b, e_a)?)?) <= tol_3d
-                            || p_b.distance(vertex_point(b, edge::start_vertex(b, e_b)?)?) <= tol_3d
-                            || p_b.distance(vertex_point(b, edge::end_vertex(b, e_b)?)?) <= tol_3d
-                        {
-                            return Err(unresolved(LoopCrossing::MeetAtLoopVertex));
-                        }
-                        at_mut(&mut cuts, aa)?.push((t_a, num_crossings));
-                        at_mut(&mut cuts, bb)?.push((t_b, num_crossings));
-                        num_crossings += 1;
-                    }
-                }
+        // Fork a759622: every contact is looked at before any crossing is resolved
+        // or refused.
+        let num_crossings = cut_at_crossings_refusing_touch(
+            kernel,
+            b,
+            f,
+            &CrossingInputs {
+                one_loop,
+                loop_edgeuses: &loop_edgeuses,
+                loop_of: &loop_of,
+                edgeuses: &edgeuses,
+                uvs: &uvs,
+                first_of_loop: &first_of_loop,
+                tol_3d,
+                uv_tol,
+            },
+            &mut cuts,
+        )?;
+        if num_crossings == 0 {
+            // (not upstream) a loop crossing nowhere bounds the face unless it winds round
+            // the other way: the whole face turned inside out
+            let inverted = one_loop
+                && face3::compute_loop_orientation(kernel, b, f, *at(&loops, 0)?, None, false)?
+                    == OrientType::Opposite;
+            if !inverted {
+                return Ok(());
             }
         }
-        if num_crossings == 0 {
-            return Ok(());
+
+        // (not in the fork) Rebuilding this face trims it alone. Where its loops cross, an
+        // offset wall a crossing loop's edges bound (the offset of the face across that
+        // edge) is cut there only by the merge (`PiecewiseMerge` with merged results). The
+        // unmerged path only stitches the offset faces, so where two such walls pass
+        // through each other they stay whole: the stitch encloses no region (the face
+        // rebuilt) or the face keeps loops that cross (`SmFace` test #38, the face left as
+        // it is). Body type does not tell where that happens: an open sheet with a hole
+        // through a face of its own has the same two walls as a solid. Every unmerged
+        // offset whose face's loops cross is therefore refused; with the results merged
+        // the same offset is built. The local operation (always unmerged) is no exception:
+        // its offset faces are stitched alike before they are moved into the body.
+        if !self.merge_results() {
+            return Err(unresolved(LoopCrossing::Unmerged));
         }
 
         // Until the merge every offset face is a sheet of its own: its edges bound it
@@ -628,7 +778,7 @@ impl OffsetExecutive {
                 let from_pt = curve.evaluate_point(kernel, lo)?;
                 let to_pt = curve.evaluate_point(kernel, hi)?;
                 if hi.partial_cmp(&lo) != Some(core::cmp::Ordering::Greater)
-                    || from_pt.distance(to_pt) <= tol_3d
+                    || stretch_too_short(from_node, to_node, from_pt.distance(to_pt), tol_3d)
                 {
                     return Err(unresolved(LoopCrossing::ThreeAtOnePoint));
                 }
@@ -644,6 +794,8 @@ impl OffsetExecutive {
                     keep: false,
                     floor: false,
                     mid,
+                    same,
+                    follows: None,
                 });
                 from = to;
                 from_node = to_node;
@@ -652,49 +804,54 @@ impl OffsetExecutive {
 
         // Which stretches bound the face: of the outer loop, those outside every inner
         // loop; of an inner loop, those inside the outer loop and outside the other
-        // inner ones.
-        for ss in 0..stretches.len() {
-            let stretch = at(&stretches, ss)?;
-            let uv3 =
-                at(&uvs, stretch.uv)?.evaluate_point(kernel, 0.5 * (stretch.lo + stretch.hi))?;
-            let uv = Point2::new(uv3.x, uv3.y);
-            let own_loop = stretch.loop_index;
-            let mut keep = true;
-            let mut in_outer = own_loop == 0;
-            let mut in_inner = 0_usize;
-            for (ll, &l) in loops.iter().enumerate() {
-                if ll == own_loop {
-                    continue;
+        // inner ones. (not upstream) Of a face of one loop, those of the loops it closes
+        // into that wind round the right way (`classify_one_loop`).
+        if one_loop {
+            classify_one_loop(kernel, &mut stretches, &uvs)?;
+        } else {
+            for ss in 0..stretches.len() {
+                let stretch = at(&stretches, ss)?;
+                let uv3 = at(&uvs, stretch.uv)?
+                    .evaluate_point(kernel, 0.5 * (stretch.lo + stretch.hi))?;
+                let uv = Point2::new(uv3.x, uv3.y);
+                let own_loop = stretch.loop_index;
+                let mut keep = true;
+                let mut in_outer = own_loop == 0;
+                let mut in_inner = 0_usize;
+                for (ll, &l) in loops.iter().enumerate() {
+                    if ll == own_loop {
+                        continue;
+                    }
+                    let found = contains_uv_point(kernel, b, l, None, uv, zone_tol)?.containment;
+                    if found != PointContainment::Inside && found != PointContainment::Outside {
+                        return Err(unresolved(LoopCrossing::StretchUnclassified));
+                    }
+                    let wanted = if ll == 0 {
+                        PointContainment::Inside
+                    } else {
+                        PointContainment::Outside
+                    };
+                    if found != wanted {
+                        keep = false;
+                    }
+                    if ll == 0 {
+                        in_outer = found == PointContainment::Inside;
+                    } else if found == PointContainment::Inside {
+                        in_inner += 1;
+                    }
                 }
-                let found = contains_uv_point(kernel, b, l, None, uv, zone_tol)?.containment;
-                if found != PointContainment::Inside && found != PointContainment::Outside {
-                    return Err(unresolved(LoopCrossing::StretchUnclassified));
-                }
-                let wanted = if ll == 0 {
-                    PointContainment::Inside
+                let stretch = at_mut(&mut stretches, ss)?;
+                stretch.keep = keep;
+                // Fork 1b016ca: the stretches round a region the loops wind round once the
+                // other way: a hole's stretch outside the outer loop and every other hole,
+                // and the outer loop's stretch inside one hole (the region of a hole that ran
+                // out past the moved outer loop).
+                stretch.floor = if own_loop != 0 {
+                    !in_outer && in_inner == 0
                 } else {
-                    PointContainment::Outside
+                    in_inner == 1
                 };
-                if found != wanted {
-                    keep = false;
-                }
-                if ll == 0 {
-                    in_outer = found == PointContainment::Inside;
-                } else if found == PointContainment::Inside {
-                    in_inner += 1;
-                }
             }
-            let stretch = at_mut(&mut stretches, ss)?;
-            stretch.keep = keep;
-            // Fork 1b016ca: the stretches round a region the loops wind round once the
-            // other way: a hole's stretch outside the outer loop and every other hole,
-            // and the outer loop's stretch inside one hole (the region of a hole that ran
-            // out past the moved outer loop).
-            stretch.floor = if own_loop != 0 {
-                !in_outer && in_inner == 0
-            } else {
-                in_inner == 1
-            };
         }
 
         // Fork 1b016ca: a region the loops wind round the other way is the offset face
@@ -712,8 +869,9 @@ impl OffsetExecutive {
                 continue;
             }
             let end = at(&stretches, ss)?.end;
+            let follows = at(&stretches, ss)?.follows;
             for (tt, other) in stretches.iter().enumerate() {
-                if other.floor && other.start == end {
+                if other.floor && other.start == end && follows.is_none_or(|f| f == tt) {
                     *at_mut(&mut next_floor, ss)? = Some(tt);
                 }
             }
@@ -763,7 +921,10 @@ impl OffsetExecutive {
                 continue;
             }
             for (tt, other) in stretches.iter().enumerate() {
-                if !other.keep || other.start != stretch.end {
+                if !other.keep
+                    || other.start != stretch.end
+                    || stretch.follows.is_some_and(|f| f != tt)
+                {
                     continue;
                 }
                 if at(&next, ss)?.is_some() {
@@ -1296,5 +1457,33 @@ impl OffsetExecutive {
             }
         }
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The length test still refuses what it is for: a stretch ending at a crossing, or
+    /// running between two vertices, whose ends lie within the tolerance, and NaN. Only an
+    /// uncut loop of one edge use (the same vertex node at both ends) passes over it.
+    #[test]
+    fn only_an_uncut_loop_of_one_edge_passes_the_length_test() {
+        let tol = 0.01;
+        // a loop of one closed edge use, uncut: its ends meet
+        assert!(!stretch_too_short(-3, -3, 0.0, tol));
+        // a real defect still caught: ends at crossings, a crossing and a vertex, two
+        // vertices of an open edge, all within the tolerance
+        assert!(stretch_too_short(0, 1, 0.005, tol));
+        assert!(stretch_too_short(-3, 2, 0.01, tol));
+        assert!(stretch_too_short(2, -3, 0.0, tol));
+        assert!(stretch_too_short(-2, -3, 0.005, tol));
+        assert!(stretch_too_short(0, 1, f64::NAN, tol));
+        // NaN is refused before the whole-loop exemption
+        assert!(stretch_too_short(-3, -3, f64::NAN, tol));
+        assert!(stretch_too_short(-3, -3, 0.0, f64::NAN));
+        // long enough
+        assert!(!stretch_too_short(0, 1, 0.02, tol));
+        assert!(!stretch_too_short(-2, -3, 0.02, tol));
     }
 }

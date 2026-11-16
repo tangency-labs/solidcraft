@@ -55,8 +55,9 @@
 //! | [`Extent3d::u_interval`], [`Extent3d::v_interval`], [`Extent3d::w_interval`] | `GetUInterval`, `GetVInterval`, `GetWInterval` |
 //! | [`Extent3d::set_u_interval`], [`Extent3d::set_v_interval`] | `SetUInterval`, `SetVInterval` |
 //! | [`Extent3d::approximate_unbounded`], [`Extent3d::approximate_unbounded_expanded`] | `ApproximateUnbounded` |
-//! | [`Extent3d::from_pseudo_box`], [`Extent3d::from_pseudo_box_with`] | `SmExtent3d(const SmPseudoBox&)` |
-//! | [`Extent3d::circumscribe`], [`Extent3d::circumscribe_with`] | `Circumscribe`                       |
+//! | [`Extent3d::from_pseudo_box`]          | `SmExtent3d(const SmPseudoBox&)`               |
+//! | [`Extent3d::circumscribe`]             | `Circumscribe`                                 |
+//! | [`Extent3d::max_distance_to_point`]    | (not upstream) the farthest of the corners from a point |
 //! | [`BoundaryType`]                       | `SmBoundaryType` (`SmTypes.h`)                 |
 //!
 //! Deviations:
@@ -81,18 +82,16 @@
 //! - `SM_ASSERT*` debug checks are not ported (they do not change results).
 //! - Upstream bug kept: `ContainsLineSeg3d` returns true when *either* end point is
 //!   inside (it ORs the two tests). See `plan/findings.md`.
-//! - Upstream quirk kept by default: `Circumscribe` of an axis-aligned pseudo box
-//!   reads the `IsAxisAligned` map (basis -> axis) as if it were axis -> basis, so a
-//!   basis that is a non-involutive permutation of the axes (e.g. `y, z, x`) gets its
-//!   intervals on the wrong axes. [`Extent3d::circumscribe_with`] reads it by basis
-//!   behind `Kernel::fixes.circumscribe_axis_map_by_basis` (WR-5;
+//! - `Circumscribe` of an axis-aligned pseudo box reads the `IsAxisAligned` map by
+//!   basis (basis -> axis). Upstream reads it as if it were axis -> basis, so a basis
+//!   that is a non-involutive permutation of the axes (e.g. `y, z, x`) gets its
+//!   intervals on the wrong axes (WR-5;
 //!   `plan/upstream-issues/WR-5--addendum-2026-10-31-opt-in-axis-map-by-basis.md`).
 
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::pseudo_box::PseudoBox;
 use crate::geom::vector3d::{asin, sqrt};
-use crate::kernel::Kernel;
 use crate::math::{
     is_infinite_param, max2, max3, min2, min3, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ,
     INFINITE_PARAMETER, PI, UNDEF_DOUBLE,
@@ -330,71 +329,38 @@ impl Extent3d {
         }
     }
 
-    /// The box circumscribing `pb` with a default kernel
-    /// (`SmExtent3d(const SmPseudoBox&)`); see [`Extent3d::from_pseudo_box_with`].
+    /// The box circumscribing `pb` (`SmExtent3d(const SmPseudoBox&)`); see
+    /// [`Extent3d::circumscribe`].
     #[must_use]
     pub fn from_pseudo_box(pb: &PseudoBox) -> Self {
-        Self::from_pseudo_box_with(pb, &Kernel::default())
-    }
-
-    /// The box circumscribing `pb` with `k`'s opt-in fixes
-    /// (`SmExtent3d(const SmPseudoBox&)`); see [`Extent3d::circumscribe_with`].
-    #[must_use]
-    pub fn from_pseudo_box_with(pb: &PseudoBox, k: &Kernel) -> Self {
         let mut e = Self::new();
-        e.circumscribe_with(pb, k);
+        e.circumscribe(pb);
         e
-    }
-
-    /// Becomes the box circumscribing `pb` with a default kernel (`Circumscribe`); see
-    /// [`Extent3d::circumscribe_with`].
-    pub fn circumscribe(&mut self, pb: &PseudoBox) {
-        self.circumscribe_with(pb, &Kernel::default());
     }
 
     /// Becomes the box circumscribing `pb` (`Circumscribe`): the same size for an
     /// axis-aligned pseudo box (copied from its intervals, so partially unbounded
     /// pseudo boxes stay partially unbounded), fully unbounded for an unaligned
-    /// unbounded one, else the bounding box of its corners. With
-    /// `Kernel::fixes.circumscribe_axis_map_by_basis` the axis-aligned map is read by
-    /// basis (WR-5); otherwise its entries are read as bases, as upstream does.
-    pub fn circumscribe_with(&mut self, pb: &PseudoBox, k: &Kernel) {
+    /// unbounded one, else the bounding box of its corners. The axis-aligned map is
+    /// read by basis (WR-5).
+    pub fn circumscribe(&mut self, pb: &PseudoBox) {
         // low work - axis aligned PseudoBox
         if let Some(axis_map) = pb.is_axis_aligned() {
-            if k.fixes.circumscribe_axis_map_by_basis {
-                // Basis `ii` is parallel to axis `|axis_map[ii]| - 1`: its interval
-                // belongs on that axis, negated when the basis is reversed.
-                for (ii, &m) in axis_map.iter().enumerate() {
-                    let ivl = pb.interval(ii).unwrap_or_default();
-                    let (lo, hi) = if m < 0 {
-                        (-ivl.max(), -ivl.min())
-                    } else {
-                        (ivl.min(), ivl.max())
-                    };
-                    let axis = (m.unsigned_abs() as usize).wrapping_sub(1);
-                    if let Ok(c) = self.min.component_mut(axis) {
-                        *c = lo;
-                    }
-                    if let Ok(c) = self.max.component_mut(axis) {
-                        *c = hi;
-                    }
+            // Basis `ii` is parallel to axis `|axis_map[ii]| - 1`: its interval
+            // belongs on that axis, negated when the basis is reversed.
+            for (ii, &m) in axis_map.iter().enumerate() {
+                let ivl = pb.interval(ii).unwrap_or_default();
+                let (lo, hi) = if m < 0 {
+                    (-ivl.max(), -ivl.min())
+                } else {
+                    (ivl.min(), ivl.max())
+                };
+                let axis = (m.unsigned_abs() as usize).wrapping_sub(1);
+                if let Ok(c) = self.min.component_mut(axis) {
+                    *c = lo;
                 }
-            } else {
-                for (ii, &m) in axis_map.iter().enumerate() {
-                    // upstream indexes the basis with the axis map entry of axis `ii`
-                    let lx = (m.unsigned_abs() as usize).wrapping_sub(1);
-                    let ivl = pb.interval(lx).unwrap_or_default();
-                    let (lo, hi) = if m > 0 {
-                        (ivl.min(), ivl.max())
-                    } else {
-                        (-ivl.max(), -ivl.min())
-                    };
-                    if let Ok(c) = self.min.component_mut(ii) {
-                        *c = lo;
-                    }
-                    if let Ok(c) = self.max.component_mut(ii) {
-                        *c = hi;
-                    }
+                if let Ok(c) = self.max.component_mut(axis) {
+                    *c = hi;
                 }
             }
             return;
@@ -762,6 +728,25 @@ impl Extent3d {
     #[must_use]
     pub fn max_distance(&self, other: &Self) -> f64 {
         sqrt(self.max_distance_squared(other))
+    }
+
+    /// (not upstream) The largest distance from `p` to a point of the box: the distance to
+    /// the farthest of its eight corners, which on each axis is the bound farther from `p`.
+    #[must_use]
+    pub fn max_distance_to_point(&self, p: Point3) -> f64 {
+        let far = |lo: f64, hi: f64, x: f64| {
+            if (x - lo).abs() >= (hi - x).abs() {
+                x - lo
+            } else {
+                hi - x
+            }
+        };
+        Vec3::new(
+            far(self.min.x, self.max.x, p.x),
+            far(self.min.y, self.max.y, p.y),
+            far(self.min.z, self.max.z, p.z),
+        )
+        .length()
     }
 
     /// Square root of [`Extent3d::min_distance_squared`] (`MinimumDistance`).
@@ -1217,6 +1202,27 @@ mod tests {
 
     fn p(x: f64, y: f64, z: f64) -> Point3 {
         Vec3::new(x, y, z)
+    }
+
+    /// The farthest point of a box from a point is its farthest corner, from inside, from
+    /// outside and from a corner itself.
+    #[test]
+    fn the_largest_distance_to_a_point_is_to_the_farthest_corner() {
+        let e = Extent3d::from_points(p(-1.0, 0.0, 2.0), p(3.0, 5.0, 4.0));
+        for at in [
+            p(0.0, 1.0, 3.0),
+            p(10.0, -2.0, 0.0),
+            p(-1.0, 0.0, 2.0),
+            p(1.0, 2.5, 3.0),
+        ] {
+            let want = e
+                .corners()
+                .iter()
+                .map(|c| (*c - at).length())
+                .fold(0.0, f64::max);
+            assert!((e.max_distance_to_point(at) - want).abs() < 1e-12, "{at:?}");
+        }
+        assert!((e.max_distance_to_point(p(-1.0, 0.0, 2.0)) - e.max_distance(&e)).abs() < 1e-12);
     }
 
     /// upstream `my_test_extent3d` (`tests/prog_test/src/smCurveTest.cpp`).

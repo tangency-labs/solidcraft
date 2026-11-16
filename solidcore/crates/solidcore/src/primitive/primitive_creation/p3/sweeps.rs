@@ -14,11 +14,9 @@
 //! 4096; the repeated linear sweep checks that bound before its end cap, which moves
 //! the profile once per repetition. No additional recursion. Unavailable calls retain
 //! their full caller tails.
-//! Not upstream (WR-409, tangency-labs/solidcore#1113, opt-in
-//! `Kernel::fixes.sheet_sweep_joins_profile_wires`): a profile that bounds no planar
+//! Not upstream (WR-409, tangency-labs/solidcore#1113): a profile that bounds no planar
 //! face becomes wires joined where its curves meet (`join_profile_wire_ends`).
-//! Not upstream (WR-442, tangency-labs/solidcore#478, opt-in
-//! `Kernel::fixes.revolve_nested_shells_as_cavities`): after a full turn's
+//! Not upstream (WR-442, tangency-labs/solidcore#478): after a full turn's
 //! stitch, a closed shell inside another becomes that solid's cavity.
 //! Not upstream (WR-448, tangency-labs/solidcore#545, opt-in
 //! `Kernel::fixes.revolve_analytic_profile_faces`; SolidCraft change, tangency-labs/smlib
@@ -30,8 +28,8 @@
 //! (`sm_CreateAnalyticRotationalSweep`), as fork 9853e54 deletes it: a one-curve profile
 //! goes through the same per-curve rule, so a whole circle's torus has its seam at the
 //! profile (#1491).
-//! Not upstream (WR-590, opt-in `Kernel::fixes.revolve_splits_curves_on_axis`;
-//! SolidCraft change, tangency-labs/smlib e4f1377): a partial turn first splits each
+//! Not upstream (WR-590; SolidCraft change, tangency-labs/smlib e4f1377): a partial
+//! turn first splits each
 //! curve where it meets the axis inside itself ([`split_curves_on_axis`], the fork's
 //! `sm_SplitCurvesOnAxis`), which `CheckCurveSweep` otherwise refuses
 //! (`SM_SC_ROT_ON_CURVE`); a closed curve's last piece is joined back onto its first.
@@ -39,7 +37,7 @@
 //! SolidCraft change, tangency-labs/smlib c8f6a31): the statuses upstream drops here
 //! are returned instead (`SER`).
 
-use super::{construct::target, geometry::bspline, PrimitiveAccess};
+use super::{construct::target, geometry::bspline_with_nurb, PrimitiveAccess};
 use crate::curve::curve::Curve;
 use crate::curve::curve::CurveKind;
 use crate::curve::ellipse::Ellipse;
@@ -96,10 +94,13 @@ fn split(a: &impl PrimitiveAccess, b: BrepId, curves: &mut Vec<Option<Curve>>) -
         let curve = slot
             .as_ref()
             .ok_or_else(|| SolidError::primitive_missing(OP, "a profile curve"))?;
-        let curve = bspline(curve)
+        let k = a.kernel(b)?;
+        // `((SmBSplineCurve *)cr3DCurves[ii])->SubdivideAtDiscontinuity(..)`: the curve with
+        // the NURB its own `GetOrCreateGwNurbPointer` makes (a line's lazy NURB), not a copy
+        // of its bare base, which has none and refuses (`make_nurb`, 1001).
+        let curve = bspline_with_nurb(k, curve)?
             .ok_or_else(|| SolidError::invalid_input(OP, "non B-spline continuity input"))?;
         // fork c8f6a31 (WR-662): SER(SubdivideAtDiscontinuity(..)).
-        let k = a.kernel(b)?;
         let pieces = ignored(passed_on(
             curve.subdivide_at_discontinuity(k, ContinuityType::C1, 0.5),
             k.fixes.sweep_statuses_pass_on,
@@ -249,15 +250,14 @@ fn targets(
         }
     }
 }
-/// Not upstream (WR-409, tangency-labs/solidcore#1113, opt-in
-/// `Kernel::fixes.sheet_sweep_joins_profile_wires`; the SolidCraft fork's
+/// Not upstream (WR-409, tangency-labs/solidcore#1113; the SolidCraft fork's
 /// `sm_CreateJoinedWireEdges`): the profile's wire edges `edges`, in the curves' order,
 /// joined where they meet. An end within the B-rep's tolerance of an earlier wire's end
 /// is glued to that earlier vertex (`GlueVertices`), so two curves meeting at a point
 /// share one vertex there. Without it the topology sweep's copies of two coincident
 /// vertices came out coincident, each with a preimage, and its stitch refused them: a
 /// partial revolve or repeated linear sweep of an open profile of more than one curve
-/// failed. Nothing is done without the opt-in.
+/// failed.
 ///
 /// # Errors
 ///
@@ -268,9 +268,6 @@ fn join_profile_wire_ends(
     edges: &[crate::topology::EdgeId],
 ) -> Result<()> {
     use crate::topology::{edge, vertex, VertexId};
-    if !a.kernel(brep)?.fixes.sheet_sweep_joins_profile_wires {
-        return Ok(());
-    }
     a.with_primitive_brep(brep, |k, b| {
         let tol = b.tolerance();
         // the distinct vertices of the wires so far
@@ -547,16 +544,36 @@ impl PrimitiveCreation {
                     } else {
                         None
                     };
-                    let rev = match analytic {
-                        Some(surface) => Some(surface),
-                        None => ignored(SurfOfRevolution::create_canonical(
+                    // Not upstream (#17204): the frame comes from a point of the curve
+                    // off the axis by more than the B-rep's tolerance, within which a
+                    // profile vertex is on the axis
+                    let tolerance = a.brep(brep)?.tolerance();
+                    let rev = if let Some(surface) = analytic {
+                        Some(surface)
+                    } else {
+                        // Not upstream (#17204): a B-spline end within the B-rep's
+                        // tolerance of the axis is on it for the body, so the surface
+                        // of revolution turns the curve with that end's control point
+                        // on the axis. A curve the analytic rule above recognised (a
+                        // circular arc's sphere) keeps its own ends: its surface puts
+                        // its poles on the axis itself
+                        let profile = spline_ends_on_axis(
                             a.kernel(brep)?,
-                            curve.clone(),
+                            curve,
+                            axis_base,
+                            axis,
+                            tolerance,
+                        )?
+                        .unwrap_or_else(|| curve.clone());
+                        ignored(SurfOfRevolution::create_canonical_off_axis(
+                            a.kernel(brep)?,
+                            profile,
                             axis_base,
                             axis,
                             false,
+                            tolerance,
                         ))?
-                        .map(Surface::from),
+                        .map(Surface::from)
                     };
                     let mut success = false;
                     if let Some(surface) = rev {
@@ -573,12 +590,10 @@ impl PrimitiveCreation {
         // fork c8f6a31 (WR-662): SER(pBrep->StitchAndOrient()).
         let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
         ignore_status(passed_on(a.stitch_and_orient(brep), p)?)?;
-        // not upstream (WR-442, #478, opt-in): a closed shell inside another is its cavity
-        if a.kernel(brep)?.fixes.revolve_nested_shells_as_cavities {
-            a.with_brep_mut(brep, |k, b, _, env| {
-                crate::topology::brep::p6::nest_closed_shells_as_cavities(k, b, env)
-            })?;
-        }
+        // not upstream (WR-442, #478): a closed shell inside another is its cavity
+        a.with_brep_mut(brep, |k, b, _, env| {
+            crate::topology::brep::p6::nest_closed_shells_as_cavities(k, b, env)
+        })?;
         a.set_editing(brep, false)?;
         Ok(())
     }
@@ -613,11 +628,9 @@ impl PrimitiveCreation {
                 ));
             }
             let tolerance = a.brep(brep)?.tolerance();
-            // Not upstream (WR-590, opt-in): no curve meets the axis inside itself
+            // Not upstream (WR-590): no curve meets the axis inside itself
             // (CheckCurveSweep's SM_SC_ROT_ON_CURVE)
-            if a.kernel(brep)?.fixes.revolve_splits_curves_on_axis {
-                split_curves_on_axis(a.kernel(brep)?, curves, axis_base, axis, tolerance)?;
-            }
+            split_curves_on_axis(a.kernel(brep)?, curves, axis_base, axis, tolerance)?;
             a.set_editing(brep, true)?;
             let mut faces = Vec::new();
             let mut edges = Vec::new();
@@ -686,6 +699,61 @@ impl PrimitiveCreation {
     }
 }
 
+/// Not upstream (#17204): `curve`, a B-spline, with each end that lies within `tolerance`
+/// of the axis through `axis_base` along `axis` but off it put exactly on it (the end's
+/// control point, which is the end of a curve clamped there, moved to its foot on the axis,
+/// its weight kept). Within the B-rep's tolerance the end is on the axis for the body; left
+/// a hair off it (a sketch solver's 3e-11 mm), its surface of revolution's last row of
+/// control points is a circle of that radius, no pole, and the face's degenerate edge there
+/// is a gap in its loop. `None` for another curve, or when no end moves.
+///
+/// # Errors
+///
+/// Those of the curve's ends and control points.
+fn spline_ends_on_axis(
+    k: &Kernel,
+    curve: &Curve,
+    axis_base: Point3,
+    axis: Vec3,
+    tolerance: f64,
+) -> Result<Option<Curve>> {
+    use crate::nurbs::b_spline_curve::p2::ControlPointForm;
+    let CurveKind::BSpline(spline) = curve.kind() else {
+        return Ok(None);
+    };
+    let ends = curve.ends(k)?;
+    let count = spline.nurb_ref()?.cpts().len();
+    let rational = spline
+        .nurb_ref()?
+        .cpts()
+        .first()
+        .is_some_and(|c| c.w != crate::nurbs::math::NOW);
+    let form = if rational {
+        ControlPointForm::EuclideanRational
+    } else {
+        ControlPointForm::NonRational
+    };
+    let mut moved: Option<BSplineCurve> = None;
+    for (end, index) in [(ends.start, Some(0)), (ends.end, count.checked_sub(1))] {
+        let Some(index) = index else {
+            continue;
+        };
+        let (dist, _) = line_point_distance(axis_base, axis, end);
+        if !(dist > 0.0 && dist <= tolerance) {
+            continue;
+        }
+        let (point, weight) = spline.control_point(form, index)?;
+        // the end is that control point only where the curve is clamped
+        if point.distance(end) > EFF_ZERO * (1.0 + end.max_dimension()) {
+            continue;
+        }
+        let foot = axis_base + line_closest_point(axis_base, axis, end) * axis;
+        let target = moved.get_or_insert_with(|| spline.clone());
+        target.set_control_point(form, index, foot, weight)?;
+    }
+    Ok(moved.map(Curve::from))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::curve::curve::Curve;
@@ -703,8 +771,71 @@ mod tests {
         )
     }
 
-    /// A full turn of a half annulus about its diameter is a hollow ball with the
-    /// opt-in; upstream makes the inner ball a second solid.
+    /// WR-776: a line skew to the axis sweeps a hyperboloid of one sheet. Every point of
+    /// the result is as far from the axis as the profile's point at the same axial
+    /// coordinate, both measured here from the profile's and the axis's own numbers.
+    /// Upstream's one-curve special case made the cone through the end circles, 3.85 mm
+    /// off its hyperboloid half way along this line; with the analytic-faces fix or
+    /// without, the line is its surface of revolution.
+    #[test]
+    fn a_line_skew_to_the_axis_revolves_onto_its_hyperboloid() {
+        let (p0, p1) = ([600.0, 0.0, 0.0], [700.0, 0.0, 200.0]);
+        let o = [500.0, -50.0, 0.0];
+        let n = (40.0_f64 * 40.0 + 80.0 * 80.0 + 300.0 * 300.0).sqrt();
+        let a = [40.0 / n, 80.0 / n, 300.0 / n];
+        let dot = |u: [f64; 3], v: [f64; 3]| u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+        // the axial coordinate of p and its distance from the axis
+        let polar = |p: [f64; 3]| {
+            let q = [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
+            let h = dot(q, a);
+            (h, (dot(q, q) - h * h).max(0.0).sqrt())
+        };
+        let ((h0, _), (h1, _)) = (polar(p0), polar(p1));
+        let profile = segment(p0, p1);
+        for analytic in [false, true] {
+            let mut k = Kernel::default();
+            k.fixes.revolve_analytic_profile_faces = analytic;
+            let sheet = create_rotational_sweep(
+                &mut k,
+                &[Some(&profile)],
+                Point3::new(o[0], o[1], o[2]),
+                Vec3::new(a[0], a[1], a[2]),
+                360.0,
+                false,
+            )
+            .unwrap();
+            let faces = crate::topology::brep::p1::faces(&sheet, None).unwrap();
+            assert!(!faces.is_empty());
+            let mut worst = 0.0_f64;
+            for f in faces {
+                let surface = crate::topology::face::p2::surface(&sheet, f)
+                    .unwrap()
+                    .expect("a surface");
+                let d = surface.natural_uv_domain_with_nurb(&k).unwrap();
+                for i in 0..=24 {
+                    for j in 0..=24 {
+                        let uv = crate::geom::vector2d::Point2::new(
+                            d.u_min() + (d.u_max() - d.u_min()) * f64::from(i) / 24.0,
+                            d.v_min() + (d.v_max() - d.v_min()) * f64::from(j) / 24.0,
+                        );
+                        let x = surface.evaluate_point(&k, uv).unwrap();
+                        let (h, r) = polar([x.x, x.y, x.z]);
+                        let t = (h - h0) / (h1 - h0);
+                        assert!((-1e-9..=1.0 + 1e-9).contains(&t), "past the profile: {x:?}");
+                        let on = [0, 1, 2].map(|c| p0[c] + t * (p1[c] - p0[c]));
+                        worst = worst.max((r - polar(on).1).abs());
+                    }
+                }
+            }
+            assert!(
+                worst <= 1e-6,
+                "{worst} mm off the hyperboloid (fix {analytic})"
+            );
+        }
+    }
+
+    /// A full turn of a half annulus about its diameter is a hollow ball; upstream
+    /// makes the inner ball a second solid.
     #[test]
     fn issue_478_full_turn_nested_shell_is_a_cavity() {
         use crate::geom::attribute::{AttributeStore, ObjectKey};
@@ -721,7 +852,6 @@ mod tests {
         let curves: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
 
         let mut k = Kernel::default();
-        k.fixes.revolve_nested_shells_as_cavities = true;
         let mut ball = create_rotational_sweep(&mut k, &curves, o, x, 360.0, true).unwrap();
         let store = AttributeStore::default();
         let key_of = |_| ObjectKey(0);
@@ -768,6 +898,98 @@ mod tests {
         }
     }
 
+    /// A dome turned a whole turn about z: a cubic Bezier from the pole on the axis down
+    /// to the rim at r 10, a line across the base and one up the axis. With the spline's
+    /// pole a hair past the axis (3.4e-11 mm on the far side, as a sketch solver leaves
+    /// it; SolidCraft puts the lines' ends on the axis, not a spline's, #17204), well
+    /// within the B-rep's tolerance, the body is the one built with the pole on the axis:
+    /// the surface of revolution's frame faces the profile.
+    /// Before, the frame faced the pole's side, half a turn from the profile, and the
+    /// check found the face's edges 10.7 mm off its surface.
+    #[test]
+    fn issue_17204_dome_pole_a_hair_past_the_axis() {
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+
+        let dome = |x: f64| {
+            let pts = [
+                [x, 0.0, 5.0],
+                [5.0, 0.0, 5.0],
+                [10.0, 0.0, 3.0],
+                [10.0, 0.0, 0.0],
+            ];
+            let pw = pts
+                .iter()
+                .map(|&[x, y, z]| CPoint::new(x, y, z, NOW))
+                .collect();
+            let nurb = NurbCurve::new(pw, 3, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]).unwrap();
+            let profile = [
+                Curve::from(BSplineCurve::from_nurb(nurb, 3, false)),
+                segment([10.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
+                segment([0.0, 0.0, 0.0], [0.0, 0.0, 5.0]),
+            ];
+            let curves: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
+            let (o, z) = (Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+            // with the fixes SolidCraft runs
+            let mut k = Kernel {
+                fixes: crate::kernel::UpstreamFixes::all(),
+                ..Kernel::default()
+            };
+            let mut b = create_rotational_sweep(&mut k, &curves, o, z, 360.0, true).unwrap();
+            let check = crate::topology::brep::validation::check_brep(
+                &mut k,
+                &mut b,
+                crate::topology::brep::validation::CheckLevel::Level2,
+            )
+            .unwrap();
+            assert_eq!(
+                check.failure_count(),
+                0,
+                "pole at x {x}: {:?}",
+                check.lines()
+            );
+            let store = AttributeStore::default();
+            let key_of = |_| ObjectKey(0);
+            let attributes = PropertyAttributes {
+                store: &store,
+                key_of: &key_of,
+            };
+            brep_volume(&k, &mut b, 1e-8, &attributes).unwrap()
+        };
+        let on = dome(0.0);
+        let past = dome(-3.4e-11);
+        assert!(on > 0.0, "volume {on}");
+        assert!(
+            (past - on).abs() <= 1e-6 * on,
+            "volume {past}, on the axis {on}"
+        );
+    }
+
+    /// The on-axis tolerance of a surface of revolution is a finite, non-negative
+    /// distance: NaN, infinity and a negative one are refused, not read as the default
+    /// or as putting every point on the axis (#17204).
+    #[test]
+    fn issue_17204_on_axis_tolerance_must_be_finite() {
+        use crate::surface::surf_of_revolution::p1::SurfOfRevolution;
+
+        for tol in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0] {
+            let k = Kernel::default();
+            let line = segment([5.0, 0.0, 0.0], [5.0, 0.0, 5.0]);
+            let r = SurfOfRevolution::create_canonical_off_axis(
+                &k,
+                line,
+                Point3::new(0.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+                false,
+                tol,
+            );
+            assert!(r.is_err(), "tolerance {tol} accepted");
+        }
+    }
+
     /// A square with a square hole (20 x 20 at r 10 to 30, the hole 8 x 8 centred in it)
     /// turned a whole turn about z is a ring with a ring-shaped void: with the opt-ins
     /// (WR-529, the fork's tangency-labs/smlib@38b4212) the void is not counted as
@@ -792,7 +1014,6 @@ mod tests {
         let (o, z) = (Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
 
         let mut k = Kernel::default();
-        k.fixes.revolve_nested_shells_as_cavities = true;
         k.fixes.revolve_holed_profile_void = true;
         let mut ring = create_rotational_sweep(&mut k, &curves, o, z, 360.0, true).unwrap();
         let store = AttributeStore::default();
@@ -817,8 +1038,9 @@ mod tests {
     }
 
     /// An open chain of two lines (out from r 6 to 8, then up 2) revolved half a turn into
-    /// a sheet joins at its meeting vertex with the opt-in (WR-409): two faces, the flat
-    /// ring sector and the cylinder, of area (8^2 - 6^2) pi / 2 + 8 pi 2.
+    /// a sheet joins at its meeting vertex (WR-409): two faces, the flat ring sector and
+    /// the cylinder, of area (8^2 - 6^2) pi / 2 + 8 pi 2. Upstream left the two wires
+    /// apart and the sweep failed.
     #[test]
     fn issue_1113_open_chain_revolves_into_a_joined_sheet() {
         use crate::mass::integrator::properties::{face_area, face_properties};
@@ -833,7 +1055,6 @@ mod tests {
         let (o, z) = (Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
 
         let mut k = Kernel::default();
-        k.fixes.sheet_sweep_joins_profile_wires = true;
         let mut sheet = create_rotational_sweep(&mut k, &curves, o, z, 180.0, false).unwrap();
         let faces = crate::topology::brep::p1::faces(&sheet, None)
             .unwrap()
@@ -879,6 +1100,85 @@ mod tests {
                 (got - want).abs() <= 1e-8 * want,
                 "face area {got}, want {want}"
             );
+        }
+    }
+
+    /// Goldens `sweep.api_brep` `issue1463_drilled_hole_{pz,mz}_120` (WR-409): a drilled
+    /// hole's open profile, the wall r 2 from z 5 down to 1 and the cone from there to the
+    /// axis at the origin, turned 120 degrees about +z and about -z, is a sheet of two
+    /// cone faces (the wall's of half-angle 0) meeting at the profile's middle vertex:
+    /// 5 vertices (the apex is one), 6 edges, valid at Level 2.
+    /// By Pappus the wall is 2 pi / 3 * 2 * 4 = 16 pi / 3 and the cone, slant sqrt 5
+    /// about radius 1, is 2 pi sqrt 5 / 3. Upstream left the two wires apart and both
+    /// sweeps failed (1001).
+    #[test]
+    fn issue_1463_drilled_hole_profile_revolves_part_way_into_a_joined_sheet() {
+        use crate::mass::integrator::properties::{face_area, face_properties};
+        use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+        use crate::surface::surface::SurfaceKind;
+        use crate::topology::brep::validation::{check_brep, CheckLevel};
+        use crate::topology::face::p2::PPF_AREA;
+
+        let chain = [
+            segment([2.0, 0.0, 5.0], [2.0, 0.0, 1.0]),
+            segment([2.0, 0.0, 1.0], [0.0, 0.0, 0.0]),
+        ];
+        let curves: Vec<Option<&Curve>> = chain.iter().map(Some).collect();
+        let pi = std::f64::consts::PI;
+        let want = [2.0 * pi * 5.0_f64.sqrt() / 3.0, 16.0 * pi / 3.0];
+        for z in [1.0, -1.0] {
+            let mut k = Kernel::default();
+            let (o, axis) = (Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, z));
+            let mut sheet = create_rotational_sweep(&mut k, &curves, o, axis, 120.0, false)
+                .unwrap_or_else(|e| panic!("axis z {z}: {e}"));
+            let faces = crate::topology::brep::p1::faces(&sheet, None).unwrap();
+            assert_eq!(faces.len(), 2, "axis z {z}");
+            let edges = crate::topology::brep::p1::edges(&sheet, None).unwrap();
+            assert_eq!(edges.len(), 6, "axis z {z}");
+            let vertices = crate::topology::brep::p1::vertices(&sheet, None).unwrap();
+            assert_eq!(vertices.len(), 5, "axis z {z}");
+            // The profile's top end (2, 0, 5) turned 120 degrees the axis's way round.
+            let top = Point3::new(-1.0, z * 3.0_f64.sqrt(), 5.0);
+            let turned = vertices.iter().any(|&v| {
+                crate::topology::vertex::point(&sheet, v).is_ok_and(|p| p.distance(top) < 1e-9)
+            });
+            assert!(turned, "axis z {z}: no vertex at {top:?}");
+            let check = check_brep(&mut k, &mut sheet, CheckLevel::Level2).unwrap();
+            assert!(check.is_valid(), "axis z {z}: {:?}", check.lines());
+            let mut areas = Vec::new();
+            for &f in &faces {
+                let surface = crate::topology::face::p2::surface(&sheet, f)
+                    .unwrap()
+                    .expect("face surface");
+                assert!(
+                    matches!(surface.kind(), SurfaceKind::Cone(_)),
+                    "axis z {z}: face {f:?} is not a cone"
+                );
+                // `face_properties` at accuracy 1e-9, as in the test above.
+                let est = face_area(&k, &mut sheet, f, 1e-4).unwrap();
+                let a = face_properties(
+                    &k,
+                    &mut sheet,
+                    f,
+                    OrientType::Same,
+                    1e-9,
+                    Point3::new(0.0, 0.0, 0.0),
+                    est,
+                    0.0,
+                    PPF_AREA,
+                )
+                .unwrap()
+                .area
+                .abs();
+                areas.push(a);
+            }
+            areas.sort_by(f64::total_cmp);
+            for (got, want) in areas.iter().zip(want) {
+                assert!(
+                    (got - want).abs() <= 1e-8 * want,
+                    "axis z {z}: face area {got}, want {want}"
+                );
+            }
         }
     }
 }

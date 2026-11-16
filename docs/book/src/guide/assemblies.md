@@ -70,7 +70,9 @@ does not move, and a part that joints hold to something grounded moves only as f
 allow (below). Dragging any member of a chain joined to nothing grounded moves the whole chain,
 preserving its joint values. Shared nested definitions move in every instance; the selected
 instance follows the pointer even when its parent is rotated differently from the first one. A drag that starts on empty space, on a part that can't move, or
-with Shift, Ctrl (Cmd) or Alt held draws a selection box instead. Other uncaptured moves stay
+with Shift, Ctrl (Cmd) or Alt held draws a selection box instead. A drag over a selected part
+grabs that part, even where another part is in front of it: select a copy's row in the Browser
+to drag it off a grounded copy placed on top of it. Other uncaptured moves stay
 pending. Scripts and agents do the same with `occurrence.drag {occurrence or path, at, point}`,
 which moves the placement by `point - at` in world coordinates and answers the placements it
 `moved`.
@@ -95,6 +97,25 @@ closes the handles.
 
 To use the previous Move panel, turn off **Use joint motion handles for assembly Move**
 in the same settings section.
+
+**Place a part from parameters.** `occurrence.move` takes its `translate` as numbers or as length
+expressions over the design's parameters (`"translate": ["0 mm", "tube_front_y", 0]`), as
+`solid.move` does for bodies. An occurrence moved by expressions that name a parameter keeps them
+(`expressed_moves` in `component.list`) and, whenever such a parameter changes, moves on by the
+difference, along the axes the move was given in (`space: local` or `world`), so an imported STEP
+part placed at a station follows the station. Other moves of it (a drag, another move) stay, and
+undo, saving and opening keep the expressions. Renaming a parameter carries into them, and
+deleting one they use is refused. A move by expressions is captured at once (`capture: false` is
+refused with them). If an expression stops working out (say a parameter becomes an angle), the
+part stays where it is until it works out again.
+
+The same holds for the `origin` a move turns about (a part that turns about a point that follows a
+parameter is carried by what the turn leaves behind when the point moves), for the translation
+column of a `matrix` (the last entry of each of the first three rows, or entries 4, 8 and 12 of a
+flat one; the rotation entries are numbers), and for the `matrix` of `file.insert_step`, which
+places the new part the same way. A grounded part stays put, as with `translate`. The turn's
+`angle`, the rotation entries of a `matrix` and an absolute placement (`to`, `to_matrix`) are
+worked out once, when the move is made.
 
 Paste New copies nested component definitions, sketches, feature histories and generated
 dimension parameters. Repeated child instances remain shared within the new copy. Materials,
@@ -300,6 +321,11 @@ part ("Pedestal:1 is not connected to anything grounded"), the Drive Joints dial
 row, `motion.play` lists such joints under `unmoved`, and `joint.list` names every such chain under
 `floating`. Ground a part of the chain, or join it to a grounded part (a rigid as-built joint keeps
 it where it is), and it moves.
+
+Driving a joint turns the side that is held by no grounded part, with everything joined to it
+rigidly. A rigid joint whose origin is lost (its face was deleted) still holds its two parts as
+they are, so the parts beyond it move with the side that turns. A joint between two grounded
+parts has nothing to turn: the reason says "both sides are held by grounded parts" and names them.
 
 `joint.drive` answers the joint's values as `joint.list` gives them, in degrees and millimetres
 with their units and limits, and `moved` says whether any part moved. A joint's origins are mated
@@ -533,8 +559,8 @@ the component shares them, Paste New copies them, and they are saved with the co
 `component.metadata.set {component, part_number?, description?, revision?, bom_type?, values?, properties?}`
 changes them in one undo step (an empty value removes a field). The root component is the
 design itself: its properties are `document.metadata`'s. Standard parts (`parts.insert`) get a
-part number from their standard and size (`ISO 4762 M6x20`, or a bearing's designation) and a
-description; **Change Part Size** renumbers them, keeping a field you changed yourself.
+part number from their standard and size (`ISO 4762 M6x20`, `GOST 7798-70 M12x60`, or a bearing's
+designation) and a description; **Change Part Size** renumbers them, keeping a field you changed yourself.
 
 **Bill of Materials** (`assembly.bom`, on the **INSPECT** panel) counts the placed components:
 

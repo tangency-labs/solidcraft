@@ -114,6 +114,16 @@ pub fn started(dir: &Path) {
     let _ = std::fs::remove_file(dir.join(MARKER));
 }
 
+/// The window closed while the app was still starting (behind its starting page, #1210). A close
+/// the user asked for is not a failed start: the marker goes, so closing a couple of launches early
+/// cannot put the next one in safe mode. A close the app made itself (its graphics device was lost
+/// and it starts again) keeps the marker: that start did fail.
+pub fn closed_while_starting(dir: &Path, by_user: bool) {
+    if by_user {
+        started(dir);
+    }
+}
+
 /// A saved backend change that this launch is trying. Keep this value until the first
 /// frame is presented, so only this launch's matching attempt can be confirmed or reverted.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -994,6 +1004,23 @@ mod tests {
         // A damaged marker counts as none.
         std::fs::write(d.join(MARKER), "zz").unwrap();
         assert_eq!(begin(&d), 0);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Closing the window from the starting page twice is not two failed starts (#1210); a close
+    /// after a lost device still counts toward safe mode.
+    #[test]
+    fn closing_while_starting_is_not_a_failed_start_unless_the_app_closed_itself() {
+        let d = scratch("closed-while-starting");
+        for _ in 0..FAILED_STARTS_FOR_SAFE_MODE + 1 {
+            assert_eq!(begin(&d), 0, "a user's close never counts");
+            closed_while_starting(&d, true);
+        }
+        assert_eq!(begin(&d), 0);
+        closed_while_starting(&d, false);
+        assert_eq!(begin(&d), 1, "the device was lost: that start failed");
+        closed_while_starting(&d, false);
+        assert_eq!(begin(&d), FAILED_STARTS_FOR_SAFE_MODE);
         let _ = std::fs::remove_dir_all(&d);
     }
 

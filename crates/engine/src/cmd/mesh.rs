@@ -42,8 +42,12 @@ fn target(s: &Session, p: &Value, cmd: &str) -> Result<String> {
 fn convert(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "mesh.convert";
     let state = s.model.state();
-    let body = target(s, p, cmd)?;
-    let source = state.body(&body).ok_or_else(|| bad(cmd, format!("no body `{body}`")))?;
+    let given = target(s, p, cmd)?;
+    // The selection and the Browser name a body of a further placement as the world shows it
+    // (`Mesh (Scan:2)`): that name means the body it shows, which the conversion edits in its
+    // component, as `appearance.assign` reads it (#9740).
+    let body = s.own_body_name(&given).ok_or_else(|| bad(cmd, format!("no body `{given}`")))?;
+    let source = state.body(&body).ok_or_else(|| bad(cmd, format!("no body `{given}`")))?;
     if !source.body.is_mesh() {
         return Err(bad(cmd, "select a mesh body"));
     }

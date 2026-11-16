@@ -105,8 +105,6 @@
 //!   otherwise solves globally on the base, which finds a point on a closed surface's seam
 //!   once at each end of the period and refuses the two answers.
 
-use std::borrow::Cow;
-
 use crate::blend::fillet_custom_solver::{
     face_owner, offset_compute_inward_vector, offset_evaluate_1st, offset_evaluate_point,
     offset_local_point_solve, surface_global_point_solve, ConstantRadiusAssistedFs, InitialValues,
@@ -117,7 +115,8 @@ use crate::blend::fillet_geom::p1::{
 };
 use crate::blend::fillet_intersector::FilletIntersector;
 use crate::blend::fillet_solver::p1::{
-    FilletSolver, FilletSolverOps, FilletSphereSolveEnfo, OffsetSurfaceSlot,
+    seam_periods, wrap_closed_directions, FilletSolver, FilletSolverOps, FilletSphereSolveEnfo,
+    OffsetSurfaceSlot, SeamDomain,
 };
 use crate::blend::fillet_solver::p3::StepSolveOutcome;
 use crate::blend::fillet_solver::p4::IntersectorSolver;
@@ -210,11 +209,13 @@ fn interval_at<'a>(ivls: &'a mut ExtentNd, i: usize, op: &'static str) -> Result
 /// out of bounds) are kept.
 fn as_sm_err(e: SolidError, op: &'static str) -> SolidError {
     match e {
+        // a certificate's work budget spent: never flattened into a status
+        e if e.is_not_certified() => e,
         SolidError::Unported { .. }
         | SolidError::Cancelled { .. }
         | SolidError::InvalidInput { .. }
         | SolidError::PortInvariant { .. } => e,
-        _ => SolidError::sm_err(op),
+        _ => SolidError::blend_failed(op, "a stage the solver calls failed"),
     }
 }
 
@@ -603,13 +604,18 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
                 &GlobalPointSolveOptions::<ObjectHandle>::default(),
             )?;
             if sols.len() != 1 {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the point does not drop onto the other edge once",
+                ));
             }
 
             // get OtherFilletEdge Parameter
             let mut fillet_edge_t = sols
                 .get(0)
-                .ok_or_else(|| SolidError::sm_err(OP))?
+                .ok_or_else(|| {
+                    SolidError::blend_failed(OP, "the point does not drop onto the other edge once")
+                })?
                 .start
                 .param(0)?;
 
@@ -656,16 +662,12 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
                 non_zero_tangents: true,
             };
             let mat = base2.evaluate(k, uv_pnt, 1, 1, flags)?;
-            let du = mat
-                .get(1)
-                .and_then(|r| r.first())
-                .copied()
-                .ok_or_else(|| SolidError::sm_err(OP))?;
-            let dv = mat
-                .first()
-                .and_then(|r| r.get(1))
-                .copied()
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+            let du = mat.get(1).and_then(|r| r.first()).copied().ok_or_else(|| {
+                SolidError::blend_failed(OP, "the second surface has no u derivative")
+            })?;
+            let dv = mat.first().and_then(|r| r.get(1)).copied().ok_or_else(|| {
+                SolidError::blend_failed(OP, "the second surface has no v derivative")
+            })?;
             let mut deg = du.angle_between(dv)?;
             deg *= 180.0 / PI;
             // (not a range test: a NaN angle keeps the guess, as upstream)
@@ -693,12 +695,17 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
                 EFF_ZERO_SQ,
             )?;
             if sols.len() != 1 {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the point does not drop onto the other rail's surface once",
+                ));
             }
-            let s = sols
-                .first()
-                .copied()
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+            let s = sols.first().copied().ok_or_else(|| {
+                SolidError::blend_failed(
+                    OP,
+                    "the point does not drop onto the other rail's surface once",
+                )
+            })?;
             srf2_guess_uv.x = s.x;
             srf2_guess_uv.y = s.y;
         }
@@ -728,10 +735,12 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
                 EFF_ZERO_SQ,
             )?;
             if sols.len() == 1 {
-                let s = sols
-                    .first()
-                    .copied()
-                    .ok_or_else(|| SolidError::sm_err(OP))?;
+                let s = sols.first().copied().ok_or_else(|| {
+                    SolidError::blend_failed(
+                        OP,
+                        "the point does not drop onto the other rail's surface once",
+                    )
+                })?;
                 srf2_guess_uv.x = s.x;
                 srf2_guess_uv.y = s.y;
             }
@@ -757,6 +766,19 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
             if let Some((closed, wraps)) = dir {
                 *ivl = closed;
                 *p = wraps;
+            }
+        }
+    }
+    // Not upstream (#15767): the ball's section solve wraps a closed base across its seam
+    if fs.solver.seam_domain == SeamDomain::Wrapped {
+        for ((ivl, p), period) in ivls
+            .iter_mut()
+            .zip(periodic.iter_mut())
+            .zip(seam_periods(k, base2)?)
+        {
+            if let Some(period) = period {
+                *ivl = period;
+                *p = true;
             }
         }
     }
@@ -979,15 +1001,13 @@ impl EvalNFunctions for GuessSphereEnfo<'_> {
 
 /// `SmLocalSolveNd(sEvalFun, &sIntervals, &sPeriodicities)` set up as both plane
 /// solves do: desired accuracy `SM_EFF_ZERO_SQ`, at most 8 total boundary hits, 30
-/// iterations; `k`'s `fixes.oscillating_skips_failed_guesses` is passed on.
+/// iterations.
 fn plane_local_solver<'a, E: EvalNFunctions + ?Sized>(
-    k: &Kernel,
     eval: &'a mut E,
     intervals: &'a ExtentNd,
     periodicities: &'a [bool],
 ) -> LocalSolveNd<'a, E> {
     let mut ls = LocalSolveNd::new(eval, Some(intervals), Some(periodicities));
-    ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
     ls.set_desired_accuracy(EFF_ZERO_SQ);
     ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
     ls.set_maximum_iterations(30);
@@ -1083,7 +1103,7 @@ impl ConstantRadiusAssistedFs {
         let plane_d = -plane_orig.dot(plane_normal);
         let approx_tol_3d = self.solver.approx_tol_3d;
         let mut eval = GuessSphereEnfo::new(k, plane_normal, plane_d, self);
-        let mut ls = plane_local_solver(k, &mut eval, &intervals, &periodicities);
+        let mut ls = plane_local_solver(&mut eval, &intervals, &periodicities);
 
         // Solve it
         let mut sol = ls.solve_it(&guess_t, approx_tol_3d)?;
@@ -1141,6 +1161,12 @@ pub fn point_on_plane_solve(
     let jacobian_size = solver.jacobian_size()?;
     let mut intervals = plane_intervals(jacobian_size, uv_domain1, uv_domain2)?;
     let mut periodicities = vec![false; 2];
+    // Not upstream (#15767): the ball's section solve wraps a closed base across its seam (the
+    // second surface's in `LoadInitialValues`)
+    if solver.solver().seam_domain == SeamDomain::Wrapped {
+        let base = rail_offset(solver.solver(), 0)?.base_surface().clone();
+        wrap_closed_directions(k, &base, &mut intervals, &mut periodicities, 0)?;
+    }
     let mut guess_t = vec![uv1.x, uv1.y];
 
     let mut surface1 = rail_offset(solver.solver(), 0)?.clone();
@@ -1207,7 +1233,10 @@ pub fn point_on_plane_solve(
         if norm.length_squared() < EFF_ZERO_SQ {
             norm = offset_evaluate_normal(k, rail_offset_mut(solver.solver_mut(), rail)?, uv)?;
             if norm.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the offset surface normal is zero",
+                ));
             }
         }
         // (the Unitize status is ignored: the normal is not zero here)
@@ -1271,7 +1300,7 @@ fn fillet_sphere_solve(
     let approx_tol_3d = solver.solver().approx_tol_3d;
     // (the constructor's "sphere centre and radius" are the plane normal and D)
     let mut eval = SphereEquations(k, FilletSphereSolveEnfo::new(plane_normal, plane_d, solver));
-    let mut ls = plane_local_solver(k, &mut eval, intervals, periodicities);
+    let mut ls = plane_local_solver(&mut eval, intervals, periodicities);
 
     // Solve equations with NewtonRaphson iteration
     let mut sol = ls.solve_it(guess_t, approx_tol_3d)?;
@@ -1682,7 +1711,8 @@ impl VariableRadiusFs {
 
         // pCurve = pOptRefCurve; NER(pCurve); (m_vFilletGeoms[0] is read before, but
         // first dereferenced in the rail loop)
-        let curve = ref_curve.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let curve =
+            ref_curve.ok_or_else(|| SolidError::blend_missing(OP, "the reference curve"))?;
         let fillet_geom = *self
             .curve_based
             .solver
@@ -1708,10 +1738,14 @@ impl VariableRadiusFs {
             // (m_vOtherRails1 / m_vOtherRails2 are not appended upstream)
             let all_rails = [pseudo.geom(fillet_geom)?.rail(i)];
             for rail in all_rails {
-                let rail = rail.ok_or_else(|| SolidError::null_pointer(OP))?;
+                let rail = rail
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the fillet geometry's rail"))?;
                 let fil_eus = edge::edgeuses(pseudo.brep(), rail, None, None)?;
                 if fil_eus.len() != 2 {
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::blend_failed(
+                        OP,
+                        "the rail does not have two edge uses",
+                    ));
                 }
                 for &eu in &fil_eus {
                     let vu = pseudo.brep().edgeuse(eu)?.vertexuse.ok_or_else(|| {
@@ -1743,11 +1777,19 @@ impl VariableRadiusFs {
                         &GlobalPointSolveOptions::<ObjectHandle>::default(),
                     )?;
                     if solutions.len() != 1 {
-                        return Err(SolidError::sm_err(OP));
+                        return Err(SolidError::blend_failed(
+                            OP,
+                            "the point does not drop onto the reference curve once",
+                        ));
                     }
                     let mut t = solutions
                         .get(0)
-                        .ok_or_else(|| SolidError::sm_err(OP))?
+                        .ok_or_else(|| {
+                            SolidError::blend_failed(
+                                OP,
+                                "the point does not drop onto the reference curve once",
+                            )
+                        })?
                         .start
                         .param(0)?;
                     if b3d_test && ivl.is_value_on_boundary(t, EFF_ZERO).0 && is_closed_solver_edge
@@ -1806,7 +1848,7 @@ impl VariableRadiusFs {
             .curve_based
             .original
             .clone()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's original curve"))?;
         let opts = LawIntersectionOptions {
             law_orient: self.law_orientation,
             point_curve: &original,
@@ -1839,7 +1881,10 @@ impl VariableRadiusFs {
         traced?;
         for &vu in tsect_pnts.iter().skip(1) {
             if pseudo.fillet_vertexuse(vu)?.tsect_pnt().curve_parameter < 0.0 {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "an intersection point has a negative curve parameter",
+                ));
             }
         }
 
@@ -1926,7 +1971,10 @@ impl VariableRadiusFs {
             || sdug.length_squared() < EFF_ZERO_SQ
             || sdvg.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "an offset surface has a zero derivative",
+            ));
         }
 
         let diff1 = sf - sg;
@@ -2056,7 +2104,14 @@ impl VariableRadiusFs {
         )?;
         if sols.len() == 2 {
             // [B391]
-            let sol = |i: usize| sols.get(i).ok_or_else(|| SolidError::sm_err(OP));
+            let sol = |i: usize| {
+                sols.get(i).ok_or_else(|| {
+                    SolidError::blend_failed(
+                        OP,
+                        "the point solve has fewer solutions than it counted",
+                    )
+                })
+            };
             let t0 = sol(0)?.start.param(0)?;
             let t1 = sol(1)?.start.param(0)?;
             let dist0 = self.law_interval.distance_from(t0);
@@ -2080,11 +2135,16 @@ impl VariableRadiusFs {
             }
         }
         if sols.len() != 1 {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the point does not drop onto the solver's curve once",
+            ));
         }
         let drop_t = sols
             .get(0)
-            .ok_or_else(|| SolidError::sm_err(OP))?
+            .ok_or_else(|| {
+                SolidError::blend_failed(OP, "the point does not drop onto the solver's curve once")
+            })?
             .start
             .param(0)?;
         let mut fillet_edge_t = drop_t;
@@ -2165,10 +2225,12 @@ impl VariableRadiusFs {
                     EFF_ZERO_SQ,
                 )?;
                 if sols.len() == 1 {
-                    let s = sols
-                        .first()
-                        .copied()
-                        .ok_or_else(|| SolidError::sm_err(OP))?;
+                    let s = sols.first().copied().ok_or_else(|| {
+                        SolidError::blend_failed(
+                            OP,
+                            "the point does not drop onto the second surface once",
+                        )
+                    })?;
                     s2d.x = s.x;
                     s2d.y = s.y;
                 }
@@ -2507,10 +2569,7 @@ impl CircularCrossSectionFsg {
         // ball changes its radius along the round (a radius law, or a constant chord
         // between faces whose angle changes); the others' balls touch the round along
         // their great circles.
-        let ball_radius_varies = matches!(
-            solver_type,
-            FilletSolverType::VariableRadius | FilletSolverType::ConstDist
-        );
+        let ball_radius_varies = solver_type.ball_radius_varies();
         // the centre line is a plain SmBSplineCurve here, so its virtuals are the
         // B-spline ones
         let mut cl = Curve::from(core::mem::take(center_line));
@@ -2586,7 +2645,10 @@ fn scale_to_joint(joined: &BSplineSurface, piece: &mut BSplineSurface) -> Result
         if wa > 0.0 && wb > 0.0 && r.is_finite() {
             Ok(r)
         } else {
-            Err(SolidError::sm_err(OP_PIECEWISE))
+            Err(SolidError::blend_failed(
+                OP_PIECEWISE,
+                "a weight at the joint's ends is not positive",
+            ))
         }
     };
     let (r0, r1) = (ratio(0, 0)?, ratio(a.m(), b.m())?);
@@ -2687,7 +2749,10 @@ impl CircularCrossSectionFsg {
             {
                 let crate::surface::surface::SurfaceKind::ProceduralBlend(pb) = surface.kind()
                 else {
-                    return Err(SolidError::sm_err(OP_PIECEWISE));
+                    return Err(SolidError::blend_failed(
+                        OP_PIECEWISE,
+                        "a piece's definition is not a procedural blend",
+                    ));
                 };
                 let mut net = pb.net().copy();
                 // each definition's net is on its own homogeneous scale (its section's
@@ -2721,7 +2786,9 @@ impl CircularCrossSectionFsg {
             }
             joined = Some(next);
         }
-        let joined = joined.ok_or_else(|| SolidError::sm_err(OP_PIECEWISE))?;
+        let joined = joined.ok_or_else(|| {
+            SolidError::blend_failed(OP_PIECEWISE, "the law corner has no pieces")
+        })?;
         let kept = if ball_radius_varies {
             Some(LawCornerPieces::classify(
                 k,
@@ -2942,7 +3009,10 @@ pub fn law_in_parameter(lb: &LawBall) -> Result<Option<BSplineCurve>> {
             for i in 0..lk {
                 let kk = if db > 0.0 { i } else { lk - 1 - i };
                 let (Some(&kn), Some(&m)) = (c.knots.get(kk), c.knot_multiplicities.get(kk)) else {
-                    return Err(SolidError::sm_err(OP_LAW));
+                    return Err(SolidError::blend_failed(
+                        OP_LAW,
+                        "the law curve's knots and multiplicities differ in number",
+                    ));
                 };
                 t_knots.push((kn - da) / db);
                 t_mult.push(m);
@@ -2953,7 +3023,10 @@ pub fn law_in_parameter(lb: &LawBall) -> Result<Option<BSplineCurve>> {
             for i in 0..lc {
                 let kk = if db > 0.0 { i } else { lc - 1 - i };
                 let Some(&cp) = c.control_points.get(kk) else {
-                    return Err(SolidError::sm_err(OP_LAW));
+                    return Err(SolidError::blend_failed(
+                        OP_LAW,
+                        "the law curve lacks a control point",
+                    ));
                 };
                 t_cps.push(cp);
                 if rational {
@@ -3003,37 +3076,6 @@ pub fn law_in_parameter(lb: &LawBall) -> Result<Option<BSplineCurve>> {
 
 const OP_LAW: &str = "blend::fillet_standard_solver::p2::law_in_parameter";
 
-/// Not the fork's: the face a round's ball rolls on, for the round by its definition: the
-/// surface the trace rolled the ball on. Past its domain the offset of a B-spline, surface
-/// of revolution or surface of extrusion is evaluated on its extended base
-/// (`m_pExtendedSurface`: the base's tangent extension, or a surface of revolution of a
-/// circle's arc carried on as its circle), while the base itself continues otherwise (a
-/// B-spline's end spans carried on, a revolved generator's extrapolation). A round whose
-/// rails run on past the face (an edge's round run on past the edge's ends, or out to an
-/// End round a tube) had no foot on the plain base there: its first station missed the
-/// rails (by more than 1 on a twisted wall) and the round was built as the trace's skinned
-/// B-spline, which is the walls' round only at its sections. So where the offset holds an
-/// extension (the one it holds now, pending or stored, which contains every point the
-/// trace evaluated), the definition rolls on it. A plane, cylinder, cone, sphere or torus
-/// continues as itself and keeps its analytic kind in the definition, and a blend by its
-/// definition keeps its definition.
-fn rolled_on(offset: &crate::surface::offset_surface::OffsetSurface) -> Cow<'_, Surface> {
-    use crate::surface::surface::SurfaceKind;
-    let base = offset.base_surface();
-    let extends = matches!(
-        base.kind(),
-        SurfaceKind::BSpline(_)
-            | SurfaceKind::SurfOfRevolution(_)
-            | SurfaceKind::SurfOfExtrusion(_)
-    );
-    let extended = if extends {
-        offset.with_extended_base_surface(|e| e.map(Surface::clone_keeping_owner))
-    } else {
-        None
-    };
-    extended.map_or(Cow::Borrowed(base), Cow::Owned)
-}
-
 impl CircularCrossSectionFsg {
     /// The fork's `SmGnSectionFSG::CircleSurface` gate (cc08236, 308cc40, c596548; with
     /// `fixes.fillet_round_as_definition`, WR-698): a ball of one radius between faces that are NURBS surfaces is the round by
@@ -3075,7 +3117,9 @@ impl CircularCrossSectionFsg {
         use crate::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
         use crate::blend::fillet_section::definition_box::definition_enclosable;
         use crate::blend::fillet_section::interval::Ivl;
-        use crate::blend::fillet_section::section::{ArcSection, GnLawRound, GnSectionFsg};
+        use crate::blend::fillet_section::section::{
+            rolled_on, ArcSection, GnLawRound, GnSectionFsg,
+        };
         use crate::blend::fillet_standard_solver::touch_circle::{
             corner_angle, fillet_curve_corners,
         };
@@ -3149,6 +3193,30 @@ impl CircularCrossSectionFsg {
                     return Ok(None);
                 }
                 let mut leader = edge.copy();
+                // The edge's curve cut to where the stations are: an unbounded line is held as a
+                // NURB a million times the part's size, whose control points round at about
+                // 1e-9 mm, and every move of the round's frame (its recertificate is taken in its
+                // own) carries that rounding into the leader, past the round's bound. Cut, its
+                // control points are of the part's size; the round is built on the cut curve.
+                let station_ts = points
+                    .iter()
+                    .filter_map(|p| p.user_doubles.first().copied())
+                    .filter(|t| t.is_finite());
+                let (lo, hi) = station_ts
+                    .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), t| {
+                        (lo.min(t), hi.max(t))
+                    });
+                let whole = leader.natural_interval();
+                if lo < hi {
+                    let mut cut = Extent1d::from_min_max(lo.max(whole.min()), hi.min(whole.max()));
+                    if cut.length() > 0.0 && cut != whole {
+                        leader.trim(
+                            k,
+                            &mut cut,
+                            crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+                        )?;
+                    }
+                }
                 leader.set_out_of_bounds_enabled(true);
                 let Some(mut law) = law_in_parameter(lb)? else {
                     return Ok(None);
@@ -3367,7 +3435,7 @@ impl super::p1::LinearCrossSectionFsg {
         uv: [&mut BSplineCurve; 2],
         ball: &CircleBall,
     ) -> Result<Option<Surface>> {
-        use crate::blend::fillet_section::section::GnSectionFsg;
+        use crate::blend::fillet_section::section::{rolled_on, GnSectionFsg};
         use crate::blend::fillet_standard_solver::touch_circle::{
             corner_angle, fillet_curve_corners,
         };
@@ -3741,7 +3809,10 @@ impl SurfaceSurfaceFs {
         if self.calc_fillet_start(k)?.is_none() {
             return Ok(());
         }
-        Err(SolidError::null_pointer(OP_SS_CALC))
+        Err(SolidError::blend_missing(
+            OP_SS_CALC,
+            "the executive's pseudo-B-rep",
+        ))
     }
 
     /// `SmSurfaceSurfaceFS::CalcFilletGeom` up to `m_pExecutive->GetPseudoBrep()`: the
@@ -3780,7 +3851,10 @@ impl SurfaceSurfaceFs {
         let n2 = offset_evaluate_normal(k, self.base.surface_mut(1)?, g1)?;
         *curr.crv_deriv_mut() = n1.cross(n2);
         if curr.crv_deriv().length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the offset normals at the guesses are parallel",
+            ));
         }
 
         let mut step = 0.0001;
@@ -3876,6 +3950,19 @@ pub struct SurfaceSurfaceStart {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A G^n section certificate that spent its work budget is not flattened to `SM_ERR`.
+    #[test]
+    fn a_certificate_past_its_budget_is_not_flattened_to_sm_err() {
+        let e = SolidError::blend(
+            "t",
+            crate::error::blend::BlendFailure::NotCertified {
+                halvings: 1,
+                stations: 2,
+            },
+        );
+        assert_eq!(as_sm_err(e.clone(), "op"), e);
+    }
     use crate::blend::fillet_standard_solver::p1::{
         FilletLawKind, CONSTANT_RADIUS_FS_TYPE, SURFACE_SURFACE_FS_TYPE, VARIABLE_RADIUS_FS_TYPE,
     };
@@ -4136,10 +4223,14 @@ mod tests {
             g,
         )
         .expect("solver");
-        assert!(matches!(
-            fs.calc_fillet_geom(&k),
-            Err(SolidError::Upstream { .. })
-        ));
+        let e = fs.calc_fillet_geom(&k).unwrap_err();
+        assert_eq!(
+            e.blend_failure(),
+            Some(&crate::error::blend::BlendFailure::Failed(
+                "the offset normals at the guesses are parallel"
+            ))
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
         let mut fs = SurfaceSurfaceFs::new(
             &k,
             &mut FilletBrep::new(),
@@ -4156,13 +4247,14 @@ mod tests {
             g,
         )
         .expect("solver");
-        assert!(matches!(
-            fs.calc_fillet_geom(&k),
-            Err(SolidError::Upstream {
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        let e = fs.calc_fillet_geom(&k).unwrap_err();
+        assert_eq!(
+            e.blend_failure(),
+            Some(&crate::error::blend::BlendFailure::Missing(
+                "the executive's pseudo-B-rep"
+            ))
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
     }
 
     #[test]
@@ -4208,10 +4300,16 @@ mod tests {
         assert!(vr.is_kind_of(VARIABLE_RADIUS_FS_TYPE) && vr.is_kind_of(CURVE_BASED_FS_TYPE));
         assert!(!vr.is_kind_of(CONSTANT_RADIUS_FS_TYPE));
         let mut pseudo = FilletBrep::new();
-        assert!(matches!(
-            vr.re_calc_fillet_geom(&k, &mut pseudo, false, None, None),
-            Err(SolidError::Upstream { .. })
-        ));
+        let e = vr
+            .re_calc_fillet_geom(&k, &mut pseudo, false, None, None)
+            .unwrap_err();
+        assert_eq!(
+            e.blend_failure(),
+            Some(&crate::error::blend::BlendFailure::Missing(
+                "the reference curve"
+            ))
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
         // (no fillet geometry: upstream reads m_vFilletGeoms[0] out of bounds)
         assert!(matches!(
             vr.re_calc_fillet_geom(&k, &mut pseudo, false, None, Some(&centre)),

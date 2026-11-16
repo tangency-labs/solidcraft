@@ -508,8 +508,7 @@ fn link(i: i64) -> Option<NodeId> {
 fn status(e: &SolidError) -> i64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
-        SolidError::Upstream { code, .. } => i64::from(*code),
-        _ => -1,
+        e => solidcore::error::upstream_status(e).map_or(-1, i64::from),
     }
 }
 
