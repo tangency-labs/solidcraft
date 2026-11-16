@@ -2878,12 +2878,11 @@ fn measure_counts_round_holes_through_unfold_and_refold() {
             if holes == 0 {
                 blank_volumes[stage_index] = measured_volume;
             }
-            // A hole adds one wall and two circular rims, with one vertex on each rim.
-            // The flat extrusion also keeps each whole cylinder's seam.
+            // A hole adds one wall and two circular rims, with one vertex on each rim, folded or
+            // flat: the flat body's hole walls are whole cylinders, with no seam edge.
             // The folded blank extrudes an eight-segment L-section: ten faces, 24 edges, 16 vertices.
             let blank = if stage == "unfolded" { [6, 12, 8] } else { [10, 24, 16] };
-            let edges_per_hole = if stage == "unfolded" { 3 } else { 2 };
-            assert_eq!(counts, [blank[0] + holes, blank[1] + edges_per_hole * holes, blank[2] + 2 * holes], "{holes} holes, {stage}: {body}");
+            assert_eq!(counts, [blank[0] + holes, blank[1] + 2 * holes, blank[2] + 2 * holes], "{holes} holes, {stage}: {body}");
             assert_eq!(body["face_types"].as_object().unwrap().values().map(|n| n.as_u64().unwrap()).sum::<u64>(), counts[0]);
             assert_eq!(body["sheet_metal"], true);
             for (key, count) in ["faces", "edges", "vertices"].into_iter().zip(counts) {
@@ -3793,9 +3792,7 @@ fn fold_across_two_rounded_tabs_keeps_one_face_per_arc() {
         assert!(rel(volume(&mut s), flat) < 1e-3, "a fold keeps the material");
         let bb = &run(&mut s, "inspect.measure", json!({}))["bodies"][0]["bbox"];
         assert!(bb["max"][2].as_f64().unwrap() > 7.0, "both tabs stand up: {bb}");
-        // This construction check counts the sewn faces before coplanar end pieces merge.
-        let body = &run(&mut s, "inspect.measure", json!({}))["bodies"][0];
-        (body["kernel"]["faces"].as_u64().unwrap(), body["face_types"]["cylinder"].as_u64().unwrap_or(0))
+        faces(&mut s)
     };
     let ((rounded_faces, rounded_cylinders), (sharp_faces, sharp_cylinders)) = (folded(&rounded), folded(&sharp));
     let counts = [(rounded_faces, rounded_cylinders), (sharp_faces, sharp_cylinders)];
