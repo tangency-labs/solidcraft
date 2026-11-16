@@ -106,6 +106,7 @@ pub mod render;
 pub mod render_bindings;
 pub mod render_camera;
 pub mod render_hdr;
+pub mod render_info;
 pub mod render_jobs;
 pub mod render_library;
 pub mod render_lights;
