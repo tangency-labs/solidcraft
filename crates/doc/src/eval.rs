@@ -2896,6 +2896,11 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             frame = doc.feature(sp.sketch.0).map(|s| doc.component_transform(s.component));
             reads.drawn_targets(st, f);
         }
+        // And a rib, which is built against the bodies where its sketch is drawn (#17655).
+        FeatureKind::Rib { sketch, .. } => {
+            frame = doc.feature(sketch.0).map(|s| doc.component_transform(s.component));
+            reads.drawn_targets(st, f);
+        }
         FeatureKind::Sketch { plane, sketch } => {
             match crate::face_anchor::plane_face_anchor(plane) {
                 // Read in the frame of the placement it was drawn in, its face through the
@@ -11198,11 +11203,12 @@ fn drawn_tools_change_bodies(kind: &FeatureKind) -> bool {
 
 /// The component whose frame a feature's drawn tools are made in: its own for a feature with
 /// drawn tools (see [`drawn_tools_change_bodies`]), and its sketch's for a hole at sketch points,
-/// whose points are kept in that sketch's frame (#17623). `None` for every other feature: a hole
+/// whose points are kept in that sketch's frame (#17623), and for a rib (#17655). `None` for every other feature: a hole
 /// at a picked position is kept in the frame of the body it was picked on.
 fn tools_component(doc: &Document, f: &Feature) -> Option<u64> {
     match &f.kind {
         FeatureKind::Hole { points: Some(sp), .. } => doc.feature(sp.sketch.0).map(|s| s.component),
+        FeatureKind::Rib { sketch, .. } => doc.feature(sketch.0).map(|s| s.component),
         kind if drawn_tools_change_bodies(kind) => Some(f.component),
         _ => None,
     }

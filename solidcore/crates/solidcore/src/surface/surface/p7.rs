@@ -109,19 +109,21 @@
 //!   `EvaluateSTEP`, `GetFace` and the base `CalculateBoundingBox`
 //!   (`surface.surface_p1`; the solver constructors also hand over the caches holding
 //!   the patch data of tree nodes).
-//! - **No evidence (WR-663).** With the opt-in `Kernel::fixes.query_statuses_pass_on`,
-//!   `IsClosed` is `false` when an end, the continuity, the mid derivatives or the
-//!   Frenet frame cannot be evaluated, and the base `IsPlanar` is `false` without its
-//!   box, as the fork (tangency-labs/smlib 21dcf69). The same flag passes on the other
-//!   statuses this file's functions drop and gives their soft answers (the convergence
-//!   tests, `sm_GoodDropResult`, `ApproxDerivativeLengths`, `FindDegenParamForDirection`,
-//!   `sm_CheckSeamDrop`, `sm_LoadGuesses`), as do the other `surface::surface` files
+//! - **No evidence (WR-663).** `IsClosed` is `false` when an end has no position or the
+//!   short-arc filter's Frenet frame cannot be evaluated (the fork,
+//!   tangency-labs/smlib 21dcf69); where only the derivatives (end, continuity or mid)
+//!   cannot be evaluated, as through a cone apex, the end positions (as the evaluation
+//!   writes them, [`SurfaceEvaluate::evaluate_point_written`]) decide closure and
+//!   the continuity is Discontinuous, the rule `SmCPGlobalSolver::Solve` follows for a
+//!   closed curve. The base `IsPlanar` is `false` without its box. The other
+//!   statuses this file's functions drop are passed on and their soft answers given
+//!   (the convergence tests, `sm_GoodDropResult`, `ApproxDerivativeLengths`,
+//!   `FindDegenParamForDirection`, `sm_CheckSeamDrop`, `sm_LoadGuesses`), as in the
+//!   other `surface::surface` files
 //!   (`plan/upstream-issues/WR-663--addendum-2026-10-31-surface-statuses.md`).
 
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{
-    ignore_or_pass_on, ignore_status, ignored, ignored_or_pass_on, passed_on, Result, SolidError,
-};
+use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent1d::ExtentNd;
 use crate::geom::extent2d::Extent2d;
@@ -156,7 +158,7 @@ use crate::topology::BrepId;
 
 use super::p1::{
     evaluate_1st_derivatives, evaluate_2nd_derivatives, evaluate_directional_derivs, is_node_valid,
-    CsNormalizeEnfo, OperandDomain, SecondDerivatives, SolveOperands, SurfaceSolveContext,
+    CsNormalizeEnfo, OperandDomain, SolveOperands, SurfaceSolveContext,
 };
 use super::p2::{derivative_limit, drop_vectors, normal_limit, SurfaceEvaluate};
 use super::{Surface, SurfaceKind};
@@ -364,12 +366,8 @@ pub fn base_evaluate_normal<S: SurfaceEvaluate + ?Sized>(
                     // They both produced non-zero normals.
                     norm2 /= len;
                     normal = 2.0 * norm1 - norm2; // Linear extrapolation.
-                                                  // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-                    normal = if k.fixes.query_statuses_pass_on {
-                        normal.unitize()?
-                    } else {
-                        normal.unitize_or_z()
-                    };
+                                                  // (passed on as the fork does, WR-663, tangency-labs/smlib 21dcf69)
+                    normal = normal.unitize()?;
                 }
 
                 return Ok(normal);
@@ -567,30 +565,17 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
     want_continuity: bool,
 ) -> Result<(bool, Option<ContinuityType>)> {
     let discontinuous = want_continuity.then_some(ContinuityType::Discontinuous);
-    // with the opt-in fix a surface that cannot be evaluated is not shown closed
+    // a surface whose end positions cannot be evaluated is not shown closed
     // (tangency-labs/smlib 21dcf69)
-    let not_shown = k.fixes.query_statuses_pass_on;
 
     // locals
     let count = if param == SurfParamType::Both { 2 } else { 1 };
     let mut min_continuity = ContinuityType::CInfinity;
-    let mut p_min = Vec3::UNDEF;
-    let mut p_max = Vec3::UNDEF;
     let mut p_mid: Vec<Vec3> = vec![Vec3::UNDEF; 4];
     let mut g_mid: Vec<Vec3> = vec![Vec3::UNDEF; 4];
     let mut uv_min = Vec2::UNDEF;
     let mut uv_max = Vec2::UNDEF;
     let mut uv_mid = Vec2::UNDEF;
-    let zero = Vec3::new(0.0, 0.0, 0.0);
-    let mut d2_min = SecondDerivatives {
-        point: Vec3::UNDEF,
-        du: zero,
-        dv: zero,
-        duv: zero,
-        duu: zero,
-        dvv: zero,
-    };
-    let mut d2_max = d2_min;
 
     // for every param direction to be checked
     for ii in 0..count {
@@ -630,44 +615,51 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
                 uv_mid.x = uv.x;
             }
 
-            // evaluate isoParameter endPoints
-            if want_continuity {
-                match ignored(evaluate_2nd_derivatives(
-                    k,
-                    surface,
-                    uv_min,
-                    Side::Left,
-                    Side::Left,
-                ))? {
-                    Some(d) => d2_min = d,
-                    None if not_shown => return Ok((false, discontinuous)),
-                    None => (),
+            // evaluate isoParameter endPoints (the second derivatives only when the
+            // continuity is wanted). Closure is decided from the end positions alone:
+            // where the derivatives cannot be evaluated (a pole such as a cone apex) the
+            // positions still decide it and the continuity is Discontinuous, as
+            // `SmCPGlobalSolver::Solve` does for a closed curve. The position is the
+            // one the evaluation writes even when its status fails (a cone's NURB
+            // position at the apex); only an end with no position leaves the surface
+            // not shown closed (tangency-labs/smlib 21dcf69, WR-663).
+            let d2 = if want_continuity {
+                match (
+                    ignored(evaluate_2nd_derivatives(
+                        k,
+                        surface,
+                        uv_min,
+                        Side::Left,
+                        Side::Left,
+                    ))?,
+                    ignored(evaluate_2nd_derivatives(
+                        k,
+                        surface,
+                        uv_max,
+                        Side::Left,
+                        Side::Left,
+                    ))?,
+                ) {
+                    (Some(d2_min), Some(d2_max)) => Some((d2_min, d2_max)),
+                    _ => None,
                 }
-                match ignored(evaluate_2nd_derivatives(
-                    k,
-                    surface,
-                    uv_max,
-                    Side::Left,
-                    Side::Left,
-                ))? {
-                    Some(d) => d2_max = d,
-                    None if not_shown => return Ok((false, discontinuous)),
-                    None => (),
-                }
-                p_min = d2_min.point;
-                p_max = d2_max.point;
             } else {
-                match ignored(surface.evaluate_point(k, uv_min))? {
-                    Some(p) => p_min = p,
-                    None if not_shown => return Ok((false, discontinuous)),
-                    None => (),
+                None
+            };
+            let (p_min, p_max) = if let Some((d2_min, d2_max)) = d2 {
+                (d2_min.point, d2_max.point)
+            } else {
+                let Some(p_min) = surface.evaluate_point_written(k, uv_min)? else {
+                    return Ok((false, discontinuous));
+                };
+                let Some(p_max) = surface.evaluate_point_written(k, uv_max)? else {
+                    return Ok((false, discontinuous));
+                };
+                if want_continuity {
+                    min_continuity = ContinuityType::Discontinuous;
                 }
-                match ignored(surface.evaluate_point(k, uv_max))? {
-                    Some(p) => p_max = p,
-                    None if not_shown => return Ok((false, discontinuous)),
-                    None => (),
-                }
-            }
+                (p_min, p_max)
+            };
 
             // pick a tolerance
             let scaled_zero = EFF_ZERO * 1000.0 * (1.0 + p_max.max_dimension());
@@ -680,7 +672,7 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
             }
 
             // when asked - compute and save the lowest continuity across the boundary
-            if want_continuity {
+            if let Some((d2_min, d2_max)) = d2 {
                 let (first_min, second_min, first_max, second_max) =
                     if this_param == SurfParamType::U {
                         (d2_min.du, d2_min.duu, d2_max.du, d2_max.duu)
@@ -705,9 +697,8 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
                         geometric_g2: k.fixes.geometric_g2_continuity,
                     },
                 ) {
-                    Err(e) if not_shown && !e.is_unported_or_cancelled() => {
-                        return Ok((false, discontinuous))
-                    }
+                    // a continuity that cannot be evaluated is not shown: Discontinuous
+                    Err(e) if !e.is_unported_or_cancelled() => ContinuityType::Discontinuous,
                     r => r?,
                 };
 
@@ -720,7 +711,9 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
             // extra test
             if (min_continuity as i32) > (ContinuityType::Discontinuous as i32) {
                 // filter out very short curve passing as closed curves
-                match ignored(evaluate_directional_derivs(
+                // (no derivatives through the middle, an iso line through a pole: the
+                // end positions decide closure, the seam is not shown smooth)
+                let Some(d) = ignored(evaluate_directional_derivs(
                     k,
                     surface,
                     uv_mid,
@@ -728,14 +721,13 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
                     2,
                     Side::Left,
                     Side::Left,
-                ))? {
-                    Some(d) => {
-                        for (dst, src) in p_mid.iter_mut().zip(d) {
-                            *dst = src;
-                        }
-                    }
-                    None if not_shown => return Ok((false, discontinuous)),
-                    None => (),
+                ))?
+                else {
+                    min_continuity = ContinuityType::Discontinuous;
+                    continue;
+                };
+                for (dst, src) in p_mid.iter_mut().zip(d) {
+                    *dst = src;
                 }
 
                 let p_mid0 = p_mid.first().copied().unwrap_or(Vec3::UNDEF);
@@ -746,21 +738,13 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
                 // cheesy one point test for a short curve
                 if mid_gap_sq < 4.0 * tol * tol {
                     // but some short curves can be very small circles - watch for those
-                    // (status ignored; on failure upstream has already written the
-                    // position, the tangent and a zero curvature vector)
-                    if let Some(g) = ignored(frenet_from_derivatives(&p_mid, 2))? {
-                        for (dst, src) in g_mid.iter_mut().zip(g) {
-                            *dst = src;
-                        }
-                    } else if not_shown {
+                    // (status ignored upstream, which then reads what the failed call
+                    // wrote; the fork shows nothing closed)
+                    let Some(g) = ignored(frenet_from_derivatives(&p_mid, 2))? else {
                         return Ok((false, discontinuous));
-                    } else {
-                        for (dst, src) in g_mid.iter_mut().zip(p_mid.iter().take(2)) {
-                            *dst = *src;
-                        }
-                        if let Some(c) = g_mid.get_mut(2) {
-                            *c = Vec3::new(0.0, 0.0, 0.0);
-                        }
+                    };
+                    for (dst, src) in g_mid.iter_mut().zip(g) {
+                        *dst = src;
                     }
 
                     // get curvature and radius of curvature
@@ -1002,9 +986,9 @@ impl Surface {
                     [false, true, false],
                     false,
                 ))?;
-                // with the opt-in fix a surface that cannot be boxed is not shown planar
+                // a surface that cannot be boxed is not shown planar, as the fork
                 // (tangency-labs/smlib 21dcf69)
-                let not_shown = pseudo.is_none() && k.fixes.query_statuses_pass_on;
+                let not_shown = pseudo.is_none();
                 let pseudo = pseudo
                     .and_then(|b| b.pseudo_box)
                     .unwrap_or_else(PseudoBox::new);
@@ -1118,16 +1102,15 @@ impl Surface {
         let mut s_ivl = Extent1d::new();
         let mut t_ivl = Extent1d::new();
         let singular_u = singular_dir == SurfParamType::U;
-        // (the statuses SMLib drops here are passed on with the opt-in fix, WR-663,
+        // (the statuses SMLib drops here are passed on, as the fork does, WR-663,
         // tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
         let (ds, dt) = if singular_u {
-            ignore_or_pass_on(s_ivl.set_min_max(uv_min.x, uv_max.x), pass)?;
-            ignore_or_pass_on(t_ivl.set_min_max(uv_min.y, uv_max.y), pass)?;
+            s_ivl.set_min_max(uv_min.x, uv_max.x)?;
+            t_ivl.set_min_max(uv_min.y, uv_max.y)?;
             (uv.x, uv.y)
         } else {
-            ignore_or_pass_on(s_ivl.set_min_max(uv_min.y, uv_max.y), pass)?;
-            ignore_or_pass_on(t_ivl.set_min_max(uv_min.x, uv_max.x), pass)?;
+            s_ivl.set_min_max(uv_min.y, uv_max.y)?;
+            t_ivl.set_min_max(uv_min.x, uv_max.x)?;
             (uv.y, uv.x)
         };
 
@@ -1172,19 +1155,13 @@ impl Surface {
             } else {
                 at(&m, 1, 0)?
             };
-            let surf_dt = if pass {
-                surf_dt.unitize()?
-            } else {
-                surf_dt.unitize_or_z()
-            };
+            let surf_dt = surf_dt.unitize()?;
 
             // measure how closely test point dir is to target dir
             let this_f = surf_dt.dot(s_dir);
             // (upstream's `AngleBetween` is for debugging only; its status is passed on
-            // with the opt-in fix)
-            if pass {
-                surf_dt.angle_between(s_dir)?;
-            }
+            // as the fork does)
+            surf_dt.angle_between(s_dir)?;
 
             // save the best sample point
             if this_f > best_f {
@@ -1233,22 +1210,17 @@ impl Surface {
         };
         let mut found_param = near_best_param;
         if !found {
-            if let Some((f, t)) = ignored_or_pass_on(
-                singular_param_solve(
-                    k,
-                    self,
-                    uv,
-                    s_dir,
-                    singular_dir,
-                    &s_ivl,
-                    s_ivl.evaluate(best_param),
-                    tol,
-                ),
-                pass,
-            )? {
-                found = f;
-                found_t = t;
-            }
+            // (status ignored upstream; passed on as the fork does)
+            (found, found_t) = singular_param_solve(
+                k,
+                self,
+                uv,
+                s_dir,
+                singular_dir,
+                &s_ivl,
+                s_ivl.evaluate(best_param),
+                tol,
+            )?;
             found_param = best_param;
         }
 
@@ -2204,7 +2176,8 @@ fn pair_solve_best_answer_sq(
 // ---- first-derivative helpers --------------------------------------------------------------
 
 /// The average first derivative magnitudes `(|S_u|, |S_v|)` over a 4x4 grid of
-/// `uv_domain` (`ApproxDerivativeLengths`).
+/// `uv_domain` (`ApproxDerivativeLengths`), averaged over the samples that evaluate
+/// (`SM_UNDEF_DOUBLE` when none does), as the fork.
 ///
 /// # Errors
 ///
@@ -2214,15 +2187,13 @@ pub fn approx_derivative_lengths<S: SurfaceEvaluate + ?Sized>(
     surface: &S,
     uv_domain: &Extent2d,
 ) -> Result<Vec2> {
-    // Method: simple, just evaluate on a grid and average.
-    const NUM_SAMPLES: usize = 4;
+    // Method: simple, just evaluate on a grid (4 x 4) and average.
     let samples = [0.15, 0.35, 0.65, 0.85];
     let mut mag_u = 0.0;
     let mut mag_v = 0.0;
     let mut d = (Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF);
-    // with the opt-in fix the samples that evaluate are averaged, `SM_UNDEF_DOUBLE` when
-    // none does (WR-663, tangency-labs/smlib 21dcf69)
-    let only_evaluated = k.fixes.query_statuses_pass_on;
+    // the samples that evaluate are averaged, `SM_UNDEF_DOUBLE` when none does, as the
+    // fork (WR-663, tangency-labs/smlib 21dcf69)
     let mut num_evaluated: u32 = 0;
     // an average, a scale for tolerances: a procedural blend's net answers it (#2510)
     let _net = NetScope::new(k);
@@ -2231,7 +2202,7 @@ pub fn approx_derivative_lengths<S: SurfaceEvaluate + ?Sized>(
         for &sj in &samples {
             let uv = uv_domain.evaluate(si, sj);
             let evaluated = eval_1st_keep(k, surface, uv, Side::Left, Side::Left, &mut d)?;
-            if only_evaluated && !evaluated {
+            if !evaluated {
                 continue;
             }
             mag_u += d.1.length();
@@ -2240,18 +2211,11 @@ pub fn approx_derivative_lengths<S: SurfaceEvaluate + ?Sized>(
         }
     }
 
-    if only_evaluated {
-        if num_evaluated == 0 {
-            return Ok(Vec2::new(UNDEF_DOUBLE, UNDEF_DOUBLE));
-        }
-        mag_u /= f64::from(num_evaluated);
-        mag_v /= f64::from(num_evaluated);
-        return Ok(Vec2::new(mag_u, mag_v));
+    if num_evaluated == 0 {
+        return Ok(Vec2::new(UNDEF_DOUBLE, UNDEF_DOUBLE));
     }
-
-    mag_u /= (NUM_SAMPLES * NUM_SAMPLES) as f64;
-    mag_v /= (NUM_SAMPLES * NUM_SAMPLES) as f64;
-
+    mag_u /= f64::from(num_evaluated);
+    mag_v /= f64::from(num_evaluated);
     Ok(Vec2::new(mag_u, mag_v))
 }
 
@@ -2360,11 +2324,9 @@ pub fn compute_inward_vector<S: SurfaceEvaluate + ?Sized>(
     // towards midPoint UV vec
     let mid_uv = surface.natural_uv_domain_with_nurb(k)?.evaluate(0.5, 0.5);
     let dir_uv = mid_uv - uv;
-    // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-    let dir_uv = match passed_on(dir_uv.unitize(), k.fixes.query_statuses_pass_on)? {
-        Ok(d) => d,
-        Err(_) => dir_uv,
-    };
+    // (status ignored upstream; passed on as the fork does, WR-663,
+    // tangency-labs/smlib 21dcf69)
+    let dir_uv = dir_uv.unitize()?;
 
     // directional derivative
     let inward = dir_uv.x * du + dir_uv.y * dv;
@@ -2398,13 +2360,9 @@ pub fn drop_points_to_tangent_plane<S: SurfaceEvaluate + ?Sized>(
     let mut out = Vec::new();
     for p in points {
         let diff = *p - pnt;
-        // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-        if let Some(s) = ignored_or_pass_on(
-            drop_vectors(du, dv, &[diff]),
-            k.fixes.query_statuses_pass_on,
-        )?
-        .and_then(|v| v.first().copied())
-        {
+        // (status ignored upstream; passed on as the fork does, WR-663,
+        // tangency-labs/smlib 21dcf69)
+        if let Some(s) = drop_vectors(du, dv, &[diff])?.first().copied() {
             uv_step = s;
         }
         out.push(uv + uv_step);
@@ -2483,13 +2441,10 @@ pub fn load_guesses(
         }
         None => false,
     };
-    // (the point evaluation's status is passed on with the opt-in fix, WR-663,
+    // (the point evaluation's status is passed on, as the fork does, WR-663,
     // tangency-labs/smlib 21dcf69)
-    let pass = k.fixes.query_statuses_pass_on;
     if !ok {
-        if let Some(p) = ignored_or_pass_on(surface.evaluate_point(k, close_uv), pass)? {
-            pt = p;
-        }
+        pt = surface.evaluate_point(k, close_uv)?;
     }
 
     // get current distance and upcoming NewtonRaphson values
@@ -2601,9 +2556,7 @@ pub fn load_guesses(
                 None => false,
             };
             if !ok {
-                if let Some(p) = ignored_or_pass_on(surface.evaluate_point(k, uv), pass)? {
-                    pt = p;
-                }
+                pt = surface.evaluate_point(k, uv)?;
             }
 
             surf_to_pt = pt - test_pnt;
@@ -2640,13 +2593,12 @@ pub fn pass_sc_convergence_test<S: SurfaceEvaluate + ?Sized>(
     curve: &Curve,
     parameter: f64,
 ) -> Result<bool> {
-    // with the opt-in fix a point that cannot be evaluated is not shown converged
-    // (WR-663, tangency-labs/smlib 21dcf69)
-    let not_shown = k.fixes.query_statuses_pass_on;
+    // a point that cannot be evaluated is not shown converged, as the fork (WR-663,
+    // tangency-labs/smlib 21dcf69)
 
     // surface eval
     let mut d = (Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF);
-    if !eval_1st_keep(k, surface, uv, Side::Left, Side::Left, &mut d)? && not_shown {
+    if !eval_1st_keep(k, surface, uv, Side::Left, Side::Left, &mut d)? {
         return Ok(false);
     }
     let (pnt, mut du, mut dv) = d;
@@ -2659,8 +2611,7 @@ pub fn pass_sc_convergence_test<S: SurfaceEvaluate + ?Sized>(
                 *dst = src;
             }
         }
-        None if not_shown => return Ok(false),
-        None => (),
+        None => return Ok(false),
     }
     let [pv0, mut pv1] = pv;
 
@@ -2712,15 +2663,14 @@ where
     S1: SurfaceEvaluate + ?Sized,
     S2: SurfaceEvaluate + ?Sized,
 {
-    // with the opt-in fix a point that cannot be evaluated is not shown converged
-    // (WR-663, tangency-labs/smlib 21dcf69)
-    let not_shown = k.fixes.query_statuses_pass_on;
+    // a point that cannot be evaluated is not shown converged, as the fork (WR-663,
+    // tangency-labs/smlib 21dcf69)
     let mut d1 = (Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF);
-    if !eval_1st_keep(k, surface, uv, Side::Left, Side::Left, &mut d1)? && not_shown {
+    if !eval_1st_keep(k, surface, uv, Side::Left, Side::Left, &mut d1)? {
         return Ok(false);
     }
     let mut d2 = (Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF);
-    if !eval_1st_keep(k, surface2, uv2, Side::Left, Side::Left, &mut d2)? && not_shown {
+    if !eval_1st_keep(k, surface2, uv2, Side::Left, Side::Left, &mut d2)? {
         return Ok(false);
     }
     let (pnt, mut du, mut dv) = d1;
@@ -2782,19 +2732,12 @@ pub fn check_seam_drop<S: SurfaceEvaluate + ?Sized>(
     // pOther point is dropped onto a seam in pThis (evaluated in its STEP
     // parameterisation). Upstream ignores the status: on failure sPtDer keeps its
     // default-constructed (undefined) vectors.
-    // (both statuses are passed on with the opt-in fix, WR-663, tangency-labs/smlib
+    // (both statuses are passed on, as the fork does, WR-663, tangency-labs/smlib
     // 21dcf69)
-    let pass = k.fixes.query_statuses_pass_on;
-    let pt_der = ignored_or_pass_on(evaluate_step(k, this_surf, this_uv), pass)?
-        .unwrap_or_else(|| vec![vec![Vec3::UNDEF; 2]; 2]);
+    let pt_der = evaluate_step(k, this_surf, this_uv)?;
 
-    let mut d = (Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF);
-    if pass {
-        d = evaluate_1st_derivatives(k, other_surf, other_uv, Side::Left, Side::Left)?;
-    } else {
-        eval_1st_keep(k, other_surf, other_uv, Side::Left, Side::Left, &mut d)?;
-    }
-    let (_, other_u, other_v) = d;
+    let (_, other_u, other_v) =
+        evaluate_1st_derivatives(k, other_surf, other_uv, Side::Left, Side::Left)?;
 
     // Unitize them, so that dot-product comparisons mean direction only.
     let mut other_u = other_u.unitize().map_err(|_| {
@@ -2894,12 +2837,10 @@ pub fn good_drop_result<S: SurfaceEvaluate + ?Sized>(
     }
 
     // Evaluate the error functions: how far from the surface normal.
-    // (with the opt-in fix a drop that cannot be evaluated is not shown good, WR-663,
+    // (a drop that cannot be evaluated is not shown good, as the fork, WR-663,
     // tangency-labs/smlib 21dcf69; the fork keeps the dropped `Unitize` statuses)
-    let not_shown = k.fixes.query_statuses_pass_on;
     let mut d = (Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF);
-    let result_evaluated = eval_1st_keep(k, surface, result_uv, Side::Left, Side::Left, &mut d)?;
-    if !result_evaluated && not_shown {
+    if !eval_1st_keep(k, surface, result_uv, Side::Left, Side::Left, &mut d)? {
         return Ok(false);
     }
     let (srf_point, su, sv) = d;
@@ -2946,16 +2887,14 @@ pub fn good_drop_result<S: SurfaceEvaluate + ?Sized>(
     // itself is its point (not upstream: `EvaluatePoint` there can round one ulp away
     // from the first-derivative evaluation of the result, which then measured the
     // result farther than itself).
-    let mut guess_3d = Vec3::UNDEF;
-    if guess_uv == result_uv && result_evaluated {
-        guess_3d = srf_point;
+    let guess_3d = if guess_uv == result_uv {
+        srf_point
     } else {
-        match ignored(surface.evaluate_point(k, guess_uv))? {
-            Some(p) => guess_3d = p,
-            None if not_shown => return Ok(false),
-            None => (),
-        }
-    }
+        let Some(p) = ignored(surface.evaluate_point(k, guess_uv))? else {
+            return Ok(false);
+        };
+        p
+    };
     let dsq_guess = pt_to_drop.distance_squared(guess_3d);
     let dsq_result = pt_to_drop.distance_squared(srf_point);
     if dsq_result > dsq_guess {
@@ -3289,13 +3228,6 @@ mod tests {
     use crate::curve::hermite_curve::HermiteCurve;
     use crate::surface::plane::Plane;
 
-    fn issue_2009_kernels() -> (Kernel, Kernel) {
-        let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        (off, on)
-    }
-
     #[test]
     fn issue_2009_unevaluable_samples_give_no_derivative_lengths() {
         // tangency-labs/smlib 21dcf69 (ApproxDerivativeLengths): the samples that
@@ -3303,11 +3235,9 @@ mod tests {
         // unset derivatives.
         let s = Surface::from(BSplineSurface::default());
         let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
-        let (off, on) = issue_2009_kernels();
-        let len_off = approx_derivative_lengths(&off, &s, &dom).unwrap();
-        let len_on = approx_derivative_lengths(&on, &s, &dom).unwrap();
-        assert_eq!(len_on, Vec2::new(UNDEF_DOUBLE, UNDEF_DOUBLE));
-        assert_ne!(len_off, len_on);
+        let k = Kernel::default();
+        let len = approx_derivative_lengths(&k, &s, &dom).unwrap();
+        assert_eq!(len, Vec2::new(UNDEF_DOUBLE, UNDEF_DOUBLE));
     }
 
     #[test]
@@ -3317,36 +3247,23 @@ mod tests {
         // unset values, which agree.
         let s = Surface::from(BSplineSurface::default());
         let uv = Point2::new(0.5, 0.5);
-        let (off, on) = issue_2009_kernels();
-        let ss_off = pass_ss_convergence_test(&off, &s, uv, &s, uv).unwrap();
-        let ss_on = pass_ss_convergence_test(&on, &s, uv, &s, uv).unwrap();
-        assert!(!ss_on);
-        assert!(ss_off);
+        let k = Kernel::default();
+        assert!(!pass_ss_convergence_test(&k, &s, uv, &s, uv).unwrap());
     }
 
     #[test]
     fn issue_2009_unevaluable_surface_is_not_shown_closed() {
         // tangency-labs/smlib 21dcf69 (SmSurface::IsClosed): a surface that cannot be
-        // evaluated is not shown closed. Coverage only: upstream's unset ends coincide
-        // but its short-curve test then rejects them too.
+        // evaluated is not shown closed.
         let s = Surface::from(BSplineSurface::default());
         let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
-        assert!(s
-            .evaluate_point(&Kernel::default(), Point2::new(0.0, 0.0))
-            .is_err());
-        let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        let closed_off = s
-            .is_closed(&off, &dom, SurfParamType::U, None, false)
+        let k = Kernel::default();
+        assert!(s.evaluate_point(&k, Point2::new(0.0, 0.0)).is_err());
+        let closed = s
+            .is_closed(&k, &dom, SurfParamType::U, None, false)
             .unwrap()
             .0;
-        let closed_on = s
-            .is_closed(&on, &dom, SurfParamType::U, None, false)
-            .unwrap()
-            .0;
-        assert!(!closed_on);
-        assert!(!closed_off);
+        assert!(!closed);
     }
 
     /// tangency-labs/solidcore#525 (WR-384): with the corner points wanted, upstream's
