@@ -1,11 +1,37 @@
 {
   "ar": {
     "cmd.gear_edit": "تحرير ترس",
-    "cmd.gear_insert": "إدراج ترس"
+    "cmd.gear_insert": "إدراج ترس",
+    "gear.backlash": "الخلوص بين الأسنان",
+    "gear.bore_diameter": "قطر ثقب المحور",
+    "gear.bore_offset": "إزاحة ثقب المحور",
+    "gear.double_helical": "حلزوني مزدوج",
+    "gear.face_width": "عرض السن",
+    "gear.helix_angle": "زاوية الحلزون",
+    "gear.internal": "ترس داخلي",
+    "gear.module": "المقياس",
+    "gear.pressure_angle": "زاوية الضغط",
+    "gear.profile_shift": "إزاحة المنحنى",
+    "gear.rim_thickness": "سماكة الحلقة",
+    "gear.teeth": "عدد الأسنان",
+    "help.gear.insert": "يدرج ترسًا أسطوانيًا مستقيم أو حلزوني الأسنان بمنحنى ملتف، خارجيًا أو داخليًا، كمكوّن جديد. تحدد المقياس وعدد الأسنان وزاوية الضغط وعرض السن، ويمكنك إضافة زاوية حلزون أو أسنان حلزونية مزدوجة أو ثقب محور أو حلقة داخلية؛ تُرسم الأسنان وتُمسح كأي ميزة أخرى."
   },
   "de": {
     "cmd.gear_edit": "Zahnrad bearbeiten",
-    "cmd.gear_insert": "Zahnrad einfügen"
+    "cmd.gear_insert": "Zahnrad einfügen",
+    "gear.backlash": "Flankenspiel",
+    "gear.bore_diameter": "Wellenbohrung (Durchmesser)",
+    "gear.bore_offset": "Versatz der Wellenbohrung",
+    "gear.double_helical": "Doppelschräg",
+    "gear.face_width": "Zahnbreite",
+    "gear.helix_angle": "Schrägungswinkel",
+    "gear.internal": "Innenverzahnung",
+    "gear.module": "Modul",
+    "gear.pressure_angle": "Eingriffswinkel",
+    "gear.profile_shift": "Profilverschiebung",
+    "gear.rim_thickness": "Kranzdicke",
+    "gear.teeth": "Zähnezahl",
+    "help.gear.insert": "Fügt ein Evolventen-Stirnrad (gerad- oder schrägverzahnt), außen- oder innenverzahnt, als neues Bauteil ein. Sie geben Modul, Zähnezahl, Eingriffswinkel und Zahnbreite an und können einen Schrägungswinkel, Doppelschrägverzahnung, eine Wellenbohrung oder einen Innenkranz hinzufügen; die Zähne werden wie jedes andere Feature skizziert und gesweept."
   },
   "en": {
     "cmd.gear_edit": "Edit Gear",
@@ -26,22 +52,87 @@
   },
   "he": {
     "cmd.gear_edit": "עריכת גלגל שיניים",
-    "cmd.gear_insert": "הוספת גלגל שיניים"
+    "cmd.gear_insert": "הוספת גלגל שיניים",
+    "gear.backlash": "מרווח שיניים",
+    "gear.bore_diameter": "קוטר חור הציר",
+    "gear.bore_offset": "היסט חור הציר",
+    "gear.double_helical": "סליל כפול",
+    "gear.face_width": "רוחב שן",
+    "gear.helix_angle": "זווית סליל",
+    "gear.internal": "גלגל שיניים פנימי",
+    "gear.module": "מודול",
+    "gear.pressure_angle": "זווית לחץ",
+    "gear.profile_shift": "הסטת פרופיל",
+    "gear.rim_thickness": "עובי טבעת",
+    "gear.teeth": "מספר שיניים",
+    "help.gear.insert": "מוסיף גלגל שיניים בעל פרופיל אבולוטי, ישר או סלילי, חיצוני או פנימי, כרכיב חדש. מזינים מודול, מספר שיניים, זווית לחץ ורוחב שן, ואפשר להוסיף זווית סליל, שיניים סליליות כפולות, חור ציר או טבעת פנימית; השיניים משורטטות ונסחפות כמו כל תכונה אחרת."
   },
   "ja": {
     "cmd.gear_edit": "歯車を編集",
-    "cmd.gear_insert": "歯車を挿入"
+    "cmd.gear_insert": "歯車を挿入",
+    "gear.backlash": "バックラッシ",
+    "gear.bore_diameter": "軸穴の直径",
+    "gear.bore_offset": "軸穴のオフセット",
+    "gear.double_helical": "やまば歯",
+    "gear.face_width": "歯幅",
+    "gear.helix_angle": "ねじれ角",
+    "gear.internal": "内歯車",
+    "gear.module": "モジュール",
+    "gear.pressure_angle": "圧力角",
+    "gear.profile_shift": "転位",
+    "gear.rim_thickness": "リムの厚さ",
+    "gear.teeth": "歯数",
+    "help.gear.insert": "インボリュート平歯車またははすば歯車（外歯または内歯）を新しいコンポーネントとして挿入します。モジュール、歯数、圧力角、歯幅を指定し、ねじれ角、やまば歯、軸穴、内歯のリムを追加できます。歯形はスケッチされ、ほかのフィーチャーと同じようにスイープされます。"
   },
   "ko": {
     "cmd.gear_edit": "기어 편집",
-    "cmd.gear_insert": "기어 삽입"
+    "cmd.gear_insert": "기어 삽입",
+    "gear.backlash": "백래시",
+    "gear.bore_diameter": "축 구멍 지름",
+    "gear.bore_offset": "축 구멍 오프셋",
+    "gear.double_helical": "이중 헬리컬",
+    "gear.face_width": "이 너비",
+    "gear.helix_angle": "비틀림각",
+    "gear.internal": "내접 기어",
+    "gear.module": "모듈",
+    "gear.pressure_angle": "압력각",
+    "gear.profile_shift": "전위",
+    "gear.rim_thickness": "림 두께",
+    "gear.teeth": "잇수",
+    "help.gear.insert": "인벌루트 평기어 또는 헬리컬 기어(외접 또는 내접)를 새 컴포넌트로 삽입합니다. 모듈, 잇수, 압력각, 이 너비를 지정하고 비틀림각, 이중 헬리컬 이, 축 구멍, 내접 기어의 림을 추가할 수 있습니다. 잇날은 스케치되어 다른 피처처럼 스윕됩니다."
   },
   "vi": {
     "cmd.gear_edit": "Sửa bánh răng",
-    "cmd.gear_insert": "Chèn bánh răng"
+    "cmd.gear_insert": "Chèn bánh răng",
+    "gear.backlash": "Độ hở răng",
+    "gear.bore_diameter": "Đường kính lỗ trục",
+    "gear.bore_offset": "Độ lệch lỗ trục",
+    "gear.double_helical": "Răng chữ V",
+    "gear.face_width": "Bề rộng răng",
+    "gear.helix_angle": "Góc nghiêng răng",
+    "gear.internal": "Bánh răng trong",
+    "gear.module": "Mô-đun",
+    "gear.pressure_angle": "Góc áp lực",
+    "gear.profile_shift": "Dịch chỉnh",
+    "gear.rim_thickness": "Độ dày vành",
+    "gear.teeth": "Số răng",
+    "help.gear.insert": "Chèn bánh răng trụ thân khai, răng thẳng hoặc răng nghiêng, ăn khớp ngoài hoặc ăn khớp trong, thành một thành phần mới. Bạn nhập mô-đun, số răng, góc áp lực và bề rộng răng, rồi có thể thêm góc nghiêng răng, răng chữ V, lỗ trục hoặc vành bánh răng trong; răng được phác thảo rồi quét như mọi tính năng khác."
   },
   "zh": {
     "cmd.gear_edit": "编辑齿轮",
-    "cmd.gear_insert": "插入齿轮"
+    "cmd.gear_insert": "插入齿轮",
+    "gear.backlash": "齿侧间隙",
+    "gear.bore_diameter": "轴孔直径",
+    "gear.bore_offset": "轴孔偏移",
+    "gear.double_helical": "人字齿",
+    "gear.face_width": "齿宽",
+    "gear.helix_angle": "螺旋角",
+    "gear.internal": "内齿轮",
+    "gear.module": "模数",
+    "gear.pressure_angle": "压力角",
+    "gear.profile_shift": "变位",
+    "gear.rim_thickness": "齿圈厚度",
+    "gear.teeth": "齿数",
+    "help.gear.insert": "将渐开线直齿轮或斜齿轮（外齿或内齿）作为新零部件插入。指定模数、齿数、压力角和齿宽后，还可加入螺旋角、人字齿、轴孔或内齿圈；齿形会被草绘并像其他特征一样扫掠。"
   }
 }
