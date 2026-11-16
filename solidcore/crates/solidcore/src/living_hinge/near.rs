@@ -76,7 +76,7 @@ fn near_line(a: (f64, f64), b: (f64, f64), v: f64, q: f64) -> Option<(f64, f64)>
 }
 
 /// Whether the direction at `angle` lies on the arc from `start` sweeping `sweep`.
-fn sweeps(start: f64, sweep: f64, angle: f64) -> bool {
+pub(crate) fn sweeps(start: f64, sweep: f64, angle: f64) -> bool {
     if sweep.abs() >= TAU {
         return true;
     }

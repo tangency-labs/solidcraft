@@ -30,6 +30,7 @@
 
 pub(crate) mod lattice;
 pub(crate) mod near;
+pub(crate) mod plan;
 pub(crate) mod rows;
 pub(crate) mod spans;
 
@@ -38,6 +39,7 @@ mod tests;
 
 pub use crate::cell_grid::{MAX_CELLS as MAX_SLOTS, MAX_COORD, MIN_SIZE};
 pub use near::{clean_crossing, component, near_set, near_union, outside, NearEdge};
+pub use plan::{frame_box, plan};
 pub use rows::{plan_rows, plan_rows_zoned, RowSpan};
 pub use spans::{chain_ids, clean_ends, row_crossings, row_spans, row_zone};
 

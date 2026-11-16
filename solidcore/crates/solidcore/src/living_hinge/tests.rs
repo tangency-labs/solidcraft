@@ -445,3 +445,72 @@ fn case_j_margin() {
     assert_eq!(plan.left_out, 6);
     assert!(close(plan.cut_length(), 1218.0), "{}", plan.cut_length());
 }
+
+fn frame_rect(u0: f64, v0: f64, u1: f64, v1: f64) -> Vec<NearEdge> {
+    let p = [(u0, v0), (u1, v0), (u1, v1), (u0, v1)];
+    p.iter()
+        .zip(p.iter().cycle().skip(1))
+        .map(|(&a, &b)| NearEdge::Line(a, b))
+        .collect()
+}
+
+#[test]
+fn case_a_through_the_entry_matches_the_hand_numbers() {
+    use SlotKind::*;
+    // The band u 0..60 by v 30..70 in the plate u 0..60 by v 0..100; its sides are closed.
+    let field = [frame_rect(0.0, 30.0, 60.0, 70.0)];
+    let plate = [frame_rect(0.0, 0.0, 60.0, 100.0)];
+    let closed = [
+        NearEdge::Line((0.0, 30.0), (60.0, 30.0)),
+        NearEdge::Line((60.0, 70.0), (0.0, 70.0)),
+    ];
+    let s = spec(HingeClip::RunOut, 3.0);
+    let got = plan(&field, &plate, &closed, &s, None).unwrap();
+    let (_, want) = plan_band(&s);
+    assert_eq!(got.rows, 27);
+    assert_eq!(got.slots.len(), 95);
+    assert_eq!(
+        (got.count(Whole), got.count(Shortened), got.count(RunOut)),
+        (41, 26, 28)
+    );
+    assert_eq!(got.left_out, 0);
+    assert!(close(got.cut_length(), 1366.0), "{}", got.cut_length());
+    assert_eq!(got.slots.len(), want.slots.len());
+    for (g, w) in got.slots.iter().zip(&want.slots) {
+        assert!(
+            g.row == w.row && close(g.a0, w.a0) && close(g.a1, w.a1) && g.kind == w.kind,
+            "{g:?} against {w:?}"
+        );
+    }
+}
+
+#[test]
+fn the_entry_refuses_an_empty_area_and_an_empty_plate() {
+    let s = spec(HingeClip::RunOut, 3.0);
+    let plate = [frame_rect(0.0, 0.0, 60.0, 100.0)];
+    assert!(matches!(
+        plan(&[], &plate, &[], &s, None),
+        Err(LivingHingeError::Field(_))
+    ));
+    let field = [frame_rect(0.0, 30.0, 60.0, 70.0)];
+    assert!(matches!(
+        plan(&field, &[], &[], &s, None),
+        Err(LivingHingeError::Plate(_))
+    ));
+}
+
+#[test]
+fn the_box_of_a_half_disc_holds_its_top() {
+    let half = [vec![
+        NearEdge::Arc {
+            center: (0.0, 0.0),
+            radius: 2.0,
+            start: 0.0,
+            sweep: std::f64::consts::PI,
+        },
+        NearEdge::Line((-2.0, 0.0), (2.0, 0.0)),
+    ]];
+    let b = frame_box(&half);
+    assert!(close(b.u_min, -2.0) && close(b.u_max, 2.0));
+    assert!(close(b.v_min, 0.0) && close(b.v_max, 2.0));
+}
