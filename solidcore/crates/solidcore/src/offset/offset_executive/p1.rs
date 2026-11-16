@@ -2862,7 +2862,6 @@ impl OffsetExecutive {
 ///
 /// [`SolidError::PortInvariant`] for a matched edge use without a mate or vertex; those
 /// of the evaluations.
-#[allow(clippy::too_many_arguments)]
 fn keep_source_tolerances(
     k: &Kernel,
     original: &Brep,
