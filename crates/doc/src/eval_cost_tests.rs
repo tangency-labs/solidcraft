@@ -1741,6 +1741,7 @@ fn a_patterned_modelled_thread_reuses_its_final_check() {
                     reversed2: false,
                 },
                 bodies: Vec::new(),
+                placements: Vec::new(),
             },
             None,
         )
