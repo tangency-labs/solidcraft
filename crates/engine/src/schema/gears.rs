@@ -3,8 +3,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Insert an external involute spur gear as a new component: a tooth outline sketched on the XY
-/// plane and extruded along +Z. One undo step.
+/// Insert an involute spur gear, external or internal, as a new component: a tooth outline sketched on
+/// the XY plane and extruded along +Z. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct GearInsertParams {
@@ -28,7 +28,16 @@ pub struct GearInsertParams {
     /// more closely and build more slowly.
     #[serde(default)]
     pub flank_points: Option<u32>,
-    /// The component's name (default: `Spur Gear M2 Z20`).
+    /// An internal gear: a ring whose teeth point inward (default false). Profile shift is not used.
+    #[serde(default)]
+    pub internal: Option<bool>,
+    /// Internal gears only: ring thickness outside the tooth roots in millimetres (default: twice the module).
+    #[serde(default)]
+    pub rim_thickness: Option<f64>,
+    /// External gears only: diameter of an axle hole through the centre in millimetres (default: none).
+    #[serde(default)]
+    pub bore_diameter: Option<f64>,
+    /// The component's name (default: `Spur Gear M2 Z20`, or `Internal Gear M2 Z40`).
     #[serde(default)]
     pub name: Option<String>,
 }
@@ -61,6 +70,15 @@ pub struct GearEditParams {
     /// New points per flank, 2 to 64.
     #[serde(default)]
     pub flank_points: Option<u32>,
+    /// Make it an internal gear (true) or an external one (false).
+    #[serde(default)]
+    pub internal: Option<bool>,
+    /// New ring thickness outside the tooth roots of an internal gear, in millimetres.
+    #[serde(default)]
+    pub rim_thickness: Option<f64>,
+    /// New diameter of the axle hole through an external gear in millimetres; 0 removes it.
+    #[serde(default)]
+    pub bore_diameter: Option<f64>,
 }
 
 /// What `gear.insert` and `gear.edit` return.
@@ -76,8 +94,8 @@ pub struct InsertedGear {
     pub pitch_diameter: f64,
     /// Base circle diameter in millimetres.
     pub base_diameter: f64,
-    /// Tip (outside) diameter in millimetres.
+    /// Tooth tip diameter in millimetres: the outside of an external gear, the inside of an internal one.
     pub tip_diameter: f64,
-    /// Root diameter in millimetres.
+    /// Tooth root diameter in millimetres.
     pub root_diameter: f64,
 }

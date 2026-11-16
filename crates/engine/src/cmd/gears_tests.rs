@@ -121,3 +121,62 @@ fn deleting_a_gear_forgets_its_values() {
     run(&mut s, "component.delete", json!({"component": g["component"]}));
     assert!(s.doc.gears.is_empty());
 }
+
+#[test]
+fn an_internal_gear_is_a_ring_with_its_teeth_inside() {
+    let mut s = Session::default();
+    let r = run(&mut s, "gear.insert", json!({"module": 2, "teeth": 40, "face_width": 8, "internal": true}));
+    assert_eq!(r["name"], "Internal Gear M2 Z40");
+    // Tips of the ring's teeth are inside the pitch circle, the roots outside it.
+    assert!((r["tip_diameter"].as_f64().unwrap_or(0.0) - 76.0).abs() < 1e-9);
+    assert!((r["root_diameter"].as_f64().unwrap_or(0.0) - 85.0).abs() < 1e-9);
+    // The default ring is two modules thick outside the roots: outer radius 42.5 + 4. The pitch circle cuts a tooth and a gap equally.
+    let v = volume(&mut s);
+    assert!((v / 8.0 - PI * (46.5 * 46.5 - 40.0 * 40.0)).abs() < 0.06 * PI * 46.5 * 46.5, "{v}");
+}
+
+#[test]
+fn an_external_gear_takes_an_axle_hole_and_edit_can_turn_it_into_a_ring() {
+    let mut s = Session::default();
+    run(&mut s, "gear.insert", json!({"module": 2, "teeth": 20, "face_width": 10, "bore_diameter": 10}));
+    let v = volume(&mut s);
+    assert!((v / 10.0 - PI * (20.0 * 20.0 - 5.0 * 5.0)).abs() < 0.06 * PI * 400.0, "{v}");
+    run(&mut s, "gear.edit", json!({"component": "Spur Gear M2 Z20", "bore_diameter": 0}));
+    assert!((volume(&mut s) / 10.0 - PI * 400.0).abs() < 0.06 * PI * 400.0);
+    // Inside out: the saved axle hole is dropped and the name follows.
+    let r = run(&mut s, "gear.edit", json!({"component": "Spur Gear M2 Z20", "internal": true, "teeth": 40}));
+    assert_eq!(r["name"], "Internal Gear M2 Z40");
+    assert!(volume(&mut s) < 8.0 * 10.0 * PI * 46.5 * 46.5);
+}
+
+#[test]
+fn an_internal_or_bored_gear_keeps_its_values_through_save_and_reopen() {
+    let mut s = Session::default();
+    run(&mut s, "gear.insert", json!({"module": 2, "teeth": 30, "internal": true, "rim_thickness": 5}));
+    run(&mut s, "gear.insert", json!({"module": 1, "teeth": 24, "bore_diameter": 6}));
+    let saved = s.doc.gears.clone();
+    let text = serde_json::to_string(&saved).unwrap_or_default();
+    let back: std::collections::BTreeMap<u64, solidcraft_doc::SpurGear> = serde_json::from_str(&text).unwrap_or_default();
+    assert_eq!(back, saved);
+    assert!(saved.values().any(|g| g.internal && g.rim_thickness == 5.0));
+    assert!(saved.values().any(|g| !g.internal && g.bore_diameter == 6.0));
+}
+
+#[test]
+fn hostile_internal_and_bore_values_are_refused_and_leave_the_design_alone() {
+    let mut s = Session::default();
+    for p in [
+        json!({"module": 2, "teeth": 40, "internal": true, "profile_shift": 0.5}),
+        json!({"module": 2, "teeth": 40, "internal": true, "bore_diameter": 5}),
+        json!({"module": 2, "teeth": 40, "internal": true, "rim_thickness": -1}),
+        json!({"module": 2, "teeth": 40, "rim_thickness": 3}),
+        json!({"module": 2, "teeth": 40, "bore_diameter": -1}),
+        json!({"module": 2, "teeth": 40, "bore_diameter": 1e9}),
+        json!({"module": 2, "teeth": 40, "bore_diameter": 80}),
+        json!({"module": 2, "teeth": 40, "internal": "yes"}),
+        json!({"module": 2, "teeth": 40, "backlash": -1}),
+    ] {
+        assert!(s.execute("gear.insert", &p).is_err(), "{p}");
+    }
+    assert_eq!(volume(&mut s), 0.0);
+}

@@ -22,11 +22,13 @@ pub struct GearSpec {
     pub backlash: f64,
     /// Points along each flank, from the start of the involute to the tip.
     pub flank_points: u32,
+    /// An internal gear: the teeth point inward from a ring (profile shift is not used).
+    pub internal: bool,
 }
 
 impl GearSpec {
     pub fn new(module: f64, teeth: u32, pressure_angle_deg: f64) -> Self {
-        Self { module, teeth, pressure_angle: pressure_angle_deg.to_radians(), shift: 0.0, backlash: 0.0, flank_points: 8 }
+        Self { module, teeth, pressure_angle: pressure_angle_deg.to_radians(), shift: 0.0, backlash: 0.0, flank_points: 8, internal: false }
     }
     pub fn pitch_radius(&self) -> f64 {
         self.module * f64::from(self.teeth) / 2.0
@@ -34,10 +36,18 @@ impl GearSpec {
     pub fn base_radius(&self) -> f64 {
         self.pitch_radius() * self.pressure_angle.cos()
     }
+    /// The tooth tips: outside an external gear, inside an internal one.
     pub fn tip_radius(&self) -> f64 {
+        if self.internal {
+            return self.pitch_radius() - self.module;
+        }
         self.pitch_radius() + self.module * (1.0 + self.shift)
     }
+    /// The tooth roots: inside an external gear, outside an internal one.
     pub fn root_radius(&self) -> f64 {
+        if self.internal {
+            return self.pitch_radius() + self.module * 1.25;
+        }
         self.pitch_radius() - self.module * (1.25 - self.shift)
     }
 }
@@ -57,8 +67,25 @@ fn half_tooth_angle(g: &GearSpec, r: f64) -> Option<f64> {
     Some(at_base - inv((rb / r).clamp(-1.0, 1.0).acos()))
 }
 
-/// The closed outline, counter-clockwise, without repeating the first point.
+/// The closed outline, counter-clockwise, without repeating the first point. For an internal
+/// gear it is the edge of the hole in the ring: the tooth space of a ring gear has the shape of
+/// an external tooth, so it is built as one, with the clearance on the tip side and the
+/// backlash widening the space.
 pub fn outline(g: &GearSpec) -> Result<Vec<[f64; 2]>, String> {
+    if !g.backlash.is_finite() || g.backlash < 0.0 || g.backlash >= g.module * PI / 2.0 {
+        return Err("the backlash must be from 0 up to a quarter of the circular pitch".into());
+    }
+    if !g.internal {
+        return build(g, g.tip_radius(), g.root_radius());
+    }
+    if g.shift != 0.0 {
+        return Err("profile shift is for external gears".into());
+    }
+    let space = GearSpec { internal: false, backlash: -g.backlash, ..*g };
+    build(&space, g.root_radius(), g.tip_radius())
+}
+
+fn build(g: &GearSpec, ra: f64, rf: f64) -> Result<Vec<[f64; 2]>, String> {
     let finite = g.module.is_finite() && g.pressure_angle.is_finite() && g.shift.is_finite() && g.backlash.is_finite();
     if !finite || g.module <= 0.0 {
         return Err("the module must be a positive number".into());
@@ -72,7 +99,7 @@ pub fn outline(g: &GearSpec) -> Result<Vec<[f64; 2]>, String> {
     if g.flank_points < 2 || g.flank_points > 64 {
         return Err("a flank needs between 2 and 64 points".into());
     }
-    let (rb, rf, ra) = (g.base_radius(), g.root_radius(), g.tip_radius());
+    let rb = g.base_radius();
     if !(rf > 0.0) {
         return Err("the root circle is inside the axis: use more teeth or a smaller profile shift".into());
     }
@@ -179,6 +206,30 @@ mod tests {
     }
 
     #[test]
+    fn an_internal_gear_has_its_teeth_pointing_inward() {
+        let mut g = GearSpec::new(2.0, 40, 20.0);
+        g.internal = true;
+        assert!((g.tip_radius() - 38.0).abs() < 1e-12 && (g.root_radius() - 42.5).abs() < 1e-12);
+        let pts = outline(&g).unwrap();
+        let (lo, hi) = (g.tip_radius() - 1e-9, g.root_radius() + 1e-9);
+        assert!(pts.iter().all(|p| (lo..=hi).contains(&radius(p))));
+        assert!((pts.iter().map(radius).fold(f64::MAX, f64::min) - g.tip_radius()).abs() < 1e-9);
+        assert!((pts.iter().map(radius).fold(0.0, f64::max) - g.root_radius()).abs() < 1e-9);
+    }
+
+    #[test]
+    fn an_internal_gear_space_is_as_wide_as_the_external_tooth_it_meshes_with() {
+        // On the pitch circle the ring's space equals the external tooth, plus the backlash.
+        let ext = GearSpec::new(2.0, 40, 20.0);
+        let space = |backlash: f64| {
+            let v = GearSpec { backlash: -backlash, ..ext };
+            2.0 * half_tooth_angle(&v, v.pitch_radius()).unwrap() * v.pitch_radius()
+        };
+        assert!((space(0.0) - PI * 2.0 / 2.0).abs() < 1e-9);
+        assert!((space(0.1) - (PI + 0.1)).abs() < 1e-9);
+    }
+
+    #[test]
     fn hostile_parameters_are_refused_not_panics() {
         for (m, z, a) in [
             (0.0, 20, 20.0),
@@ -201,6 +252,12 @@ mod tests {
         assert!(outline(&g).is_err());
         g.shift = 0.0;
         g.backlash = 1e9;
+        assert!(outline(&g).is_err());
+        g.backlash = -0.1;
+        assert!(outline(&g).is_err());
+        g.backlash = 0.0;
+        g.internal = true;
+        g.shift = 0.5;
         assert!(outline(&g).is_err());
     }
 

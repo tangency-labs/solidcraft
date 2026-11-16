@@ -3470,6 +3470,15 @@ pub struct SpurGear {
     pub backlash: f64,
     /// Points along each flank.
     pub flank_points: u32,
+    /// An internal gear: a ring with its teeth pointing inward.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub internal: bool,
+    /// Ring thickness outside the tooth roots of an internal gear (mm).
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub rim_thickness: f64,
+    /// Diameter of the axle hole through an external gear (mm); 0 for none.
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub bore_diameter: f64,
 }
 
 fn is_zero_f64(v: &f64) -> bool {
