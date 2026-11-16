@@ -170,6 +170,55 @@ mod tests {
         assert_eq!((sent.options.get("origin"), sent.options.get("units")), (Some(&json!(true)), Some(&json!("in"))));
     }
 
+    /// A minimal valid ASCII STL in a temporary file: one triangle. The format states no unit,
+    /// so an imported file waits for the answer.
+    fn ascii_stl(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("solidcraft-mesh-units-{}-{name}.stl", std::process::id()));
+        std::fs::write(
+            &path,
+            "solid part\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 10 0 0\n      vertex 0 10 0\n    endloop\n  endfacet\nendsolid part\n",
+        )
+        .unwrap();
+        path
+    }
+
+    /// The unit of an imported mesh is asked on the screen the import starts: the start page
+    /// asks it too (#15598). The file is chosen and imported the way a person does it, so the
+    /// whole path is the one the report describes.
+    #[test]
+    fn the_unit_is_asked_on_the_start_page_where_the_import_starts() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.show(0);
+        h.frames(3);
+        let path = ascii_stl("import");
+        h.step(&json!({"choose_file": path.to_string_lossy()})).unwrap();
+        h.step(&json!({"click": {"handle": "home:import"}})).unwrap();
+        h.frames(3);
+        assert!(h.app.home.open, "the start page stays open while the file waits for its unit");
+        assert!(h.app.mesh_units.is_some(), "the import asked for the unit of the file it was given");
+        assert!(crate::scenario::handle_at("mesh_units:ok").is_some(), "the unit is asked on the start page too");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// One Escape gives the pending question up, and leaves the start page open: the question
+    /// is a dialog of its own, not the page's own Escape (#15598).
+    #[test]
+    fn escape_gives_the_pending_question_up_and_keeps_the_start_page() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.show(0);
+        h.frames(3);
+        let path = ascii_stl("escape");
+        h.step(&json!({"choose_file": path.to_string_lossy()})).unwrap();
+        h.step(&json!({"click": {"handle": "home:import"}})).unwrap();
+        h.frames(3);
+        assert!(crate::scenario::handle_at("mesh_units:ok").is_some(), "the question is asked");
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.frames(3);
+        assert!(h.app.mesh_units.is_none(), "Escape gives the question up: nothing is imported");
+        assert!(h.app.home.open, "Escape does not close the start page behind the question");
+        let _ = std::fs::remove_file(&path);
+    }
+
     #[test]
     fn the_move_to_origin_checkbox_is_found_by_its_name() {
         let mut h = crate::scenario::Harness::new();

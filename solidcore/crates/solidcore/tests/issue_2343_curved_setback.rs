@@ -1,7 +1,7 @@
 //! tangency-labs/solidcore#2343 (smlib#85 part C, built in solidcore; the fork's work in
 //! progress at tangency-labs/smlib 37c9e1d is the reference, not the target): three unequal
 //! rounds at a vertex where a face is a cylinder, cone or sphere, convex or concave, end on a
-//! Setback (`Kernel::fixes.fillet_setback_beside_curved_faces`, WR-697), its fill certified no more concave than what each patch is G1 to (the owner's
+//! Setback (WR-697), its fill certified no more concave than what each patch is G1 to (the owner's
 //! ruling (a) on #85, `II >= k G`).
 //!
 //! The cases are the fork's capi `setback` cases `curved_d_prism_corner`,
@@ -25,11 +25,11 @@
     clippy::indexing_slicing
 )] // test helpers
 use solidcore::blend::blend_corner::BlendCornerEvent;
-use solidcore::blend::blend_refusal::{BlendRefusal, SetbackTooLongWhy};
+use solidcore::blend::blend_refusal::{BlendRefusal, SetbackTooLongWhy, SetbackTooShortWhy};
 use solidcore::blend::blend_setback::SpringCurve;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
-use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
+use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection, boolean_union};
 use solidcore::curve::curve::Curve;
 use solidcore::curve::ellipse::Ellipse;
 use solidcore::error::SolidError;
@@ -208,6 +208,21 @@ fn round_asked(
     v: Point3,
     asked: Option<f64>,
 ) -> Rounded {
+    round_set_back(k, b, edges, radii, v, asked, false)
+}
+
+/// [`round_asked`], the setback asked through the fill's door (`set_set_back_fill`), or with
+/// `marked` through the made corner's (`add_set_back_vertex`, then `set_corner_setback` on
+/// the corner once made), as SolidCraft and `solidcore-ops` ask one.
+fn round_set_back(
+    k: &mut Kernel,
+    b: &mut Brep,
+    edges: &[EdgeId],
+    radii: &[f64],
+    v: Point3,
+    asked: Option<f64>,
+    marked: bool,
+) -> Rounded {
     let xs = vec![FilletSurfaceGeneratorType::Circular; edges.len()];
     let vid = vertex_at(b, v);
     let rounded = {
@@ -215,7 +230,11 @@ fn round_asked(
         s.prepare_per_edge_constant_radius(k, edges, radii, &xs, 1, 1.0)
             .unwrap();
         if let Some(sb) = asked {
-            s.set_set_back_fill(vid, sb, 0.0, false);
+            if marked {
+                s.add_set_back_vertex(vid);
+            } else {
+                s.set_set_back_fill(vid, sb, 0.0, false);
+            }
         }
         s.create_corners(k, None).unwrap();
         let mut event = None;
@@ -237,6 +256,9 @@ fn round_asked(
                 );
             }
         }
+        if let (true, Some(sb), Some(c)) = (marked, asked, this) {
+            s.set_corner_setback(c, sb).unwrap();
+        }
         let result = s.do_filleting(k, None);
         let (mut setbacks, mut room, mut springs) = (Vec::new(), Vec::new(), Vec::new());
         let mut tol = 0.0;
@@ -244,6 +266,14 @@ fn round_asked(
             let fc = s.corner(c).unwrap();
             if this == Some(c) {
                 tol = fc.approx_tol_3d;
+            }
+            // a corner's setback set on it is classified when the corners are filleted
+            if this == Some(c) && marked {
+                event = Some(
+                    fc.blend
+                        .as_ref()
+                        .map_or(BlendCornerEvent::None, |bc| bc.event),
+                );
             }
             if let Some(sb) = fc.setback.as_ref() {
                 eprintln!("setbacks {:?}", sb.setbacks);
@@ -836,31 +866,6 @@ fn d_prism_corner_far_from_the_origin_is_a_setback() {
     }
 }
 
-/// Without `fillet_setback_beside_curved_faces` (as a design made before it), a corner beside a curved face is the corner it was: not a Setback
-/// (the N-by-N convex corner), and built, asked for a setback or not. The D prism's corner
-/// (beside a cylinder) and the countersink's (beside a cone).
-#[test]
-fn without_its_flag_a_corner_beside_a_curved_face_builds_as_before() {
-    for asked in [None, Some(3.05)] {
-        let (mut k, mut b, edges, case) = d_prism_case();
-        k.fixes.fillet_setback_beside_curved_faces = false;
-        let r = round_asked(&mut k, &mut b, &edges, &[2.0, 2.5, 3.0], case.v, asked);
-        assert_eq!(
-            r.event,
-            Some(BlendCornerEvent::None),
-            "{asked:?}: {}",
-            r.reason
-        );
-        assert!(r.ok, "{asked:?}: {}", r.reason);
-    }
-    let mut k = all_fixes();
-    k.fixes.fillet_setback_beside_curved_faces = false;
-    let (mut b, edges, radii, case) = countersink_case(&mut k);
-    let r = round_each(&mut k, &mut b, &edges, &radii, case.v);
-    assert_eq!(r.event, Some(BlendCornerEvent::None), "{}", r.reason);
-    assert!(r.ok, "{}", r.reason);
-}
-
 /// A 40 x 40 x 20 block with a D-shaped pocket 10 deep (R 8 about (20, 20), flat x = 24,
 /// floor z = 10), its floor corner V = (24, 20 + sqrt 48, 10), where the floor, the flat and
 /// the concave cylinder meet: the floor's chord, the upright and the floor's arc rounded 2,
@@ -1081,8 +1086,7 @@ fn middle(c: [f64; 3], n1: [f64; 3], n2: [f64; 3], r: f64) -> Point3 {
 /// degrees to z = 6) less x < 0, its top corner V = (0, `rho_t`, 6), `rho_t` = 10 - 6 tan 30, where
 /// the top, the plane x = 0 and the convex cone meet: the top's diameter, the generator and the
 /// top's arc rounded 1.25, 1.5 and 2 (k = 0). Faces: the part's 5, 4 rounds, 6 patches (15).
-#[test]
-fn cone_frustum_corner_is_a_setback_beside_the_cone() {
+fn cone_frustum_case() -> (Kernel, Brep, Vec<EdgeId>, Vec<f64>, Case) {
     let mut k = all_fixes();
     let tb = (PI / 6.0).tan();
     let (cb, sb) = ((PI / 6.0).cos(), (PI / 6.0).sin());
@@ -1097,7 +1101,7 @@ fn cone_frustum_corner_is_a_setback_beside_the_cone() {
     )
     .unwrap();
     let cut = create_box(&mut k, Point3::new(-20.0, -20.0, -1.0), 20.0, 40.0, 10.0).unwrap();
-    let mut b = boolean_difference(&mut k, cone, cut).unwrap();
+    let b = boolean_difference(&mut k, cone, cut).unwrap();
     let mut edges = vec![pick(&k, &b, [0.0, 0.0, 6.0]), pick(&k, &b, [0.0, rm, 3.0])];
     let mut radii = vec![1.25, 1.5];
     for e in edges_on(&k, &b, |p| {
@@ -1138,6 +1142,12 @@ fn cone_frustum_corner_is_a_setback_beside_the_cone() {
         k: 0.0,
         faces_want: 15,
     };
+    (k, b, edges, radii, case)
+}
+
+#[test]
+fn cone_frustum_corner_is_a_setback_beside_the_cone() {
+    let (mut k, mut b, edges, radii, case) = cone_frustum_case();
     let r = round_each(&mut k, &mut b, &edges, &radii, case.v);
     assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
     assert!(r.ok, "{}", r.reason);
@@ -1287,6 +1297,32 @@ fn the_named_setback_builds() {
     graded(&mut k, &mut b, &case, 3);
 }
 
+/// The D prism's corner with three equal rounds, r 2.5, set back 4 on the made corner
+/// (`add_set_back_vertex`, then `set_corner_setback`, the door SolidCraft and
+/// `solidcore-ops` use): a set-back vertex is no Ball, so the corner is made the N x N corner
+/// and classified when the corners are filleted. Beside the cylinder it is the Setback, as one
+/// asked through the fill's door is, set back 4 along each edge and graded as above. Before,
+/// such a corner stayed the N x N corner with its uncertified `N_FillNSidedHole` patch.
+#[test]
+fn a_setback_set_on_the_corner_beside_a_curved_face_is_the_setback() {
+    let (mut k, mut b, edges, mut case) = d_prism_case();
+    let s2 = 2.0f64.sqrt();
+    let r = 2.5;
+    case.on_rounds[0] = Point3::new(4.0 - r + r / s2, 0.0, 10.0 - r + r / s2);
+    case.on_rounds[2] = Point3::new(-(10.0 - r) - r / s2, 0.0, 10.0 - r + r / s2);
+    let rounded = round_set_back(&mut k, &mut b, &edges, &[r; 3], case.v, Some(4.0), true);
+    assert_eq!(
+        rounded.event,
+        Some(BlendCornerEvent::Setback),
+        "{}",
+        rounded.reason
+    );
+    assert!(rounded.ok, "{}", rounded.reason);
+    assert_eq!(rounded.setbacks, vec![4.0; 3]);
+    graded(&mut k, &mut b, &case, 3);
+    springs_are_the_fills(&k, &b, &rounded, case.name, 3);
+}
+
 /// The D prism with flat a 8 (R 10, H 20), bored about its axis with radius `bore` where
 /// given (the bore R 6.9 leaves the top a strip 1.1 wide beside the chord), and its top corner
 /// V = (8, 6, 20), where the top, the flat and the convex cylinder meet: the chord, the upright
@@ -1294,12 +1330,27 @@ fn the_named_setback_builds() {
 /// chord's and the arc's rounds turn at the unrounded upright (a Mitre); the upright's round
 /// ends on the bottom. `faces`: the faces the rounded part has.
 fn d_prism_eight_case(bore: Option<f64>, faces: usize) -> (Kernel, Brep, Vec<EdgeId>, Case) {
+    let name = if bore.is_some() {
+        "bored d prism, flat 8"
+    } else {
+        "d prism, flat 8"
+    };
+    d_prism_eight_bored(bore.map(|r| ([0.0, 0.0], r)), faces, name)
+}
+
+/// [`d_prism_eight_case`], bored where `bore` is given, about the upright through its centre
+/// `(x, y)` with its radius, right through the prism; `name` the case's.
+fn d_prism_eight_bored(
+    bore: Option<([f64; 2], f64)>,
+    faces: usize,
+    name: &'static str,
+) -> (Kernel, Brep, Vec<EdgeId>, Case) {
     let mut k = all_fixes();
     let (rr, a, hh) = (10.0f64, 8.0f64, 20.0f64);
     let h = (rr * rr - a * a).sqrt();
     let mut b = d_prism(&mut k, 0.0, 0.0, rr, a, 0.0, hh);
-    if let Some(r) = bore {
-        let cyl = create_cylinder(&mut k, Point3::new(0.0, 0.0, -1.0), r, hh + 2.0).unwrap();
+    if let Some(([x, y], r)) = bore {
+        let cyl = create_cylinder(&mut k, Point3::new(x, y, -1.0), r, hh + 2.0).unwrap();
         b = boolean_difference(&mut k, b, cyl).unwrap();
     }
     let edges = [[a, 0.0, hh], [a, h, 5.0], [-rr, 0.0, hh]]
@@ -1309,11 +1360,7 @@ fn d_prism_eight_case(bore: Option<f64>, faces: usize) -> (Kernel, Brep, Vec<Edg
     let s2 = 0.5f64.sqrt();
     let mid = |c: Point3, e: Point3, r: f64| c + (e - c).unitize().unwrap() * r;
     let case = Case {
-        name: if bore.is_some() {
-            "bored d prism, flat 8"
-        } else {
-            "d prism, flat 8"
-        },
+        name,
         v: Point3::new(a, h, hh),
         reach: 11.0,
         convex: true,
@@ -1577,4 +1624,403 @@ fn bored_d_prism_spring_curve_leaving_the_top_names_the_setback_that_keeps_it() 
     assert!(r.ok, "asked {named}: {}", r.reason);
     graded(&mut k, &mut b, &case, 3);
     kept_definitions(&k, &b, &case, 3);
+}
+
+/// The corner's piece of the top face of [`d_prism_eight_case`] when every setback is `s`, by
+/// its closed form, as a closed polygon through V (the top is a plane, so its spring curve is
+/// the parabola of [`top_spring_least_rho`]): V, along the chord to `s` from V, the chord
+/// round's end section to its rail end P on x = 7, the spring curve to Q on rho = 8 (2000 even
+/// steps of its parameter), the arc round's end section out to rho = 10, and the arc back to V
+/// (200 steps).
+fn top_piece(s: f64) -> Vec<(f64, f64)> {
+    let psi_v = 6.0f64.atan2(8.0);
+    let p = (7.0, 6.0 - s);
+    let psi = psi_v + s / 10.0;
+    let q = (8.0 * psi.cos(), 8.0 * psi.sin());
+    let along = (7.0 - q.0) / psi.sin();
+    let x = (7.0, q.1 - along * psi.cos());
+    let mut out = vec![(8.0, 6.0), (8.0, 6.0 - s)];
+    for i in 0..=2000 {
+        let t = f64::from(i) / 2000.0;
+        let (a, b, c) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t), t * t);
+        out.push((a * p.0 + b * x.0 + c * q.0, a * p.1 + b * x.1 + c * q.1));
+    }
+    for i in 0..=200 {
+        let a = psi + (psi_v - psi) * f64::from(i) / 200.0;
+        out.push((10.0 * a.cos(), 10.0 * a.sin()));
+    }
+    out
+}
+
+/// Whether the point `c` lies inside the polygon `piece` (odd crossings of a ray along +x),
+/// and its least distance from the polygon's sides.
+fn placed(piece: &[(f64, f64)], c: (f64, f64)) -> (bool, f64) {
+    let mut inside = false;
+    let mut least = f64::INFINITY;
+    for i in 0..piece.len() {
+        let (a, b) = (piece[i], piece[(i + 1) % piece.len()]);
+        if (a.1 > c.1) != (b.1 > c.1) && c.0 < a.0 + (c.1 - a.1) / (b.1 - a.1) * (b.0 - a.0) {
+            inside = !inside;
+        }
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        let t = (((c.0 - a.0) * dx + (c.1 - a.1) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+        least = least.min((a.0 + t * dx - c.0).hypot(a.1 + t * dy - c.1));
+    }
+    (inside, least)
+}
+
+/// Whether the circle about `c` of radius `r` lies outside the polygon `piece` and clear of
+/// it.
+fn circle_outside(piece: &[(f64, f64)], c: (f64, f64), r: f64) -> bool {
+    let (inside, least) = placed(piece, c);
+    !inside && least > r
+}
+
+/// #2343 (d), condition 2: a small bore (R 0.15) through the D prism's top at (6.7, 3), asked
+/// 7.5 at V. The bore lies wholly inside the corner's piece of the top, 0.08 clear of its
+/// spring curve, so condition 1 passes; main built the corner, its fill over the bore's top
+/// loop (`check_brep` clean, but the bore's top circle gone and its wall meeting a fill patch
+/// at 1.57 rad). The corner checks what it takes out of the top: refused as `SetbackTooLong`
+/// at V, why `PieceHoldsEdge`, naming a setback whose piece of the top, by its closed form,
+/// leaves the bore outside and clear, within 1e-3 of the largest such (found by bisection on
+/// the closed form). Asked it, the corner builds, graded as the corners above, the bore's top
+/// circle kept. The twin with the bore just outside the piece asked 7.5, at (6.3, 2.7), 0.08
+/// clear of the spring curve on the other side, builds.
+#[test]
+fn a_bore_inside_the_corners_piece_of_the_top_is_refused_naming_the_setback_that_leaves_it_out() {
+    let (inside, outside, radius, asked) = ((6.7, 3.0), (6.3, 2.7), 0.15, 7.5);
+    let (held_at_asked, least) = placed(&top_piece(asked), inside);
+    assert!(held_at_asked && least > radius + 0.05, "{least}");
+    assert!(circle_outside(&top_piece(asked), outside, radius));
+    // the limit by the closed form: the largest setback whose piece leaves the bore out
+    let (mut clear, mut held) = (4.0, asked);
+    assert!(circle_outside(&top_piece(clear), inside, radius));
+    for _ in 0..50 {
+        let mid = 0.5 * (clear + held);
+        if circle_outside(&top_piece(mid), inside, radius) {
+            clear = mid;
+        } else {
+            held = mid;
+        }
+    }
+    let limit = clear;
+    let name = "d prism, small bore inside the corner's piece";
+    let (mut k, mut b, edges, case) =
+        d_prism_eight_bored(Some(([inside.0, inside.1], radius)), 14, name);
+    let v = vertex_at(&b, case.v);
+    let r = round_asked(
+        &mut k,
+        &mut b,
+        &edges,
+        &[1.0, 1.5, 2.0],
+        case.v,
+        Some(asked),
+    );
+    assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
+    assert!(!r.ok, "asked {asked}: built over the bore");
+    let named = match r.refusal {
+        Some(BlendRefusal::SetbackTooLong {
+            vertex,
+            largest,
+            why,
+        }) => {
+            assert_eq!(vertex, v);
+            assert_eq!(why, SetbackTooLongWhy::PieceHoldsEdge, "{}", r.reason);
+            largest
+        }
+        other => panic!("{other:?}, {}", r.reason),
+    };
+    eprintln!("named {named}, limit {limit}");
+    assert!(
+        circle_outside(&top_piece(named), inside, radius),
+        "{named}: the bore not outside its piece"
+    );
+    assert!(
+        named < limit && named > limit - 1e-3,
+        "{named} against the limit {limit}"
+    );
+    let (mut k, mut b, edges, case) =
+        d_prism_eight_bored(Some(([inside.0, inside.1], radius)), 14, name);
+    let r = round_asked(
+        &mut k,
+        &mut b,
+        &edges,
+        &[1.0, 1.5, 2.0],
+        case.v,
+        Some(named),
+    );
+    assert!(r.ok, "asked {named}: {}", r.reason);
+    graded(&mut k, &mut b, &case, 3);
+    kept_definitions(&k, &b, &case, 3);
+    let top_circle = |k: &Kernel, b: &Brep, c: (f64, f64)| {
+        edges_on(k, b, |p| {
+            (p.z - 20.0).abs() < 1e-9 && ((p.x - c.0).hypot(p.y - c.1) - radius).abs() < 1e-9
+        })
+        .len()
+    };
+    assert_eq!(top_circle(&k, &b, inside), 1, "the bore's top circle");
+
+    let name = "d prism, small bore outside the corner's piece";
+    let (mut k, mut b, edges, case) =
+        d_prism_eight_bored(Some(([outside.0, outside.1], radius)), 14, name);
+    let r = round_asked(
+        &mut k,
+        &mut b,
+        &edges,
+        &[1.0, 1.5, 2.0],
+        case.v,
+        Some(asked),
+    );
+    assert!(r.ok, "asked {asked}: {}", r.reason);
+    graded(&mut k, &mut b, &case, 3);
+    kept_definitions(&k, &b, &case, 3);
+    assert_eq!(top_circle(&k, &b, outside), 1, "the bore's top circle");
+}
+
+/// An arc of radius `r` about `c` in the plane of the unit vectors `xref` and `yref`, from
+/// angle `a0` to `a1` (radians, from `xref` toward `yref`).
+fn arc_in(k: &Kernel, c: Point3, xref: Vec3, yref: Vec3, r: f64, a0: f64, a1: f64) -> Curve {
+    let axis = xref.cross(yref);
+    let x0 = xref * a0.cos() + yref * a0.sin();
+    let y0 = axis.cross(x0);
+    let frame = Axis2Placement::new(c, x0, y0);
+    let interval = Extent1d::from_min_max(0.0, (a1 - a0) * 180.0 / PI);
+    Curve::from(Ellipse::create_canonical_circle(k, &frame, r, Some(&interval), None).unwrap())
+}
+
+/// A hip roof with one curved slope (`curved`; else that slope is the plane z = 6 - 3 y / 4,
+/// the planar twin): the intersection of two prisms. One runs along x, its
+/// section in the plane x = -10 bounded by z = 0, the plane z = 6 + 3 y / 4 (y < 0) and the
+/// circle of radius 5 about (y, z) = (-3, 2) (y > 0); the other runs along y, its section the
+/// triangle (-6, 0), (0, 6), (6, 0) in (x, z). Its apex V = (0, 0, 6) is a convex vertex of
+/// four edges and four faces: the planes z = 6 + 3 y / 4, z = 6 + x and z = 6 - x and the
+/// convex cylinder of radius 5 about the line y = -3, z = 2, along x.
+fn hip_roof(k: &mut Kernel, curved: bool) -> Brep {
+    let x0 = -10.0;
+    let p = |y: f64, z: f64| Point3::new(x0, y, z);
+    let yb = -3.0 + 21.0f64.sqrt();
+    let slope = line(p(-8.0, 0.0), p(0.0, 6.0));
+    let vault = arc_in(
+        k,
+        p(-3.0, 2.0),
+        Vec3::Y,
+        Vec3::Z,
+        5.0,
+        (-2.0f64).atan2(21.0f64.sqrt()),
+        4.0f64.atan2(3.0),
+    );
+    let along_x = if curved {
+        let floor = line(p(yb, 0.0), p(-8.0, 0.0));
+        create_linear_sweep(
+            k,
+            &[Some(&slope), Some(&vault), Some(&floor)],
+            Vec3::X,
+            20.0,
+            true,
+        )
+        .unwrap()
+    } else {
+        let flat = line(p(0.0, 6.0), p(8.0, 0.0));
+        let floor = line(p(8.0, 0.0), p(-8.0, 0.0));
+        create_linear_sweep(
+            k,
+            &[Some(&slope), Some(&flat), Some(&floor)],
+            Vec3::X,
+            20.0,
+            true,
+        )
+        .unwrap()
+    };
+    let q = |x: f64, z: f64| Point3::new(x, -10.0, z);
+    let left = line(q(-6.0, 0.0), q(0.0, 6.0));
+    let right = line(q(0.0, 6.0), q(6.0, 0.0));
+    let base = line(q(6.0, 0.0), q(-6.0, 0.0));
+    let along_y = create_linear_sweep(
+        k,
+        &[Some(&left), Some(&right), Some(&base)],
+        Vec3::Y,
+        20.0,
+        true,
+    )
+    .unwrap();
+    boolean_intersection(k, along_x, along_y).unwrap()
+}
+
+/// The hip roof's apex and its four edges, to round at `radii` in turn round the apex: the
+/// edges between the slope z = 6 + 3 y / 4 and z = 6 + x, z = 6 + x and the cylinder (its
+/// planar twin's slope), that and z = 6 - x, and z = 6 - x and the first slope. The case
+/// grades the curved roof (its faces' closed forms and a point on each round, the round's
+/// ball at z = 2, the cylinder's axis height, r inside both its faces). Faces: the part's 5,
+/// 4 rounds, 8 patches (17).
+fn hip_roof_case(radii: [f64; 4], curved: bool) -> (Kernel, Brep, Vec<EdgeId>, Case) {
+    let mut k = all_fixes();
+    let b = hip_roof(&mut k, curved);
+    let yc = if curved { -3.0 + 24.0f64.sqrt() } else { 4.0 };
+    let edges = [
+        [-3.0, -4.0, 3.0],
+        [-3.0, yc, 3.0],
+        [3.0, yc, 3.0],
+        [3.0, -4.0, 3.0],
+    ]
+    .iter()
+    .map(|&p| pick(&k, &b, p))
+    .collect();
+    let s2 = 2.0f64.sqrt();
+    let slope = [0.0, -0.6, 0.8];
+    let (bl, br) = ([-1.0 / s2, 0.0, 1.0 / s2], [1.0 / s2, 0.0, 1.0 / s2]);
+    let [r0, r1, r2, r3] = radii;
+    let case = Case {
+        name: "hip roof",
+        v: Point3::new(0.0, 0.0, 6.0),
+        reach: 7.0,
+        convex: true,
+        inside: Point3::new(0.0, -2.0, 3.0),
+        faces: vec![
+            CurvedFace::plane([0.0, 0.0, 6.0], slope),
+            CurvedFace::plane([0.0, 0.0, 6.0], bl),
+            CurvedFace {
+                kind: Kind::Cylinder,
+                at: Point3::new(0.0, -3.0, 2.0),
+                axis: Vec3::X,
+                radius: 5.0,
+                slope: 0.0,
+                side: 1.0,
+            },
+            CurvedFace::plane([0.0, 0.0, 6.0], br),
+        ],
+        on_rounds: vec![
+            middle([r0 * s2 - 4.0, (5.0 * r0 - 16.0) / 3.0, 2.0], slope, bl, r0),
+            middle([r1 * s2 - 4.0, 2.0 - r1, 2.0], bl, [0.0, 1.0, 0.0], r1),
+            middle([4.0 - r2 * s2, 2.0 - r2, 2.0], [0.0, 1.0, 0.0], br, r2),
+            middle([4.0 - r3 * s2, (5.0 * r3 - 16.0) / 3.0, 2.0], br, slope, r3),
+        ],
+        k: 0.0,
+        faces_want: 17,
+    };
+    (k, b, edges, case)
+}
+
+/// #13832: four rounds at a vertex of four faces, one a cylinder (`classify_setback` sets no
+/// limit on the rounds beside a curved face). The hip roof's apex, its four edges rounded 1
+/// each and 1, 1, 1, 1.25: a Setback, sound (`check_brep` level 2), its 8 patches one Bezier
+/// span each, G1 to 1e-9 rad at every seam against the faces' exact normals, convex, on the
+/// material's side of every face, its spring curves the fill's edges: graded as the
+/// three-round corners above. Its planar twin builds with 1, 1.25, 1.5 and 1.75 too.
+#[test]
+fn hip_roof_apex_of_four_rounds_is_a_setback_beside_the_cylinder() {
+    for radii in [[1.0; 4], [1.0, 1.0, 1.0, 1.25]] {
+        let (mut k, mut b, edges, case) = hip_roof_case(radii, true);
+        let r = round_each(&mut k, &mut b, &edges, &radii, case.v);
+        assert_eq!(
+            r.event,
+            Some(BlendCornerEvent::Setback),
+            "{radii:?}: {}",
+            r.reason
+        );
+        assert!(r.ok, "{radii:?}: {}", r.reason);
+        graded(&mut k, &mut b, &case, 4);
+        springs_are_the_fills(&k, &b, &r, case.name, 4);
+        kept_definitions(&k, &b, &case, 4);
+    }
+    let radii = [1.0, 1.25, 1.5, 1.75];
+    let (mut k, mut b, edges, case) = hip_roof_case(radii, false);
+    let r = round_each(&mut k, &mut b, &edges, &radii, case.v);
+    assert_eq!(
+        r.event,
+        Some(BlendCornerEvent::Setback),
+        "planar: {}",
+        r.reason
+    );
+    assert!(r.ok, "planar: {}", r.reason);
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "planar: {lines:?}");
+}
+
+/// #13832: the hip roof's apex rounded 1, 1.25, 1.5 and 1.75. No fill up to degree 9 is
+/// certified at the rule's setbacks or at twice them (each degree from 6 up solves its
+/// programme, and the net fails the convexity certificate), so the corner is refused. A
+/// refusal is a typed [`SolidError::BlendRefused`] (as the corner asked too short is, below);
+/// main returns an untyped failure with status 1001 and names no setback (#16398).
+#[test]
+#[ignore = "fails on main: the curved Setback's refusal when nothing up to twice the rule's setbacks certifies is untyped (#16398)"]
+fn hip_roof_apex_of_unequal_rounds_is_refused_as_data() {
+    let radii = [1.0, 1.25, 1.5, 1.75];
+    let (mut k, mut b, edges, case) = hip_roof_case(radii, true);
+    let r = round_each(&mut k, &mut b, &edges, &radii, case.v);
+    assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
+    assert!(!r.ok, "built");
+    assert!(r.refusal.is_some(), "untyped: {}", r.reason);
+}
+
+/// The setback asked at the cone frustum's corner in the tests below: 0.01 past its least
+/// setback on the top's arc (where the rails cross, 1.70548).
+const CONE_ASKED: f64 = 1.715_475_624_592_318_2;
+
+/// #13832, the cone grown against the cone placed. Asked [`CONE_ASKED`], the cone frustum's
+/// fill is not certified, and the setbacks grow: twice first (certified), then the bisection
+/// on the grid of thousandths, which ends at 1.102. The corner is refused as data, naming
+/// 1.102 x the one asked; `cone_frustum_named_and_twice_asked_setbacks_build` builds it.
+#[test]
+#[ignore = "slow: about 7 minutes in the goldens profile (the growth's eleven curved fills, up to \
+            degree 9); cone_frustum_named_and_twice_asked_setbacks_build builds what it names"]
+fn cone_frustum_asked_too_short_names_the_grown_setback() {
+    let (mut k, mut b, edges, radii, case) = cone_frustum_case();
+    let v = vertex_at(&b, case.v);
+    let r = round_asked(&mut k, &mut b, &edges, &radii, case.v, Some(CONE_ASKED));
+    assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
+    assert!(!r.ok, "asked {CONE_ASKED}: built");
+    let named = match r.refusal {
+        Some(BlendRefusal::SetbackTooShort { vertex, least, why }) => {
+            assert_eq!(vertex, v);
+            assert_eq!(why, SetbackTooShortWhy::ConcaveFill);
+            least
+        }
+        other => panic!("{other:?}, {}", r.reason),
+    };
+    assert!((named - 1.102 * CONE_ASKED).abs() <= 1e-12, "{named}");
+    assert!((r.fit - named).abs() <= 1e-12, "{}", r.fit);
+}
+
+/// #13832, the cone placed where it grows: asked the setback the growth names
+/// (1.102 x [`CONE_ASKED`], above), the cone frustum's corner builds, graded as the corners
+/// above; and asked twice [`CONE_ASKED`] (the growth's first trial), it builds the same way.
+/// (That the growth's fills there are these placed ones, to 1e-9, was measured with the
+/// growth instrumented, in #13832 step 5's PR: no public hook reaches a trial's fill.)
+#[test]
+fn cone_frustum_named_and_twice_asked_setbacks_build() {
+    let named = 1.102 * CONE_ASKED;
+    // points on the rounds past twice the ask (3.431 along each edge from V): the top's
+    // diameter's at y = 1.5, the generator's ball at z = 1.5, the top's arc's at 30 degrees
+    let tb = (PI / 6.0).tan();
+    let (cb, sb) = ((PI / 6.0).cos(), (PI / 6.0).sin());
+    let rg = 10.0 - 1.5 * tb - 1.5 / cb;
+    let yg = (rg * rg - 2.25).sqrt();
+    let ra = 10.0 - 4.0 * tb - 2.0 / cb;
+    let (c30, s30) = (0.75f64.sqrt(), 0.5);
+    let far = vec![
+        middle([1.25, 1.5, 4.75], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], 1.25),
+        middle(
+            [1.5, yg, 1.5],
+            [-1.0, 0.0, 0.0],
+            [cb * 1.5 / rg, cb * yg / rg, sb],
+            1.5,
+        ),
+        middle(
+            [ra * c30, ra * s30, 4.0],
+            [0.0, 0.0, 1.0],
+            [cb * c30, cb * s30, sb],
+            2.0,
+        ),
+    ];
+    for placed in [named, 2.0 * CONE_ASKED] {
+        let (mut k, mut b, edges, radii, mut case) = cone_frustum_case();
+        case.on_rounds.clone_from(&far);
+        let r = round_asked(&mut k, &mut b, &edges, &radii, case.v, Some(placed));
+        assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
+        assert!(r.ok, "asked {placed}: {}", r.reason);
+        graded(&mut k, &mut b, &case, 3);
+        springs_are_the_fills(&k, &b, &r, case.name, 3);
+    }
 }

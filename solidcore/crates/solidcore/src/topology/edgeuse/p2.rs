@@ -64,10 +64,11 @@
 //!   [`topo::notify`] (`SmTopology::Notify`) with the caller's records, attribute
 //!   store and context; it propagates errors upstream does not report (`Notify`
 //!   returns `void`).
-//! - **No evidence (WR-663).** With the opt-in `Kernel::fixes.query_statuses_pass_on`,
-//!   `IsEdgeuseSideInSurface` answers `true` at a sample whose point or drop fails and
-//!   `HasDogLegNearPole` shows no dog-leg without the polygon or its angles, as the
-//!   fork (tangency-labs/smlib 666242b).
+//! - **No evidence (WR-663).** `IsEdgeuseSideInSurface` answers `true` at a sample
+//!   whose point or drop fails and `HasDogLegNearPole` shows no dog-leg without the
+//!   polygon, as the fork (tangency-labs/smlib 666242b); upstream reads the unset
+//!   values. A control point whose angles cannot be measured (a zero polygon segment)
+//!   is skipped and the scan goes on, where the fork ends it with no dog-leg.
 
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::Curve;
@@ -468,7 +469,6 @@ pub fn evaluate_binormal_step_off_into(
 
     let mut eval_fun = FindStepOff::new(k, step_off_distance, surf_point, plane_normal, surface);
     let mut ls = LocalSolveNd::new(&mut eval_fun, Some(&intervals), Some(&periodicities));
-    ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
     ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 3);
 
     // intersect: plane, surface and sphere
@@ -934,11 +934,9 @@ pub struct EdgeuseSide {
 ///
 /// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] for an edge
 /// without curve (upstream dereferences null); those of `IsPeriodic`, the curve and
-/// surface evaluations and `MapTo2d` that upstream does not ignore. The statuses of
-/// the evaluations and of `DropPoint` are ignored, as upstream ([`SolidError::Unported`]
-/// still propagates); with the opt-in
-/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`] a sample whose point or drop
-/// fails answers `true` (its "cannot tell", tangency-labs/smlib 666242b).
+/// surface evaluations and `MapTo2d` that upstream does not ignore. A sample whose
+/// point or drop fails answers `true` (the fork's "cannot tell", tangency-labs/smlib
+/// 666242b; upstream ignores those statuses). [`SolidError::Unported`] propagates.
 pub fn is_edgeuse_side_in_surface(
     k: &Kernel,
     b: &Brep,
@@ -996,8 +994,6 @@ pub fn is_edgeuse_side_in_surface(
     let mut uv_classify = SS_UMIN | SS_VMIN | SS_UMAX | SS_VMAX;
     // `SmPoint2d` / `SmPoint3d` default to undefined coordinates
     let mut uv_drop_point = Point2::UNDEF;
-    let mut uv_trim_curve_3d = Point3::UNDEF;
-    let mut edge_point = Point3::UNDEF;
     let u_dir = Vec2::new(1.0, 0.0);
     let v_dir = Vec2::new(0.0, 1.0);
     let (mut up_u, mut down_u, mut up_v, mut down_v) = (0_u64, 0_u64, 0_u64, 0_u64);
@@ -1030,30 +1026,25 @@ pub fn is_edgeuse_side_in_surface(
         };
         let param = edge_interval.evaluate(norm_param);
 
-        // Edge->3d Point (status ignored: a failed evaluation leaves the last point;
-        // with the opt-in fix a sample that cannot be evaluated or dropped gives no
-        // evidence, TRUE, as the fork has it: tangency-labs/smlib 666242b)
-        let no_evidence = k.fixes.query_statuses_pass_on;
-        match ignored(edge_curve.evaluate_point(k, param))? {
-            Some(p) => edge_point = p,
-            None if no_evidence => return Ok(out),
-            None => (),
-        }
+        // Edge->3d Point (status ignored upstream: a failed evaluation leaves the last
+        // point; a sample that cannot be evaluated or dropped gives no evidence, TRUE,
+        // as the fork has it: tangency-labs/smlib 666242b)
+        let Some(edge_point) = ignored(edge_curve.evaluate_point(k, param))? else {
+            return Ok(out);
+        };
 
         // next Drop GuessUV = UVTrimCurve(dParam) or last Drop point
         let mut guess = None;
         if let Some(trim) = uv_trim_curve {
-            match ignored(trim.evaluate_point(k, param))? {
-                Some(p) => uv_trim_curve_3d = p,
-                None if no_evidence => return Ok(out),
-                None => (),
-            }
+            let Some(uv_trim_curve_3d) = ignored(trim.evaluate_point(k, param))? else {
+                return Ok(out);
+            };
             guess = Some(Point2::new(uv_trim_curve_3d.x, uv_trim_curve_3d.y));
         } else if ii > 0 {
             guess = uv_drop_points.last().copied();
         }
 
-        // Drop Point (status ignored)
+        // Drop Point (a failed drop gives no evidence, as the fork)
         let opts = DropPointOptions {
             guess_uv: guess,
             operation: SolverOperation::Minimize,
@@ -1066,12 +1057,7 @@ pub fn is_edgeuse_side_in_surface(
             // only by a successful drop
             Some(d) if d.success || guess.is_some() => uv_drop_point = d.result_uv,
             Some(_) => (),
-            None if no_evidence => return Ok(out),
-            None => {
-                if let Some(g) = guess {
-                    uv_drop_point = g;
-                }
-            }
+            None => return Ok(out),
         }
 
         // Tol  2d mapping of Surface ZoneTol3d
@@ -1226,11 +1212,10 @@ pub fn has_dog_leg_near_pole(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<DogL
             ))
         }
     };
-    // with the opt-in fix, without the polygon or the angles the edge use is not shown
-    // to dog-leg (tangency-labs/smlib 666242b); upstream's polygon error is the port's
-    let no_evidence = k.fixes.query_statuses_pass_on;
+    // without the polygon or the angles the edge use is not shown to dog-leg, as the
+    // fork (tangency-labs/smlib 666242b)
     let control_points = match base.polygon(&base.natural_interval()) {
-        Err(e) if no_evidence && !e.is_unported_or_cancelled() => return Ok(out),
+        Err(e) if !e.is_unported_or_cancelled() => return Ok(out),
         r => r?,
     };
     let num = control_points.len();
@@ -1327,22 +1312,21 @@ pub fn has_dog_leg_near_pole(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<DogL
                         let next_vec = next_cpt - cpt;
 
                         // Angle in Control Polygon at target ControlPoint (a zero vector
-                        // gives 0, as upstream)
-                        let ang_vec_rad = match last_vec.angle_between(next_vec) {
-                            Err(_) if no_evidence => return Ok(out),
-                            r => r.unwrap_or(0.0),
+                        // gives 0 upstream; the fork ends the scan with no dog-leg). A
+                        // point without its angles is no evidence either way: skip it
+                        // (the angles do not depend on jj) and go on to the next one.
+                        let Ok(ang_vec_rad) = last_vec.angle_between(next_vec) else {
+                            break;
                         };
 
                         // Angles between ControlPolygon Next/Last Vecs and the
                         // singularity direction (upstream sets [1 0 0] for both checks)
                         let sing_vec = Vec3::new(1.0, 0.0, 0.0);
-                        let ang_last_pole_rad = match last_vec.angle_between(sing_vec) {
-                            Err(_) if no_evidence => return Ok(out),
-                            r => r.unwrap_or(0.0),
+                        let Ok(ang_last_pole_rad) = last_vec.angle_between(sing_vec) else {
+                            break;
                         };
-                        let ang_next_pole_rad = match next_vec.angle_between(sing_vec) {
-                            Err(_) if no_evidence => return Ok(out),
-                            r => r.unwrap_or(0.0),
+                        let Ok(ang_next_pole_rad) = next_vec.angle_between(sing_vec) else {
+                            break;
                         };
 
                         let ang_last_pole_deg = rad_to_deg(ang_last_pole_rad);
@@ -1427,8 +1411,7 @@ mod tests {
         let mut k = Kernel::default();
         let b0 = crate::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 1.0, 2.0, 3.0)
             .unwrap();
-        let mut on_k = Kernel::default();
-        on_k.fixes.query_statuses_pass_on = true;
+        let on_k = Kernel::default();
         for eu in b0.edgeuses().ids() {
             if face(&b0, eu).unwrap().is_none() {
                 continue;
@@ -1445,10 +1428,6 @@ mod tests {
                     in_surface: true,
                     on_natural_boundary: true
                 }
-            );
-            assert_eq!(
-                is_edgeuse_side_in_surface(&k, &b, eu, 5, None, None).unwrap(),
-                on
             );
         }
     }

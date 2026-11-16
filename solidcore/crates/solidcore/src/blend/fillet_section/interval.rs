@@ -13,6 +13,8 @@
 
 use core::ops::{Add, Div, Mul, Sub};
 
+use crate::geom::certified::next_up;
+
 /// `std::min(a, b)`: `(b < a) ? b : a` (a NaN `a` is kept).
 #[inline]
 pub(crate) fn cmin(a: f64, b: f64) -> f64 {
@@ -370,21 +372,6 @@ impl Ivl {
             quotients.into_iter().fold(f64::INFINITY, f64::min),
             quotients.into_iter().fold(f64::NEG_INFINITY, f64::max),
         )
-    }
-}
-
-/// The next double above `x` (`f64::next_up` needs Rust 1.86; the MSRV is 1.85). The
-/// sign branches prevent integer wrap: positive finite bits are below +infinity's, and
-/// negative nonzero bits are above the sign bit. NaN and +infinity are returned as is.
-fn next_up(x: f64) -> f64 {
-    if x.is_nan() || x == f64::INFINITY {
-        x
-    } else if x == 0.0 {
-        f64::from_bits(1)
-    } else if x > 0.0 {
-        f64::from_bits(x.to_bits() + 1)
-    } else {
-        f64::from_bits(x.to_bits() - 1)
     }
 }
 

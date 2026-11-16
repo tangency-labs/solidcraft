@@ -24,14 +24,14 @@
 //! the structural checks of a record (counts, budgets, a use's interval in its curve's natural
 //! range) are the caller's, before it converts the record (`solidcore-ops`' `pcurve`).
 //!
-//! Deviations: the pole test is the evaluator's speed test this routine has always used
-//! ([`pole_by_speed`]), not [`super::collapse`]'s exact one; the B-spline cut and the knot span
-//! search are kept here ([`segment`], [`find_span`]) as the routine had them.
+//! Deviations: the B-spline cut and the knot span search are kept here ([`segment`],
+//! [`find_span`]) as the routine had them.
 use super::spline::EvalSurface;
 use super::uv::{self, Domain};
 use super::vec::{v3, VecExt};
 use super::{Axes, Curve, Curve2, CurveEval, EvalError, Surface, SurfaceEval};
 use crate::math::Vec3;
+use crate::SolidError;
 
 /// Why no pcurves: the records are malformed or out of bounds (`Invalid`), no pcurve within
 /// the tolerance was found or the geometry is not supported (`Failed`), or the fit would exceed
@@ -56,9 +56,10 @@ impl From<EvalError> for Error {
         match e {
             EvalError::Invalid(_) => Error::Invalid(e.to_string()),
             EvalError::TooLarge(_) => Error::TooLarge(e.to_string()),
-            EvalError::Unsupported(_) | EvalError::Unevaluable(_) | EvalError::Degenerate(_) => {
-                Error::Failed(e.to_string())
-            }
+            EvalError::Unsupported(_)
+            | EvalError::Unevaluable(_)
+            | EvalError::Degenerate(_)
+            | EvalError::OffRange(_) => Error::Failed(e.to_string()),
         }
     }
 }
@@ -697,11 +698,10 @@ impl On {
         Some(q)
     }
 
-    /// Whether `uv` is at a pole along each direction, or within `reach` of one: moving that
-    /// parameter by half its period (or across its range) moves the point by no more than `reach`
-    /// at its speed there. There the parameter is as free as at the pole itself.
-    fn pole(&self, uv: [f64; 2], reach: f64) -> [bool; 2] {
-        pole_by_speed(&self.surface, &self.dom, uv, reach)
+    /// Whether `uv` is at a pole along each direction, or within `reach` mm of one
+    /// ([`SurfaceEval::pole_within`]): there the parameter is as free as at the pole itself.
+    fn pole(&self, uv: [f64; 2], reach: f64) -> Result<[bool; 2]> {
+        Ok(self.surface.pole_within(uv, reach)?)
     }
 
     /// The loop's uses moved by whole periods so each starts where the one before it ends (in
@@ -737,8 +737,8 @@ impl On {
             // offsets up to the next pole.
             let at_pole: Vec<bool> = ends
                 .iter()
-                .map(|(s, _)| self.pole(*s, tol).get(d).copied().unwrap_or(false))
-                .collect();
+                .map(|(s, _)| Ok(self.pole(*s, tol)?.get(d).copied().unwrap_or(false)))
+                .collect::<Result<_>>()?;
             let first = at_pole.iter().position(|&p| p).unwrap_or(0);
             let order: Vec<usize> = (first..n).chain(0..first).collect();
             let mut shift = vec![0.0; n];
@@ -959,31 +959,6 @@ fn basis(knots: &[f64], p: usize, span: usize, t: f64) -> Option<Vec<f64>> {
     Some(n)
 }
 
-/// Whether `uv` is at a pole along each direction, or within `reach` of one, by the surface's
-/// speeds there: a speed below 10⁻⁹ of the other's, or one that moves the point no more than
-/// `reach` over half the period (or the whole range) of its parameter.
-pub fn pole_by_speed(s: &SurfaceEval, dom: &Domain, uv: [f64; 2], reach: f64) -> [bool; 2] {
-    let Some((_, su, sv)) = s.derivs(uv[0], uv[1]) else {
-        return [false; 2];
-    };
-    let speed = [su.len(), sv.len()];
-    let [a, b] = speed;
-    let mut out = [a <= 1e-9 * b.max(1e-12), b <= 1e-9 * a.max(1e-12)];
-    for ((flag, sp), (period, range)) in out
-        .iter_mut()
-        .zip(speed)
-        .zip(dom.period.iter().zip(dom.range.iter()))
-    {
-        let span = match (period, range) {
-            (Some(period), _) => 0.5 * period,
-            (None, Some((lo, hi))) => (hi - lo).abs(),
-            (None, None) => continue,
-        };
-        *flag |= sp * span <= reach;
-    }
-    out
-}
-
 /// Rounding allowed at the ends of a knot domain, in units of `f64::EPSILON` times its size.
 const DOMAIN_ROUNDING: f64 = 8.0;
 /// Most knots a cut takes.
@@ -1014,26 +989,60 @@ fn find_span(knots: &[f64], p: usize, n: usize, u: f64) -> Option<usize> {
     Some(k)
 }
 
+/// A typed cut failure shared by the legacy text API and the kernel restart.
+#[derive(Debug, thiserror::Error)]
+enum SegmentError {
+    #[error("{0}")]
+    Input(&'static str),
+    #[error("{0}")]
+    Invariant(&'static str),
+    #[error("too many knots")]
+    TooManyKnots,
+    #[error("[{a}, {b}] is not a piece of the domain [{lo}, {hi}]")]
+    Interval { a: f64, b: f64, lo: f64, hi: f64 },
+    #[error("knot {0} is outside the domain")]
+    Knot(f64),
+}
+
+impl SegmentError {
+    fn into_solid(self, operation: &'static str) -> SolidError {
+        match self {
+            Self::Input(reason) => SolidError::invalid_input(operation, reason),
+            Self::Invariant(reason) => SolidError::port_invariant(operation, reason),
+            Self::TooManyKnots => SolidError::Unsupported {
+                operation,
+                reason: "too many knots",
+            },
+            Self::Interval { .. } => {
+                SolidError::invalid_input(operation, "segment interval outside the spline domain")
+            }
+            Self::Knot(_) => SolidError::invalid_input(operation, "knot outside the spline domain"),
+        }
+    }
+}
+
 /// One Boehm insertion of `u` into a B-spline of degree `p` with homogeneous control points.
 fn insert_knot(
     p: usize,
     knots: &[f64],
     ctrl: &[[f64; 4]],
     u: f64,
-) -> std::result::Result<(Vec<f64>, Vec<[f64; 4]>), String> {
+) -> std::result::Result<(Vec<f64>, Vec<[f64; 4]>), SegmentError> {
     let n = ctrl.len();
     if n <= p || knots.len() != n + p + 1 {
-        return Err("knot and control point counts do not match the degree".into());
+        return Err(SegmentError::Input(
+            "knot and control point counts do not match the degree",
+        ));
     }
     if knots.len() >= MAX_KNOTS {
-        return Err("too many knots".into());
+        return Err(SegmentError::TooManyKnots);
     }
     if knots.iter().any(|k| !k.is_finite())
         || knots.windows(2).any(|w| matches!(w, [a, b] if b < a))
     {
-        return Err("knots must be finite and not decrease".into());
+        return Err(SegmentError::Input("knots must be finite and not decrease"));
     }
-    let k = find_span(knots, p, n, u).ok_or_else(|| format!("knot {u} is outside the domain"))?;
+    let k = find_span(knots, p, n, u).ok_or(SegmentError::Knot(u))?;
     let kn = |i: usize| knots.get(i).copied().unwrap_or(0.0);
     let pt = |i: usize| ctrl.get(i).copied().unwrap_or([0.0; 4]);
     let mut q = Vec::new();
@@ -1072,18 +1081,28 @@ pub fn segment(
     a: f64,
     b: f64,
 ) -> std::result::Result<(Vec<f64>, Vec<[f64; 4]>), String> {
+    segment_data(p, knots, ctrl, a, b).map_err(|e| e.to_string())
+}
+
+fn segment_data(
+    p: usize,
+    knots: &[f64],
+    ctrl: &[[f64; 4]],
+    a: f64,
+    b: f64,
+) -> std::result::Result<(Vec<f64>, Vec<[f64; 4]>), SegmentError> {
     let n = ctrl.len();
     if n <= p || knots.len() != n + p + 1 {
-        return Err("knot and control point counts do not match the degree".into());
+        return Err(SegmentError::Input(
+            "knot and control point counts do not match the degree",
+        ));
     }
     let (lo, hi) = (
         knots.get(p).copied().unwrap_or(f64::NAN),
         knots.get(n).copied().unwrap_or(f64::NAN),
     );
     if !(lo <= a && a < b && b <= hi) {
-        return Err(format!(
-            "[{a}, {b}] is not a piece of the domain [{lo}, {hi}]"
-        ));
+        return Err(SegmentError::Interval { a, b, lo, hi });
     }
     let (mut k, mut c) = (knots.to_vec(), ctrl.to_vec());
     for t in [a, b] {
@@ -1098,22 +1117,152 @@ pub fn segment(
         .iter()
         .rposition(|&x| x == a)
         .filter(|&j| j >= p)
-        .ok_or("segment start")?;
+        .ok_or(SegmentError::Invariant("segment start"))?;
     let j1 = k
         .iter()
         .position(|&x| x == b)
         .filter(|&j| j > j0)
-        .ok_or("segment end")?;
-    let points = c.get(j0 - p..j1).ok_or("segment control points")?.to_vec();
-    let inner = k.get(j0 + 1..j1).ok_or("segment knots")?;
+        .ok_or(SegmentError::Invariant("segment end"))?;
+    let points = c
+        .get(j0 - p..j1)
+        .ok_or(SegmentError::Invariant("segment control points"))?
+        .to_vec();
+    let inner = k
+        .get(j0 + 1..j1)
+        .ok_or(SegmentError::Invariant("segment knots"))?;
     let mut out = Vec::new();
     out.extend(std::iter::repeat_n(a, p + 1));
     out.extend_from_slice(inner);
     out.extend(std::iter::repeat_n(b, p + 1));
     if out.len() != points.len() + p + 1 {
-        return Err("segment counts".into());
+        return Err(SegmentError::Invariant("segment counts"));
     }
     Ok((out, points))
+}
+
+/// Start a closed spline or polyline at `start` inside its natural domain `[a, b]`.
+/// The result has domain `[start, start + b - a]`. Parameters before `start` move
+/// forward by `b - a`; all other parameters keep their points.
+///
+/// Uses [`segment`]'s exact homogeneous knot insertion, then a knot-vector shift.
+/// The old seam has multiplicity degree. A common homogeneous scale on the
+/// second piece matches unequal seam weights without changing its geometry.
+/// The seam endpoints must coincide within the outward rounding enclosure of
+/// forming and dividing their homogeneous coordinates. Gaps outside that
+/// enclosure are refused; no model tolerance is used.
+///
+/// # Errors
+/// An unsupported curve, invalid spline, start outside the open domain, or size
+/// beyond the evaluator's limits.
+pub fn restart_curve(curve: &Curve, start: f64) -> crate::Result<Curve> {
+    const OP: &str = "eval::pcurve::restart_curve";
+    let invalid = |reason| SolidError::invalid_input(OP, reason);
+    let (knots, ctrl, rational) = match curve {
+        Curve::Spline { knots, points } => (
+            knots.clone(),
+            points
+                .iter()
+                .map(|&[x, y, z]| [x, y, z, 1.0])
+                .collect::<Vec<_>>(),
+            false,
+        ),
+        Curve::RationalSpline { knots, homogeneous } => (knots.clone(), homogeneous.clone(), true),
+        Curve::Polyline { points } => {
+            let end = points.len().saturating_sub(1) as f64;
+            let knots = std::iter::once(0.0)
+                .chain((0..points.len()).map(|i| i as f64))
+                .chain(std::iter::once(end))
+                .collect();
+            (
+                knots,
+                points.iter().map(|&[x, y, z]| [x, y, z, 1.0]).collect(),
+                false,
+            )
+        }
+        _ => {
+            return Err(SolidError::Unsupported {
+                operation: OP,
+                reason: "only splines and polylines can be restarted",
+            })
+        }
+    };
+    let p = knots
+        .len()
+        .checked_sub(ctrl.len() + 1)
+        .ok_or_else(|| invalid("spline degree"))?;
+    if !(1..=super::spline::MAX_SPLINE_DEGREE).contains(&p)
+        || knots.len() > MAX_KNOTS
+        || knots.iter().any(|t| !t.is_finite())
+        || knots.windows(2).any(|w| w.first() > w.get(1))
+        || ctrl
+            .iter()
+            .any(|h| h.iter().any(|x| !x.is_finite()) || h.get(3).is_none_or(|w| *w <= 0.0))
+    {
+        return Err(invalid("invalid spline to restart"));
+    }
+    let (a, b) = (
+        *knots.get(p).ok_or_else(|| invalid("spline start"))?,
+        *knots.get(ctrl.len()).ok_or_else(|| invalid("spline end"))?,
+    );
+    if !(a < start && start < b) {
+        return Err(invalid("spline restart outside the open domain"));
+    }
+    let (mut tail_knots, mut tail) =
+        segment_data(p, &knots, &ctrl, start, b).map_err(|e| e.into_solid(OP))?;
+    let (head_knots, head) =
+        segment_data(p, &knots, &ctrl, a, start).map_err(|e| e.into_solid(OP))?;
+    let &[tx, ty, tz, tw] = tail
+        .last()
+        .ok_or_else(|| SolidError::port_invariant(OP, "spline seam end"))?;
+    let &[hx, hy, hz, hw] = head
+        .first()
+        .ok_or_else(|| SolidError::port_invariant(OP, "spline seam start"))?;
+    let tail_end = [tx / tw, ty / tw, tz / tw];
+    let head_start = [hx / hw, hy / hw, hz / hw];
+    if tail_end.iter().chain(&head_start).any(|x| !x.is_finite()) {
+        return Err(invalid("spline seam endpoints do not coincide"));
+    }
+    // Each homogeneous coordinate may carry one rounded multiplication x*w.
+    // If h = fl(p*w), the exact p*w is between down(h) and up(h). Division by
+    // positive w preserves that enclosure; outward rounding of the two divisions
+    // therefore encloses p. Compare each coordinate
+    // separately: neither model tolerances nor another axis can widen this bound.
+    let up = crate::geom::certified::next_up;
+    let down = |x: f64| -up(-x);
+    let enclosure = |x: f64, w: f64| [down(down(x) / w), up(up(x) / w)];
+    for (t, h) in [tx, ty, tz].into_iter().zip([hx, hy, hz]) {
+        let [tlo, thi] = enclosure(t, tw);
+        let [hlo, hhi] = enclosure(h, hw);
+        if [tlo, thi, hlo, hhi].iter().any(|x| !x.is_finite()) || tlo > hhi || hlo > thi {
+            return Err(invalid("spline seam endpoints do not coincide"));
+        }
+    }
+    // Sharing the endpoint needs p seam knots. Scale the entire head, not only
+    // its endpoint: a common projective scale preserves every rational span.
+    tail_knots.pop();
+    tail_knots.extend(head_knots.iter().skip(p + 1).map(|t| t + (b - a)));
+    tail.extend(head.into_iter().skip(1).map(|h| h.map(|x| x * (tw / hw))));
+    if tail_knots.len() > MAX_KNOTS
+        || tail_knots.iter().any(|t| !t.is_finite())
+        || tail_knots.windows(2).any(|w| w.first() > w.get(1))
+        || tail
+            .iter()
+            .any(|h| h.iter().any(|x| !x.is_finite()) || h.get(3).is_none_or(|w| *w <= 0.0))
+    {
+        return Err(invalid("restarted spline exceeds evaluation limits"));
+    }
+    let restarted = if rational {
+        Curve::RationalSpline {
+            knots: tail_knots,
+            homogeneous: tail,
+        }
+    } else {
+        Curve::Spline {
+            knots: tail_knots,
+            points: tail.into_iter().map(|[x, y, z, _]| [x, y, z]).collect(),
+        }
+    };
+    Ok(restarted)
 }
 
 #[cfg(test)]

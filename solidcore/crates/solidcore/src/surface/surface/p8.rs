@@ -44,9 +44,16 @@
 //! run when the solve fetches its cache (`smsurf_GetSurfaceCache`), so the tree is
 //! the face's and the coincident traces share it. The
 //! optional `SmDerivSurfDefinition` of `CreateBlendSurface` is copied, so its caller
-//! does not see the fields upstream overwrites. `CreateBlendSurface` retains the
-//! sampler's partial, zero-filled arrays when ignoring an ordinary sampling error,
-//! as upstream does; `Unported` and count-safety failures still propagate.
+//! does not see the fields upstream overwrites. Where upstream ignores a status the
+//! fork passes on (WR-663, tangency-labs/smlib 21dcf69: `CreateBlendSurface`'s
+//! sampling and cross sections, the coincidence check's boxes and points,
+//! the line intersector's normal evaluations and combination, the singularity
+//! inversion's derivatives) the port returns it; a leaf outside the domain of interest
+//! has no answers, and an iso curve that cannot be trimmed, reversed or
+//! reparameterized is no output curve. A coincidence sample where either surface's
+//! derivatives cannot be evaluated (a degenerate corner) shows no coincidence and the
+//! check goes on to its other samples; the whole-surface check's seam direction test
+//! at such a corner leaves the direction guess unchanged.
 //! `CreateBlendSurface` of a curve that is not a B-spline kind
 //! returns `InvalidInput` (upstream signals the error and casts anyway).
 //! `SmSPGlobalSolver::LocalSolve` returns `InvalidInput` when the original surface of
@@ -75,9 +82,7 @@ use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::curve_cache::CurveCache;
 use crate::curve::line::Line;
 use crate::error::surface::SurfaceFailure;
-use crate::error::{
-    ignore_or_pass_on, ignore_status, ignored, ignored_or_pass_on, passed_on, Result, SolidError,
-};
+use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -166,16 +171,15 @@ const NUM_SAMPLES: usize = 6;
 // ---- calls into other units (the only unported one is DropCurve, below) ---------------------
 
 /// `smsurf_CheckShapeMatch(sPVV0, sPVV1, tol, angTolRad, bSuccess)`: `bSuccess`. The
-/// evaluation matrices are modified in place, as upstream's arrays are. `pass_on`: the
-/// opt-in WR-663 fix (its section evaluations pass on their statuses).
+/// evaluation matrices are modified in place, as upstream's arrays are (its section
+/// evaluations pass on their statuses, as the fork, WR-663).
 fn check_shape_match(
     pvv0: &mut [[Vec3; 3]; 3],
     pvv1: &mut [[Vec3; 3]; 3],
     tol_3d: f64,
     ang_tol_rad: f64,
-    pass_on: bool,
 ) -> Result<bool> {
-    super::p3::check_shape_match(pvv0, pvv1, tol_3d, ang_tol_rad, pass_on)
+    super::p3::check_shape_match(pvv0, pvv1, tol_3d, ang_tol_rad)
 }
 
 /// `SmSurface::DropPoint(pt, domain, guess, bSuccess, uv, dist, bIsMulti, op)`: success,
@@ -269,25 +273,21 @@ fn surface_drop_curve<O: SolutionObject>(
 
 // ---- helpers --------------------------------------------------------------------------------
 
-/// `Evaluate(uv, 2, 2, TRUE, TRUE, TRUE (bOnlyUpperHalf), &sPVV[0][0])` whose status upstream ignores: on
-/// failure `out` keeps what it held (upstream's array is left as it was). With the
-/// opt-in `Kernel::fixes.query_statuses_pass_on` the failure is returned (WR-663,
-/// tangency-labs/smlib 21dcf69).
+/// `Evaluate(uv, 2, 2, TRUE, TRUE, TRUE (bOnlyUpperHalf), &sPVV[0][0])` into `out`,
+/// whose status upstream ignores (its array is then left as it was); the failure is
+/// returned, as the fork (WR-663, tangency-labs/smlib 21dcf69).
 fn evaluate_3x3_into(
     k: &Kernel,
     surface: &Surface,
     uv: Point2,
     out: &mut [[Vec3; 3]; 3],
 ) -> Result<()> {
-    let pass = k.fixes.query_statuses_pass_on;
     // bOnlyUpperHalf = TRUE: only the entries with i + j <= 2 are written
     let flags = EvaluateFlags {
         only_upper_half: true,
         ..EvaluateFlags::default()
     };
-    let Some(m) = ignored_or_pass_on(surface.evaluate(k, uv, 2, 2, flags), pass)? else {
-        return Ok(());
-    };
+    let m = surface.evaluate(k, uv, 2, 2, flags)?;
     for (i, row) in out.iter_mut().enumerate() {
         for (j, slot) in row.iter_mut().enumerate() {
             if i + j > 2 {
@@ -301,15 +301,17 @@ fn evaluate_3x3_into(
     Ok(())
 }
 
-/// `EvaluatePoint(uv, pt)` whose status upstream ignores: `Vec3::UNDEF` on failure. With
-/// the opt-in `Kernel::fixes.query_statuses_pass_on` the failure is returned (WR-663,
-/// tangency-labs/smlib 21dcf69).
-fn point_or_undef(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Point3> {
-    Ok(ignored_or_pass_on(
-        surface.evaluate_point(k, uv),
-        k.fixes.query_statuses_pass_on,
-    )?
-    .unwrap_or(Vec3::UNDEF))
+/// [`evaluate_3x3_into`] of two surfaces at one coincidence sample: `false` (the sample
+/// shows nothing) when either cannot be evaluated there. Upstream ignores both statuses
+/// and compares whatever the arrays held; the fork passes them on and fails the whole
+/// check (WR-663, tangency-labs/smlib 21dcf69).
+fn evaluate_pair(
+    k: &Kernel,
+    (sa, uva, pa): (&Surface, Point2, &mut [[Vec3; 3]; 3]),
+    (sb, uvb, pb): (&Surface, Point2, &mut [[Vec3; 3]; 3]),
+) -> Result<bool> {
+    Ok(ignored(evaluate_3x3_into(k, sa, uva, pa))?.is_some()
+        && ignored(evaluate_3x3_into(k, sb, uvb, pb))?.is_some())
 }
 
 /// The B-spline part of a curve of a kind derived from `SmBSplineCurve`.
@@ -427,13 +429,10 @@ fn boundary_curves<'s>(
 }
 
 fn trim_curves(k: &Kernel, surface: &Surface, domain: &Extent2d) -> Result<Vec<Option<Curve>>> {
-    // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-    let t = ignored_or_pass_on(
-        surface.create_natural_uv_trim_curves(k, domain, SurfParamType::V, false),
-        k.fixes.query_statuses_pass_on,
-    )?;
-    Ok(t.map(|t| t.curves_3d.into_iter().map(Some).collect())
-        .unwrap_or_default())
+    // (status ignored upstream; passed on as the fork does, WR-663,
+    // tangency-labs/smlib 21dcf69)
+    let t = surface.create_natural_uv_trim_curves(k, domain, SurfParamType::V, false)?;
+    Ok(t.curves_3d.into_iter().map(Some).collect())
 }
 
 /// The UV point and the inward UV binormal of parameter `t` on boundary `index` of
@@ -470,6 +469,205 @@ fn boundary_intersections(
 }
 
 // ---- SmSurface members ------------------------------------------------------------------------
+
+/// Not upstream: a cone (a cylinder is a cone of semi-angle 0) or a sphere as the points
+/// at distance `|radius(p)|` from its axis (from its centre for a sphere), the radius
+/// affine in the height along the axis.
+#[derive(Clone, Copy)]
+struct Revolved {
+    /// A point of the axis, the sphere's centre.
+    origin: Point3,
+    /// The unit axis; `None` for a sphere.
+    axis: Option<Vec3>,
+    /// The radius at `origin`.
+    radius: f64,
+    /// The radius's change per unit of height along `axis` (0 for a sphere).
+    slope: f64,
+}
+
+impl Revolved {
+    /// The cone's axis, radius and slope.
+    fn cone(c: &crate::surface::cone::p1::Cone) -> Self {
+        Self {
+            origin: c.rev.position.origin(),
+            axis: Some(c.rev.position.z_axis()),
+            radius: c.base_radius(),
+            slope: c.tan_semi_angle(),
+        }
+    }
+
+    /// The sphere of centre and radius `ball`.
+    const fn ball(ball: (Point3, f64)) -> Self {
+        Self {
+            origin: ball.0,
+            axis: None,
+            radius: ball.1,
+            slope: 0.0,
+        }
+    }
+
+    /// The part of `v` across the axis (all of it for a sphere).
+    fn across(&self, v: Vec3) -> Vec3 {
+        self.axis.map_or(v, |a| v - a * v.dot(a))
+    }
+
+    /// The radius at the height of `p`.
+    fn radius_at(&self, p: Point3) -> f64 {
+        self.radius
+            + self
+                .axis
+                .map_or(0.0, |a| self.slope * (p - self.origin).dot(a))
+    }
+}
+
+/// Not upstream: an upper bound on the distance from any point of either surface inside
+/// `region` to the other surface, from the definitions alone (no sampling). NaN or
+/// infinite where it cannot bound: an undefined region, a region reaching an axis (or a
+/// centre), or a radius changing sign in it (a cone's apex).
+///
+/// With `d_x(p)` the distance from `p` to the axis of `x` (to its centre) and `r_x(p)` its
+/// radius at `p`'s height, a point of `a` has `d_a = |r_a|`, and its distance to `b` is at
+/// most `|d_b - |r_b||` (the generator of `b` in the half plane through `p` is part of `b`,
+/// and the gap along the radius is at least the gap to that line). On `a` that is
+/// `|G + |r_a| - |r_b||` with `G = d_b - d_a`. Over the box with centre `c`:
+/// - `|r_a| - |r_b|` is affine where both radii keep their signs, so `|G(c) + |r_a| - |r_b||`
+///   is convex and largest at a corner.
+/// - `G(p) - G(c)` is at most `L · e_a + sin θ · e` (mean value theorem), with `e` the largest
+///   corner distance from `c`, `e_a` the largest across `a`'s axis, `θ` the angle between
+///   the axes and `L` a bound on `|u_b - u_a|`, the difference of the unit radial directions
+///   (`∇d_x = u_x`): `|u_b - u_a| ≤ 2 |w| / ρ` for the radial vectors' difference `w` (affine
+///   in `p`, at most `|w(c)| + sin θ · e`) and `ρ`, the larger lower bound on the two radial
+///   distances in the box; both must be positive (`e_b` may stand for `e_a`).
+///
+/// The bound is symmetric in `a` and `b`. Two cylinders through the same points whose axes
+/// part by `δ` stay within `≈ δ · s / R` of each other over a patch of width `s` at radius
+/// `R`.
+fn revolved_separation_bound(a: Revolved, b: Revolved, region: &Extent3d) -> f64 {
+    if !region.is_defined() {
+        return f64::NAN;
+    }
+    let c = region.mid();
+    let corners = region.corners();
+    let (qa, qb) = (a.across(c - a.origin), b.across(c - b.origin));
+    let (mut e, mut e_a, mut e_b) = (0.0_f64, 0.0_f64, 0.0_f64);
+    for &p in &corners {
+        let v = p - c;
+        e = e.max(v.length());
+        e_a = e_a.max(a.across(v).length());
+        e_b = e_b.max(b.across(v).length());
+    }
+    let sin_theta = match (a.axis, b.axis) {
+        (Some(x), Some(y)) => x.cross(y).length(),
+        _ => 0.0,
+    };
+    // both radial directions are defined over the whole box
+    let (rho_a, rho_b) = (qa.length() - e_a, qb.length() - e_b);
+    if rho_a.is_nan() || rho_b.is_nan() || rho_a <= 0.0 || rho_b <= 0.0 {
+        return f64::NAN;
+    }
+    let rho = rho_a.max(rho_b);
+    let lip = 2.0 * ((qb - qa).length() + sin_theta * e) / rho;
+    let g = qb.length() - qa.length();
+    // the radii's signs at the centre hold at every corner, or there is no bound
+    let (sa, sb) = (a.radius_at(c).signum(), b.radius_at(c).signum());
+    let mut at_corners = 0.0_f64;
+    for &p in &corners {
+        let (ra, rb) = (a.radius_at(p) * sa, b.radius_at(p) * sb);
+        if ra.is_nan() || rb.is_nan() || ra <= 0.0 || rb <= 0.0 {
+            return f64::NAN;
+        }
+        at_corners = at_corners.max((g + ra - rb).abs());
+    }
+    at_corners + lip * e_a.min(e_b) + sin_theta * e
+}
+
+/// Not upstream: the most boxes [`revolved_within`] reads before it gives up.
+const REVOLVED_MAX_BOXES: usize = 256;
+
+/// Not upstream: whether the box surely holds no point within `tol` of the surface: the
+/// distances from its points to the axis (the centre) and the radii at their heights do not
+/// overlap. A NaN anywhere answers no (the box is kept).
+fn revolved_misses(s: Revolved, region: &Extent3d, tol: f64) -> bool {
+    let c = region.mid();
+    let q = s.across(c - s.origin).length();
+    let mut reach = 0.0_f64;
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for p in region.corners() {
+        let (across, r) = (s.across(p - c).length(), s.radius_at(p));
+        if across.is_nan() || r.is_nan() {
+            return false;
+        }
+        reach = reach.max(across);
+        lo = lo.min(r);
+        hi = hi.max(r);
+    }
+    // |r| over the box: the radius is affine, so it runs between its corner values
+    let (r_lo, r_hi) = if lo > 0.0 {
+        (lo, hi)
+    } else if hi < 0.0 {
+        (-hi, -lo)
+    } else {
+        (0.0, hi.max(-lo))
+    };
+    (q - reach).max(0.0) > r_hi + tol || q + reach < r_lo - tol
+}
+
+/// Not upstream: whether the surfaces `a` and `b` stay within `tol` of each other at every
+/// point of either inside `region`. The box is halved across the axes (along the side the
+/// surfaces vary most over) until [`revolved_separation_bound`] is within `tol` on each part
+/// that may hold a point of either surface (not [`revolved_misses`]); at most
+/// [`REVOLVED_MAX_BOXES`] boxes are read, and a part still undecided then answers no. A part
+/// holding a point of one surface farther than `tol` from the other never passes, as the
+/// bound is never below the separation it bounds.
+fn revolved_within(a: Revolved, b: Revolved, tol: f64, region: &Extent3d) -> bool {
+    if !region.is_defined() || region.has_negative_volume() {
+        return false;
+    }
+    let mut todo = vec![*region];
+    let mut read = 0_usize;
+    while let Some(part) = todo.pop() {
+        read += 1;
+        if read > REVOLVED_MAX_BOXES {
+            return false;
+        }
+        if revolved_misses(a, &part, tol) && revolved_misses(b, &part, tol) {
+            continue;
+        }
+        // a NaN bound is no bound: the part is halved
+        let bound = revolved_separation_bound(a, b, &part);
+        let undecided = bound.is_nan() || bound > tol;
+        if !undecided {
+            continue;
+        }
+        // halve the side whose length counts most across the axes
+        let (min, max) = (part.min(), part.max());
+        let mut best = (0_usize, 0.0_f64);
+        for i in 0..3 {
+            let mut unit = Vec3::new(0.0, 0.0, 0.0);
+            if let Ok(x) = unit.component_mut(i) {
+                *x = 1.0;
+            }
+            let weight = (part.max_at(i) - part.min_at(i))
+                * a.across(unit).length().max(b.across(unit).length());
+            if weight > best.1 {
+                best = (i, weight);
+            }
+        }
+        if best.1.is_nan() || best.1 <= tol {
+            return false;
+        }
+        let half = 0.5 * (part.min_at(best.0) + part.max_at(best.0));
+        let (mut upper_min, mut lower_max) = (min, max);
+        for (point, value) in [(&mut upper_min, half), (&mut lower_max, half)] {
+            if let Ok(x) = point.component_mut(best.0) {
+                *x = value;
+            }
+        }
+        todo.push(Extent3d::from_points(min, lower_max));
+        todo.push(Extent3d::from_points(upper_min, max));
+    }
+    true
+}
 
 impl Surface {
     /// The interior knots of both directions where the surface continuity is at most
@@ -549,6 +747,12 @@ impl Surface {
     /// - Torus: coaxial, centres and both radii within `tol_3d`. A torus whose major
     ///   radius is within `tol_3d` of 0 is the sphere of its minor radius and is
     ///   compared with spheres as such.
+    ///
+    /// Two cones, or two spheres, that fail that comparison are still the same surface
+    /// inside `region` when an enclosed bound on their separation over the parts of
+    /// `region` that may hold them keeps them within `tol_3d` there (not upstream): two arcs drawn through the same end points about centres a little apart
+    /// (cylinders whose axes part by 8.4e-5) stay within 1e-10 of each other over the
+    /// sliver they share, though not over their whole circles.
     #[must_use]
     pub fn same_analytic_surface(
         &self,
@@ -573,7 +777,12 @@ impl Surface {
             (SurfaceKind::Cone(a), SurfaceKind::Cone(b)) => {
                 let (pa, pb) = (&a.rev.position, &b.rev.position);
                 if !pa.are_coaxial(pb, tol, reach) {
-                    return Some(false);
+                    return Some(revolved_within(
+                        Revolved::cone(a),
+                        Revolved::cone(b),
+                        tol,
+                        region,
+                    ));
                 }
                 // The second cone on the first's axis: its radius at the first's origin
                 // and its slope per unit of the first's height.
@@ -601,7 +810,11 @@ impl Surface {
                         .iter()
                         .all(|h| ((r0 + s0 * h) - (r + s * h)).abs() <= tol)
                 };
-                Some(close(radius, slope) || close(-radius, -slope))
+                Some(
+                    close(radius, slope)
+                        || close(-radius, -slope)
+                        || revolved_within(Revolved::cone(a), Revolved::cone(b), tol, region),
+                )
             }
             (SurfaceKind::Torus(a), SurfaceKind::Torus(b)) => {
                 let (pa, pb) = (&a.base.position, &b.base.position);
@@ -621,8 +834,32 @@ impl Surface {
             }
             // A sphere against a sphere or a hole-less torus; any other pair is left to the
             // caller.
-            _ => ball(self).zip(ball(other)).map(|(x, y)| same_ball(x, y)),
+            _ => ball(self).zip(ball(other)).map(|(x, y)| {
+                same_ball(x, y)
+                    || revolved_within(Revolved::ball(x), Revolved::ball(y), tol, region)
+            }),
         }
+    }
+
+    /// Not upstream: whether `other` is of another kind than this surface among plane, cone
+    /// (a cylinder is a cone of semi-angle 0), sphere and torus. Two such surfaces share no
+    /// region: where they touch tangentially they part as the square of the distance from
+    /// the contact, and they count as one only over a patch on which they stay within the
+    /// tolerance (a sphere cap thinner than it on a plane), which is a distance for the
+    /// caller to measure, never a property of their directions at the contact. `false` for
+    /// two surfaces of one kind ([`Surface::same_analytic_surface`] compares those), for a
+    /// kind with no definition to compare, and for a sphere against a torus (a torus with no
+    /// hole is a sphere).
+    #[must_use]
+    pub fn is_other_analytic_kind(&self, other: &Self) -> bool {
+        // plane, cone, then the two a torus with no hole joins
+        let rank = |s: &Self| match s.kind() {
+            SurfaceKind::Plane(_) => Some(0_u8),
+            SurfaceKind::Cone(_) => Some(1),
+            SurfaceKind::Sphere(_) | SurfaceKind::Torus(_) => Some(2),
+            _ => None,
+        };
+        rank(self).zip(rank(other)).is_some_and(|(a, b)| a != b)
     }
 
     /// `SmSurface::CoincidenceCheck` (the base body): a plane `other` runs its own
@@ -682,16 +919,12 @@ impl Surface {
             ));
         }
 
-        // Check bounding boxes (statuses ignored; passed on with the opt-in fix,
+        // Check bounding boxes (statuses ignored upstream; passed on as the fork does,
         // WR-663, tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
         let box_of = |s: &Self, d: &Extent2d| -> Result<Extent3d> {
-            Ok(ignored_or_pass_on(
-                s.calculate_bounding_box(k, d, [true, false, false], true),
-                pass,
-            )?
-            .and_then(|b| b.normal_box)
-            .unwrap_or_default())
+            Ok(s.calculate_bounding_box(k, d, [true, false, false], true)?
+                .normal_box
+                .unwrap_or_default())
         };
         let bbox0 = box_of(self, &domain0)?;
         let bbox1 = box_of(other, &domain1)?;
@@ -775,19 +1008,17 @@ impl Surface {
                     let (uv0, uv_binorm0) = boundary_uv(&domain0, ii, t0);
                     let (uv1, uv_binorm1) = boundary_uv(&domain1, jj, t1);
 
-                    // Now check the surfaces for coincidence at this point.
-                    evaluate_3x3_into(k, self, uv0, &mut pvv0)?;
-                    evaluate_3x3_into(k, other, uv1, &mut pvv1)?;
+                    // Now check the surfaces for coincidence at this point. A point
+                    // where either surface cannot be evaluated (a degenerate corner)
+                    // shows no coincidence; the other points still decide.
+                    if !evaluate_pair(k, (self, uv0, &mut pvv0), (other, uv1, &mut pvv1))? {
+                        continue;
+                    }
 
                     // Now check 2nd order terms.
-                    let matched = ignored(check_shape_match(
-                        &mut pvv0,
-                        &mut pvv1,
-                        tol_3d,
-                        ang_tol_rad,
-                        pass,
-                    ))?
-                    .unwrap_or(false);
+                    let matched =
+                        ignored(check_shape_match(&mut pvv0, &mut pvv1, tol_3d, ang_tol_rad))?
+                            .unwrap_or(false);
                     if !matched {
                         continue;
                     }
@@ -817,7 +1048,7 @@ impl Surface {
         // If there is coincidence, then one surface completely contains the other.
         // Drop any point from each to the other.
         let mut uv1 = domain1.mid();
-        let pt1 = point_or_undef(k, other, uv1)?;
+        let pt1 = other.evaluate_point(k, uv1)?;
         let in_box = bbox0.contains_point(pt1, 0.0);
         let dropped = if in_box {
             ignored(surface_drop_point(
@@ -833,17 +1064,11 @@ impl Surface {
         };
         if let Some((true, uv0, dist)) = dropped {
             if dist <= tol_3d {
-                // Point coincidence, check normals and curvature.
-                evaluate_3x3_into(k, self, uv0, &mut pvv0)?;
-                evaluate_3x3_into(k, other, uv1, &mut pvv1)?;
-                if ignored(check_shape_match(
-                    &mut pvv0,
-                    &mut pvv1,
-                    tol_3d,
-                    ang_tol_rad,
-                    pass,
-                ))?
-                .unwrap_or(false)
+                // Point coincidence, check normals and curvature (a point either
+                // surface cannot evaluate there shows no coincidence).
+                if evaluate_pair(k, (self, uv0, &mut pvv0), (other, uv1, &mut pvv1))?
+                    && ignored(check_shape_match(&mut pvv0, &mut pvv1, tol_3d, ang_tol_rad))?
+                        .unwrap_or(false)
                 {
                     return Ok(res);
                 }
@@ -852,7 +1077,7 @@ impl Surface {
 
         // Repeat the other way around.
         let uv0 = domain0.mid();
-        let pt0 = point_or_undef(k, self, uv0)?;
+        let pt0 = self.evaluate_point(k, uv0)?;
         let in_box = bbox1.contains_point(pt0, 0.0);
         let dropped = if in_box {
             ignored(surface_drop_point(
@@ -869,17 +1094,11 @@ impl Surface {
         if let Some((true, found_uv1, dist)) = dropped {
             uv1 = found_uv1;
             if dist <= tol_3d {
-                // Point coincidence, check normals and curvature.
-                evaluate_3x3_into(k, self, uv0, &mut pvv0)?;
-                evaluate_3x3_into(k, other, uv1, &mut pvv1)?;
-                if ignored(check_shape_match(
-                    &mut pvv0,
-                    &mut pvv1,
-                    tol_3d,
-                    ang_tol_rad,
-                    pass,
-                ))?
-                .unwrap_or(false)
+                // Point coincidence, check normals and curvature (a point either
+                // surface cannot evaluate there shows no coincidence).
+                if evaluate_pair(k, (self, uv0, &mut pvv0), (other, uv1, &mut pvv1))?
+                    && ignored(check_shape_match(&mut pvv0, &mut pvv1, tol_3d, ang_tol_rad))?
+                        .unwrap_or(false)
                 {
                     return Ok(res);
                 }
@@ -904,8 +1123,8 @@ impl Surface {
         tol_3d: f64,
         mut res: Coincidence,
     ) -> Result<Coincidence> {
-        // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        // (the statuses upstream ignores here are passed on as the fork does, WR-663,
+        // tangency-labs/smlib 21dcf69)
         // First collect the corner points: Eval Surfaces at normalized domain corners
         let mut pts1 = [[Vec3::UNDEF; 2]; 2];
         let mut pts2 = [[Vec3::UNDEF; 2]; 2];
@@ -914,11 +1133,11 @@ impl Surface {
                 let (fi, fj) = (f64::from(ii as u8), f64::from(jj as u8));
                 // surface1 corners
                 if let Some(slot) = pts1.get_mut(ii).and_then(|r| r.get_mut(jj)) {
-                    *slot = point_or_undef(k, self, domain0.evaluate(fi, fj))?;
+                    *slot = self.evaluate_point(k, domain0.evaluate(fi, fj))?;
                 }
                 // surface2 corners
                 if let Some(slot) = pts2.get_mut(ii).and_then(|r| r.get_mut(jj)) {
-                    *slot = point_or_undef(k, other, domain1.evaluate(fi, fj))?;
+                    *slot = other.evaluate_point(k, domain1.evaluate(fi, fj))?;
                 }
             }
         }
@@ -1007,34 +1226,36 @@ impl Surface {
         // nonZeroTangent evaluations)
         if p1(0, 0).closer_than(tol_3d, p1(1, 0)) {
             // Closed in u (on surf 1).
+            // (a corner either surface cannot differentiate, such as a degenerate
+            // one, leaves the direction guess as it is: the grid of drops below
+            // decides coincidence, the direction only seeds their guesses)
             let uv1 = domain0.evaluate(0.0, 0.0);
-            let (_, su0, _) =
-                ignored_or_pass_on(self.evaluate_1st_derivatives(k, uv1, true, true), pass)?
-                    .unwrap_or((Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF));
             let uv2 = domain1.evaluate(f64::from(idx00 as u8), f64::from(jdx00 as u8));
-            let (_, su1, sv1) =
-                ignored_or_pass_on(other.evaluate_1st_derivatives(k, uv2, true, true), pass)?
-                    .unwrap_or((Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF));
-            let other_dir = if orient == OrientType::Same { su1 } else { sv1 };
-            if su0.dot(other_dir) < 0.0 {
-                dir_u = -1.0;
+            if let (Some((_, su0, _)), Some((_, su1, sv1))) = (
+                ignored(self.evaluate_1st_derivatives(k, uv1, true, true))?,
+                ignored(other.evaluate_1st_derivatives(k, uv2, true, true))?,
+            ) {
+                let other_dir = if orient == OrientType::Same { su1 } else { sv1 };
+                if su0.dot(other_dir) < 0.0 {
+                    dir_u = -1.0;
+                }
             }
         }
 
         // Now check U seams - periodic in V
         if p1(0, 0).closer_than(tol_3d, p1(0, 1)) {
             // Closed in v (on surf 1).
+            // (as for the u direction above)
             let uv1 = domain0.evaluate(0.0, 0.0);
-            let (_, _, sv0) =
-                ignored_or_pass_on(self.evaluate_1st_derivatives(k, uv1, true, true), pass)?
-                    .unwrap_or((Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF));
             let uv2 = domain1.evaluate(f64::from(idx00 as u8), f64::from(jdx00 as u8));
-            let (_, su1, sv1) =
-                ignored_or_pass_on(other.evaluate_1st_derivatives(k, uv2, true, true), pass)?
-                    .unwrap_or((Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF));
-            let other_dir = if orient == OrientType::Same { sv1 } else { su1 };
-            if sv0.dot(other_dir) < 0.0 {
-                dir_v = -1.0;
+            if let (Some((_, _, sv0)), Some((_, su1, sv1))) = (
+                ignored(self.evaluate_1st_derivatives(k, uv1, true, true))?,
+                ignored(other.evaluate_1st_derivatives(k, uv2, true, true))?,
+            ) {
+                let other_dir = if orient == OrientType::Same { sv1 } else { su1 };
+                if sv0.dot(other_dir) < 0.0 {
+                    dir_v = -1.0;
+                }
             }
         }
 
@@ -1057,7 +1278,7 @@ impl Surface {
 
                 // this surface(dU,dV) point
                 let uv1 = domain0.evaluate(u, v);
-                let pt1 = point_or_undef(k, self, uv1)?;
+                let pt1 = self.evaluate_point(k, uv1)?;
 
                 // sUV1 =map=> sUV2
                 let normalized_uv2 = super::p2::map_uv(u, v, orient, dir_u, dir_v);
@@ -1193,9 +1414,9 @@ impl Surface {
                 want_higher,
             },
         )?;
-        // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
-        ignore_or_pass_on(start_status, pass)?;
+        // (status ignored upstream; passed on as the fork does, WR-663,
+        // tangency-labs/smlib 21dcf69)
+        start_status?;
 
         // Get Sample Values from Face2/Edge2 using edge1 as tangentReference
         def.tangent_reference = Some(curve1);
@@ -1212,25 +1433,20 @@ impl Surface {
                 want_higher,
             },
         )?;
-        ignore_or_pass_on(end_status, pass)?;
+        end_status?;
 
         // use samples to build cross-section curves that capture the G1/G2/G3 shapes
-        // (the status is not checked upstream; the curves built before a failure stay in
-        // its array, which the port cannot recover, so a failure leaves it empty)
-        let cross_sections = ignored_or_pass_on(
-            def.create_cross_section_curves(&CrossSectionValues {
-                start_pos: &start.positions,
-                start_1st_derivs: &start.first_derivs,
-                start_2nd_derivs: start.second_derivs.as_deref(),
-                start_3rd_derivs: start.third_derivs.as_deref(),
-                end_pos: Some(&end.positions),
-                end_1st_derivs: Some(&end.first_derivs),
-                end_2nd_derivs: end.second_derivs.as_deref(),
-                end_3rd_derivs: end.third_derivs.as_deref(),
-            }),
-            pass,
-        )?
-        .unwrap_or_default();
+        // (the status is not checked upstream; passed on as the fork does)
+        let cross_sections = def.create_cross_section_curves(&CrossSectionValues {
+            start_pos: &start.positions,
+            start_1st_derivs: &start.first_derivs,
+            start_2nd_derivs: start.second_derivs.as_deref(),
+            start_3rd_derivs: start.third_derivs.as_deref(),
+            end_pos: Some(&end.positions),
+            end_1st_derivs: Some(&end.first_derivs),
+            end_2nd_derivs: end.second_derivs.as_deref(),
+            end_3rd_derivs: end.third_derivs.as_deref(),
+        })?;
 
         // Skin cross sections with blend endCurves as Rail constraints to build the
         // G1/G2/G3 blend
@@ -1952,9 +2168,9 @@ impl Surface {
                 sr_eval.set_uv_coords(end.param(1)?, end.param(2)?);
 
                 // When line tangent not perp to surfNormal - can't be coincident (the
-                // fork's `SER(SetUV)` passes the evaluation's status on with the opt-in
-                // fix, WR-663, tangency-labs/smlib 21dcf69)
-                ignore_or_pass_on(sr_eval.eval_normal(k), k.fixes.query_statuses_pass_on)?;
+                // fork's `SER(SetUV)` passes the evaluation's status on, WR-663,
+                // tangency-labs/smlib 21dcf69)
+                sr_eval.eval_normal(k)?;
                 let normal = sr_eval.values()[2][2];
                 if line_vector.is_perpendicular_to(normal, EFF_ZERO_RAD) {
                     // if SurfaceNormalSection curvature is far from linear - can't be
@@ -1987,10 +2203,8 @@ impl Surface {
             let Ok(mut line) = BSplineCurve::create_line_segment(3, line_start, line_end) else {
                 return Ok(sols);
             };
-            ignore_or_pass_on(
-                line.edit_parameterization(&line_interval_used),
-                k.fixes.query_statuses_pass_on,
-            )?;
+            // (status ignored upstream; passed on as the fork does)
+            line.edit_parameterization(&line_interval_used)?;
             let line = Curve::from(line);
 
             // Check Surface/LineSegment Coincidence (its point solve reaches the
@@ -2441,11 +2655,8 @@ impl Surface {
                     &mut sols,
                 )
             };
-            // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-            let _ = super::p1::ignore_native_classification(passed_on(
-                solve,
-                k.fixes.query_statuses_pass_on,
-            )?)?;
+            // (passed on as the fork does, WR-663, tangency-labs/smlib 21dcf69)
+            solve?;
 
             // set output values
             for ii in 0..sols.len() {
@@ -2715,30 +2926,23 @@ impl Surface {
         )?;
 
         // combine duplicate solutions - find coincident regions (the call is not
-        // checked upstream, which returns SM_SUCCESS; passed on with the opt-in fix,
+        // checked upstream, which returns SM_SUCCESS; passed on as the fork does,
         // WR-663, tangency-labs/smlib 21dcf69)
-        ignore_or_pass_on(
-            super::p10::global_curve_intersect_combine_solutions(
-                k,
-                self,
-                uv_domain,
-                curve,
-                interval,
-                distance_tolerance,
-                &super::p10::CombineContext {
-                    curve_tree: Some(curve_tree),
-                    surface_cache: Some(surface_cache),
-                    curve_handle,
-                    surface_handle,
-                    edge_tolerance: super::p9::curve_edge_tolerance(
-                        curve,
-                        curve_handle,
-                        face_queries,
-                    )?,
-                },
-                &mut sols,
-            ),
-            k.fixes.query_statuses_pass_on,
+        super::p10::global_curve_intersect_combine_solutions(
+            k,
+            self,
+            uv_domain,
+            curve,
+            interval,
+            distance_tolerance,
+            &super::p10::CombineContext {
+                curve_tree: Some(curve_tree),
+                surface_cache: Some(surface_cache),
+                curve_handle,
+                surface_handle,
+                edge_tolerance: super::p9::curve_edge_tolerance(curve, curve_handle, face_queries)?,
+            },
+            &mut sols,
         )?;
         Ok(sols)
     }
@@ -2820,13 +3024,12 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
         // Do interval tests and reject if disjoint or adjust if sUVDomain is not
         // completely inside of m_crUVDomain
         if !uv_domain.is_contained_by(&self.uv_domain, EFF_ZERO) {
-            // Need to adjust continuities (the status is ignored; with the opt-in fix a
+            // Need to adjust continuities (the status is ignored upstream; as the fork, a
             // branch outside the domain of interest has no answers, WR-663,
             // tangency-labs/smlib 21dcf69)
             match ignored(uv_domain.intersect(&self.uv_domain))? {
                 Some(d) => uv_domain = d,
-                None if k.fixes.query_statuses_pass_on => return Ok(false),
-                None => (),
+                None => return Ok(false),
             }
             // Check for zero in either domain bound
             if are_same(uv_domain.max().x, uv_domain.min().x)
@@ -2973,16 +3176,10 @@ impl Surface {
         tol: f64,
     ) -> Result<SingularityInversion> {
         let reason = TerminationReason::FoundAnswerConverged;
-        let undef3 = (Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF);
 
-        // (the statuses SMLib drops here are passed on with the opt-in fix, WR-663,
+        // (the statuses SMLib drops here are passed on, as the fork does, WR-663,
         // tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
-        let (srf_pt, su, sv) = ignored_or_pass_on(
-            self.evaluate_1st_derivatives(k, uv_guess, false, false),
-            pass,
-        )?
-        .unwrap_or(undef3);
+        let (srf_pt, su, sv) = self.evaluate_1st_derivatives(k, uv_guess, false, false)?;
         if srf_pt.closer_than(tol, test_pt) {
             return Ok(SingularityInversion {
                 uv: uv_guess,
@@ -3046,7 +3243,7 @@ impl Surface {
         // Ok, neither the guess uv nor the pole is a solution. Find the degenerate
         // param, at the pole, where the non-degenerate tangent points towards the
         // test point.
-        let pole_pt = point_or_undef(k, self, sing_uv)?;
+        let pole_pt = self.evaluate_point(k, sing_uv)?;
         let diff_vec = test_pt - pole_pt; // we know this isn't zero.
         let degen =
             self.find_degen_param_for_direction(k, sing_uv, diff_vec, true, sing_dir, tol)?;
@@ -3073,11 +3270,7 @@ impl Surface {
 
         // Get a guess param. First re-evaluate at the param that's going in the right
         // direction.
-        let (_, su, sv) = ignored_or_pass_on(
-            self.evaluate_1st_derivatives(k, sing_uv, false, false),
-            pass,
-        )?
-        .unwrap_or(undef3);
+        let (_, su, sv) = self.evaluate_1st_derivatives(k, sing_uv, false, false)?;
         let good_deriv = if sing_dir == SurfParamType::U { sv } else { su };
         let mut guess_t = diff_vec.dot(good_deriv) / good_deriv.dot(good_deriv);
         guess_t = good_domain.clamp_value(guess_t);
@@ -3436,11 +3629,10 @@ pub fn extract_iso_curve(
 
     // Trim ISO curve Trim it to the length of the input UVTrimCurve line (may snap the
     // interval by tol to existing knots).
-    // (with the opt-in fix an iso curve that cannot be trimmed, reversed or
-    // reparameterized is no output curve, WR-663, tangency-labs/smlib 1612a7d)
-    let no_curve = k.fixes.query_statuses_pass_on;
+    // (an iso curve that cannot be trimmed, reversed or reparameterized is no output
+    // curve, as the fork, WR-663, tangency-labs/smlib 1612a7d)
     let mut trim = trim_ivl;
-    if ignored(iso.trim(k, &mut trim, TrimMode::default()))?.is_none() && no_curve {
+    if ignored(iso.trim(k, &mut trim, TrimMode::default()))?.is_none() {
         return Ok(None);
     }
 
@@ -3448,13 +3640,13 @@ pub fn extract_iso_curve(
     // direction
     if reverse {
         let natural = iso.natural_interval();
-        if ignored(iso.reverse_parameterization(k, &natural))?.is_none() && no_curve {
+        if ignored(iso.reverse_parameterization(k, &natural))?.is_none() {
             return Ok(None);
         }
     }
 
     // Set IsoCurve parameterization to equal input interval
-    if ignored(iso.edit_parameterization(k, interval))?.is_none() && no_curve {
+    if ignored(iso.edit_parameterization(k, interval))?.is_none() {
         return Ok(None);
     }
     Ok(Some(iso))
