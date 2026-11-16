@@ -60,10 +60,15 @@ fn open(buffer: Arc<Mutex<Vec<f32>>>) -> Result<(cpal::Stream, u32), String> {
     let config: cpal::StreamConfig = supported.into();
     let on_error = |e: cpal::Error| log::warn!("microphone: {e}");
     let stream = match format {
-        cpal::SampleFormat::F32 => device.build_input_stream(config, move |data: &[f32], _: &_| keep(&buffer, data, channels, cap, |s| s), on_error, None),
-        cpal::SampleFormat::I16 => {
-            device.build_input_stream(config, move |data: &[i16], _: &_| keep(&buffer, data, channels, cap, |s| f32::from(s) / 32_768.0), on_error, None)
+        cpal::SampleFormat::F32 => {
+            device.build_input_stream(config, move |data: &[f32], _: &_| keep(&buffer, data, channels, cap, |s| s), on_error, None)
         }
+        cpal::SampleFormat::I16 => device.build_input_stream(
+            config,
+            move |data: &[i16], _: &_| keep(&buffer, data, channels, cap, |s| f32::from(s) / 32_768.0),
+            on_error,
+            None,
+        ),
         cpal::SampleFormat::U16 => device.build_input_stream(
             config,
             move |data: &[u16], _: &_| keep(&buffer, data, channels, cap, |s| (f32::from(s) - 32_768.0) / 32_768.0),
