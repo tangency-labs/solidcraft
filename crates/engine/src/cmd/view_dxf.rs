@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 use solidcore_record::Vec2;
-use solidcraft_io::{DxfEntity, DxfLayer, DxfLinetype, DxfShape};
+use solidcraft_io::{DxfEntity, DxfFile, DxfLayerId, DxfLinetype, DxfShape};
 use solidcraft_viewport::Camera;
 
 use super::CommandSpec;
@@ -95,35 +95,50 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let writing = Stage::new("dxf_write", 1);
     writing.check().map_err(|e| bad(CMD, e))?;
-    let mut visible = 0usize;
-    let mut hidden = 0usize;
-    let mut entities = Vec::new();
+    let sketch_points = drawing
+        .sketch
+        .iter()
+        .try_fold(0usize, |total, path| total.checked_add(path.points.len()).ok_or_else(|| bad(CMD, "view sketch-point count overflow")))?;
+    let mut file = if as_arcs {
+        DxfFile::for_current_view_arc_export(drawing.lines.len(), drawing.sketch.len(), sketch_points)?
+    } else {
+        DxfFile::for_current_view_export(drawing.lines.len(), drawing.sketch.len(), sketch_points)?
+    };
+    let visible_layer = file.declare_layer("VISIBLE", 7, DxfLinetype::Continuous, None)?;
+    let hidden_layer = if dashed { Some(file.declare_layer("HIDDEN", 8, DxfLinetype::Hidden, None)?) } else { None };
+    let sketch_layer =
+        if drawing.sketch.iter().any(|path| !path.hidden) { Some(file.declare_layer("SKETCH", 5, DxfLinetype::Continuous, None)?) } else { None };
+    let mut visible = 0;
+    let mut hidden = 0;
+    let mut visible_lines = Vec::new();
+    let mut hidden_lines = Vec::new();
     for line in drawing.lines {
-        if line.hidden && !dashed {
-            continue;
-        }
-        let layer = if line.hidden {
+        if line.hidden {
+            if !dashed {
+                continue;
+            }
             hidden += 1;
-            "HIDDEN"
+            hidden_lines.push((line.a, line.b));
         } else {
             visible += 1;
-            "VISIBLE"
-        };
-        entities.push(DxfEntity { layer: layer.into(), shape: DxfShape::Line(line.a, line.b) });
+            visible_lines.push((line.a, line.b));
+        }
     }
-    let mut entities = connect(entities);
+    let hidden_paths = connect(hidden_lines);
+    let mut entities: Vec<DxfEntity> =
+        visible_lines.into_iter().map(|(a, b)| DxfEntity { layer: "VISIBLE".into(), shape: DxfShape::Line(a, b) }).collect();
+    for path in hidden_paths {
+        entities.push(DxfEntity { layer: "HIDDEN".into(), shape: DxfShape::Polyline { points: path.points } });
+    }
     if as_arcs {
         entities = arcs::recognise(entities, tolerance);
     }
-    let sketch = sketch_entities(drawing.sketch, dashed, &mut entities);
-    let mut layers = vec![DxfLayer::new("VISIBLE", 7)];
-    if dashed {
-        layers.push(DxfLayer { linetype: DxfLinetype::Hidden, ..DxfLayer::new("HIDDEN", 8) });
+    for entity in entities {
+        let layer = if entity.layer == "VISIBLE" { visible_layer } else { hidden_layer.ok_or_else(|| bad(CMD, "missing hidden DXF layer"))? };
+        file.push(layer, entity.shape, None)?;
     }
-    if sketch > 0 {
-        layers.push(DxfLayer::new("SKETCH", 5));
-    }
-    let text = solidcraft_io::write_dxf_drawing(&layers, &entities)?;
+    let sketch = sketch_entities(drawing.sketch, dashed, &mut file, hidden_layer, sketch_layer)?;
+    let text = solidcraft_io::write_dxf_file(&file)?;
     writing.check().map_err(|e| bad(CMD, e))?;
     let stats = ViewDxfStats {
         bodies: meshes.placements.len(),
@@ -160,31 +175,30 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Sketch runs as entities: visible ones on SKETCH, hidden ones dashed on HIDDEN or omitted.
 /// Returns the number of SKETCH entities.
-fn sketch_entities(paths: Vec<mesh_lines::Path>, dashed: bool, entities: &mut Vec<DxfEntity>) -> usize {
+fn sketch_entities(
+    paths: Vec<mesh_lines::Path>,
+    dashed: bool,
+    file: &mut DxfFile<DxfShape>,
+    hidden_layer: Option<DxfLayerId>,
+    sketch_layer: Option<DxfLayerId>,
+) -> Result<usize> {
     let mut count = 0;
     for path in paths.into_iter().filter(|p| dashed || !p.hidden) {
-        let layer = if path.hidden { "HIDDEN" } else { "SKETCH" };
+        let layer = (if path.hidden { hidden_layer } else { sketch_layer }).ok_or_else(|| bad(CMD, "missing sketch DXF layer"))?;
         count += usize::from(!path.hidden);
         let shape = match <[Vec2; 2]>::try_from(path.points) {
             Ok([a, b]) => DxfShape::Line(a, b),
             Err(points) => DxfShape::Polyline { points },
         };
-        entities.push(DxfEntity { layer: layer.into(), shape });
+        file.push(layer, shape, None)?;
     }
-    count
+    Ok(count)
 }
 
 /// Keep the hidden curves connected: restarting a dash on every short chord would make a
 /// small circular hole look solid. Degree-two joins continue; junctions end the polyline.
-fn connect(entities: Vec<DxfEntity>) -> Vec<DxfEntity> {
+fn connect(lines: Vec<(Vec2, Vec2)>) -> Vec<mesh_lines::Path> {
     let mut result = Vec::new();
-    let mut lines = Vec::new();
-    for entity in entities {
-        match entity {
-            DxfEntity { layer, shape: DxfShape::Line(a, b) } if layer == "HIDDEN" => lines.push((a, b)),
-            e => result.push(e),
-        }
-    }
     let extent = lines.iter().flat_map(|(a, b)| [a, b]).fold(1.0_f64, |s, p| s.max(p.x.abs()).max(p.y.abs()));
     let eps = extent * 1e-8;
     let key = |p: Vec2| [(p.x / eps).round() as i64, (p.y / eps).round() as i64];
@@ -214,7 +228,7 @@ fn connect(entities: Vec<DxfEntity>) -> Vec<DxfEntity> {
             }
             points.reverse();
         }
-        result.push(DxfEntity { layer: "HIDDEN".into(), shape: DxfShape::Polyline { points } });
+        result.push(mesh_lines::Path { points, hidden: true });
     }
     result
 }

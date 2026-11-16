@@ -238,13 +238,11 @@ fn a_gap_between_faces_is_closed_by_its_strips() {
 /// `upstream/TestFiles/pt_TestFiles/Solids/nurb_fillet.smb`, read and healed; `None` where
 /// the upstream test files are not present.
 fn nurb_fillet(k: &mut Kernel) -> Option<Brep> {
-    use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-    use solidcore::geom::object::ObjectRef;
+    use solidcore::geom::attribute::AttributeStore;
     use solidcore::topology::brep::p10::TopologyEnv;
     use solidcore::topology::brep::p7::read_from_file;
     use solidcore::topology::database_io::FileType;
     use solidcore::topology::topology::NotifyRecords;
-    use solidcore::EntityRef;
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../upstream/TestFiles/pt_TestFiles/Solids/nurb_fillet.smb");
     let Ok(bytes) = std::fs::read(&path) else {
@@ -258,10 +256,7 @@ fn nurb_fillet(k: &mut Kernel) -> Option<Brep> {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,

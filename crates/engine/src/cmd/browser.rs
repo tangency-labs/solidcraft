@@ -1546,6 +1546,9 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
         for b in f.participants.iter_mut().filter(|b| **b == old) {
             *b = name.to_string();
         }
+        // Every typed body reference, those outside `BODY_KEYS` too: a sweep along a body's
+        // edges (`path_body`) or a mutual surface trim (`with`) (#17386).
+        f.kind.remap_bodies(&BTreeMap::from([(old.clone(), name.to_string())]));
         if let FeatureKind::Sketch { plane, .. } = &mut f.kind {
             solidcraft_doc::sheet::rename_plane_sheet_body(plane, &old, name);
         }
