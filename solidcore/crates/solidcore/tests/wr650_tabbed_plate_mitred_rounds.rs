@@ -168,7 +168,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.classify_edge_interval = true;
     k.fixes.cover_refuses_folded_continuation = true;
     k.fixes.cover_wraps_across_closed_seam = true;
-    k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.curve_loop_normal_from_area = true;
     k.fixes.cylinder_rebuild_mean_radius = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
@@ -236,7 +235,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.revolve_splits_curves_on_axis = true;
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.shell_empty_cavity_fails = true;
-    k.fixes.simple_coincidence_crossing_is_point = true;
     k.fixes.slice_coincident_faces_sheet_side = true;
     k.fixes.ssi_low_angle_start_on_probation = true;
     k.fixes.ssi_pole_point_keeps_its_tangent = true;

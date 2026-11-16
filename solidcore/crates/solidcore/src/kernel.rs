@@ -921,8 +921,6 @@ pub struct UpstreamFixes {
     pub shell_edges_on_analytics_exact: bool,
     /// `DoExtendedOffset`'s protective stitch makes one pass at the merged body's tolerance instead of `StitchIntoSolid`'s doubling up to a 200th of the body's size, which welds the rims of cut-off pieces `MakeManifold` removes next into one edge of a far larger tolerance (WR-455, #855; the fork's tangency-labs/smlib@51eefa5 (was 601d804)).
     pub offset_stitch_at_body_tolerance: bool,
-    /// `SmCurve::GlobalCurveIntersect` moves a point solution to an end of either curve when that end lies within tolerance of the other curve and the curves stay within tolerance of each other over the whole stretch between (`sm_MoveContactsToCurveEnds`), so a tangential contact is not placed inside the curve (WR-455, #855; the fork's tangency-labs/smlib@51eefa5 (was 601d804)).
-    pub curve_contacts_at_curve_ends: bool,
     /// `SmOffsetExecutive::ShellBrep` of a solid inward fails when the inset leaves no cavity (an empty offset, `SM_ERR_INVALID_INPUT`) or the offset is not a closed solid (`SM_ERR`), instead of handing the input back unhollowed as a success (WR-454, #380; the fork's tangency-labs/smlib@1fc0d8f (was fbe43bb)).
     pub shell_empty_cavity_fails: bool,
     /// `CreateFilletBrep` sets each solver's trace reach before the corners (`sm_ExtendTraceToItsRails`): where the base surfaces' domains extended by the solver's factor (half their size) do not reach as far as a rail can lie from the edge (`r / tan(t/2)`, `t` the smallest angle between the faces' planes along it, `r` the largest radius over the trace, a variable round's law included), they reach twice that and `r` more, in the parameter directions that run across the edge (`GetDomainExtension`), so a blend wider than its faces is traced to its rails instead of being clamped at the extended domain's border; and `RailEdgeuseIntersect` runs a straight side edge on a plane on along its line as far, so a rail meeting the side edge's line past the edge's end is found (WR-609, WR-610, #960; the fork's tangency-labs/smlib@a9277fd and @6e77631). It runs such an edge on along its line on a cylinder or cone too, a ruling of it, so a disc's rim rounded past its wall meets the seam's line below the wall at its closed corner (the fork's @779cb9b).
@@ -981,20 +979,6 @@ pub struct UpstreamFixes {
     pub fillet_removal_takes_ring_fillets: bool,
     /// `SmMerge::ManifoldBoolean` refuses a union (`SM_ERR`, the face in the error) when a face its STEP 6 would delete has the infinite region on one side and a solid region on the other: deleting it would merge that solid into the outside. Upstream deletes it: where two operands' faces stay within tolerance of each other across a strip without being coincident (two 4 mm cubes, one turned 5.7 deg about z, within 5e-6 across a 1e-4 strip), the union deletes two such faces of the first operand, both of its solid regions merge into the infinite region, and the union comes back with no solid region and volume 0 (WR-619, #1794; own design, not in the fork).
     pub boolean_union_refuses_solid_leak: bool,
-    /// `SmCurve::SimpleCoincidenceChecker` returns a candidate coincidence range whose curves'
-    /// separation points to opposite sides at its two ends (both separations longer than
-    /// `SM_EFF_ZERO` scaled by the ends' size) as the one crossing `LocalCurveIntersect`
-    /// finds inside it, started where the separation taken as linear between the ends
-    /// vanishes (`SM_ERR` when none is found). Upstream returns the range: two equal circles
-    /// a little apart graze within tolerance over a stretch set by the subdivision, and the
-    /// range becomes a tiny edge, so a ring unioned with a half-annulus prism whose r 5 walls
-    /// are 1e-4 apart is non-manifold and at 1e-3 not a solid (WR-647, #1979; the fork's
-    /// tangency-labs/smlib@c2e3d9d). A range whose separation keeps one side without
-    /// vanishing (two curves running close within tolerance without touching, or a
-    /// tangency) is the one point where the curves come nearest (`LocalCurveSolve`
-    /// minimum from the range's middle); only curves whose separation vanishes coincide
-    /// over a range (the fork's 04b42b4).
-    pub simple_coincidence_crossing_is_point: bool,
     /// `SmFace::GetPointsInFace` samples a rectangularly trimmed face from its UV domain's
     /// minimum: each column starts at the domain's minimum u plus the column increment and
     /// each row at the domain's minimum v plus the row increment, and the column increment

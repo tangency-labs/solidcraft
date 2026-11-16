@@ -77,13 +77,11 @@
 //!   `curve.curve_p5`) is told whether the solution's first object is its `this`
 //!   curve: the split solutions name `[this, other]`, so it is when the coincidence
 //!   check split the other curve, or `this` and the other are the same curve.
-//! - **Crossing, not a range (opt-in).** With
-//!   `Kernel::fixes.simple_coincidence_crossing_is_point`,
-//!   [`Curve::simple_coincidence_checker`] returns a range whose separation changes
-//!   sides between its ends as the crossing inside it (WR-647; the fork's
-//!   tangency-labs/smlib@c2e3d9d), and one whose separation keeps one side without
-//!   vanishing as the point where the curves come nearest (the fork's 04b42b4). Off, it
-//!   is upstream's.
+//! - **Crossing, not a range (WR-647).** [`Curve::simple_coincidence_checker`] returns a
+//!   range whose separation changes sides between its ends as the crossing inside it
+//!   (the fork's tangency-labs/smlib@c2e3d9d), and one whose separation keeps one side
+//!   without vanishing as the point where the curves come nearest (the fork's 04b42b4).
+//!   Upstream returns the range.
 //! - **Statuses passed on (WR-663).** With the opt-in
 //!   `Kernel::fixes.query_statuses_pass_on` the statuses SMLib drops are passed on, as the
 //!   fork (tangency-labs/smlib 8311f8e): `CalculateBoundingBox`'s samples, interval and
@@ -1356,17 +1354,16 @@ impl Curve {
     /// point (one drop or a tiny parameter range: the better end), two points (the
     /// first and last drops when the curves separate by more than `tol` between them,
     /// or either range is degenerate), or one coincident range. `objects` name this
-    /// curve and `other` in the solutions. With
-    /// `Kernel::fixes.simple_coincidence_crossing_is_point` (WR-647) a range whose
-    /// separation changes sides is the one crossing inside it, and one whose separation
-    /// keeps one side without vanishing is the one point where the curves come nearest.
+    /// curve and `other` in the solutions. A range whose separation changes sides is
+    /// the one crossing inside it, and one whose separation keeps one side without
+    /// vanishing is the one point where the curves come nearest (WR-647).
     ///
     /// # Errors
     ///
-    /// Those of the evaluations, [`Curve::local_point_solve`] and
-    /// [`Curve::curve_max_distance_between`]; with the WR-647 opt-in, those of
-    /// [`local_curve_intersect`] and [`Curve::local_curve_solve`], and `SM_ERR` when
-    /// either finds no point.
+    /// Those of the evaluations, [`Curve::local_point_solve`],
+    /// [`Curve::curve_max_distance_between`], [`local_curve_intersect`] and
+    /// [`Curve::local_curve_solve`], and `SM_ERR` when either of the last two finds no
+    /// point.
     pub fn simple_coincidence_checker<O: Copy>(
         &self,
         k: &Kernel,
@@ -1560,82 +1557,79 @@ impl Curve {
         // the interval's ends the curves cross inside it: the answer is that crossing,
         // as a curve/curve intersection finds it, not a range. A separation that
         // vanishes to numeric zero has no side (WR-647, fork c2e3d9d).
-        if k.fixes.simple_coincidence_crossing_is_point {
-            let this_a = self.evaluate_point(k, first.0)?;
-            let this_b = self.evaluate_point(k, last.0)?;
-            let other_a = other.evaluate_point(k, first.1)?;
-            let other_b = other.evaluate_point(k, last.1)?;
-            // The side is taken across this curve, its tangent's component removed. An end
-            // of one curve that runs past the other's end drops onto that end, and the
-            // pair's difference then points along the curves, forward at one end and back at
-            // the other, for two curves that lie on each other; upstream took that for a
-            // crossing.
-            let separation_a = self.across_tangent(k, first.0, other_a - this_a)?;
-            let separation_b = self.across_tangent(k, last.0, other_b - this_b)?;
-            let scaled_zero =
-                EFF_ZERO * (1.0 + max2(this_a.max_dimension(), this_b.max_dimension()));
-            if separation_a.length() > scaled_zero
-                && separation_b.length() > scaled_zero
-                && separation_a.dot(separation_b) < 0.0
-            {
-                // start where the separation, taken as linear between the ends, vanishes
-                let (da, db) = (separation_a.length(), separation_b.length());
-                let w = da / (da + db);
-                let found = local_curve_intersect(
-                    k,
-                    self,
-                    &ivl_t1,
-                    other,
-                    &ivl_t2,
-                    tol,
-                    first.0 + w * (last.0 - first.0),
-                    first.1 + w * (last.1 - first.1),
-                )?;
-                let Some(cross) = found else {
-                    // curves change sides but no crossing found
-                    return Err(SolidError::curve_failed(
-                        "curve::simple_coincidence_checker (crossing)",
-                        "the curves change sides but no crossing was found",
-                    ));
-                };
-                return Ok(vec![pair_solution(
-                    objects,
-                    (cross.my_param, cross.other_param, cross.deviation),
-                    None,
-                )]);
-            }
+        let this_a = self.evaluate_point(k, first.0)?;
+        let this_b = self.evaluate_point(k, last.0)?;
+        let other_a = other.evaluate_point(k, first.1)?;
+        let other_b = other.evaluate_point(k, last.1)?;
+        // The side is taken across this curve, its tangent's component removed. An end
+        // of one curve that runs past the other's end drops onto that end, and the
+        // pair's difference then points along the curves, forward at one end and back at
+        // the other, for two curves that lie on each other; upstream took that for a
+        // crossing.
+        let separation_a = self.across_tangent(k, first.0, other_a - this_a)?;
+        let separation_b = self.across_tangent(k, last.0, other_b - this_b)?;
+        let scaled_zero = EFF_ZERO * (1.0 + max2(this_a.max_dimension(), this_b.max_dimension()));
+        if separation_a.length() > scaled_zero
+            && separation_b.length() > scaled_zero
+            && separation_a.dot(separation_b) < 0.0
+        {
+            // start where the separation, taken as linear between the ends, vanishes
+            let (da, db) = (separation_a.length(), separation_b.length());
+            let w = da / (da + db);
+            let found = local_curve_intersect(
+                k,
+                self,
+                &ivl_t1,
+                other,
+                &ivl_t2,
+                tol,
+                first.0 + w * (last.0 - first.0),
+                first.1 + w * (last.1 - first.1),
+            )?;
+            let Some(cross) = found else {
+                // curves change sides but no crossing found
+                return Err(SolidError::curve_failed(
+                    "curve::simple_coincidence_checker (crossing)",
+                    "the curves change sides but no crossing was found",
+                ));
+            };
+            return Ok(vec![pair_solution(
+                objects,
+                (cross.my_param, cross.other_param, cross.deviation),
+                None,
+            )]);
+        }
 
-            // The separation keeps one side but does not vanish: the curves don't coincide,
-            // they approach each other (a tangency, or two curves running close without
-            // touching). The contact is where they come nearest, a point; only curves whose
-            // separation vanishes coincide over a range (fork 04b42b4, case 3e).
-            if distance_between > scaled_zero {
-                let (found, mut nearest) = self.local_curve_solve(
-                    k,
-                    &ivl_t1,
-                    other,
-                    &ivl_t2,
-                    SolverOperation::Minimize,
-                    tol,
-                    None,
-                    None,
-                    [ivl_t1.evaluate(0.5), ivl_t2.evaluate(0.5)],
-                    objects,
-                )?;
-                if !found {
-                    // curves within tolerance but no nearest point found
-                    return Err(SolidError::curve_failed(
-                        "curve::simple_coincidence_checker (nearest)",
-                        "the curves are within tolerance but no nearest point was found",
-                    ));
-                }
-                nearest.num_variables = 2;
-                nearest.num_objects = 2;
-                nearest.solution_type = SolutionType::SingleValue;
-                nearest.objects[0] = objects[0];
-                nearest.objects[1] = objects[1];
-                return Ok(vec![nearest]);
+        // The separation keeps one side but does not vanish: the curves don't coincide,
+        // they approach each other (a tangency, or two curves running close without
+        // touching). The contact is where they come nearest, a point; only curves whose
+        // separation vanishes coincide over a range (fork 04b42b4, case 3e).
+        if distance_between > scaled_zero {
+            let (found, mut nearest) = self.local_curve_solve(
+                k,
+                &ivl_t1,
+                other,
+                &ivl_t2,
+                SolverOperation::Minimize,
+                tol,
+                None,
+                None,
+                [ivl_t1.evaluate(0.5), ivl_t2.evaluate(0.5)],
+                objects,
+            )?;
+            if !found {
+                // curves within tolerance but no nearest point found
+                return Err(SolidError::curve_failed(
+                    "curve::simple_coincidence_checker (nearest)",
+                    "the curves are within tolerance but no nearest point was found",
+                ));
             }
+            nearest.num_variables = 2;
+            nearest.num_objects = 2;
+            nearest.solution_type = SolutionType::SingleValue;
+            nearest.objects[0] = objects[0];
+            nearest.objects[1] = objects[1];
+            return Ok(vec![nearest]);
         }
 
         // add 1 coincident intersection to solution array

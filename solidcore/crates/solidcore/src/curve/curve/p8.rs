@@ -61,6 +61,10 @@
 //!   fork (tangency-labs/smlib 8311f8e): `GlobalCurveIntersect`'s refinement, interval
 //!   trims, combine and cull evaluations and range classification, and the evaluations of
 //!   its consistency check (which the port otherwise leaves out: it only warns).
+//! - **Contacts at curve ends (WR-455).** After the global solve's refinement, a point
+//!   solution whose contact runs on to an end of either curve's interval moves to that
+//!   end (`sm_MoveContactsToCurveEnds`, the fork's tangency-labs/smlib@51eefa5), so a
+//!   tangential contact is not placed inside the curve. Upstream leaves it inside.
 
 use crate::curve::curve::p1::refine_cc_solutions;
 use crate::curve::curve::p2::{at, CciGlobalSolver, Curve};
@@ -157,9 +161,7 @@ impl<'a, O: SolutionObject> Named<'a, O> {
     }
 }
 
-/// `sm_MoveContactsToCurveEnds` (the fork's tangency-labs/smlib@601d804, opt-in
-/// [`UpstreamFixes::curve_contacts_at_curve_ends`](crate::kernel::UpstreamFixes::curve_contacts_at_curve_ends),
-/// WR-455): a point solution whose contact runs on to an end of either curve's interval
+/// `sm_MoveContactsToCurveEnds` (the fork's tangency-labs/smlib@51eefa5, WR-455): a point solution whose contact runs on to an end of either curve's interval
 /// is at that end. It moves there when that end lies within `dist_tol` of the other
 /// curve and the two curves stay within `dist_tol` of each other over the whole stretch
 /// between the end and the solution, measured on each curve.
@@ -978,17 +980,15 @@ impl Curve {
 
         // Refine Range solutions.
         refine(k, &mut sols, &named)?;
-        if k.fixes.curve_contacts_at_curve_ends {
-            move_contacts_to_curve_ends(
-                k,
-                self,
-                interval,
-                other,
-                other_interval,
-                dist_tol,
-                &mut sols,
-            )?;
-        }
+        move_contacts_to_curve_ends(
+            k,
+            self,
+            interval,
+            other,
+            other_interval,
+            dist_tol,
+            &mut sols,
+        )?;
 
         // Now sort through the intersections looking for cases to combine, split, or
         // convert from 'coincident maybe' intervals to point intersections.

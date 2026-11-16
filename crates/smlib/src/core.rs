@@ -124,7 +124,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_cleanup_keeps_target_faces = true;
     f.fillet_nx1_tangent_side_edge = true;
     f.offset_stitch_at_body_tolerance = true;
-    f.curve_contacts_at_curve_ends = true;
     f.shell_empty_cavity_fails = true;
     f.ssi_tangent_contact_points = true;
     f.ssi_trace_tangent_curves_once = true;
@@ -170,7 +169,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.face_tight_box_searches_trim = true;
     f.ssi_low_angle_start_on_probation = true;
     f.fillet_variable_span_follows_fillet = true;
-    f.simple_coincidence_crossing_is_point = true;
     f.planar_path_sweep_statuses = true;
     f.planar_path_profile_placement_statuses = true;
     f.fillet_trim_status = true;

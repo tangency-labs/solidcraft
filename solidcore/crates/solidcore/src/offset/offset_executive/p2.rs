@@ -5389,16 +5389,15 @@ mod tests {
     /// until the cut-off rims of that crossing are welded, and the shell is no solid;
     /// with the opt-in one pass at the body's tolerance leaves a solid whose volume is
     /// the inner box less the hole's offset disk (cut by x = 1.5), over the height 8.5.
-    /// `contacts_at_ends` adds the other opt-in of #855 (a tangential contact is found at
-    /// a curve's end), which must not change this shell.
+    /// The other fix of #855 (a tangential contact is found at a curve's end) is always on
+    /// and must not change this shell.
     #[test]
     fn issue_855_offset_stitch_keeps_the_bodys_tolerance() {
-        let shell = |stitch: bool, contacts_at_ends: bool| -> Result<Option<f64>> {
+        let shell = |stitch: bool| -> Result<Option<f64>> {
             use crate::primitive::api_primitives::{create_box, create_cylinder};
             let mut kernel = Kernel::default();
             kernel.fixes.offset_resolve_crossing_loops = true;
             kernel.fixes.offset_stitch_at_body_tolerance = stitch;
-            kernel.fixes.curve_contacts_at_curve_ends = contacts_at_ends;
             let plate =
                 create_box(&mut kernel, Vec3::new(0.0, 0.0, 0.0), 40.0, 40.0, 10.0).unwrap();
             let hole =
@@ -5444,18 +5443,16 @@ mod tests {
         // The default path (the splits are the only path since #2981): the shell's
         // stitch still welds the rims wrongly, the offset of the plate is no closed
         // solid, and the WR-578 guard refuses it (1001)
-        assert_status(shell(false, false), 1001);
+        assert_status(shell(false), 1001);
         // the case's own opt-in (stitch at the body's tolerance) builds the closed form
         // 40 x 40 x 10 less the hole, less the cavity: 8.5 high over the inner box (37 x 37)
         // less the hole's offset disk (r 3.5, centre 3.49 from x = 1.5) cut by x = 1.5
         let expected = 4564.924657;
-        for contacts_at_ends in [false, true] {
-            let volume = shell(true, contacts_at_ends).unwrap().unwrap();
-            assert!(
-                (volume - expected).abs() < 1e-6 * expected,
-                "volume {volume}"
-            );
-        }
+        let volume = shell(true).unwrap().unwrap();
+        assert!(
+            (volume - expected).abs() < 1e-6 * expected,
+            "volume {volume}"
+        );
     }
 
     /// tangency-labs/solidcore#380: a closed inward shell of a box whose wall is as thick
