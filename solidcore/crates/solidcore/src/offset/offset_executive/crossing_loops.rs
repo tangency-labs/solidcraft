@@ -536,11 +536,15 @@ fn edge_closest_distance(k: &Kernel, b: &Brep, e: EdgeId, point: Point3) -> Resu
 /// build (`LoopCrossing::ThreeAtOnePoint`): its ends lie within `tol_3d`, unless it starts
 /// and ends at the same node, a vertex (`< 0`). That is a loop of one edge use that no
 /// crossing cuts, whole and as it was built, whose closed curve's two ends meet. A stretch
-/// that ends at a crossing, or runs between two vertices, is tested as before. NaN is too
-/// short.
+/// that ends at a crossing, or runs between two vertices, is tested as before. A NaN
+/// distance or tolerance is too short, the whole loop's included.
 fn stretch_too_short(from: i64, to: i64, distance: f64, tol_3d: f64) -> bool {
     let whole_loop = from < 0 && from == to;
-    !whole_loop && distance.partial_cmp(&tol_3d) != Some(core::cmp::Ordering::Greater)
+    match distance.partial_cmp(&tol_3d) {
+        None => true,
+        Some(core::cmp::Ordering::Greater) => false,
+        Some(_) => !whole_loop,
+    }
 }
 
 impl OffsetExecutive {
@@ -1475,6 +1479,9 @@ mod tests {
         assert!(stretch_too_short(2, -3, 0.0, tol));
         assert!(stretch_too_short(-2, -3, 0.005, tol));
         assert!(stretch_too_short(0, 1, f64::NAN, tol));
+        // NaN is refused before the whole-loop exemption
+        assert!(stretch_too_short(-3, -3, f64::NAN, tol));
+        assert!(stretch_too_short(-3, -3, 0.0, f64::NAN));
         // long enough
         assert!(!stretch_too_short(0, 1, 0.02, tol));
         assert!(!stretch_too_short(-2, -3, 0.02, tol));
