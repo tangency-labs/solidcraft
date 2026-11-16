@@ -32,6 +32,7 @@
 #![cfg_attr(not(test), deny(clippy::float_arithmetic))]
 
 pub mod affine;
+pub mod axial_section;
 pub mod blend;
 pub mod blend_definition;
 pub mod blend_surface;
@@ -54,6 +55,7 @@ pub mod export_geometry;
 pub mod extend;
 pub mod face_surface;
 pub mod file;
+pub mod import_geometry;
 pub mod joint_turn;
 pub mod label;
 pub mod measure;
@@ -75,6 +77,7 @@ pub mod sweep;
 pub mod tangent;
 pub mod trim;
 pub mod untrim;
+pub mod vertex_meet;
 
 pub use blend::{
     band_room, blend, blend_ordered, carried_faces, carried_faces_ordered, chamfer_sides,

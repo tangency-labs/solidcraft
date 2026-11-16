@@ -634,9 +634,8 @@ pub const CURVE_BOUNDED_SURFACE: &[AssertReportLabel] = &[
 ];
 
 /// Not upstream (WR-539, the fork's tangency-labs/smlib@daba678): [`TORUS`] with the
-/// fork's test 5, "Self Intersection". Only the torus check with
-/// `Kernel::fixes.torus_check_spindle_apex` reports from it; `SM_GetAssertLabelList`
-/// ([`label_list`]) keeps upstream's [`TORUS`].
+/// fork's test 5, "Self Intersection". Only the spindle torus check reports from it;
+/// `SM_GetAssertLabelList` ([`label_list`]) keeps upstream's [`TORUS`].
 pub const TORUS_WITH_SPINDLE_APEX: &[AssertReportLabel] = &[
     l(
         AssertType::Radius,

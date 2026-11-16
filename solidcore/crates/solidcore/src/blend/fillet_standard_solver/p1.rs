@@ -2889,7 +2889,8 @@ impl CircularCrossSectionFsg {
     /// a knot insertion that adds no knot; `SM_ERR_INVALID_INPUT` from `Unitize`; those
     /// of the curve and surface constructions; [`SolidError::InvalidInput`] where
     /// upstream indexes past its cross sections (a second pass for a ruled or revolved
-    /// surface).
+    /// surface), and for an `approx_tol_3d` that is not finite (before either rail is
+    /// edited).
     ///
     /// `center_line` is upstream's `SmBSplineCurve & rCenterLine`: an `SmBSplineCurve`
     /// kind (B-spline, line, ellipse, hyperbola or parabola) whose `GetDegree`, `IsLine`,
@@ -2952,6 +2953,14 @@ impl CircularCrossSectionFsg {
                 "the centre line is not an SmBSplineCurve kind",
             ));
         }
+        // A tolerance that is not finite decides no proximity test below (the rails' ends
+        // would be moved together for a NaN one): refused before either rail is edited.
+        if !approx_tol_3d.is_finite() {
+            return Err(SolidError::invalid_input(
+                OP,
+                "the approximation tolerance is not finite",
+            ));
+        }
         let knots = rail1.knots(None)?.0;
         let knots2 = rail2.knots(None)?.0;
 
@@ -3003,7 +3012,8 @@ impl CircularCrossSectionFsg {
             let t = if end == 0 { ivl.min() } else { ivl.max() };
             let end1 = rail1.evaluate_point(t)?;
             let end2 = rail2.evaluate_point(t)?;
-            if end1.distance(end2) >= approx_tol_3d {
+            let one_point = end1.distance(end2) < approx_tol_3d;
+            if !one_point {
                 continue;
             }
             let meet = (end1 + end2) / 2.0;

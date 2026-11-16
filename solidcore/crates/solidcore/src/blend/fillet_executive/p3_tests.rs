@@ -164,6 +164,7 @@ impl ExecutiveAccess<Handle> for Access {
             fit: true,
             rolls_over: false,
             into_material: false,
+            left_across: Vec::new(),
             wraps_past_both_ends: false,
         })
     }
@@ -747,6 +748,7 @@ fn state() -> FilletExecutive<Handle> {
         open_ends: Vec::new(),
         overflow_first: false,
         classify_only: false,
+        roll_over_pass: false,
         overflow_edges: Vec::new(),
         mitred_edges: Vec::new(),
         fan_split_points: Vec::new(),

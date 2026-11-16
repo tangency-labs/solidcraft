@@ -28,8 +28,7 @@
 mod offset_fixture;
 
 use offset_fixture::Notifications;
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::object::ObjectRef;
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::mass::integrator::properties::{brep_volume_default, face_area, face_centroid};
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::knots::Side;
@@ -43,7 +42,7 @@ use solidcore::topology::database_io::FileType;
 use solidcore::topology::face::p2 as face_ops;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::FaceId;
-use solidcore::{Brep, CancelToken, EntityRef, Kernel};
+use solidcore::{Brep, CancelToken, Kernel};
 
 /// The upstream test file `Solids/<name>`, or `None` without the upstream checkout.
 fn solid(k: &mut Kernel, name: &str) -> Option<Brep> {
@@ -62,10 +61,7 @@ fn solid(k: &mut Kernel, name: &str) -> Option<Brep> {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,
