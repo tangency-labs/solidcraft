@@ -729,8 +729,14 @@ fn a_root_rib_stops_at_a_moved_part_that_does_not_take_part() {
     run(&mut s, "sketch.line", json!({"points": [[30, 17], [60, 17]], "ids": ["l1"]}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.rib", json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4, "participants": ["Base block"]}));
-    // 10 long and 7 tall over Base, 20 long and 5 tall over Cap, 4 thick.
-    assert!((body_volume(&s, "Base block") - 12680.0).abs() < 1e-6, "{}", body_volume(&s, "Base block"));
+    // The wall is 4 thick and runs from the line at 17 down to a face, 2 mm into the body there (the
+    // overlap, as the samples are 1 mm apart): above Base's top (10) it is 7 tall over x 30..40
+    // (area 70), and above Cap's shown top (12) it reaches down to 10, 7 tall over x 40..60 (area
+    // 140), where Cap found unmoved would leave it 12 tall. The sample on the seam at x = 40
+    // meets Cap's top with the shared face 2 mm below it, so its overlap is 1, not 2: the wall's
+    // underside runs (39, 8), (40, 11), (41, 10), which leaves out 1/6 + 1/2 of area above 10.
+    // Volume 12000 + 4 * (70 + 140 - 2/3) = 12000 + 2512/3.
+    assert!((body_volume(&s, "Base block") - (12000.0 + 2512.0 / 3.0)).abs() < 1e-6, "{}", body_volume(&s, "Base block"));
     assert!((body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6, "{}", body_volume(&s, "Cap block"));
 }
 
