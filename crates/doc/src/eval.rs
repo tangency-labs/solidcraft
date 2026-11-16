@@ -10003,15 +10003,23 @@ fn offset_sheet(target: &ModelBody, face: usize, near: Vec3, travel: Vec3, offse
 /// at the face's level instead.
 const FROM_SLOPE_LEAST_SINE: f64 = 0.087_155_742_747_658_17;
 
-/// The plane of face `(body, face)` when it is flat and at a slant to `n`: neither square to it
-/// nor running along it.
-/// Whether two versions of one extrude start From Object faces on the same plane, each found as
-/// its build finds it in `st`, the model before the feature: by its face name or, failing that,
-/// at its pick point, with the component placements its pick measures against. An edit that
-/// keeps the From face on its plane leaves where a design saved before From Object followed a
-/// slanted face starts (`from_level`). Faces that are not flat, or not found, don't count.
-pub fn same_extrude_from_plane(doc: &Document, st: &ModelState, a: &Feature, b: &Feature) -> bool {
-    let plane = |f: &Feature| -> Option<(Vec3, Vec3)> {
+/// Whether two versions of one extrude start From Object on the same face: the same pick
+/// point, or faces on one plane, each found as its build finds it in `st`, the model before the
+/// feature: by its face name or, failing that, at its pick point, with the component placements
+/// its pick measures against. An edit that keeps the From face on its plane leaves where a
+/// design saved before From Object followed a slanted face starts (`from_level`). Faces that are
+/// not flat, or not found, don't count.
+pub fn same_extrude_from_face(doc: &Document, st: &ModelState, a: &Feature, b: &Feature) -> bool {
+    let pick = |f: &Feature| match &f.kind {
+        FeatureKind::Extrude { extent, .. } => extent.from,
+        _ => None,
+    };
+    let (Some(pa), Some(pb)) = (pick(a), pick(b)) else { return false };
+    if pa.dist(pb.0) < 1e-8 {
+        return true;
+    }
+    // Each face's plane, its unit normal, and the tolerance its body is modelled to.
+    let plane = |f: &Feature| -> Option<(Vec3, Vec3, f64)> {
         let FeatureKind::Extrude { extent, .. } = &f.kind else { return None };
         let p = extent.from?;
         let tst = state_in_frame_pinned_to(doc, st, f.component, &extent.picked_placements).ok()?;
@@ -10019,15 +10027,18 @@ pub fn same_extrude_from_plane(doc: &Document, st: &ModelState, a: &Feature, b: 
         let (bi, fi) = object_face(&tst, name, p.0, None)?;
         let b = tst.bodies.get(bi)?;
         let Some(kernel::FaceSurface::Plane { normal, point }) = kernel::face_surface(&b.body, fi) else { return None };
-        let tol = (b.body.size() * 1e-9).max(1e-9);
-        Some((point, normal.vec() * (1.0 / normal.vec().len().max(tol))))
+        Some((point, normal.vec().normalized()?, (b.body.size() * 1e-7).max(1e-7)))
     };
+    // One plane: the same normal, and each face's point on the other's plane to within the
+    // bodies' tolerance, which depends on their size and not on where they are.
     match (plane(a), plane(b)) {
-        (Some((p, m)), Some((q, n))) => m.dot(n) > 1.0 - 1e-9 && (q - p).dot(m).abs() < 1e-6 * (1.0 + p.len().max(q.len())),
+        (Some((p, m, ta)), Some((q, n, tb))) => m.dot(n) > 1.0 - 1e-9 && (q - p).dot(m).abs() < ta.max(tb),
         _ => false,
     }
 }
 
+/// The plane of face `(body, face)` when it is flat and at a slant to `n`: neither square to it
+/// nor running along it.
 fn slanted_plane(st: &ModelState, (bi, fi): (usize, usize), n: Vec3) -> Option<Plane> {
     let b = st.bodies.get(bi)?;
     let Some(kernel::FaceSurface::Plane { normal, point }) = kernel::face_surface(&b.body, fi) else { return None };
