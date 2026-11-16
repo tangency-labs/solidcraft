@@ -21,7 +21,7 @@ use solidcore::math::Vec3;
 use solidcore::nurbs::b_spline_curve::p1::{BSplineCurve, NurbCircleParam};
 use solidcore::primitive::primitive_creation::{model::PrimitiveModel, p1::PrimitiveCreation};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
-use solidcore::Kernel;
+use solidcore::{Kernel, SolidError};
 
 fn elbow(k: &mut Kernel, radius: f64, leg: f64, tol: f64) -> solidcore::Brep {
     let profile = Curve::from(
@@ -138,26 +138,26 @@ fn a_corner_too_sharp_for_its_mitre_is_refused() {
     // A path that turns back within 2 degrees was taken for a smooth one and never
     // mitred: two overlapping tubes, open at the corner, came back with 16 faces.
     for a in [0.5, 1., 1.2] {
-        let e = turn(&mut Kernel::default(), a, 0.).unwrap_err();
+        let e = turn(&mut Kernel::default(), a, 0.).err();
         assert_eq!(
-            e.primitive_failure(),
+            e.as_ref().and_then(SolidError::primitive_failure),
             Some(&PrimitiveFailure::Failed(
                 "the path turns back on itself at a corner"
             )),
-            "a {a}: {e}"
+            "a {a}: {e:?}"
         );
     }
     // With the circle at the origin `M = 1`, so the reach is `2 sqrt(2)` and the mitre
     // fits from beta = 2 asin(1 / (2 sqrt(2))) = 41.4 degrees. Below it the pieces stay
     // open (22 faces at 2 degrees, the two caps alone from 12 to 41).
     for a in [2., 10., 30., 41.] {
-        let e = turn(&mut Kernel::default(), a, 0.).unwrap_err();
+        let e = turn(&mut Kernel::default(), a, 0.).err();
         assert_eq!(
-            e.primitive_failure(),
+            e.as_ref().and_then(SolidError::primitive_failure),
             Some(&PrimitiveFailure::Failed(
                 "a corner is too sharp for its mitre: the sweep does not close"
             )),
-            "a {a}: {e}"
+            "a {a}: {e:?}"
         );
     }
     // The same circle drawn at y = 3 has `M = 4`: the reach is four times longer and a
@@ -197,4 +197,62 @@ fn a_corner_too_sharp_for_its_mitre_is_refused() {
         let exact = std::f64::consts::PI * 20.;
         assert!((v - exact).abs() < exact * 1e-4, "a {a}: {v} != {exact}");
     }
+}
+
+/// The corner where a closed path meets its start is checked as the others are: a thin
+/// triangle `(0,0,0) -> (10,0,0) -> (10,h,0)` and back swept by a circle of radius
+/// 0.01. At `h = 0.1` the path closes 0.57 degrees from turning back; at `h = 10` the
+/// closing corner is 45 degrees, past the mitre's 41.4, and the ring closes.
+#[test]
+fn a_closed_path_turning_back_where_it_closes_is_refused() {
+    let ring = |h: f64| {
+        let mut k = Kernel::default();
+        let profile = Curve::from(
+            BSplineCurve::create_circle_segment(
+                3,
+                &Axis2Placement::new(Vec3::ZERO, Vec3::Y, Vec3::Z),
+                0.01,
+                0.,
+                360.,
+                NurbCircleParam::Quadratic,
+            )
+            .unwrap(),
+        );
+        let p = [Vec3::ZERO, Vec3::new(10., 0., 0.), Vec3::new(10., h, 0.)];
+        let path = |p, q| Curve::from(BSplineCurve::create_line_segment(3, p, q).unwrap());
+        let paths = [path(p[0], p[1]), path(p[1], p[2]), path(p[2], p[0])];
+        PrimitiveModel::build_new(&mut k, |_, model| {
+            let id = PrimitiveCreation::create_sweep_along_planar_path(
+                model,
+                PrimitiveModel::MAIN,
+                &[profile],
+                &paths,
+                1e-3,
+                false,
+                false,
+                true,
+            )?;
+            model.take_brep(id)
+        })
+        .map(|(_, b)| b)
+    };
+    let e = ring(0.1).err();
+    assert_eq!(
+        e.as_ref().and_then(SolidError::primitive_failure),
+        Some(&PrimitiveFailure::Failed(
+            "the path turns back on itself at a corner"
+        )),
+        "{e:?}"
+    );
+    let mut b = ring(10.).unwrap();
+    b.refresh_cached_topology();
+    assert_eq!(
+        (
+            b.face_list().len(),
+            b.edge_list().len(),
+            b.vertex_list().len()
+        ),
+        (3, 6, 3)
+    );
+    assert!(solidcore::topology::brep::p2::is_closed_manifold(&b).unwrap());
 }
