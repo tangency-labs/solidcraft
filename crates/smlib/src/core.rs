@@ -81,14 +81,11 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.keep_operand_uv_trims = true;
     f.proto_vertex_miss_is_false = true;
     f.revolve_analytic_profile_faces = true;
-    f.taper_tangent_corner_planes = true;
     f.revolve_holed_profile_void = true;
     f.join_touching_loops = true;
     f.offset_resolve_crossing_loops = true;
     f.offset_analytic_mate_edges = true;
     f.local_operation_refuses_loose_tangent_edges = true;
-    f.internal_pole_row_through_knot = true;
-    f.extrusion_origin_scaled_zero = true;
     f.transform_scales_each_tolerance = true;
     f.transform_model_size_from_body_box = true;
     f.offset_collapsed_rounds_mated = true;
@@ -119,7 +116,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.boolean_splits_definition_across_split = true;
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;
-    f.torus_check_spindle_apex = true;
     f.local_operation_step_walls = true;
     f.edge_check_orders_tangent_faces = true;
     f.thicken_planar_side_walls = true;
@@ -127,7 +123,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.revolution_round_offset_collapses = true;
     f.proto_edge_splits_at_captured_vertices = true;
     f.imprint_reuses_coincident_face_edge = true;
-    f.boolean_new_face_closure_both_sides = true;
     f.linear_sweep_arc_is_cylinder = true;
     f.fillet_trace_reaches_rails = true;
     f.delete_vertex_joins_seam_iso_curve = true;
@@ -139,7 +134,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     // The fork's commits in `SMLIB_REV` 2fc375f, ported to solidcore since.
     f.offset_extension_as_itself = true;
     f.fillet_mitre_concave_face_corners = true;
-    f.fillet_mitre_gap_patch = true;
     f.good_drop_result_distances_in_order = true;
     f.face_tight_box_searches_trim = true;
     f.ssi_low_angle_start_on_probation = true;
@@ -153,7 +147,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ssi_proto_topology_statuses_pass_on = true;
     f.analytic_inversion_answers_apart = true;
     f.fillet_statuses_pass_on = true;
-    f.fillet_corner_per_vertex_fan = true;
     f.fillet_rail_trim_at_near_knot = true;
     f.offset_keep_cavity_regions = true;
     f.corner_patch_face_side_twist = true;

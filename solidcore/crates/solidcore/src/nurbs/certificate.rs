@@ -7,6 +7,7 @@
 //! | Rust               | Upstream |
 //! |--------------------|----------|
 //! | [`span_bound`]     | (none)   |
+//! | [`turn_about_axis`] | (none)  |
 //!
 //! **What is bounded.** Between two stations the rail runs from parameter `t_a` to `t_b`
 //! and the surface holds a point near each end, at `(u_a, v_a)` and `(u_b, v_b)`. With
@@ -74,7 +75,7 @@
 use crate::error::{Result, SolidError};
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
-use crate::math::Point3;
+use crate::math::{Point3, Vec3};
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::math::{gamma, CPoint, NOW};
 use crate::offset::construction::bernstein::{Bernstein2, Binomials};
@@ -532,4 +533,173 @@ pub fn node_on(k: &Kernel, surf: &Surface, q: Point3) -> Result<(Point2, f64)> {
         .copied()
         .ok_or_else(|| failed("a rail point with no foot on the loft"))?;
     Ok((uv, c.closest.distance))
+}
+
+/// Which way round the line through `origin` along `axis` the curve `nurb` turns over
+/// `interval` of its parameter, proved: `Some(1.0)` when `axis . ((c(t) - origin) x c'(t))` is
+/// positive all along it (counter-clockwise seen from the tip of `axis`), `Some(-1.0)` when it
+/// is negative all along it, `None` when that is not proved: the curve turns back or stands
+/// still about the line somewhere, or the bound is too loose to tell. Not upstream
+/// (solidcraft#12920: an edge on a cylinder projected along the axis is an arc of its circle
+/// only if it turns one way round). `axis` need not be a unit vector.
+///
+/// **How.** On each Bézier span, in homogeneous form about `origin` ([`RailSpans::about`]),
+/// `c - origin = H / W` and `c' = (H' W - H W') / W^2`, so `(c - origin) x c' = (H x H') / W^2`
+/// (the `H x H` term vanishes). With positive weights the sign along `axis` is that of
+/// `q = axis . (H x H')`, a polynomial of degree `2r - 1` on the span. By the convex hull
+/// property it lies between its least and largest Bernstein coefficient, so the sign is proved
+/// where every coefficient clears its error bound with one sign, on every span the interval
+/// meets (a span it meets in part is restricted to that part first).
+///
+/// **The coefficients' error**, from the spans' own ([`RailSpans::about`], [`restricted`]):
+/// `H'` (`r` times differences) within `2 r e + gamma_2 2 r |H|`; each product of `H x H'` as
+/// [`product`]; each component a difference, `gamma_1` of the two products' sizes; `q` three
+/// scaled sums, `gamma_4` of their size on top of the components' errors scaled by `|axis|`.
+///
+/// # Errors
+///
+/// `Unsupported` for an interval that is not increasing and finite, a weight that is not
+/// positive or coefficients that are not finite; those of the decomposition.
+pub fn turn_about_axis(
+    nurb: &NurbCurve,
+    origin: Point3,
+    axis: Vec3,
+    interval: [f64; 2],
+) -> Result<Option<f64>> {
+    let [t0, t1] = interval;
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+    if !(t0 < t1) || !t0.is_finite() || !t1.is_finite() {
+        return Err(failed("an interval that is not increasing and finite"));
+    }
+    let spans = RailSpans::about(nurb, origin)?;
+    let bi = Binomials::new();
+    let a = [axis.x, axis.y, axis.z];
+    let mut sign = None;
+    for ([sa, sb], h) in &spans.spans {
+        let (lo, hi) = (t0.max(*sa), t1.min(*sb));
+        if lo >= hi || sb <= sa {
+            continue;
+        }
+        let (u0, u1) = ((lo - sa) / (sb - sa), (hi - sa) / (sb - sa));
+        let (h, e) = if u0 > 0.0 || u1 < 1.0 {
+            restricted(h, spans.err, [u0, u1], [0.0, 1.0])
+        } else {
+            (h.clone(), spans.err)
+        };
+        let [hx, hy, hz, _] = &h;
+        let r = hx.degrees().0;
+        #[allow(clippy::cast_precision_loss)]
+        let k = 2.0 * r as f64;
+        let m = [hx, hy, hz]
+            .iter()
+            .map(|c| c.max_abs_coefficient())
+            .fold(0.0_f64, f64::max);
+        let ed = k * e + gamma(2) * k * m;
+        let (dx, dy, dz) = (hx.deriv_u(), hy.deriv_u(), hz.deriv_u());
+        // a component of H x H', p dq - q dp, and its error
+        let comp = |p: &Bernstein2,
+                    dq: &Bernstein2,
+                    q: &Bernstein2,
+                    dp: &Bernstein2|
+         -> Result<(Bernstein2, f64)> {
+            let (l, el) = product(p, e, dq, ed, &bi)?;
+            let (rr, er) = product(q, e, dp, ed, &bi)?;
+            let size = l.max_abs_coefficient() + rr.max_abs_coefficient();
+            Ok((l.sub(&rr, &bi)?, el + er + gamma(1) * size))
+        };
+        let (cx, ex) = comp(hy, &dz, hz, &dy)?;
+        let (cy, ey) = comp(hz, &dx, hx, &dz)?;
+        let (cz, ez) = comp(hx, &dy, hy, &dx)?;
+        let q = cx
+            .scale(a[0])
+            .add(&cy.scale(a[1]), &bi)?
+            .add(&cz.scale(a[2]), &bi)?;
+        let size = a[0].abs() * cx.max_abs_coefficient()
+            + a[1].abs() * cy.max_abs_coefficient()
+            + a[2].abs() * cz.max_abs_coefficient();
+        let eq = a[0].abs() * ex + a[1].abs() * ey + a[2].abs() * ez + gamma(4) * size;
+        let (lo_q, hi_q) = (q.min_coefficient(), q.max_coefficient());
+        if !eq.is_finite() || !lo_q.is_finite() || !hi_q.is_finite() {
+            return Err(failed("a curve's turn coefficients are not finite"));
+        }
+        let here = if lo_q > eq {
+            1.0
+        } else if hi_q < -eq {
+            -1.0
+        } else {
+            return Ok(None);
+        };
+        match sign {
+            Some(s) if s != here => return Ok(None),
+            _ => sign = Some(here),
+        }
+    }
+    Ok(sign)
+}
+
+#[cfg(test)]
+mod turn_tests {
+    #![allow(clippy::unwrap_used)] // test helpers
+    use super::*;
+
+    fn curve(points: &[[f64; 4]], degree: usize, knots: &[f64]) -> NurbCurve {
+        let pw = points
+            .iter()
+            .map(|&[x, y, z, w]| CPoint::new(x * w, y * w, z * w, w))
+            .collect();
+        NurbCurve::new(pw, degree, knots.to_vec()).unwrap()
+    }
+
+    /// A quarter circle about the z axis (rational, exact) turns one way: counter-clockwise
+    /// seen from +z, clockwise seen from -z, and the other way when it runs backwards.
+    #[test]
+    fn a_quarter_circle_turns_one_way_round_its_axis() {
+        let h = core::f64::consts::FRAC_1_SQRT_2;
+        let pts = [
+            [1.0, 0.0, 3.0, 1.0],
+            [1.0, 1.0, 3.0, h],
+            [0.0, 1.0, 3.0, 1.0],
+        ];
+        let knots = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let c = curve(&pts, 2, &knots);
+        let (o, z) = (Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+        assert_eq!(turn_about_axis(&c, o, z, [0.0, 1.0]).unwrap(), Some(1.0));
+        assert_eq!(
+            turn_about_axis(&c, o, z * -2.0, [0.0, 1.0]).unwrap(),
+            Some(-1.0)
+        );
+        assert_eq!(turn_about_axis(&c, o, z, [0.25, 0.5]).unwrap(), Some(1.0));
+        let mut back = pts;
+        back.reverse();
+        let b = curve(&back, 2, &knots);
+        assert_eq!(turn_about_axis(&b, o, z, [0.0, 1.0]).unwrap(), Some(-1.0));
+    }
+
+    /// A curve that swings round the axis and comes back (as a radial hole's rim does about
+    /// the wall's axis) is not proved, nor is a line through the axis, which stands still
+    /// about it; the part before the turn is.
+    #[test]
+    fn a_curve_that_turns_back_or_stands_still_is_not_proved() {
+        let (o, z) = (Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+        let knots = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        // from angle 0 up past 60 degrees and back to about 27
+        let back = curve(
+            &[
+                [1.0, 0.0, 0.0, 1.0],
+                [0.0, 3.0, 0.0, 1.0],
+                [1.0, 0.5, 0.0, 1.0],
+            ],
+            2,
+            &knots,
+        );
+        assert_eq!(turn_about_axis(&back, o, z, [0.0, 1.0]).unwrap(), None);
+        assert_eq!(turn_about_axis(&back, o, z, [0.0, 0.2]).unwrap(), Some(1.0));
+        let radial = curve(
+            &[[1.0, 0.0, 0.0, 1.0], [2.0, 0.0, 1.0, 1.0]],
+            1,
+            &[0.0, 0.0, 1.0, 1.0],
+        );
+        assert_eq!(turn_about_axis(&radial, o, z, [0.0, 1.0]).unwrap(), None);
+        assert!(turn_about_axis(&radial, o, z, [1.0, 0.0]).is_err());
+    }
 }

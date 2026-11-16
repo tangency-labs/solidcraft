@@ -4642,10 +4642,14 @@ fn hovering_a_picked_face_draws_hover_edges_and_preserves_selection_fill() {
 }
 
 /// #3683: a body or feature row lights what the Browser and timeline rows light: the body, or
-/// the feature's geometry; leaving it puts the view back.
+/// the feature's geometry; leaving it puts the view back. A tool a Combine's live preview stands
+/// in for (a join's) is lit by its outline, not its faces.
 #[test]
 fn hovering_a_body_or_feature_row_lights_it_as_the_browser_does() {
-    let lit = |h: &crate::scenario::Harness| crate::viewport::build_highlight(&h.app).merged().tris;
+    let lit = |h: &crate::scenario::Harness| {
+        let m = crate::viewport::build_highlight(&h.app).merged();
+        (m.tris, m.lines, m.overlay, m.hidden)
+    };
     let mut h = crate::scenario::Harness::new();
     for (name, x) in [("Block", 0), ("Cutter", 10), ("Other", 20)] {
         h.app.run("solid.box", json!({"corner": [x, x, x], "length": 20, "width": 20, "height": 20, "body_name": name})).unwrap();
