@@ -1620,8 +1620,8 @@ impl SolveApp {
                         self.viewport.nav = None;
                     }
                 }
-                "view.pan_mode" | "view.orbit_mode" | "view.zoom_mode" => {
-                    let mode = navigation::toggle_mode(id);
+                mode_id if navigation::toggle_mode(mode_id).is_some() => {
+                    let mode = navigation::toggle_mode(mode_id);
                     let active = self.viewport.nav_toggle == mode;
                     if v.get("on").and_then(Value::as_bool).unwrap_or(!active) {
                         self.viewport.nav_toggle = mode;

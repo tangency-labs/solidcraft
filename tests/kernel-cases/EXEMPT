@@ -390,7 +390,9 @@ view.navigation_bar               the view: camera, layout, display
 view.navigator                    the view: navigator type; crates/engine/src/schema/view_navigation_tests.rs
 view.next_tab                     the view: camera, layout, display
 view.normal_to                    the view: camera, layout, display
+view.orbit_mode                   the view: camera only: crates/ui-egui/src/nav_mode_tests.rs
 view.origin_axes_across_view       display-only preference: crates/engine/src/cmd/view_navigation.rs and crates/ui-egui/src/view_home_tests.rs
+view.pan_mode                     the view: camera only: crates/ui-egui/src/nav_mode_tests.rs
 view.perspective                  the view: camera, layout, display
 view.previous_tab                 the view: camera, layout, display
 view.rename                       the view: camera, layout, display
@@ -413,6 +415,7 @@ view.tool                         the view: camera, layout, display
 view.tool.zoom                    the view: camera, layout, display
 view.top                          the view: camera, layout, display
 view.visual_style                 the view: camera, layout, display
+view.zoom_mode                    the view: camera only: crates/ui-egui/src/nav_mode_tests.rs
 
 # Commands that make or change geometry and have no case yet. This section only shrinks: the
 # pull request that gives one a case in solidcore's corpus or a test moves its line to the section

@@ -479,9 +479,10 @@ fn zoom_point(app: &mut SolveApp, rect: Rect, point: Option<Pos2>, surface: bool
 pub(crate) const TOGGLE_MODES: [(&str, NavMode); 3] =
     [("view.pan_mode", NavMode::Pan), ("view.orbit_mode", NavMode::Orbit), ("view.zoom_mode", NavMode::Zoom)];
 
-/// The mode `command` turns on, if it is one of [`TOGGLE_MODES`].
+/// The mode `command` turns on, if it is one of [`TOGGLE_MODES`] (in any case, as the engine
+/// accepts command ids).
 pub(crate) fn toggle_mode(command: &str) -> Option<NavMode> {
-    TOGGLE_MODES.iter().find(|(id, _)| *id == command).map(|(_, mode)| *mode)
+    TOGGLE_MODES.iter().find(|(id, _)| id.eq_ignore_ascii_case(command)).map(|(_, mode)| *mode)
 }
 
 /// A navigation mode's key: pressed with the pointer over the view it turns that mode on (and any

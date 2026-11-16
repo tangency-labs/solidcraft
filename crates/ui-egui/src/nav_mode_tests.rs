@@ -149,4 +149,11 @@ fn the_commands_toggle_and_set_the_mode() {
     assert_eq!(h.app.viewport.nav_toggle, Some(NavMode::Pan), "turning off another mode leaves this one");
     h.app.run("view.pan_mode", json!({})).unwrap();
     assert_eq!(h.app.viewport.nav_toggle, None);
+    // The engine takes command ids in any case; so does the mode.
+    for (id, mode) in [("VIEW.PAN_MODE", NavMode::Pan), ("View.Orbit_Mode", NavMode::Orbit), ("VIEW.ZOOM_MODE", NavMode::Zoom)] {
+        h.app.run(id, json!({"on": true})).unwrap();
+        assert_eq!(h.app.viewport.nav_toggle, Some(mode), "{id}");
+        h.app.run(id, json!({"on": false})).unwrap();
+        assert_eq!(h.app.viewport.nav_toggle, None, "{id}");
+    }
 }
