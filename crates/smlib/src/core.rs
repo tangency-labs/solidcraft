@@ -87,7 +87,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.transform_model_size_from_body_box = true;
     f.uv_trim_corner_end_points_only = true;
     f.bspline_trim_preserves_uv_spans = true;
-    f.proto_edge_self_loop_on_vertex_degenerate = true;
     f.boolean_vertex_by_best_crossing = true;
     f.classify_edge_interval = true;
     f.degenerate_proto_edge_in_one_vertex = true;

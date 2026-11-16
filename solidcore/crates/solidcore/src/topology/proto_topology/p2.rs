@@ -71,15 +71,13 @@
 //!   B-rep, both ends land on that one vertex there (moved twice, to their midpoint)
 //!   while the other B-rep gets a short edge between two vertices; the merge then
 //!   fails in `MakeFaceuse` (a union whose coplanar faces' rims cross 4e-5 to 2e-4 mm
-//!   from a vertex, `SM_ERR`). With
-//!   [`ProtoTopologyManager::set_split_self_loops_on_vertices`]`(false)`, which the
-//!   Boolean's topology intersector sets only with the opt-in
-//!   `Kernel::fixes.proto_edge_self_loop_on_vertex_degenerate`,
-//!   [`ProtoTopologyManager::resolve_proto_edge`]
-//!   treats such a proto edge as degenerate instead, as upstream does for one shorter
-//!   than `2 * m_dTol`. The default keeps upstream's split, so this unit's difftest
-//!   still compares the faithful port (7 generated cases reach the branch).
-//!   Confirmed on the C++ build (plan/upstream-issues.md WR-214).
+//!   from a vertex, `SM_ERR`), or returns a body whose loops gap by the curve's length
+//!   (a box corner inside a sphere by less than the summed tolerances). So
+//!   [`ProtoTopologyManager::resolve_proto_edge`] treats such a proto edge as
+//!   degenerate instead, as upstream does for one shorter than `2 * m_dTol`, when the
+//!   whole curve stays within its ends' reach of the definition (a certain hull of the
+//!   curve, `curve_piece_within`); a curve that leaves it is refused. The `SM_ERR` trigger
+//!   is confirmed on the C++ build (WR-214); the failing body is Rust-measured.
 //! - **Opt-in fix (WR-306, #1058).** With `Kernel::fixes.degenerate_proto_edge_in_one_vertex`,
 //!   [`ProtoTopologyManager::resolve_proto_edge`] treats a proto edge from a proto vertex
 //!   back to itself whose curve ends find one vertex definition as degenerate below twice
@@ -139,6 +137,7 @@
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::curve::curve::p2::{Curve, CurveKind};
+use crate::error::boolean::BooleanStage;
 use crate::error::EntityRef;
 use crate::error::{passed_on, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
@@ -185,6 +184,8 @@ const OP_CREATE_PE: &str = "topology::proto_topology::p2::ProtoTopologyManager::
 const OP_UPDATE_EDGES: &str = "topology::proto_topology::p2::ProtoTopologyManager::update_edges";
 const OP_COMBINE_VD: &str =
     "topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions";
+const OP_RESOLVE_PE: &str =
+    "topology::proto_topology::p2::ProtoTopologyManager::resolve_proto_edge";
 
 /// `sdTolFactor` of `CanCombineVertexDefinitions`: the distance allowed between two
 /// combinable vertex definitions, in units of their summed tolerances. Upstream's, kept
@@ -2081,8 +2082,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// itself loses its definitions when its first curve is shorter than twice its
     /// tolerance; when it is longer with ends farther apart than that, the start proto
     /// vertex gets a second vertex definition at the curve's end (unless the ends are
-    /// already closest to different definitions). Not upstream: unless
-    /// [`ProtoTopologyManager::split_self_loops_on_vertices`] (the default), when the
+    /// already closest to different definitions). Not upstream: when the
     /// definition to split is on a vertex in either B-rep, the proto edge loses its
     /// definitions instead (tangency-labs/solidcore#480; see the module notes). Then, of every pair
     /// of definitions that can be combined, the redundant one is deleted. Returns the
@@ -2206,16 +2206,55 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     // either B-rep both ends land on that one vertex there while the
                     // other B-rep gets an edge between two vertices. Treat the proto
                     // edge as degenerate instead, as the short-curve branch above does,
-                    // unless the caller keeps upstream's split.
+                    // when the whole curve stays within its ends' reach of vd0 (its
+                    // ends are already one place there); a curve that leaves that
+                    // reach is a real intersection that neither the split nor the drop
+                    // keeps, so the Boolean is refused.
                     let on_vertex = match vd0 {
-                        Some(vd0) if !self.split_self_loops_on_vertices() => {
+                        Some(vd0) => {
                             let v0 = self.vd_ref(vd0)?;
                             v0.src_topo_type(1) == PointClassType::Vertex
                                 || v0.src_topo_type(2) == PointClassType::Vertex
                         }
-                        _ => false,
+                        None => false,
                     };
                     if add_vtx_def && on_vertex {
+                        let vd0 = vd0.ok_or(dangling("proto vertex has no vertex definition"))?;
+                        let v0 = self.vd_ref(vd0)?;
+                        let centre = v0.position();
+                        let vd_tol = v0.tolerance(k);
+                        // Every definition's curve, over its own interval, from its own
+                        // ends: the proto edge may hold different curves.
+                        let mut within = true;
+                        for &ed in &eds {
+                            let d = self.ed_ref(ed)?;
+                            let ivl = d.xsect_interval();
+                            let curve = curve_of(brep, d.xsect_curve_3d())?;
+                            let ends = [
+                                curve.evaluate_point(k, ivl.min())?,
+                                curve.evaluate_point(k, ivl.max())?,
+                            ];
+                            let reach = max2(centre.distance(ends[0]), centre.distance(ends[1]))
+                                + vd_tol
+                                + pe_tol;
+                            if !curve_piece_within(curve, &ivl, centre, reach) {
+                                within = false;
+                                break;
+                            }
+                        }
+                        if !within {
+                            let refusal = SolidError::boolean_stage_failed(
+                                OP_RESOLVE_PE,
+                                BooleanStage::Relate,
+                                "an intersection curve from a vertex back to it leaves the \
+                                 reach of its ends, so it can be neither split onto the vertex \
+                                 nor dropped",
+                            );
+                            // The Boolean's resolution only warns on a proto edge's error:
+                            // the manager keeps the refusal for the Boolean to return.
+                            self.note_self_loop_refusal(refusal.clone());
+                            return Err(refusal);
+                        }
                         for &ed in &eds {
                             deleted.extend(self.destruct_and_delete(ed));
                         }
@@ -3423,6 +3462,24 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     }
 }
 
+/// Not upstream (WR-214): whether `curve` over `interval` lies within `reach` of `centre`,
+/// decided on points whose convex hull holds that piece of the curve
+/// ([`Curve::piece_hull_points`], each with the error bound of its coordinates): every
+/// point's distance grown by its own rounding, plus twice its coordinates' error bound
+/// (the bound is per coordinate, so the Euclidean error is at most `sqrt(3)` of it), must be
+/// at most `reach`. `false` when the curve has no such certain hull, or for non-finite
+/// data, so an unbounded curve is never taken as near.
+fn curve_piece_within(curve: &Curve, interval: &Extent1d, centre: Point3, reach: f64) -> bool {
+    let Some(points) = curve.piece_hull_points(interval) else {
+        return false;
+    };
+    !points.is_empty()
+        && points.iter().all(|&(p, err)| {
+            let d = p.distance(centre) * (1.0 + gamma(8)) + 2.0 * err;
+            d.is_finite() && d <= reach
+        })
+}
+
 /// Not upstream (#16640): whether a definition's two curve ends, `gap` apart, both mapped to
 /// one vertex of each B-rep (tolerances `vertex_tols`), are a stretch no vertex bounds rather than the
 /// ends of a closed edge. The validity contract (`validity-and-tolerances.md`, Edge 16 and
@@ -3895,13 +3952,25 @@ mod tests {
 
     /// A proto edge from a proto vertex back to itself along an open curve 5e-5 long
     /// (longer than twice the 1e-5 tolerance, ends as far apart), the proto vertex
-    /// holding one vertex definition with `pc1` and `pc2`, resolved with
-    /// `split_self_loops_on_vertices` set to `split`. Returns the manager, the proto
-    /// vertex and edge, and what `resolve_proto_edge` returned.
+    /// holding one vertex definition with `pc1` and `pc2`, resolved. Returns the
+    /// manager, the proto vertex and edge, and what `resolve_proto_edge` returned.
     fn resolve_self_loop(
         pc1: &PointClassification<H>,
         pc2: &PointClassification<H>,
-        split: bool,
+    ) -> (
+        ProtoTopologyManager<H>,
+        ProtoVertexId,
+        ProtoEdgeId,
+        Result<Vec<H>>,
+    ) {
+        resolve_self_loop_along(line([0.0, 0.0, 0.0], [5e-5, 0.0, 0.0]), pc1, pc2)
+    }
+
+    /// [`resolve_self_loop`] along `curve`, which starts at the proto vertex.
+    fn resolve_self_loop_along(
+        curve: Curve,
+        pc1: &PointClassification<H>,
+        pc2: &PointClassification<H>,
     ) -> (
         ProtoTopologyManager<H>,
         ProtoVertexId,
@@ -3910,14 +3979,9 @@ mod tests {
     ) {
         let k = Kernel::default();
         let mut geo = Geo::default();
-        geo.curves.push(line([0.0, 0.0, 0.0], [5e-5, 0.0, 0.0]));
+        geo.curves.push(curve);
         let c0 = H(0, ClassObjectKind::Curve);
         let mut m = manager();
-        assert!(
-            m.split_self_loops_on_vertices(),
-            "upstream's split is the default"
-        );
-        m.set_split_self_loops_on_vertices(split);
         let p = Point3::new(0.0, 0.0, 0.0);
         let pv = m.new_proto_vertex(p, 1e-5).unwrap();
         m.add_proto_vertex(pv);
@@ -3950,12 +4014,8 @@ mod tests {
     /// These pool stand-ins have no surfaces or vertex records, so
     /// `CreateVertexDefinition` stops (no position found, UB-115; or the unported
     /// `SmVertex::GetPoint`): reaching it shows the split branch ran, edge kept.
-    fn assert_split_attempted(
-        pc1: &PointClassification<H>,
-        pc2: &PointClassification<H>,
-        split: bool,
-    ) {
-        let (m, pv, pe, result) = resolve_self_loop(pc1, pc2, split);
+    fn assert_split_attempted(pc1: &PointClassification<H>, pc2: &PointClassification<H>) {
+        let (m, pv, pe, result) = resolve_self_loop(pc1, pc2);
         let err = result.unwrap_err();
         let msg = err.to_string();
         assert!(
@@ -3968,16 +4028,7 @@ mod tests {
 
     #[test]
     fn resolve_self_loop_off_a_vertex_still_splits() {
-        for split in [true, false] {
-            assert_split_attempted(&region_pc(R0), &region_pc(R1), split);
-        }
-    }
-
-    #[test]
-    fn resolve_self_loop_on_a_vertex_splits_by_default() {
-        // upstream's behaviour, which this unit's difftest compares
-        assert_split_attempted(&vertex_pc(), &region_pc(R1), true);
-        assert_split_attempted(&region_pc(R0), &vertex_pc(), true);
+        assert_split_attempted(&region_pc(R0), &region_pc(R1));
     }
 
     #[test]
@@ -3985,13 +4036,50 @@ mod tests {
         // tangency-labs/solidcore#480: a definition on a vertex in either B-rep is not
         // split (both ends would be that vertex there); the proto edge is dropped
         for (pc1, pc2) in [(vertex_pc(), region_pc(R1)), (region_pc(R0), vertex_pc())] {
-            let (m, pv, pe, deleted) = resolve_self_loop(&pc1, &pc2, false);
+            let (m, pv, pe, deleted) = resolve_self_loop(&pc1, &pc2);
             assert_eq!(
                 deleted.unwrap().len(),
                 1,
                 "the definition's curve copy is deleted"
             );
             assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 0);
+            assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions().len(), 1);
+        }
+    }
+
+    /// WR-214's drop holds only for a curve that stays within its ends' reach of the
+    /// vertex: a curve from the vertex that runs 1e-3 out and comes back to 5e-5 from it
+    /// is a real intersection, and resolving it is refused, not dropped.
+    #[test]
+    fn resolve_self_loop_on_a_vertex_leaving_its_reach_is_refused() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        let bulge = || {
+            Curve::from(BSplineCurve::from_nurb(
+                NlCurve::new(
+                    vec![
+                        CPoint::new(0.0, 0.0, 0.0, NOW),
+                        CPoint::new(1e-3, 1e-3, 0.0, NOW),
+                        CPoint::new(5e-5, 0.0, 0.0, NOW),
+                    ],
+                    2,
+                    vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                )
+                .unwrap(),
+                3,
+                false,
+            ))
+        };
+        for (pc1, pc2) in [(vertex_pc(), region_pc(R1)), (region_pc(R0), vertex_pc())] {
+            let (mut m, pv, pe, result) = resolve_self_loop_along(bulge(), &pc1, &pc2);
+            let err = result.unwrap_err();
+            assert_eq!(err.operation(), OP_RESOLVE_PE, "{err}");
+            assert_eq!(err.sm_status(), Some(1001), "{err}");
+            // kept for the Boolean, whose resolution only warns on a proto edge's error
+            assert_eq!(m.take_self_loop_refusal(), Some(err));
+            assert_eq!(m.take_self_loop_refusal(), None);
+            assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 1);
             assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions().len(), 1);
         }
     }

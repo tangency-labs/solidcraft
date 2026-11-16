@@ -29,7 +29,6 @@
   "revolution_round_offset_collapses",
   "uv_trim_corner_end_points_only",
   "bspline_trim_preserves_uv_spans",
-  "proto_edge_self_loop_on_vertex_degenerate",
   "sweep_statuses_pass_on",
   "ssi_proto_topology_statuses_pass_on",
   "analytic_inversion_answers_apart",

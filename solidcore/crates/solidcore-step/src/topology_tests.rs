@@ -720,6 +720,55 @@ fn bands_and_caps_without_seams_get_one() {
     faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(1.0, 2.0)]);
 }
 
+/// A cylinder (r 5, h 10) with a hemispherical dome on top (#17151), its sphere's axis along -y
+/// or along +z. Along -y the dome's rim, the top circle, is a meridian of the sphere through both
+/// its poles: one edge passing through both, split at each so that the loop runs along each pole
+/// at a vertex. Split at the first pole alone, the rest of the rim crossed the second inside an
+/// edge, and the dome came in turned over, the solid closed with the wrong volume.
+#[test]
+fn a_dome_whose_rim_runs_through_both_poles_of_its_sphere() {
+    let (r, h) = (5.0, 10.0);
+    // pi r^2 h for the cylinder, 2/3 pi r^3 for the dome; its area 2 pi r h + pi r^2 + 2 pi r^2.
+    let volume = PI * r * r * h + 2.0 / 3.0 * PI * r * r * r;
+    let area = 2.0 * PI * r * h + 3.0 * PI * r * r;
+    for axis in [[0.0, -1.0, 0.0], [0.0, 0.0, 1.0]] {
+        let mut w = W::default();
+        let (vb, vt) = (w.vertex([r, 0.0, 0.0]), w.vertex([r, 0.0, h]));
+        let kb = w.circle([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+        let kt = w.circle([0.0, 0.0, h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+        let bottom = w.add(format!("EDGE_CURVE('',#{vb},#{vb},#{kb},.T.)"));
+        let top = w.add(format!("EDGE_CURVE('',#{vt},#{vt},#{kt},.T.)"));
+        let side = w.line_edge((vb, [r, 0.0, 0.0]), (vt, [r, 0.0, h]), true, 1.0);
+        let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let cyl = w.add(format!("CYLINDRICAL_SURFACE('',#{a},{})", real(r)));
+        let uses = [w.oe(bottom, true), w.oe(side, true), w.oe(top, false), w.oe(side, false)];
+        let bx = w.bound(&uses, true, true);
+        let wall = w.face(&[bx], cyl, true);
+        let plane = w.plane([0.0; 3], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+        let x = w.oe(bottom, false);
+        let bx = w.bound(&[x], true, true);
+        let base = w.face(&[bx], plane, true);
+        let a = w.axis([0.0, 0.0, h], axis, [1.0, 0.0, 0.0]);
+        let sphere = w.add(format!("SPHERICAL_SURFACE('',#{a},{})", real(r)));
+        let x = w.oe(top, true);
+        let bx = w.bound(&[x], true, true);
+        let dome = w.face(&[bx], sphere, true);
+        let shell = closed_shell(&mut w, &[wall, base, dome]);
+        let solid = w.add(format!("MANIFOLD_SOLID_BREP('cylinder',#{shell})"));
+        let s = one_solid(&w.file(&[solid]));
+        assert!(!s.notes.iter().any(|n| n.contains("turned over")), "axis {axis:?}: {:?}", s.notes);
+        if axis[2] == 0.0 {
+            assert!(s.notes.iter().any(|n| n.contains("2 edges split where they pass through a face's pole")), "{:?}", s.notes);
+        }
+        faces_away(&s.brep, 0, |_| [0.0, 0.0, 0.75 * h]);
+        let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+        assert!(body.is_manifold_solid().unwrap());
+        let mass = body.mass_properties(1e-6).unwrap();
+        assert!((mass.volume - volume).abs() < 1e-3, "axis {axis:?}: {mass:?}, {volume} expected");
+        assert!((mass.area - area).abs() < 1e-3, "axis {axis:?}: {mass:?}, {area} expected");
+    }
+}
+
 /// An edge from vertex `va` counterclockwise about +z to vertex `vb` on the circle of radius `r`
 /// round the z axis at height `z`.
 fn arc_about_z(w: &mut W, (va, vb): (u64, u64), r: f64, z: f64) -> u64 {

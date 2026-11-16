@@ -1388,10 +1388,6 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             capture_distance,
             0.0,
         )?;
-        // Not upstream unless opted in (`Kernel::fixes.proto_edge_self_loop_on_vertex_degenerate`,
-        // WR-214, tangency-labs/solidcore#480): a self-loop proto edge on a vertex is
-        // dropped, not split onto that vertex. Off (the default), upstream's split.
-        mgr.set_split_self_loops_on_vertices(!k.fixes.proto_edge_self_loop_on_vertex_degenerate);
         mgr.set_coincident_edges(coincident_edges);
         self.proto_topo_mgr = Some(mgr);
 
