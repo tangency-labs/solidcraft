@@ -83,6 +83,12 @@ pub fn native_cad_design(bytes: &[u8], file: &str) -> Result<NativeDesign, Strin
     Ok(design)
 }
 
+/// [`traced_records`]'s records alone.
+#[cfg(test)]
+pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, system: &str, colours: bool) -> solidcraft_kernel::ImportRecords {
+    traced_records(ir, product, system, colours).0
+}
+
 /// `ir`'s bodies as an import kept as records, written by `system`: each body region assembled
 /// into a record by `solidcore_cadir`, its pcurves without a closed form made as a STEP import's
 /// are ([`solidcraft_kernel::import_trims`]). Nothing passes through STEP text. CADIR's bodies
@@ -90,9 +96,15 @@ pub fn native_cad_design(bytes: &[u8], file: &str) -> Result<NativeDesign, Strin
 /// file has a product structure (occurrences), the tree is that structure and each body is placed
 /// once for each use of its part ([`assembly`]); otherwise the bodies are one product called
 /// `product`. With `colours`, each body takes the colours the file gives it and its faces
-/// ([`paint_of`]). What could not be read (and what was repaired on the way) is in the warnings,
-/// each naming its body.
-pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, system: &str, colours: bool) -> solidcraft_kernel::ImportRecords {
+/// ([`Looks::paint_of`]). What could not be read (and what was repaired on the way) is in the
+/// warnings, each naming its body. Also returns where each record body came from ([`validation::Origin`]), for checking the file's own
+/// figures ([`validation::check`]).
+fn traced_records(
+    ir: &cadmpeg_ir::document::CadIr,
+    product: &str,
+    system: &str,
+    colours: bool,
+) -> (solidcraft_kernel::ImportRecords, Vec<validation::Origin>) {
     use solidcraft_kernel::{ImportRecords, RecordBody, StepNode};
     let _span = solidcraft_profile::span("import", "cadir.records");
     let read = solidcore_cadir::read_bodies(ir, Some(solidcraft_kernel::import_trims()));
@@ -123,9 +135,10 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
         unplaced.push(assembly::Unplaced { body: r.body, record });
     }
     warnings.extend(read.failures.iter().map(|f| format!("{}: not imported: {}", label(&f.body), f.message)));
-    let (bodies, tree) = if ir.model.occurrences.is_empty() {
-        let bodies: Vec<RecordBody> = unplaced.into_iter().map(|u| u.record).collect();
+    let (bodies, tree, origins) = if ir.model.occurrences.is_empty() {
         let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        let origins = unplaced.iter().map(|u| validation::Origin { body: u.body.clone(), world: identity }).collect();
+        let bodies: Vec<RecordBody> = unplaced.into_iter().map(|u| u.record).collect();
         let tree = vec![StepNode {
             name: product.to_string(),
             transform: identity,
@@ -134,14 +147,15 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
             left_out: Vec::new(),
             children: Vec::new(),
         }];
-        (bodies, tree)
+        (bodies, tree, origins)
     } else {
         assembly::placed(ir, product, unplaced, &mut warnings)
     };
-    ImportRecords { bodies, tree, warnings, system: system.to_string() }
+    (ImportRecords { bodies, tree, warnings, system: system.to_string() }, origins)
 }
 
 mod assembly;
+mod validation;
 
 /// A file's appearances by what they colour: whole bodies and single faces (CADIR ids).
 struct Looks<'a> {
@@ -433,10 +447,17 @@ mod convert {
             "step" => "",
             other => other,
         };
-        let records = super::cadir_records(&ir, &product, system, format == "step");
+        let (records, origins) = super::traced_records(&ir, &product, system, format == "step");
         if records.bodies.is_empty() {
             let why = records.warnings.first().map(|w| format!(" ({w})")).unwrap_or_default();
             return Err(format!("{name}: this {format} file has no solids that can be imported{why}"));
+        }
+        // The file's own figures for its parts, checked against the bodies (built once: the
+        // design's evaluation finds them in the recent imports).
+        if !ir.model.declared_measures.is_empty()
+            && let Ok(imp) = solidcraft_kernel::records_import_shared(&records)
+        {
+            warnings.extend(super::validation::check(&ir, &records, &origins, &imp));
         }
         Ok((records, warnings, format == "fcstd"))
     }

@@ -681,3 +681,70 @@ fn colours_read_into_records_are_the_ones_our_step_reader_reads() {
     assert_eq!(o.3.len(), 2, "our reader: {o:?}");
     assert_eq!(t, o);
 }
+
+/// The washer with the CAx-IF validation properties a CAD system writes for it: its volume and its
+/// centre, as `volume` and `centre` give them.
+fn washer_stating(volume: f64, centre: [f64; 3]) -> String {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let text = std::fs::read_to_string(dir.join("washer.step")).unwrap();
+    let [x, y, z] = centre;
+    let props = format!(
+        "#300=PROPERTY_DEFINITION('geometric validation property','volume and centre',#13);\n\
+         #301=REPRESENTATION('',(#302,#303),#5);\n\
+         #302=MEASURE_REPRESENTATION_ITEM('volume measure',VOLUME_MEASURE({volume:?}),#304);\n\
+         #303=CARTESIAN_POINT('centre point',({x:?},{y:?},{z:?}));\n\
+         #304=DERIVED_UNIT((#305));\n#305=DERIVED_UNIT_ELEMENT(#1,3.);\n\
+         #306=PROPERTY_DEFINITION_REPRESENTATION(#300,#301);\n"
+    );
+    let at = text.rfind("ENDSEC;").unwrap();
+    format!("{}{props}{}", &text[..at], &text[at..])
+}
+
+/// A part whose bodies measure what its file states imports with no warning about it; one whose
+/// file states another volume or centre is named, with both figures.
+#[test]
+fn a_part_that_measures_other_than_its_file_says_is_named() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let ours = solidcraft_kernel::step_import(&std::fs::read_to_string(dir.join("washer.step")).unwrap()).unwrap();
+    let m = solidcraft_kernel::measure(&ours.bodies[0].body).unwrap();
+    let (v, c) = (m.volume, [m.centroid.x, m.centroid.y, m.centroid.z]);
+    let checked = |text: String| {
+        let (_, warnings, _) = cadmpeg_step_records(text.as_bytes(), "washer.step").unwrap();
+        warnings.into_iter().filter(|w| w.contains("the file states")).collect::<Vec<_>>()
+    };
+    assert_eq!(checked(washer_stating(v, c)), Vec::<String>::new(), "the washer as its file states it");
+    let volume = checked(washer_stating(v * 1.1, c));
+    assert!(volume.len() == 1 && volume[0].contains("volume") && volume[0].contains("9.091% off"), "{volume:?}");
+    let centre = checked(washer_stating(v, [c[0] + 5.0, c[1], c[2]]));
+    assert!(centre.len() == 1 && centre[0].contains("centre") && centre[0].contains("5.0000 mm away"), "{centre:?}");
+}
+
+/// In an assembly the file states a part's centre in the part's own coordinates: a part placed
+/// turned and moved is checked there, not where the assembly puts it.
+#[test]
+fn a_placed_parts_centre_is_checked_in_its_own_coordinates() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let text = std::fs::read_to_string(dir.join("cylinder_placed.step")).unwrap();
+    // Our reader's world centre, taken back through our reader's placement of the part.
+    let ours = solidcraft_kernel::step_import(&text).unwrap();
+    let m = solidcraft_kernel::measure(&ours.bodies[0].body).unwrap();
+    let t = ours.tree[0].children[0].transform;
+    let p = [m.centroid.x - t[3][0], m.centroid.y - t[3][1], m.centroid.z - t[3][2]];
+    let own: [f64; 3] = std::array::from_fn(|i| (0..3).map(|j| t[i][j] * p[j]).sum());
+    let world = [m.centroid.x, m.centroid.y, m.centroid.z];
+    assert!((0..3).map(|i| (own[i] - world[i]).powi(2)).sum::<f64>().sqrt() > 1.0, "the part is placed away from where it is defined");
+    let stating = |c: [f64; 3]| {
+        let [x, y, z] = c;
+        let props = format!(
+            "#300=PROPERTY_DEFINITION('geometric validation property','centre',#21);\n\
+             #301=REPRESENTATION('',(#303),#5);\n\
+             #303=CARTESIAN_POINT('centre point',({x:?},{y:?},{z:?}));\n\
+             #306=PROPERTY_DEFINITION_REPRESENTATION(#300,#301);\n"
+        );
+        let at = text.rfind("ENDSEC;").unwrap();
+        let (_, warnings, _) = cadmpeg_step_records(format!("{}{props}{}", &text[..at], &text[at..]).as_bytes(), "cylinder_placed.step").unwrap();
+        warnings.into_iter().filter(|w| w.contains("the file states")).collect::<Vec<_>>()
+    };
+    assert_eq!(stating(own), Vec::<String>::new());
+    assert_eq!(stating(world).len(), 1, "the world centre is not the part's own");
+}
