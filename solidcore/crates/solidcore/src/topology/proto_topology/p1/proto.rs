@@ -40,6 +40,7 @@ const OP_REMOVE_COINCIDENT: &str =
 /// two combinable edge definitions, in units of their summed tolerances (upstream's).
 pub const ED_TOL_FACTOR: f64 = 5.0;
 const OP_POSITION: &str = "topology::proto_topology::p1::find_position_from_pcs";
+const OP_SET_POSITION: &str = "topology::proto_topology::p1::VertexDefinition::set_position";
 const OP_EVALUATE: &str = "topology::proto_topology::p1::ProtoTopologyManager::proto_edge_evaluate";
 const OP_SRC_TOPO: &str = "topology::proto_topology::p1::VertexDefinition::set_src_topo";
 const OP_DEGEN: &str = "topology::proto_topology::p1::find_ed_on_degen_face";
@@ -946,6 +947,10 @@ pub struct VertexDefinition<O> {
     /// placed this definition crosses its source edge; `-1` when no such crossing placed
     /// it ([`VertexDefinition::place_by_crossing`]).
     crossing_sine: f64,
+    /// Not upstream (WR-306): the certain hull points of the curves this definition
+    /// absorbed (`resolve_proto_edge`), each with the error bound of its coordinates,
+    /// which [`VertexDefinition::set_position`] keeps within the tolerance.
+    absorbed_hull: Vec<(Point3, f64)>,
 }
 
 /// Not upstream (WR-410; the SolidCraft fork's `sm_CrossingError`): how far along its
@@ -993,6 +998,7 @@ impl<O: ClassObject> VertexDefinition<O> {
             final_vtx1: None,
             final_vtx2: None,
             crossing_sine: -1.0,
+            absorbed_hull: Vec::new(),
         };
 
         if !vd.pc1.are_parameters_set() {
@@ -1237,9 +1243,59 @@ impl<O: ClassObject> VertexDefinition<O> {
         }
     }
 
-    /// Sets the position (`SetPosition`).
-    pub fn set_position(&mut self, position: Point3) {
+    /// Not upstream (WR-306): the tolerance this definition needs at `position` to keep
+    /// every absorbed hull point ([`VertexDefinition::absorb_hull`]) covered, by the same
+    /// rounded distance `resolve_proto_edge` took it in by,
+    /// `|p - position| * (1 + gamma(8)) + 2 * err`, and never below its tolerance now;
+    /// `None` when a distance is not finite.
+    #[must_use]
+    pub fn covering_tolerance(&self, k: &Kernel, position: Point3) -> Option<f64> {
+        let mut needed = self.tolerance(k);
+        for &(p, err) in &self.absorbed_hull {
+            let d = p.distance(position) * (1.0 + gamma(8)) + 2.0 * err;
+            if !d.is_finite() {
+                return None;
+            }
+            needed = max2(needed, d);
+        }
+        Some(needed)
+    }
+
+    /// Sets the position (`SetPosition`). Not upstream (WR-306): the tolerance then grows,
+    /// never shrinks, to [`VertexDefinition::covering_tolerance`] at the new position, so
+    /// each curve the definition absorbed stays within its tolerance.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Failed`] (a topology failure) when a hull point's distance from
+    /// `position` is not finite; the definition is left unchanged then.
+    pub fn set_position(&mut self, k: &Kernel, position: Point3) -> Result<()> {
+        let needed = self.covering_tolerance(k, position).ok_or_else(|| {
+            SolidError::topology_failed(
+                OP_SET_POSITION,
+                "a vertex definition holding an absorbed curve cannot move to a position \
+                 at no finite distance from it",
+            )
+        })?;
         self.position = position;
+        if needed > self.tolerance(k) {
+            self.tol = needed;
+        }
+        Ok(())
+    }
+
+    /// Not upstream (WR-306): records the certain hull points (each with the error bound
+    /// of its coordinates) of a curve this definition absorbed, for
+    /// [`VertexDefinition::set_position`] to keep covered.
+    pub fn absorb_hull(&mut self, points: impl IntoIterator<Item = (Point3, f64)>) {
+        self.absorbed_hull.extend(points);
+    }
+
+    /// Not upstream (WR-306): the hull points recorded by
+    /// [`VertexDefinition::absorb_hull`].
+    #[must_use]
+    pub fn absorbed_hull(&self) -> &[(Point3, f64)] {
+        &self.absorbed_hull
     }
 
     /// Sets the owning proto vertex (`SetProtoVertex`).

@@ -78,12 +78,15 @@
 //!   whole curve stays within its ends' reach of the definition (a certain hull of the
 //!   curve, `curve_piece_within`); a curve that leaves it is refused. The `SM_ERR` trigger
 //!   is confirmed on the C++ build (WR-214); the failing body is Rust-measured.
-//! - **Opt-in fix (WR-306, #1058).** With `Kernel::fixes.degenerate_proto_edge_in_one_vertex`,
-//!   [`ProtoTopologyManager::resolve_proto_edge`] treats a proto edge from a proto vertex
-//!   back to itself whose curve ends find one vertex definition as degenerate below twice
-//!   the proto vertex's containment radius (`ContainsPoint`'s), not twice its own
-//!   tolerance, and marks the proto vertex as having absorbed it; the Boolean's
-//!   `ImprintIntersections` then fits that vertex to its edges (the SMLib fork's fix).
+//! - **Not upstream (WR-306, #1058).** [`ProtoTopologyManager::resolve_proto_edge`] also
+//!   treats a proto edge from a proto vertex back to itself as degenerate when its curve
+//!   ends find one vertex definition and every definition's curve provably lies within that
+//!   definition's tolerance of its position (a certified hull, `curve_piece_within`), and
+//!   marks the proto vertex as having absorbed it; the Boolean's `ImprintIntersections`
+//!   then fits that vertex to its edges. The SMLib fork's fix bounded the curve's length by
+//!   twice the proto vertex's containment radius instead, which is at least the capture
+//!   distance (0.01 in the Boolean), so it absorbed real closed curves (a circle of radius
+//!   1e-3) and replaced upstream's `2 * m_dTol` test instead of adding to it.
 //! - **Opt-in fix (WR-579, #1517).** With `Kernel::fixes.proto_edge_splits_at_captured_vertices`,
 //!   [`ProtoTopologyManager::resolve_proto_edge`] splits a proto edge from a proto vertex
 //!   back to itself whose curve ends find two of its definitions at each other definition
@@ -163,7 +166,6 @@ use crate::math::{max2, max3, max4, min2, Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::math::gamma;
-use crate::query::face::p2::proto_vertex_containment_radius;
 use crate::surface::surface::exact_pieces::{common_trim_interval, trim_unsnapped};
 use crate::surface::surface::p2::SurfaceKind;
 use crate::topology::brep::p5::{make_edge_in_face_in, EdgeInFace};
@@ -2212,6 +2214,69 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         Ok(())
     }
 
+    /// Not upstream (WR-306, #1058): whether the proto edge from `start` back to itself,
+    /// with first curve `int_curve` and definitions `eds`, is a speck its vertex holds.
+    /// That needs both of `int_curve`'s ends to find one vertex definition of `start`,
+    /// and every definition's curve, over its own interval, to lie within that
+    /// definition's tolerance of its position, decided on a certified hull of the curve
+    /// ([`curve_piece_within`]). That is what is proven; the vertex made from that
+    /// definition standing for the whole curve is argued: `ImprintIntersections` then fits
+    /// it to its edges and grows its tolerance to cover them. A curve with no certain
+    /// hull, or one reaching past the tolerance, is not absorbed: the capture distance,
+    /// which only says how far apart definitions are merged, never decides it. Returns that
+    /// definition with the hull points of every definition's curve, which it records
+    /// ([`VertexDefinition::absorb_hull`]) so that a later move keeps them covered.
+    fn curve_inside_one_vertex(
+        &self,
+        k: &Kernel,
+        brep: &impl ProtoBrep<O>,
+        start: Option<ProtoVertexId>,
+        int_curve: &Curve,
+        eds: &[EdgeDefId],
+    ) -> Result<Option<AbsorbedCurve>> {
+        // A null or deleted proto vertex holds nothing: upstream's short branch raises
+        // no error for it, so neither does this test.
+        let Some(start) = start.filter(|&pv| self.proto_vertex(pv).is_some()) else {
+            return Ok(None);
+        };
+        let ends = int_curve.ends(k)?;
+        let Some(vd0) = self.closest_vertex_definition(start, ends.start)? else {
+            return Ok(None);
+        };
+        if self.closest_vertex_definition(start, ends.end)? != Some(vd0) {
+            return Ok(None);
+        }
+        let v0 = self.vd_ref(vd0)?;
+        let (centre, reach) = (v0.position(), v0.tolerance(k));
+        let mut hull = Vec::new();
+        for &ed in eds {
+            let d = self.ed_ref(ed)?;
+            let ivl = d.xsect_interval();
+            let curve = curve_of(brep, d.xsect_curve_3d())?;
+            if !curve_piece_within(curve, &ivl, centre, reach) {
+                return Ok(None);
+            }
+            // (`curve_piece_within` holds only with a certain hull)
+            hull.extend(curve.piece_hull_points(&ivl).into_iter().flatten());
+        }
+        Ok(Some((vd0, hull)))
+    }
+
+    /// Not upstream (WR-306): the refusal of a split that would move a definition holding
+    /// an absorbed curve where its tolerance cannot cover that curve without reaching
+    /// another definition of the proto vertex (or to no finite distance from it), kept
+    /// for the Boolean to return as the other self-loop refusals are.
+    fn refuse_moving_absorbed(&mut self) -> SolidError {
+        let refusal = SolidError::boolean_stage_failed(
+            OP_RESOLVE_PE,
+            BooleanStage::Relate,
+            "a self-loop's split would move a vertex that absorbed a curve so far that \
+             covering the curve reaches another vertex",
+        );
+        self.note_self_loop_refusal(refusal.clone());
+        refusal
+    }
+
     /// Resolves the proto edge `pe` (`Resolve`). A proto edge from a proto vertex to
     /// itself loses its definitions when its first curve is shorter than twice its
     /// tolerance; when it is longer with ends farther apart than that, the start proto
@@ -2253,32 +2318,22 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             let int_curve = curve_of(brep, self.ed_ref(first)?.xsect_curve_3d())?;
             let (len, _) = int_curve.approximate_length(k, &pe_ivl, 5, false)?;
 
-            // WR-306 (opt-in): ends that find one vertex definition become one vertex in
-            // each B-rep, so a curve shorter than the proto vertex's containment ball is
-            // wide is that vertex, not a closed edge on it. Ends on two vertex definitions
-            // keep upstream's test against our own tolerance.
-            let absorb = k.fixes.degenerate_proto_edge_in_one_vertex;
-            let degenerate_len = if absorb {
-                let ends = int_curve.ends(k)?;
-                let start = self.pv_live(start)?;
-                let vd0 = self.closest_vertex_definition(start, ends.start)?;
-                if vd0 == self.closest_vertex_definition(start, ends.end)? {
-                    let pv = self
-                        .proto_vertex(start)
-                        .ok_or(dangling("proto vertex is deleted"))?;
-                    2.0 * proto_vertex_containment_radius(self, pv)
-                } else {
-                    2.0 * pe_tol
-                }
-            } else {
-                2.0 * pe_tol
-            };
+            // Not upstream (WR-306, #1058): a curve whose ends find one vertex definition
+            // and that provably lies within that definition's tolerance is that vertex,
+            // not a closed edge on it, whether or not it is also shorter than upstream's
+            // test (twice our own tolerance), which stays as it is. Only a curve inside
+            // the vertex's tolerance marks the vertex for ImprintIntersections' fit; a
+            // short curve outside it is dropped as upstream drops it, unmarked.
+            let short = len < 2.0 * pe_tol;
+            let inside = self.curve_inside_one_vertex(k, &*brep, start, int_curve, &eds)?;
 
-            if len < degenerate_len {
-                if absorb {
+            if short || inside.is_some() {
+                if let Some((vd0, hull)) = inside {
                     // The edges that end on our proto vertex end on our curve, up to its
                     // length away from the vertex: ImprintIntersections fits the vertex
-                    // to them.
+                    // to them. The definition keeps the curve's hull covered if a later
+                    // split moves it.
+                    self.vd_mut(vd0)?.absorb_hull(hull);
                     let start = self.pv_live(start)?;
                     self.proto_vertex_mut(start)
                         .ok_or(dangling("proto vertex is deleted"))?
@@ -2398,6 +2453,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     } else if add_vtx_def {
                         // Create a new VtxDef, and set pVD0 to sPt0, and NewVD to sPt1.
                         let vd0 = vd0.ok_or(dangling("proto vertex has no vertex definition"))?;
+                        // Not upstream (WR-306): vd0 may hold a curve it absorbed earlier,
+                        // which the move must keep within its tolerance (`set_position`
+                        // grows it). A move at no finite distance from that curve is
+                        // refused before anything changes.
+                        let Some(cover) = self.vd_ref(vd0)?.covering_tolerance(k, pt0) else {
+                            return Err(self.refuse_moving_absorbed());
+                        };
                         let v0 = self.vd_ref(vd0)?;
                         let mut pc1 = *v0.brep_point_classif(1);
                         let mut pc2 = *v0.brep_point_classif(2);
@@ -2408,11 +2470,40 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         *v0.brep_point_classif_mut(2) = pc2;
                         let new_vd = created?;
 
+                        // Not upstream (WR-306): vd0's growth may not make it reach another
+                        // definition of the proto vertex, the new one at pt1 included, that
+                        // its tolerance before the move kept clear of, or the two would make
+                        // overlapping vertices; refused then, with the new definition
+                        // deleted. An overlap the growth does not cause (or a NaN distance)
+                        // is left as upstream leaves it.
+                        let old_tol = self.vd_ref(vd0)?.tolerance(k);
+                        if cover > old_tol {
+                            let mut others = vec![(pt1, self.vd_ref(new_vd)?.tolerance(k))];
+                            for &x in self
+                                .proto_vertex(start)
+                                .ok_or(dangling("proto vertex is deleted"))?
+                                .vertex_definitions()
+                            {
+                                if x != vd0 {
+                                    let d = self.vd_ref(x)?;
+                                    others.push((d.position(), d.tolerance(k)));
+                                }
+                            }
+                            let grown_into = |(at, tol): (Point3, f64)| {
+                                let d = pt0.distance(at);
+                                old_tol + tol < d && cover + tol >= d
+                            };
+                            if others.into_iter().any(grown_into) {
+                                self.delete_vertex_definition(new_vd);
+                                return Err(self.refuse_moving_absorbed());
+                            }
+                        }
+
                         let v0 = self.vd_mut(vd0)?;
-                        v0.set_position(pt0);
+                        v0.set_position(k, pt0)?;
                         v0.set_point_parameters(k, brep)?;
                         let nv = self.vd_mut(new_vd)?;
-                        nv.set_position(pt1);
+                        nv.set_position(k, pt1)?;
                         nv.set_point_parameters(k, brep)?;
 
                         // status ignored (passed on with
@@ -3637,6 +3728,10 @@ fn curve_piece_within(curve: &Curve, interval: &Extent1d, centre: Point3, reach:
         })
 }
 
+/// Not upstream (WR-306): the vertex definition that absorbs a self-loop and the certain
+/// hull points (each with the error bound of its coordinates) of its curves.
+type AbsorbedCurve = (VertexDefId, Vec<(Point3, f64)>);
+
 /// Not upstream (#16640): whether a definition's two curve ends, `gap` apart, both mapped to
 /// one vertex of each B-rep (tolerances `vertex_tols`), are a stretch no vertex bounds rather than the
 /// ends of a closed edge. The validity contract (`validity-and-tolerances.md`, Edge 16 and
@@ -4243,15 +4338,24 @@ mod tests {
 
     #[test]
     fn resolve_self_loop_inside_one_vertex_is_absorbed() {
-        // tangency-labs/solidcore#1058 (WR-306): both ends of the 5e-5 curve find the one
-        // vertex definition, and the 0.01 capture distance makes the proto vertex's
-        // containment ball far wider than the curve: with the opt-in the proto edge is
-        // that vertex (dropped, the proto vertex marked); without it, upstream's split.
-        for absorb in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.degenerate_proto_edge_in_one_vertex = absorb;
+        // tangency-labs/solidcore#1058 (WR-306): both ends of the line find the one vertex
+        // definition (tolerance 1e-4), and the 0.01 capture distance makes the proto
+        // vertex's containment ball far wider than either line. The 5e-5 line lies within
+        // the definition's tolerance, so the proto edge is that vertex (dropped, the proto
+        // vertex marked). The 5e-4 line reaches past it: a real curve, which the capture
+        // distance alone never absorbs, so upstream's split runs. Below upstream's short
+        // test (twice the proto edge's tolerance) the 1e-6 line is dropped either way, and
+        // the vertex is marked only when the line lies within the definition's tolerance
+        // (1e-4, not 1e-7).
+        for (length, vd_tol, dropped, marked) in [
+            (5e-5, 1e-4, true, true),
+            (5e-4, 1e-4, false, false),
+            (1e-6, 1e-4, true, true),
+            (1e-6, 1e-7, true, false),
+        ] {
+            let k = Kernel::default();
             let mut geo = Geo::default();
-            geo.curves.push(line([0.0, 0.0, 0.0], [5e-5, 0.0, 0.0]));
+            geo.curves.push(line([0.0, 0.0, 0.0], [length, 0.0, 0.0]));
             let c0 = H(0, ClassObjectKind::Curve);
             let mut m = manager();
             m.set_capture_distance(0.01);
@@ -4259,7 +4363,7 @@ mod tests {
             let pv = m.new_proto_vertex(p, 1e-5).unwrap();
             m.add_proto_vertex(pv);
             let (pc1, pc2) = (region_pc(R0), region_pc(R1));
-            let vd = VertexDefinition::new(&k, &geo, &pc1, &pc2, p, 1e-5, 1e-9, None).unwrap();
+            let vd = VertexDefinition::new(&k, &geo, &pc1, &pc2, p, vd_tol, 1e-9, None).unwrap();
             let vd = m.insert_vertex_definition(vd).unwrap();
             m.add_vertex_definition(pv, vd).unwrap();
 
@@ -4273,22 +4377,219 @@ mod tests {
             let pe = m
                 .create_proto_edge(&k, &mut geo, Some(pv), Some(pv), &cc, &ci1, &cc, &ci2)
                 .unwrap();
+            let pe_tol = m.proto_edge(pe).unwrap().raw_tolerance();
+            assert_eq!(
+                length >= 2.0 * pe_tol,
+                length > 1e-6,
+                "{length:e} against upstream's short test ({pe_tol:e})"
+            );
             let result = m.resolve_proto_edge(&k, &mut geo, pe);
-            if absorb {
+            assert_eq!(m.proto_vertex(pv).unwrap().absorbed_proto_edge(), marked);
+            if dropped {
                 assert_eq!(
                     result.unwrap().len(),
                     1,
                     "the definition's curve copy is deleted"
                 );
                 assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 0);
-                assert!(m.proto_vertex(pv).unwrap().absorbed_proto_edge());
             } else {
                 // the split branch ran (see `assert_split_attempted`)
                 assert!(result.is_err());
                 assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 1);
-                assert!(!m.proto_vertex(pv).unwrap().absorbed_proto_edge());
             }
         }
+    }
+
+    /// The hull bound is met on the whole curve: a line from the vertex is inside a reach
+    /// longer than it, not one shorter, and a NaN reach never holds it.
+    #[test]
+    fn curve_inside_one_vertex_needs_the_whole_hull_within_the_tolerance() {
+        let near = line([0.0, 0.0, 0.0], [5e-5, 0.0, 0.0]);
+        let ivl = near.natural_interval();
+        let o = Point3::new(0.0, 0.0, 0.0);
+        assert!(curve_piece_within(&near, &ivl, o, 1e-4));
+        assert!(!curve_piece_within(&near, &ivl, o, 4e-5));
+        assert!(!curve_piece_within(&near, &ivl, o, f64::NAN));
+    }
+
+    /// WR-306 (#17888 review): a definition that absorbed a self-loop and is then moved by a
+    /// later self-loop's split (`set_position(pt0)`) still holds the absorbed curve. The 5e-5
+    /// line at the origin is absorbed into the definition (tolerance 1e-4); the second loop,
+    /// 1e-3 long from (2e-4, 0, 0), is split and moves the definition there, 2e-4 from the
+    /// line's start. The tolerance grows to cover the line's hull from there, so the
+    /// certified hull test holds at the new position; a move to a non-finite position is
+    /// refused and leaves the definition as it was.
+    #[test]
+    fn a_split_after_an_absorb_keeps_the_absorbed_curve_covered() {
+        let k = Kernel::default();
+        let mut geo = Geo::default();
+        geo.curves.push(line([0.0, 0.0, 0.0], [5e-5, 0.0, 0.0]));
+        geo.curves.push(line([2e-4, 0.0, 0.0], [2e-4, 1e-3, 0.0]));
+        geo.points.push(Point3::new(0.0, 0.0, 0.0));
+        let mut m = manager();
+        m.set_capture_distance(0.01);
+        let p = Point3::new(0.0, 0.0, 0.0);
+        let pv = m.new_proto_vertex(p, 1e-5).unwrap();
+        m.add_proto_vertex(pv);
+        // a point classification in B-rep 1 gives the split's new definition a position
+        let mut pc1 = PointClassification::new(1e-5);
+        pc1.set_class_object(PointClassType::Point, Some(H(0, ClassObjectKind::Point)));
+        let vd =
+            VertexDefinition::new(&k, &geo, &pc1, &region_pc(R1), p, 1e-4, 1e-9, None).unwrap();
+        let vd = m.insert_vertex_definition(vd).unwrap();
+        m.add_vertex_definition(pv, vd).unwrap();
+
+        let mut self_loop = |m: &mut ProtoTopologyManager<H>, c: usize| {
+            let mut cc = CurveClassification::new(&k);
+            cc.set_curve(Some(H(c, ClassObjectKind::Curve)), false);
+            let ivl = geo.curves[c].natural_interval();
+            let mut ci1 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
+            ci1.mid = region_pc(R0);
+            let mut ci2 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
+            ci2.mid = region_pc(R1);
+            let pe = m
+                .create_proto_edge(&k, &mut geo, Some(pv), Some(pv), &cc, &ci1, &cc, &ci2)
+                .unwrap();
+            let deleted = m.resolve_proto_edge(&k, &mut geo, pe);
+            (pe, deleted)
+        };
+
+        let (absorbed, deleted) = self_loop(&mut m, 0);
+        assert_eq!(
+            deleted.unwrap().len(),
+            1,
+            "the absorbed curve's copy is deleted"
+        );
+        assert_eq!(m.proto_edge(absorbed).unwrap().num_edge_definitions(), 0);
+        assert!(m.proto_vertex(pv).unwrap().absorbed_proto_edge());
+        assert!(!m.vertex_def(vd).unwrap().absorbed_hull().is_empty());
+
+        let (split, result) = self_loop(&mut m, 1);
+        result.unwrap();
+        assert_eq!(m.proto_edge(split).unwrap().num_edge_definitions(), 1);
+        assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions().len(), 2);
+        let def = m.vertex_def(vd).unwrap();
+        assert_eq!(
+            def.position(),
+            Point3::new(2e-4, 0.0, 0.0),
+            "the split moved it"
+        );
+        let absorbed_line = &geo.curves[0];
+        let ivl = absorbed_line.natural_interval();
+        assert!(
+            curve_piece_within(absorbed_line, &ivl, def.position(), def.tolerance(&k)),
+            "the absorbed line is within {:e} of the moved definition",
+            def.tolerance(&k)
+        );
+        assert!(def.tolerance(&k) > 2e-4 && def.tolerance(&k) < 2.0001e-4);
+
+        let mut moved = def.clone();
+        let before = moved.clone();
+        assert!(moved
+            .set_position(&k, Point3::new(f64::NAN, 0.0, 0.0))
+            .is_err());
+        assert_eq!(moved, before, "a refused move changes nothing");
+    }
+
+    /// WR-306 (#17888 review): a split that would move an absorbing definition so far that
+    /// covering its absorbed curve reaches the split's new definition is refused, not grown
+    /// into an overlap. The 5e-5 line at the origin is absorbed (tolerance 1e-4); the second
+    /// loop, 1e-3 long from (5e-3, 0, 0), would need a tolerance of about 5e-3 at its start,
+    /// which reaches its end's new definition 1e-3 away. The refusal is kept for the
+    /// Boolean, the definition stays where it was, and the new one is deleted.
+    #[test]
+    fn a_split_whose_cover_would_reach_the_new_definition_is_refused() {
+        let k = Kernel::default();
+        let mut geo = Geo::default();
+        geo.curves.push(line([0.0, 0.0, 0.0], [5e-5, 0.0, 0.0]));
+        geo.curves.push(line([5e-3, 0.0, 0.0], [5e-3, 1e-3, 0.0]));
+        geo.points.push(Point3::new(0.0, 0.0, 0.0));
+        let mut m = manager();
+        m.set_capture_distance(0.01);
+        let p = Point3::new(0.0, 0.0, 0.0);
+        let pv = m.new_proto_vertex(p, 1e-5).unwrap();
+        m.add_proto_vertex(pv);
+        let mut pc1 = PointClassification::new(1e-5);
+        pc1.set_class_object(PointClassType::Point, Some(H(0, ClassObjectKind::Point)));
+        let vd =
+            VertexDefinition::new(&k, &geo, &pc1, &region_pc(R1), p, 1e-4, 1e-9, None).unwrap();
+        let vd = m.insert_vertex_definition(vd).unwrap();
+        m.add_vertex_definition(pv, vd).unwrap();
+        let mut self_loop = |m: &mut ProtoTopologyManager<H>, c: usize| {
+            let mut cc = CurveClassification::new(&k);
+            cc.set_curve(Some(H(c, ClassObjectKind::Curve)), false);
+            let ivl = geo.curves[c].natural_interval();
+            let mut ci1 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
+            ci1.mid = region_pc(R0);
+            let mut ci2 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
+            ci2.mid = region_pc(R1);
+            let pe = m
+                .create_proto_edge(&k, &mut geo, Some(pv), Some(pv), &cc, &ci1, &cc, &ci2)
+                .unwrap();
+            m.resolve_proto_edge(&k, &mut geo, pe)
+        };
+        self_loop(&mut m, 0).unwrap();
+        assert!(m.proto_vertex(pv).unwrap().absorbed_proto_edge());
+        let next = VertexDefId::from_index(1);
+        assert_eq!(vd, VertexDefId::from_index(0));
+        assert!(m.vertex_def(next).is_none());
+
+        let err = self_loop(&mut m, 1).unwrap_err();
+        assert!(err.to_string().contains("absorbed a curve"), "{err}");
+        assert!(m.take_self_loop_refusal().is_some(), "kept for the Boolean");
+        assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions(), &[vd]);
+        let def = m.vertex_def(vd).unwrap();
+        assert_eq!(def.position(), p, "not moved");
+        assert_eq!(def.tolerance(&k), 1e-4, "not grown");
+        assert!(m.vertex_def(next).is_none(), "the new one is deleted");
+    }
+
+    #[test]
+    fn a_split_already_overlapping_before_the_growth_is_not_refused() {
+        let k = Kernel::default();
+        let mut geo = Geo::default();
+        geo.curves.push(line([0.0, 0.0, 0.0], [5e-5, 0.0, 0.0]));
+        geo.curves
+            .push(line([1.01e-4, 0.0, 0.0], [1.01e-4, 5e-5, 0.0]));
+        geo.points.push(Point3::new(0.0, 0.0, 0.0));
+        let mut m = manager();
+        m.set_capture_distance(0.01);
+        let p = Point3::new(0.0, 0.0, 0.0);
+        let pv = m.new_proto_vertex(p, 1e-5).unwrap();
+        m.add_proto_vertex(pv);
+        let mut pc1 = PointClassification::new(1e-5);
+        pc1.set_class_object(PointClassType::Point, Some(H(0, ClassObjectKind::Point)));
+        let vd =
+            VertexDefinition::new(&k, &geo, &pc1, &region_pc(R1), p, 1e-4, 1e-9, None).unwrap();
+        let vd = m.insert_vertex_definition(vd).unwrap();
+        m.add_vertex_definition(pv, vd).unwrap();
+        let mut self_loop = |m: &mut ProtoTopologyManager<H>, c: usize| {
+            let mut cc = CurveClassification::new(&k);
+            cc.set_curve(Some(H(c, ClassObjectKind::Curve)), false);
+            let ivl = geo.curves[c].natural_interval();
+            let mut ci1 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
+            ci1.mid = region_pc(R0);
+            let mut ci2 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
+            ci2.mid = region_pc(R1);
+            let pe = m
+                .create_proto_edge(&k, &mut geo, Some(pv), Some(pv), &cc, &ci1, &cc, &ci2)
+                .unwrap();
+            m.resolve_proto_edge(&k, &mut geo, pe)
+        };
+        self_loop(&mut m, 0).unwrap();
+        assert!(m.proto_vertex(pv).unwrap().absorbed_proto_edge());
+        let next = VertexDefId::from_index(1);
+        assert_eq!(vd, VertexDefId::from_index(0));
+        assert!(m.vertex_def(next).is_none());
+
+        // The new definition at (1.01e-4, 5e-5) is within 2e-4 of the moved one even
+        // at the old tolerance, so the growth causes no overlap: split as upstream.
+        self_loop(&mut m, 1).unwrap();
+        assert!(m.take_self_loop_refusal().is_none());
+        assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions().len(), 2);
+        let def = m.vertex_def(vd).unwrap();
+        assert_eq!(def.position(), Point3::new(1.01e-4, 0.0, 0.0));
+        assert!(def.tolerance(&k) > 1e-4, "grown to cover the absorbed line");
     }
 
     #[test]
