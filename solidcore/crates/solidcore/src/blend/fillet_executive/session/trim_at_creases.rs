@@ -658,9 +658,10 @@ const SECTION_FIT: f64 = 1e-3;
 /// however shallow the crossing. Accepted only on the solved residual: the point on
 /// `curve` when its distance along the normal to the tangent plane at its foot is within
 /// `tol * 1e-6`, or within 64 eps of its own coordinates where those ulps are larger
-/// (iterated on while that still halves the residual). `None` when a drop or an evaluation fails, the curve runs along
-/// the tangent plane to rounding, or no step within 32 reaches the residual (a crossing
-/// past the curve's end, or none).
+/// (iterated on while that still halves the residual). `None` when the face has no
+/// surface, a drop or an evaluation fails, the curve runs along the tangent plane to
+/// rounding, or no step within 32 reaches the residual (a crossing past the curve's end,
+/// or none): no crossing, so the caller leaves the piece where it ends.
 fn crosses_surface(
     k: &Kernel,
     curve: &Curve,
@@ -669,8 +670,9 @@ fn crosses_surface(
     start: Point3,
     tol: f64,
 ) -> Result<Option<Point3>> {
-    let surface = face::p2::surface(b, f)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
+    let Some(surface) = face::p2::surface(b, f)? else {
+        return Ok(None);
+    };
     let plane = crate::blend::fillet_overflow::plane_of(k, surface)?;
     let domain = if plane.is_none() {
         Some(surface.natural_uv_domain_with_nurb(k)?)
