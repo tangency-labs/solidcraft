@@ -1724,62 +1724,6 @@ mod tests {
         (!per_point.is_empty()).then_some((per_point, tol))
     }
 
-    /// The rows whose torus is inside out (50 of the 92), offset to the wrong side
-    /// (tangency-labs/solidcraft#17091: `CreateOffsetSurface` reverses the offset for a swap
-    /// but not for inside out). The fix must remove this list.
-    const INSIDE_OUT_ROWS: [&str; 50] = [
-        "edge_swap_inside_offset",
-        "edge_swap_inside_rebuild",
-        "gen0358",
-        "gen0393",
-        "gen0482",
-        "gen0489",
-        "issue1433_torus_far_below_s0_i1",
-        "issue1433_torus_far_below_s1_i1",
-        "issue1433_torus_far_full_s0_i1",
-        "issue1433_torus_far_full_s1_i1",
-        "issue1433_torus_far_inner_s0_i1",
-        "issue1433_torus_far_inner_s1_i1",
-        "issue1433_torus_far_offseam_s0_i1",
-        "issue1433_torus_far_offseam_s1_i1",
-        "issue1433_torus_far_past180_s0_i1",
-        "issue1433_torus_far_past180_s1_i1",
-        "issue1433_torus_far_quarter_s0_i1",
-        "issue1433_torus_far_quarter_s1_i1",
-        "issue1433_torus_scaled_0.0001_swap",
-        "issue1433_torus_scaled_0.01_swap",
-        "issue1433_torus_scaled_100000_swap",
-        "issue1433_torus_scaled_100_swap",
-        "issue1433_torus_tilted_below_s0_i1",
-        "issue1433_torus_tilted_below_s1_i1",
-        "issue1433_torus_tilted_inner_s0_i1",
-        "issue1433_torus_tilted_inner_s1_i1",
-        "issue1433_torus_tilted_offseam_s0_i1",
-        "issue1433_torus_tilted_offseam_s1_i1",
-        "issue1433_torus_tilted_past180_s0_i1",
-        "issue1433_torus_tilted_past180_s1_i1",
-        "issue1433_torus_tilted_quarter_s0_i1",
-        "issue1433_torus_tilted_quarter_s1_i1",
-        "issue1433_torus_z_below_s0_i1",
-        "issue1433_torus_z_below_s1_i1",
-        "issue1433_torus_z_inner_s0_i1",
-        "issue1433_torus_z_inner_s1_i1",
-        "issue1433_torus_z_offseam_s0_i1",
-        "issue1433_torus_z_offseam_s1_i1",
-        "issue1433_torus_z_past180_s0_i1",
-        "issue1433_torus_z_past180_s1_i1",
-        "issue1433_torus_z_quarter_s0_i1",
-        "issue1433_torus_z_quarter_s1_i1",
-        "issue1490_r20_4_s1_i1_sw0_is_nurb",
-        "issue1490_r20_4_s1_i1_sw1_is_nurb",
-        "issue1490_r20_4_s1e3_i1_sw0_is_nurb",
-        "issue1490_r20_4_s1e3_i1_sw1_is_nurb",
-        "issue1490_r20_4_s1em3_i1_sw0_is_nurb",
-        "issue1490_r20_4_s1em3_i1_sw1_is_nurb",
-        "v_neg_io_swap_rebuild",
-        "v_zero_io_swap_rebuild",
-    ];
-
     /// Every golden row that moved with the WR-408/501/504 retirement holds the exact torus
     /// (the recogniser and the rebuild) or the exact minor circle (the horn iso curve).
     #[test]
@@ -1792,7 +1736,6 @@ mod tests {
         let k = Kernel::default();
         let mut res = Residuals::default();
         let mut seen = 0;
-        let mut excluded = Vec::new();
         let mut folded = Vec::new();
         for case in &cases {
             if !WR408_501_504_MOVED.contains(&case.name.as_str()) {
@@ -1806,23 +1749,12 @@ mod tests {
             let origin = v3(i.torus.origin);
             let axis = v3(i.torus.x).cross(v3(i.torus.y));
             let lengths = input_lengths(&i.torus);
-            // every row's torus offset by a quarter of its minor radius lies along its normal,
-            // except the inside-out tori (#17091), which must stay on the wrong side by
-            // exactly 2d until the fix flips this (the torus's own flag: a case given an
-            // explicit generator takes it from that circle, not from the input's flag)
+            // Every regular row's torus offset by a quarter of its minor radius lies
+            // along its own NURB normal, including inside-out and swapped surfaces.
             let d = 0.25 * minor;
-            // every grid point is checked on its own, so a row only partly on the wrong side
-            // fails both branches
             if let Some((per_point, off_tol)) = offset_off_normal(name, &k, &t, d, origin, axis) {
-                if t.inside_out() {
-                    excluded.push(name);
-                    for off_by in per_point {
-                        res.check("offset: inside-out row, every point off by 2d (#17091)", name, (off_by - 2.0 * d).abs(), off_tol);
-                    }
-                } else {
-                    for off_by in per_point {
-                        res.check("offset: source point moved along its normal is on the offset", name, off_by, off_tol);
-                    }
+                for off_by in per_point {
+                    res.check("offset: source point moved along its normal is on the offset", name, off_by, off_tol);
                 }
             } else {
                 folded.push(name);
@@ -1883,11 +1815,8 @@ mod tests {
                         .create_offset_surface(&k, *dist, *tol)
                         .expect("offset")
                         .unwrap_or_else(|| panic!("{name}: no offset"));
-                    // the offset torus as `CreateOffsetSurface` makes it: minor r + d, d negated
-                    // when u and v are swapped (not when inside out). This row is swapped and
-                    // inside out, so that is the wrong side (#17091, checked above); this
-                    // records what the kernel builds, and the rebuild must give it back
-                    let off_minor = minor + if i.torus.swap { -dist } else { *dist };
+                    // Each orientation reversal changes the normal's side of the tube.
+                    let off_minor = minor + if t.base().swap_uv() == t.inside_out() { *dist } else { -dist };
                     res.check("offset: minor radius", name, (off.minor_radius() - off_minor).abs(), 1e-12 * off_minor);
                     res.check("offset: major radius", name, (off.major_radius() - major).abs(), 1e-12 * major);
                     let od = off.base().step_uv_domain();
@@ -1939,9 +1868,7 @@ mod tests {
             }
         }
         assert_eq!(seen, WR408_501_504_MOVED.len(), "every moved case is checked");
-        excluded.sort_unstable();
-        eprintln!("offset check: {} inside-out rows off by 2d at every point, {} rows wholly folded: {folded:?}", excluded.len(), folded.len());
-        assert_eq!(excluded, INSIDE_OUT_ROWS.to_vec(), "the rows #17091 excludes");
+        eprintln!("offset check: {} rows checked, {} rows wholly folded: {folded:?}", seen - folded.len(), folded.len());
         assert_eq!(folded, ["gen0355"], "the rows with every grid point on the folded part");
         for (key, used) in &res.0 {
             eprintln!("largest residual / allowance: {used:.3e}  {key}");
