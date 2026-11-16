@@ -1302,6 +1302,12 @@ preference_settings! {
     /// A saved design's tab and its Browser top row are named after its file, so a Save As or a
     /// renamed file shows (#7267). Off: both show the name stored in the design, as before.
     names_from_file: bool = true, PAGE_DESIGN => check_id("settings.names_from_file");
+    /// Components pasted from another design (tab) go to the origin of the component they are
+    /// pasted into, the first one's origin on it and the others kept where they are from it,
+    /// each one's contents where they are from its own origin; a whole design copied and pasted
+    /// as a linked component goes there too (#17621). Off: copied components go where they were
+    /// in the world in their design, and a copied design under the pointer, as before.
+    paste_components_at_origin: bool = false, PAGE_DESIGN => check_id_help("prefs.paste_components_at_origin", "prefs.paste_components_at_origin_help");
     /// Reopen the saved designs that were open when the app was last closed (#5542).
     reopen_designs: bool = true, PAGE_GENERAL;
     /// Ask separately when closing several unsaved designs, as before grouped saving.

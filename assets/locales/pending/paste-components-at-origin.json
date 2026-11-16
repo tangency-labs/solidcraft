@@ -1,0 +1,6 @@
+{
+  "en": {
+    "prefs.paste_components_at_origin": "Paste components from another design at the origin",
+    "prefs.paste_components_at_origin_help": "A component or whole design pasted from another tab goes to the origin of the component it is pasted into, keeping its own origin. Several components move together, keeping their places relative to each other. Off: components go where they were in their own design, and a whole design goes under the pointer."
+  }
+}
