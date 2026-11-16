@@ -103,7 +103,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sketch")
         .contract(&CREATE_CONTRACT)
         .output(output_schema_for::<CreateResult>)
-        .params("plane: XY|XZ|YZ (sketch x, y along world +X, +Y on XY; +X, -Z on XZ; +Y, +Z on YZ) | construction plane name or id | {origin?: [x,y,z] numbers in mm, default [0,0,0] (not an expression), x_dir, y_dir} (in world coordinates unless frame says otherwise; a named plane is the active component's own) | {face: [world x,y,z], body?: exact world body, index?: face index, path?: complete occurrence ids, fixed?: bool}; new face attachments require a unique certified source (a flat face of a sheet metal body attaches to its panel instead, in the flat pattern's coordinates), fixed:true explicitly freezes the selected plane; offset?: expr, flip?: bool | \"x\" | \"y\" (not on a face: sketch the plane from its other side, so the normal and the default extrude direction are reversed; a half turn about the plane's own x or y axis, true picks the one keeping the sketch's y axis upward; offset still moves along the unflipped normal), frame?: world (default) | component (which coordinates an explicit plane is in; the reply's `frame` says which, with a `note` when the active component is moved or turned), project_edges?: bool, activate_part?: bool (default false; on a face of a body of another component than the active one: activate that component at the picked placement first, as component.activate would, and make the sketch there; it stays active afterwards and the reply's `activated` names it), name?"),
+        .params("plane: XY|XZ|YZ (sketch x, y along world +X, +Y on XY; +X, -Z on XZ; +Y, +Z on YZ) | construction plane name or id | {origin?: [x,y,z] in mm, default [0,0,0], each a number or a length expression (an origin whose expressions name parameters is kept, and the sketch follows them when they change), x_dir, y_dir} (in world coordinates unless frame says otherwise; a named plane is the active component's own) | {face: [world x,y,z], body?: exact world body, index?: face index, path?: complete occurrence ids, fixed?: bool}; new face attachments require a unique certified source (a flat face of a sheet metal body attaches to its panel instead, in the flat pattern's coordinates), fixed:true explicitly freezes the selected plane; offset?: expr, flip?: bool | \"x\" | \"y\" (not on a face: sketch the plane from its other side, so the normal and the default extrude direction are reversed; a half turn about the plane's own x or y axis, true picks the one keeping the sketch's y axis upward; offset still moves along the unflipped normal), frame?: world (default) | component (which coordinates an explicit plane is in; the reply's `frame` says which, with a `note` when the active component is moved or turned), project_edges?: bool, activate_part?: bool (default false; on a face of a body of another component than the active one: activate that component at the picked placement first, as component.activate would, and make the sketch there; it stays active afterwards and the reply's `activated` names it), name?"),
     CommandSpec::new("sketch.edit", "Edit Sketch", crate::checked!("sketch.edit", edit_sketch))
         .noundo().icon("sketch")
         .contract(&EDIT_CONTRACT).output(output_schema_for::<EditResult>)
@@ -221,14 +221,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&SLOT_CENTER_TO_CENTER_CONTRACT)
         .output(output_schema_for::<crate::schema::sketch_shapes::SlotResult>)
-        .params(concat!("p0, p1: arc centres, width; returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: arc centres, width: number or expression (an expression naming a parameter is a dimension driven by it); returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.slot.overall", "Overall Slot", crate::checked!("sketch.slot.overall", slot_overall))
         .at("SKETCH", "CREATE")
         .icon("slot_overall")
         .enabled(in_sketch)
         .contract(&SLOT_OVERALL_CONTRACT)
         .output(output_schema_for::<crate::schema::sketch_shapes::SlotResult>)
-        .params(concat!("p0, p1: overall ends, width; returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: overall ends, width: number or expression (an expression naming a parameter is a dimension driven by it); returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.point", "Point", crate::checked!("sketch.point", draw_point)).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).contract(&POINT_CONTRACT).output(output_schema_for::<PointResult>).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), \"x:<a>+<b>:x,y\" (at the crossing of two curves near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", crate::checked!("sketch.dimension", dimension))
         .at("SKETCH", "CREATE")
@@ -949,11 +949,39 @@ pub(crate) const PLANE_REF_FORMS: &str = "`plane` must be XY, XZ, YZ, a construc
 pub(crate) fn custom_plane_form(v: &Value) -> std::result::Result<Plane, &'static str> {
     let origin = match v.get("origin") {
         None | Some(Value::Null) => Vec3::ZERO,
-        Some(o) => vec3(o).ok_or("plane `origin` must be three numbers [x, y, z] in mm (expressions are not evaluated here)")?,
+        Some(o) => vec3(o).ok_or("plane `origin` must be three numbers [x, y, z] in mm")?,
     };
     let x = v.get("x_dir").and_then(vec3).ok_or("plane needs x_dir")?;
     let y = v.get("y_dir").and_then(vec3).ok_or("plane needs y_dir")?;
     Plane::new(origin, x, y).ok_or("degenerate plane")
+}
+
+/// An explicit plane whose origin has length expressions (`{origin: ["0 mm", "station", 0], x_dir,
+/// y_dir}`, #8192): kept as expressions where they name parameters, so the sketch follows them.
+fn expressed_plane(s: &Session, v: &Value, cmd: &str) -> Result<PlaneRef> {
+    let origin = super::features::point_param(s, v, "origin", cmd)?.unwrap_or_default();
+    let mut at = [0.0; 3];
+    for (slot, e) in at.iter_mut().zip(&origin) {
+        *slot = s.doc.eval(e, Kind::Length).map_err(|err| bad(cmd, format!("plane origin: {err}")))?;
+    }
+    let mut numbers = v.clone();
+    numbers["origin"] = json!(at);
+    let plane = custom_plane_form(&numbers).map_err(|why| bad(cmd, why))?;
+    if origin.iter().all(|e| solidcraft_doc::expr::is_literal(e)) {
+        return Ok(PlaneRef::Custom { plane });
+    }
+    Ok(PlaneRef::Placed { origin, x_dir: plane.x, y_dir: plane.y })
+}
+
+/// [`plane_ref`] for the commands whose explicit plane has an origin of numbers only
+/// (`canvas.insert`, `canvas.decal`, the browser's): length expressions are refused as before.
+pub(super) fn plane_ref_numbers(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
+    if let Some(v @ Value::Object(o)) = p.get("plane")
+        && !o.contains_key("face")
+    {
+        custom_plane_form(v).map_err(|why| bad(cmd, why))?;
+    }
+    plane_ref(s, p, cmd)
 }
 
 pub(super) fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
@@ -964,6 +992,8 @@ pub(super) fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
         Some(v @ Value::Object(o)) => {
             if o.contains_key("face") {
                 face::capture(s, v, cmd)?
+            } else if o.get("origin").is_some_and(|origin| origin.as_array().is_some_and(|a| a.iter().any(Value::is_string))) {
+                expressed_plane(s, v, cmd)?
             } else {
                 PlaneRef::Custom { plane: custom_plane_form(v).map_err(|why| bad(cmd, why))? }
             }
@@ -1855,6 +1885,41 @@ pub(super) fn length_expr(s: &Session, p: &Value, key: &str, cmd: &str) -> Resul
     Ok((v, driven.then_some(e)))
 }
 
+/// A slot's `width`, read as [`circle_size`] reads a circle's radius (#15857): a number, or an
+/// expression over the design's parameters, which is then a diameter dimension on a round end
+/// (the parameter `dN` holds the expression) so that the slot follows it. A bare number typed as
+/// text reads in the design's unit, and an expression naming no parameter is just the number it
+/// comes to. Returns the width, and the expression when it drives the width.
+pub(super) fn slot_width(s: &Session, p: &Value, cmd: &str) -> Result<(f64, Option<String>)> {
+    let (w, driven) = match p.get("width") {
+        Some(Value::String(_)) => {
+            let e = s.doc.with_design_unit(req_expr(cmd, p, "width")?.as_str(), Kind::Length);
+            let w = s.doc.eval(&e, Kind::Length).map_err(|e| bad(cmd, format!("width: {e}")))?;
+            let driven = !solidcraft_doc::expr::references(&e).is_empty();
+            (w, driven.then_some(e))
+        }
+        // A value that is there but is no number is not a missing one.
+        Some(v) if !v.is_null() && num(p, "width").is_none() => return Err(bad(cmd, "`width` must be a number")),
+        _ => (num(p, "width").unwrap_or(0.0), None),
+    };
+    if w > 1e-9 && w < 1e9 { Ok((w, driven)) } else { Err(bad(cmd, "`width` must be positive")) }
+}
+
+/// The diameter dimension on round end `cap` that a slot whose width was typed as `driven` (an
+/// expression naming parameters) gets: the slot follows the parameters (#15857).
+pub(super) fn slot_width_dimension(
+    sk: &mut Sketch,
+    doc: &mut solidcraft_doc::Document,
+    cap: usize,
+    w: f64,
+    driven: Option<&str>,
+) -> Result<Option<String>> {
+    let Some(e) = driven else { return Ok(None) };
+    let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
+    let pname = doc.new_model_param(e, &unit);
+    Ok(Some(sk.add_constraint(ConstraintKind::Diameter { c: cap, value: w }, Some(pname))?))
+}
+
 fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.circle.center";
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
@@ -2132,18 +2197,27 @@ fn arc_centre(sk: &Sketch, a: usize) -> Option<usize> {
 /// A straight slot: two lines and two equal arc caps, tangent where they meet, plus its middle
 /// (#7908): a point held at the midpoint of a construction line between the arc centres, so it
 /// stays in the middle however the slot is edited or dragged. The middle adds no freedom.
-pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<Value> {
-    let reply = slot_parts(s, p, cmd, c0, c1, w)?;
+/// `driven` is the width's expression when it names parameters ([`slot_width`]).
+pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64, driven: Option<&str>) -> Result<Value> {
+    let reply = slot_parts(s, p, cmd, c0, c1, w, driven)?;
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// What [`slot`] adds: the curve and constraint ids, and the sketch's solve.
-pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<crate::schema::sketch_shapes::SlotResult> {
+pub(super) fn slot_parts(
+    s: &mut Session,
+    p: &Value,
+    cmd: &str,
+    c0: Vec2,
+    c1: Vec2,
+    w: f64,
+    driven: Option<&str>,
+) -> Result<crate::schema::sketch_shapes::SlotResult> {
     let h = w / 2.0;
     let d = (c1 - c0).normalized().ok_or_else(|| bad(cmd, "the slot ends must differ"))?;
     let n = d.perp();
     let mut extra = (None, None);
-    let (out, info) = draw(s, p, cmd, |sk, _| {
+    let (out, info) = draw(s, p, cmd, |sk, doc| {
         let pts: Vec<usize> =
             [c0 - n * h, c1 - n * h, c1 + n * h, c0 + n * h].iter().map(|q| sk.add_point(*q, None)).collect::<std::result::Result<_, _>>()?;
         let (p0, p1, p2, p3) = (pts[0], pts[1], pts[2], pts[3]);
@@ -2163,6 +2237,7 @@ pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Ve
         }
         let mid = sk.add_point((c0 + c1) * 0.5, None)?;
         cons.push(add_c(sk, ConstraintKind::Midpoint { p: mid, l: axis })?);
+        cons.extend(slot_width_dimension(sk, doc, a1, w, driven)?);
         extra = (sk.curves.get(axis).map(|c| c.id.clone()), sk.points.get(mid).map(|q| q.id.clone()));
         Ok((ids_of(sk, &[l1, a1, l2, a0]), cons))
     })?;
@@ -2176,19 +2251,19 @@ pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Ve
 fn slot_c2c(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.slot.center_to_center";
     let (a, b) = (req_vec2(cmd, p, "p0")?, req_vec2(cmd, p, "p1")?);
-    let w = num(p, "width").filter(|w| *w > 1e-9).ok_or_else(|| bad(cmd, "`width` must be positive"))?;
-    slot(s, p, cmd, a, b, w)
+    let (w, driven) = slot_width(s, p, cmd)?;
+    slot(s, p, cmd, a, b, w, driven.as_deref())
 }
 
 fn slot_overall(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.slot.overall";
     let (a, b) = (req_vec2(cmd, p, "p0")?, req_vec2(cmd, p, "p1")?);
-    let w = num(p, "width").filter(|w| *w > 1e-9).ok_or_else(|| bad(cmd, "`width` must be positive"))?;
+    let (w, driven) = slot_width(s, p, cmd)?;
     let d = (b - a).normalized().ok_or_else(|| bad(cmd, "the slot ends must differ"))?;
     if a.dist(b) <= w {
         return Err(bad(cmd, "the slot must be longer than it is wide"));
     }
-    slot(s, p, cmd, a + d * (w / 2.0), b - d * (w / 2.0), w)
+    slot(s, p, cmd, a + d * (w / 2.0), b - d * (w / 2.0), w, driven.as_deref())
 }
 
 fn draw_point(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3704,7 +3779,17 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
         }
         // How far the value is from what the geometry measures now: zero for a dimension that
         // only restates what the sketch already has.
-        let want = vals.get(&pname).and_then(|v| v.to_kind(if is_angle { Kind::Angle } else { Kind::Length }).ok());
+        let mut want = vals.get(&pname).and_then(|v| v.to_kind(if is_angle { Kind::Angle } else { Kind::Length }).ok());
+        // A negative linear offset flips to the opposite side of the reference and keeps its magnitude.
+        if !is_angle
+            && let Some(w) = want
+            && w < 0.0
+            && sk.flip_for_negative_dimension(&k, -w)
+        {
+            let flipped_expr = if solidcraft_doc::expr::references(&e).is_empty() { doc.design_length(-w).1 } else { format!("-({e})") };
+            doc.change_param(&pname, &flipped_expr, None, None)?;
+            want = Some(-w);
+        }
         residual = want.map(|w| (w - cur).abs()).filter(|r| r.is_finite());
         // The first length dimension of a sketch with nothing sized yet scales it (#1365).
         // A sketch axis can also be measured by its fixed endpoints. In that case, only use

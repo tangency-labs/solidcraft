@@ -259,6 +259,8 @@ that may not be settled yet (`ResolveOverlappingProtoEdges` re-parametrises over
 first points can lie 18 mm apart in an outset of `Boolean/extrudeHoles1.smb`), so their distance
 proves no separation.
 
+**A curve that runs along an edge without crossing it.** With `classify_edge_interval` (WR-305) an interval between two points on a face's boundary edge whose middle lies within the band of that edge is on the edge, not inside the face. An end the edge intersections find no crossing for (an arc 1.4e-11 from another arc, ending 2.8e-5 short of that arc's corner) used to stay unclassified, so the interval was imprinted as a second edge beside the first; now such an end counts as on the edge when it lies within the band of it and clear of its vertices, the curve is tangent to the edge (within the angle tolerance) at both ends of the interval, and the whole curve over the interval is proved within the band of the edge on control points: the curve piece's control points against the chord of its ends, those ends against the edge piece's ends, and the edge piece's control points against its own chord, rounding counted (`piece_within_band`); the end is then classified to the edge with its parameter on it (`CurveClassification::classify_edge_interval`, `intersect/curve_class/p3.rs`). Without the tangency (a curve that crosses the edge at the interval's classified end and stops a hair past it, whose short piece lies within the band whatever its angle) or the proof (another curve kind, or a curve that bows out of the band between its ends) the end stays unclassified. An interval whose ends both classify onto the edge is still decided by WR-305 alone (a straight piece along a straight edge by its ends, a curved one by its midpoint).
+
 This is the problem Segal's tolerant modeller and Jackson's local tolerances address [9, 10]: two
 entities within tolerance are one, and a decision across that band has to be made once and kept by
 every later step. The port's strip rule is one such decision; a general one for curved faces within
@@ -292,6 +294,46 @@ What the port does today:
   B-spline on a plane) is still read as coincident once its relative radius passes about 1.7e7
   times the sum of the two edges' tolerances, 330 mm at 1e-5 each (`query/edge.rs`, the 0.01°
   rule over eight rounds).
+- **Circles a hair less than tangent.** Two coplanar circles that overlap past touching by δ
+  cross at two points `2√(2δ r1 r2 / (r1 ± r2))` apart (`2√(rδ)` for equal radii from
+  outside), far beyond δ, while the circles stay within δ of each other between them; each
+  crossing is fixed along the wall only to the tolerance over the crossing angle, so the two
+  cannot be told apart. `circle_coplanar_circle_intersect_in_contact`
+  (`geom/geom_utility/p1.rs`) takes an overlap below a contact tolerance of its own as one
+  touching point midway between their nearest points, apart from the near-miss band in which
+  circles that far apart touch. On the boolean's path every site that decides the contact
+  passes the same contact tolerance, `contact_tol_3d` (`geom/tol.rs`: the system zone
+  tolerance, 1e-5 by default, not the edges' and faces' grown tolerances, so the same holes
+  give the same topology whatever came before; the touching point lies δ/2 from each operand,
+  within the approximation tolerance the intersection curves through it are held to): the wall
+  intersection of parallel cylinders that both bound faces (`surface/cone/p3.rs`), the
+  circles of an edge and a face's intersection curve (`curve/ellipse/p2.rs` through
+  `intersect/curve_class/p9.rs`) and the curve/surface classifier's osculating circles where
+  an edge meets a face (`surface/surface/p4.rs`). Two holes a hair less than tangent then
+  touch along one line and at one point on each rim. Bare curves and surfaces keep upstream's
+  zero: their radius-relative bands are a search heuristic, not a modelling tolerance. Holes
+  overlapping by more than the zone tolerance and less than the intersection tolerance (twice
+  it) cross in two lines at every site and are still refused as not a solid, as before; with
+  the intersection tolerance as the contact tolerance they came out a valid solid that kept the
+  second tool whole, as a void.
+  Parallel cones (drill points) are met by the marching intersection and are not decided this
+  way, nor are coplanar faces bounded by such circles.
+- **A line a hair inside a circle.** A line in a circle's plane, δ inside the circle, crosses
+  it at two points `2√(2rδ)` apart and stays within δ of it between them, as two circles do.
+  `line_coplanar_circle_intersect_distinct` (`geom/geom_utility/p1.rs`) takes an overlap below
+  its contact tolerance as one touching point at the chord's midpoint, unless the whole circle
+  lies within that tolerance of the line. `Ellipse::intersect_with_line` (`curve/ellipse/p2.rs`)
+  moves that point to an end of the arc or the line that lies on the stretch between the two
+  crossings, so an arc that starts on the line there touches it at its start. The two sites
+  above that pass `contact_tol_3d` for circles pass it when one of the two is a line: an edge
+  against a face's intersection curve
+  (`curve/ellipse/p2.rs` through `intersect/curve_class/p9.rs`), and the curve/surface
+  classifier's line against an osculating circle where an edge meets a face
+  (`surface/surface/p4.rs`). A flat side a hair inside a round tangent to it then touches the
+  round's end circle at one point. A line tilted out of the circle's plane keeps its crossings:
+  it meets the circle where it pierces the plane, and the chord's midpoint lies off the line.
+  The other line/circle callers keep upstream's zero. The touching point is found only where
+  it lies on both curves' intervals.
 
 **The refusal that names a tangent contact.** The kernel's boolean has none today. The `ssi` crate
 refuses a contact it cannot prove with `Error::Tangent`, code `BOOLEAN_TANGENT`, carrying where it
@@ -398,11 +440,11 @@ A reviewer can check each of these on a change to the boolean.
   `known_failing.json` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
   returns 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16; #15669).
 - Opt-in fixes for the cases in §5, §6 and §8: `boolean_union_refuses_solid_leak`,
-  `boolean_outer_shell_first`, `boolean_cleanup_removes_slits`, `keep_operand_uv_trims`,
-  `boolean_vertex_by_best_crossing`, `boolean_splits_definition_across_split`
-  (`solidcore/src/kernel.rs`). Every boolean, 3D included, skips the face pairs whose boxes lie
-  apart, and a new planar face leaves in place the inner loops whose boxes lie outside its outer
-  loop's box (WR-527), always.
+  `keep_operand_uv_trims`, `boolean_vertex_by_best_crossing` (`solidcore/src/kernel.rs`).
+  Always on: the outer shell first, the clean-up of slits and the split of a coincident
+  definition across a split point (WR-533). Every boolean, 3D included, skips the face pairs
+  whose boxes lie apart, and a new planar face leaves in place the inner loops whose boxes lie
+  outside its outer loop's box (WR-527), always.
 
 **Open.**
 - Retiring those flags: each fix on by default with its old path deleted (AGENTS.md §4b).

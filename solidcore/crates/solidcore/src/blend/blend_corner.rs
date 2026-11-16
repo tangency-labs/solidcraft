@@ -70,9 +70,11 @@ use crate::topology::{edge, Brep, EdgeId, EdgeuseId, VertexId};
 pub mod ball;
 pub mod chamfer;
 pub mod end;
+pub mod join_gap;
 pub mod mixed;
 pub mod on_face;
 pub(crate) mod piece;
+pub mod rollover;
 pub mod setback;
 pub mod swept;
 

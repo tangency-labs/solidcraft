@@ -104,18 +104,21 @@
       "ungraded": {}
     },
     "fillets": {
-      "cases": 283,
+      "cases": 291,
       "chain": {
         "1": 11,
         "13": 4,
+        "14": 1,
+        "17": 1,
         "2": 6,
         "4": 243,
+        "5": 6,
         "7": 2,
         "8": 1
       },
-      "expressible": 60,
+      "expressible": 68,
       "not_expressible": 16,
-      "operation_expressible": 267,
+      "operation_expressible": 275,
       "reasons": {
         "SolidCraft has no command for it yet": 2,
         "refused or failed in SolidCraft, not in a kernel operation": 14
@@ -134,18 +137,21 @@
       }
     },
     "frames": {
-      "cases": 6,
+      "cases": 7,
       "chain": {
         "1": 4,
+        "17": 1,
         "2": 1
       },
       "expressible": 5,
       "not_expressible": 1,
-      "operation_expressible": 5,
+      "operation_expressible": 6,
       "reasons": {
         "refused or failed in SolidCraft, not in a kernel operation": 1
       },
-      "ungraded": {}
+      "ungraded": {
+        "results": 1
+      }
     },
     "history": {
       "cases": 30,

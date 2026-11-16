@@ -69,13 +69,13 @@ fn default_lists_every_field_off_in_declaration_order() {
 #[test]
 fn one_flag_on_is_exactly_that_entry() {
     let mut newest = UpstreamFixes::default();
-    newest.face_points_span_domain = true;
-    assert_eq!(turned_on(&newest), ["face_points_span_domain"]);
+    newest.surface_parallel_to_vector_checks = true;
+    assert_eq!(turned_on(&newest), ["surface_parallel_to_vector_checks"]);
     assert_eq!(listed(&newest), debug_fields(&newest));
 
     let mut first = UpstreamFixes::default();
-    first.curve_loop_start_after_previous_end = true;
-    assert_eq!(turned_on(&first), ["curve_loop_start_after_previous_end"]);
+    first.fillet_trim_status = true;
+    assert_eq!(turned_on(&first), ["fillet_trim_status"]);
     assert_eq!(listed(&first), debug_fields(&first));
 }
 

@@ -271,6 +271,14 @@ impl Vec3 {
         (self.x * o.x) + (self.y * o.y) + (self.z * o.z)
     }
 
+    /// How far this point stands from `origin` along `direction`: `(self - origin) . direction`,
+    /// as many lengths as `direction` is long (a unit direction gives the distance itself).
+    /// Negative behind `origin`.
+    #[must_use]
+    pub fn distance_along(self, origin: Self, direction: Self) -> f64 {
+        (self - origin).dot(direction)
+    }
+
     /// Cross product `self × o` (upstream `operator*` on two vectors).
     #[must_use]
     pub fn cross(self, o: Self) -> Self {
@@ -967,6 +975,14 @@ impl DivAssign<f64> for Vec3 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn distance_along_is_signed_and_ignores_the_sideways_offset() {
+        let (o, d) = (Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 0.0));
+        assert!((Vec3::new(9.0, 6.0, -4.0).distance_along(o, d) - 4.0).abs() < 1e-12);
+        assert!((Vec3::new(1.0, -1.0, 3.0).distance_along(o, d) + 3.0).abs() < 1e-12);
+        assert_eq!(o.distance_along(o, d), 0.0);
+    }
+
     use super::*;
 
     /// Fuzz regression: when `|v|^2` overflows, the unit vector underflows to

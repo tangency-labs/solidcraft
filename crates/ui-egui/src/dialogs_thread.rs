@@ -647,7 +647,12 @@ fn up_to(inputs: &[SelInput]) -> Option<Value> {
 /// The face's size in the dialog's form, for an automatic size.
 pub(crate) fn suggested(s: &Session, picks: &[Sel], o: &Options) -> Option<String> {
     picks.first().and_then(|sel| match sel {
-        Sel::Face { point, .. } => solidcraft_engine::doc::suggested_thread_in(&crate::open_meshing::session_world(s), *point, o.form).ok(),
+        Sel::Face { body, point, .. } => {
+            let world = crate::open_meshing::session_world(s);
+            let mut state = solidcraft_engine::doc::ModelState::default();
+            state.bodies = world.bodies.iter().filter(|candidate| candidate.name == *body).cloned().collect();
+            solidcraft_engine::doc::suggested_thread_in(&state, *point, o.form).ok()
+        }
         _ => None,
     })
 }
@@ -675,6 +680,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
         old_auto_size: _,
         additional_faces,
         target_bodies,
+        single_face_selection,
     } = kind
     else {
         return;
@@ -725,7 +731,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
     // Face names follow the geometry walk: primary, optional Up To face, then added faces.
     let added_at = 1 + usize::from(matches!(up_to, Some(ThreadLimit::Face(_))));
     if let Some(inp) = d.inputs.first_mut() {
-        inp.multi = !additional_faces.is_empty() || !target_bodies.is_empty();
+        inp.multi = !additional_faces.is_empty() || (!single_face_selection && !target_bodies.is_empty());
         inp.items = std::iter::once((0, face))
             .chain(additional_faces.iter().enumerate().map(|(index, pick)| (added_at + index, pick)))
             .filter_map(|(slot, pick)| refill(slot, pick.0))
@@ -757,7 +763,6 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
         length: length.as_ref().map(expr).unwrap_or_default(),
         suggested: None,
         of: Vec::new(),
-        grouped: !target_bodies.is_empty(),
         options,
     };
 }

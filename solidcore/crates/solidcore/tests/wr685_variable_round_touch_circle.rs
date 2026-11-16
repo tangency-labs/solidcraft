@@ -217,7 +217,7 @@ fn a_progressive_spline_round_builds() {
 
 /// The box 10 x 20 x 30 after the linear law `r0` to `r1` from y = 0 rounds its top edge
 /// x = 0, z = 30: the rail on the 10 wide top runs past its far edge, a cliff overflow
-/// (`fixes.fillet_cliff_overflow`, WR-631) whose round must hold its law
+/// (WR-631) whose round must hold its law
 /// (`sm_HoldsItsLaw`).
 fn cliff_round(mut k: Kernel, r0: f64, r1: f64) -> Result<f64, (String, Option<NoRoomReason>)> {
     let mut b = create_box(&mut k, Vec3::ZERO, 10.0, 20.0, 30.0).unwrap();
