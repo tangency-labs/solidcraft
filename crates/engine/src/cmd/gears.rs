@@ -83,7 +83,7 @@ fn build(s: &mut Session, g: &GearSpec, width: f64, cmd: &str) -> Result<()> {
         }
         let chunks: Vec<&[usize]> = ids.chunks(flank).collect();
         for (i, chunk) in chunks.iter().enumerate() {
-            let kind = CurveKind::Spline { pts: chunk.to_vec(), control: false, degree: 3, periodic: false, nurbs: None };
+            let kind = CurveKind::Spline { pts: chunk.to_vec(), control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() };
             sk.add_curve(kind, None).map_err(|e| bad(cmd, e.to_string()))?;
             // After a right flank comes the tip; after a left flank, the root.
             let (from, to) = (chunk[chunk.len() - 1], chunks[(i + 1) % chunks.len()][0]);
