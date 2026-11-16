@@ -75,6 +75,7 @@ pub mod sweep;
 pub mod tangent;
 pub mod trim;
 pub mod untrim;
+pub mod vertex_meet;
 
 pub use blend::{
     band_room, blend, blend_ordered, carried_faces, carried_faces_ordered, chamfer_sides,

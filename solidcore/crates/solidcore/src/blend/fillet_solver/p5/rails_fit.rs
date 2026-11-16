@@ -20,7 +20,7 @@
 //! overflow (a convex blend built over a cliff, the material it removes taken from the
 //! body: `crate::blend::fillet_cliff_overflow`). The
 //! fork's `IsKnifeEdge` ([`is_knife_edge`], `e418750`, WR-665) is here too, used by
-//! `SmFilletCorner::Create` with `fixes.fillet_corner_per_vertex_fan`. The
+//! `SmFilletCorner::Create`. The
 //! nearest-edge search of `sm_InsideMaterial` keeps the first of equally near edges, in
 //! the face's edge order, as the fork's strict `<` does. There is no recursion.
 
