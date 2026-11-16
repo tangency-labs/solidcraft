@@ -3209,6 +3209,41 @@ fn raw_host_shared_move_menu_is_a_pointer_independent_alternative_to_drag() {
 }
 
 #[test]
+fn raw_host_move_entries_say_they_move_only_the_tab_in_a_section_with_tabs() {
+    // History joined with the Browser: "Bottom" read as moving both tabs (#17217).
+    let mut h = PanelMountHarness::new(false).unwrap();
+    open_editor(&mut h);
+    let mut raw = RawPanelHost::new(h, 1.0);
+    raw.frame(Vec::new(), false);
+    let label = |raw: &RawPanelHost, zone: Zone| {
+        let frame = raw.host.frame().unwrap();
+        let target = HostControlTarget::Shared { instance: id("editor"), action: HostSharedAction::Move(zone) };
+        frame.controls.iter().find(|control| control.target == target).map(|control| control.accessible_name.clone())
+    };
+    raw.menu(id("editor"));
+    assert_eq!(label(&raw, Zone::Bottom).as_deref(), Some("Bottom"), "a panel alone moves as a whole");
+    raw.content
+        .dispatch(vec![
+            fixture_open("fixture.log", "landing", "landing-section", Zone::Left, 1).unwrap(),
+            Mutation::Move { instance: id("editor"), destination: Destination::JoinTab { section: section("landing-section"), index: 1 } },
+            Mutation::Activate { instance: id("editor") },
+        ])
+        .unwrap();
+    raw.frame(Vec::new(), false);
+    raw.frame(Vec::new(), false);
+    if raw.host.frame().unwrap().menu_bounds.is_none() {
+        raw.menu(id("editor"));
+    }
+    assert_eq!(label(&raw, Zone::Bottom).as_deref(), Some("Move tab to bottom"));
+    assert_eq!(label(&raw, Zone::Floating).as_deref(), Some("Float tab"));
+    let before = raw.content.runtime.layout().inspect().revision;
+    raw.click(HostControlTarget::Shared { instance: id("editor"), action: HostSharedAction::Move(Zone::Bottom) }, true);
+    assert_eq!(raw.content.runtime.layout().inspect().revision, before + 1);
+    assert_eq!(raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location.zone(), Zone::Bottom);
+    assert_eq!(raw.content.runtime.layout().layout().containing(&id("landing")).unwrap().location.zone(), Zone::Left, "the other tab stays");
+}
+
+#[test]
 fn raw_host_header_collapse_restore_and_hide_retain_the_draft_and_tick_hidden_services() {
     let mut h = PanelMountHarness::new(false).unwrap();
     open_editor(&mut h);
