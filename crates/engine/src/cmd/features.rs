@@ -15,8 +15,8 @@ use super::{CommandSpec, not_in_sketch};
 use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, req_expr, str_, string_list, string_list_or_default, vec2, vec3};
 use crate::schema::features::SweepParams;
 use crate::schema::features::{
-    AppliedRadius, BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, DraftParams, ExtrudeParams,
-    FeatureNotice, FeatureResult, FilletParams, FilletResult, MoveParams, MoveResult, NoticeAction, OffsetPlaneParams, PipeParams,
+    AppliedRadius, BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, DraftParams,
+    ExtrudeParams, FeatureNotice, FeatureResult, FilletParams, FilletResult, MoveParams, MoveResult, NoticeAction, OffsetPlaneParams, PipeParams,
     PlaneAtAngleParams, PressPullParams, PressPullResult, RevolveParams, ScaleParams, ShellParams, SphereParams, TorusParams,
 };
 use crate::schema::features::{PatternCircularParams, PatternCircularResult};
