@@ -9494,13 +9494,15 @@ fn nearest_object_face(b: &ModelBody, p: Vec3, normal: Option<Vec3>) -> Option<(
 }
 
 /// The face a To / From Object point stands for, `(body index, face index)`: the face its
-/// stored `name` finds when the point lies on it (evaluation has moved the point onto its named
-/// face), else the nearest face at the point. The name settles a tie: in an assembly a part of
-/// another component may rest on the target and touch it at the point.
+/// stored `name` finds, else the nearest face at the point. The name settles a tie: in an
+/// assembly a part of another component may rest on the target and touch it at the point.
+/// Evaluation has moved the point onto its named face. A pattern's or mirror's copy keeps the
+/// point where the feature found that face before it ran (#15054), and a later feature may have
+/// cut the face away there: the copy still ends at the face the feature names, as the feature
+/// did, not at a face that later feature left at the point, such as a chamfer's slope (#17692).
 fn object_face(st: &ModelState, name: Option<&str>, p: Vec3, normal: Option<Vec3>) -> Option<(usize, usize)> {
     if let Some(n) = name.filter(|n| !n.is_empty())
         && let Some(hit) = crate::naming::locate_face(st, n, p)
-        && hit.on_point
     {
         return Some((hit.body, hit.face));
     }
