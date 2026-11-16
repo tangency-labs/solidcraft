@@ -1,0 +1,34 @@
+{
+  "en": {
+    "cmd.file_insert_gerber": "Insert PCB (Gerber)",
+    "help.file.insert_gerber": "Builds a printed circuit board from its fabrication files: the Gerber board outline and the Excellon drill files become a sketch and a board body of the thickness you set, with every hole and slot cut through. Use it to design an enclosure or a bracket around a real board."
+  },
+  "ar": {
+    "cmd.file_insert_gerber": "إدراج لوحة دوائر مطبوعة (Gerber)",
+    "help.file.insert_gerber": "يبني لوحة دوائر مطبوعة من ملفات تصنيعها: يصبح مخطط اللوحة في ملف Gerber وملفات الثقب Excellon رسمًا تخطيطيًا وجسم لوحة بالسماكة التي تحددها، مع قطع كل ثقب وشق عبرها. استخدمه لتصميم غلاف أو حامل حول لوحة حقيقية."
+  },
+  "he": {
+    "cmd.file_insert_gerber": "הוספת מעגל מודפס (Gerber)",
+    "help.file.insert_gerber": "בניית מעגל מודפס מקובצי הייצור שלו: קו המתאר של הלוח בקובץ Gerber וקובצי הקידוח Excellon הופכים לסקיצה ולגוף לוח בעובי שבחרתם, וכל חור וחריץ נחתכים לכל עומקו. כך מתכננים מארז או תושבת סביב לוח אמיתי."
+  },
+  "ja": {
+    "cmd.file_insert_gerber": "基板を挿入 (Gerber)",
+    "help.file.insert_gerber": "製造用ファイルからプリント基板を作ります。Gerber の基板外形と Excellon のドリル ファイルが、スケッチと指定した厚さの基板ボディになり、すべての穴とスロットが貫通して開けられます。実際の基板に合わせてケースやブラケットを設計するときに使います。"
+  },
+  "vi": {
+    "cmd.file_insert_gerber": "Chèn mạch in (Gerber)",
+    "help.file.insert_gerber": "Dựng bảng mạch in từ các tệp sản xuất của nó: đường viền bảng mạch Gerber và các tệp khoan Excellon trở thành một bản phác thảo và một thân khối bảng mạch với độ dày bạn đặt, mọi lỗ và rãnh đều được cắt xuyên qua. Dùng để thiết kế vỏ hoặc giá đỡ quanh một bảng mạch thật."
+  },
+  "zh": {
+    "cmd.file_insert_gerber": "插入电路板 (Gerber)",
+    "help.file.insert_gerber": "根据制造文件构建印制电路板：Gerber 板框和 Excellon 钻孔文件生成一个草图和一个指定厚度的电路板实体，所有孔和槽都被贯穿切出。用于围绕实际电路板设计外壳或支架。"
+  },
+  "de": {
+    "cmd.file_insert_gerber": "Leiterplatte einfügen (Gerber)",
+    "help.file.insert_gerber": "Baut eine Leiterplatte aus ihren Fertigungsdaten: Die Gerber-Platinenkontur und die Excellon-Bohrdateien werden zu einer Skizze und einem Platinenkörper in der gewählten Dicke, jede Bohrung und jeder Schlitz durchgehend ausgeschnitten. Damit konstruieren Sie ein Gehäuse oder einen Halter um eine echte Platine."
+  },
+  "ko": {
+    "cmd.file_insert_gerber": "PCB 삽입 (Gerber)",
+    "help.file.insert_gerber": "제조용 파일로 인쇄 회로 기판을 만듭니다. Gerber 기판 외곽선과 Excellon 드릴 파일이 스케치와 지정한 두께의 기판 바디가 되고, 모든 구멍과 슬롯이 관통해 뚫립니다. 실제 기판에 맞춰 케이스나 브래킷을 설계할 때 사용합니다."
+  }
+}

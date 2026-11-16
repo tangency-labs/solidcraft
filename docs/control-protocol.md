@@ -533,8 +533,9 @@ sock.sendall((json.dumps({"id": 1, "method": "ui.inspect", "params": {}, "token"
 The channel is untrusted input. A request line may be at most 16 MiB; a longer one is answered
 with `{"ok": false, "error": "request too large"}` and the connection is closed, as are
 connections that send eight lines that are not JSON. At most 16 connections are served at once
-(further ones get `{"ok": false, "error": "too many connections"}`), at most 64 queued requests
-run per frame so a flood cannot starve drawing, and a request that the UI thread has not
+(further ones get `{"ok": false, "error": "too many connections"}` and are closed, their request
+unrun; the app reads what they sent first, so the refusal is not lost to a reset), at most 64
+queued requests run per frame so a flood cannot starve drawing, and a request that the UI thread has not
 answered within 60 seconds (3600 seconds for `engine.batch`) is replied to with
 `{"ok": false, "running": true, "error": "timeout: … is still running …"}`. The same 16 MiB line
 limit applies to the MCP server.
@@ -959,7 +960,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `browser_eye_left` (default false: each browser and History tree row's eye, handle `eye:<name>`, sits in a column at the rows' right end, clear of the fold arrow and the radio; true: between them, as before #8718)
 - `browser_scroll_wheel` (`automatic` default, `always_zoom` or `always_pan`; browser only; small vertical steps pan in automatic and always pan, and automatic shows a one-time notice offering always zoom when the first scrolls look like a steady smooth-scroll mouse wheel; always zoom treats unmodified vertical scroll as a wheel, so two-finger pan needs Shift or the navigation modifiers)
 - `browser_wheel_hint_dismissed` (default false; browser only: true once the one-time scroll-wheel notice was answered "Don't ask again"; no control in Preferences)
-- `check_updates` (default true; [updates](book/src/guide/updates.md))
+- `check_updates` (default true; [updates](book/src/guide/updates.md)). When the organization's policy sets it ([managed deployment](book/src/guide/managed-deployment.md)), the reply has `policy: {locked: ["check_updates"], check_updates: bool}` with the value in force, `check_updates` itself stays the person's stored choice, and a request that changes it is refused
 - `color_vision` (`off` (default), `protan`, `deutan`, `tritan`: colour vision modes, #778)
 - `constraint_glyph_scale` (1…3, default 1: how large the open sketch's constraint glyphs are drawn, a multiple of their 15-pixel badge, letter and icon included; Preferences › Sketch › Constraint glyph size, #10794)
 - `default_units`

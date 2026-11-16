@@ -14,13 +14,10 @@ use solidcraft_viewport::Camera;
 
 /// The key the apps keep the preferences under in eframe's storage.
 pub const STORAGE_KEY: &str = "solidcraft.prefs";
-/// The key earlier releases used. Compatibility shim (docs/compatibility.md): read when the
-/// current key is missing, never written.
-pub const LEGACY_STORAGE_KEY: &str = "solvecraft.prefs";
 
-/// The stored preferences, from the current key or else the legacy one.
+/// The stored preferences.
 pub fn stored(get: impl Fn(&str) -> Option<String>) -> Option<String> {
-    get(STORAGE_KEY).or_else(|| get(LEGACY_STORAGE_KEY))
+    get(STORAGE_KEY)
 }
 
 mod design;
@@ -1096,6 +1093,10 @@ preference_settings! {
     /// C for Cancel (#9841). Off by default: typing does nothing to the buttons, as before.
     /// A letter that fits two buttons does nothing, and a focused text field keeps the keystroke.
     dialog_first_letter_buttons: bool = false, PAGE_GENERAL => check_id("prefs.dialog_first_letter_buttons");
+    /// The upright orbit stands a rolled view up as the pointer moves, turning the way the
+    /// pointer goes on screen (#12458). Off: a rolled view keeps its roll and turns about the
+    /// world's up axis, as before, so an upside-down view stays upside down.
+    upright_orbit_unrolls: bool = true, PAGE_NAVIGATION => check_tr("nav.upright_orbit_unrolls.label");
     /// The Donate button (Ko-fi) at the status bar's right end. The button's × turns it off; the Help
     /// menu, About and the start page keep their link.
     show_donate_button: bool = true, PAGE_GENERAL => check_id("prefs.show_donate_button");
@@ -2437,7 +2438,12 @@ fn defaults(app: &mut SolveApp, page: usize) {
     }
     let (msaa, window_system, adapter) = (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
     let units = app.preferences.default_units.clone();
+    let check_updates = app.preferences.check_updates;
     reset_preferences(&mut app.preferences, page);
+    // A setting the organization's policy locks keeps the person's choice for when the policy goes.
+    if app.policy.locks("check_updates") {
+        app.preferences.check_updates = check_updates;
+    }
     if page == PAGE_PLUGINS {
         app.prefs_window.plugin_limit_inputs = None;
     }
@@ -3637,6 +3643,10 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         o.insert("stand_up_offer".into(), json!(app.stand_up));
         o.insert("stand_up_note".into(), json!(app.stand_up.is_some() && app.stand_up_note));
         o.insert("dark".into(), json!(app.ui.dark));
+        let locked = app.policy.locked();
+        if !locked.is_empty() {
+            o.insert("policy".into(), json!({ "locked": locked, "check_updates": crate::policy::check_updates(app) }));
+        }
         o.insert("viewport_dark".into(), json!(app.viewport_dark()));
         o.insert("theme_ids".into(), json!(theme_choices(app).into_iter().map(|(id, _)| id).collect::<Vec<_>>()));
         let follow = &app.prefs_window.follow;
@@ -4447,6 +4457,10 @@ fn prepare_preferences(
         for (k, v) in src {
             if !o.contains_key(k) {
                 return Err(format!("unknown preference `{k}`"));
+            }
+            // Writing back the stored value is not a change (a client may send every setting it read).
+            if app.policy.locks(k) && o.get(k) != Some(v) {
+                return Err(format!("`{k}` is set by your organization's policy and cannot be changed here"));
             }
             if k == "custom_themes" {
                 let values = v
@@ -9600,11 +9614,10 @@ mod tests {
     }
 
     #[test]
-    fn stored_prefs_fall_back_to_the_legacy_key() {
-        let only_old = |k: &str| (k == super::LEGACY_STORAGE_KEY).then(|| "old".to_string());
-        assert_eq!(super::stored(only_old).as_deref(), Some("old"));
+    fn stored_prefs_come_from_the_current_key_only() {
         let both = |k: &str| Some(if k == super::STORAGE_KEY { "new" } else { "old" }.to_string());
         assert_eq!(super::stored(both).as_deref(), Some("new"));
+        assert_eq!(super::stored(|k| (k == "solvecraft.prefs").then(|| "old".to_string())), None);
         assert_eq!(super::stored(|_| None), None);
     }
 
