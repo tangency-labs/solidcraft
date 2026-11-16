@@ -27,7 +27,6 @@
   "cylinder_rebuild_mean_radius",
   "nurb_cylinder_inside_out_frame",
   "revolve_analytic_profile_faces",
-  "taper_tangent_corner_planes",
   "revolve_holed_profile_void",
   "linear_sweep_arc_is_cylinder",
   "join_touching_loops",

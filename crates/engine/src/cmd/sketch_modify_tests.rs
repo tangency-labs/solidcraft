@@ -5758,6 +5758,64 @@ fn trim_whole_source_keeps_its_offsets_and_unrelated_associations() {
     assert_eq!(s.doc.to_json(), doc_before);
 }
 
+/// #7390: trimming a circle or arc that has an offset copy, or trimming the copy, failed with
+/// "an offset source vanished or changed shape" (the source) or was refused (the copy). The trim
+/// now releases the offset first, as for lines: the cut happens, the copy keeps its centre and
+/// its gap to the source, that gap stays driven by the offset's parameter, and one undo puts
+/// everything back.
+#[test]
+fn trim_cuts_a_circle_or_arc_with_an_offset_and_keeps_the_gap_driving() {
+    let radius = |s: &Session, id: &str| {
+        let sk = sketch(s);
+        sk.radius(sk.curve_index(id).unwrap()).unwrap()
+    };
+    let round = |s: &Session, id: &str| {
+        let sk = sketch(s);
+        matches!(sk.curves[sk.curve_index(id).unwrap()].kind, CurveKind::Arc { .. } | CurveKind::Circle { .. })
+    };
+    let circle = || json!({"command": "sketch.circle.center", "params": {"center": [0, 0], "radius": 10}});
+    let arc = || json!({"command": "sketch.arc.center_point", "params": {"center": [0, 0], "start": [10, 0], "end": [-10, 0]}});
+    // The circles lose their lower half; the arcs (the upper half) the piece at their start,
+    // below the line at y = 5 (it crosses the source at 30° and the copy at about 24.6°).
+    for (source, cutter, at_source, at_copy) in
+        [(circle(), [[-20.0, 0.0], [20.0, 0.0]], [0.0, -10.0], [0.0, -12.0]), (arc(), [[-20.0, 5.0], [20.0, 5.0]], [9.659, 2.588], [11.818, 2.084])]
+    {
+        for trim_copy_first in [false, true] {
+            let mut s = new_sketch();
+            let src = ids(&run(&mut s, source["command"].as_str().unwrap(), source["params"].clone())["curves"])[0].clone();
+            let offset = run(&mut s, "sketch.offset", json!({"curves": [src], "distance": "2 mm", "side": [0, 30], "chain": false}));
+            let copy = ids(&offset["curves"])[0].clone();
+            let parameter = offset["param"].as_str().unwrap().to_string();
+            assert!((radius(&s, &copy) - 12.0).abs() < 1e-7, "{source}: the copy is outside");
+            run(&mut s, "sketch.line", json!({"points": cutter, "connect": false, "infer": false}));
+            let before = s.doc.to_json();
+            let picks = if trim_copy_first { [(&copy, at_copy), (&src, at_source)] } else { [(&src, at_source), (&copy, at_copy)] };
+            for (n, (id, at)) in picks.into_iter().enumerate() {
+                let r = run(&mut s, "sketch.trim", json!({"curve": id, "at": at}));
+                assert_eq!(r["sketch"]["solved"], json!(true), "{source} {id}: {r}");
+                if n == 0 {
+                    assert_eq!(ids(&r["result"]["offset_released"]), std::slice::from_ref(&copy), "{source} {id}: {r}");
+                    assert!(sketch(&s).offsets.is_empty(), "{source}: the association is released");
+                    let undone = s.doc.to_json();
+                    run(&mut s, "edit.undo", json!({}));
+                    assert_eq!(s.doc.to_json(), before, "{source} {id}: one undo restores the offset");
+                    run(&mut s, "edit.redo", json!({}));
+                    assert_eq!(s.doc.to_json(), undone);
+                }
+                assert!(round(&s, &src) && round(&s, &copy), "{source} {id}: both stay round");
+                assert!((radius(&s, &copy) - radius(&s, &src) - 2.0).abs() < 1e-7, "{source} {id}: the gap is kept");
+            }
+            let sk = sketch(&s);
+            for id in [&src, &copy] {
+                let CurveKind::Arc { c: centre, .. } = sk.curves[sk.curve_index(id).unwrap()].kind else { panic!("{source} {id}: cut into an arc") };
+                assert!(sk.points[centre].pos.dist(Vec2::ZERO) < 1e-7, "{source} {id}: the centre stays");
+            }
+            run(&mut s, "parameters.change", json!({"name": parameter, "expression": "3 mm"}));
+            assert!((radius(&s, &copy) - radius(&s, &src) - 3.0).abs() < 1e-7, "{source}: the parameter still drives the gap");
+        }
+    }
+}
+
 /// All pick orders retain driving distances through repeated trims, dragging, parameter edits and native reload.
 #[test]
 fn trim_keeps_offset_distances_driving_after_trims_drag_and_reopen() {
