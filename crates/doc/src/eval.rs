@@ -6861,6 +6861,27 @@ fn hole_tools_and_prisms(
     if bottom >= 0.0 {
         return Err(DocError::Invalid("hole depth must be positive".into()));
     }
+    // A hole exactly as deep as the material (To Object on the face it exits by, or a depth of
+    // the wall's thickness) is a through hole. Exact classification against every body: material
+    // just above the bottom, air just past it; a point within a body's tolerance of its boundary
+    // is neither, and the hole is then not taken to exit there; nor is it where the kernel
+    // cannot tell.
+    let at = |h: f64| *position + dir * (-h);
+    let eps = size * 1e-6;
+    let classes = |h: f64| st.bodies.iter().map(|b| b.body.classify_point(at(h))).collect::<std::result::Result<Vec<_>, _>>();
+    let exits = depth.is_some()
+        && classes(bottom + eps).is_ok_and(|c| c.contains(&kernel::PointClass::Inside))
+        && classes(bottom - eps).is_ok_and(|c| c.iter().all(|c| *c == kernel::PointClass::Outside));
+    // Its bore runs on past the exit face as it does above the entry, never to the material
+    // beyond: a floor ending on that face, which is rarely square to the axis to the last 1e-5 rad,
+    // crossed it and the cut left half of it across the exit (#17873).
+    let bore_end = match exits.then(|| Plane::from_normal(at(bottom), dir)).flatten() {
+        Some(exit) => match hole_run_on(st, &exit, r, (size * 0.01).max(0.1)) {
+            (run, near) if near.is_empty() => bottom - run,
+            _ => bottom,
+        },
+        None => bottom,
+    };
     // Each tool's circle seam at its own angle, so seams don't line up between tools.
     let seam = std::cell::Cell::new(0.0);
     let disc = |rad: f64| {
@@ -6879,16 +6900,7 @@ fn hole_tools_and_prisms(
             let half = val(vals, tip_angle, Kind::Angle)? / 2.0;
             // A hole exactly as deep as the material: the point is in the air past the exit
             // face, which would lie on the drill point's shoulder (a through hole, as drilled).
-            let at = |h: f64| *position + dir * (-h);
-            let eps = size * 1e-6;
-            // Exact classification against every body: material where one has the point inside,
-            // air where all have it outside; a point within a body's tolerance of its boundary is
-            // neither, and the hole is then not taken to exit at its shoulder.
-            let classes = |h: f64| st.bodies.iter().map(|b| b.body.classify_point(at(h))).collect::<std::result::Result<Vec<_>, _>>();
-            let solid = classes(bottom + eps)?.contains(&kernel::PointClass::Inside);
-            let air = classes(bottom - eps)?.iter().all(|c| *c == kernel::PointClass::Outside);
-            let exits_at_shoulder = solid && air;
-            if depth.is_some() && half > 1e-3 && half < std::f64::consts::FRAC_PI_2 && !exits_at_shoulder {
+            if depth.is_some() && half > 1e-3 && half < std::f64::consts::FRAC_PI_2 && !exits {
                 // One revolved tool (cylinder with a drill point).
                 let tip = r / half.tan();
                 let up = -dir;
@@ -6902,7 +6914,7 @@ fn hole_tools_and_prisms(
                     .collect());
             }
         }
-        Ok(vec![cyl(r, bottom, top, "bore")?])
+        Ok(vec![cyl(r, bore_end, top, "bore")?])
     };
     let mut tools = Vec::new();
     match hole {
