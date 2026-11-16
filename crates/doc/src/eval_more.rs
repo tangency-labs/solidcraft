@@ -75,7 +75,11 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             Ok(())
         }
         FeatureKind::Rib { .. } => {
-            let tools = rib_tools(vals, st, f, None)?;
+            // The rib is built against the bodies where its sketch is drawn: a body of another,
+            // moved component is met where it is shown (#17655), whether it takes part or only
+            // stops the wall.
+            let shown = targets_as_shown(st, f, &["*".to_string()])?;
+            let tools = rib_tools(vals, &shown, f, None)?;
             apply_op(doc, st, f, tools, Operation::Join, &[])
         }
         FeatureKind::ReplaceFace { faces, target, body } => {
