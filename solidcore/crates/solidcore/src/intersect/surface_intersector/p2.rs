@@ -1060,9 +1060,9 @@ impl SurfaceIntersector<'_> {
             i += 1;
         }
 
-        // Not upstream (#17110): a UV trim on a sphere is made monotone in its sweep
-        // coordinate wherever the 3D curve is monotone in longitude, certified, or the
-        // whole intersection is refused (IntersectFailed)
+        // Not upstream (#17110): each span of a UV trim on a sphere is made monotone in
+        // its sweep coordinate wherever its 3D span is monotone in longitude, certified, or
+        // the whole intersection is refused (IntersectFailed); the trace's points stay
         for (srf, ctrl) in [SrfIndex::First, SrfIndex::Second]
             .into_iter()
             .zip(&mut ctrl_uv)

@@ -380,9 +380,10 @@ pub enum SweepRefusal {
     Shape,
 }
 
-/// Not upstream (#17110): makes a traced curve's UV trim on an analytic sphere monotone
-/// in the sweep coordinate wherever its 3D curve is monotone in longitude, with a
-/// certificate, and returns how many spans it refitted (0 on any other surface, or when
+/// Not upstream (#17110): makes each span of a traced curve's UV trim on an analytic
+/// sphere monotone in the sweep coordinate wherever its 3D span is monotone in longitude,
+/// with a certificate (a joint where the trace's own points run back keeps that turn; see
+/// below), and returns how many spans it refitted (0 on any other surface, or when
 /// no span turns back).
 ///
 /// `uv` and `xyz` are the control points of the UV curve and the 3D curve, chains of
