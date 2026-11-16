@@ -612,6 +612,8 @@ fn enter_workspace(app: &mut SolveApp, render: bool) {
 /// is the active view (opened when the design has none for it), and with neither the Model view
 /// is, as the app left them by itself. Called each frame and after a design switch, so a view
 /// entered from anywhere in the app (a ribbon button, a command, Finish Sketch) shows in the strip.
+/// While the strip shows no views (views as tabs and the switcher both off), no view is opened
+/// here: the design enters the sketch or workspace in the view shown, as before design views.
 pub(crate) fn sync_views(app: &mut SolveApp) {
     let shown = if crate::render_workspace::active(app) {
         Some((ViewKind::Render, None))
@@ -622,7 +624,7 @@ pub(crate) fn sync_views(app: &mut SolveApp) {
     let views = &mut app.docs.views;
     match shown {
         Some((kind, subject)) => {
-            if prefs.opens_sub_tab(kind) && (views.active().kind != kind || views.active().subject != subject) {
+            if prefs.opens_views_by_itself() && prefs.opens_sub_tab(kind) && (views.active().kind != kind || views.active().subject != subject) {
                 views.open(kind, subject, prefs.reuse_views);
             }
         }
@@ -1820,6 +1822,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             id: tab_strip_id(),
             handles: TAB_HANDLES,
             views_as_tabs,
+            switcher_always: DesignTabPrefs::from(&app.preferences).switcher_always(),
             view_text: crate::app_bar::ViewText {
                 close_view: solidcraft_ui_text::tr_label("Close view"),
                 close_design: solidcraft_ui_text::tr_label("Close design"),
@@ -3400,6 +3403,59 @@ mod tests {
         assert_eq!(h.app.docs.views.len(), 3);
     }
 
+    /// The owner's ask: by default a design tab shows no view switcher while the design has its one
+    /// view, and entering a sketch or Render stays in that view, so the tab looks as it did before
+    /// design views. The switcher shows once the user opens a second view, with "Show the design
+    /// view switcher" on (even for one view, and a sketch then opens its own view again), and views
+    /// as tabs keeps its sub-tabs.
+    #[test]
+    fn a_design_tab_shows_no_view_switcher_until_it_has_a_second_view() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.custom_titlebar = true;
+        h.call("ui.resize", json!({"width": 1280, "height": 720}));
+        let switcher = |h: &mut crate::scenario::Harness| {
+            h.frames(3);
+            crate::scenario::rect_of("tab:switcher").is_some()
+        };
+        assert!(!h.app.preferences.show_design_view_switcher && !h.app.preferences.design_views_as_tabs, "both off by default");
+        assert!(!switcher(&mut h), "one view: no switcher");
+        assert!(crate::scenario::handle_at("tab:design:0").is_some(), "the strip is drawn");
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch1"})).unwrap();
+        h.frames(2);
+        assert!(h.app.session.active_sketch.is_some(), "the sketch is entered");
+        assert_eq!(h.app.docs.views.len(), 1, "in the view shown");
+        assert!(!switcher(&mut h), "still no switcher while sketching");
+        h.app.run("sketch.line", json!({"points": [[0, 0], [20, 10]]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        assert!(!switcher(&mut h), "nor after Finish Sketch");
+        // The preference brings the switcher back for one view, and sketches open views again.
+        h.app.preferences.show_design_view_switcher = true;
+        assert!(switcher(&mut h), "the preference shows it for one view");
+        h.app.run("sketch.create", json!({"plane": "XZ", "name": "Sketch2"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.docs.views.len(), 2, "a sketch opens its own view with the switcher on");
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.frames(2);
+        h.app.preferences.show_design_view_switcher = false;
+        assert!(switcher(&mut h), "a second view shows it with the preference off");
+        // Views as tabs: sub-tabs, no switcher, whatever the preference.
+        h.app.preferences.design_views_as_tabs = true;
+        assert!(!switcher(&mut h), "views as tabs draws sub-tabs instead");
+        assert!(crate::scenario::rect_of("tab:view:0").is_some(), "the sub-tabs are drawn");
+        h.app.preferences.show_design_view_switcher = true;
+        assert!(!switcher(&mut h));
+        // Back to one view with both off: no switcher again; a view opened with Ctrl+T shows it.
+        h.app.preferences.design_views_as_tabs = false;
+        h.app.preferences.show_design_view_switcher = false;
+        let first = h.app.docs.views.views()[0].id;
+        view_close_others(&mut h.app, first);
+        assert!(!switcher(&mut h), "one view again");
+        h.call("ui.key", json!({"key": "T", "cmd": true}));
+        assert_eq!(h.app.docs.views.len(), 2, "Ctrl+T still opens another view");
+        assert!(switcher(&mut h), "and the switcher shows");
+    }
+
     /// With "Reopen a design's views" on, a saved design's views come back when it opens again:
     /// those that can still be shown, nothing from a stale memory, and nothing at all when the
     /// preference is off.
@@ -3409,6 +3465,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
+        // Test change: the owner asked that a sketch open no view of its own while the strip shows
+        // no views (the new default); with the switcher on it does, which is what this test needs.
+        h.app.preferences.show_design_view_switcher = true;
         let path = std::env::temp_dir().join("solidcraft-remembered.scd").to_string_lossy().into_owned();
         h.app.session.path = Some(path.clone());
         h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch1"})).unwrap();

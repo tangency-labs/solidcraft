@@ -864,6 +864,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "select_other_hidden",
         "selection_shift_add_only",
         "shortcut_cycles_modes",
+        "show_design_view_switcher",
         "show_selected_hidden_edges",
         "sketch_align_points",
         "sketch_auto_dimensions",
