@@ -1828,11 +1828,18 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     ///   tolerance). So the position must lie within the definition's tolerance of the
     ///   segment between them ([`within_tolerance_of_segment`]).
     ///
-    /// Object points that fail this are not points the definition stands for (only an
-    /// inconsistent input has them), so covering them would only widen the tolerance by
-    /// that inconsistency. They, and an object point that cannot be computed (parameters
-    /// not set, an evaluation error of any kind, a non-finite result), make the result
-    /// unbounded instead of an error, so the vertex does not move and a resolution that
+    /// Object points that fail this are not points the definition stands for, so covering
+    /// them would only widen the tolerance by that inconsistency. The two writers that
+    /// place a position from its object points, `find_position_from_pcs` and
+    /// `resolve_vertex_definition` (`pt1 + frac * vec` with `frac` clamped into `[0, 1]`,
+    /// on the segment within the same `γ_3` rounding), never build such a definition
+    /// (argued). The self-loop split in `resolve_proto_edge` sets a position to a
+    /// curve end and then re-projects the parameters from it, so its distance to the
+    /// segment is bounded only by the smaller gap; there the claim rests only on the
+    /// measured goldens count (4 rejections), not on an argument. Inconsistent object
+    /// points, and an object point that cannot be computed (parameters not set, an
+    /// evaluation error of any kind, a non-finite result), make the result unbounded
+    /// instead of an error, so the vertex does not move and a resolution that
     /// combines definitions never fails here.
     fn absorbed_points_of(
         &self,
