@@ -17,6 +17,9 @@ returns `SM_ERR` for the cylinder pair. C++ SMLib v1.0.1 still returns 1001 at 0
   the union holds `pi r^2 (10 + 12)` = 166.375 pi = 522.6824777.
 - **Test.** `crates/solidcore/tests/wr492_mitred_cylinders.rs`: `small_turns_fail_like_cpp` is replaced by
   `small_turns_unite_the_pieces`. It asserts Level 2 clean, a manifold solid and the volume within 1e-6 of the closed
-  form and of the pieces' sum, the bound `larger_turns_unite_the_pieces` already uses.
+  form and of the pieces' sum, the bound `larger_turns_unite_the_pieces` already uses. This supersedes the
+  "refused at `Relate` before `MakeFaceuse`" entry for this test in the WR-658 flag-removal addendum
+  (`WR-658--addendum-2026-11-16-flag-removed-brep-edit-statuses-pass-on.md`). That `Relate` conflict came from the
+  self-loop split, which is now gone; with statuses passed on, the small turns still unite.
 - **Not covered.** SolidCraft's a52 `lead-out-minus` pair (the curve-swept run against the straight run, 5 degrees)
   was not re-run for this addendum.

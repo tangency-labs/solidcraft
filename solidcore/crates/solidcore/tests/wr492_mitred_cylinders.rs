@@ -1,7 +1,7 @@
 //! WR-492: `SmMerge::MakeFaceuse` returns `SM_ERR` (1001) when the edge `MergeEdge` matches
 //! has no end at the mate of the other edge's vertex. Two r 2.75 cylinders whose axes meet at
-//! a small turn, each cut back to the mitre plane that halves it, meet face to face there; their
-//! union fails for turns up to about 0.3 degrees (C++ SMLib v1.0.1 the same: 0.1, 0.25 and 0.3
+//! a small turn, each cut back to the mitre plane that halves it, meet face to face there; in
+//! C++ SMLib v1.0.1 their union fails for turns up to about 0.3 degrees (0.1, 0.25 and 0.3
 //! fail, 0.4 and up succeed). SolidCraft's tube corners (a52 `lead-out-minus`) are the
 //! repro. Since the proto-edge self-loop on a vertex is always degenerate (WR-214 addendum
 //! 2026-11-16) the small turns unite too: a Level 2 clean, manifold solid whose volume is the
