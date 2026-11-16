@@ -1247,8 +1247,11 @@ fn loose_top(
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] when the loose box is not finite either, or the base's net
-/// holds a NaN or an infinite point or weight: then no bound on the cell exists to name, and a box that may not hold the
-/// face is refused rather than returned; those of [`loose_top`].
+/// holds a NaN or an infinite point or weight: then no bound on the cell exists to name,
+/// and a box that may not hold the face is refused rather than returned. The net test is
+/// of the whole net, so it refuses even when the bad point has no support on the face's
+/// domain (a multi-span patch with the face on another span): such a net is invalid
+/// anyway. Those of [`loose_top`].
 fn unsolved_cell_top(
     k: &Kernel,
     lb: &LazyBrep<'_>,
@@ -3868,9 +3871,11 @@ mod tests {
     }
 
     /// (#17685) An edgeless face whose surface has an infinite or a NaN control point, or
-    /// an infinite weight, has no finite bound to name: the box is a typed refusal. Main returned Ok with the
-    /// empty box's inverted bounds (+-1e20) for the infinite one, and a NaN one passed the
-    /// loose box's min and max to a box of the other control points.
+    /// an infinite weight, has no finite bound to name: the box is the typed refusal ("has
+    /// no finite bound"), as `edgeless_face_bodies_fail_check_brep_level_2` rules for its
+    /// "nan net" case. Main returned Ok with the empty box's inverted bounds (+-1e20) for
+    /// the infinite one, and a NaN one passed the loose box's min and max to a box of the
+    /// other control points.
     #[test]
     fn edgeless_face_on_a_non_finite_net_is_refused() {
         use crate::topology::brep::p2::ArenaNotifyState;
@@ -3932,7 +3937,8 @@ mod tests {
                 Some(Surface::from(BSplineSurface::from_nurb(nurb, false)));
             let got = calculate_tight_bounding_box(&k, &b, f);
             assert!(
-                matches!(got, Err(SolidError::InvalidInput { .. })),
+                matches!(&got, Err(SolidError::InvalidInput { reason, .. })
+                    if reason.contains("has no finite bound")),
                 "{bad} (weight {weight}): {got:?}"
             );
         }
