@@ -6,7 +6,8 @@
 //! #17110: the same traces' UV trims zigzagged in u next to the pole (a 2D cusp,
 //! `SmBSplineCurve` test 13) where the 3D curve runs one way round the axis; the image
 //! certificate cannot see it, as a step in u there moves the image by only `ρ Δu`. The
-//! trims are now monotone in u wherever the 3D curve is monotone in longitude.
+//! trims' spans are now each monotone in u wherever the 3D span is monotone in longitude
+//! (the trace's points are not moved, so a joint keeps any turn they have).
 
 #![allow(
     clippy::unwrap_used,
