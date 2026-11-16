@@ -133,14 +133,17 @@ fn registry() -> Policy {
     use winreg::RegKey;
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
     let layer = |path: &str| {
-        // The machine's key first: its value wins even when it is one this version ignores.
-        let keys: Vec<RegKey> =
-            [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER].into_iter().filter_map(|hive| RegKey::predef(hive).open_subkey(path).ok()).collect();
-        Layer::read(&|name| {
-            keys.iter().find_map(|key| {
-                key.get_value::<u32, _>(name).ok().map(Value::Number).or_else(|| key.get_value::<String, _>(name).ok().map(Value::Text))
+        // Each hive's values are checked on their own, so an invalid machine value leaves the
+        // user's; among valid values the machine's wins.
+        [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER]
+            .into_iter()
+            .filter_map(|hive| RegKey::predef(hive).open_subkey(path).ok())
+            .map(|key| {
+                Layer::read(&|name| {
+                    key.get_value::<u32, _>(name).ok().map(Value::Number).or_else(|| key.get_value::<String, _>(name).ok().map(Value::Text))
+                })
             })
-        })
+            .fold(Layer::default(), Layer::or)
     };
     Policy { mandatory: layer(KEY), recommended: layer(&format!(r"{KEY}\{RECOMMENDED}")) }
 }
@@ -194,6 +197,15 @@ mod tests {
         {
             assert_eq!(Policy::from_json(text), Policy::default(), "{text}");
         }
+    }
+
+    #[test]
+    fn an_invalid_machine_value_leaves_the_users_valid_one() {
+        let machine = layer(&[(CHECK_FOR_UPDATES, Value::Number(2))]);
+        let user = layer(&[(CHECK_FOR_UPDATES, Value::Number(0))]);
+        assert_eq!(machine.or(user).check_for_updates, Some(false));
+        let machine = layer(&[(CHECK_FOR_UPDATES, Value::Number(1))]);
+        assert_eq!(machine.or(layer(&[(CHECK_FOR_UPDATES, Value::Number(0))])).check_for_updates, Some(true), "a valid machine value wins");
     }
 
     #[test]

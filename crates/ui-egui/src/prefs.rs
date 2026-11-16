@@ -2413,7 +2413,12 @@ fn defaults(app: &mut SolveApp, page: usize) {
     }
     let (msaa, window_system, adapter) = (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
     let units = app.preferences.default_units.clone();
+    let check_updates = app.preferences.check_updates;
     reset_preferences(&mut app.preferences, page);
+    // A setting the organization's policy locks keeps the person's choice for when the policy goes.
+    if app.policy.locks("check_updates") {
+        app.preferences.check_updates = check_updates;
+    }
     if page == PAGE_PLUGINS {
         app.prefs_window.plugin_limit_inputs = None;
     }

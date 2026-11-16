@@ -438,6 +438,9 @@ fn a_setting_under_policy_shows_the_organizations_value_and_cannot_be_changed() 
         assert!(refused["error"].as_str().unwrap().contains("set by your organization's policy"), "{refused}");
         assert_eq!(h.call("ui.prefs", json!({"check_updates": !on}))["ok"], json!(true));
         assert_eq!(h.app.preferences.check_updates, !on);
+        // Restore page defaults leaves it too: the person's choice outlives the policy.
+        assert_eq!(h.call("ui.prefs", json!({"button":"defaults"}))["ok"], json!(true));
+        assert_eq!(h.app.preferences.check_updates, !on, "policy {on}: defaults keep the stored choice");
     }
     // Without a policy the reply names none, and the setting changes as before.
     let mut h = crate::scenario::Harness::new();
