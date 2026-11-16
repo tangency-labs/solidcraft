@@ -838,7 +838,7 @@ fn record(
         Err(error) => values.push(status(error)?),
     }
     // (a soundness probe's measure of the result: nothing unless capture is on)
-    crate::soundness::measure(&mut body);
+    crate::soundness::measure(body);
     Ok(values)
 }
 /// Configure one actual retained corner between native corner creation and filleting.
