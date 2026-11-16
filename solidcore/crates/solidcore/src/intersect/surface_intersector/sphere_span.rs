@@ -24,8 +24,9 @@
 //! bounds, 257 point values and one pass over the net's double knots per span) is why the
 //! certificate does not poll for cancellation (`Kernel::check_cancelled`); its callers do,
 //! once per trace step or try. The monotone-sweep fit (#17110) makes at most `spans + 1`
-//! passes over a flushed curve's spans and does not poll either: its work is bounded by the
-//! trace's own point count. Its longitude test takes the sphere's frame axes as exact
+//! passes over a flushed curve's spans and certifies each changed span: its work grows
+//! with the square of the trace's point count, so it polls once per pass and once per
+//! certified span. Its longitude test takes the sphere's frame axes as exact
 //! (point intervals); the net is built from that frame, and a span the test decides by a
 //! margin below the frame's rounding is one passing within rounding of the axis (ARGUED).
 
@@ -34,6 +35,7 @@ use std::collections::VecDeque;
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::station::{ders_basis, Nurbs};
 use crate::geom::vector3d::Vec3;
+use crate::kernel::Kernel;
 use crate::surface::surface::{Surface, SurfaceKind};
 
 /// The deepest bisection of a span's parameter [`sphere_span_image`] makes: at most
@@ -364,6 +366,19 @@ fn keeps_either_sign(b: [Ivl; 3]) -> bool {
 /// pushing a handle past `Δ`; the refit is then certified by the sign test itself.
 const HANDLE_SHARE: f64 = 1.0 - 1.0 / 1024.0;
 
+/// What [`fit_monotone_sweep`] did.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct SweepFit {
+    /// The count of spans refitted.
+    pub refitted: usize,
+    /// The largest certified distance of a changed span's image from its 3D span (each at
+    /// most the tolerance; 0 when no span changed): the trim's deviation the fit adds.
+    pub bound: f64,
+}
+
+/// The operation [`fit_monotone_sweep`] names when it is cancelled.
+const OP_FIT: &str = "intersect::surface_intersector::sphere_span::fit_monotone_sweep";
+
 /// Why [`fit_monotone_sweep`] refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SweepRefusal {
@@ -373,8 +388,9 @@ pub enum SweepRefusal {
     /// A refitted span still turns back in the sweep coordinate: its rounded enclosures
     /// could not certify it.
     TurnsBack,
-    /// A refitted joint's handles both fall on the joint point (no offset left across the
-    /// sweep either): the trim would have a zero derivative there.
+    /// A handle of a joint whose factor is 0 (a chain end included) falls on the joint
+    /// point (no offset left across the sweep either): the trim would have a zero
+    /// derivative there.
     Degenerate,
     /// The chains of control points do not hold whole cubic spans of the same count.
     Shape,
@@ -383,8 +399,9 @@ pub enum SweepRefusal {
 /// Not upstream (#17110): makes each span of a traced curve's UV trim on an analytic
 /// sphere monotone in the sweep coordinate wherever its 3D span is monotone in longitude,
 /// with a certificate (a joint where the trace's own points run back keeps that turn; see
-/// below), and returns how many spans it refitted (0 on any other surface, or when
-/// no span turns back).
+/// below), and returns how many spans it refitted with the largest certified distance of
+/// a changed span's image from its 3D span (both 0 on any other surface, or when no span
+/// turns back).
 ///
 /// `uv` and `xyz` are the control points of the UV curve and the 3D curve, chains of
 /// cubic Bezier spans joined end to end (span `j` is `[3j, 3j + 3]`), as the trace flushes
@@ -405,7 +422,8 @@ pub enum SweepRefusal {
 ///
 /// Every span a factor changed must then be certified: its image within `tol` of its 3D
 /// span ([`sphere_bezier_image`]) and not [`SpanSweep::TurnsBack`], and a joint whose
-/// factor is 0 must keep a handle offset across the sweep on each side. Otherwise the fit
+/// factor is 0 (a chain end included) must keep a handle offset across the sweep on each
+/// side it has. Otherwise the fit
 /// is refused, with the reason ([`SweepRefusal`]), and the caller refuses the whole
 /// intersection. The 3D curve and the points (every `uv[3j]`) are not moved, so where
 /// the points the trace placed themselves run back in the sweep coordinate (within the
@@ -416,23 +434,29 @@ pub enum SweepRefusal {
 /// thickened pole caps of #1502, the trace into a pole of WR-550). A joint no span needed
 /// refitting is not checked: its spans were each accepted as they are.
 ///
+/// The fit polls `kernel`'s cancellation once per pass and once per certified span: the passes
+/// are at most `spans + 1` scans of every span, and a certificate costs up to 511 piece
+/// bounds, so the work grows with the square of the span count.
+///
 /// # Errors
 ///
-/// The [`SweepRefusal`].
+/// [`SolidError::Cancelled`](crate::SolidError) from `kernel`'s cancellation; otherwise `Ok`
+/// with the [`SweepFit`], or the [`SweepRefusal`].
 pub fn fit_monotone_sweep(
+    kernel: &Kernel,
     surface: &Surface,
     uv: &mut [Vec3],
     xyz: &[Vec3],
     tol: f64,
-) -> Result<usize, SweepRefusal> {
+) -> crate::Result<Result<SweepFit, SweepRefusal>> {
     // another surface, or a sphere without a net to read: no span is constrained
     let Some(Ok(net)) = SweepNet::of(surface) else {
-        return Ok(0);
+        return Ok(Ok(SweepFit::default()));
     };
     let along = net.along;
     let sweep = |q: [Vec3; 4], h: [Vec3; 4]| net.sweep(q.map(iv3), h.map(iv3));
     if uv.len() != xyz.len() || uv.len() < 4 || (uv.len() - 1) % 3 != 0 {
-        return Err(SweepRefusal::Shape);
+        return Ok(Err(SweepRefusal::Shape));
     }
     let spans = (uv.len() - 1) / 3;
     let span = |c: &[Vec3], j: usize| -> Option<[Vec3; 4]> {
@@ -481,20 +505,21 @@ pub fn fit_monotone_sweep(
         }
     };
     for _ in 0..=spans {
+        kernel.check_cancelled(OP_FIT)?;
         let mut changed = false;
         for j in 0..spans {
             let (Some(q), Some(h)) = (span(uv, j), span(xyz, j)) else {
-                return Err(SweepRefusal::Shape);
+                return Ok(Err(SweepRefusal::Shape));
             };
             if sweep(q, h) != SpanSweep::TurnsBack {
                 continue;
             }
             if fitted.get(j) == Some(&true) {
                 // a refitted span that still turns back: its rounding could not certify it
-                return Err(SweepRefusal::TurnsBack);
+                return Ok(Err(SweepRefusal::TurnsBack));
             }
             let Some([o0, _, _, o3]) = span(&original, j) else {
-                return Err(SweepRefusal::Shape);
+                return Ok(Err(SweepRefusal::Shape));
             };
             let delta = sweep_of(o3) - sweep_of(o0);
             let room = HANDLE_SHARE * delta.abs();
@@ -527,25 +552,26 @@ pub fn fit_monotone_sweep(
         }
         apply(uv, &lambda);
     }
-    // the joints a factor collapsed: a handle offset across the sweep kept on each side.
-    // A joint where the sweep turns is left as the points the trace placed have it: each
-    // span is monotone, the points are on the curve within the trace's tolerance, and no
-    // choice of handles moves them (see the function doc).
+    // the joints a factor collapsed (the chain's ends included): a handle offset across
+    // the sweep kept on each side. A joint where the sweep turns is left as the points the
+    // trace placed have it: each span is monotone, the points are on the curve within the
+    // trace's tolerance, and no choice of handles moves them (see the function doc).
     let across_of = |p: Vec3| if along == 0 { p.y } else { p.x };
     for (k, &l) in lambda.iter().enumerate() {
-        if l != 0.0 || k == 0 || k == spans {
+        if l != 0.0 {
             continue;
         }
-        let (Some(a), Some(b)) = (span(&original, k - 1), span(&original, k)) else {
-            return Err(SweepRefusal::Shape);
+        let Some(q) = original.get(3 * k).map(|&p| across_of(p)) else {
+            return Ok(Err(SweepRefusal::Shape));
         };
-        let q = across_of(a[3]);
-        if across_of(a[2]) == q || across_of(b[1]) == q {
-            return Err(SweepRefusal::Degenerate);
+        let into = k.checked_sub(1).and_then(|i| original.get(3 * i + 2));
+        let out = original.get(3 * k + 1).filter(|_| k < spans);
+        if [into, out].iter().flatten().any(|&&p| across_of(p) == q) {
+            return Ok(Err(SweepRefusal::Degenerate));
         }
     }
     // certify every span a factor changed
-    let mut count = 0;
+    let mut fit = SweepFit::default();
     for j in 0..spans {
         let touched = [j, j + 1]
             .iter()
@@ -553,21 +579,23 @@ pub fn fit_monotone_sweep(
         if !touched {
             continue;
         }
+        kernel.check_cancelled(OP_FIT)?;
         let (Some(q), Some(h)) = (span(uv, j), span(xyz, j)) else {
-            return Err(SweepRefusal::Shape);
+            return Ok(Err(SweepRefusal::Shape));
         };
         match sphere_bezier_image(surface, q, h, tol) {
-            SpanImage::Certified(_) | SpanImage::NotASphere => {}
-            SpanImage::NotCertified(why) => return Err(SweepRefusal::Off(why)),
+            SpanImage::Certified(bound) => fit.bound = fit.bound.max(bound),
+            SpanImage::NotASphere => {}
+            SpanImage::NotCertified(why) => return Ok(Err(SweepRefusal::Off(why))),
         }
         if sweep(q, h) == SpanSweep::TurnsBack {
-            return Err(SweepRefusal::TurnsBack);
+            return Ok(Err(SweepRefusal::TurnsBack));
         }
         if fitted.get(j) == Some(&true) {
-            count += 1;
+            fit.refitted += 1;
         }
     }
-    Ok(count)
+    Ok(Ok(fit))
 }
 
 /// The certificate of [`sphere_span_image`] for enclosed Bezier control points.
@@ -1366,7 +1394,10 @@ mod tests {
         assert_eq!(sphere_span_image(&s, z, z, 1.0), SpanImage::NotASphere);
         assert_eq!(sphere_span_sweep(&s, z, z), SpanSweep::NotASphere);
         let mut uv = [Vec3::ZERO; 4];
-        assert_eq!(fit_monotone_sweep(&s, &mut uv, &z, 1.0), Ok(0));
+        assert_eq!(
+            fit_monotone_sweep(&Kernel::default(), &s, &mut uv, &z, 1.0).unwrap(),
+            Ok(SweepFit::default())
+        );
     }
 
     /// The least of the UV Hermite span's sweep derivative `u'` at `n + 1` parameters, as a
@@ -1521,7 +1552,10 @@ mod tests {
         ];
         let (mut uv, xyz) = chain(k, &s, &pts);
         let before = uv.clone();
-        assert_eq!(fit_monotone_sweep(&s, &mut uv, &xyz, 1e-2), Ok(0));
+        assert_eq!(
+            fit_monotone_sweep(k, &s, &mut uv, &xyz, 1e-2).unwrap(),
+            Ok(SweepFit::default())
+        );
         assert_eq!(uv, before);
         // the middle joint's u handles overshoot the second span's chord
         let q = uv[3];
@@ -1533,8 +1567,10 @@ mod tests {
             SpanSweep::TurnsBack
         );
         let zig = uv.clone();
-        let fitted = fit_monotone_sweep(&s, &mut uv, &xyz, 1e-2).unwrap();
-        assert!(fitted >= 1);
+        let fitted = fit_monotone_sweep(k, &s, &mut uv, &xyz, 1e-2)
+            .unwrap()
+            .unwrap();
+        assert!(fitted.refitted >= 1 && fitted.bound > 0.0 && fitted.bound <= 1e-2);
         for j in 0..2 {
             assert_eq!(
                 sphere_bezier_sweep(&s, span(&uv, j), span(&xyz, j)),
@@ -1575,7 +1611,10 @@ mod tests {
             p.x -= 0.03;
         }
         let joints = [uv[0], uv[3], uv[6]];
-        assert!(fit_monotone_sweep(&s, &mut uv, &xyz, 1.0).unwrap() > 0);
+        let fit = fit_monotone_sweep(k, &s, &mut uv, &xyz, 1.0)
+            .unwrap()
+            .unwrap();
+        assert!(fit.refitted > 0 && fit.bound <= 1.0);
         assert_eq!([uv[0], uv[3], uv[6]], joints);
         // the first span runs back in u, the second forward: the turn is at the joint
         assert!(uv[3].x < uv[0].x && uv[6].x > uv[3].x);
@@ -1584,6 +1623,50 @@ mod tests {
             let h = [xyz[3 * j], xyz[3 * j + 1], xyz[3 * j + 2], xyz[3 * j + 3]];
             assert_eq!(sphere_bezier_sweep(&s, q, h), SpanSweep::Monotone);
         }
+    }
+
+    /// #17110 (review of #17686): a chain end whose only handle points back in u with
+    /// no offset across it gets the factor 0, which would put the handle on the end point
+    /// (a zero derivative there): refused (`Degenerate`), as at an interior joint.
+    #[test]
+    fn a_chain_end_whose_handle_collapses_is_refused() {
+        let k = &Kernel::default();
+        let s = ball(k);
+        let pts = [
+            Point2::new(0.30, 0.995),
+            Point2::new(0.32, 0.996),
+            Point2::new(0.34, 0.997),
+        ];
+        let (mut uv, xyz) = chain(k, &s, &pts);
+        uv[1] = Vec3::new(uv[0].x - 0.005, uv[0].y, 0.0);
+        let q = [uv[0], uv[1], uv[2], uv[3]];
+        let h = [xyz[0], xyz[1], xyz[2], xyz[3]];
+        assert_eq!(sphere_bezier_sweep(&s, q, h), SpanSweep::TurnsBack);
+        assert_eq!(
+            fit_monotone_sweep(k, &s, &mut uv, &xyz, 1.0).unwrap(),
+            Err(SweepRefusal::Degenerate)
+        );
+        // with an offset across the sweep the same end is refitted
+        let (mut uv, xyz) = chain(k, &s, &pts);
+        uv[1] = Vec3::new(uv[0].x - 0.005, uv[0].y + 1e-4, 0.0);
+        assert!(fit_monotone_sweep(k, &s, &mut uv, &xyz, 1.0)
+            .unwrap()
+            .is_ok());
+    }
+
+    /// The fit polls the kernel's cancellation and reports it apart from its refusals.
+    #[test]
+    fn a_cancelled_fit_is_cancelled_not_refused() {
+        let mut kernel = Kernel::default();
+        let s = ball(&kernel);
+        let pts = [Point2::new(0.30, 0.995), Point2::new(0.32, 0.996)];
+        let (mut uv, xyz) = chain(&kernel, &s, &pts);
+        uv[1].x = uv[0].x - 0.005;
+        let token = crate::kernel::CancelToken::new();
+        token.cancel();
+        kernel.set_cancel_token(token);
+        let error = fit_monotone_sweep(&kernel, &s, &mut uv, &xyz, 1.0).unwrap_err();
+        assert!(error.is_cancelled());
     }
 
     /// A refit that cannot keep the image within the tolerance is refused: far from the
@@ -1604,7 +1687,7 @@ mod tests {
         ));
         assert_eq!(sphere_bezier_sweep(&s, b, h), SpanSweep::TurnsBack);
         assert!(matches!(
-            fit_monotone_sweep(&s, &mut b, &h, 1e-3),
+            fit_monotone_sweep(k, &s, &mut b, &h, 1e-3).unwrap(),
             Err(SweepRefusal::Off(_))
         ));
     }
