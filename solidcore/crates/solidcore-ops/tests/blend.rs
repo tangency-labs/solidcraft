@@ -2299,16 +2299,19 @@ fn a_rim_round_across_a_loft_s_creases_is_certified_or_refused() {
     }
 }
 
-/// SolidCraft #17263: a 12.2 x 2.2 bar swept along an arc with its orientation kept (the arc
-/// from (0, 0, 0) to (30, 0, 0) about (15, 0, 330), dipping to z = 330 - R at its middle,
-/// R = hypot(15, 330)), its lower long edge at y = 0 rounded at 0.2. The faces beside the edge
-/// are 2.2 and 12.2 wide; the round was refused as cutting the part in pieces, naming about
-/// 0.07, because the middle of a section's arc, inside the material, was classified as lying
-/// outside the part. It builds. The bar is 12.2 x 2.2 x 30 (each section x = const is the
-/// profile moved). The round takes off its corner section A = (1 - pi/4) r^2, whose centroid lies
-/// d = r (10 - 3 pi) / (12 - 3 pi) inside the lower face, swept about the arc's axis through
-/// its angle theta (Pappus), and at each end the wedge between the upright end face and the
-/// radial plane through the edge's end, A 15 d / 330.
+/// SolidCraft #17263: a 12.2 x 2.2 bar swept along an arc with its orientation kept (the arc from
+/// (0, 0, 0) to (30, 0, 0) about (15, 0, 330), dipping to z = 330 - R at its middle, R = hypot(15,
+/// 330)), its lower long edge at y = 0 rounded at 0.2. The faces beside the edge are 2.2 and 12.2
+/// wide; the round was refused as cutting the part in pieces, naming about 0.07, because the middle
+/// of a section's arc, inside the material, was classified as lying outside the part. Past that,
+/// the round (a torus about the arc's axis) took its section from the solver's first one, which
+/// lies past the edge's end on the lower face's ruled extension, 5.5e-6 off the half-plane through
+/// the axis: the revolution failed its own check and the result was refused as no solid. It builds.
+/// The bar is 12.2 x 2.2 x 30 (each section x = const is the profile moved). The round takes off
+/// its corner section A = (1 - pi/4) r^2, whose centroid lies d = r (10 - 3 pi) / (12 - 3 pi)
+/// inside the lower face, swept about the arc's axis through its angle theta (Pappus), and at each
+/// end the wedge between the upright end face and the radial plane through the edge's end, A 15 d /
+/// 330.
 #[test]
 fn a_round_on_a_bar_swept_along_a_wide_arc_is_not_refused_as_cutting_the_part() {
     all_fixes();
