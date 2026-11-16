@@ -1598,6 +1598,26 @@ fn plan_standard(s: &mut Session, record: &Drawing, request: StandardParams) -> 
     Ok((chosen, reply))
 }
 
+/// Where the group of standard views is anchored in the sheet's drawing space.
+#[derive(Clone, Copy)]
+enum Anchor {
+    Middle,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+}
+
+impl Anchor {
+    fn corner(self, space: Aabb2, total: Vec2) -> Vec2 {
+        match self {
+            Self::Middle => space.center() - total * 0.5,
+            Self::TopLeft => Vec2::new(space.min.x, space.max.y - total.y),
+            Self::TopRight => Vec2::new(space.max.x - total.x, space.max.y - total.y),
+            Self::BottomLeft => space.min,
+        }
+    }
+}
+
 fn flat(s: &mut Session, p: &Value) -> Result<Value> {
     let request: FlatParams = crate::schema::read(FLAT, p)?;
     let record = s.drawing(FLAT)?.clone();
