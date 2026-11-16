@@ -386,9 +386,10 @@ fn parallel_import_does_not_prepare_past_body_budget_with_duplicates_or_mapped_i
         reader.rep_bodies(60, &IDENTITY, &[], "Budget", None, &mut out, 0);
         assert!(reader.oriented.is_empty() && reader.unreadable.is_empty(), "the walk only plans the solids");
         while reader.convert_next(workers == 1) {}
-        let out = reader.remap(&out);
+        let (out, _, left_out) = reader.remap(&out);
         assert_eq!(reader.bodies.len(), MAX_BODIES);
         assert_eq!(out, vec![MAX_BODIES - 2, MAX_BODIES - 1]);
+        assert!(left_out.is_empty(), "{left_out:?}");
         assert_eq!(reader.bodies.last().unwrap().name, "Second");
         assert_eq!(reader.oriented.len(), 2);
         assert!(!reader.oriented.contains_key(&2003) && !reader.unreadable.contains_key(&2003));
