@@ -1510,10 +1510,13 @@ mod tests {
         let (off, tol) = (edges_off_surface(&fill), super::face_tolerance(&side));
         assert!(off <= tol, "an edge is {off} off the face (tolerance {tol})");
         // Its area is at least its shadow on the plane x = 0 (the 20 × 20 square the loop bounds
-        // there) and, a least-bending fill, no more than the half side it spans.
+        // there) and, a least-bending fill, no more than the half side it spans. That half side
+        // is a half turn of radius 10 and height 20, area π r h = 200π exactly (the test below
+        // shows the fill is that half side), so the upper bound is 200π widened by the
+        // integrator's relative accuracy, 1e-12; a strict `< 200π` held only on quadrature error.
         let area = measure(&fill).unwrap().area;
         eprintln!("half a post's side: one face of area {area}, its edges within {off:e}");
-        assert!(area > 400.0 && area < std::f64::consts::PI * 10.0 * 20.0, "{area}");
+        assert!(area > 400.0 && area <= std::f64::consts::PI * 10.0 * 20.0 * (1.0 + 1e-12), "{area}");
     }
 
     /// The fill of the loop above is that half side itself (#15021): its one face lies on the
