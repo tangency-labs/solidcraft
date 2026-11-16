@@ -1835,10 +1835,10 @@ mod tests {
 /// closed result, the volume. [`solidcore::mass::enclosure::enclose_volume`] encloses the
 /// volume of the body as stored (the nets) with a certified `[lo, hi]`; the body bounded by
 /// the definitions differs from it by at most `sum A_f d_f` (each face within `d_f` of its
-/// net, `A_f` its area). The golden's mass values are the integrator's estimates at the
-/// requested relative accuracy `1e-4` (`brep_mass_properties`, not a proved bound): the row
-/// before and the row after each lie within that accuracy of the certified enclosure, so
-/// the volume moved inside the estimate's own accuracy band.
+/// net, `A_f` its area). The volume the integrator converges to (its finest accuracy) lies
+/// in that band. The golden's mass values are the integrator's estimates at the requested
+/// relative accuracy `1e-4` (`brep_mass_properties`, not a proved bound), recorded beside
+/// it; every operation's logged blend faces are definitions (`blend::definition_check`).
 ///
 /// [`NetScope`]: solidcore::surface::procedural_blend::NetScope
 #[cfg(test)]
@@ -1847,7 +1847,7 @@ pub(super) mod round_definition_proof {
     use solidcore::kernel::Kernel;
     use solidcore::mass::enclosure::enclose_volume;
     use solidcore::mass::integrator::properties::{
-        brep_mass_properties, face_area, PropertyAttributes,
+        brep_mass_properties, face_area, PropertyAttributes, ESTIMATE_ACCURACY_FINEST,
     };
     use solidcore::math::Vec3;
     use solidcore::surface::surface::Surface;
@@ -1884,9 +1884,10 @@ pub(super) mod round_definition_proof {
 
     /// The certified volume band of the closed body `b`: its enclosure (asked 1e-6 wide
     /// relative; refinement stops earlier where the gaps between faces, which no cut
-    /// narrows, are wider) widened by `spread`.
-    /// Asserts that the golden's estimates before (`old`) and after (this body's estimate)
-    /// lie within the mass accuracy of it.
+    /// narrows, are wider) widened by `spread`. Asserts that the volume the integrator
+    /// converges to (its estimate at its finest accuracy, 1e-8 relative) lies in it. The
+    /// golden's own estimate (at 1e-4) and the row before (`old`, the old body's) are
+    /// returned for the record only: an estimate is not a bound.
     pub(in super::super) fn volume_band(
         k: &Kernel,
         b: &mut Brep,
@@ -1899,38 +1900,37 @@ pub(super) mod round_definition_proof {
             store: &store,
             key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
         };
-        let new = brep_mass_properties(k, b, MASS_ACCURACY, 1.0, Vec3::ZERO, &attributes)
-            .unwrap()
-            .properties
-            .volume;
-        let scale = new.abs();
-        let enclosure = enclose_volume(k, b, 1e-6 * scale).unwrap();
-        let (lo, hi) = (enclosure.lo - spread, enclosure.hi + spread);
-        let off = |v: f64| {
-            if v < lo {
-                lo - v
-            } else if v > hi {
-                v - hi
-            } else {
-                0.0
-            }
+        let mut volume = |accuracy: f64| {
+            brep_mass_properties(k, b, accuracy, 1.0, Vec3::ZERO, &attributes)
+                .unwrap()
+                .properties
+                .volume
         };
-        for (which, v) in [("before", old), ("after", new)] {
-            assert!(
-                off(v) <= MASS_ACCURACY * scale,
-                "{name}: the volume {which} {v} is {:e} off the certified [{lo}, {hi}]",
-                off(v)
-            );
-        }
+        let new = volume(MASS_ACCURACY);
+        let converged = volume(ESTIMATE_ACCURACY_FINEST);
+        let enclosure = enclose_volume(k, b, 1e-6 * new.abs()).unwrap();
+        let (lo, hi) = (enclosure.lo - spread, enclosure.hi + spread);
+        assert!(
+            (lo..=hi).contains(&converged),
+            "{name}: the converged volume {converged} is off the certified [{lo}, {hi}]"
+        );
+        eprintln!(
+            "{name}: converged {converged}, the golden's estimate {new} (before {old}), \
+             band width {:e}",
+            hi - lo
+        );
         (lo, hi)
     }
 }
 
 #[cfg(test)]
-mod round_definition_rows {
+pub(super) mod round_definition_rows {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::round_definition_proof::{certified_blends, volume_band};
     use super::*;
+    use solidcore::blend::definition_check::{
+        bare_blend_faces, BlendFaceKind, BlendFaceLog, CornerKind,
+    };
 
     /// The moved rows of the full real-solid form: name, the volume and the counts the
     /// golden held before, and the counts after (`None`: an open result, no volume).
@@ -1966,6 +1966,21 @@ mod round_definition_rows {
         ("sweep5-letter_g-e10-r1.0", Some(572.1858458923035), [0, 23, 35, 14], [0, 23, 35, 14]),
         ("sweep5-nurb_box1-all-r0.5", Some(3793.253064279953), [0, 18, 36, 20], [0, 18, 36, 20]),
     ];
+
+    /// No face the operation logged as a blend face (`blend::definition_check`) is a bare
+    /// net that a definition should hold: a face without a definition is either an exact
+    /// analytic surface (a plane, sphere, cone or torus: the ball's own surface, nothing
+    /// approximated) or a face of a pinned corner (the corner hierarchy this flag never made
+    /// definitions; its faces are definitions only with the blend corner's fixes).
+    pub(in super::super) fn no_bare_blend_face(k: &Kernel, b: &Brep, name: &str) {
+        let made = k.blend_face_log.as_ref().unwrap().last().to_vec();
+        assert!(!made.is_empty(), "{name}: no blend face logged");
+        for bare in bare_blend_faces(b, &made).unwrap() {
+            let exact = matches!(bare.surface, "plane" | "sphere" | "cone" | "torus");
+            let pinned = bare.kind == BlendFaceKind::Corner(CornerKind::Pinned);
+            assert!(exact || pinned, "{name}: a bare blend face {bare:?}");
+        }
+    }
 
     /// The fixture inputs of `name`.
     pub(super) fn inputs(name: &str) -> super::super::Inputs {
@@ -2016,11 +2031,16 @@ mod round_definition_rows {
             let mut k = Kernel::default();
             let mut body = build(&mut k, &input).unwrap().unwrap();
             let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+            k.blend_face_log = Some(BlendFaceLog::default());
             let result = fillet_selected(&mut k, &mut body, &selected, &input).ok().unwrap();
             assert!(result.is_ok(), "{name}: {result:?}");
+            no_bare_blend_face(&k, &body, name);
             assert_eq!(counts(&body, 0), after, "{name}");
             if name != "stubs4-delete-edge-bottle-e8-r0.1" {
                 assert_eq!(before, after, "{name}");
+            }
+            if name == "stubs4-delete-edge-bottle-e8-r0.1" {
+                rail_splits_at_a_c1_knot(&k, &body);
             }
             let spread = certified_blends(&k, &mut body, name);
             if let Some(old) = old_volume {
@@ -2028,6 +2048,83 @@ mod round_definition_rows {
                 eprintln!("{name}: certified volume [{lo}, {hi}], before {old}");
             }
         }
+    }
+
+    /// The bottle's extra vertex: two edges between the same B-spline face and blend face
+    /// meet at a vertex that lies, within its tolerance, on that face's iso-line at a u
+    /// knot of multiplicity at least the degree less one (where the face is only C1, so the
+    /// rail, the feet of the ball's centres, turns), the knot nearest the edges' trim end.
+    fn rail_splits_at_a_c1_knot(k: &Kernel, b: &Brep) {
+        use solidcore::math::Point2;
+        use solidcore::nurbs::b_spline_surface::SurfParamType;
+        use solidcore::surface::surface::SurfaceKind;
+        let edges = p1::edges(b, None).unwrap();
+        let faces_of = |e: EdgeId| {
+            let mut f = edge::faces(b, e, None).unwrap();
+            f.sort();
+            f
+        };
+        let mut found = 0;
+        for (i, &e1) in edges.iter().enumerate() {
+            for &e2 in edges.iter().skip(i + 1) {
+                let faces = faces_of(e1);
+                if faces.len() != 2 || faces != faces_of(e2) {
+                    continue;
+                }
+                let ends = |e: EdgeId| edge::vertices(b, e, None).unwrap();
+                let Some(v) = ends(e1).into_iter().flatten().find(|v| ends(e2).contains(&Some(*v)))
+                else {
+                    continue;
+                };
+                let surface = |f| b.face(f).unwrap().surface.clone().unwrap();
+                let (Some(&shoulder), Some(_)) = (
+                    faces.iter().find(|&&f| matches!(surface(f).kind(), SurfaceKind::BSpline(_))),
+                    faces.iter().find(|&&f| surface(f).procedural_blend().is_some()),
+                ) else {
+                    continue;
+                };
+                let s = surface(shoulder);
+                let SurfaceKind::BSpline(net) = s.kind() else {
+                    unreachable!()
+                };
+                let p = solidcore::topology::vertex::point(b, v).unwrap();
+                let tol = solidcore::topology::vertex::tolerance(b, v).unwrap();
+                // the end of e1's trim on the shoulder at the vertex
+                let eu = edge::edgeuses(b, e1, None, None)
+                    .unwrap()
+                    .into_iter()
+                    .find(|&u| eu::face(b, u).unwrap() == Some(shoulder))
+                    .unwrap();
+                let trim = eu::uv_trim_curve(b, eu).unwrap().0.unwrap();
+                let ivl = trim.natural_interval();
+                let uv = [ivl.min(), ivl.max()]
+                    .into_iter()
+                    .map(|t| {
+                        let q = trim.evaluate_point(k, t).unwrap();
+                        Point2::new(q.x, q.y)
+                    })
+                    .min_by(|a, c| {
+                        let d = |w: &Point2| s.evaluate_point(k, *w).unwrap().distance(p);
+                        d(a).total_cmp(&d(c))
+                    })
+                    .unwrap();
+                let degree = net.degree(SurfParamType::U);
+                let (knots, mults) = net.knots(SurfParamType::U, None).unwrap();
+                let (&knot, _) = knots
+                    .iter()
+                    .zip(&mults)
+                    .filter(|(_, &m)| m + 1 >= degree)
+                    .min_by(|a, c| (a.0 - uv.x).abs().total_cmp(&(c.0 - uv.x).abs()))
+                    .expect("a knot of multiplicity at least the degree less one");
+                let on_iso = s.evaluate_point(k, Point2::new(knot, uv.y)).unwrap().distance(p);
+                assert!(
+                    on_iso <= tol,
+                    "the split vertex is {on_iso:e} off the u = {knot} iso-line (tolerance {tol:e})"
+                );
+                found += 1;
+            }
+        }
+        assert_eq!(found, 1, "one rail split at a C1 knot");
     }
 
     /// issue #2349's teardrop at its solver-geometry and corner-edge checkpoints: every

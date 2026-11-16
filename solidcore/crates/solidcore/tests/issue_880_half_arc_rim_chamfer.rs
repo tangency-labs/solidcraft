@@ -448,7 +448,10 @@ fn crease_degrees(
 /// G1 by the control net's bound, one face more per crease than the chamfer as one face,
 /// and the edge's dihedral, from the definitions' own sided partials, more than the G1
 /// angle at the wall's end (7.78 and 4.78 degrees) and none at the cut face's, whose foot
-/// does not jump; and the edge on the definition's ruling.
+/// does not jump; and the edge on the definition's ruling. (The volume of the half rim
+/// chamfered at these setbacks is certified in the goldens, `blend.fillet_executive_p3`'s
+/// `round_definition_rows`: the integrator's converged volume lies in the body's certified
+/// enclosure.)
 #[test]
 fn issue_880_one_half_chamfer_splits_at_its_crease_as_a_definition() {
     let sin_g1 = (0.5_f64).to_radians().sin(); // SM_CONTINUITY_ANGLE
@@ -546,9 +549,11 @@ fn issue_880_one_half_chamfer_splits_at_its_crease_as_a_definition() {
                 creases += 1;
             }
         }
-        assert!(
-            creases >= 1,
-            "{offsets:?}: no crease among {} faces",
+        assert_eq!(
+            creases,
+            1,
+            "{offsets:?}: one crease, where the run-on's wall foot crosses the wall's G1 \
+             boundary, among {} faces",
             chamfers.len()
         );
         // one face more for each crease than the 4 faces to 7 the chamfer builds as one face

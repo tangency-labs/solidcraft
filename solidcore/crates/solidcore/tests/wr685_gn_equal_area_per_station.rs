@@ -84,9 +84,10 @@ fn blend_nets(b: &Brep, vdeg: usize) -> Vec<Net> {
             continue;
         };
         // a blend face is its definition; the fork's driver prints its net
-        let bs = match (s.procedural_blend().map(|d| d.net()), s.kind()) {
-            (Some(BlendNet::Approx(bs)), _) | (None, SurfaceKind::BSpline(bs)) => bs,
-            _ => continue,
+        let ((Some(BlendNet::Approx(bs)), _) | (None, SurfaceKind::BSpline(bs))) =
+            (s.procedural_blend().map(|d| d.net()), s.kind())
+        else {
+            continue;
         };
         if bs.degree(SurfParamType::V) != vdeg {
             continue;

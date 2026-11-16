@@ -445,6 +445,8 @@ fn run(k: &mut Kernel, input: &TwoOffsetChamfer) -> SolidResult<Vec<f64>> {
 mod round_definition_rows {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::super::end_to_end::round_definition_proof::{certified_blends, volume_band};
+    use super::super::end_to_end::round_definition_rows::no_bare_blend_face;
+    use solidcore::blend::definition_check::BlendFaceLog;
     use super::*;
     use solidcore::surface::procedural_blend::BlendRef;
 
@@ -484,11 +486,15 @@ mod round_definition_rows {
                 .unwrap()
                 .two_offset_chamfer
                 .expect("a two-offset chamfer");
-            let mut k = Kernel::default();
+            let mut k = Kernel {
+                blend_face_log: Some(BlendFaceLog::default()),
+                ..Kernel::default()
+            };
             let Ok(mut done) = chamfered(&mut k, &input).unwrap() else {
                 panic!("{name}: set-up stopped short");
             };
             assert!(done.result.is_ok(), "{name}: {:?}", done.result);
+            no_bare_blend_face(&k, &done.body, name);
             let counts = [
                 0,
                 p1::vertices(&done.body, None).unwrap().len() as i64,
