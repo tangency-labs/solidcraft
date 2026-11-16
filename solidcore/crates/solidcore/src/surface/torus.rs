@@ -82,9 +82,9 @@
 //! - **Recognition.** [`Torus::is_nurb_surface_torus`] returns `Some` where upstream
 //!   returns `TRUE` with a torus and an error where a `SER` call returns its status
 //!   (a truthy result without torus). `Notify(SM_NO_COPY)` (attribute copying) has no
-//!   equivalent. An opt-in fork fix: the torus keeps the tested NURB
-//!   (`Kernel::fixes.found_torus_sphere_keep_tested_nurb`, WR-493, off by default;
-//!   upstream keeps the NURB made from the fitted circles, ~1e-11 off the tested one).
+//!   equivalent. Always: the torus keeps the tested NURB (WR-493, the fork's
+//!   tangency-labs/smlib@7ea6a96; upstream keeps the NURB made from the fitted
+//!   circles, ~1e-11 off the tested one).
 //!   Always: the generator interval is measured signed in it and in
 //!   [`Torus::rebuild_step_from_nurb_parameters`] (WR-408; upstream's unsigned
 //!   `AngleBetween` mirrors an interval below the equator; the zero tolerance is
@@ -1083,11 +1083,9 @@ impl Torus {
     /// curve, and takes the NURB domain of `test` (through [`Self::reparameterize`]).
     /// `None` when `test` is not a torus (upstream default scale `1`).
     ///
-    /// With the opt-in
-    /// [`UpstreamFixes::found_torus_sphere_keep_tested_nurb`](crate::kernel::UpstreamFixes::found_torus_sphere_keep_tested_nurb)
-    /// (WR-493) the torus then keeps a copy of `test`'s NURB and rebuilds its analytic
-    /// data from it (`SetFromGwNurb`); by default it keeps the NURB made from the
-    /// fitted circles, as upstream. The generator's interval is measured signed (WR-408;
+    /// The torus then keeps a copy of `test`'s NURB and rebuilds its analytic data from
+    /// it (`SetFromGwNurb`; WR-493: upstream keeps the NURB made from the fitted
+    /// circles). The generator's interval is measured signed (WR-408;
     /// a failed angle is not a torus), and the major radius is measured from the torus
     /// origin (WR-501).
     ///
@@ -1285,17 +1283,14 @@ impl Torus {
         // InputSurface->NurbDomain (status ignored)
         ignore_status(torus.reparameterize(k, &test.natural_uv_domain()))?;
 
-        // not upstream (WR-493, opt-in; the SolidCraft fork's tangency-labs/smlib@7ea6a96):
-        // the torus keeps the NURB tested (SetFromGwNurb, whose rebuild's status is
-        // ignored)
-        if k.fixes.found_torus_sphere_keep_tested_nurb {
-            let nurb = test
-                .gw_nurb()
-                .ok_or_else(|| SolidError::surface_missing(OP_NURB_TORUS, "the tested NURB"))?;
-            torus.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
-            torus.base.base.nurb_is_borrowed = false;
-            ignore_status(torus.rebuild_step_from_nurb_parameters(k))?;
-        }
+        // not upstream (WR-493; the SolidCraft fork's tangency-labs/smlib@7ea6a96): the
+        // torus keeps the NURB tested (SetFromGwNurb, whose rebuild's status is ignored)
+        let nurb = test
+            .gw_nurb()
+            .ok_or_else(|| SolidError::surface_missing(OP_NURB_TORUS, "the tested NURB"))?;
+        torus.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
+        torus.base.base.nurb_is_borrowed = false;
+        ignore_status(torus.rebuild_step_from_nurb_parameters(k))?;
 
         // (Notify(SM_NO_COPY) copies the test surface's attributes: not modelled)
         Ok(Some(torus))
@@ -2444,10 +2439,11 @@ mod tests {
     }
 
     /// tangency-labs/solidcore#1433: the torus R 10, r 3 is found in its NURB form;
-    /// with `found_torus_sphere_keep_tested_nurb` it keeps exactly that NURB.
+    /// it keeps exactly that NURB (WR-493; upstream keeps the one made from the fitted
+    /// circles, ~1e-11 off).
     #[test]
     fn issue_1433_torus_found_in_its_nurb_keeps_it() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let t = Torus::create_canonical(
             &k,
             &Axis2Placement::default(),
@@ -2459,14 +2455,6 @@ mod tests {
         .unwrap();
         let nurbs = plain(&t);
 
-        // upstream: found, with the NURB made from the fitted circles
-        let found = Torus::is_nurb_surface_torus(&k, &nurbs, 1.0)
-            .unwrap()
-            .expect("a torus");
-        assert!((found.major_radius() - 10.0).abs() < 1e-9);
-        assert!((found.minor_radius() - 3.0).abs() < 1e-9);
-
-        k.fixes.found_torus_sphere_keep_tested_nurb = true;
         let found = Torus::is_nurb_surface_torus(&k, &nurbs, 1.0)
             .unwrap()
             .expect("a torus");
@@ -2480,11 +2468,10 @@ mod tests {
     }
 
     /// Partial tori (swapped, inside out, below the equator, scaled, tiny) are found
-    /// with the flags on and keep their NURB; a perturbed NURB is not a torus.
+    /// and keep their NURB; a perturbed NURB is not a torus.
     #[test]
     fn torus_recognition_partial_scaled_and_non_matching() {
-        let mut k = Kernel::default();
-        k.fixes.found_torus_sphere_keep_tested_nurb = true;
+        let k = Kernel::default();
         let frame = Axis2Placement::new(
             Vec3::new(1.0, 2.0, 0.5),
             Vec3::new(0.0, 1.0, 0.0),

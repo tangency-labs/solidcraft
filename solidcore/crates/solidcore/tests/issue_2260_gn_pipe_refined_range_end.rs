@@ -73,7 +73,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_trace_reaches_rails",
     "fillet_trim_status",
     "fillet_variable_span_follows_fillet",
-    "found_torus_sphere_keep_tested_nurb",
     "geometric_g2_continuity",
     "join_touching_loops",
     "keep_operand_uv_trims",

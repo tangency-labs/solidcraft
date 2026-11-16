@@ -30,7 +30,6 @@
   "proto_edge_splits_at_captured_vertices",
   "classify_edge_interval",
   "new_edge_vertex_tolerance_covers_gap",
-  "found_torus_sphere_keep_tested_nurb",
   "fillet_point_step_per_point",
   "analytic_copy_keeps_parameterization",
   "offset_extension_from_base",

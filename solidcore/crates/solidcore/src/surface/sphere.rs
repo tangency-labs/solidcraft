@@ -106,10 +106,11 @@
 //!   point a whole radius from them. A circle whose cap lies within the tolerance is
 //!   still a touch for a B-rep at that tolerance: `FaceIntersect` makes it one
 //!   (`topology::face::p3`). No input-driven recursion.
-//! - **Opt-in fix** ([`UpstreamFixes::found_torus_sphere_keep_tested_nurb`](crate::kernel::UpstreamFixes::found_torus_sphere_keep_tested_nurb),
-//!   WR-493, the SolidCraft fork's tangency-labs/smlib@7ea6a96): `IsNurbSurfaceSphere`
-//!   tests the half meridian within `180 + 360 * SM_EFF_ZERO` degrees and the sphere it
-//!   finds keeps the tested NURB (`SetFromGwNurb`). Off by default (upstream).
+//! - **Found spheres keep the tested NURB** (WR-493, the SolidCraft fork's
+//!   tangency-labs/smlib@7ea6a96): `IsNurbSurfaceSphere` tests the half meridian within
+//!   `180 + 360 * SM_EFF_ZERO` degrees (upstream `180 + SM_EFF_ZERO`) and the sphere it
+//!   finds keeps the tested NURB (`SetFromGwNurb`), its sweep interval the polar
+//!   curve's (#2073). Upstream keeps the NURB made from the fitted circles.
 //! - **Far spheres** (#3131, by default): `IsNurbSurfaceSphere` and
 //!   `RebuildSTEPFromNURBParameters` add to their fixed half-meridian tolerances, and
 //!   `IsNurbSurfaceSphere` to its generator's STEP interval test, the angles' rounding at
@@ -2064,12 +2065,10 @@ impl Sphere {
     /// domain of `test` (through [`Self::reparameterize`]). `None` when `test` is not
     /// a sphere.
     ///
-    /// With the opt-in
-    /// [`UpstreamFixes::found_torus_sphere_keep_tested_nurb`](crate::kernel::UpstreamFixes::found_torus_sphere_keep_tested_nurb)
-    /// (WR-493) the half turn is tested within `180 + 360 * SM_EFF_ZERO` degrees and the
-    /// sphere then keeps a copy of `test`'s NURB, its analytic data rebuilt from it
-    /// (`SetFromGwNurb`); by default `180 + SM_EFF_ZERO` and the NURB made from the
-    /// fitted circles, as upstream. Not upstream: in both modes the half-meridian test, and
+    /// The half turn is tested within `180 + 360 * SM_EFF_ZERO` degrees and the sphere
+    /// then keeps a copy of `test`'s NURB, its analytic data rebuilt from it
+    /// (`SetFromGwNurb`; WR-493: upstream tests `180 + SM_EFF_ZERO` and keeps the NURB
+    /// made from the fitted circles). Not upstream: the half-meridian test, and
     /// the test of the generator's STEP interval against the sphere's (within `SM_EFF_ZERO`
     /// upstream), also allow the angles' rounding at the points' size,
     /// [`meridian_rounding`] of the corner points' size and the circle's radius: `4
@@ -2146,13 +2145,9 @@ impl Sphere {
         // see if we have a U or a V oriented sphere
         let angles_u = iso_u.angles.unwrap_or(Extent1d::new());
         let angles_v = iso_v.angles.unwrap_or(Extent1d::new());
-        // not upstream (WR-493, opt-in; tangency-labs/smlib@7ea6a96): the half-meridian
+        // not upstream (WR-493; tangency-labs/smlib@7ea6a96): the half-meridian
         // tolerance compensates for degrees, as RebuildSTEPFromNURBParameters [B279]
-        let half_meridian_tol = if k.fixes.found_torus_sphere_keep_tested_nurb {
-            360.0 * EFF_ZERO
-        } else {
-            EFF_ZERO
-        };
+        let half_meridian_tol = 360.0 * EFF_ZERO;
         // not upstream: the angles' rounding at the points' size (`meridian_rounding`)
         let corners = min_pnt.max_dimension().max(max_pnt.max_dimension());
         let (p, q) = (test.degree(SurfParamType::U), test.degree(SurfParamType::V));
@@ -2308,23 +2303,21 @@ impl Sphere {
             Ok(()) => {}
         }
 
-        // not upstream (WR-493, opt-in; tangency-labs/smlib@7ea6a96): the sphere keeps
-        // the NURB tested (SetFromGwNurb, whose rebuild's status is ignored)
-        if k.fixes.found_torus_sphere_keep_tested_nurb {
-            let nurb = test
-                .gw_nurb()
-                .ok_or_else(|| SolidError::surface_missing(OP_NURB_SPHERE, "the tested NURB"))?;
-            sphere.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
-            sphere.base.base.nurb_is_borrowed = false;
-            ignore_status(sphere.rebuild_step_from_nurb_parameters(k))?;
-            // (not in the fork) the rebuild takes the sweep interval from one iso circle
-            // and the polar curve from another; they differ beyond the check's 1e-12 on a
-            // small sphere. The interval is the polar curve's (#2073).
-            if let Some(ivl) = sphere.base.polar_curve().map(Ellipse::step_interval) {
-                let d = sphere.base.anal_uv_domain;
-                sphere.base.anal_uv_domain =
-                    Extent2d::from_bounds(ivl.min(), d.min().y, ivl.max(), d.max().y);
-            }
+        // not upstream (WR-493; tangency-labs/smlib@7ea6a96): the sphere keeps the NURB
+        // tested (SetFromGwNurb, whose rebuild's status is ignored)
+        let nurb = test
+            .gw_nurb()
+            .ok_or_else(|| SolidError::surface_missing(OP_NURB_SPHERE, "the tested NURB"))?;
+        sphere.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
+        sphere.base.base.nurb_is_borrowed = false;
+        ignore_status(sphere.rebuild_step_from_nurb_parameters(k))?;
+        // (not in the fork) the rebuild takes the sweep interval from one iso circle and
+        // the polar curve from another; they differ beyond the check's 1e-12 on a small
+        // sphere. The interval is the polar curve's (#2073).
+        if let Some(ivl) = sphere.base.polar_curve().map(Ellipse::step_interval) {
+            let d = sphere.base.anal_uv_domain;
+            sphere.base.anal_uv_domain =
+                Extent2d::from_bounds(ivl.min(), d.min().y, ivl.max(), d.max().y);
         }
 
         // (Notify(SM_NO_COPY) copies the test surface's attributes: not modelled)
@@ -3532,12 +3525,11 @@ mod tests {
         }
     }
 
-    /// tangency-labs/smlib@7ea6a96 (WR-493): with `found_torus_sphere_keep_tested_nurb`
-    /// the sphere found in a NURB keeps exactly that NURB.
+    /// tangency-labs/smlib@7ea6a96 (WR-493): the sphere found in a NURB keeps exactly
+    /// that NURB (upstream keeps the one made from the fitted circles, ~1e-11 off).
     #[test]
     fn wr493_sphere_found_in_its_nurb_keeps_it() {
-        let mut k = Kernel::default();
-        k.fixes.found_torus_sphere_keep_tested_nurb = true;
+        let k = Kernel::default();
         for radius in [2.0, -2.0, 1e-3, 500.0] {
             let s = canonical(&k, radius);
             let nurbs = BSplineSurface::from_gw_nurb(s.base().base().gw_nurb().unwrap());
