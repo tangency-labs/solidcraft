@@ -30,6 +30,9 @@
     clippy::indexing_slicing
 )] // test helpers
 
+#[path = "support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 use solidcore::blend::blend_corner::BlendCornerEvent;
 use solidcore::blend::fillet_executive::p1::{FilletLaw, FilletLawKind};
 use solidcore::blend::fillet_executive::session::FilletSession;
@@ -57,20 +60,13 @@ use solidcore::topology::{edge, Brep, EdgeId};
 use solidcore::Kernel;
 use std::f64::consts::FRAC_PI_4;
 
-/// SolidCraft's fixes at the 5d2635d36 pin: the corpus's `fixes.json` and the bump's other fixes
-/// (tangency-labs/solidcraft#11875).
+/// SolidCraft's whole preset (`kernel_cases/fixes.json`). That includes the 5d2635d36 bump's other
+/// fixes (tangency-labs/solidcraft#11875: `face_swap_uv_transposes_trims`,
+/// `closed_smooth_pole_tangent_limit` and `fillet_chamfer_corner`), and since the file matches
+/// `core::fixes()`, `brep_ray_classifies_current_trims`. Every value here is unchanged under it.
 fn solidcraft_kernel() -> Kernel {
-    let names: Vec<String> = serde_json::from_str(include_str!("kernel_cases/fixes.json")).unwrap();
-    let mut f = UpstreamFixes::default();
-    for name in names.iter().map(String::as_str).chain([
-        "face_swap_uv_transposes_trims",
-        "closed_smooth_pole_tangent_limit",
-        "fillet_chamfer_corner",
-    ]) {
-        *f.flag_mut(name).unwrap_or_else(|| panic!("flag {name}")) = true;
-    }
     Kernel {
-        fixes: f,
+        fixes: solidcraft_fixes::solidcraft_fixes(),
         ..Kernel::default()
     }
 }
