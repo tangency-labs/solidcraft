@@ -1908,6 +1908,186 @@ fn a_ledge_rounded_concave_first_refuses_its_convex_chain_with_its_reason() {
     }
 }
 
+/// `int_a^b sqrt(r^2 - x^2) dx`, in closed form.
+fn disc_strip(a: f64, b: f64, r: f64) -> f64 {
+    let f = |x: f64| 0.5 * x * (r * r - x * x).sqrt() + 0.5 * r * r * (x / r).asin();
+    f(b) - f(a)
+}
+
+/// The ledge's operand volume, the kernel case's closed form (its `method`):
+///
+/// ```text
+/// 15 (1728 + 162 pi) - 6 (15 * 48 + I(-7.5, 7.5; 18)) - 432 pi - 216 pi + 36 * 27 * 18
+///   - 18 * 6 * 18 + 36 * 18 * 12 + 2916 pi - 18 (288 + 144 pi) - 3 * 72 pi - 6 * 2 I(9, 12; 12)
+/// ```
+///
+/// with `I(a, b; R) = int_a^b sqrt(R^2 - x^2) dx`: 43913.957931372.
+fn ledge_operand_volume() -> f64 {
+    15.0 * (1728.0 + 162.0 * PI)
+        - 6.0 * (15.0 * 48.0 + disc_strip(-7.5, 7.5, 18.0))
+        - 432.0 * PI
+        - 216.0 * PI
+        + 36.0 * 27.0 * 18.0
+        - 18.0 * 6.0 * 18.0
+        + 36.0 * 18.0 * 12.0
+        + 2916.0 * PI
+        - 18.0 * (288.0 + 144.0 * PI)
+        - 3.0 * 72.0 * PI
+        - 6.0 * 2.0 * disc_strip(9.0, 12.0, 12.0)
+}
+
+/// The ledge corner (#10876) rounded r 0.5 at both edges as the blend corner's Roll-over, its
+/// volume's change from the operand's. In the local frame u = x - 12, v = y - 30, w = z - 33
+/// (the ledge top w = 0 for v < 0, the arch's front v = 0, the bore's flat wall u = 0 above
+/// w = 0 and its round bottom, the circle of radius `RB` = 12 about u = -12, w = 0, below):
+/// - the convex round (E1, between the ledge top and the bore's bottom, from y = 21 to 30)
+///   takes its section `A1` over its length 9. Its axis A1 is at u = `ua` = sqrt(156) - 12,
+///   w = -r (the ball touching the top and outside the bore: `(RB + ua)^2 + r^2 = (RB + r)^2`);
+///   its section is the curvilinear triangle bounded by the top from (ua, 0) to the corner,
+///   the bore's circle from the corner to its tangent point T with the round, and the round's
+///   arc back: by Green's theorem `A1 = 1/2 (RB^2 (phi_t - sin phi_t) + loop_round)`, below;
+/// - the concave round (E2, between the top and the arch's front, from x = 12 to 18) adds its
+///   section `(1 - pi/4) r^2` over its remainder from u = ua (the convex round's rail on the
+///   top) to 6;
+/// - the torus about A1 (major radius 2 r, minor r) adds the material past that strip, as on
+///   the planar twin ([`roll_over_material`]): `I = int_r^(2r) rho (r - sqrt(r^2 - (2r -
+///   rho)^2)) theta_max(rho) d rho`, the meridian section of height `r - sqrt(..)` at distance
+///   `rho` from A1 swept over the directions `theta` (from +w towards -u) the cliff keeps. The
+///   cliff is the flat wall where its direction meets it above w = 0 (`rho sin theta = ua`,
+///   for `rho` past W's distance `rho_w = sqrt(ua^2 + r^2)` from A1) and the bore's circle
+///   below (`(RB + ua) sin theta + r cos theta = ((RB + r)^2 - RB^2 + rho^2) / (2 rho)`, for
+///   `rho` up to `rho_w`); with `rho = 2r - r cos phi` the integrand is analytic on each side
+///   of `phi_w`, and each side is integrated by two Gauss-Legendre rules (20 points on 8
+///   panels, 30 on 16) that agree to 1e-14 relative (asserted): the reference is their mean.
+fn ledge_rolled_change(r: f64) -> f64 {
+    let rb = 12.0;
+    let ua = ((rb + r) * (rb + r) - r * r).sqrt() - rb;
+    // A1: the loop top (ua, 0) -> corner (0, 0) -> T along the bore's circle -> back along
+    // the round's arc, counter-clockwise; 1/2 the integral of u dw - w du
+    let d = rb + r;
+    let phi_t = (-r / d).asin(); // T's angle about the bore's axis, below w = 0
+    let along_bore = rb * rb * (phi_t - phi_t.sin());
+    // the round's arc about (ua, -r) from T's direction psi_t to the top's tangent point at
+    // pi/2: with u = ua + r cos psi, w = -r + r sin psi, u dw - w du = (ua r cos psi + r^2 -
+    // r^2 sin psi) d psi, whose integral is ua r sin psi + r^2 psi + r^2 cos psi. T lies on the
+    // line from the bore's axis to the round's centre, so its direction from the centre is
+    // the opposite of (RB + ua, -r)
+    let psi_t = r.atan2(-(ua + rb));
+    let arc = |psi: f64| ua * r * psi.sin() + r * r * psi + r * r * psi.cos();
+    let along_round = arc(PI / 2.0) - arc(psi_t);
+    let a1 = 0.5 * (along_bore + along_round);
+    let strip = (1.0 - PI / 4.0) * r * r;
+    // the torus's material past the concave strip
+    let big_r = 2.0 * r;
+    let rho_w = (ua * ua + r * r).sqrt();
+    let beta = r.atan2(rb + ua);
+    let theta_max = |rho: f64| {
+        if rho >= rho_w {
+            (ua / rho).min(1.0).asin()
+        } else {
+            let s = (d * d - rb * rb + rho * rho) / (2.0 * rho * d);
+            s.min(1.0).asin() - beta
+        }
+    };
+    let f = |phi: f64| {
+        let rho = big_r - r * phi.cos();
+        rho * r * r * (1.0 - phi.sin()) * phi.sin() * theta_max(rho)
+    };
+    let phi_w = ((big_r - rho_w) / r).acos();
+    let both = |a: f64, b: f64| {
+        let x = gauss(&f, a, b, 20, 8);
+        let y = gauss(&f, a, b, 30, 16);
+        assert!((x - y).abs() <= 1e-14 * x.abs(), "{x} {y}");
+        0.5 * (x + y)
+    };
+    let material = both(0.0, phi_w) + both(phi_w, PI / 2.0);
+    -9.0 * a1 + (6.0 - ua) * strip + material
+}
+
+/// The kernel case `10876-fillet-ledge-convex-and-concave-edges-at-bore-r0-5` (#10876): the
+/// ledge's convex edge (top and bore bottom) and concave edge (top and arch front) rounded r
+/// 0.5 together, at the corner beside the bore's tangent seam. It builds as the blend corner's
+/// Roll-over: the concave round's End at the cliff spans the bore's round bottom and its flat
+/// wall across their tangent seam, its rib in two pieces through the seam's line. The result
+/// is valid at Level 2, one closed manifold solid facing out, and its volume is the operand's
+/// closed form plus [`ledge_rolled_change`] within 1e-11 relative (the End cut on the
+/// cylinder continued instead of the wall would move it 7.2e-6, 1.6e-10 relative), which the
+/// kernel's certified enclosure holds; the cap's two faces meet along the seam's line from W
+/// to S, at its closed-form point, where the rib's two pieces meet.
+///
+/// The enclosures are asked 1e-3 wide, not the 1e-5 of the stair twin: two of the operand's
+/// own edges, far from the corner (the radius-18 cylinder's at y = -16.36, z = 6, x from -7.5
+/// to 7.5, and the radius-12 bore's at y = 27, z = 25.06, x from -9 to 9), leave gaps between
+/// their faces whose strips settle the operand's enclosure at 7.4e-4 before any blend
+/// (measured; the blend's two rib pieces add 8e-7). 1e-3 still decides the Roll-over (the
+/// torus's material alone adds 0.032); the split at the seam is decided by the volume to
+/// 1e-11 and the seam edge, not by the enclosure.
+#[test]
+fn the_ledge_corner_rolls_over_across_the_bores_tangent_seam() {
+    rig_fixes();
+    let b = ledge();
+    let v0 = ledge_operand_volume();
+    assert!(rel(b.volume(1e-12).unwrap(), v0) < 1e-11, "{v0}");
+    enclosure_holds(&b, v0, 1e-3);
+    let e1 = nearest_edge(&b, [12.0, 25.5, 33.0]);
+    let e2 = nearest_edge(&b, [15.0, 30.0, 33.0]);
+    blend(
+        &b,
+        Blend::Round,
+        &[e1, e2],
+        &[0.5, 0.5],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert!(b.is_manifold_solid().unwrap());
+    b.check_solid().unwrap();
+    let want = v0 + ledge_rolled_change(0.5);
+    let v = b.volume(1e-12).unwrap();
+    assert!(rel(v, want) < 1e-11, "{v} {want}");
+    enclosure_holds(&b, want, 1e-3);
+    // the cap's two faces meet along the seam's line from W to S, where the rib's two pieces
+    // meet: S on that line (x = 12, z = 33) at the torus's height h = sqrt((rho - r)(3r - rho))
+    // over its centre plane y = 30 - r, rho = sqrt(ua^2 + r^2) W's distance from A1
+    let r: f64 = 0.5;
+    let ua = ((12.0 + r) * (12.0 + r) - r * r).sqrt() - 12.0;
+    let rho = (ua * ua + r * r).sqrt();
+    let h = ((rho - r) * (3.0 * r - rho)).sqrt();
+    let (w, s) = ([12.0, 30.0, 33.0], [12.0, 30.0 - r + h, 33.0]);
+    let (_, brep) = kernel_copy(&b);
+    let near = |p: Vec3, q: [f64; 3]| (p - Vec3::new(q[0], q[1], q[2])).length() <= 1e-9;
+    let ends = |e: EdgeId| {
+        let v0 = edge::start_vertex(&brep, e).unwrap().unwrap();
+        let v1 = edge::end_vertex(&brep, e).unwrap().unwrap();
+        (
+            brep.vertex(v0).unwrap().point,
+            brep.vertex(v1).unwrap().point,
+        )
+    };
+    let seam: Vec<EdgeId> = brep
+        .edges()
+        .ids()
+        .filter(|&e| {
+            let (p, q) = ends(e);
+            (near(p, w) && near(q, s)) || (near(p, s) && near(q, w))
+        })
+        .collect();
+    assert_eq!(seam.len(), 1, "the cap's seam edge from W to S");
+    let faces = edge::faces(&brep, seam[0], None).unwrap();
+    assert!(faces.len() == 2 && faces[0] != faces[1], "{faces:?}");
+    let at_s = brep
+        .edges()
+        .ids()
+        .filter(|&e| {
+            let (p, q) = ends(e);
+            near(p, s) || near(q, s)
+        })
+        .count();
+    assert_eq!(at_s, 3, "S: the seam edge and the rib's two pieces");
+}
+
 /// The ledge's planar twin (#10876): the slab [0, 10] x [-10, 10] x [-10, 0] with the riser
 /// [0, 10] x [0, 10] x [0, 10] on it. Their walls x = 0 are one face, so three edges meet at
 /// V = 0: E1 (the top z = 0 and the wall, convex), E2 (the top and the riser's front y = 0,
