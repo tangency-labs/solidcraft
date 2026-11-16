@@ -8084,7 +8084,21 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let selected: std::collections::HashSet<_> = app
         .highlighted()
         .iter()
-        .filter_map(|item| crate::sketch_modify_ui::point_id(&app.session, item).and_then(|id| sk.resolve_point(id)))
+        .filter_map(|item| {
+            // A selected arc or circle keeps its centre marked even after its hover sleeps.
+            let curve = match item {
+                Sel::SketchCurve { id, sketch } if sketch.is_none_or(|owner| owner == sid) => Some(id),
+                Sel::ExternalSketchCurve { id, sketch } if *sketch == sid => Some(id),
+                _ => None,
+            };
+            if let Some(id) = curve {
+                return match sk.curves.get(sk.curve_index(id)?)?.kind {
+                    CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } => Some(c),
+                    _ => None,
+                };
+            }
+            crate::sketch_modify_ui::point_id(&app.session, item).and_then(|id| sk.resolve_point(id))
+        })
         .collect();
     let (selected_splines, selected_handles) = selected_spline_handles(sk, &app.session.selection);
     let handle_mirrors = selected_spline_handle_mirrors(sk, &app.session.selection);

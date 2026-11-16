@@ -88,6 +88,24 @@ fn ignore<T>(result: Result<T>) -> Result<Option<T>> {
     }
 }
 
+/// [`ignore`] of a corner's vertex geometry, except that a refusal the corner made, with
+/// its typed cause ([`crate::error::blend::BlendFailure::NoRoom`], its error info and fit
+/// noted by the corner), is passed on as it is, as a corner refused at its topology keeps
+/// its reason (not the fork's, #17224).
+fn ignore_but_refusal(result: Result<()>) -> Result<Option<()>> {
+    match result {
+        Err(error)
+            if matches!(
+                error.blend_failure(),
+                Some(crate::error::blend::BlendFailure::NoRoom(_))
+            ) =>
+        {
+            Err(error)
+        }
+        result => ignore(result),
+    }
+}
+
 /// Which of the port's blend-too-large refusals noted [`FilletErrorType::NoRoom`] (not
 /// upstream). The fork's `SM_FILERR_NO_ROOM` is one code for all of them, told apart only by
 /// the error info's comment; this names the refusal so a caller need not match the comment
@@ -206,6 +224,13 @@ pub enum NoRoomReason {
     /// Join ends them on. The fit is the smaller offset, on the edge of the larger (not the
     /// fork's, #2905).
     JoinOffsetsDiffer,
+    /// Two rounds running on into each other across an edge between their faces, tangent
+    /// along it, end on the section where their contact lines cross that edge, and a
+    /// constant round's contact line never reaches it: the largest ball touching the round's
+    /// face on that edge and its other face is smaller than the round, so no ball of its
+    /// radius fits there. Noted only after the Join's vertex geometry failed. The fit is that
+    /// largest ball, less the fit margin, on the first round's edge (not the fork's, #17224).
+    JoinRailMissesSideEdge,
     /// A blend past its faces would leave a strip of the body, along an edge of the body,
     /// thinner than the part resolves: the edge lies off the blend by less than the trim's
     /// tolerance and the body's together, within which the strip's vertices are one. The
@@ -2947,7 +2972,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 }
             }
             access.vertices_set_constant(corner, as_constant)?;
-            if ignore(access.vertices_calculate(k, corner, self))?.is_none() {
+            if ignore_but_refusal(access.vertices_calculate(k, corner, self))?.is_none() {
                 return self.corner_vertex_failure(
                     access,
                     corner,
@@ -3386,7 +3411,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     "Fillet Corner Error: Topology Adjustment Failure",
                 );
             }
-            if ignore(access.vertices_calculate(k, corner, self))?.is_none() {
+            if ignore_but_refusal(access.vertices_calculate(k, corner, self))?.is_none() {
                 return self.corner_vertex_failure(
                     access,
                     corner,
@@ -3482,7 +3507,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     "Fillet Corner Error: Unable to Make Topology",
                 );
             }
-            if ignore(access.vertices_calculate(k, corner, self))?.is_none() {
+            if ignore_but_refusal(access.vertices_calculate(k, corner, self))?.is_none() {
                 return self.corner_vertex_failure(
                     access,
                     corner,

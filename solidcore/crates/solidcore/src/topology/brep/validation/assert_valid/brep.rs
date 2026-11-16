@@ -15,10 +15,9 @@
 //! Deviations: the validate-only tolerance pass does not compute the bounding box (used
 //! only when fixing); `AssertValid` drops its maxima (upstream only prints them in a
 //! warning, which is omitted). `pOptMaxEdgeFaceGap` (always 0 upstream, see the pass)
-//! and the unused outputs are not returned. With
-//! `Kernel::fixes.validate_tolerances_fixes_reported_gaps` (WR-679) the update grows a
-//! vertex past half its tolerance, not the whole. Edge-use marks are a local set. `CollectRegions`'
-//! linear stack and result searches use companion sets (same order).
+//! and the unused outputs are not returned. Not upstream (WR-679): the update grows a
+//! vertex past half its tolerance, not the whole. Edge-use marks are a local set.
+//! `CollectRegions`' linear stack and result searches use companion sets (same order).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -256,10 +255,10 @@ pub struct ToleranceGaps {
 
 /// `SmBrep::ValidateAndUpdateTolerances(bValidateOnly, ...)` reporting into `rep`: the
 /// native status and the outputs. Unless `validate_only`, a vertex with a bad
-/// vertex/edge or vertex/face gap (over its tolerance; over half of it with
-/// `validate_tolerances_fixes_reported_gaps`, WR-679) grows to twice its larger gap,
-/// and an edge with an edge/face gap over its tolerance grows to twice the gap when
-/// the gap is under the B-rep's box diagonal / 800, before the gaps are reported.
+/// vertex/edge or vertex/face gap (over half its tolerance, WR-679; upstream: over the
+/// whole of it) grows to twice its larger gap, and an edge with an edge/face gap over its
+/// tolerance grows to twice the gap when the gap is under the B-rep's box diagonal / 800,
+/// before the gaps are reported.
 pub(super) fn validate_and_update(
     k: &mut Kernel,
     b: &mut Brep,
@@ -301,13 +300,10 @@ fn validate_and_update_body(
         .length()
     };
 
-    // a gap is bad past the whole vertex tolerance upstream; past half of it (as the
-    // report below checks them) with the fix (WR-679)
-    let half_bad = k.fixes.validate_tolerances_fixes_reported_gaps;
-    let bad_vertex_gap = |gap: Option<f64>, tol: f64| {
-        let limit = if half_bad { tol / 2.0 } else { tol };
-        gap.is_some_and(|g| g > limit)
-    };
+    // Not upstream (WR-679): a gap is bad past half the vertex tolerance, as the report
+    // below checks them; upstream takes the whole tolerance, so it reports gaps between
+    // the two as bad and never fixes them.
+    let bad_vertex_gap = |gap: Option<f64>, tol: f64| gap.is_some_and(|g| g > tol / 2.0);
 
     // the marked edge uses (an unlocked mark)
     let mut marked: BTreeSet<EdgeuseId> = BTreeSet::new();
