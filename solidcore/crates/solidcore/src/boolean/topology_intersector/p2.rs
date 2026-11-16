@@ -122,6 +122,12 @@
 //!   edge in the vertex's order: where a 5 mm round's cylinder grazed a 1 mm round and the
 //!   corner patch beside it within the tolerance, the gap at the corner was "closed" up the
 //!   round's tangent line, and the round's own end stayed open.
+//! - **Not upstream (#17200).** `IIREdgeBrep` reports what its `MergeCurveClasses` deleted
+//!   also when the merge fails after squeezing (it sets `m_bTopologyDeleted` and fills the
+//!   deletion lists before returning the status), and `CloseIntersectionLoop` passes those
+//!   deletions on before its error. Upstream's `SER` returned before setting the flag, so
+//!   `SmMerge::MarkCommon` kept the squeezed vertex as a loop end and `FixGaps` read it once
+//!   deleted (#1036's coincident skins).
 //! - **Recursion.** None.
 
 use crate::curve::curve::p2::{Curve, CurveKind};
@@ -323,6 +329,17 @@ pub struct DeletedTopology<O> {
     pub deleted_edges: Vec<O>,
     /// `paDeletedVerts`.
     pub deleted_vertices: Vec<O>,
+}
+
+impl<O> DeletedTopology<O> {
+    /// Nothing deleted.
+    const fn none() -> Self {
+        Self {
+            topology_deleted: false,
+            deleted_edges: Vec::new(),
+            deleted_vertices: Vec::new(),
+        }
+    }
 }
 
 /// What [`TopologyIntersector::fix_gaps`] returns.
@@ -898,6 +915,37 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         swap_order: bool,
         force_face_intersections: bool,
     ) -> Result<DeletedTopology<O>> {
+        let mut out = DeletedTopology::none();
+        self.iir_edge_brep_into(
+            k,
+            brep,
+            edge,
+            target,
+            (swap_order, force_face_intersections),
+            &mut out,
+        )?;
+        Ok(out)
+    }
+
+    /// [`TopologyIntersector::iir_edge_brep`] writing its outputs to `out`, also when
+    /// `MergeCurveClasses` fails after its squeeze deleted topology: `out` then holds the
+    /// deletions and `topology_deleted` is set, so the caller drops the deleted entities
+    /// and starts a new pass instead of reading them (#17200; upstream's `SER` returns
+    /// before `m_bTopologyDeleted` is set, though its out-params already hold the lists).
+    /// The flag pair is (`bSwapOrder`, `bForceFaceIntersections`).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`TopologyIntersector::iir_edge_brep`].
+    fn iir_edge_brep_into(
+        &mut self,
+        k: &mut Kernel,
+        brep: &mut impl IntersectorBrepP3<O>,
+        edge: O,
+        target: O,
+        (swap_order, force_face_intersections): (bool, bool),
+        out: &mut DeletedTopology<O>,
+    ) -> Result<()> {
         let curve = brep
             .edge_curve(edge)
             .ok_or(invalid(OP_IIR_EDGE, "edge handle is unknown"))?
@@ -957,22 +1005,24 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         cc_insert_topology_intersections(k, &*brep, &mut crv_class2, &solutions)?;
 
         // merge curveClassifications into Breps
-        let merge = if swap_order {
-            self.merge_curve_classes(k, brep, &mut crv_class2, &mut crv_class1, true)?
+        let (merge, status) = if swap_order {
+            self.merge_curve_classes_attempt(k, brep, &mut crv_class2, &mut crv_class1, true)
         } else {
-            self.merge_curve_classes(k, brep, &mut crv_class1, &mut crv_class2, true)?
+            self.merge_curve_classes_attempt(k, brep, &mut crv_class1, &mut crv_class2, true)
         };
-        let merged = DeletedTopology {
-            topology_deleted: merge.topology_was_deleted,
-            deleted_edges: merge.deleted_edges.unwrap_or_default(),
-            deleted_vertices: merge.deleted_vertices.unwrap_or_default(),
-        };
+        out.deleted_edges = merge.deleted_edges.unwrap_or_default();
+        out.deleted_vertices = merge.deleted_vertices.unwrap_or_default();
+        // Not upstream (#17200): a failed merge whose squeeze already deleted topology
+        // reports it too (the merge's flag covers its deletion lists on every exit).
+        // Upstream returns the status first, so `SmMerge::MarkCommon` kept the deleted
+        // vertex in its single-vertex list and `FixGaps` read it.
+        out.topology_deleted = merge.topology_was_deleted;
 
         // set output values and return
-        if merged.topology_deleted {
+        if out.topology_deleted {
             self.topology_deleted = true;
         }
-        Ok(merged)
+        status
     }
 
     /// `CloseIntersectionLoop(pBrepVertex, rbMadeNewTopology, rDeletedVertices,
@@ -988,9 +1038,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     /// the other B-rep, the same is tried the other way round for the other vertex's
     /// unmated edges. Returns `rbMadeNewTopology`; `deleted_vertices` and
     /// `deleted_edges` are reset once the vertex and its mate are found, then receive
-    /// the vertices and edges (of either B-rep) each completed
-    /// [`TopologyIntersector::iir_edge_brep`] deleted by squeezing, so they hold the
-    /// completed calls' deletions also when a later call fails. Unowned in `units.json`
+    /// the vertices and edges (of either B-rep) its
+    /// [`TopologyIntersector::iir_edge_brep`] deleted by squeezing, also when that call
+    /// then fails (#17200: its error comes after the deletions). Unowned in `units.json`
     /// (called from `SmMerge.cpp:2961`); co-ported into this part.
     ///
     /// # Errors
@@ -1122,9 +1172,13 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 let old_edges = brep.brep_edges(other)?;
 
                 // intersect, insert, and relate target Edge with m_pOther brep
-                let deleted = self.iir_edge_brep(k, brep, be, other, false, true)?;
+                // the deletions are kept also when it fails (#17200)
+                let mut deleted = DeletedTopology::none();
+                let status =
+                    self.iir_edge_brep_into(k, brep, be, other, (false, true), &mut deleted);
                 deleted_vertices.extend(deleted.deleted_vertices);
                 deleted_edges.extend(deleted.deleted_edges);
+                status?;
 
                 // remember if  new edges were added to m_pOther
                 let new_edges = brep.brep_edges(other)?;
@@ -1169,9 +1223,13 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     let old_edges = brep.brep_edges(this)?;
 
                     // intersect, insert, and relate target edge into this  m_pBrep
-                    let deleted = self.iir_edge_brep(k, brep, oe, this, true, true)?;
+                    // the deletions are kept also when it fails (#17200)
+                    let mut deleted = DeletedTopology::none();
+                    let status =
+                        self.iir_edge_brep_into(k, brep, oe, this, (true, true), &mut deleted);
                     deleted_vertices.extend(deleted.deleted_vertices);
                     deleted_edges.extend(deleted.deleted_edges);
+                    status?;
 
                     // remember if new topology was added to m_pBrep
                     let new_edges = brep.brep_edges(this)?;

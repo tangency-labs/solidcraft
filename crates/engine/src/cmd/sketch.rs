@@ -238,7 +238,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&DIMENSION_CONTRACT)
         .output(output_schema_for::<DimensionResult>)
         .params(
-        "entities: [refs] (a line midpoint is \"mid:line_id\"; a model edge or vertex, {edge: [x,y,z], body?} or {vertex: [x,y,z], body?}, is projected into the sketch first and measured there: a point against the projected edge measures the distance to it), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|major|minor|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points or a line off the axes: with auto, text_at across from them (between the perpendiculars through them, or a tenth of their distance past) is the distance between them; pulled further past an end, up or down from it horizontal, sideways vertical. Two midpoints: placing text above or below their bounding box measures horizontally, beside it vertically, anywhere else (inside it or past its corners) the distance between them. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An ellipse: a half-axis, the distance from the centre to an axis end (major or minor; with auto, text_at pulled across the major axis gives the major half-axis, pulled out past an end of it the minor one, the minor without text_at; previous_axis?: major|minor, the half-axis an earlier placement chose, kept while text_at is near the boundary between them; the reply's axis names the one chosen; with auto, when a driving dimension already holds one half-axis (or its whole axis), the other one, wherever text_at is; without its major axis line the major half-axis goes to the ellipse's own major end, without its minor axis line the minor half-axis is the minor radius); any other type, radius among them, the minor radius; an ellipse's axis line with auto: its length, the whole axis, wherever text_at is; half_axes?: bool (default true; false: with auto, the minor radius wherever text_at is, as before half-axes, which the Dimension tool sends with Draw ellipses with their axes off). An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends the Sketch preference, on by default): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales to the value instead of distorting: about the origin when the drawing is tied to it (joined to the origin, or constrained to a sketch axis), otherwise about the middle of the drawing, so it stays where it was drawn (#11043); scale_about_origin?: bool (default false; the dimension tool sends the Sketch preference) scales about the origin always, as before #11043. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
+        "entities: [refs] (3D sketch geometry too, #10608: a drawn 3D line for its length, two 3D points such as \"w1.start\" for their distance, with type distance_x / distance_y / distance_z for the run along an axis, two drawn 3D lines for the angle between them, a drawn 3D arc for its radius; driven and value work as below; a line midpoint is \"mid:line_id\"; a model edge or vertex, {edge: [x,y,z], body?} or {vertex: [x,y,z], body?}, is projected into the sketch first and measured there: a point against the projected edge measures the distance to it), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|major|minor|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points or a line off the axes: with auto, text_at across from them (between the perpendiculars through them, or a tenth of their distance past) is the distance between them; pulled further past an end, up or down from it horizontal, sideways vertical. Two midpoints: placing text above or below their bounding box measures horizontally, beside it vertically, anywhere else (inside it or past its corners) the distance between them. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An ellipse: a half-axis, the distance from the centre to an axis end (major or minor; with auto, text_at pulled across the major axis gives the major half-axis, pulled out past an end of it the minor one, the minor without text_at; previous_axis?: major|minor, the half-axis an earlier placement chose, kept while text_at is near the boundary between them; the reply's axis names the one chosen; with auto, when a driving dimension already holds one half-axis (or its whole axis), the other one, wherever text_at is; without its major axis line the major half-axis goes to the ellipse's own major end, without its minor axis line the minor half-axis is the minor radius); any other type, radius among them, the minor radius; an ellipse's axis line with auto: its length, the whole axis, wherever text_at is; half_axes?: bool (default true; false: with auto, the minor radius wherever text_at is, as before half-axes, which the Dimension tool sends with Draw ellipses with their axes off). An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends the Sketch preference, on by default): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales to the value instead of distorting: about the origin when the drawing is tied to it (joined to the origin, or constrained to a sketch axis), otherwise about the middle of the drawing, so it stays where it was drawn (#11043); scale_about_origin?: bool (default false; the dimension tool sends the Sketch preference) scales about the origin always, as before #11043. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
     ),
     CommandSpec::new("sketch.constraint.horizontal_vertical", "Horizontal/Vertical", crate::checked!("sketch.constraint.horizontal_vertical", c_horizontal_vertical))
         .at("SKETCH", "CONSTRAINTS")
@@ -260,28 +260,28 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&TANGENT_CONTRACT)
         .output(output_schema_for::<TangentResult>)
-        .params(concat!("a, b: curves or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or the end point of a line or an arc: that end then lies on the other curve (or on the other end point), and its curve is tangent there, in one step (`constraints` lists both)", model_operand_doc!())),
+        .params(concat!("a, b: curves or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or the end point of a line or an arc: that end then lies on the other curve (or on the other end point), and its curve is tangent there, in one step (`constraints` lists both); in a 3D sketch, a drawn 3D line and a drawn 3D arc that meet at an end (the line leaves the arc the way it runs on)", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.equal", "Equal", crate::checked!("sketch.constraint.equal", c_equal))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_equal")
         .enabled(in_sketch)
         .contract(&EQUAL_CONTRACT)
         .output(output_schema_for::<EqualResult>)
-        .params(concat!("a, b: lines or circles/arcs; or curves: [2 to 200 lines or circles/arcs], each made equal to the first, in one step", model_operand_doc!())),
+        .params(concat!("a, b: lines or circles/arcs (in a 3D sketch, two drawn 3D lines or two drawn 3D arcs); or curves: [2 to 200 lines or circles/arcs], each made equal to the first, in one step", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.parallel", "Parallel", crate::checked!("sketch.constraint.parallel", c_parallel))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_parallel")
         .enabled(in_sketch)
         .contract(&PARALLEL_CONTRACT)
         .output(output_schema_for::<ConstraintResult>)
-        .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created)", model_operand_doc!())),
+        .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created); in a 3D sketch, two drawn 3D lines, or a drawn 3D line and an origin plane xy / yz / xz", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.perpendicular", "Perpendicular", crate::checked!("sketch.constraint.perpendicular", c_perpendicular))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_perpendicular")
         .enabled(in_sketch)
         .contract(&PERPENDICULAR_CONTRACT)
         .output(output_schema_for::<ConstraintResult>)
-        .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created)", model_operand_doc!())),
+        .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created); in a 3D sketch, two drawn 3D lines", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.fix", "Fix/Unfix", crate::checked!("sketch.constraint.fix", c_fix))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_fix")
@@ -309,7 +309,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&COLLINEAR_CONTRACT)
         .output(output_schema_for::<ConstraintResult>)
-        .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created)", model_operand_doc!())),
+        .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created); in a 3D sketch, two drawn 3D lines", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.symmetry", "Symmetry", crate::checked!("sketch.constraint.symmetry", c_symmetry))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_symmetry")
@@ -675,7 +675,10 @@ pub(super) fn wire_collapse(before: &Sketch, after: &Sketch) -> Option<String> {
         |(lo, hi), p| (lo.min(p), hi.max(p)),
     );
     let span = if lo.x <= hi.x { lo.dist(hi) } else { 0.0 };
-    let reach = FLUNG * span.max(1.0);
+    // A 3D dimension may ask for more than the curves span now (its largest driving value).
+    let longest =
+        after.wire_constraints.iter().filter(|c| !c.driven && !c.kind.is_angle()).filter_map(|c| c.kind.value()).map(f64::abs).fold(0.0, f64::max);
+    let reach = FLUNG * (span + longest).max(1.0);
     let thrown = new.iter().any(|(id, w)| old.get(id).is_some_and(|o| o.fit.iter().zip(&w.fit).any(|(p, q)| !(p.dist(*q) <= reach))));
     thrown.then(|| "that would throw 3D points of the sketch far away: its 3D constraints have no solution near the sketch as it is".to_string())
 }
@@ -711,7 +714,8 @@ pub(crate) fn collapse_reason(before: &Sketch, after: &Sketch) -> Option<String>
     if flung(before, after) {
         return Some("that would throw points of the sketch far away: its constraints have no solution near the sketch as it is".into());
     }
-    None
+    // The 3D curves too (#10608).
+    wire_collapse(before, after)
 }
 
 /// Did solving `before` into `after` throw some point further than [`FLUNG`] times the sketch's
@@ -1001,9 +1005,12 @@ pub(crate) fn created(before: Option<&Sketch>, after: &Sketch) -> Value {
     let wires: Vec<String> = after.wires.iter().map(|x| x.id.as_str()).filter(new).map(str::to_string).collect();
     let owned = |v: Vec<&str>| v.into_iter().map(str::to_string).collect::<Vec<_>>();
     // 3D constraints (#10608) are constraints too.
-    let mut constraints = ids(cons);
-    constraints.extend(after.wire_constraints.iter().map(|c| c.id.clone()).filter(|id| new(&id.as_str())));
-    let out = Created { points: owned(points), curves: owned(curves), constraints, dimensions: ids(dims), wires };
+    // 3D constraints and dimensions (#10608) are listed as the planar ones are.
+    let (mut constraints, mut dimensions) = (ids(cons), ids(dims));
+    for c in after.wire_constraints.iter().filter(|c| new(&c.id.as_str())) {
+        if c.kind.is_dimension() { &mut dimensions } else { &mut constraints }.push(c.id.clone());
+    }
+    let out = Created { points: owned(points), curves: owned(curves), constraints, dimensions, wires };
     serde_json::to_value(out).unwrap_or_default()
 }
 
@@ -3032,6 +3039,9 @@ fn two_curves_or_axes(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<(usize, u
 
 fn c_tangent(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constraint.tangent";
+    if let Some(made) = super::sketch_3d::relation_3d(s, p, cmd)? {
+        return reply(cmd, TangentResult { made: TangentMade::Curves(made), param_warnings: Vec::new() });
+    }
     let p = &super::sketch_project::project_operands(s, p, cmd, &["a", "b"])?;
     let sk = sketch_store::read(&s.doc, sketch_store::target(s, p, cmd)?)?;
     if tangent_end(sk, p, "a").is_some() || tangent_end(sk, p, "b").is_some() {
@@ -3164,7 +3174,15 @@ fn tangent_at_end(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     reply(cmd, TangentResult { made, param_warnings: Vec::new() })
 }
 fn c_equal(s: &mut Session, p: &Value) -> Result<Value> {
-    if p.get("curves").is_some() {
+    if let Some(made) = super::sketch_3d::relation_3d(s, p, "sketch.constraint.equal")? {
+        return reply("sketch.constraint.equal", EqualResult { made: EqualMade::Pair(made), param_warnings: Vec::new() });
+    }
+    if let Some(list) = p.get("curves") {
+        let cmd = "sketch.constraint.equal";
+        let sk = sketch_store::read(&s.doc, sketch_store::target(s, p, cmd)?)?;
+        if list.as_array().into_iter().flatten().filter_map(Value::as_str).any(|id| sk.wire_index(id).is_some()) {
+            return Err(bad(cmd, "3D curves take Equal a pair at a time: give `a` and `b`"));
+        }
         return equal_curves(s, p);
     }
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.equal", &["a", "b"])?;
@@ -3205,6 +3223,9 @@ fn equal_curves(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, EqualResult { made: EqualMade::Curves { constraints: out, sketch: info }, param_warnings: Vec::new() })
 }
 fn c_parallel(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(made) = super::sketch_3d::relation_3d(s, p, "sketch.constraint.parallel")? {
+        return reply("sketch.constraint.parallel", ConstraintResult { made, param_warnings: Vec::new() });
+    }
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.parallel", &["a", "b"])?;
     constrain_reply(s, p, "sketch.constraint.parallel", |sk| {
         two_curves_or_axes(sk, p, "sketch.constraint.parallel")
@@ -3213,6 +3234,9 @@ fn c_parallel(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 fn c_perpendicular(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(made) = super::sketch_3d::relation_3d(s, p, "sketch.constraint.perpendicular")? {
+        return reply("sketch.constraint.perpendicular", ConstraintResult { made, param_warnings: Vec::new() });
+    }
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.perpendicular", &["a", "b"])?;
     constrain_reply(s, p, "sketch.constraint.perpendicular", |sk| {
         two_curves_or_axes(sk, p, "sketch.constraint.perpendicular")
@@ -3239,6 +3263,9 @@ fn c_concentric(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 fn c_collinear(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(made) = super::sketch_3d::relation_3d(s, p, "sketch.constraint.collinear")? {
+        return reply("sketch.constraint.collinear", ConstraintResult { made, param_warnings: Vec::new() });
+    }
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.collinear", &["a", "b"])?;
     constrain_reply(s, p, "sketch.constraint.collinear", |sk| {
         two_curves_or_axes(sk, p, "sketch.constraint.collinear")
@@ -3570,6 +3597,9 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
 /// [`dimension`]'s reply, as the typed value the output schema describes.
 fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
     let cmd = "sketch.dimension";
+    if let Some(reply) = super::sketch_3d::dimension_3d(s, p, cmd)? {
+        return Ok(reply);
+    }
     // A dimension may measure model geometry (#7912): an `{edge: [x,y,z], body?}` or a
     // `{vertex: [x,y,z], body?}` among its entities is projected into the sketch first, as
     // `sketch.project` does, and stands for the projected curve (or point) there.
@@ -3962,6 +3992,7 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
     let current = solved_measure(s, p, cmd, &new_id).unwrap_or(current);
     if driven {
         return Ok(DimensionResult {
+            constraint: None,
             param: None,
             driven: Some(true),
             kind: kind_name.to_string(),
@@ -4003,6 +4034,7 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
     }
     let v = s.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
     Ok(DimensionResult {
+        constraint: None,
         param: Some(param),
         driven: None,
         kind: kind_name.to_string(),
@@ -4245,6 +4277,9 @@ fn dimension_text(s: &mut Session, p: &Value) -> Result<Value> {
     let key = str_(p, "dimension").ok_or_else(|| bad(cmd, "`dimension` must be a dimension id or parameter name"))?.to_string();
     let at = if bool_(p, "reset").unwrap_or(false) { None } else { Some(req_vec2(cmd, p, "at")?) };
     let (id, info) = edit_solve(s, p, cmd, false, |sk, _| {
+        if sk.wire_constraints.iter().any(|c| c.kind.is_dimension() && (c.id == key || c.param.as_deref() == Some(key.as_str()))) {
+            return Err(bad(cmd, format!("`{key}` is a 3D dimension: 3D dimensions have no text to move yet (#10617)")));
+        }
         let c = sk
             .constraints
             .iter()

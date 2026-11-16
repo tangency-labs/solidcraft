@@ -20,8 +20,9 @@
 //! The end face at a tangent side is extended `CInfinity` and that side's cap edge is
 //! `OnExtendEdge` (WR-600, the fork's tangency-labs/smlib@856b54e). At a multi-neighbour
 //! end face whose side edges are both cliff edges, the end face is the side face whose
-//! surface holds the other side edge; upstream takes the first side's, whatever its
-//! surface. There is no recursion.
+//! surface holds the other side edge or, where neither surface holds it and only one tangent
+//! plane at the vertex holds the other side edge's direction there, that plane's face (WR-783);
+//! otherwise, as upstream, the first side's, whatever its surface. There is no recursion.
 
 use std::collections::BTreeMap;
 
@@ -44,7 +45,7 @@ use crate::query::brep::{BrepFaceServices, FaceCaches};
 use crate::surface::surface::Surface;
 use crate::topology::brep_cache::CacheObject;
 use crate::topology::edge;
-use crate::topology::edgeuse::p1 as eu1;
+use crate::topology::edgeuse::{p1 as eu1, p3 as eu3};
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, Vertex, VertexId};
 
 const OP: &str = "blend::fillet_corner::topology::make_nx1_corner_topology";
@@ -98,6 +99,44 @@ fn face_holds_edge(
             &mut services,
         )?
         .is_some())
+}
+
+/// Whether the edge of `other` leaves `vertex` in the tangent plane of `side`'s face there:
+/// square to that face's normal at the vertex (read on `side` at its edge's end there) within
+/// `ang_tol_deg`. The end cap's edge along `other` runs from the vertex to the rail's end on
+/// it, so the cap can lie on that face's surface only if this holds. An edge that does not end
+/// at the vertex, a zero tangent and a failed evaluation answer `false`; of a closed edge, the
+/// tangent and the face's normal are read at its start. The normal is read without building a
+/// UV trim curve (`use_3d_only`), so the test leaves `target` as it was.
+///
+/// # Errors
+/// `Unported` and a cancellation; any other failure answers `false`.
+fn edge_leaves_in_face(
+    k: &Kernel,
+    target: &mut Brep,
+    side: EdgeuseId,
+    other: EdgeuseId,
+    vertex: VertexId,
+    ang_tol_deg: f64,
+) -> Result<bool> {
+    super::or_false((|| {
+        let side_edge = need(eu1::edge(target, side)?, "side edge use without edge")?;
+        let other_edge = need(eu1::edge(target, other)?, "side edge use without edge")?;
+        let Some(leaving) = tangent_leaving(k, target, other_edge, vertex)? else {
+            return Ok(false);
+        };
+        let interval = edge::interval(target, side_edge)?;
+        let t = if edge::start_vertex(target, side_edge)? == Some(vertex) {
+            interval.min()
+        } else if edge::end_vertex(target, side_edge)? == Some(vertex) {
+            interval.max()
+        } else {
+            return Ok(false);
+        };
+        let options = eu3::BinormalOptions::default();
+        let normal = eu3::evaluate_binormal(k, target, side, t, true, &options)?.face_normal;
+        Ok(normal.is_perpendicular_to(leaving, ang_tol_deg))
+    })())
 }
 
 /// `sm_FindSurfaceExtensionDistAtCorner`: an extension distance for the end surface of
@@ -981,9 +1020,9 @@ impl FilletCorner {
                         (first, second)
                     } else if same[1] {
                         (second, first)
-                    } else if !face_holds_edge(k, target, first, second, self.approx_tol_3d)?
-                        && face_holds_edge(k, target, second, first, self.approx_tol_3d)?
-                    {
+                    } else if face_holds_edge(k, target, first, second, self.approx_tol_3d)? {
+                        (first, second)
+                    } else if face_holds_edge(k, target, second, first, self.approx_tol_3d)? {
                         // Both are cliff edges. The cap lies on the end face's surface
                         // between the end rib and both side edges, so the end face is the
                         // one whose surface holds the other side edge (the gap check asks
@@ -993,7 +1032,22 @@ impl FilletCorner {
                         // the vertex: the mirror image built and the part did not (#15768).
                         (second, first)
                     } else {
-                        (first, second)
+                        // Neither surface holds the whole other side edge (a wall whose slanted
+                        // end overhangs a plate: the plate's corner edge runs on past the wall's
+                        // end face, the wall's edge leaves the plate's end plane). The cap's edge
+                        // along it, from the vertex to the rail's end, lies on the end face's
+                        // surface only if the edge leaves the vertex in it: on the first face's
+                        // surface, picked whatever, the cap was left off the result, refused as
+                        // no closed solid (#17617, WR-783). Where both or neither leave so, the
+                        // first, as upstream.
+                        let tol_deg = crate::math::rad_to_deg(self.tangency_tol_radians);
+                        if !edge_leaves_in_face(k, target, first, second, vertex, tol_deg)?
+                            && edge_leaves_in_face(k, target, second, first, vertex, tol_deg)?
+                        {
+                            (second, first)
+                        } else {
+                            (first, second)
+                        }
                     };
                     end_face = eu1::face(target, pick)?;
                     extend_edge = eu1::edge(target, pick)?;

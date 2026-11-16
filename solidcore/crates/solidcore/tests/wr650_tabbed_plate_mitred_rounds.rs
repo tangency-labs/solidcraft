@@ -177,7 +177,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_trim_status = true;
     k.fixes.fillet_variable_span_follows_fillet = true;
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
-    k.fixes.good_drop_result_distances_in_order = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
     k.fixes.join_touching_loops = true;
     k.fixes.keep_operand_uv_trims = true;
@@ -200,8 +199,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.ssi_low_angle_start_on_probation = true;
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
-    k.fixes.transform_model_size_from_body_box = true;
-    k.fixes.transform_scales_each_tolerance = true;
     k.fixes.uv_trim_corner_end_points_only = true;
     let mut b = plate(&mut k);
     let before = volume(&k, &mut b);

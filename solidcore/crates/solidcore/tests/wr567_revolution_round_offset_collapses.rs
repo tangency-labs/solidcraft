@@ -4,8 +4,10 @@
 //! fillet's surface of revolution of an arc; moved in past its radius it has no offset,
 //! as a torus's, and the floor's and side's offsets meet across it in a circle. Upstream's
 //! `SmSurfOfRevolution` never collapses, and its offset builds the arc turned inside out
-//! (r 0.1 or 0.5 round its centre): the shell fails with 1001 open at the rounded end's
-//! other side, and is 0.85% and 4.2% low open at the rounded end.
+//! (r 0.1 or 0.5 round its centre): upstream's shell fails with 1001 open at the rounded
+//! end's other side, and is 0.85% and 4.2% low open at the rounded end. Without the
+//! collapse test the kernel's cavity selection (WR-667) still gives the closed form open
+//! at the other end.
 //!
 //! Expected: the cavity is the cylinder r 15 - t, 5 - t deep; the round takes
 //! r^2 (1 - pi/4) from the disc's section, its centroid r (10 - 3 pi) / (3 (4 - pi)) in
@@ -27,6 +29,7 @@ use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_cylinder;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::{Brep, Kernel};
 
 const RD: f64 = 15.0;
@@ -87,11 +90,24 @@ fn shelled(k: &mut Kernel, edge_z: f64, open_z: f64, t: f64) -> bool {
     )
 }
 
+/// Without the revolution's collapse test the round's offset is the arc turned inside out
+/// (upstream), and the shell failed with 1001 open at the other end while the inset kept
+/// every finite region. Keeping only the cavity regions (WR-667) gives the closed form, a
+/// shell valid at every `check_brep` level. (Deduced, not checked: with fewer than two
+/// finite regions the selection is skipped, so the result would not have changed; this
+/// merge leaves at least two.)
 #[test]
-fn wr567_default_fails_open_at_the_other_end() {
-    // upstream: the round's offset is the arc turned inside out
+fn wr567_without_collapse_open_at_the_other_end_keeps_the_cavity() {
     let mut k = kernel(false);
-    assert!(!shelled(&mut k, -H, 0.0, 1.6));
+    assert!(shelled(&mut k, -H, 0.0, 1.6));
+    let b = rounded_disc(&mut k, -H);
+    let open = planar_faces_at(&k, &b, 2, 0.0);
+    let mut result = shell(&mut k, b, -1.6, &open).unwrap();
+    result.refresh_cached_topology();
+    for level in [CheckLevel::Level0, CheckLevel::Level1, CheckLevel::Level2] {
+        let checked = check_brep(&mut k, &mut result, level).unwrap();
+        assert!(checked.is_valid(), "{level:?}: {:?}", checked.lines());
+    }
 }
 
 #[test]

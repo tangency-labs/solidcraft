@@ -110,6 +110,11 @@ const OP_SAMPLE: &str = "surface::surface::p6::DerivSurfDefinition::sample_value
 /// zero-filled partial arrays retained after a sampling failure. Upstream fixtures
 /// use at most hundreds of samples; this allows 65,536 intervals.
 pub const MAX_BOUNDARY_SAMPLES: u64 = 65_536;
+
+/// The sine of the angle to a surface below which `SimpleCoincidenceChecker` takes a curve for
+/// tangent to it at a point (about one degree; upstream's literal): a curve within tolerance
+/// and tangent there runs in the surface, one at a steeper angle crosses it.
+pub const COINCIDENT_TANGENT_SINE: f64 = 0.017;
 const OP_SS: &str = "surface::surface::p6::SsGlobalSolver::solutions_identical";
 const OP_CS_INTERSECT: &str = "surface::surface::p6::cs_intersect_local_solve";
 /// The most Newton steps the solve of [`Surface::local_curve_intersect`] takes (upstream's
@@ -797,7 +802,7 @@ impl Surface {
             let norm = self.evaluate_normal(k, mid_uv, Side::Right, Side::Right)?;
             let dot = mid_pt1.dot(norm);
 
-            found = dot.abs() < 0.017; // about 1 degree
+            found = dot.abs() < COINCIDENT_TANGENT_SINE;
         }
 
         if found {
@@ -863,7 +868,7 @@ impl Surface {
                 let norm = self.evaluate_normal(k, uv, Side::Right, Side::Right)?;
                 let dot = st_pnt1.dot(norm);
 
-                found_start = dot.abs() < 0.017; // about 1 degree
+                found_start = dot.abs() < COINCIDENT_TANGENT_SINE;
             }
 
             // this CrvStartPt is coincident and tangent to surface
@@ -918,7 +923,7 @@ impl Surface {
                 let norm = self.evaluate_normal(k, uv, Side::Right, Side::Right)?;
                 let dot = en_pnt1.dot(norm);
 
-                found_end = dot.abs() < 0.017; // about 1 degree
+                found_end = dot.abs() < COINCIDENT_TANGENT_SINE;
             }
 
             // this CrvEndPt is coincident and tangent to surface
