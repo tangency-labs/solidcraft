@@ -7091,7 +7091,15 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
         let shown_ms = crate::now_ms() - at;
         if shown_ms < STATUS_TOAST_MS {
             let undo = app.status_undo;
-            let actions = if undo { vec![(solidcraft_ui_text::tr_label("Undo"), ToastKind::Secondary)] } else { Vec::new() };
+            // An error offers Report…: the report dialog, filled in with it (when tickets work here).
+            let report = error && !undo && crate::issue_report::ticket::enabled(app);
+            let actions = if undo {
+                vec![(solidcraft_ui_text::tr_label("Undo"), ToastKind::Secondary)]
+            } else if report {
+                vec![(solidcraft_ui_text::tr("report.report_action"), ToastKind::Secondary)]
+            } else {
+                Vec::new()
+            };
             let extras = ToastExtras {
                 close: Some("toast:status:close"),
                 countdown: Some((countdown_left(0.0, shown_ms / 1000.0, STATUS_TOAST_MS / 1000.0), STATUS_TOAST_MS / 1000.0)),
@@ -7099,12 +7107,18 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
                 card_hint: (!undo).then(|| solidcraft_ui_text::tr("messages.chip_hint")),
                 ..Default::default()
             };
+            let reported = report.then(|| msg.clone());
             if let Some(toast) = paint_toast_ext(ui, free, msg, ToastLead::Dot(error), &actions, extras) {
                 let r = toast.rect;
                 if undo && toast.clicked == Some(0) {
                     app.status = None;
                     app.status_undo = false;
                     let _ = app.run("edit.undo", json!({}));
+                }
+                if report && toast.clicked == Some(0) {
+                    app.status = None;
+                    let dialog = app.dialog.clone();
+                    crate::issue_report::begin(app, ui.ctx(), dialog.as_ref(), reported.as_deref());
                 }
                 obstacles.push(r);
                 crate::scenario::publish_rect("toast", r);
