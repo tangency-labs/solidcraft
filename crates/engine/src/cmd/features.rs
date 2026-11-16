@@ -852,7 +852,12 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
         FeatureKind::Extrude { operation: Operation::Join | Operation::Cut | Operation::Intersect, targets, .. }
             if participants.is_empty() && targets.is_empty() =>
         {
-            shown_scope(s).unwrap_or_default()
+            let shown = shown_scope(s).unwrap_or_default();
+            if shown.is_empty() && shown_scope(s).is_some() {
+                // An empty list would mean every body, hidden ones included.
+                return Err(EngineError::Other("no shown solid body to change: show one, or name the bodies".into()));
+            }
+            shown
         }
         _ => participants,
     };

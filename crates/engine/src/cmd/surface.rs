@@ -2002,6 +2002,24 @@ mod tests {
         assert!((volume(&s, "Block") - (1000.0 - 40.0 * std::f64::consts::PI)).abs() < 1e-6);
     }
 
+    /// A hidden solid with only a surface shown: an automatic cut is refused, never reaching the
+    /// hidden body (an empty participant list would mean every body).
+    #[test]
+    fn automatic_cut_with_only_a_surface_shown_leaves_hidden_solid_alone() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        sheet(&mut s, "XY", "Sheet", [20.0, 0.0], [30.0, 10.0]);
+        run(&mut s, "browser.visibility", json!({"items": ["Block"], "visible": false}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Hole"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [5, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = s.doc.clone();
+        let error = s.execute("solid.extrude", &json!({"sketch": "Hole", "distance": 3, "operation": "cut"})).unwrap_err().to_string();
+        assert!(error.contains("no shown solid body"), "{error}");
+        assert_eq!(s.doc, before);
+        assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
+    }
+
     /// Sheet-metal machining preserves separate surfaces before cutting any ordinary solids.
     #[test]
     fn automatic_solid_cuts_preserve_surfaces_beside_sheet_metal() {
