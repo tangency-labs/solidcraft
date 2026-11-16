@@ -477,7 +477,8 @@ pub fn select_topology_to_keep<C: StitchCallback + ?Sized>(
             return Ok(out);
         }
 
-        // knot counts (statuses ignored: a failing call leaves its list empty)
+        // knot counts (statuses ignored upstream, where a failing call leaves its list
+        // empty; passed on here, WR-658)
         let knots1 = curve_of(b, edge1)?.knots(k, None)?.0.len();
         let knots2 = curve_of(b, edge2)?.knots(k, None)?.0.len();
 
@@ -635,7 +636,8 @@ fn test_and_split_edge_with(
         return Ok(out);
     }
 
-    // Check on the interior (status ignored: a failure reports not interior).
+    // Check on the interior (status ignored upstream, where a failure reports not
+    // interior; passed on here, WR-658).
     let interior = check_interior_edge(k, b, e, dropped.parameter, this_tol)?;
     if !interior {
         out.reason = SplitReason::CloseToBoundary;
@@ -1412,7 +1414,8 @@ impl<'c> Stitch<'c> {
         }
 
         // the vertex and edge pairs have been found and they are in tolerance so delete
-        // FacesToDelete (increments unlocked mark value; status ignored)
+        // FacesToDelete (increments unlocked mark value; status ignored upstream, passed
+        // on here, WR-658)
         self.edit_remove_faces(k, b, faces_to_delete)?;
 
         // now follow the procedure that is used in DoStitching for stitching vertex
@@ -1635,7 +1638,8 @@ impl<'c> Stitch<'c> {
             let mut marks = Marks::default();
 
             // CalculateBoundingBox(sBrepBBox) with the header defaults; status ignored
-            // upstream (a failure leaves the default-initialised box)
+            // upstream (a failure leaves the default-initialised box), passed on here
+            // (WR-658)
             let brep_bbox =
                 qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
 
@@ -2088,7 +2092,7 @@ impl<'c> Stitch<'c> {
                 }
             }
 
-            // status ignored
+            // status ignored upstream; passed on here (WR-658)
             update_object_tolerance(k, b, EntityRef::Vertex(vtx1), min_dist, old_tol, check_gaps)?;
             out.max_vertex_gap = smos_max(out.max_vertex_gap, min_dist);
 
@@ -2687,11 +2691,12 @@ fn evaluate_binormal(
 
 // ---- SM_API entry points ---------------------------------------------------------------
 
-/// `SmApiStitch(SmBrep*)`: `StitchAndOrient` (status ignored), then success.
+/// `SmApiStitch(SmBrep*)`: `StitchAndOrient`, then success. Upstream ignores the
+/// stitch's status; it is passed on here (WR-658).
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] for a null B-rep.
+/// [`SolidError::InvalidInput`] for a null B-rep; any error of `StitchAndOrient`.
 pub fn api_stitch(k: &mut Kernel, b: Option<&mut Brep>) -> Result<()> {
     let b = b.ok_or_else(|| SolidError::invalid_input(API_OP, "no B-rep to stitch"))?;
     // StitchAndOrient() with its header defaults

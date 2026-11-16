@@ -2341,7 +2341,8 @@ fn redistribute_inner_loops(
         let other = if classify_to_original { new_face } else { face };
         let mut pc = PointClassification::<EntityRef>::new(tolerance);
         let need_move = if missing_new && missing_original {
-            // Both statuses and the drop's success flag are ignored natively.
+            // Both statuses and the drop's success flag are ignored natively; the
+            // statuses are passed on here (WR-658).
             let _old_domain = computed_uv_domain(k, b, face)?;
             let new_domain = computed_uv_domain(k, b, new_face)?;
             let surface = required(b.face(face)?.surface.as_ref(), "split face without surface")?;

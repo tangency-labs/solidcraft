@@ -667,7 +667,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             let (new_e, other_new_e) =
                 self.new_edge_pair(ii, &new_edges, &new_edges_other, true)?;
 
-            // when old pNewE<->pOtherNewE mapping exists remove it (status unchecked)
+            // when old pNewE<->pOtherNewE mapping exists remove it (status unchecked
+            // upstream; passed on here, WR-658)
             if new_e.is_some() && other_new_e.is_some() {
                 self.remove_relationship(new_e, other_new_e)?;
             }

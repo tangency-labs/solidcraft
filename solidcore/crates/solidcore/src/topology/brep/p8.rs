@@ -1068,7 +1068,8 @@ pub fn make_faces_with_curves(
                 let new_key = CurveKey(store.len());
                 store.push(new_curve);
 
-                // insert the split LoopCurve children into the loops (status ignored)
+                // insert the split LoopCurve children into the loops (status ignored
+                // upstream; passed on here, WR-658)
                 loops.insert_into_loops(new_key, loop_key)?;
 
                 // add new Solution for the new curve to SolArray

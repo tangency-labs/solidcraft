@@ -3085,8 +3085,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // In the SmMerge::MergeAddedTopology routine, by now all coincident edges should have common edges
                 let mut are_coincident = false;
                 if !common_edges.is_empty() {
-                    // (upstream passes the angle tolerance as the 3D tolerance; the status is
-                    // ignored, bAreCoincident stays FALSE)
+                    // (upstream passes the angle tolerance as the 3D tolerance and ignores the
+                    // status, leaving bAreCoincident FALSE; passed on here, WR-658)
                     let (coincident, _max_dist) = surface_coincidence_check(
                         k,
                         brep,
@@ -3104,7 +3104,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
                 // If we arrive here, we are ready to intersect the faces
                 let ang_tol_deg = 180.0 / PI * self.this_ang_tol_rad;
-                // (the status is ignored: on failure the output arrays stay empty)
+                // (upstream ignores the status: on failure the output arrays stay empty;
+                // passed on here, WR-658)
                 let mut fi = brep.face_intersect(
                     k,
                     face1,
@@ -3281,9 +3282,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         add_unique(&mut out.processed_faces, face1);
                         add_unique(&mut out.processed_faces, face2);
 
-                        // We want only one edge shared between the faces (the status is
-                        // ignored; GlueEdgesGeneral returns SM_SUCCESS at once for a null
-                        // edge, which MakeEdgeInFace leaves when it makes none)
+                        // We want only one edge shared between the faces (upstream ignores
+                        // the status, passed on here, WR-658; GlueEdgesGeneral returns
+                        // SM_SUCCESS at once for a null edge, which MakeEdgeInFace leaves
+                        // when it makes none)
                         if let (Some(e1), Some(e2)) = (new_edge1, new_edge2) {
                             // m_pBrep->GlueEdgesGeneral(pNewEdge1, SM_OT_SAME, 0.0,
                             // bDoRegionNesting, pNewEdge2) (pInsideFaceuses NULL)
@@ -3370,13 +3372,14 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let mut f2 = pc2
             .face_object()
             .ok_or(dangling("classification without face"))?;
-        // (FindObjPoint3d's status is ignored: the point stays UNDEF on failure)
+        // (upstream ignores FindObjPoint3d's status, leaving the point UNDEF on failure;
+        // passed on here, WR-658)
         let mut pt = pc1.find_obj_point_3d(k, brep)?;
 
         // This classification may be outdated. Check and update. Will either be face or vertex
         let mut uv1 = pc1.uv_param();
         let mut uv2 = pc2.uv_param();
-        // (every status below is ignored upstream)
+        // (every status below is ignored upstream and passed on here, WR-658)
         brep.face_point_3d_classify(k, f1, pt, tol, false, pc1, Some(uv1))?;
         brep.face_point_3d_classify(k, f2, pt, tol, false, pc2, Some(uv2))?;
 
@@ -3450,8 +3453,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let old_face = ci.mid.face_object();
 
         // (the face and vertices are passed as they are, null or not: MakeEdgeInFace
-        // checks them itself. The status is ignored: a failed MakeEdgeInFace leaves the
-        // edge and face null, and the curve copy stays in the store as upstream leaks it)
+        // checks them itself. Upstream ignores the status: a failed MakeEdgeInFace leaves
+        // the edge and face null and leaks the curve copy; passed on here, WR-658)
         let made = Some(brep_make_edge_in_face(
             k,
             brep,
@@ -4482,7 +4485,7 @@ pub fn intersect_shell_vertices<O: ClassObject + SolutionObject + Ord>(
             .ok_or(dangling("solution without objects"))?;
         pc2.load_from_intersection(vtx_zone_tol, object, &sol.start, 0, BIG_DOUBLE)?;
 
-        // the status of FindOrCreateProtoVertex is not checked
+        // upstream does not check FindOrCreateProtoVertex's status; passed on here, WR-658
         if swap_order {
             mgr.find_or_create_proto_vertex_pcs(k, geometry, &mut pc2, &mut pc1)?;
         } else {

@@ -3412,8 +3412,8 @@ fn set_vertex_point(b: &mut Brep, env: &mut NotifyEnv<'_>, v: VertexId, p: Point
     )
 }
 
-/// `pEU->GetOrCreateUVTrimCurve(pUV)` (status ignored; header defaults `NULL`, `NULL`,
-/// `TRUE`), then `SER(pUV->Copy(..))`: a copy of the edge use's UV trim curve. A
+/// `pEU->GetOrCreateUVTrimCurve(pUV)` (status ignored upstream, passed on here, WR-658;
+/// header defaults `NULL`, `NULL`, `TRUE`), then `SER(pUV->Copy(..))`: a copy of the edge use's UV trim curve. A
 /// missing curve is dereferenced upstream (after its `SM_ASSERT`). UV trim curves are
 /// made as B-splines (the `SmBSplineCurve*&` overload casts). An `SmLine` is an
 /// `SmBSplineCurve`: its copy serves `CreateExtendedCurve` through its B-spline part,

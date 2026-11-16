@@ -580,7 +580,8 @@ impl Stitch<'_> {
 
             // Check for Vertices coincident with Edges if asked.
             if self.split_edges_with_vertices {
-                // get modified Brep Bounding box (status not checked)
+                // get modified Brep Bounding box (status not checked upstream; passed on
+                // here, WR-658)
                 let brep_bbox =
                     qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
 
@@ -1576,7 +1577,7 @@ impl Stitch<'_> {
                     let mid = (vertex::point(b, v)? + vertex::point(b, new_v)?) * 0.5;
                     self.edit_set_point(k, b, v, mid)?;
 
-                    // (status not checked)
+                    // (status not checked upstream; passed on here, WR-658)
                     self.edit_glue_vertices(k, b, v, new_v, None)?;
                     out.processed.push(v);
                     set_none(verts, ii)?;
@@ -1584,7 +1585,7 @@ impl Stitch<'_> {
                     // Set max distance.
                     out.max_vertex_gap = smos_max(out.max_vertex_gap, dist_to_edge);
 
-                    // (statuses not checked)
+                    // (statuses not checked upstream; passed on here, WR-658)
                     update_object_tolerance(
                         k,
                         b,

@@ -87,8 +87,8 @@ fn unit_normal(normal: Vec3) -> Result<Vec3> {
         .map_err(|_| invalid("the plane normal has zero length"))
 }
 
-/// `pBrep->CalculateBoundingBox(BBox)` with its status ignored (the box then stays
-/// empty), and the length of its diagonal.
+/// `pBrep->CalculateBoundingBox(BBox)`, and the length of its diagonal. Upstream
+/// ignores the status (the box then stays empty); it is passed on here (WR-658).
 fn box_and_length(k: &Kernel, brep: &Brep) -> Result<(Extent3d, f64)> {
     let bbox = qbrep::calculate_bounding_box(k, brep, BoundingBoxOptions::default())?;
     let diagonal = bbox.size();

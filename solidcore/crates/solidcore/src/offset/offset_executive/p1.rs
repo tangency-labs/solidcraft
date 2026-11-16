@@ -1019,8 +1019,8 @@ impl OffsetExecutive {
 
         // Clean up those faces we have collected.
         let editing_enabled = result.editing_enabled();
-        // cpp:2099–2102 ignores ordinary RemoveFaces failures but still executes
-        // its editing guard and traversal-mark effects. Missing work must defer.
+        // cpp:2099–2102 ignores RemoveFaces' status; it is passed on here (WR-658,
+        // tangency-labs/smlib 4803d6d).
         crate::topology::brep::p5::remove_faces(kernel, result, editing_enabled, &delete_faces)?;
 
         // Forget the deleted faces and edgeuses, so later lookups in the relations
@@ -1064,11 +1064,9 @@ impl OffsetExecutive {
         for id in crate::topology::brep::p1::edges(result, None)? {
             let primary = required(eu::primary_edgeuse(result, id)?)?;
             // NormalizedEvaluate(0.5, FALSE, sPnt): 3d. Upstream ignores the evaluation
-            // status and keeps the initialized point.
-            let point = Some(eu3::normalized_evaluate(
-                kernel, result, primary, 0.5, false, false, true,
-            )?)
-            .map_or(Vec3::UNDEF, |eval| eval.point);
+            // status and keeps the initialized point; it is passed on here (WR-658).
+            let point =
+                eu3::normalized_evaluate(kernel, result, primary, 0.5, false, false, true)?.point;
             // cpp:2069–2072: the solve runs with the original's editing disabled and
             // leaves it enabled afterwards (still disabled when the solve fails)
             original.set_editing_enabled(false);
@@ -2584,7 +2582,8 @@ impl OffsetExecutive {
             // The deletion edits the offset B-rep through the kernel context, whose
             // callbacks a kernel-context caller has lent to `notifications.context`
             // (upstream: the one context); without returning them the deletion
-            // failed as a nested edit and, its status ignored, kept the face.
+            // fails as a nested edit. Upstream ignores its status; it is passed on
+            // here (WR-658).
             let lent = notifications.context.as_deref_mut();
             Context::with_lease_returned(kernel, lent, |kernel| {
                 KernelManifoldIntersector::delete_faces_in(
@@ -2664,7 +2663,8 @@ impl OffsetExecutive {
         let original_face = original.face(required(original_use.face)?)?;
         let brep = self.required_offset_brep()?;
         let offset_face = brep.face(offset_face)?;
-        // Intersect's status is ignored; upstream initializes its output on failure.
+        // Upstream ignores Intersect's status and initializes its output on failure;
+        // it is passed on here (WR-658).
         let domain = original_face.uv_domain.intersect(&offset_face.uv_domain)?;
         let mid_uv = domain.evaluate(0.5, 0.5);
         // (`EvaluateNormal(sMidUV, TRUE, TRUE, ..)`: from the left)
@@ -2918,20 +2918,21 @@ fn uv_curve_bounding_box(kernel: &Kernel, curve: &mut Curve) -> Result<Extent3d>
             ));
         }
     }
-    // cpp:3777–3780 ignores both statuses. An ordinary bounding-box failure leaves
-    // the initialized extent, while a genuinely missing dependency must still defer.
-    Ok(Some(curve.calculate_bounding_box(
-        kernel,
-        &curve.natural_interval(),
-        crate::nurbs::b_spline_curve::BoundingBoxRequest {
-            normal: true,
-            pseudo: false,
-            polar: false,
-        },
-        true,
-    )?)
-    .and_then(|boxes| boxes.normal)
-    .unwrap_or_else(Extent3d::new))
+    // cpp:3777–3780 ignores both statuses and keeps the initialized extent; they are
+    // passed on here (WR-658, tangency-labs/smlib 4803d6d).
+    Ok(curve
+        .calculate_bounding_box(
+            kernel,
+            &curve.natural_interval(),
+            crate::nurbs::b_spline_curve::BoundingBoxRequest {
+                normal: true,
+                pseudo: false,
+                polar: false,
+            },
+            true,
+        )?
+        .normal
+        .unwrap_or_else(Extent3d::new))
 }
 
 fn required<T>(value: Option<T>) -> Result<T> {

@@ -683,7 +683,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 add_unique(&mut faces_vertices, v);
             }
 
-            // remove TargetFace<->OtherFace relationship if it exists (status unchecked)
+            // remove TargetFace<->OtherFace relationship if it exists (status unchecked
+            // upstream; passed on here, WR-658)
             if let Some(o_face) = self.other_mate(Some(f)) {
                 self.remove_relationship(Some(f), Some(o_face))?;
             }
@@ -1109,7 +1110,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 if dropped.success && within {
                     // add the edge pair to the list of mated object
                     // thus filling a potential intersection loop gap
-                    // (status unchecked)
+                    // (status unchecked upstream; passed on here, WR-658)
                     self.relate(k, brep, Some(be), Some(o_edge))?;
                     return Ok(true);
                 }
@@ -1721,12 +1722,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         continue;
                     }
 
-                    // (status unchecked)
+                    // (status unchecked upstream; passed on here, WR-658)
                     mgr.find_or_create_proto_vertex_pcs(k, brep, &mut pc1, &mut pc2)?;
                 }
 
                 // If the Faces are coincident, and there is some overlap - create a
-                // ProtoFace. (status unchecked)
+                // ProtoFace. (status unchecked upstream; passed on here, WR-658)
                 if are_coincident && !coinc_pes.is_empty() {
                     {
                         let pf = mgr.create_proto_face(Some(f1), Some(f2), &coinc_pes)?;
@@ -1759,7 +1760,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     .proto_edges()
                     .get(jj)
                     .ok_or(invalid(OP_INTERSECT_TOPOLOGY, "proto edge list"))?;
-                // (status unchecked)
+                // (status unchecked upstream; passed on here, WR-658)
                 {
                     let d = mgr.split_intersecting_proto_edges(k, brep, pe1, pe2)?;
                     deleted.extend(d);
@@ -1795,9 +1796,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
     /// `SetRelationships()`: relates the final vertices of every vertex definition and
     /// the final edges of every edge definition of the manager (a definition without
-    /// both is skipped with a warning; `Relate`'s status is unchecked). Coincident
-    /// faces are not related (`sbRelateFaces` is `FALSE`). Always `SM_SUCCESS`. Not
-    /// upstream (#16937): an edge pair is not related where either edge's mate stands
+    /// both is skipped with a warning; `Relate`'s status, unchecked upstream, is passed
+    /// on here, WR-658). Coincident faces are not related (`sbRelateFaces` is `FALSE`).
+    /// Always `SM_SUCCESS` upstream. Not upstream (#16937): an edge pair is not related where either edge's mate stands
     /// beside the other edge in its own operand ([`TopologyIntersector::mate_stands_beside`]),
     /// so a refusal `Relate` passes on is a conflict between edges
     /// at different places only.
@@ -1805,7 +1806,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] without a manager or for deleted definitions;
-    /// [`SolidError::Unported`] / [`SolidError::InvalidInput`] from `Relate`.
+    /// any error of `Relate`.
     pub fn set_relationships(
         &mut self,
         k: &Kernel,
@@ -2231,7 +2232,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 ii += 1;
                 continue;
             };
-            // (status unchecked: an initial box on failure)
+            // (status unchecked upstream, which keeps an initial box on failure; passed on
+            // here, WR-658)
             let e1_box = brep.edge_bounding_box(k, e1)?;
 
             let mut jj = 0usize;
@@ -2311,7 +2313,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     ));
                 }
 
-                // Update tolerances (statuses unchecked).
+                // Update tolerances (statuses unchecked upstream; passed on here, WR-658).
                 brep.update_object_tolerance(k, e1, dist_to_edge, 0.0, false)?;
                 brep.update_object_tolerance(k, e2, dist_to_edge, 0.0, false)?;
                 let check_gaps = dist_to_edge > self.this_approx_tol_3d / 4.0;
@@ -2428,7 +2430,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         ))?
                         .clone_for_evaluation()?;
                     let curve = curve_of(brep, Some(curve_h))?.clone_for_evaluation()?;
-                    // (status unchecked: not coincident on failure)
+                    // (status unchecked upstream: not coincident on failure; passed on
+                    // here, WR-658)
                     let sol = Some(surface_solve_with_face_caches(k, brep, |context| {
                         surface.simple_coincidence_checker_with_context(
                             k,
@@ -2455,7 +2458,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     let mut pt_class = PointClassification::new(edge_zone_tol);
                     let crv_pt = eval_curve_point(k, brep, curve_h, edge_dom.evaluate(0.38))?;
                     // Allow any part of the Face: including Edges and Vertices
-                    // (status unchecked).
+                    // (status unchecked upstream; passed on here, WR-658).
                     brep.face_point_3d_classify(
                         k,
                         f,

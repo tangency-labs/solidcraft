@@ -889,7 +889,7 @@ pub fn reset_infinite_region(
     // manage IsVoid region bits
     match void_setting {
         SetRegionVoidType::NestedSolid => {
-            // status ignored upstream; the port's null-dereference marker still propagates
+            // status ignored upstream; passed on here (WR-658)
             match set_region_is_void_flags_for_nested_solids(k, b) {
                 Err(e @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => {
                     return Err(e)

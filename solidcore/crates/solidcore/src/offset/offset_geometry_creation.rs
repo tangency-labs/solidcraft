@@ -3149,7 +3149,8 @@ impl OffsetGeometryCreation {
             let t2 = pv2.get(1).copied().ok_or(dangling("tangent missing"))?;
             // (not upstream) an inverted edge's curve runs the other way
             if (t1.dot(t2) < 0.0) != inverted {
-                // Opposite orientation - reverse 3DCurve and UVCurve (statuses ignored)
+                // Opposite orientation - reverse 3DCurve and UVCurve (statuses ignored
+                // upstream; passed on here, WR-658)
                 let ivl = curve_of(brep, c3)?.natural_interval();
                 let c = brep
                     .curve_mut(c3)
@@ -3642,7 +3643,7 @@ impl OffsetGeometryCreation {
                 face_solutions.push((solutions.len(), solutions.len()));
                 for sol in sols2.as_slice() {
                     // (neither status is checked upstream: a failed evaluation leaves its
-                    // output at SmPoint3d's SM_UNDEF_DOUBLE default)
+                    // output at SmPoint3d's SM_UNDEF_DOUBLE default; passed on here, WR-658)
                     let undef = Vec3::new(UNDEF_DOUBLE, UNDEF_DOUBLE, UNDEF_DOUBLE);
                     let pv = curve_of(brep, curve_3d)?.evaluate(
                         k,
@@ -5890,8 +5891,9 @@ impl OffsetGeometryCreation {
             )?;
             // when Rail1Curve StartPoint dropped to CenterLine
             if dropped.success {
-                // Trim CenterLine to Start dropPoint (both statuses ignored; the trim may
-                // snap sCenterIvl by tol to existing knots)
+                // Trim CenterLine to Start dropPoint (both statuses ignored upstream and
+                // passed on here, WR-658; the trim may snap sCenterIvl by tol to existing
+                // knots)
                 center_ivl.set_min_max(dropped.parameter, center_ivl.max())?;
                 center_line.trim(k, &mut center_ivl, TrimMode::Notify)?;
             }
@@ -6922,7 +6924,7 @@ impl<O: ClassObject + SolutionObject> LocalOperationGeometryCreation<O> {
                 .face_surface(face)?
                 .ok_or(dangling("face without surface"))?;
             let old_domain = surface_of(brep, sur)?.natural_uv_domain_with_nurb(k)?;
-            // Reparameterize's status is ignored
+            // Reparameterize's status is ignored upstream; passed on here (WR-658)
             {
                 let s = brep
                     .surface_mut(new_surface)

@@ -881,8 +881,8 @@ pub(crate) fn delete_topological_vertex_joining(
                                         )
                                     })?;
                             let point = b.vertex(far_vertex)?.point;
-                            // Native ignores EvaluatePoint's status. Its defined
-                            // SM_UNDEF_DOUBLE sentinel remains explicit when an ordinary evaluation fails.
+                            // Native ignores EvaluatePoint's status (SM_UNDEF_DOUBLE on
+                            // failure); it is passed on here (WR-658).
                             let evaluated = survive_curve.evaluate_point(k, far)?;
                             if evaluated.closer_than(max_gap, point) {
                                 same_geometry = true;

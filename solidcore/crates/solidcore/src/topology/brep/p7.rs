@@ -767,7 +767,8 @@ pub fn read_from_file(
     make_topology_from_data(k, b, &mut brep_data, env, false, true, true)?;
     drop(brep_data);
 
-    // check the UV trim curves unless they are rebuilt (statuses ignored)
+    // check the UV trim curves unless they are rebuilt (statuses ignored upstream;
+    // passed on here, WR-658)
     if !rebuild_uv_trim_curves_flag {
         check_and_fix_uv_trim_curves(k, b)?;
     }
