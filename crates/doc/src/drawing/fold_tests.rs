@@ -1,6 +1,6 @@
 use super::*;
 use solidcore_record::Vec2;
-use solidcraft_geom::drawing_view::{NamedView, Scale, ViewFrame, basis_looking};
+use solidcraft_geom::drawing_view::{NamedView, ProjectedSide, Scale, ViewFrame, basis_looking, projected_basis};
 
 const EPS: f64 = 1e-12;
 
@@ -280,4 +280,265 @@ fn a_100_by_60_by_20_block_shows_its_edges_at_the_isometric_ratio() {
     let span = |f: fn(&Vec2) -> f64| paper.iter().map(f).fold(f64::NEG_INFINITY, f64::max) - paper.iter().map(f).fold(f64::INFINITY, f64::min);
     let (width, height) = (span(|p| p.x), span(|p| p.y));
     assert!((width - 113.13708498984761).abs() < EPS && (height - 81.64965809277261).abs() < EPS, "{width} {height}");
+}
+
+// ---- An auxiliary view: folded from its parent, square to a line or a face ----
+
+/// The parent folded toward `w` in third angle: the kernel's `fold` the tests below were written for.
+fn fold(f: &Plane, w: [f64; 2]) -> Result<Plane> {
+    auxiliary_basis(f, Vec2::new(w[0], w[1]), Projection::Third)
+}
+
+/// `p` in `frame`'s coordinates, restated with the test's own products.
+fn seen(frame: &Plane, p: Vec3) -> (f64, f64) {
+    let d = p - frame.origin;
+    (d.dot(frame.x), d.dot(frame.y))
+}
+
+/// A 50 mm cube's corners from the origin.
+fn cube() -> Vec<Vec3> {
+    let s = 50.0;
+    (0..8).map(|i| Vec3::new(f64::from(i & 1) * s, f64::from((i >> 1) & 1) * s, f64::from((i >> 2) & 1) * s)).collect()
+}
+
+/// A view leaning off every axis, as `basis_looking` makes it.
+fn leaning() -> Plane {
+    basis_looking(Vec3::new(0.3, 1.0, -0.2), Vec3::new(0.1, 0.2, 1.0), Vec3::new(5.0, -7.0, 2.0)).unwrap()
+}
+
+/// Toward each of its paper axes the fold is the frame turned a quarter turn about its other axis,
+/// as the same doubles (`==`, so a zero's sign aside): toward +x its x becomes `-n` and its y stays,
+/// toward -x `n` and y, toward +y x and `-n`, toward -y x and `n`, with `n = x × y`; a direction's
+/// size changes nothing, up to 1e300.
+#[test]
+fn fold_toward_each_side_is_the_frame_turned_a_quarter_turn() {
+    for f in [front(), tilted(), turned()] {
+        let n = f.x.cross(f.y);
+        for (w, want_x, want_y) in [([1.0, 0.0], -n, f.y), ([-1.0, 0.0], n, f.y), ([0.0, 1.0], f.x, -n), ([0.0, -1.0], f.x, n)] {
+            for size in [1.0, 3.0, 1e300] {
+                let got = fold(&f, w.map(|c| c * size)).unwrap();
+                assert_eq!(got.origin, f.origin);
+                assert_eq!((got.x, got.y), (want_x, want_y), "{w:?} x{size}");
+            }
+        }
+    }
+}
+
+/// Toward each paper axis an auxiliary view is that side's projected view, in either angle, from
+/// every named view and a leaning one, as the same doubles with no -0: folded right of the front
+/// view it is the right view.
+#[test]
+fn an_auxiliary_view_toward_a_side_is_its_projected_view() {
+    use ProjectedSide::{Above, Below, Left, Right};
+    for parent in NamedView::ALL.map(NamedView::basis).into_iter().chain([leaning()]) {
+        for projection in [Projection::Third, Projection::First] {
+            for (side, toward) in
+                [(Right, Vec2::new(1.0, 0.0)), (Left, Vec2::new(-1.0, 0.0)), (Above, Vec2::new(0.0, 1.0)), (Below, Vec2::new(0.0, -1.0))]
+            {
+                let view = auxiliary_basis(&parent, toward, projection).unwrap();
+                assert_eq!(view, projected_basis(&parent, side, projection).unwrap(), "{parent:?} {side:?} {projection:?}");
+                assert!(!negative_zero(view.x) && !negative_zero(view.y), "{parent:?} {side:?} {projection:?}: {view:?}");
+            }
+        }
+    }
+    assert_eq!(fold(&front(), [1.0, 0.0]).unwrap(), NamedView::Right.basis());
+}
+
+/// For 1000 seeded directions on three frames, and the boundary shapes (a -0, just past the least
+/// that passes, 1e300): the axes are unit and square within `gamma_16`, the view's normal is the
+/// direction (it looks from the side it sits on), the origin is kept, and every point keeps its
+/// coordinate along the fold line `f = (-w_y, w_x)`, so the two views line up across it.
+#[test]
+fn fold_keeps_the_fold_line_and_looks_from_its_side() {
+    let tol = 16.0 * f64::EPSILON / 2.0 / (1.0 - 16.0 * f64::EPSILON / 2.0);
+    let check = |f: &Plane, w: [f64; 2]| {
+        let got = fold(f, w).unwrap_or_else(|e| panic!("{w:?}: {e}"));
+        let m = w[0].abs().max(w[1].abs());
+        let (wx, wy) = (w[0] / m, w[1] / m);
+        let len = (wx * wx + wy * wy).sqrt();
+        let (wx, wy) = (wx / len, wy / len);
+        assert!((got.x.len() - 1.0).abs() <= tol, "{w:?} {:?}", got.x);
+        assert!((got.y.len() - 1.0).abs() <= tol, "{w:?} {:?}", got.y);
+        assert!(got.x.dot(got.y).abs() <= tol, "{w:?}");
+        assert!((got.x.cross(got.y).dot(f.x * wx + f.y * wy) - 1.0).abs() <= tol, "{w:?}: looks from its side");
+        assert_eq!(got.origin, f.origin);
+        for p in [Vec3::new(10.0, -3.0, 4.0), Vec3::new(-25.0, 40.0, 7.5)] {
+            let ((a, b), (c, d)) = (seen(f, p), seen(&got, p));
+            assert!(((-wy * a + wx * b) - (-wy * c + wx * d)).abs() <= 100.0 * tol, "{w:?} {p:?}");
+        }
+    };
+    let mut seed = 0x0001_3044_0003_u64;
+    let mut next = move || {
+        seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        (seed >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
+    };
+    for f in [front(), tilted(), turned()] {
+        for _ in 0..1000 {
+            let w = [next(), next()];
+            if w[0].abs().max(w[1].abs()) > 1e-6 {
+                check(&f, w);
+            }
+        }
+        for w in [[-0.0, 1.0], [1.0, -0.0], [0.6, -0.8], [1e300, -1e300], [1.000_000_1 * MIN_DIRECTION, 0.0]] {
+            check(&f, w);
+        }
+    }
+}
+
+/// Toward any side, in either angle: a basis through the parent's origin, looking from the side it
+/// sits on in third angle and from the side away from it in first, and every point of a cube keeps
+/// its place along the fold line (square to the side), so the two views line up across it.
+#[test]
+fn an_auxiliary_view_looks_from_its_side_and_lines_up_along_its_fold() {
+    for parent in [front(), leaning()] {
+        for (projection, from) in [(Projection::Third, 1.0), (Projection::First, -1.0)] {
+            for toward in [Vec2::new(0.6, 0.8), Vec2::new(-0.28, 0.96), Vec2::new(3.0, -4.0)] {
+                let view = auxiliary_basis(&parent, toward, projection).unwrap();
+                validate_plane(&view).unwrap();
+                assert_eq!(view.origin, parent.origin);
+                let w = toward * (1.0 / toward.len());
+                assert!(close(view.normal(), (parent.x * w.x + parent.y * w.y) * from), "{toward:?} {projection:?}: {view:?}");
+                let along = |v: Vec2| -w.y * v.x + w.x * v.y;
+                for p in cube() {
+                    let (shown, folded) = (along(parent.to_local(p)), along(view.to_local(p)));
+                    assert!((shown - folded).abs() < EPS, "{toward:?} {projection:?} {p:?}: {shown} {folded}");
+                }
+            }
+        }
+    }
+}
+
+/// What gives no fold is refused with its cause: a parent off orthonormal past 1e-8 or not finite;
+/// a side not finite or of length at or below `MIN_DIRECTION` (a longer one fits). The thresholds
+/// decide exactly.
+#[test]
+fn fold_refuses_what_gives_no_view() {
+    let off = |dx: f64| Plane { x: Vec3::new(1.0 + dx, 0.0, 0.0), ..front() };
+    assert!(fold(&off(0.5e-8), [1.0, 0.0]).is_ok());
+    assert!(says(fold(&off(2e-8), [1.0, 0.0]), "not orthonormal within 1e-8"));
+    assert!(says(fold(&Plane { origin: Vec3::new(f64::NAN, 0.0, 0.0), ..front() }, [1.0, 0.0]), "not finite"));
+    for bad in [[f64::NAN, 1.0], [1.0, f64::INFINITY], [0.0, 0.0], [1e-300, -1e-300], [MIN_DIRECTION, 0.0]] {
+        let r = fold(&front(), bad);
+        assert!(says(r.clone(), "a longer one fits") && says(r, "1e-9"), "{bad:?}");
+    }
+    assert!(fold(&front(), [1.000_000_1 * MIN_DIRECTION, 0.0]).is_ok());
+}
+
+/// A line's view: its side is square to the line's image, and the folded view shows the line at its
+/// true length, on three frames, for lines at every slope to them (seeded), within 1e-12 of their
+/// length.
+#[test]
+fn an_auxiliary_view_of_a_line_shows_its_true_length() {
+    let mut seed = 0x0001_3044_0004_u64;
+    let mut next = move || {
+        seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        (seed >> 11) as f64 / (1u64 << 53) as f64 * 200.0 - 100.0
+    };
+    for f in [front(), tilted(), turned()] {
+        for _ in 0..200 {
+            let (start, end) = (Vec3::new(next(), next(), next()), Vec3::new(next(), next(), next()));
+            let q = auxiliary_side(&f, FoldFor::Line { start, end }, FoldSide::Toward(Vec2::new(1.0, 1.0)))
+                .unwrap_or_else(|e| panic!("{start:?} {end:?}: {e:?}"));
+            let view = auxiliary_basis(&f, q, Projection::Third).unwrap();
+            let ((a, b), (c, d)) = (seen(&view, start), seen(&view, end));
+            let length = (end - start).len();
+            assert!(((c - a).hypot(d - b) - length).abs() <= 1e-12 * length.max(1.0), "{start:?} {end:?}");
+            let ((a, b), (c, d)) = (seen(&f, start), seen(&f, end));
+            assert!((((c - a) * q.x + (d - b) * q.y) / length).abs() <= 1e-12, "square to the image");
+            assert!((q.len() - 1.0).abs() <= 1e-15);
+        }
+    }
+}
+
+/// A face the front view sees edge-on (its slope, 30 degrees off level, is a line in it): the side
+/// runs along its normal's image, and the folded view shows the face at its true shape, a 40 by 25
+/// rectangle, its sides square.
+#[test]
+fn an_auxiliary_view_of_an_edge_on_face_shows_its_true_shape() {
+    let f = front();
+    let (s, c) = (0.5, 3f64.sqrt() / 2.0);
+    // Down the slope in the front view's plane (X, Z), and across it along Y.
+    let (down, across, corner) = (Vec3::new(c, 0.0, -s), Vec3::Y, Vec3::new(10.0, -5.0, 30.0));
+    let q = auxiliary_side(&f, FoldFor::Face { point: corner, normal: Vec3::new(s, 0.0, c) }, FoldSide::Toward(Vec2::new(1.0, 1.0))).unwrap();
+    assert!((q.x - s).abs() < 1e-15 && (q.y - c).abs() < 1e-15, "{q:?}");
+    let view = auxiliary_basis(&f, q, Projection::Third).unwrap();
+    let (o, a, b) = (seen(&view, corner), seen(&view, corner + down * 40.0), seen(&view, corner + across * 25.0));
+    let side = |p: (f64, f64)| (p.0 - o.0).hypot(p.1 - o.1);
+    assert!((side(a) - 40.0).abs() < EPS && (side(b) - 25.0).abs() < EPS);
+    assert!(((a.0 - o.0) * (b.0 - o.0) + (a.1 - o.1) * (b.1 - o.1)).abs() < EPS);
+}
+
+/// The side: away from the middle (a vertical line at x = 10 of the front view goes right of a
+/// middle at x = 0, left of one at x = 20), or the way `toward` points; a line exactly through the
+/// middle goes right, or up when its fold line runs along x; no -0.
+#[test]
+fn an_auxiliary_side_goes_away_from_the_middle_or_toward_its_side() {
+    let f = front();
+    let line = |start: [f64; 3], end: [f64; 3]| FoldFor::Line { start: Vec3::from(start), end: Vec3::from(end) };
+    let side = |what, side| auxiliary_side(&f, what, side).unwrap();
+    let (away, toward) = (|x: f64, y: f64| FoldSide::AwayFrom(Vec2::new(x, y)), |x: f64, y: f64| FoldSide::Toward(Vec2::new(x, y)));
+    let upright = line([10.0, 0.0, 0.0], [10.0, 3.0, 20.0]);
+    assert_eq!(side(upright, away(0.0, 0.0)), Vec2::new(1.0, 0.0));
+    assert_eq!(side(upright, away(20.0, 0.0)), Vec2::new(-1.0, 0.0));
+    assert_eq!(side(upright, toward(0.3, 5.0)), Vec2::new(1.0, 0.0));
+    assert_eq!(side(upright, toward(-0.3, -5.0)), Vec2::new(-1.0, 0.0));
+    // The middle at (10, 7) of the front view's plane: the line passes through it.
+    assert_eq!(side(upright, away(10.0, 7.0)), Vec2::new(1.0, 0.0));
+    let level = line([0.0, 0.0, 4.0], [20.0, 0.0, 4.0]);
+    let up = side(level, away(0.0, 0.0));
+    assert!(up == Vec2::new(0.0, 1.0) && up.x.is_sign_positive(), "{up:?}");
+    assert_eq!(side(level, away(0.0, 9.0)), Vec2::new(0.0, -1.0));
+    assert_eq!(side(level, away(7.0, 4.0)), Vec2::new(0.0, 1.0));
+    // A face: the side away from the middle along its normal's image.
+    let wall = FoldFor::Face { point: Vec3::new(0.0, 0.0, 4.0), normal: Vec3::new(0.0, 0.0, -2.0) };
+    assert_eq!(side(wall, away(0.0, 9.0)), Vec2::new(0.0, -1.0));
+    assert_eq!(side(wall, away(0.0, 0.0)), Vec2::new(0.0, 1.0));
+}
+
+/// Each cause refused as itself: a parent off orthonormal; a point not finite or a line of no
+/// length; a line the parent sees end-on (within `MIN_DIRECTION` radians of its normal, decided
+/// exactly); a face it doesn't see edge-on, with its angle (past `EDGE_ON`); a side along the fold
+/// line, or not finite.
+#[test]
+fn an_auxiliary_side_refuses_each_cause() {
+    let f = front();
+    let line = |end: [f64; 3]| FoldFor::Line { start: Vec3::ZERO, end: Vec3::from(end) };
+    let face = |point: [f64; 3], normal: [f64; 3]| FoldFor::Face { point: Vec3::from(point), normal: Vec3::from(normal) };
+    let right = FoldSide::Toward(Vec2::new(1.0, 0.0));
+    let skewed = Plane { x: Vec3::new(1.0 + 2e-8, 0.0, 0.0), ..front() };
+    assert_eq!(auxiliary_side(&skewed, line([0.0, 0.0, 1.0]), right), Err(FoldRefusal::Frame));
+    for bad in [
+        line([0.0; 3]),
+        line([f64::NAN, 0.0, 1.0]),
+        line([0.0, f64::INFINITY, 1.0]),
+        FoldFor::Line { start: Vec3::new(-f64::MAX, 0.0, 0.0), end: Vec3::new(f64::MAX, 0.0, 0.0) },
+        face([0.0; 3], [0.0; 3]),
+        face([f64::NAN, 0.0, 0.0], [1.0, 0.0, 0.0]),
+    ] {
+        assert_eq!(auxiliary_side(&f, bad, right), Err(FoldRefusal::Input), "{bad:?}");
+    }
+    // The front view looks along -Y: a line along Y is a point in it.
+    for end in [[0.0, 5.0, 0.0], [MIN_DIRECTION, -1.0, 0.0]] {
+        assert_eq!(auxiliary_side(&f, line(end), right), Err(FoldRefusal::EndOn), "{end:?}");
+    }
+    // Just past end-on, its image runs along x, and so does its fold line: the side is across it.
+    let up = FoldSide::Toward(Vec2::new(0.0, 1.0));
+    assert_eq!(auxiliary_side(&f, line([1.000_000_1 * MIN_DIRECTION, -1.0, 0.0]), up), Ok(Vec2::new(0.0, 1.0)));
+    assert_eq!(auxiliary_side(&f, line([1.000_000_1 * MIN_DIRECTION, -1.0, 0.0]), right), Err(FoldRefusal::AlongFoldLine));
+    // A face at 45 degrees to the view's plane is refused, naming its angle.
+    match auxiliary_side(&f, face([0.0; 3], [1.0, -1.0, 0.0]), right) {
+        Err(FoldRefusal::NotEdgeOn { angle }) => assert!((angle - std::f64::consts::FRAC_PI_4).abs() < 1e-15, "{angle}"),
+        other => panic!("{other:?}"),
+    }
+    assert!(matches!(auxiliary_side(&f, face([0.0; 3], [1.0, -2.0 * EDGE_ON, 0.0]), right), Err(FoldRefusal::NotEdgeOn { .. })));
+    assert!(auxiliary_side(&f, face([0.0; 3], [1.0, -0.5 * EDGE_ON, 0.0]), right).is_ok());
+    // The upright line's fold line runs along the front view's y.
+    let upright = line([0.0, 0.0, 1.0]);
+    for along in [[0.0, 1.0], [0.0, -3.0], [MIN_DIRECTION, 1.0]] {
+        assert_eq!(auxiliary_side(&f, upright, FoldSide::Toward(Vec2::from(along))), Err(FoldRefusal::AlongFoldLine), "{along:?}");
+    }
+    assert!(auxiliary_side(&f, upright, FoldSide::Toward(Vec2::new(1e-8, 1.0))).is_ok());
+    for bad in [FoldSide::Toward(Vec2::new(f64::NAN, 1.0)), FoldSide::Toward(Vec2::ZERO), FoldSide::AwayFrom(Vec2::new(f64::INFINITY, 0.0))] {
+        assert_eq!(auxiliary_side(&f, upright, bad), Err(FoldRefusal::Input), "{bad:?}");
+    }
 }

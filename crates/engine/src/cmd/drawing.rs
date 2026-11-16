@@ -324,7 +324,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// What view `view` is called until views have saved names: which way it looks, where it sits of
 /// the view it is made from, or what it is a section of (`Front`, `Right of Front`, `Section of
-/// Front`, `Pictorial above right of Front`).
+/// Front`, `Pictorial above right of Front`, `Auxiliary of Right of Front`).
 fn view_label(d: &Drawing, view: &View) -> String {
     let mut label = String::new();
     let mut at = view;
@@ -363,6 +363,11 @@ fn view_label(d: &Drawing, view: &View) -> String {
                     Diagonal::BelowRight => "Pictorial below right of ",
                     Diagonal::BelowLeft => "Pictorial below left of ",
                 });
+                let Some(next) = d.view(*parent) else { break };
+                at = next;
+            }
+            ViewKind::Auxiliary { parent, .. } => {
+                label.push_str("Auxiliary of ");
                 let Some(next) = d.view(*parent) else { break };
                 at = next;
             }

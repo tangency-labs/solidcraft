@@ -24,7 +24,7 @@ use solidcraft_render::VisualStyle;
 use crate::drawing_view::{CHORD_MM, CHORD_RANGE, Stats};
 
 use super::Point2;
-use super::drawing_dimension::EdgeParam;
+use super::drawing_dimension::{EdgeParam, FaceParam};
 use super::types::Point3;
 
 /// The lowest and highest picture resolution a sheet takes, in dots per inch.
@@ -771,7 +771,7 @@ pub struct ChoicesResult {
 pub struct InspectResult {
     pub view: String,
     pub sheet: String,
-    /// `base`, `projected`, `section` or `pictorial`.
+    /// `base`, `projected`, `section`, `pictorial` or `auxiliary`.
     pub kind: &'static str,
     /// The design it draws: its own source, or its base view's.
     pub source: String,
@@ -780,6 +780,9 @@ pub struct InspectResult {
     /// The side of its parent a projected view sits on, or the diagonal a pictorial view sits on.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub side: Option<String>,
+    /// The side of its parent an auxiliary view sits on: a unit `[dx, dy]` on the parent's paper.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub toward: Option<[f64; 2]>,
     /// Which way it looks, as resolved through its parents.
     pub direction: ViewResult,
     pub place: PlaceParam,
@@ -956,6 +959,35 @@ pub struct ProjectedParams {
     pub parent: ViewIdParam,
     pub side: SideParam,
     /// Where it sits (when not given, lined up with its parent, a gap past the parent's boundary).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PlaceParam")]
+    pub place: Option<PlaceParam>,
+}
+
+/// What `drawing.view.auxiliary` takes: its parent, the edge or the face it looks square to (one of
+/// them), the side of its parent it sits on, and where.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct AuxiliaryParams {
+    pub parent: ViewIdParam,
+    /// A straight edge the parent shows as a line: the view looks square to it, so it shows at its
+    /// true length.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "EdgeParam")]
+    pub edge: Option<EdgeParam>,
+    /// A flat face the parent shows edge-on: the view looks along its normal, so it shows at its true
+    /// shape.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "FaceParam")]
+    pub face: Option<FaceParam>,
+    /// The side of its parent it sits on, a direction on paper `[dx, dy]` (when not given, the side
+    /// away from the middle of what the parent shows).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "[f64; 2]")]
+    pub toward: Option<[f64; 2]>,
+    /// Where its centre goes: `{at: [x, y]}` only (when not given, lined up with its parent, its
+    /// boundary a gap past the parent's).
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PlaceParam")]
     pub place: Option<PlaceParam>,
