@@ -433,7 +433,8 @@ pub fn wide_form_button(ui: &mut Ui, label: &str, primary: bool, enabled: bool) 
         .allocate_ui_with_layout(size, egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| {
             ui.spacing_mut().button_padding = vec2(t.space_12, 0.0);
             ui.add_enabled(enabled, |ui: &mut Ui| {
-                let text = RichText::new(label).size(t.font_button).semibold();
+                let text = RichText::new(label).size(t.font_button);
+                let text = if primary && enabled { text.semibold() } else { text };
                 let tone = if primary && enabled { ButtonTone::Primary } else { ButtonTone::Normal };
                 ui.add(form_action_widget(ui, text, tone, false, size))
             })
