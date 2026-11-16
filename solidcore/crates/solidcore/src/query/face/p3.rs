@@ -4182,8 +4182,9 @@ mod tests {
     /// The one valid-to-refusal change of the edgeless branch is a face without edge boxes
     /// whose loose box is not finite. A face made over a domain under the tolerance has no
     /// edge, and its body fails `check_brep` at Level 2 on its topology (`SmBrep` test 126),
-    /// finite or with a NaN in its net, its domain or its tolerance; none of those NaN cases
-    /// reaches the refusal either, as the hull or the loose box stays finite.
+    /// finite or with a NaN in its net, its domain or its tolerance. Of those NaN cases only
+    /// the NaN net reaches the refusal (its box has no finite bound); the domain and
+    /// tolerance cases keep a finite hull or loose box.
     #[test]
     fn edgeless_face_bodies_fail_check_brep_level_2() {
         use crate::topology::brep::p2::ArenaNotifyState;
