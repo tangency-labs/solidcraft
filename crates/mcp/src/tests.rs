@@ -867,7 +867,8 @@ fn inspect_design_lists_joint_definitions() {
     let d = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false, "joints": false}));
     assert!(d.get("joints").is_none(), "{d}");
 
-    // A sub-assembly held together as an import holds it: its rigid joints are counted, not listed.
+    // A sub-assembly held together as an import holds it: with `joints: "summary"` its rigid
+    // joints are counted, not listed.
     for opts in [crate::Options::default(), crate::Options { compact: true }] {
         let mut s = Server::new(Box::new(Headless::default())).with_options(opts);
         let mut exec = |command: &str, params: Value| tool(&mut s, "execute", json!({"command": command, "params": params}));
@@ -883,7 +884,11 @@ fn inspect_design_lists_joint_definitions() {
             exec("component.create", json!({"name": name, "parent": "Kit", "activate": false, "grounded": false}));
         }
         exec("joint.rigid_group", json!({"occurrences": ["Kit", "P1", "P2"]}));
+        // By default every joint is listed, as before the filters.
         let d = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+        assert_eq!(d["joints"].as_array().map(Vec::len), Some(3), "{d}");
+        assert!(d.get("joint_summary").is_none(), "{d}");
+        let d = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false, "joints": "summary"}));
         let names: Vec<&str> = d["joints"].as_array().into_iter().flatten().filter_map(|j| j["name"].as_str()).collect();
         assert_eq!(names, ["Glue"], "{d}");
         assert_eq!(d["joint_summary"]["by_type"], json!({"rigid": 3}), "{d}");

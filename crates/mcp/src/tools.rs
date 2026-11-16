@@ -458,15 +458,16 @@ fn inspect_design_tool(opts: Options) -> Value {
          rolled back, error, warning, timing), bodies (volume, area, centre of mass, bounding box, face/edge/vertex \
          counts), sketches (curves with ids and coordinates, points, constraints, profiles, degrees of freedom, solve \
          status), assembly joints (what each origin is attached to: occurrence, the feature, face, edge or sketch \
-         curve its face names refer to, whether it resolves and why not; `execute` `joint.inspect {joint}` gives one; the rigid \
-         joints holding an imported assembly's contents are only counted, per component, in `joint_summary`), \
+         curve its face names refer to, whether it resolves and why not; `execute` `joint.inspect {joint}` gives one; with \
+         `joints: \"summary\"` the rigid joints holding an imported assembly's contents are only counted, per component, in \
+         `joint_summary`), \
          the active sketch, selection and undo depth. On a large design keep the reply small with `timeline: \"summary\"` \
          (each feature as id, name, type, and error or warning only when it has one) or false, and `bodies: \"names\"` or false.",
             object(
                 json!({
                     "measure": {"type": "boolean", "description": "Measure bodies (default true)"},
                     "sketches": {"type": "boolean", "description": "Full sketch contents (default true; false = summary only)"},
-                    "joints": {"type": "boolean", "description": "Joint definitions as joint.inspect gives them, when the design has joints (default true)"},
+                    "joints": {"anyOf": [{"type": "boolean"}, {"type": "string"}], "description": JOINTS_ARG},
                     "timeline": timeline_arg(),
                     "bodies": {"anyOf": [{"type": "boolean"}, {"type": "string"}], "description": BODIES_ARG},
                 }),
@@ -503,7 +504,7 @@ fn inspect_design_tool(opts: Options) -> Value {
                     "anyOf": [{"type": "array", "items": {"type": "string"}}, {"type": "boolean"}, {"type": "string"}],
                     "description": "Only these bodies, by name (default: all); or \"names\" (only the body names, nothing measured) or false (no bodies)",
                 },
-                "joints": {"type": "boolean", "description": "Joint definitions as joint.inspect gives them, when the design has joints (default true)"},
+                "joints": {"anyOf": [{"type": "boolean"}, {"type": "string"}], "description": JOINTS_ARG},
                 "timeline": timeline_arg(),
             }),
             &[],
@@ -1337,20 +1338,29 @@ fn inspect_design_compact(b: &mut dyn Backend, a: &Map<String, Value>) -> Result
     Ok(d)
 }
 
-/// `inspect_design`'s joints: what each is attached to, except the rigid joints holding a
-/// component's contents together (an imported assembly has one per placement, hundreds of them),
-/// which `joint_summary` counts per component instead, with every joint by type. Left out when
-/// there are none or `joints: false`; an app from before the filters gives every joint.
+/// `inspect_design`'s `joints` argument.
+const JOINTS_ARG: &str = "Joint definitions as joint.inspect gives them, when the design has joints: true (every joint, the default), \
+     \"summary\" (every joint but the rigid joints holding an imported assembly's contents, which `joint_summary` counts per \
+     component) or false (none)";
+
+/// `inspect_design`'s joints: what each is attached to. With `joints: "summary"`, not the rigid
+/// joints holding a component's contents together (an imported assembly has one per placement,
+/// hundreds of them), which `joint_summary` counts per component instead, with every joint by
+/// type; an app from before the filters gives every joint. Left out when there are none or
+/// `joints: false`.
 fn design_joints(b: &mut dyn Backend, a: &Map<String, Value>, d: &mut Value) {
-    if !a.get("joints").and_then(Value::as_bool).unwrap_or(true) {
-        return;
-    }
-    let j = match exec(b, "joint.inspect", json!({"exclude_rigid_groups": true})) {
+    let summary = match a.get("joints") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(false)) => return,
+        Some(Value::Bool(true)) => false,
+        Some(Value::String(v)) if v.trim().eq_ignore_ascii_case("summary") => true,
+        // Anything else: as the default, every joint.
+        Some(_) => false,
+    };
+    let filtered = if summary { exec(b, "joint.inspect", json!({"exclude_rigid_groups": true})).ok() } else { None };
+    let j = match filtered.map_or_else(|| exec(b, "joint.inspect", json!({})), Ok) {
         Ok(j) => j,
-        Err(_) => match exec(b, "joint.inspect", json!({})) {
-            Ok(j) => j,
-            Err(_) => return,
-        },
+        Err(_) => return,
     };
     if j["joints"].as_array().is_some_and(|v| !v.is_empty()) {
         d["joints"] = j["joints"].clone();
