@@ -3851,19 +3851,24 @@ fn issue_17616_body() -> Body {
     Body::from_record(&record, true).unwrap().0
 }
 
-/// Each cylinder face of `b` (the bends): its UV domain and its surface's natural domain.
-fn bend_domains(b: &Body) -> Vec<([f64; 4], [f64; 4])> {
+/// Each cylinder face of `b`: its radius, its axis (a point and the unit direction), its UV
+/// domain and its surface's natural domain.
+fn issue_17616_cylinders(b: &Body) -> Vec<(f64, [Vec3; 2], [f64; 4], [f64; 4])> {
     use solidcore::topology::face::p2 as face;
     let (k, brep) = kernel_copy(b);
     let mut out = Vec::new();
     for &f in brep.face_list() {
         let s = face::surface(&brep, f).unwrap().unwrap();
-        if !matches!(s.kind(), SurfaceKind::Cone(c) if c.is_cylinder()) {
+        let SurfaceKind::Cone(c) = s.kind() else {
             continue;
-        }
+        };
+        let cone = c.canonical();
+        assert!(cone.semi_angle_deg == 0.0, "a face on a cone");
         let d = face::uv_domain(&brep, f).unwrap();
         let n = s.natural_uv_domain_with_nurb(&k).unwrap();
         out.push((
+            cone.radius,
+            [cone.origin.origin(), cone.origin.z_axis()],
             [d.u_min(), d.u_max(), d.v_min(), d.v_max()],
             [n.u_min(), n.u_max(), n.v_min(), n.v_max()],
         ));
@@ -3889,19 +3894,23 @@ fn a_round_overflowing_a_split_flange_s_tab_top_leaves_the_bends_on_their_surfac
     rig_fixes();
     let b = issue_17616_body();
     let before = volume(&b);
-    // each bend's UV domain is its surface's whole natural domain
-    let on_its_surface = |b: &Body| {
-        let bends = bend_domains(b);
+    // the ten bends, of radius 2 inside and 5 outside, each with its UV domain its surface's
+    // whole natural domain
+    let bends_on_their_surfaces = |b: &Body| {
+        let bends: Vec<_> =
+            issue_17616_cylinders(b).into_iter().filter(|c| c.0 < 6.0).collect();
         assert_eq!(bends.len(), 10);
-        for (d, n) in &bends {
+        for (r, _, d, n) in &bends {
+            assert!((r - 2.0).abs() <= 1e-9 || (r - 5.0).abs() <= 1e-9, "a bend of radius {r}");
             for (x, y) in d.iter().zip(n) {
                 assert!((x - y).abs() <= 1e-9, "a bend's domain {d:?} is not its surface's {n:?}");
             }
         }
     };
-    on_its_surface(&b);
+    bends_on_their_surfaces(&b);
+    assert_eq!(issue_17616_cylinders(&b).len(), 10);
     let e = edge_at(&b, [90.0, 52.5, 50.0]);
-    let made = blend(&b, Blend::Round, &[e], &[10.0], &[], Corners::Filled)
+    blend(&b, Blend::Round, &[e], &[10.0], &[], Corners::Filled)
         .unwrap_or_else(|e| panic!("the tab's top edge does not round: {e:?}"));
     let report = b.check(CheckLevel::All).unwrap();
     assert!(report.is_valid(), "{report}");
@@ -3909,11 +3918,14 @@ fn a_round_overflowing_a_split_flange_s_tab_top_leaves_the_bends_on_their_surfac
     let removed = 35.0 * (30.0 - disc_strip(7.0, 10.0, 10.0));
     let after = volume(&b);
     assert!(rel(before - after, removed) < 1e-6, "{before} - {after} vs {removed}");
-    // the round is one face, kept as its definition
-    assert_eq!(made.made.len(), 1);
-    let (_, brep) = kernel_copy(&b);
-    let round = brep.face(brep.face_list()[made.made[0]]).unwrap();
-    assert!(round.surface.as_ref().unwrap().procedural_blend().is_some());
+    // the round: one exact cylinder of radius 10 about the ball centres' line x = 80, z = 40
+    let rounds: Vec<_> =
+        issue_17616_cylinders(&b).into_iter().filter(|c| c.0 >= 6.0).collect();
+    assert_eq!(rounds.len(), 1);
+    let (r, [origin, axis], _, _) = rounds[0];
+    assert!((r - 10.0).abs() <= 1e-9, "the round's radius {r}");
+    assert!(axis.cross(Vec3::new(0.0, 1.0, 0.0)).length() <= 1e-12, "the round's axis {axis:?}");
+    assert!((origin.x - 80.0).abs() <= 1e-9 && (origin.z - 40.0).abs() <= 1e-9, "{origin:?}");
     // the bends the round does not reach as they were
-    on_its_surface(&b);
+    bends_on_their_surfaces(&b);
 }
