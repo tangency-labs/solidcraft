@@ -54,14 +54,11 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.revolution_round_offset_collapses = true;
     k.fixes.uv_trim_corner_end_points_only = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
-    k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.classify_edge_interval = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
-    k.fixes.transform_scales_each_tolerance = true;
-    k.fixes.transform_model_size_from_body_box = true;
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
     k.fixes.point_solve_keeps_triangle_guess = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;

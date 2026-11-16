@@ -81,6 +81,13 @@
 //! - **Same curve on two edges.** `SectorClassifyCurveOn` compares the curve pointers
 //!   of two different edges; an edge owns its curve in the port, so two edges never
 //!   share one (`bSingleCurveOnEdges` is always false), as in `query::edge`.
+//! - **Secants within tolerance.** `SectorClassifyCurveOn` ends a single edge's sectoring
+//!   once no angle between the curve's and the edge's tangents is below 2°. After the
+//!   first round those tangents are secants to the stepped-off points, and the port
+//!   accepts them only once the points are more than the intersection tolerance apart: a
+//!   curve a hair inside a tangent edge turns its secant past 2° at a step of a tolerance
+//!   while still within tolerance of the edge, and upstream reads it inside a face it only
+//!   touches.
 //! - **`SmCrvOnSurf`** preserves a face surface's concrete dispatch.
 //! - **`FindElementInMaskedArray` (`WR-167`).** Each element is searched only when
 //!   its own mask bit is set; indices beyond the mask width have no bit. This corrects
@@ -2913,11 +2920,19 @@ pub fn sector_classify_curve_on(
             }
 
             // end criteria: Sectoring a single edge with no small angles between edge
-            // and curve or a large sector
+            // and curve or a large sector. Not upstream (#16877): after the first round the
+            // tangents are secants from the crossing to the stepped-off points, and they
+            // say which side the curve takes only once those points are more than the
+            // intersection tolerance apart. Closer than that, a curve that runs a hair
+            // inside a tangent edge (a line δ inside a circle it touches, δ below the
+            // tolerance) turns its secant δ/s off the edge's, past 2° at a step of a
+            // tolerance, and reads inside a face it only touches. The steps go on until the
+            // samples part, as the sector test near tangency does (docs/booleans.md §4.2).
             if (cp_eu1 == cp_eu2
                 || (count == 0
                     && first_max_dist < curve_zone_tol_3d / 1000.0
                     && is_between(ang_eu1_eu2, 178.0 * PI / 180.0, 182.0 * PI / 180.0)))
+                && (count == 0 || min_dist > xsect_tol)
                 && ang_eu1_eu2 > two_deg
                 && ang_eu1_curve > two_deg
                 && ang_eu2_curve > two_deg

@@ -1452,7 +1452,8 @@ fn open_or_closed(curve: BCurve, ps: P3, pe: P3, same_sense: bool, closed: bool,
     };
     if closed {
         if !curve_closed {
-            return Err("a closed edge on an open curve".into());
+            let interval = loop_on_open_curve(&eval, a, b, &knots, ps, tol)?;
+            return Ok(Mapped { curve, interval, with_step: true, sense_mismatch: false });
         }
         // The whole curve, from its one vertex round to it again. A vertex at the curve's seam
         // (within the tolerance of its ends) keeps the curve as it is; a vertex elsewhere on it
@@ -1518,6 +1519,52 @@ fn open_or_closed(curve: BCurve, ps: P3, pe: P3, same_sense: bool, closed: bool,
         return Ok(Mapped { curve, interval: [from, to + (b - a)], with_step: same_sense, sense_mismatch: false });
     }
     Ok(Mapped { curve, interval: [from, to], with_step: same_sense, sense_mismatch: false })
+}
+
+/// A closed edge on an open curve that runs on past it: a full turn written as a spline that
+/// goes round more than once (a periodic curve unrolled, as a record keeps a turn whose seam
+/// moved), so the curve passes the edge's vertex twice. The edge is the loop between those two
+/// parameters; a curve that passes the vertex once, or three times, does not say which loop.
+fn loop_on_open_curve(eval: &CurveEval, a: f64, b: f64, knots: &[f64], p: P3, tol: f64) -> R<[f64; 2]> {
+    let open = || "a closed edge on an open curve".to_string();
+    let p = v3(p);
+    let near = tol.max(1e-9 * (1.0 + p.len()));
+    let at = |t: f64| eval.point(t).map_or(f64::INFINITY, |q| q.dist(p));
+    // Every pass: the nearest point of each stretch of the domain not yet near a pass found,
+    // a hundredth of the domain kept clear on each side of one.
+    let margin = (b - a) * 0.01;
+    let mut hits: Vec<f64> = Vec::new();
+    for _ in 0..4 {
+        let mut bounds = vec![a];
+        for h in &hits {
+            bounds.extend([h - margin, h + margin]);
+        }
+        bounds.push(b);
+        let found: Vec<f64> = bounds
+            .chunks(2)
+            .filter_map(|r| match r {
+                [lo, hi] if lo < hi => project(eval, *lo, *hi, knots, p).filter(|t| at(*t) <= near),
+                _ => None,
+            })
+            .collect();
+        if found.is_empty() {
+            break;
+        }
+        hits.extend(found);
+        hits.sort_by(f64::total_cmp);
+    }
+    // Hits with no point away from the vertex between them are one pass.
+    let leaves = |x: f64, y: f64| (1..8).any(|k| at(x + (y - x) * k as f64 / 8.0) > 2.0 * near);
+    let mut passes: Vec<f64> = Vec::new();
+    for t in hits {
+        if passes.last().is_none_or(|&last| leaves(last, t)) {
+            passes.push(t);
+        }
+    }
+    match passes.as_slice() {
+        [x, y] => Ok([*x, *y]),
+        _ => Err(open()),
+    }
 }
 
 /// The parameter in [a, b] of the curve's point nearest `p`: the nearest of samples along each

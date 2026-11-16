@@ -497,7 +497,10 @@ impl Assembly<'_> {
     /// face's on its axis) inside its interval: a great circle from the equator over the pole to a
     /// vertex just past it. On the face's parameters the pole is a line, along which the edge's
     /// pcurve would have to jump half a turn; split there, the jump is at a vertex on the pole,
-    /// where a loop may run along the pole's line. Returns how many edges were split.
+    /// where a loop may run along the pole's line. Both pieces of a split edge are looked at again:
+    /// a great circle through both poles (a hemisphere's rim on a sphere whose axis lies in the
+    /// rim's plane) is split at each, the second pole lying on the piece the first split made.
+    /// Returns how many splits were made.
     pub(crate) fn split_at_poles(&mut self) -> R<usize> {
         let mut splits = 0;
         for fi in 0..self.faces.len() {
@@ -512,18 +515,28 @@ impl Assembly<'_> {
             edges.sort_unstable();
             edges.dedup();
             for e in edges {
-                for pole in &poles {
-                    let Some(t) = self.through_at(e, *pole)? else { continue };
-                    splits += 1;
-                    if splits > MAX_SPLITS {
-                        return Err(format!("more than {MAX_SPLITS} edges split at poles"));
-                    }
-                    let v = self.split_edge(e, t)?;
-                    // The new vertex is the pole, as the face's parameters have it.
-                    if let Some(x) = self.vertices.get_mut(v as usize) {
-                        let gap = Vec3::from(x.point).dist(*pole);
-                        x.point = arr(*pole);
-                        x.tolerance = x.tolerance.max(1.5 * gap);
+                // The pieces still to look at: the edge, then each piece a split leaves.
+                let mut pieces = vec![e];
+                while let Some(piece) = pieces.pop() {
+                    for pole in &poles {
+                        let Some(t) = self.through_at(piece, *pole)? else { continue };
+                        splits += 1;
+                        if splits > MAX_SPLITS {
+                            return Err(format!("more than {MAX_SPLITS} edges split at poles"));
+                        }
+                        // `split_edge` keeps the part before `t` as `piece` and appends the rest.
+                        let rest = index(self.edges.len())?;
+                        let v = self.split_edge(piece, t)?;
+                        // The new vertex is the pole, as the face's parameters have it.
+                        if let Some(x) = self.vertices.get_mut(v as usize) {
+                            let gap = Vec3::from(x.point).dist(*pole);
+                            x.point = arr(*pole);
+                            x.tolerance = x.tolerance.max(1.5 * gap);
+                        }
+                        // Either piece may pass through another pole; neither through this one,
+                        // which is now an end of both (`through_at` takes no pole at an end).
+                        pieces.extend([rest, piece]);
+                        break;
                     }
                 }
             }
