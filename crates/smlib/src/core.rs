@@ -85,9 +85,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.proto_vertex_miss_is_false = true;
     f.check_loop_vertex_tolerance = true;
     f.check_loop_projected_seam_ends = true;
-    f.oscillating_skips_failed_guesses = true;
-    f.refine_cc_range_ends = true;
-    f.flat_corners_test_bits = true;
     f.cylinder_rebuild_mean_radius = true;
     f.revolve_analytic_profile_faces = true;
     f.taper_tangent_corner_planes = true;
@@ -153,7 +150,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.linear_sweep_arc_is_cylinder = true;
     f.loops_go_on_round_the_vertex = true;
     f.revolve_splits_curves_on_axis = true;
-    f.cover_wraps_across_closed_seam = true;
     f.fillet_trace_reaches_rails = true;
     f.delete_vertex_joins_seam_iso_curve = true;
     f.box_face_failures_propagate = true;
@@ -161,7 +157,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_removal_takes_ring_fillets = true;
     // The fork's commits that reached `SMLIB_REV` at eaa998a (tangency-labs/smlib#68, #69, #70).
     f.fillet_trim_inside_by_best_dot = true;
-    f.fillet_half_degree_crease = true;
     f.curve_loop_normal_from_area = true;
     // The fork's commits in `SMLIB_REV` 2fc375f, ported to solidcore since.
     f.fillet_cliff_overflow = true;
@@ -191,7 +186,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.boolean_union_refuses_solid_leak = true;
     f.curve_loop_start_after_previous_end = true;
     f.loop_use_reports_open_gaps = true;
-    f.face_points_span_domain = true;
     f.drop_curve_v_domain_degeneracy = true;
     f.mirror_curve_keeps_euclidean_control_points = true;
     f.dupin_bottom_hyperbola_axis = true;
@@ -201,12 +195,9 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.point_on_start_point_squared_tolerance = true;
     f.bspline_trim_keeps_rational_end_spans = true;
     f.fillet_exact_round_classes = true;
-    f.check_seam_crossing_unclosed = true;
-    f.ascii_doubles_round_trip = true;
     f.offset_edges_keep_source_tolerance = true;
     f.surface_continuity_checks_last_v_knot = true;
     f.volume_lift_third_derivative_terms = true;
-    f.curve_bounded_surface_read_uv_type_and_implicit_outer = true;
     f.volume_representational_end_continuities = true;
     f.offset_open_edge_second_trim_point = true;
     f.close_loop_relates_only_coincident_edges = true;
@@ -445,12 +436,14 @@ fn call_on<T: dump::Answer>(
 /// (unported code, invalid input to an adapter, a missing record...) is not a status the C++
 /// path returns, so it fails the call instead of hiding as a skipped entity. So does a status
 /// error whose cause chain holds a solidcore-side failure or a cancellation
-/// ([`SolidError::is_status_answer`](solidcore::SolidError::is_status_answer)), the rule of
+/// ([`SolidError::is_status_answer`](solidcore::SolidError::is_status_answer)), or a blend
+/// certificate that spent its work budget
+/// ([`SolidError::is_not_certified`](solidcore::SolidError::is_not_certified)), the rule of
 /// solidcore-ops' `session::answer`.
 pub(crate) fn answer<T>(r: std::result::Result<T, solidcore::SolidError>) -> std::result::Result<Option<T>, solidcore::SolidError> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.is_status_answer() => Ok(None),
+        Err(e) if e.is_status_answer() && !std::iter::successors(Some(&e), |e| e.cause()).any(|e| e.is_not_certified()) => Ok(None),
         Err(e) => Err(e),
     }
 }

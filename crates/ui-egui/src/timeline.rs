@@ -1993,7 +1993,13 @@ mod tests {
 
             let at = |name: &str| crate::scenario::handle_at(name).unwrap();
             let (back, play, forward) = (at("history:back"), at("history:play"), at("history:forward"));
-            assert!(back.x < play.x && play.x < forward.x, "Play sits between Previous and Next; {dock} {width}");
+            let along_strip = |position: egui::Pos2| {
+                if dock == "left" && width == crate::ui_kit::history_width(false) { position.y } else { position.x }
+            };
+            assert!(
+                along_strip(back) < along_strip(play) && along_strip(play) < along_strip(forward),
+                "Play sits between Previous and Next; {dock} {width}"
+            );
 
             h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
             h.frames(2);

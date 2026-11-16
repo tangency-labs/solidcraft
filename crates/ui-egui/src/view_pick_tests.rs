@@ -104,6 +104,29 @@ fn a_section_pick_lands_on_the_cap_not_the_removed_face() {
     assert_eq!(r["hits"].as_array().map(Vec::len), Some(1));
 }
 
+/// A sheet has no inside, so one crossed in the removed half is not a cut: the pick looks
+/// through the section to the sheet behind it instead of stopping on a cap (#17177).
+#[test]
+fn a_section_pick_reaches_a_sheet_behind_a_sheet_in_the_removed_half() {
+    let mut h = Harness::new();
+    for (name, y) in [("W1", 5), ("W2", 8)] {
+        h.app.run("sketch.create", json!({"plane":"XY","name":name})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0, y], [10, y]],"ids":[format!("{name}c")]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.call(
+            "engine.execute",
+            json!({"command": "surface.extrude", "params": {"sketch": name, "curves": [format!("{name}c")], "distance": 10, "body_name": name}}),
+        );
+    }
+    h.call("engine.execute", json!({"command": "inspect.section", "params": {"plane": {"origin": [0, 0, 5], "normal": [0, 0, 1]}}}));
+    // Through W1 at z = 7 (removed), the cut plane at y = 7, then W2 at z = 4 (kept).
+    let r = pick(&mut h, json!({"rays": [{"origin": [5, 0, 12], "dir": [0, 1, -1]}]}));
+    let hit = &r["hits"][0];
+    assert!(hit.get("section_cap").is_none(), "{hit}");
+    assert_eq!(hit["body"], "W2", "{hit}");
+    assert!((hit["point"][2].as_f64().unwrap() - 4.0).abs() < 1e-6, "{hit}");
+}
+
 /// A pixel near a silhouette edge reports that edge with its distance; a pixel in the
 /// middle of the face reports none.
 #[test]

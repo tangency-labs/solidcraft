@@ -75,7 +75,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.hole" => &[("position", Pick), ("direction", Dir), ("body", Body)],
         "solid.scale" => &[("origin", Make), ("bodies", Body)],
         "solid.offset_face" | "solid.shell" => &[("faces", Picks), ("body", Body)],
-        "solid.thread" => &[("face", Pick), ("from", Pick), ("up_to", Plane)],
+        "solid.thread" => &[("face", Pick), ("faces", Picks), ("from", Pick), ("up_to", Plane)],
         "solid.emboss" => &[("face", Make)],
         "solid.draft" => &[("faces", Picks), ("neutral", Plane), ("pull", Dir), ("body", Body)],
         "solid.press_pull" => &[("face", Pick), ("edges", Picks), ("body", Body)],
@@ -436,13 +436,18 @@ pub fn mapped() -> bool {
 
 /// Author generated geometry directly in the active component's local frame.
 /// Restores the enclosing command's mapping state, including on an error.
-pub(crate) fn local_geometry() -> LocalGeometry {
-    LocalGeometry(MAPPED.with(|m| m.replace(true)))
+pub(crate) fn local_geometry() -> GeometryMapping {
+    GeometryMapping(MAPPED.with(|m| m.replace(true)))
 }
 
-pub(crate) struct LocalGeometry(bool);
+/// Let a nested constructor map world geometry itself, as it does when run directly.
+pub(crate) fn world_geometry() -> GeometryMapping {
+    GeometryMapping(MAPPED.with(|m| m.replace(false)))
+}
 
-impl Drop for LocalGeometry {
+pub(crate) struct GeometryMapping(bool);
+
+impl Drop for GeometryMapping {
     fn drop(&mut self) {
         MAPPED.with(|m| m.set(self.0));
     }
@@ -494,16 +499,67 @@ impl Drop for Nested {
     }
 }
 
+/// The plural picks of a new or redefined Thread, before world coordinates are mapped.
+fn grouped_thread_faces<'a>(id: &str, params: &'a Value) -> Option<&'a [Value]> {
+    let params = match id {
+        "solid.thread" => params,
+        "timeline.redefine" if params.get("command").and_then(Value::as_str) == Some("solid.thread") => params.get("params")?,
+        _ => return None,
+    };
+    let faces = params.get("faces")?.as_array()?;
+    // Malformed or oversized inputs are refused by the constructor without geometric queries.
+    (params.get("face").is_none() && (1..=1024).contains(&faces.len())).then_some(faces.as_slice())
+}
+
+/// Normalize a grouped Thread's explicit body identities before the existing frame mapper.
+/// The records come from the command's input prefix, never from geometry or the final model.
+fn thread_body_picks(s: &Session, input: &solidcraft_doc::ModelState, faces: &[Value]) -> crate::Result<Vec<Value>> {
+    let records = s.placed_document().body_frames_with_source(input);
+    let mut owner = None;
+    let mut normalized = Vec::with_capacity(faces.len());
+    for value in faces {
+        let name = value
+            .get("body")
+            .and_then(Value::as_str)
+            .ok_or_else(|| crate::params::bad("solid.thread", "each entry of `faces` must be {body, point}"))?;
+        let mut exact = records.iter().filter(|(world, _, _, _, _)| world == name);
+        let record = match (exact.next(), exact.next()) {
+            (Some(record), None) => Some(record),
+            (None, None) => {
+                let mut definitions = records.iter().filter(|(_, definition, _, _, _)| definition == name);
+                match (definitions.next(), definitions.next()) {
+                    (Some(record), None) => Some(record),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+        .ok_or_else(|| crate::params::bad("solid.thread", format!("Thread target body `{name}` is missing or ambiguous")))?;
+        if owner.is_some_and(|owner| owner != record.2) {
+            return Err(crate::params::bad(
+                "solid.thread",
+                "all faces of one Thread feature must belong to the same component; create a separate Thread feature for each component",
+            ));
+        }
+        owner = Some(record.2);
+        let mut pick = value.clone();
+        pick["body"] = Value::String(record.0.clone());
+        normalized.push(pick);
+    }
+    Ok(normalized)
+}
+
 /// `params` with world picks mapped into component frames (`None`: nothing to change). A model
 /// that cannot be placed is the error.
 pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<Value>> {
     // A command with no world picks has nothing to map, and may not need the bodies placed.
     let picks = !table(id).is_empty() || matches!(id, "library.apply" | "timeline.redefine" | "sketch.redefine");
-    // Edit Feature of a revolve restores its saved axis (and the origin's expressions) even
+    // Edit Feature of a revolve or coil restores its saved axis (and the origin's expressions) even
     // where nothing is placed (`map_local`).
-    let revolve_edit =
-        id == "timeline.redefine" && matches!(params.get("command").and_then(Value::as_str), Some("solid.revolve" | "surface.revolve"));
-    if !picks || (!placed(s) && !revolve_edit) {
+    let axis_edit = id == "timeline.redefine"
+        && matches!(params.get("command").and_then(Value::as_str), Some("solid.revolve" | "surface.revolve" | "solid.coil"));
+    let grouped_thread = grouped_thread_faces(id, params);
+    if !picks || (!placed(s) && !axis_edit && grouped_thread.is_none()) {
         return Ok(None);
     }
     // A move of bodies in differently turned frames keeps its world vectors: `solid.move` splits
@@ -512,8 +568,38 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<V
         return Ok(None);
     }
     // Nothing placed: the model is its own world, and only the saved axis is restored.
-    let world = if placed(s) { s.world_state()? } else { s.model.state() };
-    Ok(map_local(s, &world, id, params))
+    let placed = placed(s);
+    // A grouped edit chooses its references before the feature it replaces. Later cuts and
+    // removals must not hide an owner, or force its points into the active component's frame.
+    let thread_input = if grouped_thread.is_some() && id == "timeline.redefine" {
+        params
+            .get("feature")
+            .and_then(|value| value.as_str().map(str::to_string).or_else(|| value.as_u64().map(|id| id.to_string())))
+            .and_then(|key| s.doc.find_feature(&key))
+            .map(|feature| s.model.state_before(feature.id))
+    } else {
+        None
+    };
+    let world = match (placed, &thread_input) {
+        (true, Some(input)) => std::sync::Arc::new(solidcraft_doc::world_state(&s.placed_document(), input)?),
+        (true, None) => s.world_state()?,
+        (false, Some(input)) => input.clone(),
+        (false, None) => s.model.state(),
+    };
+    let mut normalized = params.clone();
+    if let Some(faces) = grouped_thread {
+        let input = thread_input.clone().unwrap_or_else(|| s.model.state());
+        let faces = Value::Array(thread_body_picks(s, &input, faces)?);
+        if id == "timeline.redefine" {
+            normalized["params"]["faces"] = faces;
+        } else {
+            normalized["faces"] = faces;
+        }
+    }
+    if !placed && !axis_edit {
+        return Ok(grouped_thread.map(|_| normalized));
+    }
+    Ok(map_local_with_input(s, &world, id, &normalized, thread_input.as_deref()).or_else(|| grouped_thread.map(|_| normalized)))
 }
 
 /// A `solid.move` of bodies placed in different frames, as one move per frame (#9660). A Move
@@ -574,6 +660,17 @@ pub(crate) fn split_move(s: &Session, params: &Value) -> crate::Result<Option<Ve
 
 /// [`to_local`] on the placed model `world`.
 fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: &Value) -> Option<Value> {
+    map_local_with_input(s, world, id, params, None)
+}
+
+/// A grouped Thread edit also maps its picks using the bodies present at its input.
+fn map_local_with_input(
+    s: &Session,
+    world: &solidcraft_doc::ModelState,
+    id: &str,
+    params: &Value,
+    input: Option<&solidcraft_doc::ModelState>,
+) -> Option<Value> {
     if id == "solid.move" && ["translate", "origin", "axis"].iter().any(|k| params.get(k).is_some_and(Value::is_object)) {
         let mut normalized = params.clone();
         let mut changed = false;
@@ -631,7 +728,7 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
             _ => None,
         };
         let edited = if cmd == "surface.revolve" { SURFACE_REVOLVE_EDIT } else { cmd };
-        let mapped = if placed(s) { map_local(&context, world, edited, params.get("params")?) } else { None };
+        let mapped = if placed(s) { map_local_with_input(&context, world, edited, params.get("params")?, input) } else { None };
         let mut inner = match mapped {
             Some(inner) => inner,
             None if stored_axis.is_some() || matches!(cmd, "solid.revolve" | "surface.revolve") => params.get("params")?.clone(),
@@ -715,6 +812,10 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
     }
     let obj = params.as_object()?;
     let mut command_frames = frames(s);
+    if let Some(input) = input {
+        let bodies = s.placed_document().body_frames_with_source(input).into_iter().map(|(world, own, _, _, m)| (world, own, m)).collect();
+        command_frames.bodies = std::cell::OnceCell::from(std::sync::Arc::new(bodies));
+    }
     if id == "sketch.redefine" {
         let key = params.get("sketch").and_then(|value| value.as_str().map(str::to_string).or_else(|| value.as_u64().map(|id| id.to_string())))?;
         let feature = s.doc.find_feature(&key)?;

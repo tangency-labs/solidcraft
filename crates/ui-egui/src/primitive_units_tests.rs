@@ -471,7 +471,7 @@ fn editing_a_coil_preserves_its_axis_reference_and_reverse_option() {
     ok(&mut h);
     match &h.app.session.doc.feature(id).unwrap().kind {
         solidcraft_engine::doc::FeatureKind::Coil { axis_ref, reversed, .. } => {
-            assert!(matches!(axis_ref, Some(solidcraft_engine::doc::AxisRef::Construction { name }) if name.to_string() == "Spin"));
+            assert!(matches!(axis_ref, Some(solidcraft_engine::doc::AxisRef::Construction { name }) if name.as_ref() == "Spin"));
             assert!(*reversed);
         }
         other => panic!("expected coil: {other:?}"),

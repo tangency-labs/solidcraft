@@ -1086,6 +1086,49 @@ fn mirror_of_a_boss_and_a_cut_from_its_face_makes_both_copies() {
     assert!(rel(both, want) < 1e-6, "ring {ring} mm³, lid {lid} mm³, mirrored {both} mm³ (expected {want})");
 }
 
+/// #15054: a boss (`Boss`) joined to a bar, and a cut (`Slot`) up to the boss's top that splits
+/// the boss in two. Mirrored or patterned together, each copy of the cut ends at the copy of that
+/// top, as the cut did: the top the cut was made up to is in two pieces once the cut has run, so
+/// it was "no longer exists as it was picked" for the copies.
+#[test]
+fn copies_of_a_boss_and_a_cut_up_to_its_top_make_both_copies() {
+    for (command, params) in [
+        ("solid.mirror", json!({"features": ["Boss", "Slot"], "plane": "YZ"})),
+        ("solid.pattern.rectangular", json!({"features": ["Boss", "Slot"], "dir1": [-1, 0, 0], "count1": 2, "spacing1": 40})),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 80, "width": 10, "height": 10, "corner": [-40, 0, -10], "body_name": "Bar"}));
+        let bar = run(&mut s, "inspect.measure", json!({}))["bodies"][0].clone();
+        for (name, sketch, p0, p1) in [("Boss", "B", [5, 0], [35, 10]), ("Slot", "C", [15, 0], [25, 10])] {
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": sketch}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": p0, "p1": p1}));
+            run(&mut s, "sketch.finish", json!({}));
+            let extent = if name == "Boss" { json!({"distance": 5, "operation": "join"}) } else { json!({"to": [20, 5, 5], "operation": "cut"}) };
+            let mut p = json!({"sketch": sketch, "profiles": [0], "name": name});
+            if let (Some(p), Some(e)) = (p.as_object_mut(), extent.as_object()) {
+                p.extend(e.clone());
+            }
+            run(&mut s, "solid.extrude", p);
+        }
+        let one = run(&mut s, "inspect.measure", json!({}))["bodies"][0].clone();
+        let r = run(&mut s, command, params);
+        assert!(r["error"].is_null(), "{command}: {r}");
+        let both = run(&mut s, "inspect.measure", json!({}))["bodies"][0].clone();
+        // The bar 80 × 10 × 10 and two bosses 30 × 10 × 5, each with a 10 mm slot through it.
+        let v = |m: &Value| m["volume_mm3"].as_f64().unwrap_or(f64::NAN);
+        let want = 80.0 * 10.0 * 10.0 + 2.0 * (30.0 - 10.0) * 10.0 * 5.0;
+        assert!(rel(v(&one), 80.0 * 10.0 * 10.0 + (30.0 - 10.0) * 10.0 * 5.0) < 1e-9, "{command}: one boss {one}");
+        assert!(rel(v(&both), want) < 1e-9, "{command}: {} mm³, expected {want} mm³ (bar {bar})", v(&both));
+        // The copy adds the faces, edges and vertices the boss and its slot added, apart from it.
+        let count = |m: &Value, what: &str| m[what].as_i64().unwrap_or(-1);
+        assert_eq!(both["kernel"]["shells"].as_i64(), Some(1), "{command}: {both}");
+        for what in ["faces", "edges", "vertices"] {
+            let want = count(&bar, what) + 2 * (count(&one, what) - count(&bar, what));
+            assert_eq!(count(&both, what), want, "{command}: {what}: bar {bar}, one boss {one}, both {both}");
+        }
+    }
+}
+
 /// #14305: in a component, a pattern or mirror of two cuts makes the copies of both. The first
 /// cut's copies used to hand the plate back outside its component, so the second cut's copies
 /// found no body there ("there is no body to cut or intersect").
