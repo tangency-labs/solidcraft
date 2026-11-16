@@ -77,9 +77,9 @@
   "ar": {
     "Animation": "التحريك",
     "Close design": "إغلاق التصميم",
-    "Close other views": "إغلاق المشاهد الأخرى",
+    "Close other views": "إغلاق العروض الأخرى",
     "Close view": "إغلاق العرض",
-    "Close views to the right": "إغلاق المشاهد على اليمين",
+    "Close views to the right": "إغلاق العروض التي على اليمين",
     "Duplicate this view": "تكرار هذا العرض",
     "Duplicate view": "تكرار العرض",
     "Model": "النموذج",
@@ -90,13 +90,13 @@
     "Reopen closed view": "إعادة فتح العرض المغلق",
     "Sheet": "ورقة",
     "Sketch": "رسم",
-    "design_view.close_design_detail": "إغلاق التصميم يغلق مشاهده الـ {n}. إغلاق عرض واحد لا يطلب تأكيدًا أبدًا.",
+    "design_view.close_design_detail": "إغلاق التصميم يغلق عروضه البالغ عددها {n}. أما إغلاق عرض واحد فلا يطلب تأكيدًا أبدًا.",
     "design_view.close_view": "إغلاق العرض",
-    "design_view.follow_live": "متابعة مباشرة",
+    "design_view.follow_live": "متابعة التغييرات مباشرة",
     "design_view.save_design": "حفظ {name}",
     "design_view.sheet_deleted": "تم حذف {name}",
     "design_view.sheet_deleted_body": "يعيده التراجع مع هذا العرض كما كان.",
-    "design_view.source_unsaved": "{name} به تغييرات غير محفوظة. تعرض هذه الورقة الملف المحفوظ.",
+    "design_view.source_unsaved": "في {name} تغييرات غير محفوظة. تعرض هذه الورقة الملف المحفوظ.",
     "design_view.undo_delete": "التراجع عن الحذف"
   },
   "he": {

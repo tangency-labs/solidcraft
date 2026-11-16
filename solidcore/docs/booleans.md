@@ -318,6 +318,22 @@ What the port does today:
   second tool whole, as a void.
   Parallel cones (drill points) are met by the marching intersection and are not decided this
   way, nor are coplanar faces bounded by such circles.
+- **A line a hair inside a circle.** A line in a circle's plane, δ inside the circle, crosses
+  it at two points `2√(2rδ)` apart and stays within δ of it between them, as two circles do.
+  `line_coplanar_circle_intersect_distinct` (`geom/geom_utility/p1.rs`) takes an overlap below
+  its contact tolerance as one touching point at the chord's midpoint, unless the whole circle
+  lies within that tolerance of the line. `Ellipse::intersect_with_line` (`curve/ellipse/p2.rs`)
+  moves that point to an end of the arc or the line that lies on the stretch between the two
+  crossings, so an arc that starts on the line there touches it at its start. The two sites
+  above that pass `contact_tol_3d` for circles pass it when one of the two is a line: an edge
+  against a face's intersection curve
+  (`curve/ellipse/p2.rs` through `intersect/curve_class/p9.rs`), and the curve/surface
+  classifier's line against an osculating circle where an edge meets a face
+  (`surface/surface/p4.rs`). A flat side a hair inside a round tangent to it then touches the
+  round's end circle at one point. A line tilted out of the circle's plane keeps its crossings:
+  it meets the circle where it pierces the plane, and the chord's midpoint lies off the line.
+  The other line/circle callers keep upstream's zero. The touching point is found only where
+  it lies on both curves' intervals.
 
 **The refusal that names a tangent contact.** The kernel's boolean has none today. The `ssi` crate
 refuses a contact it cannot prove with `Error::Tangent`, code `BOOLEAN_TANGENT`, carrying where it

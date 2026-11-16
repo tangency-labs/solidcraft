@@ -762,7 +762,7 @@ pub fn for_feature(
     feature: &solidcraft_engine::doc::FeatureKind,
     frame: &solidcraft_engine::doc::Mat,
 ) {
-    let solidcraft_engine::doc::FeatureKind::Move { bodies, translate, rotate_axis, origin, angle, copy } = feature else { return };
+    let solidcraft_engine::doc::FeatureKind::Move { bodies, translate, rotate_axis, origin, angle, copy, .. } = feature else { return };
     let mut translate = translate.clone();
     let mut origin = origin.clone();
     let mut axis = rotate_axis.map(Vec3::from).unwrap_or(Vec3::Z);

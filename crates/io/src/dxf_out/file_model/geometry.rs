@@ -185,6 +185,13 @@ where
     F: FnMut(&DxfShape) -> Result<DxfGeometryBounds>,
 {
     match shape {
+        DxfShape::Insert { .. }
+        | DxfShape::SourceSpline { .. }
+        | DxfShape::SourceEllipse { .. }
+        | DxfShape::SourcePolyline { .. }
+        | DxfShape::SourceOmitted { .. } => {
+            Err(IoError::Invalid("not supported yet: source DXF records require their SketchImport projection".into()))
+        }
         DxfShape::BulgedPolyline { vertices, closed } => {
             // The file-level length-only preflight already charged every
             // entity's interval work cumulatively before this value scan.
@@ -231,6 +238,13 @@ fn transformed_point(point: Vec2, scale: f64, translation: Vec2) -> Result<Vec2>
 
 fn transformed_shape(shape: &DxfShape, scale: f64, translation: Vec2) -> Result<DxfShape> {
     match shape {
+        DxfShape::Insert { .. }
+        | DxfShape::SourceSpline { .. }
+        | DxfShape::SourceEllipse { .. }
+        | DxfShape::SourcePolyline { .. }
+        | DxfShape::SourceOmitted { .. } => {
+            Err(IoError::Invalid("not supported yet: source DXF records require their SketchImport projection".into()))
+        }
         DxfShape::BulgedPolyline { vertices, closed } => {
             super::super::admit_bulged(vertices, *closed)?;
             let mut copied = Vec::new();
@@ -400,13 +414,29 @@ impl DxfFile<DxfShape> {
     }
 
     fn preflight_geometry(&self, copy_limit: usize, work_limit: usize) -> Result<()> {
+        if self.is_sketch_import() {
+            return Err(invalid("not supported yet: source DXF bounds/copy require explicit owned conversion"));
+        }
         let mut budget = GeometryBudget::default();
         let mut text_bytes = 0usize;
         for entity in self.entities() {
             // Work units bound our geometry scans/copies, not callback work,
             // string comparison cost in layer declarations, or wall-clock time.
             budget.charge(0, 32, copy_limit, work_limit)?;
+            if let Some(source) = entity.source_text()
+                && let Some(raw) = source.raw_group1()
+            {
+                text_bytes = accumulated_text_bytes(text_bytes, raw.len(), copy_limit)?;
+                budget.charge(raw.len(), raw.len(), copy_limit, work_limit)?;
+            }
             match entity.geometry() {
+                DxfShape::Insert { .. }
+                | DxfShape::SourceSpline { .. }
+                | DxfShape::SourceEllipse { .. }
+                | DxfShape::SourcePolyline { .. }
+                | DxfShape::SourceOmitted { .. } => {
+                    return Err(IoError::Invalid("not supported yet: source DXF records require their SketchImport projection".into()));
+                }
                 DxfShape::BulgedPolyline { vertices, closed } => {
                     let count = vertices.len();
                     if !(2..=super::super::path::MAX_PATH_ITEMS).contains(&count) {
@@ -473,7 +503,8 @@ impl DxfFile<DxfShape> {
         for entity in self.entities() {
             self.layer(entity.layer())?;
             let layer = layers.get(entity.layer().index).copied().ok_or_else(|| invalid("missing DXF layer remap"))?;
-            output.push(layer, transformed_shape(entity.geometry(), scale, translation)?, entity.weight())?;
+            let source_text = entity.source_text().map(|source| source.transformed(translation, scale)).transpose()?;
+            output.push_with_source(layer, transformed_shape(entity.geometry(), scale, translation)?, entity.weight(), source_text)?;
         }
         Ok(output)
     }
@@ -1056,10 +1087,10 @@ mod tests {
         assert!(file.translated_scaled(Vec2::ZERO, 0.5).is_err());
     }
     #[test]
-    fn owned_nine_text_modes_keep_custom_zero_when_a_bulged_shape_is_added_and_copied() {
+    fn imported_nine_text_modes_keep_custom_zero_when_a_bulged_shape_is_added_and_copied() {
         use crate::{
             DxfEntityWeight as Weight, DxfLinetype as LineType, DxfShape as Shape, DxfStandardWeight as Standard, DxfTextHorizontalAlignment as H,
-            DxfTextVerticalAlignment as V, DxfVertex as Vertex,
+            DxfTextVerticalAlignment as V, DxfVertex as Vertex, read_dxf_file,
         };
         use solidcore_record::Vec2;
 
@@ -1074,21 +1105,23 @@ mod tests {
             (1, 3, H::Centre, V::Top),
             (2, 3, H::Right, V::Top),
         ];
-
-        // X2 starts from the actual admitted model handoff. X3 retains the
-        // independent literal DXF/anchor oracle under its original test name.
-        let physical = Standard::from_code(50).unwrap();
-        let mut source = DxfFile::with_layer_zero(3, LineType::Hidden, Some(physical)).unwrap();
-        for (h, v, horizontal, vertical) in modes {
-            let at = if h == 0 && v == 0 { Vec2::new(99.0, 88.0) } else { Vec2::new(2.0, 3.0) };
-            let shape = if h == 1 && v == 0 {
-                Shape::Text { at, height: 4.0, angle_deg: 90.0, text: "  °  ".into() }
-            } else {
-                Shape::AlignedText { at, height: 4.0, angle_deg: 90.0, text: "  °  ".into(), horizontal, vertical }
-            };
-            source.push(source.default_layer(), shape, Some(Weight::ByLayer)).unwrap();
+        // Literal millimetre DXF, with the canonical HIDDEN definition and a
+        // nondefault layer0. No generated writer output supplies these oracles.
+        let mut input = concat!(
+            "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n",
+            "0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLTYPE\n",
+            "0\nLTYPE\n2\nHIDDEN\n72\n65\n73\n2\n40\n3\n49\n2\n74\n0\n49\n-1\n74\n0\n0\nENDTAB\n",
+            "0\nTABLE\n2\nLAYER\n0\nLAYER\n2\n0\n62\n3\n6\nHIDDEN\n370\n50\n0\nENDTAB\n0\nENDSEC\n",
+            "0\nSECTION\n2\nENTITIES\n",
+        )
+        .to_string();
+        for (h, v, _, _) in modes {
+            input.push_str(&format!("0\nTEXT\n8\n0\n370\n-1\n10\n99\n20\n88\n11\n2\n21\n3\n40\n4\n50\n90\n72\n{h}\n73\n{v}\n1\n  %%d  \n"));
         }
+        input.push_str("0\nENDSEC\n0\nEOF\n");
+        let mut source = read_dxf_file(&input).unwrap();
         assert_eq!(source.entities().len(), 9);
+        let physical = Standard::from_code(50).unwrap();
         let old_zero = source.default_layer();
         let zero = source.layer(old_zero).unwrap();
         assert_eq!((zero.name(), zero.color(), zero.linetype(), zero.weight()), ("0", 3, LineType::Hidden, Some(physical)));
@@ -1117,7 +1150,7 @@ mod tests {
         assert!(source.layer(copied.default_layer()).is_err());
         for (entity, (h, v, horizontal, vertical)) in copied.entities().iter().take(9).zip(modes) {
             // Left/baseline selects group10; other modes select group11. The
-            // admitted centre/baseline canonical Text representation is retained.
+            // reader's centre/baseline canonical Text representation is retained.
             let at = if h == 0 && v == 0 { Vec2::new(208.0, 171.0) } else { Vec2::new(14.0, 1.0) };
             let expected = if h == 1 && v == 0 {
                 Shape::Text { at, height: 8.0, angle_deg: 90.0, text: "  °  ".into() }
@@ -1296,6 +1329,93 @@ mod tests {
             assert!(copied.layer(source.default_layer()).is_err());
             assert_eq!(source.layers().len(), 1);
             assert_eq!(source.entities().len(), 10);
+        }
+    }
+
+    // Additive X2 builder/writer coverage; original X3 reader oracles above stay unchanged.
+    #[test]
+    fn owned_nine_text_modes_keep_custom_zero_when_a_bulged_shape_is_added_and_copied() {
+        use crate::{
+            DxfEntityWeight as Weight, DxfLinetype as LineType, DxfShape as Shape, DxfStandardWeight as Standard, DxfTextHorizontalAlignment as H,
+            DxfTextVerticalAlignment as V, DxfVertex as Vertex,
+        };
+        use solidcore_record::Vec2;
+
+        let modes = [
+            (0, 0, H::Left, V::Baseline),
+            (1, 0, H::Centre, V::Baseline),
+            (2, 0, H::Right, V::Baseline),
+            (0, 2, H::Left, V::Middle),
+            (1, 2, H::Centre, V::Middle),
+            (2, 2, H::Right, V::Middle),
+            (0, 3, H::Left, V::Top),
+            (1, 3, H::Centre, V::Top),
+            (2, 3, H::Right, V::Top),
+        ];
+
+        // X2 starts from the actual admitted model handoff. X3 retains the
+        // independent literal DXF/anchor oracle under its original test name.
+        let physical = Standard::from_code(50).unwrap();
+        let mut source = DxfFile::with_layer_zero(3, LineType::Hidden, Some(physical)).unwrap();
+        for (h, v, horizontal, vertical) in modes {
+            let at = if h == 0 && v == 0 { Vec2::new(99.0, 88.0) } else { Vec2::new(2.0, 3.0) };
+            let shape = if h == 1 && v == 0 {
+                Shape::Text { at, height: 4.0, angle_deg: 90.0, text: "  °  ".into() }
+            } else {
+                Shape::AlignedText { at, height: 4.0, angle_deg: 90.0, text: "  °  ".into(), horizontal, vertical }
+            };
+            source.push(source.default_layer(), shape, Some(Weight::ByLayer)).unwrap();
+        }
+        assert_eq!(source.entities().len(), 9);
+        let old_zero = source.default_layer();
+        let zero = source.layer(old_zero).unwrap();
+        assert_eq!((zero.name(), zero.color(), zero.linetype(), zero.weight()), ("0", 3, LineType::Hidden, Some(physical)));
+        source
+            .push(
+                old_zero,
+                Shape::BulgedPolyline {
+                    vertices: vec![
+                        Vertex { at: Vec2::ZERO, bulge: 0.5 },
+                        Vertex { at: Vec2::new(4.0, 0.0), bulge: -0.5 },
+                        Vertex { at: Vec2::new(8.0, 0.0), bulge: -0.0 },
+                    ],
+                    closed: false,
+                },
+                Some(Weight::ByBlock),
+            )
+            .unwrap();
+        let original: Vec<_> = source.entities().iter().map(|e| e.geometry().clone()).collect();
+        assert_eq!(original.len(), 10);
+        let copied = source.translated_scaled(Vec2::new(10.0, -5.0), 2.0).unwrap();
+        let zero = copied.layer(copied.default_layer()).unwrap();
+        assert_eq!((zero.name(), zero.color(), zero.linetype(), zero.weight()), ("0", 3, LineType::Hidden, Some(physical)));
+        assert_eq!(copied.layers().len(), 1);
+        assert_eq!(copied.entities().len(), 10);
+        assert!(copied.layer(old_zero).is_err());
+        assert!(source.layer(copied.default_layer()).is_err());
+        for (entity, (h, v, horizontal, vertical)) in copied.entities().iter().take(9).zip(modes) {
+            // Left/baseline selects group10; other modes select group11. The
+            // admitted centre/baseline canonical Text representation is retained.
+            let at = if h == 0 && v == 0 { Vec2::new(208.0, 171.0) } else { Vec2::new(14.0, 1.0) };
+            let expected = if h == 1 && v == 0 {
+                Shape::Text { at, height: 8.0, angle_deg: 90.0, text: "  °  ".into() }
+            } else {
+                Shape::AlignedText { at, height: 8.0, angle_deg: 90.0, text: "  °  ".into(), horizontal, vertical }
+            };
+            assert_eq!(entity.geometry(), &expected);
+            assert_eq!(entity.layer(), copied.default_layer());
+            assert_eq!(entity.weight(), Some(Weight::ByLayer));
+        }
+        let Shape::BulgedPolyline { vertices, closed } = copied.entities()[9].geometry() else { panic!("expected bulged geometry") };
+        assert!(!*closed);
+        assert_eq!(vertices.iter().map(|v| v.at).collect::<Vec<_>>(), [Vec2::new(10.0, -5.0), Vec2::new(18.0, -5.0), Vec2::new(26.0, -5.0)]);
+        assert_eq!(vertices.iter().map(|v| v.bulge.to_bits()).collect::<Vec<_>>(), [0.5f64.to_bits(), (-0.5f64).to_bits(), (-0.0f64).to_bits()]);
+        for (index, original_shape) in original.iter().enumerate() {
+            assert_eq!(copied.effective_linetype(index).unwrap(), LineType::Hidden);
+            assert_eq!(copied.effective_weight(index).unwrap(), if index == 9 { Weight::ByBlock } else { Weight::Explicit(physical) });
+            assert_eq!(source.entities()[index].geometry(), original_shape);
+            assert_eq!(source.entities()[index].layer(), old_zero);
+            assert_eq!(source.entities()[index].weight(), Some(if index == 9 { Weight::ByBlock } else { Weight::ByLayer }));
         }
     }
 }
