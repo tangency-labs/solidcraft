@@ -181,10 +181,8 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_removal_takes_ring_fillets = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_trim_inside_by_best_dot = true;
     k.fixes.fillet_trim_status = true;
     k.fixes.fillet_variable_span_follows_fillet = true;
-    k.fixes.fillet_vertex_error_diagnostics = true;
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
     k.fixes.good_drop_result_distances_in_order = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;

@@ -36,11 +36,9 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.curve_loop_normal_from_area = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
-    k.fixes.fillet_vertex_error_diagnostics = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.corner_patch_face_side_twist = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
-    k.fixes.fillet_trim_inside_by_best_dot = true;
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.offset_extended_edges_mated = true;
     k.fixes.thicken_planar_side_walls = true;
