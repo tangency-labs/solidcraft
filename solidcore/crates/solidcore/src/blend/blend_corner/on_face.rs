@@ -108,39 +108,57 @@ pub fn bezier_spans(k: &Kernel, curve: &Curve) -> Result<Option<Vec<Span>>> {
     Ok(Some(pieces))
 }
 
-/// How far each Euclidean point of the pieces [`bezier_pieces`] gives for `curve` can be
-/// from the exact one, over all of them; `None` where [`bezier_pieces`] gives none or the
-/// bound is not finite.
+/// [`bezier_pieces`] in the frame at `origin`: the B-spline's homogeneous control points
+/// moved by `-origin w` before it is cut, so the rounding follows the curve's size rather
+/// than its place (`docs/definitions-and-certificates.md` §7.5), with how far each
+/// Euclidean point can be from the exact one moved by `-origin`. `None` where
+/// [`bezier_pieces`] gives none or the bound is not finite.
 ///
-/// `decompose_bez` makes each point by levels of `alpha a + (1 - alpha) b`, one level per
-/// knot insertion, from points of earlier levels or copies of them, so a point is at most
-/// `D` levels from the B-spline's control points, `D` its degree times its knot count. The
-/// exact points of every level are convex combinations of the control points, within `M`,
-/// their largest homogeneous coordinate (the weight among them), and their weights at least
-/// `w`, the least weight. One level rounds `alpha` (a quotient of two knot differences) by
-/// `gamma(3)`, `1 - alpha` and the combination by `gamma(3)` and `gamma(2)` more, and adds
-/// at most `gamma(9) (M + e)` to its inputs' error `e`; after `D` levels a homogeneous
-/// coordinate is within `E = gamma(9 D) M`. A Euclidean coordinate `x / w` is then within
-/// `E (1 + P) / (w - E)` and its division's `gamma(1) P`, `P = M / w` bounding it, and a
+/// The move rounds each coordinate by `T = gamma(2)` of its own size plus `|origin| w`; the
+/// exact pieces of the moved points are then within `T` of those of the exact ones, the cut
+/// being convex combinations. `decompose_bez` makes each point by levels of
+/// `alpha a + (1 - alpha) b`, one level per knot insertion, from points of earlier levels
+/// or copies of them, so a point is at most `D` levels from the control points, `D` the
+/// degree times the knot count. The exact points of every level are convex combinations of
+/// the control points: their coordinates within `M`, the largest moved one, their weights
+/// within `W`, the largest, and at least `w`, the least. One level rounds `alpha` (a
+/// quotient of two knot differences) by `gamma(3)`, `1 - alpha` and the combination by
+/// `gamma(3)` and `gamma(2)` more, and adds at most `gamma(9)` of the size plus the inputs'
+/// error to that error; after `D` levels a coordinate is within `E = T + gamma(9 D) M` and
+/// a weight within `F = gamma(9 D) W`. A Euclidean coordinate `x / w` is then within
+/// `(E + P F) / (w - F)` and its division's `gamma(1) P`, `P = M / w` bounding it, and a
 /// point within `sqrt 3` of that; `2` for `sqrt 3`, `gamma(8)` for the rounding of the bound.
 ///
 /// # Errors
 ///
 /// As [`bezier_pieces`].
-pub fn pieces_rounding(k: &Kernel, curve: &Curve) -> Result<Option<f64>> {
+pub fn bezier_pieces_at(
+    k: &Kernel,
+    curve: &Curve,
+    origin: Vec3,
+) -> Result<Option<(Vec<Vec<Hom>>, f64)>> {
     let Some(base) = spline_base(k, curve)? else {
         return Ok(None);
     };
     let Some(nurb) = base.nurb.as_ref() else {
         return Ok(None);
     };
-    let (mut most, mut w_min) = (0.0f64, f64::INFINITY);
+    let o = [origin.x, origin.y, origin.z];
+    let o_size = o.iter().fold(0.0f64, |m, c| m.max(c.abs()));
+    let (mut moved, mut shift) = (Vec::new(), 0.0f64);
+    let (mut most, mut w_most, mut w_min) = (0.0f64, 0.0f64, f64::INFINITY);
     for cp in nurb.cpts() {
         let Some(h) = homogeneous(cp) else {
             return Ok(None);
         };
-        most = h.iter().fold(most, |m, c| m.max(c.abs()));
+        let m = [h[0] - o[0] * h[3], h[1] - o[1] * h[3], h[2] - o[2] * h[3]];
+        for (c, hc) in m.iter().zip(h) {
+            shift = shift.max(gamma(2) * (hc.abs() + o_size * h[3]));
+            most = most.max(c.abs());
+        }
+        w_most = w_most.max(h[3]);
         w_min = w_min.min(h[3]);
+        moved.push(CPoint::new(m[0], m[1], m[2], cp.w));
     }
     let levels = nurb
         .degree()
@@ -150,11 +168,23 @@ pub fn pieces_rounding(k: &Kernel, curve: &Curve) -> Result<Option<f64>> {
         return Ok(None);
     };
     let g = gamma(levels);
-    let e = g * most;
-    let p = most / w_min;
-    let r = 2.0 * (e * (1.0 + p) / (w_min - e) + gamma(1) * p) * (1.0 + gamma(8));
-    let bounded = (0.0..0.5).contains(&g) && w_min > e && r.is_finite();
-    Ok(bounded.then_some(r))
+    let local = crate::nurbs::crv_basic::Curve::new(moved, nurb.degree(), nurb.knots().to_vec())?;
+    let mut pieces = Vec::new();
+    for bez in local.decompose_bez()? {
+        let mut piece = Vec::new();
+        for cp in bez.cpts() {
+            let Some(h) = homogeneous(cp) else {
+                return Ok(None);
+            };
+            piece.push(h);
+        }
+        pieces.push(piece);
+    }
+    let (e, f) = (shift + g * (most + shift), g * w_most);
+    let p = (most + shift) / w_min;
+    let r = 2.0 * ((e + p * f) / (w_min - f) + gamma(1) * p) * (1.0 + gamma(8));
+    let bounded = (0.0..0.5).contains(&g) && w_min > f && r.is_finite();
+    Ok(bounded.then_some((pieces, r)))
 }
 
 /// A control point as a homogeneous point; `None` for a planar (2D) one or one whose

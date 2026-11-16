@@ -89,7 +89,7 @@
 //!   `SM_ASSERT`s (no-ops in release builds) and the user pointers
 //!   (`m_apUserPointer`, not modelled by [`TsectPnt`]).
 
-use crate::blend::blend_corner::on_face::{bezier_pieces, pieces_rounding, Hom};
+use crate::blend::blend_corner::on_face::{bezier_pieces_at, Hom};
 use crate::blend::fillet_standard_solver::p1::FilletLaw;
 use crate::curve::curve::Curve;
 use crate::error::{passed_on, Result, SolidError};
@@ -784,7 +784,7 @@ impl SurfaceIntersector<'_> {
                 );
                 if crossing
                     && self.is_point_on_curve(k, d.point, core::slice::from_ref(c), None)?
-                    && self.runs_along_boundary(k, c, &d.boundary)?
+                    && self.runs_along_boundary(k, c, &d.boundary, d.point)?
                 {
                     along.push(ii);
                 }
@@ -808,12 +808,14 @@ impl SurfaceIntersector<'_> {
     /// chord `[a, b]` stays within `d` of it. A piece of the boundary from `a` to `b` whose
     /// control points are within `e` of the line through them passes within `e` of each
     /// point of the chord (its foot on the line runs from `a` to `b`). Where the computed
-    /// points are within `r` of the exact ones ([`pieces_rounding`]), the boundary piece is
+    /// points are within `r` of the exact ones, the boundary piece is
     /// within `e + r` of the line and its exact ends within `r` of `a` and `b`, so within
     /// `e + 2 r` of each point of the chord. Each piece of the curve needs one piece of the
     /// boundary with `d + e`, the curve's `r` and twice the boundary's below the tolerance,
-    /// the sum rounded up by `gamma(4)`. False otherwise: also for a curve or boundary
-    /// [`bezier_pieces`] does not cut (another kind, a weight not positive, a failed
+    /// the sum rounded up by `gamma(4)`. Both are cut and measured in the frame at `at`, the
+    /// contact, so `r` follows their size rather than their place ([`bezier_pieces_at`]).
+    /// False otherwise: also for a curve or boundary
+    /// [`bezier_pieces_at`] does not cut (another kind, a weight not positive, a failed
     /// decomposition) or whose rounding is not bounded. A boundary piece whose ends coincide
     /// gives no chord, and one that bends away from its chord by the tolerance gives none a
     /// curve piece is near, so a curve along an arc of the boundary is kept.
@@ -821,8 +823,14 @@ impl SurfaceIntersector<'_> {
     /// # Errors
     ///
     /// [`SolidError::Unported`] and a cancellation.
-    fn runs_along_boundary(&self, k: &Kernel, curve: &Curve, boundary: &Curve) -> Result<bool> {
-        match self.hulls_near_boundary(k, curve, boundary) {
+    fn runs_along_boundary(
+        &self,
+        k: &Kernel,
+        curve: &Curve,
+        boundary: &Curve,
+        at: Point3,
+    ) -> Result<bool> {
+        match self.hulls_near_boundary(k, curve, boundary, at) {
             Ok(along) => Ok(along),
             Err(e) if e.is_unported_or_cancelled() => Err(e),
             Err(_) => Ok(false),
@@ -831,15 +839,18 @@ impl SurfaceIntersector<'_> {
 
     /// The test of [`SurfaceIntersector::runs_along_boundary`], with every failure an
     /// error.
-    fn hulls_near_boundary(&self, k: &Kernel, curve: &Curve, boundary: &Curve) -> Result<bool> {
+    fn hulls_near_boundary(
+        &self,
+        k: &Kernel,
+        curve: &Curve,
+        boundary: &Curve,
+        at: Point3,
+    ) -> Result<bool> {
         let tol = self.this_approx_tol_3d;
-        let (Some(pieces), Some(along)) = (bezier_pieces(k, curve)?, bezier_pieces(k, boundary)?)
-        else {
-            return Ok(false);
-        };
-        let (Some(r_curve), Some(r_boundary)) =
-            (pieces_rounding(k, curve)?, pieces_rounding(k, boundary)?)
-        else {
+        let (Some((pieces, r_curve)), Some((along, r_boundary))) = (
+            bezier_pieces_at(k, curve, at)?,
+            bezier_pieces_at(k, boundary, at)?,
+        ) else {
             return Ok(false);
         };
         // each boundary piece's chord and how far the piece strays from it, its rounding
@@ -2499,7 +2510,8 @@ mod tests {
     /// too. A curve through it that leaves the boundary stays and covers it: by twice the
     /// tolerance at its far end, by 0.1, by 0.012 in its middle with both ends on the
     /// boundary, by 3 tolerances between the points it is on the boundary at, or along the
-    /// boundary's line past its end. A tangent curve along the boundary stays too.
+    /// boundary's line past its end. A tangent curve along the boundary stays too. Moved
+    /// 1e6 away or made 100 times longer, a curve gets the same answer.
     #[test]
     fn a_crossing_curve_along_the_boundary_of_a_deferred_contact_gives_way_to_it() {
         let k = &Kernel::default();
@@ -2591,6 +2603,38 @@ mod tests {
         // a tangent curve along the boundary is no crossing
         let out = run(line(at, [0.3, 0.5, 0.5 * tol]), TsectCurveType::Tangent);
         assert_eq!(out.curve_types, [TsectCurveType::Tangent]);
+        // the same half-tolerance line and the cubic between its samples, 1e6 away, 100
+        // times longer or both: the same answers
+        for (shift, size) in [(1e6, 1.0), (0.0, 100.0), (1e6, 100.0)] {
+            let at = [0.2 * size + shift, 0.5 + shift, 0.0];
+            let contact = DeferredTouching {
+                point: Vec3::from_array(at),
+                tsp: contact.tsp.clone(),
+                boundary: line([shift, 0.5 + shift, 0.0], [size + shift, 0.5 + shift, 0.0]),
+            };
+            let mut run_at = |c: Curve| {
+                let mut out = TsectCurves::default();
+                out.curves_3d.push(c);
+                for uv in &mut out.uv_curves {
+                    uv.push(line([0.2, 0.5, 0.0], [0.3, 0.5, 0.0]));
+                }
+                out.curve_types.push(TsectCurveType::Crossing);
+                out.deviations.push(0.0);
+                si.deferred_touching = vec![contact.clone()];
+                si.add_deferred_touching_points(k, &mut out).unwrap();
+                out.curve_types
+            };
+            let half = line(at, [0.3 * size + shift, 0.5 + shift, 0.5 * tol]);
+            assert_eq!(run_at(half), [TsectCurveType::Touching], "{shift} {size}");
+            let pw = [(0.0, 0.0), (1.0 / 3.0, z), (2.0 / 3.0, -z), (1.0, 0.0)]
+                .iter()
+                .map(|&(s, z)| CPoint::new(at[0] + 0.1 * size * s, at[1], z, NOW))
+                .collect();
+            let knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+            let wave = NurbCurve::new(pw, 3, knots).expect("cubic");
+            let wave = Curve::from(BSplineCurve::from_nurb(wave, 3, false));
+            assert_eq!(run_at(wave), [TsectCurveType::Crossing], "{shift} {size}");
+        }
     }
 
     #[test]
