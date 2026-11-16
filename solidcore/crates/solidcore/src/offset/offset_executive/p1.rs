@@ -2776,21 +2776,18 @@ impl OffsetExecutive {
                                 offset_key_of,
                             )
                         })?;
-                        // Not upstream (WR-671, tangency-labs/solidcore#2111), opt-in
-                        // `Kernel::fixes.offset_edges_keep_source_tolerance`: the offset
+                        // Not upstream (WR-671, tangency-labs/solidcore#2111): the offset
                         // edge and its vertices, made at the B-rep's zone tolerance, keep
-                        // the matched original edge's tolerance and its vertices' largest.
-                        if kernel.kernel().fixes.offset_edges_keep_source_tolerance {
-                            keep_source_tolerances(
-                                kernel.kernel(),
-                                original,
-                                original_use,
-                                original_edge,
-                                required(self.offset_brep.as_mut())?,
-                                offset,
-                                offset_edge,
-                            )?;
-                        }
+                        // the matched original edge's tolerance and its vertices' own.
+                        keep_source_tolerances(
+                            kernel.kernel(),
+                            original,
+                            original_use,
+                            original_edge,
+                            required(self.offset_brep.as_mut())?,
+                            offset,
+                            offset_edge,
+                        )?;
                         if let Some(slot) = original_uses.get_mut(slot) {
                             *slot = None;
                         }
@@ -2837,26 +2834,33 @@ impl OffsetExecutive {
     }
 }
 
-/// (Not upstream, WR-671, `Kernel::fixes.offset_edges_keep_source_tolerance`.) Raises
-/// `offset_edge` of `result` to the tolerance of the original edge it was matched to,
-/// and each of its vertices to the tolerance of the original vertex it stands for.
-/// `original_use` and `offset_use` are the matched edge uses (matched at their
-/// midpoints, so they may run either way). An edge use starts at its vertex use's vertex
-/// and its mate at the other end. Uses that run the same way (their 3D tangents at the
-/// midpoint point the same way: an offset curve runs beside its original) pair start
-/// with start. Uses that run opposite ways pair each start with the start of the other's
-/// mate. An offset edge with one vertex stands for both original ends and takes the
-/// larger. An end takes only its own vertex's tolerance otherwise: taking the larger of
-/// the two ends' grew a thin vertex to its edge's other end's tolerance, one edge further
-/// at each operation, until it reached past a short neighbouring edge and the merge
-/// joined that edge's two ends. Tolerances only grow
-/// (`SetTolerance(.., bUpdateOnlyIfLarger = TRUE)`).
+/// (Not upstream, WR-671.) Raises `offset_edge` of `result` to the tolerance of the
+/// original edge it was matched to, and each of its vertices to the tolerance of the
+/// original vertex it stands for. `original_use` and `offset_use` are the edge uses
+/// `MapEdgeuses` matched by their UV midpoints, so they may run either way. An edge use
+/// starts at its vertex use's vertex and its mate at the other end. An offset edge with
+/// one vertex stands for both original ends and takes the larger. An end takes only its
+/// own vertex's tolerance otherwise: taking the larger of the two ends' grew a thin vertex
+/// to its edge's other end's tolerance, one edge further at each operation, until it
+/// reached past a short neighbouring edge and the merge joined that edge's two ends.
+/// Tolerances only grow (`SetTolerance(.., bUpdateOnlyIfLarger = TRUE)`).
+///
+/// Which way the uses run is read where they were matched, in UV: an offset face is
+/// trimmed by its original's UV curves on a surface that shares the original's
+/// parameters (an offset surface; a local operation's new surface, whatever its own
+/// frame, takes the face's UV curves too), so a matched pair's UV tangents at the
+/// midpoint are one curve's, the same way or reversed. Uses that run the same way pair
+/// start with start; uses that run opposite ways pair each start with the start of the
+/// other's mate. Their 3D tangents do not tell this: a local operation's surface turned
+/// in its own parameters carries the UV curve another way in space (square to the
+/// original's at a quarter turn, opposite past it). A pair whose UV tangents are not
+/// parallel within the angular tolerance is no curve and its image (the drop fallback
+/// matched a piece elsewhere): nothing is raised, as upstream raises nothing.
 ///
 /// # Errors
 ///
-/// [`SolidError::PortInvariant`] for a matched edge use without a mate or vertex, or
-/// matched uses of an edge with two vertices whose tangents do not tell their directions
-/// apart; those of the evaluations.
+/// [`SolidError::PortInvariant`] for a matched edge use without a mate or vertex, a UV
+/// tangent that is not finite (NaN) or zero; those of the evaluations.
 fn keep_source_tolerances(
     k: &Kernel,
     original: &Brep,
@@ -2868,7 +2872,6 @@ fn keep_source_tolerances(
 ) -> Result<()> {
     const OP: &str = "offset::offset_executive::keep_source_tolerances";
     let edge_tolerance = edge::tolerance(original, original_edge)?;
-    edge::set_tolerance(result, offset_edge, edge_tolerance, true, true)?;
     let mates = |b: &Brep, u: EdgeuseId| -> Result<[VertexId; 2]> {
         let mate = eu::mate(b, u)?
             .ok_or_else(|| SolidError::port_invariant(OP, "a matched edge use without a mate"))?;
@@ -2880,28 +2883,52 @@ fn keep_source_tolerances(
     let starts = vertex::tolerance(original, source_start)?;
     let ends = vertex::tolerance(original, source_end)?;
     if made[0] == made[1] {
+        edge::set_tolerance(result, offset_edge, edge_tolerance, true, true)?;
         vertex::set_tolerance(result, made[0], starts.max(ends), true, true)?;
         return Ok(());
     }
-    let tangent = |b: &Brep, u: EdgeuseId| -> Result<Vec3> {
-        eu3::normalized_evaluate_read_only(k, b, u, 0.5, false, true)?
+    let uv_tangent = |b: &Brep, u: EdgeuseId| -> Result<Vec3> {
+        eu3::normalized_evaluate_read_only(k, b, u, 0.5, true, true)?
             .first_deriv
             .ok_or_else(|| SolidError::port_invariant(OP, "an edge use without a tangent"))
     };
-    let along = tangent(original, original_use)?.dot(tangent(result, offset_use)?);
-    let [made_start, made_end] = if along > 0.0 {
-        made
-    } else if along < 0.0 {
-        [made[1], made[0]]
-    } else {
-        return Err(SolidError::port_invariant(
-            OP,
-            "matched edge uses whose tangents do not tell their directions apart",
-        ));
+    let Some(same_way) = run_same_way(
+        k,
+        uv_tangent(original, original_use)?,
+        uv_tangent(result, offset_use)?,
+    )?
+    else {
+        return Ok(());
     };
+    let [made_start, made_end] = if same_way { made } else { [made[1], made[0]] };
+    edge::set_tolerance(result, offset_edge, edge_tolerance, true, true)?;
     vertex::set_tolerance(result, made_start, starts, true, true)?;
     vertex::set_tolerance(result, made_end, ends, true, true)?;
     Ok(())
+}
+
+/// Whether two matched edge uses with UV tangents `source` and `made` run the same way
+/// (`Some(true)`), opposite ways (`Some(false)`), or are not one curve's at all
+/// (`None`: the tangents are not parallel within the angular tolerance,
+/// `|source · made| < cos(ang_tol) |source| |made|`).
+///
+/// # Errors
+///
+/// [`SolidError::PortInvariant`] for a tangent that tells no direction: zero, infinite
+/// or NaN (the comparisons are written so NaN fails).
+fn run_same_way(k: &Kernel, source: Vec3, made: Vec3) -> Result<Option<bool>> {
+    let along = source.dot(made);
+    let scale = source.length() * made.length();
+    if !(along.is_finite() && scale.is_finite() && scale > 0.0) {
+        return Err(SolidError::port_invariant(
+            "offset::offset_executive::keep_source_tolerances",
+            "matched edge uses whose UV tangents do not tell their directions apart",
+        ));
+    }
+    if along.abs() < k.tolerances.ang_tol_rad().cos() * scale {
+        return Ok(None);
+    }
+    Ok(Some(along > 0.0))
 }
 
 /// The vertex an edge use starts at (`GetVertexuse()->GetVertex()`).
@@ -5617,5 +5644,204 @@ mod tests {
             );
             assert_eq!(vertex::tolerance(&result, end).unwrap(), thin, "{reversed}");
         }
+    }
+
+    /// `run_same_way` reads one curve's UV tangents, either way, within the angular
+    /// tolerance; tangents that are not parallel (a square or 30-degree pair) are no
+    /// curve and its image; a NaN, infinite or zero tangent stays a `PortInvariant`.
+    #[test]
+    fn run_same_way_takes_parallel_tangents_only() {
+        let k = Kernel::default();
+        let t = Vec3::new(3.0, 4.0, 0.0);
+        let turned = |deg: f64| {
+            let (s, c) = (deg * PI / 180.0).sin_cos();
+            Vec3::new(c * t.x - s * t.y, s * t.x + c * t.y, 0.0) * 0.5
+        };
+        assert_eq!(run_same_way(&k, t, t * 2.0).unwrap(), Some(true));
+        assert_eq!(run_same_way(&k, t, t * -0.25).unwrap(), Some(false));
+        assert_eq!(run_same_way(&k, t, turned(0.4)).unwrap(), Some(true));
+        assert_eq!(run_same_way(&k, t, turned(179.6)).unwrap(), Some(false));
+        for deg in [0.6, 30.0, 90.0, 120.0, 150.0, 179.4] {
+            assert_eq!(run_same_way(&k, t, turned(deg)).unwrap(), None, "{deg}");
+        }
+        for bad in [
+            Vec3::new(f64::NAN, 0.0, 0.0),
+            Vec3::new(f64::INFINITY, 0.0, 0.0),
+            Vec3::ZERO,
+        ] {
+            for (a, b) in [(t, bad), (bad, t)] {
+                let e = run_same_way(&k, a, b).unwrap_err();
+                assert!(
+                    matches!(e, SolidError::PortInvariant { .. }),
+                    "{bad:?}: {e}"
+                );
+            }
+        }
+    }
+
+    /// A box whose top is given a plane moved up 1, tilted 2 degrees (so not parallel:
+    /// the given frame is kept as it came) and turned `deg` degrees in its own
+    /// parameters, after `loosen` has loosened the box; the local operation's result.
+    fn turned_top(deg: f64, loosen: impl FnOnce(&mut Brep)) -> (Brep, Result<()>) {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            10.0,
+            10.0,
+            10.0,
+        )
+        .unwrap();
+        loosen(&mut b);
+        let top = bp1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&f| {
+                let s = face::surface(&b, f).unwrap().unwrap();
+                let mid = s
+                    .natural_uv_domain_with_nurb(&k)
+                    .unwrap()
+                    .evaluate(0.5, 0.5);
+                (s.evaluate_point(&k, mid).unwrap().z - 10.0).abs() < 1e-9
+            })
+            .unwrap();
+        let own = face::surface(&b, top).unwrap().unwrap().clone();
+        let SurfaceKind::Plane(plane) = own.kind() else {
+            panic!("a box's top is a plane");
+        };
+        let q = *plane.position();
+        let (s, c) = (deg * PI / 180.0).sin_cos();
+        let (x, y) = (
+            q.x_axis() * c + q.y_axis() * s,
+            q.y_axis() * c - q.x_axis() * s,
+        );
+        let (ts, tc) = (2.0 * PI / 180.0).sin_cos();
+        let tilt = |v: Vec3| Vec3::new(v.x, tc * v.y - ts * v.z, ts * v.y + tc * v.z);
+        let given = Surface::from(Plane::new(
+            q.origin() + Vec3::Z,
+            tilt(x),
+            tilt(y),
+            plane.uv_scale(),
+            &own.natural_uv_domain_with_nurb(&k).unwrap(),
+        ));
+        let done = crate::offset::offset_executive::p2::local_operation_simple(
+            &mut k,
+            &mut b,
+            &[top],
+            vec![given],
+        );
+        (b, done)
+    }
+
+    /// The vertex of `b` at `(x, y)`, on the top (z > 5) or the bottom.
+    fn vertex_at(b: &Brep, x: f64, y: f64, top: bool) -> VertexId {
+        b.vertices()
+            .ids()
+            .find(|&v| {
+                let p = vertex::point(b, v).unwrap();
+                (p.x - x).abs() < 1e-6 && (p.y - y).abs() < 1e-6 && (p.z > 5.0) == top
+            })
+            .unwrap()
+    }
+
+    /// The edge of `b` between `v` and `w`.
+    fn edge_between(b: &Brep, v: VertexId, w: VertexId) -> EdgeId {
+        b.edges()
+            .ids()
+            .find(|&e| {
+                let mut ends = edge::vertices(b, e, None).unwrap();
+                ends.sort();
+                let mut want = vec![Some(v), Some(w)];
+                want.sort();
+                ends == want
+            })
+            .unwrap()
+    }
+
+    /// A local operation given a top plane turned in its own parameters keeps the source
+    /// tolerances on the images of their sources (WR-671). The face takes its UV curves to
+    /// the given surface, so its edges are made where that surface carries them: at 30
+    /// degrees the top is the face's square turned 30 degrees about the corner at the
+    /// origin, and the box's top edge on y = 0 is the top edge from that corner along
+    /// y = 0. Loosened one at a time (1e-3; an edge's tolerance grows its ends too):
+    /// the corner's image alone takes the corner's tolerance, and the loose edge's image
+    /// takes the edge's while the top edges at y = 10 stay thin.
+    #[test]
+    fn a_turned_top_keeps_source_tolerances_on_its_images() {
+        for deg in [0.0, 30.0] {
+            let (b, done) = turned_top(deg, |b| {
+                let corner = vertex_at(b, 0.0, 0.0, true);
+                vertex::set_tolerance(b, corner, 1e-3, true, true).unwrap();
+            });
+            done.unwrap_or_else(|e| panic!("{deg}: {e}"));
+            let corner = vertex_at(&b, 0.0, 0.0, true);
+            assert!((vertex::point(&b, corner).unwrap().z - 11.0).abs() < 1e-9);
+            for v in b.vertices().ids() {
+                let t = vertex::tolerance(&b, v).unwrap();
+                assert_eq!(t >= 1e-3, v == corner, "{deg}: {v:?} {t}");
+            }
+            let (b, done) = turned_top(deg, |b| {
+                let (corner, other) = (vertex_at(b, 0.0, 0.0, true), vertex_at(b, 10.0, 0.0, true));
+                let e = edge_between(b, corner, other);
+                edge::set_tolerance(b, e, 1e-3, true, true).unwrap();
+            });
+            done.unwrap_or_else(|e| panic!("{deg}: {e}"));
+            let top_edges_at = |y: f64| -> Vec<EdgeId> {
+                b.edges()
+                    .ids()
+                    .filter(|&e| {
+                        let ends = edge::vertices(&b, e, None).unwrap();
+                        let points: Vec<_> = ends
+                            .iter()
+                            .map(|v| vertex::point(&b, v.unwrap()).unwrap())
+                            .collect();
+                        points.iter().all(|p| p.z > 5.0)
+                            && points.iter().any(|p| (p.y - y).abs() < 1e-6)
+                    })
+                    .collect()
+            };
+            let corner = vertex_at(&b, 0.0, 0.0, true);
+            let image = top_edges_at(0.0)
+                .into_iter()
+                .find(|&e| {
+                    let ends = edge::vertices(&b, e, None).unwrap();
+                    ends.contains(&Some(corner))
+                        && ends
+                            .iter()
+                            .all(|v| vertex::point(&b, v.unwrap()).unwrap().y.abs() < 1e-6)
+                })
+                .unwrap();
+            assert!(edge::tolerance(&b, image).unwrap() >= 1e-3, "{deg}");
+            let far = top_edges_at(10.0);
+            assert!(!far.is_empty());
+            for e in far {
+                let t = edge::tolerance(&b, e).unwrap();
+                assert!(t < 1e-3, "{deg}: {e:?} {t}");
+            }
+        }
+    }
+
+    /// The top turned a quarter turn: the face's square lands beside the box and the body
+    /// built is refused as unsound, typed, with the box unchanged. Pairing the matched
+    /// edges' ends by their 3D tangents, square to each other here, raised a
+    /// `PortInvariant` instead.
+    #[test]
+    fn a_quarter_turned_top_is_refused_typed_not_a_port_invariant() {
+        let (b, done) = turned_top(90.0, |_| ());
+        let e = done.unwrap_err();
+        assert!(!matches!(e, SolidError::PortInvariant { .. }), "{e}");
+        assert!(
+            matches!(
+                e.failure().map(|f| &f.reason),
+                Some(crate::error::Reason::Offset(
+                    crate::error::offset::OffsetFailure::Unsound { .. }
+                ))
+            ),
+            "{e}"
+        );
+        assert_eq!(
+            (b.faces().len(), b.edges().len(), b.vertices().len()),
+            (6, 12, 8)
+        );
     }
 }

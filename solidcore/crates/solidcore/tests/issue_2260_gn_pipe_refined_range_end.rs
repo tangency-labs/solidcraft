@@ -88,7 +88,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "local_surface_intersect_guards_max_boundary_retry",
     "new_edge_vertex_tolerance_covers_gap",
     "offset_analytic_mate_edges",
-    "offset_edges_keep_source_tolerance",
     "offset_extension_as_itself",
     "offset_extension_from_base",
     "offset_open_edge_second_trim_point",
