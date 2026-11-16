@@ -2793,8 +2793,10 @@ impl OffsetExecutive {
                         if kernel.kernel().fixes.offset_edges_keep_source_tolerance {
                             keep_source_tolerances(
                                 original,
+                                original_use,
                                 original_edge,
                                 required(self.offset_brep.as_mut())?,
+                                offset,
                                 offset_edge,
                             )?;
                         }
@@ -2846,37 +2848,61 @@ impl OffsetExecutive {
 
 /// (Not upstream, WR-671, `Kernel::fixes.offset_edges_keep_source_tolerance`.) Raises
 /// `offset_edge` of `result` to the tolerance of the original edge it was matched to,
-/// and both its vertices to the larger of the original edge's vertices' tolerances
-/// (matched edge uses may run in opposite directions, so the ends are not paired).
+/// and each of its vertices to the tolerance of the original vertex it stands for.
+/// `original_use` and `offset_use` are the matched edge uses, on face uses that face the
+/// same way: an edge use starts at its vertex use's vertex and its mate at the other end,
+/// so the start of each use pairs with the start of the other, and the start of each
+/// mate with the start of the other mate (as `restore_kept_edges` pairs them). An end
+/// takes only its own vertex's tolerance: taking the larger of the two ends' grew a thin
+/// vertex to its edge's other end's tolerance, one edge further at each operation, until
+/// it reached past a short neighbouring edge and the merge joined that edge's two ends.
 /// Tolerances only grow (`SetTolerance(.., bUpdateOnlyIfLarger = TRUE)`).
 fn keep_source_tolerances(
     original: &Brep,
+    original_use: EdgeuseId,
     original_edge: EdgeId,
     result: &mut Brep,
+    offset_use: EdgeuseId,
     offset_edge: EdgeId,
 ) -> Result<()> {
     let edge_tolerance = edge::tolerance(original, original_edge)?;
-    let mut vertex_tolerance = 0.0_f64;
-    for v in [
-        edge::start_vertex(original, original_edge)?,
-        edge::end_vertex(original, original_edge)?,
-    ]
-    .into_iter()
-    .flatten()
-    {
-        vertex_tolerance = vertex_tolerance.max(vertex::tolerance(original, v)?);
-    }
     edge::set_tolerance(result, offset_edge, edge_tolerance, true, true)?;
-    for v in [
-        edge::start_vertex(result, offset_edge)?,
-        edge::end_vertex(result, offset_edge)?,
-    ]
-    .into_iter()
-    .flatten()
-    {
-        vertex::set_tolerance(result, v, vertex_tolerance, true, true)?;
+    let ends = [
+        (Some(original_use), Some(offset_use)),
+        (
+            eu::mate(original, original_use)?,
+            eu::mate(result, offset_use)?,
+        ),
+    ];
+    for (source, made) in ends {
+        let (Some(source), Some(made)) = (source, made) else {
+            return Err(SolidError::port_invariant(
+                "offset::offset_executive::keep_source_tolerances",
+                "a matched edge use without a mate",
+            ));
+        };
+        let source_vertex = use_vertex(original, source)?;
+        let made_vertex = use_vertex(result, made)?;
+        let tolerance = vertex::tolerance(original, source_vertex)?;
+        vertex::set_tolerance(result, made_vertex, tolerance, true, true)?;
     }
     Ok(())
+}
+
+/// The vertex an edge use starts at (`GetVertexuse()->GetVertex()`).
+fn use_vertex(b: &Brep, u: EdgeuseId) -> Result<VertexId> {
+    let vu = eu::vertexuse(b, u)?.ok_or_else(|| {
+        SolidError::port_invariant(
+            "offset::offset_executive::keep_source_tolerances",
+            "an edge use without a vertex use",
+        )
+    })?;
+    crate::topology::vertexuse::vertex(b, vu)?.ok_or_else(|| {
+        SolidError::port_invariant(
+            "offset::offset_executive::keep_source_tolerances",
+            "a vertex use without a vertex",
+        )
+    })
 }
 
 /// The notification environment of offset-side entities: the caller's records,
