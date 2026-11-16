@@ -53,7 +53,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "classify_edge_interval",
     "cone_create_canonical_preserves_inside_out_and_checks_height",
     "corner_patch_face_side_twist",
-    "curve_contacts_at_curve_ends",
     "curve_loop_normal_from_area",
     "degen_param_tiebreak_uses_actual_param",
     "edgeuse_convexity_propagates_step_off_failure",

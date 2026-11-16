@@ -2487,9 +2487,15 @@ fn normalized_evaluate_3d(
 /// leaves the face's domain or crosses a seam), the longest run (in edge parameter) of
 /// pieces that meet end to end, as one UV trim curve: the second starts at the edge
 /// parameter where the first ends (`SM_ARE_SAME`) and at the same `(u, v)`, to within
-/// the drop's UV tolerances (`tol_3d` over one plus the surface's derivative lengths).
-/// A run of several pieces is joined exactly (`CreateByJoining`); no piece is
-/// reparameterized. `uv_curves` keeps the one run.
+/// the drop's UV tolerances (`tol_3d` over one plus the surface's derivative lengths)
+/// and within the join's own end-to-end tolerance
+/// ([`BSplineCurve::ends_meet_for_join`]). A run of several pieces is joined exactly
+/// (`CreateByJoining`); no piece is reparameterized. `uv_curves` keeps the one run.
+///
+/// The join's test matters where the drop's UV tolerances are the looser ones (a large
+/// `tol_3d` over a slow surface): pieces that end up to `u_tol` apart are not end to end,
+/// and joining them fails (`segments not end to end`) instead of the longest piece being
+/// kept. (Not in the fork, whose run test is the UV tolerances alone.)
 ///
 /// # Errors
 ///
@@ -2536,6 +2542,7 @@ fn longest_drop_run(
             if !are_same(prev.0.max(), next.0.min())
                 || (prev.2.x - next.1.x).abs() > u_tol
                 || (prev.2.y - next.1.y).abs() > v_tol
+                || !BSplineCurve::ends_meet_for_join(prev.2, next.1)
             {
                 break;
             }
@@ -2816,5 +2823,69 @@ mod tests {
         );
         let p = run.evaluate_point(&k, 0.4).unwrap();
         assert!((p.x - 0.4).abs() < 1e-12 && p.y.abs() < 1e-12, "{p:?}");
+    }
+
+    /// Two drop pieces on consecutive edge parameters whose ends are 0.54 apart in UV, the
+    /// pair `remove_topo_edges_mouse_two_struts` drops at its edge's zone tolerance 3.63.
+    /// The drop's UV tolerances (3.63 over one plus the plane's speeds, about 1.8) pass the
+    /// gap; the join's own end test (`1000 sqrt(eps) (1 + 28.56) = 0.0296`) does not. They
+    /// are no run: the longer piece is kept on its own, where joining them failed with
+    /// `segments not end to end`.
+    #[test]
+    fn longest_drop_run_does_not_join_pieces_the_join_refuses() {
+        use crate::math::Vec3;
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+
+        let piece = |t0: f64, t1: f64, a: [f64; 2], b: [f64; 2]| {
+            let pts = vec![
+                CPoint::new(a[0], a[1], 0.0, NOW),
+                CPoint::new(b[0], b[1], 0.0, NOW),
+            ];
+            let nl = NlCurve::new(pts, 1, vec![t0, t0, t1, t1]).unwrap();
+            Curve::from(BSplineCurve::from_nurb(nl, 2, false))
+        };
+        let k = Kernel::default();
+        let plane = Surface::from(
+            crate::primitive::api_primitives::create_plane_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                1.0,
+                1.0,
+            )
+            .unwrap(),
+        );
+        let (a_end, b_start) = (
+            [28.560_706_814_852_54, 2.175_278_413_029_963],
+            [28.465_894_268_602_494, 1.641_316_435_609_047_7],
+        );
+        // the gap passes the drop's UV tolerances and fails the join's end test
+        let gap = Vec3::new(a_end[0] - b_start[0], a_end[1] - b_start[1], 0.0).length();
+        assert!(gap > 0.5 && gap < 3.63 / 2.0, "{gap}");
+        assert!(!BSplineCurve::ends_meet_for_join(
+            Vec3::new(a_end[0], a_end[1], 0.0),
+            Vec3::new(b_start[0], b_start[1], 0.0)
+        ));
+        let mut pieces = vec![
+            piece(
+                0.0,
+                0.847_722_980_184_200_7,
+                [28.560_706_814_852_54, 0.0],
+                a_end,
+            ),
+            piece(
+                0.847_722_980_184_200_7,
+                26.992_802_825_478_737,
+                b_start,
+                [0.651_850_362_241_519_7, 1.726_906_332_096_931],
+            ),
+        ];
+        longest_drop_run(&k, &plane, 3.630_206_397_575_422_6, &mut pieces).unwrap();
+        assert_eq!(pieces.len(), 1);
+        let ivl = pieces[0].natural_interval();
+        assert!(
+            are_same(ivl.min(), 0.847_722_980_184_200_7)
+                && are_same(ivl.max(), 26.992_802_825_478_737),
+            "the longer piece is kept: {ivl:?}"
+        );
     }
 }
