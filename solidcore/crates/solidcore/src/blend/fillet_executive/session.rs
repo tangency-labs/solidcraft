@@ -1852,7 +1852,7 @@ impl<'target> FilletSession<'target> {
     /// per edge, the offset of the second edge use's surface (`radii` gives the first's).
     /// With a linear cross-section that is a chamfer with setbacks `radii[i]` and
     /// `second_radii[i]`. It runs the same `SetFilletParameters`, so the fork's vertex-fan
-    /// split (`fixes.fillet_corner_per_vertex_fan`) applies to it.
+    /// split (WR-665) applies to it.
     ///
     /// # Errors
     /// Those of [`FilletSession::prepare_per_edge_constant_radius`]; native invalid input
@@ -2165,6 +2165,38 @@ impl<'target> FilletSession<'target> {
                     vertex,
                     &edgeuses,
                     &earlier_pass_faces,
+                    |edgeuse| {
+                        let object =
+                            FilletObject::Topology(FilletBody::Target, EntityRef::Edgeuse(edgeuse));
+                        let Some(FilletObject::Solver(id)) =
+                            executive.fillet_solver_of_edgeuse(object)
+                        else {
+                            return false;
+                        };
+                        solvers
+                            .get(id.0 as usize)
+                            .and_then(Option::as_ref)
+                            .is_some_and(|s| {
+                                // only offsets fixed along the edge are a constant reach
+                                // (`OffsetRadiiCanChange`, as the swept corners read it): a
+                                // constant-distance solver's offsets are solved per section
+                                let can_change = match s {
+                                    SolverObject::ConstantRadius(s) => {
+                                        FilletSolverOps::offset_radii_can_change(&**s)
+                                    }
+                                    SolverObject::VariableRadius(s) => {
+                                        FilletSolverOps::offset_radii_can_change(&**s)
+                                    }
+                                    SolverObject::ConstantDistance(s) => {
+                                        FilletSolverOps::offset_radii_can_change(&**s)
+                                    }
+                                    SolverObject::SurfaceSurface(s) => {
+                                        FilletSolverOps::offset_radii_can_change(&**s)
+                                    }
+                                };
+                                matches!(can_change, Ok(false))
+                            })
+                    },
                     |edgeuse| {
                         let object =
                             FilletObject::Topology(FilletBody::Target, EntityRef::Edgeuse(edgeuse));
@@ -5503,32 +5535,6 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         };
         Ok(Some((edge(first)?, edge(second)?)))
     }
-    fn geometry_rails_fit(
-        &mut self,
-        k: &mut Kernel,
-        solver: FilletObject,
-        executive: &FilletExecutive<FilletObject>,
-    ) -> Result<bool> {
-        let FilletObject::Solver(id) = solver else {
-            return Err(invalid("object is not a solver"));
-        };
-        let solver = self
-            .solvers
-            .get_mut(id.0 as usize)
-            .and_then(Option::as_mut)
-            .ok_or_else(|| invalid("solver is not live in this session"))?;
-        let mut context = SessionRollOver {
-            corners: &mut self.corners,
-            executive,
-        };
-        FilletSolver::rails_fit_their_faces_with_ops(
-            live_solver_ops(solver),
-            k,
-            self.target,
-            &mut self.pseudo,
-            &mut context,
-        )
-    }
     fn geometry_rails_fit_judged(
         &mut self,
         k: &mut Kernel,
@@ -5593,6 +5599,11 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         else {
             return Err(invalid("solver edge is not a target edge"));
         };
+        // a sheet's edge bounds no material: its blend adds none (not the fork's, whose
+        // `IsConcaveEdge` fails there)
+        if !crate::blend::fillet_solver::p5::edge_bounds_material(self.target, edge)? {
+            return Ok(false);
+        }
         crate::blend::fillet_solver::p5::is_concave_edge(k, self.target, edge)
     }
     fn geometry_generator_is_linear(&self, solver: FilletObject) -> Result<bool> {

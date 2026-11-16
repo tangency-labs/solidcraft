@@ -673,6 +673,26 @@ impl RoomReason {
             }
         }
     }
+
+    /// The reason in words for a blend whose size is `kind`: a chamfer (a distance or a scale)
+    /// has no rolling ball, so its reasons speak of its offset instead (#12128); a round's are
+    /// [`RoomReason::words`].
+    #[must_use]
+    pub const fn words_for(self, kind: FitKind) -> &'static str {
+        if !matches!(kind, FitKind::Distance | FitKind::Scale) {
+            return self.words();
+        }
+        match self {
+            RoomReason::BallDoesNotFit => "the chamfer's offset does not fit a face it runs along",
+            RoomReason::RailLeavesFace => "the chamfer's contact line leaves the face it runs along",
+            RoomReason::FaceConsumed => "the chamfers take the whole of a face they run along",
+            RoomReason::BallsFold => "the chamfer's offsets fold over each other along the edge",
+            RoomReason::OffsetCollapses => {
+                "the offset is as wide as a face it runs along, so the chamfer cannot end at the edge's end"
+            }
+            other => other.words(),
+        }
+    }
 }
 
 impl FitKind {
