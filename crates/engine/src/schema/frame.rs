@@ -624,8 +624,8 @@ fn member_required(schema: &mut Schema) {
     schema.insert("anyOf".into(), json!([only("profile", "profile_sketch"), only("profile_sketch", "profile")]));
 }
 
-/// Lay structural members along the lines of a frame sketch: one body per line, from its start
-/// to its end, its cross-section square to the line. The section is a built-in `profile` or the
+/// Lay structural members along selected lines and circular arcs of a frame sketch. Each curve
+/// makes one member, or an ordered tangent chain makes one continuous member. The section is a built-in `profile` or the
 /// profiles of a `profile_sketch`, one of them. Each member keeps its name when other lines are
 /// added or deleted. Returns the feature and the bodies it made.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -636,11 +636,14 @@ pub struct FrameMemberKeys {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SketchRef")]
     pub sketch: Option<SketchRef>,
-    /// The lines to lay members along, by curve id, one member each. Default: every straight
+    /// The lines or arcs to lay members along, by curve id. One member each, unless continuous. Default: every straight
     /// line drawn in the sketch that isn't construction, projected or otherwise linked, or of no
     /// length.
     #[serde(default)]
     pub lines: Option<LineIds>,
+    /// One member along explicit, ordered tangent lines and circular arcs. Default: false.
+    #[serde(default)]
+    pub continuous: Option<bool>,
     /// The section as a built-in profile. Give it or `profile_sketch`, not both.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ProfileParam")]

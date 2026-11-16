@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.frame.continuous": "One Continuous Member",
+    "ui.frame.continuous_requires_selection": "Select connected lines and arcs in path order; turn off All Lines for one continuous member."
+  },
+  "ar": {
+    "ui.frame.continuous": "عنصر هيكلي واحد متصل",
+    "ui.frame.continuous_requires_selection": "حدّد خطوطًا وأقواسًا متصلة بترتيب المسار؛ عطّل «كل الخطوط» لإنشاء عنصر هيكلي واحد متصل."
+  },
+  "de": {
+    "ui.frame.continuous": "Ein durchgehendes Rahmenelement",
+    "ui.frame.continuous_requires_selection": "Zusammenhängende Linien und Bögen in Pfadreihenfolge auswählen; für ein durchgehendes Rahmenelement Alle Linien ausschalten."
+  },
+  "he": {
+    "ui.frame.continuous": "איבר מסגרת רציף אחד",
+    "ui.frame.continuous_requires_selection": "בחרו קווים וקשתות מחוברים לפי סדר המסלול; בטלו את ״כל הקווים״ כדי ליצור איבר מסגרת רציף אחד."
+  },
+  "ja": {
+    "ui.frame.continuous": "1 本の連続部材",
+    "ui.frame.continuous_requires_selection": "接続された線と円弧をパスの順に選択し、連続部材では「すべての線」をオフにしてください。"
+  },
+  "ko": {
+    "ui.frame.continuous": "하나의 연속 부재",
+    "ui.frame.continuous_requires_selection": "연결된 선과 원호를 경로 순서대로 선택하고 연속 부재에서는 모든 선을 끄세요."
+  },
+  "vi": {
+    "ui.frame.continuous": "Một phần tử khung kết cấu liên tục",
+    "ui.frame.continuous_requires_selection": "Chọn các đoạn thẳng và cung tròn nối tiếp theo thứ tự đường dẫn; tắt Tất cả đoạn thẳng để tạo một phần tử khung kết cấu liên tục."
+  },
+  "zh": {
+    "ui.frame.continuous": "单根连续构件",
+    "ui.frame.continuous_requires_selection": "按路径顺序选择相连的直线和圆弧；创建连续构件时请关闭所有直线。"
+  }
+}
