@@ -1552,7 +1552,7 @@ struct HeldSketch {
 fn param_names(f: &Feature) -> Vec<String> {
     let mut names: Vec<String> = f.kind.expressions().iter().flat_map(|e| expr::references(e)).collect();
     if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-        names.extend(sketch.constraints.iter().filter_map(|c| c.param.clone()));
+        names.extend(sketch.dimension_params().into_iter().cloned());
         names.extend(sketch.patterns.iter().flat_map(|p| p.expressions.values()).flat_map(|e| expr::references(e)));
         names.extend(sketch.text_exprs().into_iter().flat_map(|(_, e)| expr::references(e)));
         names.extend(sketch.text_word_exprs().into_iter().flat_map(|e| crate::text_params::references(e)));
@@ -1782,6 +1782,7 @@ fn feature_json(f: &Feature, steps: &ImportDigests) -> String {
 /// upgraded topology, refreshed links) stays out of the stored sketch. A `solved` that does not
 /// match `stored` entity for entity is not adopted.
 fn adopt_solution(stored: &mut solidcraft_sketch::Sketch, solved: &solidcraft_sketch::Sketch) -> bool {
+    adopt_wires(stored, solved);
     if stored.patterns != solved.patterns {
         // Rebuild authored copies without storing topology derived from links or offsets.
         let mut updated = stored.clone();
@@ -1830,6 +1831,24 @@ fn adopt_solution(stored: &mut solidcraft_sketch::Sketch, solved: &solidcraft_sk
         solidcraft_sketch::keep_point_order(&mut c.kind, &d.kind);
     }
     true
+}
+
+/// [`adopt_solution`] for the drawn 3D curves, apart from the planar sketch (whose entities may
+/// not pair up): where their constraints solved them for the new values, and those constraints
+/// (their values, the places fixed points' expressions give) (#10608).
+fn adopt_wires(stored: &mut solidcraft_sketch::Sketch, solved: &solidcraft_sketch::Sketch) {
+    for w in stored.wires.iter_mut().filter(|w| w.link.is_none()) {
+        if let Some(s) = solved.wires.iter().find(|s| s.id == w.id && s.link.is_none()) {
+            w.fit.clone_from(&s.fit);
+            w.pts.clone_from(&s.pts);
+            w.arc = s.arc;
+        }
+    }
+    if stored.wire_constraints.len() == solved.wire_constraints.len()
+        && stored.wire_constraints.iter().zip(&solved.wire_constraints).all(|(a, b)| a.id == b.id)
+    {
+        stored.wire_constraints.clone_from(&solved.wire_constraints);
+    }
 }
 
 impl Document {
@@ -2385,6 +2404,9 @@ fn fixed_pattern(pattern: &crate::PatternKind) -> bool {
 fn fixed_plane(plane: &PlaneRef) -> bool {
     match plane {
         PlaneRef::Origin { .. } | PlaneRef::Custom { .. } | PlaneRef::Placed { .. } | PlaneRef::Construction { .. } => true,
+        // Turned about an edge or face of the model (or through a point of it): that geometry
+        // is read too, as `plane_reads_geometry` says.
+        PlaneRef::AtAngle { line: Some(_), .. } | PlaneRef::AtAngle { pivot: Some(_), .. } => false,
         PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => fixed_plane(base),
         _ => false,
     }
@@ -3250,6 +3272,9 @@ impl Model {
                 && doc.sketch(s.feature).is_ok_and(|stored| {
                     stored.driving_values() != s.sketch.driving_values()
                         || stored.patterns != s.sketch.patterns
+                        // 3D dimensions and 3D points placed by expressions (#10608).
+                        || stored.wire_constraints != s.sketch.wire_constraints
+                        || stored.wires.iter().zip(&s.sketch.wires).any(|(a, b)| a.link.is_none() && a.id == b.id && a.fit != b.fit)
                         || s.sketch.texts_follow_other_values(stored)
                         || s.sketch.points.iter().zip(&stored.points).any(|(p, q)| p.link.is_some() && p.id == q.id && p.pos != q.pos)
                 })
@@ -4672,6 +4697,28 @@ pub(crate) fn empty_intersection(bodies: &[&str]) -> DocError {
     DocError::Invalid(format!("the intersection is empty: nothing of {body} would remain; check that the profile overlaps the body"))
 }
 
+thread_local! {
+    /// What the feature being evaluated says about targets it found joined into another body
+    /// ([`joined_into`]); [`eval_feature`] adds them to its warning.
+    static JOINED_TARGETS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The body that the target `name`, gone from the model, is part of now: a Combine before `f`
+/// joined it into its target, which a later Combine may have joined on in turn (#17807). `None`
+/// when no such Combine took it (a cut or intersect consumes its tools: they are part of
+/// nothing), or the body it went into is gone too.
+fn joined_into<'d>(doc: &'d Document, state: &ModelState, f: &Feature, name: &str) -> Option<&'d str> {
+    let mut now: Option<&'d str> = None;
+    for g in doc.features.iter().take_while(|g| g.id != f.id).filter(|g| !g.suppressed) {
+        if let FeatureKind::Combine { target, tools, operation: Operation::Join | Operation::NewBody, keep_tools: false } = &g.kind
+            && tools.iter().any(|t| t.0.as_str() == now.unwrap_or(name))
+        {
+            now = Some(target.0.as_str());
+        }
+    }
+    now.filter(|b| state.body(b).is_some())
+}
+
 /// The body a feature's target name `name` picks. Body names are unique, so a body of the
 /// feature's component asked to be called a name another component's body already has (a
 /// linked component's `AS5047P_PCB`) was named otherwise (`Body1`), and the name still picks the
@@ -4830,7 +4877,20 @@ fn apply_traced_with(
     } else {
         let mut v = Vec::new();
         for t in targets {
-            v.push(named_target(doc, state, f, t)?);
+            let i = match named_target(doc, state, f, t) {
+                // A target an earlier Combine has since joined into its own target is that
+                // body now (#17807), as a Combine tool that is part of another body is.
+                Err(DocError::Unknown(_)) if let Some(base) = joined_into(doc, state, f, t) => {
+                    JOINED_TARGETS.with(|n| n.borrow_mut().push(format!("`{t}` is part of `{base}` now")));
+                    let i = named_target(doc, state, f, base)?;
+                    if v.contains(&i) {
+                        continue;
+                    }
+                    i
+                }
+                r => r?,
+            };
+            v.push(i);
         }
         v
     };
@@ -10028,6 +10088,24 @@ fn eval_feature(
     import_report: &mut Option<Arc<kernel::ImportReport>>,
     repair: &mut Option<Arc<kernel::RepairReport>>,
 ) -> Result<()> {
+    JOINED_TARGETS.with(|n| n.borrow_mut().clear());
+    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair);
+    for note in JOINED_TARGETS.with(|n| std::mem::take(&mut *n.borrow_mut())) {
+        append_warning(warning, note);
+    }
+    r
+}
+
+/// [`eval_feature`] for one kind of feature.
+fn eval_feature_kind(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &mut ModelState,
+    warning: &mut Option<String>,
+    import_report: &mut Option<Arc<kernel::ImportReport>>,
+    repair: &mut Option<Arc<kernel::RepairReport>>,
+) -> Result<()> {
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
     refuse_ambiguous_targets(doc, st, f, &f.participants)?;
@@ -10133,6 +10211,9 @@ fn eval_feature(
             Ok(())
         }
         FeatureKind::Hole { thread, thread_depth, thread_class, diameter, hand, modeled, ease_out, depth, to, .. } => {
+            if st.bodies.is_empty() {
+                return Err(empty_boolean_targets(doc, st, f, &[], f.participants.is_empty()));
+            }
             let thread_depth = thread_depth.as_ref().map(|d| val(vals, d, Kind::Length)).transpose()?;
             if thread_depth.is_some() && thread.is_none() {
                 return Err(DocError::Invalid("thread depth requires a tapped hole".into()));
@@ -12029,7 +12110,7 @@ fn construction_planes_in_frame<'a>(doc: &Document, st: &ModelState, comp: u64, 
 
 /// `plane` moved by the placement `m`; an error when `m` does not keep it a plane (a placement
 /// that is not a rigid motion, which [`Document`] does not take).
-fn placed_plane(m: &crate::Mat, plane: &Plane) -> Result<Plane> {
+pub(crate) fn placed_plane(m: &crate::Mat, plane: &Plane) -> Result<Plane> {
     Plane::new(crate::apply_point(m, plane.origin), crate::apply_vector(m, plane.x), crate::apply_vector(m, plane.y))
         .ok_or_else(|| DocError::Invalid("a sketch plane cannot be placed: the placement is not a rigid motion".into()))
 }

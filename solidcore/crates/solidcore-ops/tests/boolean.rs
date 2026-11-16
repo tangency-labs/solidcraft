@@ -195,6 +195,47 @@ fn a_large_cylinder_resting_on_a_box_edge_unions() {
     }
 }
 
+/// A cylinder r 9 lying along x on a box's top face (z = 0), sunk `d` into it, joined. Where
+/// the end caps (x = ±15) meet the top face, the line x = ±15, z = 0 touches each cap's
+/// circle at the circle's vertex, a hair inside it. The sector test at that vertex read the
+/// line inside the cap from secants a tolerance long, while the samples were still within
+/// tolerance of each other, so the line was kept as two edges across the cap and the union
+/// failed (status 1001) for d from about 7e-7 to 1e-5. Below the contact tolerance the two
+/// solids touch along the line; at it, they are one solid less a sliver of
+/// (4/3)·√(2r)·d^1.5 per unit length (5.4e-6 mm³ here, inside the volume check's 2.4e-4).
+#[test]
+fn a_cylinder_sunk_a_hair_into_a_flat_face_joins_it() {
+    let (r, len) = (9.0, 30.0);
+    let whole = 40.0 * 40.0 * 10.0 + PI * r * r * len;
+    for fixes in [false, true] {
+        if fixes {
+            all_fixes();
+        }
+        for (d, solids) in [(1e-6, 2), (5e-6, 2), (1e-5, 1)] {
+            let b = make_box([-20.0, -20.0, -10.0], [40.0, 40.0, 10.0]).unwrap();
+            let c = solidcore_ops::make_cylinder([0.0; 3], r, len).unwrap();
+            // rows: the images of x, y, z; row 3 the translation (p' = p·A + t)
+            c.transform(&[
+                [0.0, 0.0, -1.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0],
+                [-15.0, 0.0, r - d, 1.0],
+            ])
+            .unwrap();
+            let u = boolean(b, c, BooleanOp::Union)
+                .unwrap_or_else(|e| panic!("d {d} fixes {fixes}: {e:?}"))
+                .unwrap();
+            assert!(
+                (volume(&u) - whole).abs() <= 1e-8 * whole,
+                "d {d} fixes {fixes}: {}",
+                volume(&u)
+            );
+            assert_eq!(u.solid_count().unwrap(), solids, "d {d} fixes {fixes}");
+            assert!(u.to_record().is_ok(), "d {d} fixes {fixes}");
+        }
+    }
+}
+
 /// Two equal cylinders side by side, touching along a line. Their faces leave the line
 /// together and part as the square of the distance over the radius, so the fixed steps off
 /// the line took two large ones for one surface, and the union failed (100 times the size)
@@ -1174,6 +1215,85 @@ fn a_ball_with_its_poles_within_tolerance_of_a_rolls_face_is_cut() {
                 want,
                 &what,
             ));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The half roll less the r 6 ball about (0, 50 - 1e-6, 20), its poles 1e-6 inside the roll's
+/// outside (within the tolerance the trace refines with), its seam turned 0.01, 0.02 and 0.03
+/// rad off the meridian the line runs into the poles along (#16637). The line passes each pole
+/// 1e-6 away and crosses the seam δ/sin(turn) from it, 1e-4 to 3.3e-5: farther than the summed
+/// tolerances (2e-5), within upstream's combine radius (1e-4). The crossing's vertex
+/// definition was combined into the pole's and deleted, the proto vertex stayed at the average
+/// of the two, and the curve that started at the crossing was continued past its start to that
+/// average, out of the ball's UV domain (`SmBrep` test 70); every frame was refused as not a
+/// solid. The merged vertex is now the pole, its tolerance the certified distance to the
+/// crossing it absorbed, and that curve's end is moved onto the pole inside the domain. Each
+/// frame is one valid solid of V = 3920π less the ball between radii 48 and 50 at that
+/// distance ([`ball_inside`]), with the face, edge and vertex counts of the same frame with
+/// the seam turned 0.1 (the crossing within the summed tolerances of the pole, one vertex
+/// there before and after #16637): no vertex or sliver edge is left at the crossing.
+#[test]
+fn a_ball_with_its_poles_within_tolerance_and_its_seam_turned_off_the_line_is_cut() {
+    all_fixes();
+    let d = 50.0 - 1e-6;
+    let want = 3920.0 * PI - (ball_inside(|_| 50.0, d) - ball_inside(|_| 48.0, d));
+    let counts = |frame, turn: f64| {
+        boolean(
+            half_roll(frame),
+            ball([0.0, d, 20.0], turn),
+            BooleanOp::Subtract,
+        )
+        .ok()
+        .flatten()
+        .and_then(|r| r.counts().ok())
+    };
+    let mut failed = Vec::new();
+    for frame in [2, 5, 8, 14] {
+        let control = counts(frame, 0.1);
+        for turn in [0.01, 0.02, 0.03] {
+            let what = format!("turned {turn}, frame {frame}");
+            failed.extend(cut_is_valid_solid(
+                half_roll(frame),
+                ball([0.0, d, 20.0], turn),
+                want,
+                &what,
+            ));
+            let got = counts(frame, turn);
+            if got.is_none() || got != control {
+                failed.push(format!("{what}: counts {got:?}, turned 0.1 {control:?}"));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The controls of the cut above, valid before and after #16637: the seam turned ±1e-3 rad
+/// (the crossing 1e-3 from the pole, beyond the combine radius) and ±0.1 rad (1e-5, within
+/// the summed tolerances) with the poles 1e-6 inside the roll's outside, and every turn of the
+/// test above and these with the poles 1e-6 outside it. Each frame is one valid solid of the
+/// closed-form volume.
+#[test]
+fn a_ball_with_its_poles_within_tolerance_and_its_seam_turned_is_cut_in_the_controls() {
+    all_fixes();
+    let mut failed = Vec::new();
+    for (delta, turns) in [
+        (-1e-6, &[-1e-3, 1e-3, -0.1, 0.1][..]),
+        (1e-6, &[0.01, 0.02, 0.03, -1e-3, 1e-3, -0.1, 0.1][..]),
+    ] {
+        let d = 50.0 + delta;
+        let want = 3920.0 * PI - (ball_inside(|_| 50.0, d) - ball_inside(|_| 48.0, d));
+        for &turn in turns {
+            for frame in [2, 5, 8, 14] {
+                let what = format!("δ {delta:e}, turned {turn}, frame {frame}");
+                failed.extend(cut_is_valid_solid(
+                    half_roll(frame),
+                    ball([0.0, d, 20.0], turn),
+                    want,
+                    &what,
+                ));
+            }
         }
     }
     assert!(failed.is_empty(), "{failed:#?}");

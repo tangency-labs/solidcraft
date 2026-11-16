@@ -91,11 +91,9 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "offset_edges_keep_source_tolerance",
     "offset_extension_as_itself",
     "offset_extension_from_base",
-    "offset_keep_cavity_regions",
     "offset_open_edge_second_trim_point",
     "point_class_gap_3d_propagates_no_drop_error",
     "proto_edge_splits_at_captured_vertices",
-    "proto_edge_split_upper_keeps_the_old_max",
     "proto_vertex_miss_is_false",
     "revolve_analytic_profile_faces",
     "revolve_holed_profile_void",
@@ -108,10 +106,7 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "ssi_trace_tangent_curves_once",
     "surface_continuity_checks_last_v_knot",
     "sweep_statuses_pass_on",
-    "transform_model_size_from_body_box",
-    "transform_scales_each_tolerance",
     "uv_trim_corner_end_points_only",
-    "validation_does_not_make_uv_trims",
 ];
 
 /// The volume 729f893 gives the rounded body at accuracy 1e-7.
