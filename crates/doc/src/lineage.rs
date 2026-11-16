@@ -779,9 +779,12 @@ fn order_legacy_family(bodies: &mut [crate::ModelBody], members: &[usize], doc: 
     if order.len() != names.len() {
         return;
     }
-    for (name, piece) in names.into_iter().zip(order) {
+    // The body a name past the first was split off moves with the name (see `order_lumps`).
+    let split_from: Vec<Option<String>> = members.iter().map(|i| bodies.get(*i).and_then(|b| b.split_from.clone())).collect();
+    for ((name, from), piece) in names.into_iter().zip(split_from).zip(order) {
         if let Some(b) = members.get(piece).and_then(|i| bodies.get_mut(*i)) {
             b.name = name;
+            b.split_from = from;
         }
     }
 }
@@ -825,8 +828,10 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         keys.sort();
         // A name moves with the feature it belongs to: in a cut's family the first name is the
         // cut body's own feature's and the rest are the cut's, and `body.rename` stores a name in
-        // the `body_names` of the feature a body says made it (#10438).
-        let names: Vec<(String, u64)> = members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature))).collect();
+        // the `body_names` of the feature a body says made it (#10438). So does the body a name
+        // past the first was split off, which gives that piece its material and look.
+        let names: Vec<(String, u64, Option<String>)> =
+            members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature, b.split_from.clone()))).collect();
         // The pieces take the family's places in that order too, so the state lists them as
         // their names run. The session pins a feature's body names in state order, and the next
         // evaluation hands them out in this order: listed in the kernel's order, the pieces
@@ -835,9 +840,10 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         if moved.len() != members.len() || names.len() != members.len() {
             continue;
         }
-        for ((mut b, (name, feature)), place) in moved.into_iter().zip(names).zip(&members) {
+        for ((mut b, (name, feature, split_from)), place) in moved.into_iter().zip(names).zip(&members) {
             b.name = name;
             b.feature = feature;
+            b.split_from = split_from;
             if let Some(slot) = bodies.get_mut(*place) {
                 *slot = b;
             }

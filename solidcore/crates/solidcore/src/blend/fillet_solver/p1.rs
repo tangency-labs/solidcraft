@@ -179,6 +179,8 @@ fn invalid(reason: &'static str) -> SolidError {
 /// upstream, not a status) pass through.
 fn as_sm_err(e: SolidError, op: &'static str) -> SolidError {
     match e {
+        // a certificate's work budget spent: never flattened into a status
+        e if e.is_not_certified() => e,
         SolidError::Unported { .. }
         | SolidError::Cancelled { .. }
         | SolidError::InvalidInput { .. }
@@ -213,6 +215,17 @@ pub enum FilletSolverType {
     CurveBased = 5,
     /// `SM_FS_CONST_RADIUS_ASSISTED`.
     ConstRadiusAssisted = 6,
+}
+
+impl FilletSolverType {
+    /// Whether the solver's ball changes its radius along the round (a radius law, or a
+    /// constant chord between faces whose angle changes), so a circular section is the
+    /// circle along which the balls' envelope touches the ball rather than its great
+    /// circle (the fork's `SmGnSectionFSG::CircleSurface`, WR-685, f2ec002).
+    #[must_use]
+    pub const fn ball_radius_varies(self) -> bool {
+        matches!(self, Self::VariableRadius | Self::ConstDist)
+    }
 }
 
 /// `SmFilletSurfaceGeneratorType`; discriminants are the upstream values.
@@ -1926,7 +1939,14 @@ impl FilletSolver {
 fn bool_status(r: Result<bool>) -> Result<bool> {
     match r {
         Ok(v) => Ok(v),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(e)
+            if matches!(
+                e,
+                SolidError::Unported { .. } | SolidError::Cancelled { .. }
+            ) || e.is_not_certified() =>
+        {
+            Err(e)
+        }
         Err(_) => Ok(true),
     }
 }
@@ -1938,7 +1958,14 @@ fn singularity_status(
 ) -> Result<crate::surface::surface::p5::Singularity> {
     match r {
         Ok(v) => Ok(v),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(e)
+            if matches!(
+                e,
+                SolidError::Unported { .. } | SolidError::Cancelled { .. }
+            ) || e.is_not_certified() =>
+        {
+            Err(e)
+        }
         Err(_) => Ok(crate::surface::surface::p5::Singularity {
             singular: true,
             direction: SurfParamType::Neither,
@@ -3528,6 +3555,43 @@ pub use rails::{compute_support_edge, split_rail, RailOwnership, RetainedRailOwn
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The solvers whose ball changes its radius along the round, so that
+    /// `skins_varying_balls` holds their exact-circle skin to its balls (#15256): a
+    /// variable radius and a constant distance (its radius follows the faces' angle),
+    /// not a constant radius or the constant-radius-assisted solver.
+    #[test]
+    fn variable_radius_and_constant_distance_balls_vary() {
+        use FilletSolverType as T;
+        assert!(T::VariableRadius.ball_radius_varies());
+        assert!(T::ConstDist.ball_radius_varies());
+        for t in [
+            T::Unknown,
+            T::SurfSurf,
+            T::ConstRadius,
+            T::CurveBased,
+            T::ConstRadiusAssisted,
+        ] {
+            assert!(!t.ball_radius_varies(), "{t:?}");
+        }
+    }
+
+    /// A G^n section certificate that spent its work budget is not flattened to `SM_ERR`
+    /// ([`as_sm_err`]) nor read as `TRUE` ([`bool_status`], [`singularity_status`]).
+    #[test]
+    fn a_certificate_past_its_budget_passes_the_solver_s_status_filters() {
+        let e = SolidError::blend(
+            "t",
+            crate::error::blend::BlendFailure::NotCertified {
+                halvings: 1,
+                stations: 2,
+            },
+        );
+        assert_eq!(as_sm_err(e.clone(), "op"), e);
+        assert_eq!(bool_status(Err(e.clone())), Err(e.clone()));
+        assert!(singularity_status(Err(e.clone())).is_err());
+        assert_eq!(bool_status(Err(SolidError::sm_err("t"))), Ok(true));
+    }
 
     #[test]
     fn audit_483_edge_domain_is_no_trimmed_curve_after_a_failed_trim() {

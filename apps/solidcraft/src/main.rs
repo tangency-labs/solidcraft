@@ -753,7 +753,9 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         easyprint_upload: Some(std::sync::Arc::new(easyprint_upload)),
         browser_files: None,
         agent_http: Some(std::sync::Arc::new(agent_http)),
-        secrets: Some(std::sync::Arc::new(Keychain)),
+        secrets: Some(std::sync::Arc::new(Keychain("SolidCraft agent chat"))),
+        tickets_http: Some(std::sync::Arc::new(tickets_http)),
+        ticket_secrets: Some(std::sync::Arc::new(Keychain("SolidCraft tickets"))),
         show_in_folder: Some(Box::new(|path| {
             let folder = std::path::Path::new(path).parent().unwrap_or_else(|| std::path::Path::new("."));
             let mut command = std::process::Command::new(if cfg!(target_os = "windows") {
@@ -865,28 +867,82 @@ fn easyprint_upload(name: &str, bytes: Vec<u8>, done: std::sync::mpsc::Sender<Re
     });
 }
 
-/// API keys in the system keychain (service "SolidCraft agent chat", one entry per agent).
-struct Keychain;
+/// Secrets in the system keychain: API keys (service "SolidCraft agent chat", one entry per
+/// agent) and the ticket server's sign-in (service "SolidCraft tickets").
+struct Keychain(&'static str);
 
 impl Keychain {
-    fn entry(id: &str) -> Result<keyring::Entry, String> {
-        keyring::Entry::new("SolidCraft agent chat", id).map_err(|e| e.to_string())
+    fn entry(&self, id: &str) -> Result<keyring::Entry, String> {
+        keyring::Entry::new(self.0, id).map_err(|e| e.to_string())
     }
+}
+
+/// HTTP to the ticket server for problem reports (docs/problem-reports.md): on a worker thread, HTTPS
+/// only (a local test server aside), no redirects (the token must not follow one), at most 16 MB
+/// back. The answer comes on `done`.
+fn tickets_http(r: solidcraft_ui_egui::agent_chat::backend::HttpRequest, done: std::sync::mpsc::Sender<solidcraft_ui_egui::tickets::Reply>) {
+    let spawned = std::thread::Builder::new().name("tickets-http".into()).spawn(move || {
+        // HTTPS, or plain HTTP to this computer (a test server): the host compared exactly.
+        let reply = if solidcraft_ui_egui::tickets::api::allowed_url(&r.url) { tickets_call(&r) } else { Err("only HTTPS is allowed".into()) };
+        let _ = done.send(reply);
+    });
+    // Without a worker the sender is dropped with the closure: the report sees no answer and
+    // waits in the queue.
+    drop(spawned);
+}
+
+fn tickets_call(r: &solidcraft_ui_egui::agent_chat::backend::HttpRequest) -> Result<(u16, Vec<u8>), String> {
+    use std::time::Duration;
+    let tls = ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .unversioned_rustls_crypto_provider(std::sync::Arc::new(rustls::crypto::ring::default_provider()))
+        .build();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .tls_config(tls)
+        .http_status_as_error(false)
+        .timeout_global(Some(Duration::from_secs(r.timeout_s.clamp(1, 3600))))
+        .timeout_connect(Some(Duration::from_secs(10)))
+        .user_agent(concat!("SolidCraft/", env!("CARGO_PKG_VERSION")))
+        .max_redirects(0)
+        .build()
+        .into();
+    let body = r.body.as_deref().unwrap_or_default();
+    macro_rules! with_headers {
+        ($req:expr) => {{
+            let mut req = $req;
+            for (k, v) in &r.headers {
+                req = req.header(k, v);
+            }
+            req
+        }};
+    }
+    let mut response = match r.method {
+        "GET" => with_headers!(agent.get(&r.url)).call(),
+        "POST" => with_headers!(agent.post(&r.url)).send(body),
+        "PUT" => with_headers!(agent.put(&r.url)).send(body),
+        "PATCH" => with_headers!(agent.patch(&r.url)).send(body),
+        "DELETE" => with_headers!(agent.delete(&r.url)).call(),
+        other => return Err(format!("unsupported method {other}")),
+    }
+    .map_err(|e| e.to_string())?;
+    let status = response.status().as_u16();
+    let body = response.body_mut().with_config().limit(16 << 20).read_to_vec().map_err(|e| e.to_string())?;
+    Ok((status, body))
 }
 
 impl solidcraft_ui_egui::agent_chat::backend::Secrets for Keychain {
     fn get(&self, id: &str) -> Result<Option<String>, String> {
-        match Self::entry(id)?.get_password() {
+        match self.entry(id)?.get_password() {
             Ok(p) => Ok(Some(p)),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(e.to_string()),
         }
     }
     fn set(&self, id: &str, secret: &str) -> Result<(), String> {
-        Self::entry(id)?.set_password(secret).map_err(|e| e.to_string())
+        self.entry(id)?.set_password(secret).map_err(|e| e.to_string())
     }
     fn delete(&self, id: &str) -> Result<(), String> {
-        match Self::entry(id)?.delete_credential() {
+        match self.entry(id)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(e) => Err(e.to_string()),
         }
@@ -2093,6 +2149,7 @@ mod viewport_tests {
             ctx.set_zoom_factor(zoom);
             let mut app = super::SolveApp::new(super::Session::default(), Default::default());
             app.integrated_titlebar = true;
+            app.preferences.language = "en".into();
             for (command, params) in [
                 ("sketch.create", json!({"plane":"XY"})),
                 ("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})),

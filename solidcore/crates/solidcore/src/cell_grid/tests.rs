@@ -16,7 +16,7 @@ use crate::prism::profile::{Loop2, Seg2};
 
 use crate::cell_grid::lattice::{Lattice, CIRCLE_SIDES};
 use crate::cell_grid::region::{clip_halfplane, poly_area, Bounds, Convex, Loop, Prim, Region};
-use crate::cell_grid::snap::snap_loop;
+use crate::cell_grid::snap::{piece_hits, simple, snap_loop as snap_loop_by};
 use crate::cell_grid::vec::{ring_next, ring_prev, Vec2Ext};
 use crate::cell_grid::*;
 use crate::prism::profile::cross2;
@@ -628,6 +628,11 @@ fn an_arc_meets_a_convex_polygon_only_where_it_passes_through_it() {
 
 // --- snapping ---
 
+/// A loop snapped with no inset.
+fn snap_loop(lp: &Loop, lat: &Lattice) -> Result<Loop, &'static str> {
+    snap_loop_by(lp, lat, 0)
+}
+
 fn aligned_loop() -> Loop {
     frame_rect(ALIGNED.0, ALIGNED.1, ALIGNED.2, ALIGNED.3)
 }
@@ -676,6 +681,399 @@ fn a_loop_with_an_arc_or_an_off_direction_edge_cannot_snap() {
         snap_loop(&tilted, &lat).err(),
         Some("edge off the lattice directions")
     );
+}
+
+/// The issue's field: x from -45.5 to 47.5, y from -24.5 to 24.5, with a round keep-out of
+/// diameter 14.2 centred at (-39.5, 0) that crosses the left edge and merges into the outer
+/// loop (four lines and an arc). The hexagon lattice has size 10, web 2 and runs at 90 degrees,
+/// so its vertical lattice lines are at x = 6k and the right edge should snap to x = 42.
+fn notched_field_spec() -> CellGridSpec {
+    CellGridSpec {
+        shape: CellShape::Hexagon,
+        size: 10.0,
+        web: 2.0,
+        angle: FRAC_PI_2,
+        clip: Clip::Snap,
+        ..CellGridSpec::default()
+    }
+}
+
+fn notched_field() -> Loop2 {
+    let (cx, r) = (-39.5, 7.1);
+    let y = (r * r - 6.0 * 6.0_f64).sqrt();
+    let a = y.atan2(-6.0);
+    Loop2 {
+        segs: vec![
+            Seg2::Line {
+                a: v(-45.5, -24.5),
+                b: v(47.5, -24.5),
+            },
+            Seg2::Line {
+                a: v(47.5, -24.5),
+                b: v(47.5, 24.5),
+            },
+            Seg2::Line {
+                a: v(47.5, 24.5),
+                b: v(-45.5, 24.5),
+            },
+            Seg2::Line {
+                a: v(-45.5, 24.5),
+                b: v(-45.5, y),
+            },
+            Seg2::Arc {
+                center: v(cx, 0.0),
+                radius: r,
+                start: a,
+                sweep: -2.0 * a,
+            },
+            Seg2::Line {
+                a: v(-45.5, -y),
+                b: v(-45.5, -24.5),
+            },
+        ],
+    }
+}
+
+#[test]
+fn an_arc_in_the_outer_loop_does_not_stop_its_straight_edges_snapping() {
+    let p = run(&[notched_field()], &notched_field_spec());
+    let right = p
+        .cells
+        .iter()
+        .flat_map(vertices)
+        .map(|q| q.x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    // The right edge snaps to the lattice line x = 42: no cell reaches past it. Unsnapped, the
+    // whole cells flush against x = 47 were kept.
+    assert!(right <= 42.0 + 1e-6, "rightmost cell wall at {right}");
+    assert!(p
+        .cells
+        .iter()
+        .flat_map(vertices)
+        .any(|q| (q.x - 42.0).abs() < 1e-6));
+    assert!(p.warnings.is_empty(), "{:?}", p.warnings);
+}
+
+#[test]
+fn a_cubic_keep_out_does_not_stop_an_arc_field_snapping() {
+    // The notched field has an exact arc; the keep-out inside it is a cubic loop, which is
+    // flattened. Only the keep-out is followed as drawn: the field's straight edges still snap.
+    let keep_out = Loop2 {
+        segs: vec![
+            Seg2::Cubic {
+                p0: v(6.0, 0.0),
+                p1: v(6.0, 6.0),
+                p2: v(14.0, 6.0),
+                p3: v(14.0, 0.0),
+            },
+            Seg2::Cubic {
+                p0: v(14.0, 0.0),
+                p1: v(14.0, -6.0),
+                p2: v(6.0, -6.0),
+                p3: v(6.0, 0.0),
+            },
+        ],
+    };
+    let p = run(&[notched_field(), keep_out], &notched_field_spec());
+    let right = p
+        .cells
+        .iter()
+        .flat_map(vertices)
+        .map(|q| q.x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    assert!(right <= 42.0 + 1e-6, "rightmost cell wall at {right}");
+    assert!(
+        p.warnings.iter().any(|w| w.contains("followed")),
+        "{:?}",
+        p.warnings
+    );
+}
+
+#[test]
+fn snapping_a_loop_with_an_arc_keeps_the_arc_and_moves_its_ends_onto_the_snapped_edges() {
+    let lat = Lattice::new(CellShape::Hexagon, 10.0, 2.0, DotGrid::Hexagonal, 8).unwrap();
+    let spec = notched_field_spec();
+    let lp = lattice_loops(&[notched_field()], &spec, &mut Vec::new())
+        .unwrap()
+        .0;
+    let snapped = snap_loop(&lp[0], &lat).unwrap();
+    let arc = snapped
+        .prims
+        .iter()
+        .find_map(|p| match *p {
+            Prim::Arc { r, c, p0, p1, .. } => Some((r, c, p0, p1)),
+            Prim::Line { .. } => None,
+        })
+        .unwrap();
+    assert!((arc.0 - 7.1).abs() < 1e-9);
+    // Both ends are still on the circle, and the ring stays closed.
+    for end in [arc.2, arc.3] {
+        assert!((end.distance(arc.1) - 7.1).abs() < 1e-9);
+    }
+    let n = snapped.prims.len();
+    for k in 0..n {
+        assert!(
+            snapped.prims[k]
+                .end()
+                .distance(snapped.prims[(k + 1) % n].start())
+                < 1e-9
+        );
+    }
+}
+
+/// Whether the straight piece `line` meets `arc` cut into chords of pi/16, as the first version
+/// of the self-intersection test saw arcs.
+fn line_meets_chords_of(arc: &Prim, line: &Prim) -> bool {
+    let Prim::Arc {
+        c, r, a0, sweep, ..
+    } = *arc
+    else {
+        return false;
+    };
+    let n = (sweep.abs() / (PI / 16.0)).ceil().max(1.0) as usize;
+    let pt = |k: usize| {
+        let a = a0 + sweep * k as f64 / n as f64;
+        c + v(r * a.cos(), r * a.sin())
+    };
+    let side = |a: Vec2, b: Vec2, x: Vec2| cross2(b - a, x - a) > 0.0;
+    (0..n).any(|k| {
+        let (p0, p1) = (pt(k), pt(k + 1));
+        let (q0, q1) = (line.start(), line.end());
+        side(p0, p1, q0) != side(p0, p1, q1) && side(q0, q1, p0) != side(q0, q1, p1)
+    })
+}
+
+#[test]
+fn a_snapped_edge_that_cuts_an_arc_between_its_chord_samples_is_found_to_cross_it() {
+    // An arc of radius 10 from 0 to pi/8, closed by two lines through the centre, and a short
+    // stray edge across the arc at pi/32 that starts and ends 0.02 either side of it: the arc's
+    // chords (at pi/16) lie 0.048 inside the circle, so they never reach the edge.
+    let (c, r) = (v(0.0, 0.0), 10.0);
+    let arc = Prim::arc(c, r, 0.0, PI / 8.0);
+    let at = |radius: f64| v(radius * (PI / 32.0).cos(), radius * (PI / 32.0).sin());
+    let ring = [
+        arc,
+        Prim::line(arc.end(), c),
+        Prim::line(c, arc.start()),
+        Prim::line(at(r - 0.02), at(r + 0.02)),
+    ];
+    assert!(
+        !line_meets_chords_of(&arc, &ring[3]),
+        "the sampled test misses the crossing"
+    );
+    assert!(!simple(&ring));
+    // The same edge stopping short of the arc does not cross it.
+    let short = [
+        ring[0],
+        ring[1],
+        ring[2],
+        Prim::line(at(r - 0.04), at(r - 0.02)),
+    ];
+    // (The pieces are a sector and a stray edge, not one closed loop, so the stray is checked
+    // against the arc directly.)
+    assert!(piece_hits(&short[0], &short[3]).is_empty());
+    // Two circles crossing between each other's samples.
+    let other = Prim::arc(v(10.0, 0.0), r, PI * 0.5, PI);
+    assert!(!simple(&[Prim::arc(c, r, -PI / 2.0, PI), other]));
+    assert!(simple(&[
+        Prim::arc(c, r, PI / 2.0, PI),
+        Prim::arc(v(30.0, 0.0), r, PI / 2.0, PI)
+    ]));
+}
+
+/// A field with a round keep-out well inside it: the outer edges and the keep-out can be clipped
+/// by different modes.
+fn keep_out_field() -> Vec<Loop2> {
+    vec![rect(0.3, 0.2, 43.1, 40.7), circle(21.0, 20.0, 4.3)]
+}
+
+fn kind_count(p: &CellGridPlan, kind: CellKind) -> usize {
+    p.cells.iter().filter(|c| c.kind == kind).count()
+}
+
+#[test]
+fn a_keep_out_can_be_clipped_by_another_mode_than_the_field() {
+    let field = keep_out_field();
+    let snap = run(&field, &with_clip(CellShape::Hexagon, Clip::Snap));
+    // The default: the keep-out follows `clip`.
+    let same = CellGridSpec {
+        keepout_clip: Some(Clip::Snap),
+        ..with_clip(CellShape::Hexagon, Clip::Snap)
+    };
+    let same = run(&field, &same);
+    assert_eq!(counts(&snap), counts(&same));
+    assert!((snap.open_area - same.open_area).abs() < 1e-9);
+    assert_eq!(kind_count(&snap, CellKind::Free), 0);
+    // Free round the keep-out only: its cells are trimmed to the circle, the outer edge's are not.
+    let mixed = CellGridSpec {
+        keepout_clip: Some(Clip::Free),
+        ..with_clip(CellShape::Hexagon, Clip::Snap)
+    };
+    let mixed = run(&field, &mixed);
+    let free = kind_count(&mixed, CellKind::Free);
+    assert!(
+        free > 0 && free < mixed.cells.len() / 2,
+        "{free} of {}",
+        mixed.cells.len()
+    );
+    // Cells far from the keep-out are the same as with snap everywhere.
+    let far = |p: &CellGridPlan| {
+        let mut v: Vec<(i64, i64)> = p
+            .cells
+            .iter()
+            .filter(|c| c.center.distance(v(21.0, 20.0)) > 4.3 + 2.0 * P)
+            .map(|c| (c.i, c.j))
+            .collect();
+        v.sort_unstable();
+        v
+    };
+    assert_eq!(far(&mixed), far(&snap));
+    // Whole round the keep-out only: no cell touches the circle, and nothing is trimmed.
+    let whole = CellGridSpec {
+        keepout_clip: Some(Clip::Whole),
+        ..with_clip(CellShape::Hexagon, Clip::Snap)
+    };
+    let whole = run(&field, &whole);
+    assert_eq!(kind_count(&whole, CellKind::Free), 0);
+    assert!(whole.open_area <= snap.open_area + 1e-9);
+}
+
+#[test]
+fn an_edge_that_passes_through_a_vertex_of_the_loop_is_not_simple() {
+    // (0,0) -> (4,4) passes through the vertex (2,2), where the two edges on either side of it
+    // lie on opposite sides: the loop crosses itself there.
+    let pts = [(0.0, 0.0), (4.0, 4.0), (0.0, 4.0), (2.0, 2.0), (3.0, 0.0)];
+    let ring: Vec<Prim> = (0..pts.len())
+        .map(|k| {
+            let (a, b) = (pts[k], pts[(k + 1) % pts.len()]);
+            Prim::line(v(a.0, a.1), v(b.0, b.1))
+        })
+        .collect();
+    assert!(!simple(&ring));
+    // A plain quadrilateral, whose neighbours only meet at their joints, is still simple.
+    let square: Vec<Prim> = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
+        .iter()
+        .zip([(4.0, 0.0), (4.0, 4.0), (0.0, 4.0), (0.0, 0.0)])
+        .map(|(a, b)| Prim::line(v(a.0, a.1), v(b.0, b.1)))
+        .collect();
+    assert!(simple(&square));
+}
+
+#[test]
+fn a_very_long_edge_across_an_arc_is_still_found_to_cross_it() {
+    // The unit right semicircle, and a line from -1e9 to 1e9 through its centre: it meets the
+    // arc's rim at (1, 0). A quadratic with the radius added to terms of 1e18 loses the radius.
+    let arc = Prim::arc(v(0.0, 0.0), 1.0, -FRAC_PI_2, PI);
+    let line = Prim::line(v(-1e9, 0.0), v(1e9, 0.0));
+    assert!(!simple(&[arc, line]));
+}
+
+#[test]
+fn a_circle_meets_a_very_long_segment_where_it_crosses_it() {
+    use crate::cell_grid::region::circle_segment_points;
+    let (pts, n) = circle_segment_points(v(0.0, 0.0), 1.0, v(-1e9, 0.0), v(1e9, 0.0));
+    assert_eq!(n, 2);
+    assert!(pts[0].distance(v(-1.0, 0.0)) < 1e-6 && pts[1].distance(v(1.0, 0.0)) < 1e-6);
+    // A segment that stops short of the circle meets it nowhere; one that ends inside, once.
+    assert_eq!(
+        circle_segment_points(v(0.0, 0.0), 1.0, v(-1e9, 0.0), v(-2.0, 0.0)).1,
+        0
+    );
+    assert_eq!(
+        circle_segment_points(v(0.0, 0.0), 1.0, v(-1e9, 0.0), v(0.0, 0.0)).1,
+        1
+    );
+}
+
+#[test]
+fn pieces_that_overlap_along_a_stretch_are_not_simple() {
+    let ring = |extra: Prim| {
+        [
+            Prim::line(v(0.0, 0.0), v(3.0, 0.0)),
+            Prim::line(v(3.0, 0.0), v(3.0, 3.0)),
+            Prim::line(v(3.0, 3.0), v(0.0, 0.0)),
+            extra,
+        ]
+    };
+    // Only neighbours may meet, and only at their joint: a stray edge that touches the ring
+    // at a point is refused.
+    assert!(!simple(&ring(Prim::line(v(3.0, 0.0), v(3.5, 0.0)))));
+    let apart = ring(Prim::line(v(3.5, 0.0), v(4.0, 0.0)));
+    assert!(apart
+        .iter()
+        .take(3)
+        .all(|p| piece_hits(p, &apart[3]).is_empty()));
+    assert!(!simple(&ring(Prim::line(v(1.0, 0.0), v(2.0, 0.0)))));
+    // Two arcs of one circle: end to end they only touch, overlapping they share a stretch.
+    let (c, r) = (v(0.0, 0.0), 5.0);
+    let touching = [Prim::arc(c, r, 0.0, PI), Prim::arc(c, r, PI, PI)];
+    assert!(simple(&touching));
+    let overlapping = [Prim::arc(c, r, 0.0, PI), Prim::arc(c, r, PI / 2.0, PI)];
+    assert!(!simple(&overlapping));
+    let backwards = [Prim::arc(c, r, 0.0, PI), Prim::arc(c, r, 1.5 * PI, -PI)];
+    assert!(!simple(&backwards));
+}
+
+#[test]
+fn a_snap_inset_moves_each_straight_field_edge_in_by_whole_lattice_lines() {
+    let lat = lattice(CellShape::Hexagon);
+    let field = frame_rect(0.3, 0.2, 60.1, 50.7);
+    let b = |n| snap_loop_by(&field, &lat, n).unwrap().bounds();
+    // The horizontal lattice lines are P / 2 apart (P is the cell pitch), at multiples of it: the
+    // field's y edges 0.2 and 50.7 snap in to 3.1 and 49.6, and each inset moves each of them in
+    // by exactly one more line. Worked out here from the pitch, not from the lattice code.
+    let step = P / 2.0;
+    for n in 0..4u32 {
+        let got = b(n);
+        let want = (step * (1.0 + f64::from(n)), step * (16.0 - f64::from(n)));
+        assert!(
+            (got.y0 - want.0).abs() < 1e-9,
+            "inset {n}: y0 {} not {}",
+            got.y0,
+            want.0
+        );
+        assert!(
+            (got.y1 - want.1).abs() < 1e-9,
+            "inset {n}: y1 {} not {}",
+            got.y1,
+            want.1
+        );
+    }
+    // The vertical edges move in too, by less than a cell column each step.
+    for n in 0..3u32 {
+        let (lo, hi) = (b(n), b(n + 1));
+        assert!(lo.x0 < hi.x0 && hi.x0 - lo.x0 <= H + 1e-9, "{lo:?} {hi:?}");
+        assert!(hi.x1 < lo.x1 && lo.x1 - hi.x1 <= H + 1e-9, "{lo:?} {hi:?}");
+    }
+    // A keep-out (clockwise) is not moved by an inset, whatever the field gets.
+    let hole = frame_rect(10.0, 10.0, 12.0, 11.0).oriented(false);
+    let plain = snap_loop(&hole, &lat).unwrap().bounds();
+    let spec = CellGridSpec {
+        snap_inset: 2,
+        ..with_clip(CellShape::Hexagon, Clip::Snap)
+    };
+    let region = vec![rect(0.3, 0.2, 60.1, 50.7), circle(30.0, 25.0, 2.1)];
+    let moved = run(&region, &spec);
+    let still = run(&region, &with_clip(CellShape::Hexagon, Clip::Snap));
+    assert!(moved.cells.len() < still.cells.len());
+    assert!(moved.open_area < still.open_area);
+    assert!(plain.x0 <= 10.0 && plain.x1 >= 12.0);
+}
+
+#[test]
+fn a_snap_inset_needs_snap_and_a_sane_count() {
+    let with = |clip, snap_inset| CellGridSpec {
+        snap_inset,
+        ..with_clip(CellShape::Hexagon, clip)
+    };
+    let field = [rect(0.3, 0.2, 60.1, 50.7)];
+    assert!(plan(&field, &with(Clip::Snap, 1)).is_ok());
+    assert!(plan(&field, &with(Clip::Free, 1)).is_err());
+    assert!(plan(&field, &with(Clip::Whole, 1)).is_err());
+    assert!(plan(&field, &with(Clip::Snap, MAX_SNAP_INSET + 1)).is_err());
+    // An inset that eats the whole field keeps it as drawn, with a warning, and never panics.
+    let eaten = plan(&field, &with(Clip::Snap, MAX_SNAP_INSET)).unwrap();
+    assert!(!eaten.warnings.is_empty());
 }
 
 #[test]

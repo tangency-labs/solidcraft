@@ -20,19 +20,26 @@
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
+use solidcore::heal::face_props::HealerOpType;
 use solidcore::mass::integrator::properties::{
     brep_properties, MassPropertyBehavior, PropertyAttributes,
 };
 use solidcore::primitive::api_primitives as primitives;
+use solidcore::query::brep::BrepQuery;
 use solidcore::query::brep::{calculate_bounding_box, BoundingBoxOptions};
 use solidcore::topology::api_files::{read_brep_from_file, write_brep_to_file};
 use solidcore::topology::brep::p1 as bl;
+use solidcore::topology::brep::p1::heal_brep;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p3::topology_ref;
+use solidcore::topology::brep::p7::read_from_file;
+use solidcore::topology::brep::p9::find_infinite_region;
 use solidcore::topology::brep_data_write::FromBrepEnv;
+use solidcore::topology::database_io::FileType;
+use solidcore::topology::loopuse::notify_ref;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::topology::{EdgeId, EdgeuseId, FaceId};
-use solidcore::{Brep, EntityRef, Kernel, Point2, Point3};
+use solidcore::topology::{EdgeId, EdgeuseId, FaceId, RegionId};
+use solidcore::{Brep, EntityRef, Kernel, Point2, Point3, SolidError};
 
 /// A caller's naming unrelated to the B-rep's owner identities (the C API glue's).
 fn caller_named(entity: EntityRef) -> ObjectRef {
@@ -247,4 +254,109 @@ fn bodies_round_trip_with_their_own_identities() {
 #[test]
 fn bodies_round_trip_with_a_callers_identities() {
     round_trip(Naming::Caller);
+}
+
+/// `Solids/box.smb` at the pinned upstream commit, vendored verbatim
+/// (`data/reader-regressions/README.md`). Its data predates the current healer, so a read
+/// heals it, infinite-region ray search included.
+const BOX: &[u8] = include_bytes!("data/reader-regressions/box.smb");
+
+/// `SmBrep::ReadFromFile` of [`BOX`] into a new B-rep, the topology named by `key_of`.
+fn read_box(
+    k: &mut Kernel,
+    key_of: &dyn Fn(EntityRef) -> ObjectRef,
+) -> (solidcore::Result<()>, Brep) {
+    let mut b = Brep::new_with_infinite_region().unwrap();
+    let mut attributes = AttributeStore::new();
+    let mut records = NotifyRecords::new();
+    let mut env = TopologyEnv {
+        all_attributes: &[],
+        attributes: &mut attributes,
+        key_of,
+        records: &mut records,
+        next_key: 1 << 50,
+    };
+    let r = read_from_file(k, &mut b, BOX.to_vec(), FileType::Ascii, false, &mut env);
+    (r, b)
+}
+
+/// The regions of `b` with their void flags, in arena order, and its infinite region.
+fn regions(b: &Brep) -> (Vec<(RegionId, i32)>, Option<RegionId>) {
+    (
+        b.regions()
+            .iter()
+            .map(|(id, r)| (id, r.is_void()))
+            .collect(),
+        b.infinite_region(),
+    )
+}
+
+/// What the box file declares: region 0 the void infinite region, region 1 the solid.
+fn box_regions() -> (Vec<(RegionId, i32)>, Option<RegionId>) {
+    (
+        vec![(RegionId::from_index(0), 1), (RegionId::from_index(1), 0)],
+        Some(RegionId::from_index(0)),
+    )
+}
+
+/// Identities that do not name each object distinctly under its own type code are
+/// refused before the read heals: a curve owned by a non-edge identity names no edge, so
+/// the healer's infinite-region rays had no edge to solve on ("curve without an edge")
+/// and the region step failed (silently, its status dropped, or as 1001 once passed on).
+#[test]
+fn a_read_refuses_identities_that_name_no_object() {
+    let untyped = |_: EntityRef| ObjectRef {
+        type_code: 0,
+        key: ObjectKey(0),
+    };
+    let shared = |e: EntityRef| ObjectRef {
+        key: ObjectKey(7),
+        ..notify_ref(e)
+    };
+    let cases: [(&dyn Fn(EntityRef) -> ObjectRef, &str); 2] = [
+        (
+            &untyped,
+            "an object identity does not carry its object's type code",
+        ),
+        (&shared, "two objects share one identity"),
+    ];
+    for pass_on in [false, true] {
+        for (key_of, expected) in cases {
+            let mut k = Kernel::default();
+            k.fixes.brep_edit_statuses_pass_on = pass_on;
+            let (r, _) = read_box(&mut k, key_of);
+            match r {
+                Err(SolidError::InvalidInput { operation, reason }) => {
+                    assert_eq!(
+                        operation, "topology::brep::p10::make_topology_from_data",
+                        "pass_on {pass_on}"
+                    );
+                    assert_eq!(reason, expected, "pass_on {pass_on}");
+                }
+                r => panic!("pass_on {pass_on}: expected {expected:?}, got {r:?}"),
+            }
+        }
+    }
+}
+
+/// A box read under distinct, typed identities heals with the healer's statuses passed
+/// on: its infinite-region rays solve point-edge on the box's own edges and find the
+/// region the file declares, directly, through the read and through the public heal.
+#[test]
+fn a_box_read_heals_and_its_rays_find_the_infinite_region() {
+    let mut k = Kernel::default();
+    k.fixes.brep_edit_statuses_pass_on = true;
+    let (r, mut b) = read_box(&mut k, &notify_ref);
+    r.unwrap();
+    assert_eq!(b.naming(), solidcore::topology::NamingScheme::Caller);
+    assert_eq!(regions(&b), box_regions());
+
+    // the search itself: a ray that fails its point-edge solves is an error here
+    let query = BrepQuery::of_brep(&b);
+    let found = find_infinite_region(&mut k, &mut b, &query, None, None).unwrap();
+    assert_eq!(found, Some(RegionId::from_index(0)));
+
+    // the public heal, statuses passed on, keeps the regions it finds
+    heal_brep(&mut k, &mut b, HealerOpType::All, None, None, None, false).unwrap();
+    assert_eq!(regions(&b), box_regions());
 }

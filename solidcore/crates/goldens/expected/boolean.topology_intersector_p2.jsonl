@@ -15,8 +15,8 @@
 {"case":"close_loop_drop_relate_offset_3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[69.00008,73.00008,1303.0008400000002]],"n":29}}}
 {"case":"close_loop_drop_relate_partly_mated","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[67.0001,67.0001,1491.00125]],"n":33}}}
 {"case":"close_loop_far_drop_control_unmated_far_vertex","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,1.0,0.0,0.00001,0.00001,52.0,0.0,0.0,0.0,0.0,1.0,-1.0,8.0,-1.0]}}
-{"case":"close_loop_far_drop_quarter_arc_common_ends","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[58.00004,58.00004,588.00026]],"n":18}}}
-{"case":"close_loop_far_drop_quarter_arc_shifted_ends","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[58.00004,58.00004,588.00026]],"n":18}}}
+{"case":"close_loop_far_drop_quarter_arc_common_ends","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[61.00004,65.00004,645.00026]],"n":18}}}
+{"case":"close_loop_far_drop_quarter_arc_shifted_ends","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[61.00004,65.00004,645.00026]],"n":18}}}
 {"case":"close_loop_far_unmated","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[67.00002,75.00002,510.00009]],"n":17}}}
 {"case":"close_loop_gen00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[60.000099999999996,60.000099999999996,1278.00125]],"n":30}}}
 {"case":"close_loop_gen01","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[3069.0001200000006,3069.0001200000006,38724.00174]],"n":37}}}
