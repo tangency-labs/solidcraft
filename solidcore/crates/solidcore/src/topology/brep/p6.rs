@@ -24,10 +24,9 @@
 //! scan resumes past the count of distributed face uses; the port keeps that. A deleted
 //! region (`delete pRegion`, after `SM_NO_DESTRUCTION`) leaves its arena like a deleted
 //! shell; the infinite region moves to the head of the region list.
-//! Opt-in (WR-584, fork tangency-labs/smlib@69c5198):
-//! [`UpstreamFixes::boolean_new_face_closure_both_sides`](crate::kernel::UpstreamFixes::boolean_new_face_closure_both_sides)
-//! makes the closure test search from the face use and its mate at once
-//! ([`tr::closure_traversal_from_both_sides`]): the same answer without marks.
+//! Not upstream (WR-584, fork tangency-labs/smlib@69c5198): the closure test searches
+//! from the face use and its mate at once ([`tr::closure_traversal_from_both_sides`]):
+//! the same answer without marks, where upstream walks the shell from one side.
 //! `MakeFaceTopology`: the caller's [`Marks`] hold the objects' mark values (the
 //! `SmNewMarkAndLock` block claims and releases a new mark, also on error). New objects
 //! get their `SmTopology` record in the [`NotifyEnv`] under its identity, which also
@@ -1486,15 +1485,11 @@ fn split_closed(
     lock: &MarkLock,
     attempt: &mut RegionSplitAttempt,
 ) -> Result<()> {
-    // WR-584 (opt-in, fork tangency-labs/smlib@69c5198): search from both sides at
-    // once. Same answer; no walk across the whole shell, no marks (nothing below
-    // reads the walk's marks: the replacement claims a new mark before it moves).
-    let closed = if k.fixes.boolean_new_face_closure_both_sides {
-        tr::closure_traversal_from_both_sides(brep, start)?
-    } else {
-        tr::closure_traversal(k, brep, marks, start, lock, None)?
-    };
-    if !closed {
+    // Not upstream (WR-584, fork tangency-labs/smlib@69c5198): search from both sides
+    // at once. Same answer; no walk across the whole shell, no marks (nothing below
+    // reads the walk's marks: the replacement claims a new mark before it moves). A
+    // missing radial the search meets fails here, before the new shell and region exist.
+    if !tr::closure_traversal_from_both_sides(brep, start)? {
         return Ok(());
     }
     let new_shell = brep.add_shell_record(Shell {

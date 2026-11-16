@@ -328,6 +328,7 @@ impl Sketch {
                 vertex_name: None,
                 auto_face: false,
                 lost: false,
+                name_dropped: false,
             });
             id
         } else {

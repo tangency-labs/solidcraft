@@ -2237,6 +2237,46 @@ pub(crate) fn crv_hull_points(cur: &Curve, ivl: &Extent1d) -> Option<Vec<(Vec3, 
         .collect()
 }
 
+/// The Euclidean control points of the piece of `cur` over `ivl` alone, each with the
+/// error bound of its coordinates: `cur` split at `ivl`'s ends (`crv_split`, skipped at an
+/// end of the natural domain), so the first and last points are the piece's end points
+/// and the piece lies in the convex hull of all of them. The bound is [`piece_slack`] of
+/// `cur`'s control points for the two splits (`p` convex-combination steps each), which
+/// also covers the division by the weight.
+///
+/// `None`, meaning no certified piece, when `cur` is not clamped, under the conditions of
+/// [`crv_span_boxes`], or when a split fails.
+///
+/// Not upstream.
+#[must_use]
+pub(crate) fn crv_piece_hull_points(cur: &Curve, ivl: &Extent1d) -> Option<Vec<(Vec3, f64)>> {
+    let (p, n) = (cur.degree(), cur.n());
+    let knots = cur.knots();
+    nonempty_spans(knots, p, n)?;
+    let (lo, hi) = (ivl.min(), ivl.max());
+    let (first, last) = (*knots.get(p)?, *knots.get(n.checked_add(1)?)?);
+    let inside = lo.is_finite() && hi.is_finite() && first <= lo && lo <= hi && hi <= last;
+    if !inside || !is_clamped(knots, p) {
+        return None;
+    }
+    let slack = piece_slack(cur.cpts().iter().copied(), p.checked_mul(2)?)?;
+    let mut piece = cur.clone();
+    if lo > first {
+        piece = crv_split(&piece, lo).ok()?.1;
+    }
+    if hi < last {
+        piece = crv_split(&piece, hi).ok()?.0;
+    }
+    if !is_clamped(piece.knots(), piece.degree()) {
+        return None;
+    }
+    piece
+        .cpts()
+        .iter()
+        .map(|&c| Some((hull_point(c)?, slack)))
+        .collect()
+}
+
 /// Rounding allowance for boxes of pieces made by `levels` convex-combination steps
 /// from control points `cpts` (homogeneous, all weights positive): `16 * levels * eps *
 /// M * (wmax / wmin)`, with `M` the largest Euclidean coordinate magnitude.

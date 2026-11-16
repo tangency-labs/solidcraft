@@ -400,11 +400,11 @@ mod tests {
         assert_eq!(preferences[0].entries[0].name, "report");
         assert_eq!(preferences[0].path, dir.to_string_lossy());
         begin(&mut h.app, "helper.report");
-        let slot = h.app.plugin_menu.dialog.take().unwrap();
+        let slot = h.app.plugin_menu.dialogs.pop().unwrap();
         assert!(slot.ready(&h.app).unwrap_err().contains("file"));
         assert!(h.app.control_held.is_empty(), "missing grants never queue a run");
         crate::plugin_menu::open_entry(&mut h.app, 0, 0);
-        let menu = h.app.plugin_menu.dialog.as_ref().unwrap();
+        let menu = h.app.plugin_menu.dialog().unwrap();
         assert_eq!(slot.fields, menu.fields);
         assert_eq!(slot.plugin.approval, menu.plugin.approval);
         assert_eq!(slot.ready(&h.app), menu.ready(&h.app));
@@ -412,17 +412,17 @@ mod tests {
         assert_eq!(menu.ready(&h.app), Ok(json!({"count":3})));
         h.app.preferences.disabled_plugins.insert("helper".into());
         assert!(menu.ready(&h.app).is_err(), "disabling an already open dialog prevents running it");
-        h.app.plugin_menu.dialog = None;
+        h.app.plugin_menu.dialogs.clear();
         assert!(items(&h.app, Slot::Menu("Help")).is_empty());
         begin(&mut h.app, "helper.report");
-        assert!(h.app.plugin_menu.dialog.is_none());
+        assert!(h.app.plugin_menu.dialogs.is_empty());
         h.app.preferences.disabled_plugins.clear();
         for command in ["helper.missing", "missing.report", "solid.box", "helper.report.extra"] {
             begin(&mut h.app, command);
-            assert!(h.app.plugin_menu.dialog.is_none(), "{command}");
+            assert!(h.app.plugin_menu.dialogs.is_empty(), "{command}");
         }
         std::fs::remove_file(dir.join("plugin.wasm")).unwrap();
         begin(&mut h.app, "helper.report");
-        assert!(h.app.plugin_menu.dialog.is_none(), "a package the shared reader refuses cannot open a slot dialog");
+        assert!(h.app.plugin_menu.dialogs.is_empty(), "a package the shared reader refuses cannot open a slot dialog");
     }
 }

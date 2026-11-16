@@ -462,7 +462,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 .collect()
         }
         Target::SelectionFilter => {
-            let mode = app.ui.pick_mode();
+            let mode = app.pick_mode();
             [("face", "Faces"), ("body", "Bodies"), ("component", "Components")]
                 .into_iter()
                 .map(|(choice, label)| {

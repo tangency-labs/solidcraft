@@ -1325,11 +1325,14 @@ pub fn open_sessions(app: &SolveApp) -> Vec<&Session> {
     app.docs.slots.iter().map(|s| s.as_ref().map_or(&app.session, |d| &d.session)).collect()
 }
 
+/// Closing tab `i` asks to save first: it has changes, and is not a STEP, IGES or mesh file
+/// opened and only looked at (#15111), whose file still holds all of it.
 fn dirty(app: &SolveApp, i: usize) -> bool {
+    let asks = |s: &Session| s.is_dirty() && !s.unchanged_import();
     if i == app.docs.active || app.docs.slots.is_empty() {
-        return app.session.is_dirty();
+        return asks(&app.session);
     }
-    app.docs.slots.get(i).and_then(Option::as_ref).is_some_and(|s| s.session.is_dirty())
+    app.docs.slots.get(i).and_then(Option::as_ref).is_some_and(|s| asks(&s.session))
 }
 
 /// A tab's name: the file a saved design was opened or saved as (without its extension), so a
@@ -2751,6 +2754,34 @@ mod tests {
         assert!((volume - 1000.0).abs() < 1e-6, "the first tab's part: {volume}");
     }
 
+    /// #15111: a STEP file opened in a tab and only looked at closes without asking to save,
+    /// although it was never saved as a design. Changed, it asks again.
+    #[test]
+    fn an_opened_step_file_closes_without_asking_until_it_is_changed() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-close-step-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let step = dir.join("Block.step");
+        let mut maker = Session::default();
+        maker.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        maker.execute("file.export", &json!({"path": step.to_string_lossy()})).unwrap();
+        let opened = || {
+            let mut s = Session::default();
+            s.execute("doc.open", &json!({"path": step.to_string_lossy()})).unwrap();
+            s
+        };
+        let mut a = app();
+        open_tab(&mut a, opened()).unwrap();
+        assert!(a.session.is_dirty() && a.session.path.is_none(), "still a design never saved");
+        control(&mut a, &json!({"action": "close", "index": 1}));
+        assert_eq!((a.docs.count(), a.docs.closing), (1, None), "closed without asking");
+
+        open_tab(&mut a, opened()).unwrap();
+        a.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0]})).unwrap();
+        control(&mut a, &json!({"action": "close", "index": 1}));
+        assert_eq!((a.docs.count(), a.docs.closing), (2, Some(1)), "a changed import asks first");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     /// #3055: Close All Tabs, and Cancel at the first question: the tabs not closed yet stay.
     /// Close All Tabs on blank designs leaves one blank design.
     #[test]
@@ -3254,6 +3285,7 @@ mod tests {
     #[test]
     fn the_views_of_a_design_follow_commands_keys_and_the_app() {
         let mut h = crate::scenario::Harness::new();
+        h.app.preferences.design_views_as_tabs = true;
         h.app.home.open = false;
         let call =
             |h: &mut crate::scenario::Harness, command: &str, params: Value| h.call("engine.execute", json!({"command": command, "params": params}));
@@ -3841,11 +3873,11 @@ mod tests {
     }
 
     /// Without the preference (the default), a switch cancels the dialog and the tool, as before
-    /// #9360; the design keeps its toolbar tab (`remember_toolbar_tab`, on by default).
+    /// #9360; with `remember_toolbar_tab` on (off by default) the design keeps its toolbar tab.
     #[test]
     fn a_tab_switch_cancels_the_dialog_and_tool_by_default() {
         let defaults = crate::prefs::Prefs::default();
-        assert!(!defaults.keep_work_on_tab_switch && defaults.remember_toolbar_tab);
+        assert!(!defaults.keep_work_on_tab_switch && !defaults.remember_toolbar_tab);
         let (mut a, _) = measuring_and_drawing(false, true);
         switch(&mut a, 0);
         assert!(a.dialog.is_none() && a.tool.is_none());
@@ -3878,6 +3910,7 @@ mod tests {
     #[test]
     fn each_design_remembers_its_own_toolbar_tab() {
         let mut a = app();
+        a.preferences.remember_toolbar_tab = true;
         a.run("solid.box", json!({"length": 1, "width": 1, "height": 1})).unwrap();
         a.ui.tab = "SURFACE".into();
         new_design_with_a_box(&mut a);
