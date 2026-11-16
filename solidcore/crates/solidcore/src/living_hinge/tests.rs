@@ -799,3 +799,24 @@ fn line_ends_are_snapped_onto_an_arcs_ends() {
     let edges = near_loop(&far).unwrap();
     assert_eq!(edges.get(1), Some(&NearEdge::Line((-2.0, 0.5), (2.0, 0.0))));
 }
+
+#[test]
+fn a_slot_region_is_a_closed_stadium() {
+    let slot = HingeSlot {
+        row: 0,
+        index: 0,
+        v: 5.0,
+        a0: 0.0,
+        a1: 10.0,
+        kind: SlotKind::Whole,
+        crossing: None,
+    };
+    let region = slot_region(&slot, 0.2);
+    assert!(region.holes.is_empty());
+    assert_eq!(region.outer.segs.len(), 4);
+    assert!(region.outer.is_closed(1e-12));
+    // 10 x 0.2 plus a disc of radius 0.1, counter-clockwise.
+    let area = region.outer.signed_area().unwrap().value;
+    let want = 10.0 * 0.2 + std::f64::consts::PI * 0.01;
+    assert!((area - want).abs() < 1e-12, "{area}");
+}

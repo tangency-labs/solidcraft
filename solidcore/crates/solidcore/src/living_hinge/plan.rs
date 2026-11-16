@@ -4,14 +4,15 @@
 //! The frame and the area stay inputs, not a sketch: a sheet-metal bend zone feeds the same
 //! entry later (sheet-metal addendum).
 
-use std::f64::consts::FRAC_PI_2;
+use std::f64::consts::{FRAC_PI_2, PI};
 
 use super::lattice::{FrameBox, Lattice};
 use super::near::{sweeps, NearEdge};
 use super::rows::plan_rows_zoned;
 use super::spans::{clean_ends, row_spans, row_zone};
-use super::{LivingHingeError, LivingHingePlan, LivingHingeSpec, CHORD, ON_EDGE};
-use crate::prism::profile::{Loop2, Seg2};
+use super::{HingeSlot, LivingHingeError, LivingHingePlan, LivingHingeSpec, CHORD, ON_EDGE};
+use crate::math::Vec2;
+use crate::prism::profile::{Loop2, Region2, Seg2};
 
 /// The box of `loops` in the frame; an arc counts its ends and the points where it is furthest
 /// along `u` or `v`. Empty loops give an inverted box, which the lattice refuses.
@@ -241,4 +242,39 @@ pub fn plan(
         },
         |_, v| row_zone(plate, closed, v, rho, closed_reach),
     ))
+}
+
+/// A slot's region in the hinge frame for the extrude (design 7): two lines and two half-circle
+/// arcs of radius `slot_width / 2`, counter-clockwise, around the centre line `[a0, a1]` on the
+/// row `v` (for a run-out, past the plate's edge).
+pub fn slot_region(slot: &HingeSlot, slot_width: f64) -> Region2 {
+    let r = slot_width / 2.0;
+    let (a0, a1, v) = (slot.a0, slot.a1, slot.v);
+    Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line {
+                    a: Vec2::new(a0, v - r),
+                    b: Vec2::new(a1, v - r),
+                },
+                Seg2::Arc {
+                    center: Vec2::new(a1, v),
+                    radius: r,
+                    start: -FRAC_PI_2,
+                    sweep: PI,
+                },
+                Seg2::Line {
+                    a: Vec2::new(a1, v + r),
+                    b: Vec2::new(a0, v + r),
+                },
+                Seg2::Arc {
+                    center: Vec2::new(a0, v),
+                    radius: r,
+                    start: FRAC_PI_2,
+                    sweep: PI,
+                },
+            ],
+        },
+        holes: Vec::new(),
+    }
 }
