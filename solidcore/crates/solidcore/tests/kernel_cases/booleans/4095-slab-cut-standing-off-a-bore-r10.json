@@ -1,0 +1,159 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b14": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b16"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b19",
+        "b20"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "4095-slab-cut-standing-off-a-bore-r10",
+  "expected": {
+    "body_count": 1,
+    "method": "plate 60x40x20 minus the bore pi R^2*20 minus the notch (the slab 6x16 from z=12 up through the top z=20: 6*16*8 = 768), which the bore beside it does not change. V = 60*40*20 - pi*10^2*20 - 768. The bug removed about 5% too much with no warning",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4095"
+    ],
+    "volume_mm3": 40948.8147,
+    "what": "a slab cut whose +x face stands 6.73e-05 mm (0.90 x the coincidence tolerance 7.48e-05) off a through-bore's wall (R=10), beside the bore"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 27,
+      "faces": 12,
+      "vertices": 18
+    }
+  },
+  "records": "4095-slab-cut-standing-off-a-bore-r10.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 9780.318530712952,
+      "body_count": 1,
+      "edges": 27,
+      "faces": 12,
+      "vertices": 18,
+      "volume_mm3": 40948.81469278421
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4095"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a slab cut whose +x face stands 6.73e-05 mm (0.90 x the coincidence tolerance 7.48e-05) off a through-bore's wall (R=10), beside the bore",
+  "why_not": []
+}

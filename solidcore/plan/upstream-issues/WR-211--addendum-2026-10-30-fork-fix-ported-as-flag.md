@@ -1,0 +1,5 @@
+Updates: WR-211
+
+#### WR-211 (update, 2026-10-30). The fork's fix is ported as an opt-in flag
+
+The fork's fix, as cherry-picked on its replay/1.0.1 branch (tangency-labs/smlib@5c0b5ed, from 74bed94), is ported behind `Kernel::fixes.ellipse_adjust_step_interval_keeps_turns` (off by default, so the default path still collapses as upstream). With the flag, `Ellipse::adjust_step_interval` converts an interval end outside the current arc as the fork's `ConvertAngle` does: whole turns back into a full-turn arc, its NURBS parameter moved by the NURBS length per turn (negated when inside out); in proportion past a partial arc. Test `step_interval_past_a_turn_keeps_its_length_with_the_fix` (a full and a half circle moved to `[360, 540]`: the curve keeps its NURBS length, starts at angle 0 and ends at 180, and the reparameterised knots stay finite) beside the unchanged `step_interval_past_a_turn_collapses_as_upstream`. Found through the SolidCraft C API's flat round trip (`capi/tests/flat_roundtrip.cpp`: a torus face whose minor range starts a turn on imports with the fix, fails with `SM_ERR` without).

@@ -1,0 +1,154 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "2005-closed-sweep-twisted-cut-inside-a-torus",
+  "expected": {
+    "body_count": 1,
+    "method": "the square (half diagonal 5.66 < 8) turns about its centre, which follows the circle, so it sweeps A * 2 pi R = 64 * 2 pi 30 whatever the twist; it lies wholly inside the torus (V = 2 pi^2 R r^2 = 37895.0), leaving a sealed tunnel (a body with an internal void, shell count 2 which the rig cannot grade, so valid is false): V = 37895.0 - 12063.7 = 25831.3.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2005",
+      "tangency-labs/solidcraft#2010"
+    ],
+    "valid": false,
+    "volume_mm3": 25835.56511039833,
+    "what": "an 8 x 8 square swept a full turn round a circle of radius 30 with a 180 degree twist, cut from a torus (R 30, r 8) that holds it (no result, or minutes)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 10,
+      "faces": 5,
+      "vertices": 5
+    }
+  },
+  "records": "2005-closed-sweep-twisted-cut-inside-a-torus.bodies.json.gz",
+  "result": [
+    {
+      "body": "Torus",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 15511.207873958881,
+      "body_count": 1,
+      "edges": 9,
+      "faces": 5,
+      "vertices": 5,
+      "volume_mm3": 25835.56511161394
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2005",
+    "tangency-labs/solidcraft#2010"
+  ],
+  "traced_ops": [
+    "revolve",
+    "sweep_stations",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "an 8 x 8 square swept a full turn round a circle of radius 30 with a 180 degree twist, cut from a torus (R 30, r 8) that holds it (no result, or minutes)",
+  "why_not": []
+}

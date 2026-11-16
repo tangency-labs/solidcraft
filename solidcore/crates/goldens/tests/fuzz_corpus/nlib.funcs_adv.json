@@ -1,0 +1,8 @@
+{
+  "unit": "nlib.funcs_adv",
+  "cases": [
+    {"name": "fuzz01749_bad_index_count_9223372036854776000", "origin": "fuzz-out/n2000/nlib.funcs_adv/fuzz01749.json (panic: rust: attempt to add with overflow at crates/solidcore/src/nurbs/funcs_adv.rs:175)", "cpp": "harness: invalid argument: bad index/count 9223372036854776000", "rust": "ok", "inputs": {"d": 1, "f": {"p": 9223372036854775807, "u": [3.0], "v": [-2.76]}, "op": "deriv"}},
+    {"name": "fuzz01829_knots_not_non_decreasing", "origin": "fuzz-out/n2000/nlib.funcs_adv/fuzz01829.json (panic: rust: attempt to add with overflow at crates/solidcore/src/nurbs/funcs_adv.rs:333)", "cpp": "harness: invalid argument: knots not non-decreasing", "rust": "ok", "inputs": {"f": {"p": 4, "u": [1.33, 1.33, 1.33, 1.33, 1.33, 1e+300, 8.62, 11.1, 0.0, 11.1, 11.1, 11.1], "v": [5.57, 0.246, -1.04, 8.37, -3.59, 2.7, 1.45]}, "op": "mul_func"}},
+    {"name": "fuzz01958_need_m_n_p_1", "origin": "fuzz-out/n2000/nlib.funcs_adv/fuzz01958.json (panic: rust: attempt to add with overflow at crates/solidcore/src/nurbs/funcs_adv.rs:333)", "cpp": "harness: invalid argument: need m = n + p + 1", "rust": "ok", "inputs": {"f": {"p": 3, "u": [8.01], "v": [4.23]}, "op": "mul_func"}}
+  ]
+}

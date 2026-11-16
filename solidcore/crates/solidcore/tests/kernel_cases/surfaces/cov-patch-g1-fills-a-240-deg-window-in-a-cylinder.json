@@ -1,0 +1,136 @@
+{
+  "area": "surfaces",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b14"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "stitch",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "tolerance": 0.00004914987172899634
+      }
+    }
+  ],
+  "case": "cov-patch-g1-fills-a-240-deg-window-in-a-cylinder",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "edges": [
+        [
+          8.660254037844387,
+          -5,
+          15
+        ],
+        [
+          0,
+          10,
+          15
+        ],
+        [
+          8.660254037844387,
+          -5,
+          25
+        ],
+        [
+          0,
+          10,
+          25
+        ],
+        [
+          -5,
+          -8.660254037844387,
+          20
+        ],
+        [
+          -5,
+          8.660254037844387,
+          20
+        ]
+      ],
+      "order": "g1"
+    },
+    "method": "the box x -5..11, y -11..11, z 15..25 cuts the wall where 10 cos a >= -5, |a| <= 120 deg: seen from any direction the window folds over itself, so it bounds no height field. G1 to the wall all round, the fill stays close to the cylinder it replaces: the sealed part is the whole cylinder, pi 100 40 = 12566.370614, within 0.5 % (the fill's own shape is not the cylinder's, so that is a bound, not an identity)",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#759"
+    ],
+    "tolerance": {
+      "rel": 0.005
+    },
+    "volume_mm3": 12566.370614359172,
+    "what": "a window 240 deg round a cylinder's wall (r10 x 40, z 15..25), the faces the cut made taken off and the window patched g1 and stitched: tangent to the wall it replaces, close to the cylinder"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 10,
+      "faces": 4,
+      "vertices": 8
+    }
+  },
+  "records": "cov-patch-g1-fills-a-240-deg-window-in-a-cylinder.bodies.json.gz",
+  "result": [
+    {
+      "body": "Cyl",
+      "made": "b15"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3141.5926469125066,
+      "body_count": 1,
+      "edges": 6,
+      "faces": 4,
+      "vertices": 4,
+      "volume_mm3": 12566.370547674924
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#759"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "tagged",
+    "stitch"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a window 240 deg round a cylinder's wall (r10 x 40, z 15..25), the faces the cut made taken off and the window patched g1 and stitched: tangent to the wall it replaces, close to the cylinder",
+  "why_not": []
+}

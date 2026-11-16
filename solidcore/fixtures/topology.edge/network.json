@@ -1,0 +1,3552 @@
+{
+ "cases": [
+  {
+   "name": "net_query_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "query",
+    "e": 0,
+    "v": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_curve_delete_notify_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_curve",
+    "e": 0,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "delete": true,
+    "notify": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_curve_keep_quiet_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_curve",
+    "e": 0,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "delete": false,
+    "notify": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_curve_null_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_curve",
+    "e": 0,
+    "curve": null,
+    "delete": false,
+    "notify": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_interval_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_interval",
+    "e": 0,
+    "a": 0.0,
+    "b": 1.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_orient_same_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_orient",
+    "e": 0,
+    "orientation": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_orient_opposite_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_orient",
+    "e": 0,
+    "orientation": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_orient_unknown_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_orient",
+    "e": 0,
+    "orientation": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_reverse_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "reverse",
+    "e": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_end_tangent_start_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "end_tangent",
+    "e": 0,
+    "at_start": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_end_tangent_end_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "end_tangent",
+    "e": 0,
+    "at_start": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_trimmed_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "trimmed",
+    "e": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_ode_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "ode",
+    "e": 0,
+    "origin": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "radius": 0.25,
+    "t": 0.3,
+    "n": 28
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_ode_huge_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "ode",
+    "e": 0,
+    "origin": [
+     1000000.0,
+     -1000000.0,
+     100000.0
+    ],
+    "radius": 1000000.0,
+    "t": 1.0,
+    "n": 32
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_ode_tiny_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "ode",
+    "e": 0,
+    "origin": [
+     1e-09,
+     0,
+     0
+    ],
+    "radius": 1e-09,
+    "t": 0.0,
+    "n": 28
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_blend_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "blend",
+    "e": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_radial_curve_wire_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "radial_curve",
+    "e": 0,
+    "param": 0.5,
+    "e2": 1,
+    "orientation": 1,
+    "force": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_radial_wire_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "radial",
+    "e": 0,
+    "eu": 0,
+    "region": -1,
+    "orientation": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_radial_wire_region_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "radial",
+    "e": 0,
+    "eu": 0,
+    "region": 0,
+    "orientation": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_gaps_max_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "e": 0,
+    "which": 0,
+    "want": true,
+    "tol": -1.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_gaps_down_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "e": 0,
+    "which": 2,
+    "want": true,
+    "tol": 0.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_gaps_up_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "e": 0,
+    "which": 1,
+    "want": true,
+    "tol": -1.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_1_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 0,
+    "operation": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_2_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 0,
+    "operation": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_10_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 0,
+    "operation": 10
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_11_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 0,
+    "operation": 11
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_15_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 0,
+    "operation": 15
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_16_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 0,
+    "operation": 16
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_tol_grow_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "e": 0,
+    "tol": 2e-05,
+    "only_larger": true,
+    "cascade": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_tol_shrink_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "e": 0,
+    "tol": 1e-07,
+    "only_larger": true,
+    "cascade": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_tol_force_shrink_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "e": 0,
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_tol_nocascade_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "e": 0,
+    "tol": 0.5,
+    "only_larger": true,
+    "cascade": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_reset_primary_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "reset_primary",
+    "e": 0,
+    "eu": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_reset_primary_null_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "reset_primary",
+    "e": 0,
+    "eu": -1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_add_pair_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "add_pair",
+    "e": 0,
+    "o1": 1,
+    "o2": 2,
+    "sector": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_add_pair_same_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "add_pair",
+    "e": 0,
+    "o1": 2,
+    "o2": 1,
+    "sector": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_filtered_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "filtered",
+    "e": 0,
+    "attr": 7,
+    "ty": 0,
+    "index": -1,
+    "attach": [
+     [
+      16005,
+      0
+     ],
+     [
+      16013,
+      0
+     ],
+     [
+      16012,
+      0
+     ],
+     [
+      16021,
+      0
+     ],
+     [
+      16006,
+      1
+     ]
+    ]
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_filtered_target_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "filtered",
+    "e": 0,
+    "attr": -1,
+    "ty": 16021,
+    "index": 0,
+    "attach": []
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16012_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 0,
+    "ty": 16012,
+    "index": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16013_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 0,
+    "ty": 16013,
+    "index": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16005_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 0,
+    "ty": 16005,
+    "index": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16016_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 0,
+    "ty": 16016,
+    "index": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16006_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 0,
+    "ty": 16006,
+    "index": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16021_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 0,
+    "ty": 16021,
+    "index": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16011_e0",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 0,
+    "ty": 16011,
+    "index": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_query_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "query",
+    "e": 1,
+    "v": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_curve_delete_notify_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_curve",
+    "e": 1,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "delete": true,
+    "notify": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_curve_keep_quiet_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_curve",
+    "e": 1,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "delete": false,
+    "notify": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_curve_null_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_curve",
+    "e": 1,
+    "curve": null,
+    "delete": false,
+    "notify": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_interval_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_interval",
+    "e": 1,
+    "a": 0.0,
+    "b": 1.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_orient_same_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_orient",
+    "e": 1,
+    "orientation": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_orient_opposite_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_orient",
+    "e": 1,
+    "orientation": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_orient_unknown_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_orient",
+    "e": 1,
+    "orientation": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_reverse_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "reverse",
+    "e": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_end_tangent_start_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "end_tangent",
+    "e": 1,
+    "at_start": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_end_tangent_end_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "end_tangent",
+    "e": 1,
+    "at_start": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_trimmed_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "trimmed",
+    "e": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_ode_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "ode",
+    "e": 1,
+    "origin": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "radius": 0.25,
+    "t": 0.3,
+    "n": 28
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_ode_huge_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "ode",
+    "e": 1,
+    "origin": [
+     1000000.0,
+     -1000000.0,
+     100000.0
+    ],
+    "radius": 1000000.0,
+    "t": 1.0,
+    "n": 32
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_ode_tiny_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "ode",
+    "e": 1,
+    "origin": [
+     1e-09,
+     0,
+     0
+    ],
+    "radius": 1e-09,
+    "t": 0.0,
+    "n": 28
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_blend_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "blend",
+    "e": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_radial_curve_wire_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "radial_curve",
+    "e": 1,
+    "param": 0.5,
+    "e2": 2,
+    "orientation": 1,
+    "force": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_radial_wire_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "radial",
+    "e": 1,
+    "eu": 2,
+    "region": -1,
+    "orientation": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_radial_wire_region_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "radial",
+    "e": 1,
+    "eu": 2,
+    "region": 0,
+    "orientation": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_gaps_max_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "e": 1,
+    "which": 0,
+    "want": true,
+    "tol": -1.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_gaps_down_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "e": 1,
+    "which": 2,
+    "want": true,
+    "tol": 0.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_gaps_up_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "e": 1,
+    "which": 1,
+    "want": true,
+    "tol": -1.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_1_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 1,
+    "operation": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_2_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 1,
+    "operation": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_10_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 1,
+    "operation": 10
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_11_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 1,
+    "operation": 11
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_15_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 1,
+    "operation": 15
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_16_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 1,
+    "operation": 16
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_tol_grow_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "e": 1,
+    "tol": 2e-05,
+    "only_larger": true,
+    "cascade": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_tol_shrink_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "e": 1,
+    "tol": 1e-07,
+    "only_larger": true,
+    "cascade": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_tol_force_shrink_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "e": 1,
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_tol_nocascade_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "e": 1,
+    "tol": 0.5,
+    "only_larger": true,
+    "cascade": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_reset_primary_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "reset_primary",
+    "e": 1,
+    "eu": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_reset_primary_null_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "reset_primary",
+    "e": 1,
+    "eu": -1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_add_pair_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "add_pair",
+    "e": 1,
+    "o1": 1,
+    "o2": 2,
+    "sector": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_add_pair_same_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "add_pair",
+    "e": 1,
+    "o1": 2,
+    "o2": 1,
+    "sector": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_filtered_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "filtered",
+    "e": 1,
+    "attr": 7,
+    "ty": 0,
+    "index": -1,
+    "attach": [
+     [
+      16005,
+      2
+     ],
+     [
+      16013,
+      0
+     ],
+     [
+      16012,
+      0
+     ],
+     [
+      16021,
+      0
+     ],
+     [
+      16006,
+      1
+     ]
+    ]
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_filtered_target_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "filtered",
+    "e": 1,
+    "attr": -1,
+    "ty": 16021,
+    "index": 1,
+    "attach": []
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16012_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 1,
+    "ty": 16012,
+    "index": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16013_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 1,
+    "ty": 16013,
+    "index": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16005_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 1,
+    "ty": 16005,
+    "index": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16016_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 1,
+    "ty": 16016,
+    "index": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16006_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 1,
+    "ty": 16006,
+    "index": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16021_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 1,
+    "ty": 16021,
+    "index": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16011_e1",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 1,
+    "ty": 16011,
+    "index": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_query_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "query",
+    "e": 2,
+    "v": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_curve_delete_notify_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_curve",
+    "e": 2,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "delete": true,
+    "notify": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_curve_keep_quiet_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_curve",
+    "e": 2,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "delete": false,
+    "notify": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_curve_null_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_curve",
+    "e": 2,
+    "curve": null,
+    "delete": false,
+    "notify": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_interval_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_interval",
+    "e": 2,
+    "a": 0.0,
+    "b": 1.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_orient_same_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_orient",
+    "e": 2,
+    "orientation": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_orient_opposite_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_orient",
+    "e": 2,
+    "orientation": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_orient_unknown_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_orient",
+    "e": 2,
+    "orientation": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_reverse_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "reverse",
+    "e": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_end_tangent_start_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "end_tangent",
+    "e": 2,
+    "at_start": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_end_tangent_end_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "end_tangent",
+    "e": 2,
+    "at_start": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_trimmed_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "trimmed",
+    "e": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_ode_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "ode",
+    "e": 2,
+    "origin": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "radius": 0.25,
+    "t": 0.3,
+    "n": 28
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_ode_huge_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "ode",
+    "e": 2,
+    "origin": [
+     1000000.0,
+     -1000000.0,
+     100000.0
+    ],
+    "radius": 1000000.0,
+    "t": 1.0,
+    "n": 32
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_ode_tiny_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "ode",
+    "e": 2,
+    "origin": [
+     1e-09,
+     0,
+     0
+    ],
+    "radius": 1e-09,
+    "t": 0.0,
+    "n": 28
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_blend_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "blend",
+    "e": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_radial_curve_wire_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "radial_curve",
+    "e": 2,
+    "param": 0.5,
+    "e2": 3,
+    "orientation": 1,
+    "force": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_radial_wire_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "radial",
+    "e": 2,
+    "eu": 4,
+    "region": -1,
+    "orientation": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_radial_wire_region_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "radial",
+    "e": 2,
+    "eu": 4,
+    "region": 0,
+    "orientation": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_gaps_max_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "e": 2,
+    "which": 0,
+    "want": true,
+    "tol": -1.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_gaps_down_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "e": 2,
+    "which": 2,
+    "want": true,
+    "tol": 0.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_gaps_up_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "e": 2,
+    "which": 1,
+    "want": true,
+    "tol": -1.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_1_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 2,
+    "operation": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_2_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 2,
+    "operation": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_10_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 2,
+    "operation": 10
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_11_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 2,
+    "operation": 11
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_15_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 2,
+    "operation": 15
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_16_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 2,
+    "operation": 16
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_tol_grow_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "e": 2,
+    "tol": 2e-05,
+    "only_larger": true,
+    "cascade": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_tol_shrink_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "e": 2,
+    "tol": 1e-07,
+    "only_larger": true,
+    "cascade": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_tol_force_shrink_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "e": 2,
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_tol_nocascade_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "e": 2,
+    "tol": 0.5,
+    "only_larger": true,
+    "cascade": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_reset_primary_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "reset_primary",
+    "e": 2,
+    "eu": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_reset_primary_null_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "reset_primary",
+    "e": 2,
+    "eu": -1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_add_pair_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "add_pair",
+    "e": 2,
+    "o1": 1,
+    "o2": 2,
+    "sector": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_add_pair_same_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "add_pair",
+    "e": 2,
+    "o1": 2,
+    "o2": 1,
+    "sector": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_filtered_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "filtered",
+    "e": 2,
+    "attr": 7,
+    "ty": 0,
+    "index": -1,
+    "attach": [
+     [
+      16005,
+      4
+     ],
+     [
+      16013,
+      0
+     ],
+     [
+      16012,
+      0
+     ],
+     [
+      16021,
+      0
+     ],
+     [
+      16006,
+      1
+     ]
+    ]
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_filtered_target_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "filtered",
+    "e": 2,
+    "attr": -1,
+    "ty": 16021,
+    "index": 2,
+    "attach": []
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16012_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 2,
+    "ty": 16012,
+    "index": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16013_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 2,
+    "ty": 16013,
+    "index": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16005_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 2,
+    "ty": 16005,
+    "index": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16016_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 2,
+    "ty": 16016,
+    "index": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16006_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 2,
+    "ty": 16006,
+    "index": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16021_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 2,
+    "ty": 16021,
+    "index": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16011_e2",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 2,
+    "ty": 16011,
+    "index": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_query_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "query",
+    "e": 3,
+    "v": 3
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_curve_delete_notify_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_curve",
+    "e": 3,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "delete": true,
+    "notify": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_curve_keep_quiet_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_curve",
+    "e": 3,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "delete": false,
+    "notify": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_curve_null_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_curve",
+    "e": 3,
+    "curve": null,
+    "delete": false,
+    "notify": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_interval_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_interval",
+    "e": 3,
+    "a": 0.0,
+    "b": 1.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_orient_same_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_orient",
+    "e": 3,
+    "orientation": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_orient_opposite_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_orient",
+    "e": 3,
+    "orientation": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_orient_unknown_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_orient",
+    "e": 3,
+    "orientation": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_reverse_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "reverse",
+    "e": 3
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_end_tangent_start_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "end_tangent",
+    "e": 3,
+    "at_start": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_end_tangent_end_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "end_tangent",
+    "e": 3,
+    "at_start": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_trimmed_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "trimmed",
+    "e": 3
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_ode_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "ode",
+    "e": 3,
+    "origin": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "radius": 0.25,
+    "t": 0.3,
+    "n": 28
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_ode_huge_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "ode",
+    "e": 3,
+    "origin": [
+     1000000.0,
+     -1000000.0,
+     100000.0
+    ],
+    "radius": 1000000.0,
+    "t": 1.0,
+    "n": 32
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_ode_tiny_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "ode",
+    "e": 3,
+    "origin": [
+     1e-09,
+     0,
+     0
+    ],
+    "radius": 1e-09,
+    "t": 0.0,
+    "n": 28
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_blend_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "blend",
+    "e": 3
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_radial_curve_wire_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "radial_curve",
+    "e": 3,
+    "param": 0.5,
+    "e2": 4,
+    "orientation": 1,
+    "force": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_radial_wire_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "radial",
+    "e": 3,
+    "eu": 6,
+    "region": -1,
+    "orientation": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_radial_wire_region_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "radial",
+    "e": 3,
+    "eu": 6,
+    "region": 0,
+    "orientation": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_gaps_max_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "e": 3,
+    "which": 0,
+    "want": true,
+    "tol": -1.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_gaps_down_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "e": 3,
+    "which": 2,
+    "want": true,
+    "tol": 0.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_gaps_up_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "e": 3,
+    "which": 1,
+    "want": true,
+    "tol": -1.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_1_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 3,
+    "operation": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_2_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 3,
+    "operation": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_10_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 3,
+    "operation": 10
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_11_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 3,
+    "operation": 11
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_15_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 3,
+    "operation": 15
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_16_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 3,
+    "operation": 16
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_tol_grow_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "e": 3,
+    "tol": 2e-05,
+    "only_larger": true,
+    "cascade": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_tol_shrink_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "e": 3,
+    "tol": 1e-07,
+    "only_larger": true,
+    "cascade": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_tol_force_shrink_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "e": 3,
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_tol_nocascade_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "e": 3,
+    "tol": 0.5,
+    "only_larger": true,
+    "cascade": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_reset_primary_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "reset_primary",
+    "e": 3,
+    "eu": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_reset_primary_null_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "reset_primary",
+    "e": 3,
+    "eu": -1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_add_pair_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "add_pair",
+    "e": 3,
+    "o1": 1,
+    "o2": 2,
+    "sector": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_add_pair_same_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "add_pair",
+    "e": 3,
+    "o1": 2,
+    "o2": 1,
+    "sector": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_filtered_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "filtered",
+    "e": 3,
+    "attr": 7,
+    "ty": 0,
+    "index": -1,
+    "attach": [
+     [
+      16005,
+      6
+     ],
+     [
+      16013,
+      0
+     ],
+     [
+      16012,
+      0
+     ],
+     [
+      16021,
+      0
+     ],
+     [
+      16006,
+      1
+     ]
+    ]
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_filtered_target_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "filtered",
+    "e": 3,
+    "attr": -1,
+    "ty": 16021,
+    "index": 3,
+    "attach": []
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16012_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 3,
+    "ty": 16012,
+    "index": 3
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16013_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 3,
+    "ty": 16013,
+    "index": 3
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16005_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 3,
+    "ty": 16005,
+    "index": 3
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16016_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 3,
+    "ty": 16016,
+    "index": 3
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16006_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 3,
+    "ty": 16006,
+    "index": 3
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16021_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 3,
+    "ty": 16021,
+    "index": 3
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16011_e3",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 3,
+    "ty": 16011,
+    "index": 3
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_query_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "query",
+    "e": 4,
+    "v": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_curve_delete_notify_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_curve",
+    "e": 4,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "delete": true,
+    "notify": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_curve_keep_quiet_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_curve",
+    "e": 4,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "delete": false,
+    "notify": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_curve_null_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_curve",
+    "e": 4,
+    "curve": null,
+    "delete": false,
+    "notify": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_interval_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_interval",
+    "e": 4,
+    "a": 0.0,
+    "b": 1.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_orient_same_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_orient",
+    "e": 4,
+    "orientation": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_orient_opposite_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_orient",
+    "e": 4,
+    "orientation": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_orient_unknown_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_orient",
+    "e": 4,
+    "orientation": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_reverse_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "reverse",
+    "e": 4
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_end_tangent_start_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "end_tangent",
+    "e": 4,
+    "at_start": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_end_tangent_end_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "end_tangent",
+    "e": 4,
+    "at_start": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_trimmed_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "trimmed",
+    "e": 4
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_ode_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "ode",
+    "e": 4,
+    "origin": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "radius": 0.25,
+    "t": 0.3,
+    "n": 28
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_ode_huge_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "ode",
+    "e": 4,
+    "origin": [
+     1000000.0,
+     -1000000.0,
+     100000.0
+    ],
+    "radius": 1000000.0,
+    "t": 1.0,
+    "n": 32
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_ode_tiny_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "ode",
+    "e": 4,
+    "origin": [
+     1e-09,
+     0,
+     0
+    ],
+    "radius": 1e-09,
+    "t": 0.0,
+    "n": 28
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_blend_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "blend",
+    "e": 4
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_radial_curve_wire_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "radial_curve",
+    "e": 4,
+    "param": 0.5,
+    "e2": 0,
+    "orientation": 1,
+    "force": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_radial_wire_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "radial",
+    "e": 4,
+    "eu": 8,
+    "region": -1,
+    "orientation": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_radial_wire_region_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "radial",
+    "e": 4,
+    "eu": 8,
+    "region": 0,
+    "orientation": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_gaps_max_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "e": 4,
+    "which": 0,
+    "want": true,
+    "tol": -1.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_gaps_down_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "e": 4,
+    "which": 2,
+    "want": true,
+    "tol": 0.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_gaps_up_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "e": 4,
+    "which": 1,
+    "want": true,
+    "tol": -1.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_1_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 4,
+    "operation": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_2_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 4,
+    "operation": 2
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_10_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 4,
+    "operation": 10
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_11_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 4,
+    "operation": 11
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_15_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 4,
+    "operation": 15
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_notify_16_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "e": 4,
+    "operation": 16
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_tol_grow_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "e": 4,
+    "tol": 2e-05,
+    "only_larger": true,
+    "cascade": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_tol_shrink_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "e": 4,
+    "tol": 1e-07,
+    "only_larger": true,
+    "cascade": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_tol_force_shrink_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "e": 4,
+    "tol": 1e-07,
+    "only_larger": false,
+    "cascade": true
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_tol_nocascade_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_tol",
+    "e": 4,
+    "tol": 0.5,
+    "only_larger": true,
+    "cascade": false
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_reset_primary_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "reset_primary",
+    "e": 4,
+    "eu": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_reset_primary_null_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "reset_primary",
+    "e": 4,
+    "eu": -1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_add_pair_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "add_pair",
+    "e": 4,
+    "o1": 1,
+    "o2": 2,
+    "sector": 0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_add_pair_same_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "add_pair",
+    "e": 4,
+    "o1": 2,
+    "o2": 1,
+    "sector": 1
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_filtered_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "filtered",
+    "e": 4,
+    "attr": 7,
+    "ty": 0,
+    "index": -1,
+    "attach": [
+     [
+      16005,
+      8
+     ],
+     [
+      16013,
+      0
+     ],
+     [
+      16012,
+      0
+     ],
+     [
+      16021,
+      0
+     ],
+     [
+      16006,
+      1
+     ]
+    ]
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_filtered_target_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "filtered",
+    "e": 4,
+    "attr": -1,
+    "ty": 16021,
+    "index": 0,
+    "attach": []
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16012_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 4,
+    "ty": 16012,
+    "index": 4
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16013_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 4,
+    "ty": 16013,
+    "index": 4
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16005_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 4,
+    "ty": 16005,
+    "index": 4
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16016_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 4,
+    "ty": 16016,
+    "index": 4
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16006_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 4,
+    "ty": 16006,
+    "index": 4
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16021_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 4,
+    "ty": 16021,
+    "index": 4
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_connected_16011_e4",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "connected",
+    "e": 4,
+    "ty": 16011,
+    "index": 4
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_orient_seq_chain",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "orient_seq",
+    "edges": [
+     0,
+     1,
+     2
+    ]
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_orient_seq_reversed",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "orient_seq",
+    "edges": [
+     2,
+     1,
+     0
+    ]
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_orient_seq_two",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "orient_seq",
+    "edges": [
+     3,
+     4
+    ]
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_orient_seq_two_closed",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "orient_seq",
+    "edges": [
+     1,
+     1
+    ]
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_orient_seq_broken",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "orient_seq",
+    "edges": [
+     0,
+     3,
+     1
+    ]
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_orient_seq_single",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "orient_seq",
+    "edges": [
+     2
+    ]
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_orient_seq_empty",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "orient_seq",
+    "edges": []
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_orient_seq_all",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "orient_seq",
+    "edges": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_interval_inverted",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_interval",
+    "e": 0,
+    "a": 3.0,
+    "b": -2.0
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_interval_point",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_interval",
+    "e": 1,
+    "a": 0.5,
+    "b": 0.5
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  },
+  {
+   "name": "net_set_interval_huge",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "set_interval",
+    "e": 2,
+    "a": -1e+300,
+    "b": 1e+300
+   },
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology"
+  }
+ ]
+}

@@ -1,0 +1,220 @@
+{
+  "coverage": "A flat attributed sheet thickened by ShellBrep with bCreateOffsetSolid (tangency-labs/solidcore#1973): every sheet face and edge carries its own SmLongAttribute; StitchFaces glues the sheet copy's edges to the side walls' and SmAObject::Notify carries each glued edge's attributes, so the result's z = 0 edges keep theirs.",
+  "cases": [
+    {
+      "name": "static_shell_thicken_plane_sheet_attributed_out",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp ShellBrep (bCreateOffsetSolid on a sheet: MergeBrep, then StitchFaces glues the sheet copy's edges to the side walls'; tangency-labs/solidcore#1973)",
+      "inputs": {
+        "operation": "static_shell",
+        "source": {
+          "kind": "plane_sheet",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x_axis": [
+            1,
+            0,
+            0
+          ],
+          "y_axis": [
+            0,
+            1,
+            0
+          ],
+          "scale": [
+            1,
+            1
+          ],
+          "domain": [
+            0,
+            0,
+            20,
+            10
+          ]
+        },
+        "tolerance": 1e-06,
+        "config": {
+          "offset_distance": 2,
+          "extend_convex": true,
+          "merge_results": true,
+          "create_offset_solid": true
+        },
+        "attributed": 0
+      }
+    },
+    {
+      "name": "static_shell_thicken_plane_sheet_attributed_in",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp ShellBrep (bCreateOffsetSolid on a sheet: MergeBrep, then StitchFaces glues the sheet copy's edges to the side walls'; tangency-labs/solidcore#1973)",
+      "inputs": {
+        "operation": "static_shell",
+        "source": {
+          "kind": "plane_sheet",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x_axis": [
+            1,
+            0,
+            0
+          ],
+          "y_axis": [
+            0,
+            1,
+            0
+          ],
+          "scale": [
+            1,
+            1
+          ],
+          "domain": [
+            0,
+            0,
+            20,
+            10
+          ]
+        },
+        "tolerance": 1e-06,
+        "config": {
+          "offset_distance": -2,
+          "extend_convex": true,
+          "merge_results": true,
+          "create_offset_solid": true
+        },
+        "attributed": 0
+      }
+    },
+    {
+      "name": "static_shell_thicken_plane_sheet_attributed_out_nomerge",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp ShellBrep (bCreateOffsetSolid on a sheet: MergeBrep, then StitchFaces glues the sheet copy's edges to the side walls'; tangency-labs/solidcore#1973)",
+      "inputs": {
+        "operation": "static_shell",
+        "source": {
+          "kind": "plane_sheet",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x_axis": [
+            1,
+            0,
+            0
+          ],
+          "y_axis": [
+            0,
+            1,
+            0
+          ],
+          "scale": [
+            1,
+            1
+          ],
+          "domain": [
+            0,
+            0,
+            20,
+            10
+          ]
+        },
+        "tolerance": 1e-06,
+        "config": {
+          "offset_distance": 2,
+          "extend_convex": true,
+          "merge_results": false,
+          "create_offset_solid": true
+        },
+        "attributed": 0
+      }
+    },
+    {
+      "name": "static_shell_thicken_plane_sheet_attributed_small_out",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp ShellBrep (bCreateOffsetSolid on a sheet: MergeBrep, then StitchFaces glues the sheet copy's edges to the side walls'; tangency-labs/solidcore#1973)",
+      "inputs": {
+        "operation": "static_shell",
+        "source": {
+          "kind": "plane_sheet",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x_axis": [
+            1,
+            0,
+            0
+          ],
+          "y_axis": [
+            0,
+            1,
+            0
+          ],
+          "scale": [
+            1,
+            1
+          ],
+          "domain": [
+            0,
+            0,
+            20,
+            10
+          ]
+        },
+        "tolerance": 1e-06,
+        "config": {
+          "offset_distance": 0.25,
+          "extend_convex": true,
+          "merge_results": true,
+          "create_offset_solid": true
+        },
+        "attributed": 0
+      }
+    },
+    {
+      "name": "api_shell_thicken_plane_sheet_attributed_out",
+      "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp ShellBrep (bCreateOffsetSolid on a sheet; tangency-labs/solidcore#1973)",
+      "inputs": {
+        "operation": "api_shell",
+        "source": {
+          "kind": "plane_sheet",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x_axis": [
+            1,
+            0,
+            0
+          ],
+          "y_axis": [
+            0,
+            1,
+            0
+          ],
+          "scale": [
+            1,
+            1
+          ],
+          "domain": [
+            0,
+            0,
+            20,
+            10
+          ]
+        },
+        "tolerance": 1e-06,
+        "config": {
+          "offset_distance": 2,
+          "extend_convex": true,
+          "merge_results": true,
+          "create_offset_solid": true
+        },
+        "attributed": 0
+      }
+    }
+  ]
+}

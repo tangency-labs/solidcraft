@@ -1,0 +1,160 @@
+{
+  "area": "ladder/05-holes-and-taps",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "016-tapped-rc-1-2-through",
+  "expected": {
+    "body_count": 1,
+    "faces": 7,
+    "method": "ISO 7-1 Rc 1/2: gauge diameter d = 20.955 at the face, 14 threads per inch, h = 0.640327 P, minor d1 = d - 2h = 18.631 there and 1/16 smaller per mm deeper (18.631 - 13.2/16 = 17.806 at the end of the 13.2 mm useful thread); a straight (not reamed) hole takes the tap maker's 17.6 (Yamawa YEU23 p.709, the largest for non-full threads): removed pi 8.8^2 20; + one cylinder face",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 43134.30129812,
+    "what": "an Rc 1/2 tapped hole through the stock (ISO 7-1 internal taper): a straight hole at the tap maker's 17.6 mm, cosmetic thread"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 9419.270743869529,
+      "body_count": 1,
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10,
+      "volume_mm3": 43134.30129807457
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10
+    }
+  },
+  "records": "016-tapped-rc-1-2-through.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 9419.270743869529,
+      "body_count": 1,
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10,
+      "volume_mm3": 43134.30129807457
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "an Rc 1/2 tapped hole through the stock (ISO 7-1 internal taper): a straight hole at the tap maker's 17.6 mm, cosmetic thread",
+  "why_not": []
+}

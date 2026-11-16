@@ -1,0 +1,2083 @@
+{
+ "cases": [
+  {
+   "name": "Surface_insert_knot_u_mid",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.37,
+    "mt": 1,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_insert_knot_v_mid",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.41376086784715216,
+    "mt": 1,
+    "dir": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_insert_knots_u",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [
+     0.0323000000097693,
+     0.1,
+     0.37,
+     0.9
+    ],
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_insert_knots_v",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [
+     0.20700296280090316,
+     0.41376086784715216,
+     0.41376086784715216
+    ],
+    "dir": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_extract_patch_mid",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     0.2,
+     0.8,
+     0.12085383569829942,
+     0.46545034410871433
+    ],
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_insert_knot_u_mid_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.37,
+    "mt": 1,
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_insert_knot_v_mid_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.41376086784715216,
+    "mt": 1,
+    "dir": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_insert_knots_u_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [
+     0.0323000000097693,
+     0.1,
+     0.37,
+     0.9
+    ],
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_insert_knots_v_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [
+     0.20700296280090316,
+     0.41376086784715216,
+     0.41376086784715216
+    ],
+    "dir": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_extract_patch_mid_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     0.2,
+     0.8,
+     0.12085383569829942,
+     0.46545034410871433
+    ],
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_insert_knot_u_full",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.37,
+    "mt": 3,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_insert_knot_u_at_knot",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.0323000000097693,
+    "mt": 1,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_insert_knot_u_too_many",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.37,
+    "mt": 5,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_insert_knot_u_end",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.0,
+    "mt": 1,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_insert_knot_u_outside",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 2.0,
+    "mt": 1,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_insert_knot_uv",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.37,
+    "mt": 1,
+    "dir": 3
+   }
+  },
+  {
+   "name": "Surface_insert_knot_zero",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.41376086784715216,
+    "mt": 0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "Surface_insert_knot_v_outside",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.924912355322601,
+    "mt": 1,
+    "dir": 2
+   }
+  },
+  {
+   "name": "Surface_insert_knot_v_max",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.41376086784715216,
+    "mt": 1,
+    "dir": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_split_u_mid",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "split",
+    "t": 0.37,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_split_v_mid",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "split",
+    "t": 0.41376086784715216,
+    "dir": 2
+   }
+  },
+  {
+   "name": "Surface_split_u_knot",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "split",
+    "t": 0.0323000000097693,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_split_u_end",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "split",
+    "t": 1.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_split_uv",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "split",
+    "t": 0.37,
+    "dir": 3
+   }
+  },
+  {
+   "name": "Surface_decompose",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "decompose"
+   }
+  },
+  {
+   "name": "Surface_iso_u_start",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 0.0634210842965636,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_iso_u_end",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 0.6377485983139218,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_iso_u_mid",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 0.41376086784715216,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_iso_u_before",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": -0.22374267271211554,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_iso_v_start",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 0.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "Surface_iso_v_end",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 1.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "Surface_iso_v_mid",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 0.37,
+    "dir": 2
+   }
+  },
+  {
+   "name": "Surface_iso_v_knot",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 0.0323000000097693,
+    "dir": 2
+   }
+  },
+  {
+   "name": "Surface_iso_v_after",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 1.25,
+    "dir": 2
+   }
+  },
+  {
+   "name": "Surface_iso_uv",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 0.37,
+    "dir": 3
+   }
+  },
+  {
+   "name": "Surface_insert_knots_empty",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [],
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_insert_knots_end",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [
+     0.37,
+     1.0
+    ],
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_insert_knots_uv",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [
+     0.37
+    ],
+    "dir": 3
+   }
+  },
+  {
+   "name": "Surface_extract_patch_whole",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     0.0,
+     1.0,
+     0.0634210842965636,
+     0.6377485983139218
+    ]
+   }
+  },
+  {
+   "name": "Surface_extract_patch_snap",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     3e-09,
+     0.0322999960097693,
+     0.0634210822965636,
+     0.41376086784715216
+    ]
+   }
+  },
+  {
+   "name": "Surface_extract_patch_knots",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     0.0323000000097693,
+     1.0,
+     0.0634210842965636,
+     0.41376086784715216
+    ]
+   }
+  },
+  {
+   "name": "Surface_extract_patch_empty",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     0.37,
+     0.37,
+     0.0634210842965636,
+     0.6377485983139218
+    ]
+   }
+  },
+  {
+   "name": "Surface_extract_patch_inverted",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     0.0,
+     1.0,
+     0.41376086784715216,
+     0.0634210842965636
+    ]
+   }
+  },
+  {
+   "name": "Surface_extract_patch_outside",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     -0.1,
+     0.37,
+     0.41376086784715216,
+     0.7526141011173935
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_insert_knot_u_mid",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": -3.4494389572299022,
+    "mt": 1,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_insert_knot_v_mid",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 6.1,
+    "mt": 1,
+    "dir": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_insert_knots_u",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [
+     -4.927769938899861,
+     -4.061086369737861,
+     -3.4494389572299022,
+     -0.5475299932110955
+    ],
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_insert_knots_v",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [
+     2.5,
+     6.1,
+     6.1
+    ],
+    "dir": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_extract_patch_mid",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     -4.380239945688765,
+     -1.095059986422191,
+     1.0,
+     7.0
+    ],
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_insert_knot_u_mid_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": -3.4494389572299022,
+    "mt": 1,
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_insert_knot_v_mid_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 6.1,
+    "mt": 1,
+    "dir": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_insert_knots_u_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [
+     -4.927769938899861,
+     -4.061086369737861,
+     -3.4494389572299022,
+     -0.5475299932110955
+    ],
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_insert_knots_v_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [
+     2.5,
+     6.1,
+     6.1
+    ],
+    "dir": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_extract_patch_mid_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     -4.380239945688765,
+     -1.095059986422191,
+     1.0,
+     7.0
+    ],
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_insert_knot_u_full",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": -3.4494389572299022,
+    "mt": 3,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_insert_knot_u_at_knot",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": -4.061086369737861,
+    "mt": 1,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_insert_knot_u_too_many",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": -3.4494389572299022,
+    "mt": 5,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_insert_knot_u_end",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": -5.475299932110956,
+    "mt": 1,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_insert_knot_u_outside",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 1.0,
+    "mt": 1,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_insert_knot_uv",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": -3.4494389572299022,
+    "mt": 1,
+    "dir": 3
+   }
+  },
+  {
+   "name": "offset_nurb_insert_knot_zero",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 6.1,
+    "mt": 0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "offset_nurb_insert_knot_v_outside",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 15.0,
+    "mt": 1,
+    "dir": 2
+   }
+  },
+  {
+   "name": "offset_nurb_insert_knot_v_max",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 6.1,
+    "mt": 1,
+    "dir": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_split_u_mid",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "split",
+    "t": -3.4494389572299022,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_split_v_mid",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "split",
+    "t": 6.1,
+    "dir": 2
+   }
+  },
+  {
+   "name": "offset_nurb_split_u_knot",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "split",
+    "t": -4.061086369737861,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_split_u_end",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "split",
+    "t": 0.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_split_uv",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "split",
+    "t": -3.4494389572299022,
+    "dir": 3
+   }
+  },
+  {
+   "name": "offset_nurb_decompose",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "decompose"
+   }
+  },
+  {
+   "name": "offset_nurb_iso_u_start",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 0.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_iso_u_end",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 10.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_iso_u_mid",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 6.1,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_iso_u_before",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": -5.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_iso_v_start",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": -5.475299932110956,
+    "dir": 2
+   }
+  },
+  {
+   "name": "offset_nurb_iso_v_end",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 0.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "offset_nurb_iso_v_mid",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": -3.4494389572299022,
+    "dir": 2
+   }
+  },
+  {
+   "name": "offset_nurb_iso_v_knot",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": -4.061086369737861,
+    "dir": 2
+   }
+  },
+  {
+   "name": "offset_nurb_iso_v_after",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 1.368824983027739,
+    "dir": 2
+   }
+  },
+  {
+   "name": "offset_nurb_iso_uv",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": -3.4494389572299022,
+    "dir": 3
+   }
+  },
+  {
+   "name": "offset_nurb_insert_knots_empty",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [],
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_insert_knots_end",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [
+     -3.4494389572299022,
+     0.0
+    ],
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_insert_knots_uv",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [
+     -3.4494389572299022
+    ],
+    "dir": 3
+   }
+  },
+  {
+   "name": "offset_nurb_extract_patch_whole",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_extract_patch_snap",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     -5.475299929110956,
+     -4.0610863737378615,
+     -2e-09,
+     6.1
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_extract_patch_knots",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     -4.061086369737861,
+     0.0,
+     0.0,
+     6.1
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_extract_patch_empty",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     -3.4494389572299022,
+     -3.4494389572299022,
+     0.0,
+     10.0
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_extract_patch_inverted",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     -5.475299932110956,
+     0.0,
+     6.1,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_extract_patch_outside",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     -6.022829925322052,
+     -3.4494389572299022,
+     6.1,
+     12.0
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_insert_knot_u_mid",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.37,
+    "mt": 1,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_insert_knot_v_mid",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.61,
+    "mt": 1,
+    "dir": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_insert_knots_u",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [
+     0.1,
+     0.37,
+     0.37,
+     0.9
+    ],
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_insert_knots_v",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [
+     0.25,
+     0.61,
+     0.61
+    ],
+    "dir": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_extract_patch_mid",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     0.2,
+     0.8,
+     0.1,
+     0.7
+    ],
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_insert_knot_u_mid_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.37,
+    "mt": 1,
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_insert_knot_v_mid_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.61,
+    "mt": 1,
+    "dir": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_insert_knots_u_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [
+     0.1,
+     0.37,
+     0.37,
+     0.9
+    ],
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_insert_knots_v_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [
+     0.25,
+     0.61,
+     0.61
+    ],
+    "dir": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_extract_patch_mid_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     0.2,
+     0.8,
+     0.1,
+     0.7
+    ],
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_insert_knot_u_full",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.37,
+    "mt": 3,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_insert_knot_u_at_knot",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.37,
+    "mt": 1,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_insert_knot_u_too_many",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.37,
+    "mt": 5,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_insert_knot_u_end",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.0,
+    "mt": 1,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_insert_knot_u_outside",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 2.0,
+    "mt": 1,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_insert_knot_uv",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.37,
+    "mt": 1,
+    "dir": 3
+   }
+  },
+  {
+   "name": "DropCurveSurface_insert_knot_zero",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.61,
+    "mt": 0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_insert_knot_v_outside",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 1.5,
+    "mt": 1,
+    "dir": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_insert_knot_v_max",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "insert_knot",
+    "t": 0.61,
+    "mt": 1,
+    "dir": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_split_u_mid",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "split",
+    "t": 0.37,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_split_v_mid",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "split",
+    "t": 0.61,
+    "dir": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_split_u_knot",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "split",
+    "t": 0.37,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_split_u_end",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "split",
+    "t": 1.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_split_uv",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "split",
+    "t": 0.37,
+    "dir": 3
+   }
+  },
+  {
+   "name": "DropCurveSurface_decompose",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "decompose"
+   }
+  },
+  {
+   "name": "DropCurveSurface_iso_u_start",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 0.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_iso_u_end",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 1.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_iso_u_mid",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 0.61,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_iso_u_before",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": -0.5,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_iso_v_start",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 0.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_iso_v_end",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 1.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_iso_v_mid",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 0.37,
+    "dir": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_iso_v_knot",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 0.37,
+    "dir": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_iso_v_after",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 1.25,
+    "dir": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_iso_uv",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "iso_curve",
+    "t": 0.37,
+    "dir": 3
+   }
+  },
+  {
+   "name": "DropCurveSurface_insert_knots_empty",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [],
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_insert_knots_end",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [
+     0.37,
+     1.0
+    ],
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_insert_knots_uv",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "insert_knots",
+    "x": [
+     0.37
+    ],
+    "dir": 3
+   }
+  },
+  {
+   "name": "DropCurveSurface_extract_patch_whole",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     0.0,
+     1.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_extract_patch_snap",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     3e-09,
+     0.369999996,
+     -2e-09,
+     0.61
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_extract_patch_knots",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     0.37,
+     1.0,
+     0.0,
+     0.61
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_extract_patch_empty",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     0.37,
+     0.37,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_extract_patch_inverted",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     0.0,
+     1.0,
+     0.61,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_extract_patch_outside",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": "extract_patch",
+    "rect": [
+     -0.1,
+     0.37,
+     0.61,
+     1.2
+    ]
+   }
+  }
+ ]
+}

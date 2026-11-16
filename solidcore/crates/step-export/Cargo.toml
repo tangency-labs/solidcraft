@@ -1,0 +1,14 @@
+[package]
+name = "step-export"
+description = "ISO 10303-21 writer for the neutral STEP B-rep model, and the mapper that reads a Part 21 file into that model"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+publish = false
+
+[dependencies]
+solidcore = { path = "../solidcore" }
+solidcore-record = { path = "../solidcore-record" }
+
+[lints]
+workspace = true

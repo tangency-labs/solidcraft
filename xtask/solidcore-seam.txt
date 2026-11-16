@@ -1,0 +1,7 @@
+# Direct uses of solidcore crates that are not in the public list (xtask/solidcore-public.txt),
+# one a line: `<crate path> -> <solidcore crate>  <reason, naming the solidcore issue or plan step
+# that removes it>`. `cargo xtask layers` (xtask/src/layers.rs, seam_check) fails on a use this
+# list does not name, and on a listed use that is gone: remove its line in the same pull request.
+# Never add a line: call solidcore-ops or solidcore-tess (solidcore docs/layers.md).
+crates/smlib -> solidcore  the kernel wrapper calls the kernel crate directly until the switch commit of the solidcore ops stage 3b plan
+crates/geom -> solidcore  re-exports the plan evaluator (solidcore::eval::plan) to geom's callers until RFC 0003 item 1.8 moves model-evaluation callers to ops/tess queries

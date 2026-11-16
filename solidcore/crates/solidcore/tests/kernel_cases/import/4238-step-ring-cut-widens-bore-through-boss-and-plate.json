@@ -1,0 +1,167 @@
+{
+  "area": "import",
+  "bodies": {
+    "b23": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b25": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b26"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b26"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b27"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b28"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b28"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b29"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b27"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b30"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b29"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b31"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b30",
+        "b31"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b32"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "4238-step-ring-cut-widens-bore-through-boss-and-plate",
+  "expected": {
+    "body_count": 1,
+    "method": "plate 60x40x5 + boss r10 x 10 less the bore, widened from r4 to r6 through both: V = 12000 + pi*100*10 - pi*36*15. The ring's sketch lies on the boss top (z 15); the cut's 15 mm reach the plate's bottom face (z 0) exactly",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4238"
+    ],
+    "volume_mm3": 13445.1326,
+    "what": "after a STEP round trip, a ring (r 4..6) sketched on a bored boss's top face and cut 15 mm down through the boss and the plate to widen the bore: 'boolean Cut: no result' on the imported body (the same cut worked on the part built in SolidCraft)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 18,
+      "faces": 9,
+      "vertices": 12
+    }
+  },
+  "records": "4238-step-ring-cut-widens-bore-through-boss-and-plate.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b32"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 6767.610537308404,
+      "body_count": 1,
+      "edges": 18,
+      "faces": 9,
+      "vertices": 12,
+      "volume_mm3": 13445.132620657781
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4238"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "after a STEP round trip, a ring (r 4..6) sketched on a bored boss's top face and cut 15 mm down through the boss and the plate to widen the bore: 'boolean Cut: no result' on the imported body (the same cut worked on the part built in SolidCraft)",
+  "why_not": []
+}

@@ -90,6 +90,12 @@ pub(crate) fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: crate::C
     imp::sides(body, edges, d1, side, flip)
 }
 
+/// [`chamfer_sides`] with `d1` back along the face whose outward normal at the middle of its edge
+/// leans most along `first` (the first of the edge's two faces where they lean alike).
+pub(crate) fn chamfer_sides_along(body: &Body, edges: &[Vec3], d1: f64, side: crate::ChamferSide, first: Vec3) -> Result<Body> {
+    imp::sides_along(body, edges, d1, side, first)
+}
+
 /// One edge rounded with the radius `spline` (checked by the caller) along it from the end
 /// nearest `start` ([`crate::fillet_variable_spline`]).
 pub(crate) fn fillet_variable(body: &Body, edge_at: Vec3, start: Vec3, spline: &RadiusSpline) -> Result<Body> {
@@ -394,6 +400,10 @@ mod imp {
     }
 
     pub(super) fn sides(body: &Body, edges: &[Vec3], d1: f64, side: crate::ChamferSide, flip: bool) -> Result<Body> {
+        sides_along(body, edges, d1, side, Vec3::new(0.0, 0.0, if flip { -1.0 } else { 1.0 }))
+    }
+
+    pub(super) fn sides_along(body: &Body, edges: &[Vec3], d1: f64, side: crate::ChamferSide, first: Vec3) -> Result<Body> {
         body.require_brep("chamfer")?;
         sizes_ok("chamfer", &vec![d1; edges.len()])?;
         let picked = resolve(body, edges)?;
@@ -402,9 +412,8 @@ mod imp {
             crate::ChamferSide::Distance(d) => ChamferSecond::Distance(d),
             crate::ChamferSide::Angle(a) => ChamferSecond::Angle(a),
         };
-        let up = if flip { [0.0, 0.0, -1.0] } else { [0.0, 0.0, 1.0] };
         let tol = pick_tolerance(body);
-        run(body, "chamfer", &picked.edges, |b| b.chamfer_sides(&picked.points, tol, d1, second, up))
+        run(body, "chamfer", &picked.edges, |b| b.chamfer_sides(&picked.points, tol, d1, second, [first.x, first.y, first.z]))
             .map_err(|e| crate::blend::with_continuation(e, next))
     }
 
@@ -470,7 +479,7 @@ mod imp {
                         None => String::new(),
                     };
                     if let Some(why) = why {
-                        beside = format!("{beside}: {}", why.words());
+                        beside = format!("{beside}: {}", why.words_for(kind));
                     }
                     let fits = match kind {
                         solidcraft_smlib::FitKind::Scale => {
@@ -481,6 +490,18 @@ mod imp {
                     KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow{beside}; {fits}"))
                 }
                 SmError::Unported(why) => KernelError::Invalid(format!("not supported yet: {why}")),
+                // Not too large: a longer setback. Named as building only where solidcore's fill
+                // is the corner; where another patch replaces it (a G2 corner) it is what
+                // solidcore's corner needs, which that patch may not fit.
+                SmError::SetbackTooShort { least, at, builds } => {
+                    let at = at.map(|[x, y, z]| format!(" at ({x:.3}, {y:.3}, {z:.3})")).unwrap_or_default();
+                    let least = crate::blend::trimmed_mm(least);
+                    KernelError::Invalid(if builds {
+                        format!("the setback{at} of the {what} is too short for its corner's fill; {}{least} mm", crate::blend::SETBACK_AT_LEAST)
+                    } else {
+                        format!("the setback{at} of the {what} is too short for its corner's fill: solidcore's corner needs a setback of at least {least} mm")
+                    })
+                }
                 e => failed(what, "operation", e),
             })?;
             // Checked here unless the evaluation's validation mode leaves it to the feature's end
@@ -689,6 +710,33 @@ mod tests {
             let [_, _, z] = picked.points[0];
             assert!((z - 20.0).abs() < 1e-9, "the pick at {foot:?} took an edge through z = {z}");
         }
+    }
+
+    /// The reporter's case of #12128: a chamfer wider than the rounds at the corners of a block's
+    /// top edge is refused, naming the largest distance that fits (the rounds' radius), in a
+    /// chamfer's words: no rolling ball, which a chamfer has not.
+    #[test]
+    fn a_chamfer_too_wide_for_the_rounded_corners_is_refused_in_its_own_words() {
+        let block = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(60.0, 30.0, 10.0)).unwrap();
+        let uprights = [Vec3::new(0.0, 0.0, 5.0), Vec3::new(60.0, 0.0, 5.0), Vec3::new(60.0, 30.0, 5.0), Vec3::new(0.0, 30.0, 5.0)];
+        let rounded = crate::fillet(&block, &uprights, 2.5).unwrap();
+        // The top edge all round: the four straight edges and the four quarter circles.
+        let c = 2.5 - 2.5 * std::f64::consts::FRAC_1_SQRT_2;
+        let top = [
+            Vec3::new(30.0, 0.0, 10.0),
+            Vec3::new(60.0, 15.0, 10.0),
+            Vec3::new(30.0, 30.0, 10.0),
+            Vec3::new(0.0, 15.0, 10.0),
+            Vec3::new(c, c, 10.0),
+            Vec3::new(60.0 - c, c, 10.0),
+            Vec3::new(60.0 - c, 30.0 - c, 10.0),
+            Vec3::new(c, 30.0 - c, 10.0),
+        ];
+        assert!(imp::blend(&rounded, "chamfer", Kind::Chamfer, &top, &[2.0; 8]).is_ok(), "a 2 mm chamfer fits the 2.5 mm rounds");
+        let e = imp::blend(&rounded, "chamfer", Kind::Chamfer, &top, &[3.0; 8]).unwrap_err();
+        let KernelError::TooLarge(text) = &e else { panic!("{e:?}") };
+        assert!(text.contains("the largest distance that fits is 2.5"), "{text}");
+        assert!(!text.contains("ball") && !text.contains("roll"), "{text}");
     }
 
     #[test]

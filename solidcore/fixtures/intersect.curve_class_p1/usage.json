@@ -1,0 +1,38 @@
+{ "cases": [
+  { "name": "apply_point_solution_two_planes",
+    "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:1655 (sm_RefineCCIToSurfaces calls sm_ApplyPointSolution with the classification's surfaces and the curve/edge solution)",
+    "inputs": {
+      "objects": [
+        { "curve": { "bspline": { "dim": 3, "p": 3,
+            "cpts": [[0.0, 0.0, 0.0, -1.7976931348623157e308], [1.0, 0.002, -0.001, -1.7976931348623157e308], [2.0, -0.001, 0.002, -1.7976931348623157e308], [3.0, 0.0, 0.0, -1.7976931348623157e308]],
+            "u": [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0] } } },
+        { "plane": { "o": [0.0, 0.0, 0.0], "n": [0.0, 0.0, 1.0] } },
+        { "plane": { "o": [0.0, 0.0, 0.0], "n": [0.0, 1.0, 0.0] } }
+      ],
+      "ops": [
+        { "op": "set_size", "t": 0, "n": 1 },
+        { "op": "set_curve", "t": 0, "obj": 0, "owned": false },
+        { "op": "set_src_tol", "t": 0, "tol": 1e-5 },
+        { "op": "set_intersect_data", "t": 0, "s1": 1, "s2": 2, "uv2": null, "current": true, "ti": null },
+        { "op": "ivl_set", "t": 0, "j": 0, "a": 0.0, "b": 1.0 },
+        { "op": "apply", "t": 0, "use_cc": true, "edge": null, "emate": null,
+          "srf": [1, 2, null, null], "uv": [[1.5, 0.0], [0.0, 1.5], [0.0, 0.0], [0.0, 0.0]],
+          "sol": [0.5, 0.25, 1e-4], "sss": [0.0, 0.0, 0.0] },
+        { "op": "classify_crv_loc", "t": 0, "j": 0, "w": 0, "prm": 0.5 },
+        { "op": "set_pc_params", "t": 0, "mids": true }
+      ] } },
+  { "name": "xsect_curve_through_point_tangent_planes",
+    "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:618 (sm_SetXSectCurveThroughPoint skips tangent surf/surf points)",
+    "inputs": {
+      "objects": [
+        { "curve": { "bspline": { "dim": 3, "p": 3,
+            "cpts": [[0.0, 0.0, 0.01, -1.7976931348623157e308], [1.0, 0.0, 0.01, -1.7976931348623157e308], [2.0, 0.0, 0.01, -1.7976931348623157e308], [3.0, 0.0, 0.01, -1.7976931348623157e308]],
+            "u": [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0] } } },
+        { "plane": { "o": [0.0, 0.0, 0.0], "n": [0.0, 0.0, 1.0] } },
+        { "plane": { "o": [0.0, 0.0, 0.0], "n": [0.0, 0.0, 1.0] } }
+      ],
+      "ops": [
+        { "op": "xsect_curve", "t": 0, "c": 0, "tol": 1e-5, "uvc": [], "srf": [1, 2],
+          "uv": [[1.5, 0.0], [1.5, 0.0]], "prm": 0.5, "dev": -7.0, "p": [0.0, 0.0, 0.0] }
+      ] } }
+] }

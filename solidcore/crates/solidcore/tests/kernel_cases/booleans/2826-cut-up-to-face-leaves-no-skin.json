@@ -1,0 +1,162 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b14": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b16"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b19",
+        "b20"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "2826-cut-up-to-face-leaves-no-skin",
+  "expected": {
+    "body_count": 1,
+    "faces": 9,
+    "method": "plate 40x40x2.8 minus the barrel r6 x 1.6 from below minus the hole r3.04 x 1.2 from the barrel floor (z 1.6) to the top face (z 2.8): V = 4480 - pi*36*1.6 - pi*3.04^2*1.2. Faces: bottom (with the barrel opening), top (with the hole), 4 sides, barrel wall, barrel floor (annulus), hole wall = 9; a skin would add a 10th",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2826",
+      "tangency-labs/solidcraft#2827"
+    ],
+    "volume_mm3": 4264.204251952329,
+    "what": "a cut that ends exactly in a face of its target (the plate's top face) must open the hole, not leave a zero-thickness skin over it"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 18,
+      "faces": 9,
+      "vertices": 12
+    }
+  },
+  "records": "2826-cut-up-to-face-leaves-no-skin.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3673.172953614461,
+      "body_count": 1,
+      "edges": 18,
+      "faces": 9,
+      "vertices": 12,
+      "volume_mm3": 4264.204251951434
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2826",
+    "tangency-labs/solidcraft#2827"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a cut that ends exactly in a face of its target (the plate's top face) must open the hole, not leave a zero-thickness skin over it",
+  "why_not": []
+}

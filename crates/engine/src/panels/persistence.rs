@@ -1798,6 +1798,7 @@ fn decode_inner(bytes: &[u8], registry: &PanelRegistry, workspace: &WorkspaceId,
     envelope.layout.sections.retain(|s| !s.tabs.is_empty());
     // Newly quarantining an active tab creates a fallback selection. That
     // projection is produced by us, not an intervening user activation.
+    normalize_column_widths(&mut envelope.layout, registry)?;
     record_section_projections(&mut envelope);
     reconcile_priority_context(&mut envelope)?;
     validate(&envelope.layout, registry)?;

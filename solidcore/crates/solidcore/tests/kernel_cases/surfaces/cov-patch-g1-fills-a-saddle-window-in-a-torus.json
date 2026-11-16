@@ -1,0 +1,132 @@
+{
+  "area": "surfaces",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b14"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "stitch",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "tolerance": 0.00008174154293618146
+      }
+    }
+  ],
+  "case": "cov-patch-g1-fills-a-saddle-window-in-a-torus",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "edges": [
+        [
+          6.417783810682518,
+          -10.789476030783234,
+          -3
+        ],
+        [
+          6.417783810682518,
+          10.789476030783234,
+          -3
+        ],
+        [
+          6.417783810682518,
+          10.789476030783234,
+          3
+        ],
+        [
+          6.417783810682518,
+          -10.789476030783234,
+          3
+        ],
+        [
+          -6,
+          10.39230584418982,
+          0
+        ],
+        [
+          -6,
+          -10.39230584418982,
+          0
+        ]
+      ],
+      "order": "g1"
+    },
+    "method": "the box x -6..13, y -13..13, z -3..3 opens the inner wall where 12 cos a >= -6 (|a| <= 120 deg): its rim is two arcs on z = +-3 each way and two curves on x = -6, and it bounds no height field. G1: the fill's tangent plane is the torus's all round the rim. The fill's shape is its own: one closed valid solid is the right answer.",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#759"
+    ],
+    "what": "a window 240 deg round the saddle-shaped inner wall of a torus (R20, r8) between z = -3 and 3, its cut faces taken off, patched g1 and stitched"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 9,
+      "faces": 2,
+      "vertices": 7
+    }
+  },
+  "records": "cov-patch-g1-fills-a-saddle-window-in-a-torus.bodies.json.gz",
+  "result": [
+    {
+      "body": "Ring",
+      "made": "b15"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 6364.645886728492,
+      "body_count": 1,
+      "edges": 5,
+      "faces": 2,
+      "vertices": 3,
+      "volume_mm3": 25495.968716919542
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#759"
+  ],
+  "traced_ops": [
+    "revolve",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "tagged",
+    "stitch"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a window 240 deg round the saddle-shaped inner wall of a torus (R20, r8) between z = -3 and 3, its cut faces taken off, patched g1 and stitched",
+  "why_not": []
+}

@@ -1,0 +1,166 @@
+{
+  "area": "ladder/06-threads",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b16"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b17"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b18"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b17",
+        "b18"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "014-external-buttress-asme-1.5-8",
+  "expected": {
+    "body_count": 1,
+    "method": "groove volume per turn 2 pi int r w(r) dr over the material it cuts (Pappus on the axial section; a screw motion), w(r) = P - flat - depth (tan a + tan b); six whole turns between free ends, so V = stock - 6 x that. Tolerance 0.01%: SMLib's exact screw sweep. ASME B1.9 basic profile: 7 deg load flank, 45 deg clearance flank, h = 0.6 P, flats (P - 0.6 P (tan7 + tan45))/2 = 0.16316 P; the root radius and allowances are not modelled",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 0.0001
+    },
+    "volume_mm3": 19631.082660727,
+    "what": "a modelled 1.5-8 buttress thread (ASME B1.9 basic profile, 7/45 deg) on a 1.5 in shaft, six turns"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 5916.276938815345,
+      "body_count": 1,
+      "edges": 87,
+      "faces": 31,
+      "vertices": 58,
+      "volume_mm3": 19631.08121588802
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 120,
+      "faces": 50,
+      "vertices": 72
+    }
+  },
+  "records": "014-external-buttress-asme-1.5-8.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b19"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5916.276938815345,
+      "body_count": 1,
+      "edges": 87,
+      "faces": 31,
+      "vertices": 58,
+      "volume_mm3": 19631.08121588802
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "screw_sweep",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a modelled 1.5-8 buttress thread (ASME B1.9 basic profile, 7/45 deg) on a 1.5 in shaft, six turns",
+  "why_not": []
+}

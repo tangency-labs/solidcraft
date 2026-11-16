@@ -1,0 +1,659 @@
+{
+  "area": "sweeps",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "sweep",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "frame": "follow",
+        "path": [
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                -30.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                -35.505001
+              ],
+              "start": [
+                0.0,
+                0.0,
+                -30.0
+              ]
+            }
+          }
+        ],
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "end": 6.283185307179586,
+              "radius": 5.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.7071067811865475,
+          0.0,
+          -0.7071067811865475
+        ],
+        "distance": 321.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                -113.49063838044087,
+                160.5,
+                -143.49063838044088
+              ],
+              "start": [
+                -113.49063838044087,
+                -160.5,
+                -143.49063838044088
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                113.49063838044087,
+                160.5,
+                83.49063838044087
+              ],
+              "start": [
+                -113.49063838044087,
+                160.5,
+                -143.49063838044088
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                113.49063838044087,
+                -160.5,
+                83.49063838044087
+              ],
+              "start": [
+                113.49063838044087,
+                160.5,
+                83.49063838044087
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -113.49063838044087,
+                -160.5,
+                -143.49063838044088
+              ],
+              "start": [
+                113.49063838044087,
+                -160.5,
+                83.49063838044087
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b1",
+        "b2"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b3"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    },
+    {
+      "inputs": [],
+      "op": "sweep",
+      "outputs": [
+        "b4"
+      ],
+      "params": {
+        "cap": true,
+        "frame": "follow",
+        "path": [
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                -30.0
+              ],
+              "start": [
+                -5.505001,
+                0.0,
+                -30.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                25.0,
+                0.0,
+                -30.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                -30.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                30.505001,
+                0.0,
+                -30.0
+              ],
+              "start": [
+                25.0,
+                0.0,
+                -30.0
+              ]
+            }
+          }
+        ],
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                -1.0,
+                0.0,
+                6.123233995736766e-17
+              ],
+              "center": [
+                -5.505001,
+                0.0,
+                -30.0
+              ],
+              "end": 6.283185307179586,
+              "radius": 5.0,
+              "reference": [
+                6.123233995736766e-17,
+                0.0,
+                1.0
+              ],
+              "start": 0.0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          -0.7071067811865475,
+          -0.0,
+          0.7071067811865475
+        ],
+        "distance": 321.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                -113.49063838044087,
+                -160.5,
+                -143.49063838044088
+              ],
+              "start": [
+                -113.49063838044087,
+                160.5,
+                -143.49063838044088
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                113.49063838044087,
+                -160.5,
+                83.49063838044087
+              ],
+              "start": [
+                -113.49063838044087,
+                -160.5,
+                -143.49063838044088
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                113.49063838044087,
+                160.5,
+                83.49063838044087
+              ],
+              "start": [
+                113.49063838044087,
+                -160.5,
+                83.49063838044087
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -113.49063838044087,
+                160.5,
+                -143.49063838044088
+              ],
+              "start": [
+                113.49063838044087,
+                160.5,
+                83.49063838044087
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b4",
+        "b5"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b7"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.7071067811865475,
+          0.7071067811865475,
+          0.0
+        ],
+        "distance": 321.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                -88.49063838044087,
+                113.49063838044087,
+                130.5
+              ],
+              "start": [
+                -88.49063838044087,
+                113.49063838044087,
+                -190.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                138.49063838044088,
+                -113.49063838044087,
+                130.5
+              ],
+              "start": [
+                -88.49063838044087,
+                113.49063838044087,
+                130.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                138.49063838044088,
+                -113.49063838044087,
+                -190.5
+              ],
+              "start": [
+                138.49063838044088,
+                -113.49063838044087,
+                130.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -88.49063838044087,
+                113.49063838044087,
+                -190.5
+              ],
+              "start": [
+                138.49063838044088,
+                -113.49063838044087,
+                -190.5
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b6",
+        "b7"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b8"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    },
+    {
+      "inputs": [
+        "b3",
+        "b8"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "op": "union"
+      }
+    },
+    {
+      "inputs": [],
+      "op": "sweep",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "cap": true,
+        "frame": "follow",
+        "path": [
+          {
+            "line": {
+              "end": [
+                25.0,
+                0.0,
+                -30.0
+              ],
+              "start": [
+                25.0,
+                -5.505001,
+                -30.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                25.0,
+                20.0,
+                -30.0
+              ],
+              "start": [
+                25.0,
+                0.0,
+                -30.0
+              ]
+            }
+          }
+        ],
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                -6.123233995736766e-17,
+                -1.0,
+                0.0
+              ],
+              "center": [
+                25.0,
+                -5.505001,
+                -30.0
+              ],
+              "end": 6.283185307179586,
+              "radius": 5.0,
+              "reference": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "start": 0.0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          -0.7071067811865475,
+          -0.7071067811865475,
+          -0.0
+        ],
+        "distance": 321.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                -88.49063838044087,
+                113.49063838044087,
+                -190.5
+              ],
+              "start": [
+                -88.49063838044087,
+                113.49063838044087,
+                130.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                138.49063838044088,
+                -113.49063838044087,
+                -190.5
+              ],
+              "start": [
+                -88.49063838044087,
+                113.49063838044087,
+                -190.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                138.49063838044088,
+                -113.49063838044087,
+                130.5
+              ],
+              "start": [
+                138.49063838044088,
+                -113.49063838044087,
+                -190.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -88.49063838044087,
+                113.49063838044087,
+                130.5
+              ],
+              "start": [
+                138.49063838044088,
+                -113.49063838044087,
+                130.5
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b10",
+        "b11"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b12"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b12"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b13"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "5323-sweep-circle-along-polyline-turning-in-two-planes",
+  "expected": {
+    "body_count": 1,
+    "method": "the section is symmetric about the path, so each mitred corner adds outside the wedge it removes inside: V = pi*5^2*(30+25+20) = 5890.486",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#5323"
+    ],
+    "volume_mm3": 5890.4862,
+    "what": "a circle r5 swept along a 3D polyline (30, 25, 20 mm) whose two corners turn in different planes: truck's solid was 0.64% short (5852.75 for 5890.49), with no warning"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 9,
+      "faces": 5,
+      "vertices": 6
+    }
+  },
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b13"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2513.2741228937934,
+      "body_count": 1,
+      "edges": 7,
+      "faces": 5,
+      "vertices": 4,
+      "volume_mm3": 5890.486225560711
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#5323"
+  ],
+  "traced_ops": [
+    "sweep",
+    "extrude",
+    "boolean",
+    "sweep",
+    "extrude",
+    "boolean",
+    "extrude",
+    "boolean",
+    "boolean",
+    "sweep",
+    "extrude",
+    "boolean",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a circle r5 swept along a 3D polyline (30, 25, 20 mm) whose two corners turn in different planes: truck's solid was 0.64% short (5852.75 for 5890.49), with no warning",
+  "why_not": []
+}

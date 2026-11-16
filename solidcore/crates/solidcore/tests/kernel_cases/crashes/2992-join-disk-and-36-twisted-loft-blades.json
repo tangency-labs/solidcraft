@@ -1,0 +1,1548 @@
+{
+  "area": "crashes",
+  "bodies": {
+    "b103": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b107": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b11": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b111": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b115": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b119": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b123": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b127": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b131": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b135": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b139": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b143": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b147": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b15": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b19": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b23": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b27": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b31": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b35": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b39": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b43": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b47": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b51": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b55": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b59": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b63": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b67": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b7": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b71": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b75": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b79": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b83": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b87": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b91": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b95": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b99": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b11"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b12"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b14"
+      ],
+      "params": {
+        "operand": 2
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b16"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b18"
+      ],
+      "params": {
+        "operand": 3
+      }
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b20"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b20"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b21"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b21"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b22"
+      ],
+      "params": {
+        "operand": 4
+      }
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b24"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b25"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b26"
+      ],
+      "params": {
+        "operand": 5
+      }
+    },
+    {
+      "inputs": [
+        "b27"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b28"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b28"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b29"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b29"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b30"
+      ],
+      "params": {
+        "operand": 6
+      }
+    },
+    {
+      "inputs": [
+        "b31"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b32"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b32"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b33"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b33"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b34"
+      ],
+      "params": {
+        "operand": 7
+      }
+    },
+    {
+      "inputs": [
+        "b35"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b36"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b36"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b37"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b37"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b38"
+      ],
+      "params": {
+        "operand": 8
+      }
+    },
+    {
+      "inputs": [
+        "b39"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b40"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b40"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b41"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b41"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b42"
+      ],
+      "params": {
+        "operand": 9
+      }
+    },
+    {
+      "inputs": [
+        "b43"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b44"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b44"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b45"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b45"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b46"
+      ],
+      "params": {
+        "operand": 10
+      }
+    },
+    {
+      "inputs": [
+        "b47"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b48"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b48"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b49"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b49"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b50"
+      ],
+      "params": {
+        "operand": 11
+      }
+    },
+    {
+      "inputs": [
+        "b51"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b52"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b52"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b53"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b53"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b54"
+      ],
+      "params": {
+        "operand": 12
+      }
+    },
+    {
+      "inputs": [
+        "b55"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b56"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b56"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b57"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b57"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b58"
+      ],
+      "params": {
+        "operand": 13
+      }
+    },
+    {
+      "inputs": [
+        "b59"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b60"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b60"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b61"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b61"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b62"
+      ],
+      "params": {
+        "operand": 14
+      }
+    },
+    {
+      "inputs": [
+        "b63"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b64"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b64"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b65"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b65"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b66"
+      ],
+      "params": {
+        "operand": 15
+      }
+    },
+    {
+      "inputs": [
+        "b67"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b68"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b68"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b69"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b69"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b70"
+      ],
+      "params": {
+        "operand": 16
+      }
+    },
+    {
+      "inputs": [
+        "b71"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b72"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b72"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b73"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b73"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b74"
+      ],
+      "params": {
+        "operand": 17
+      }
+    },
+    {
+      "inputs": [
+        "b75"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b76"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b76"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b77"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b77"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b78"
+      ],
+      "params": {
+        "operand": 18
+      }
+    },
+    {
+      "inputs": [
+        "b79"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b80"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b80"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b81"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b81"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b82"
+      ],
+      "params": {
+        "operand": 19
+      }
+    },
+    {
+      "inputs": [
+        "b83"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b84"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b84"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b85"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b85"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b86"
+      ],
+      "params": {
+        "operand": 20
+      }
+    },
+    {
+      "inputs": [
+        "b87"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b88"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b88"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b89"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b89"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b90"
+      ],
+      "params": {
+        "operand": 21
+      }
+    },
+    {
+      "inputs": [
+        "b91"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b92"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b92"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b93"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b93"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b94"
+      ],
+      "params": {
+        "operand": 22
+      }
+    },
+    {
+      "inputs": [
+        "b95"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b96"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b96"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b97"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b97"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b98"
+      ],
+      "params": {
+        "operand": 23
+      }
+    },
+    {
+      "inputs": [
+        "b99"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b100"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b100"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b101"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b101"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b102"
+      ],
+      "params": {
+        "operand": 24
+      }
+    },
+    {
+      "inputs": [
+        "b103"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b104"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b104"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b105"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b105"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b106"
+      ],
+      "params": {
+        "operand": 25
+      }
+    },
+    {
+      "inputs": [
+        "b107"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b108"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b108"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b109"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b109"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b110"
+      ],
+      "params": {
+        "operand": 26
+      }
+    },
+    {
+      "inputs": [
+        "b111"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b112"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b112"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b113"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b113"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b114"
+      ],
+      "params": {
+        "operand": 27
+      }
+    },
+    {
+      "inputs": [
+        "b115"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b116"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b116"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b117"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b117"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b118"
+      ],
+      "params": {
+        "operand": 28
+      }
+    },
+    {
+      "inputs": [
+        "b119"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b120"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b120"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b121"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b121"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b122"
+      ],
+      "params": {
+        "operand": 29
+      }
+    },
+    {
+      "inputs": [
+        "b123"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b124"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b124"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b125"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b125"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b126"
+      ],
+      "params": {
+        "operand": 30
+      }
+    },
+    {
+      "inputs": [
+        "b127"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b128"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b128"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b129"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b129"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b130"
+      ],
+      "params": {
+        "operand": 31
+      }
+    },
+    {
+      "inputs": [
+        "b131"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b132"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b132"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b133"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b133"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b134"
+      ],
+      "params": {
+        "operand": 32
+      }
+    },
+    {
+      "inputs": [
+        "b135"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b136"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b136"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b137"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b137"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b138"
+      ],
+      "params": {
+        "operand": 33
+      }
+    },
+    {
+      "inputs": [
+        "b139"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b140"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b140"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b141"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b141"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b142"
+      ],
+      "params": {
+        "operand": 34
+      }
+    },
+    {
+      "inputs": [
+        "b143"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b144"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b144"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b145"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b145"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b146"
+      ],
+      "params": {
+        "operand": 35
+      }
+    },
+    {
+      "inputs": [
+        "b147"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b148"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b148"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b149"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b149"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b150"
+      ],
+      "params": {
+        "operand": 36
+      }
+    },
+    {
+      "inputs": [
+        "b6",
+        "b10",
+        "b14",
+        "b18",
+        "b22",
+        "b26",
+        "b30",
+        "b34",
+        "b38",
+        "b42",
+        "b46",
+        "b50",
+        "b54",
+        "b58",
+        "b62",
+        "b66",
+        "b70",
+        "b74",
+        "b78",
+        "b82",
+        "b86",
+        "b90",
+        "b94",
+        "b98",
+        "b102",
+        "b106",
+        "b110",
+        "b114",
+        "b118",
+        "b122",
+        "b126",
+        "b130",
+        "b134",
+        "b138",
+        "b142",
+        "b146",
+        "b150"
+      ],
+      "op": "union_all",
+      "outputs": [
+        "b151"
+      ],
+      "params": {}
+    }
+  ],
+  "case": "2992-join-disk-and-36-twisted-loft-blades",
+  "expected": {
+    "body_count": 1,
+    "method": "each blade root is embedded in the disk, so the 37 bodies join into one connected solid; the join must finish with one valid closed solid",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#2992"
+    ],
+    "what": "join of a disk and a circular pattern of 36 twisted lofted blades (embedded 2.54 mm in the disk): blocks for minutes"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 549,
+      "faces": 185,
+      "vertices": 366
+    }
+  },
+  "records": "2992-join-disk-and-36-twisted-loft-blades.bodies.json.gz",
+  "result": [
+    {
+      "body": "HP compresseur 1 — disque",
+      "made": "b151"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1432256.0099661173,
+      "body_count": 1,
+      "edges": 543,
+      "faces": 183,
+      "vertices": 362,
+      "volume_mm3": 3538232.7515345346
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2992"
+  ],
+  "traced_ops": [
+    "revolve",
+    "loft",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "union_all"
+  ],
+  "ungraded": [],
+  "what": "join of a disk and a circular pattern of 36 twisted lofted blades (embedded 2.54 mm in the disk): blocks for minutes",
+  "why_not": []
+}

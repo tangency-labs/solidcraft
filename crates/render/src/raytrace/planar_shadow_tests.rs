@@ -27,7 +27,7 @@ fn spawned(triangle: Triangle, point: Vec3, scale: f64, direction: Vec3) -> Ray 
         geometric_normal: normal,
         front_face: hit.front_face,
         shading_normal: normal,
-        surface: crate::surface::OpaqueSurface::new(Vec3::new(0.5, 0.5, 0.5), 0.0, 0.7, 1.5).unwrap(),
+        surface: solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(0.5, 0.5, 0.5), 0.0, 0.7, 1.5).unwrap(),
         vertices: triangle.vertices(),
         barycentric: hit.barycentric,
     }

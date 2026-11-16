@@ -1,0 +1,864 @@
+{
+ "cases": [
+  {
+   "name": "ctor_merge_test_computed_tol",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:222 (SmMerge(ctx, b1, b2, 0.0, 20 deg))",
+   "inputs": {
+    "op": "construct",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "other": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "sphere.smb"
+     }
+    },
+    "tol": 0.0,
+    "ang": 0.3490658503988659
+   }
+  },
+  {
+   "name": "ctor_default_arguments",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:590 (SmMerge(ctx, b0, b1): tolerance and angle default to 0)",
+   "inputs": {
+    "op": "construct",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "sphere.smb"
+     }
+    },
+    "other": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "tol": 0.0,
+    "ang": 0.0
+   }
+  },
+  {
+   "name": "ctor_brep_test_1e-6",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2403 (SmMerge(ctx, prism, tool face, 1e-6, 20 deg))",
+   "inputs": {
+    "op": "construct",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "sphere.smb"
+     }
+    },
+    "other": {
+     "kind": "graph",
+     "brep": {
+      "kind": "face",
+      "surface": {
+       "plane": {
+        "o": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "n": [
+         0.0,
+         0.0,
+         1.0
+        ]
+       }
+      },
+      "dom": [
+       -2.0,
+       -2.0,
+       2.0,
+       2.0
+      ]
+     }
+    },
+    "tol": 1e-06,
+    "ang": 0.3490658503988659
+   }
+  },
+  {
+   "name": "ctor_sweep_test_angle_0_1",
+   "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:418 (SmMerge(ctx, b, temp, b->GetTolerance(), 0.1))",
+   "inputs": {
+    "op": "construct",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "other": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_circ.smb"
+     }
+    },
+    "tol": 1e-05,
+    "ang": 0.1
+   }
+  },
+  {
+   "name": "ctor_options_all_set",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:1913 (SmApiBooleanWithOptions passes an SmMergeOptions)",
+   "inputs": {
+    "op": "construct",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "other": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "tol": 0.001,
+    "ang": 0.3490658503988659,
+    "options": 31
+   }
+  },
+  {
+   "name": "ctor_options_none_set",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:1913 (SmApiBooleanWithOptions passes an SmMergeOptions)",
+   "inputs": {
+    "op": "construct",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "other": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "tol": 0.001,
+    "ang": 0.3490658503988659,
+    "options": 0
+   }
+  },
+  {
+   "name": "ctor_tol_exactly_eff_zero",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:96 (dApproxTol3d < SM_EFF_ZERO boundary: not computed)",
+   "inputs": {
+    "op": "construct",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "tol": 1e-12,
+    "ang": 0.0
+   }
+  },
+  {
+   "name": "ctor_tol_below_eff_zero",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:96 (dApproxTol3d < SM_EFF_ZERO boundary: computed)",
+   "inputs": {
+    "op": "construct",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "other": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "tol": 1e-12,
+    "ang": 0.0
+   }
+  },
+  {
+   "name": "ctor_negative_zero_angle",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:155 (dAngleTolRadians == 0.0 also holds for -0.0)",
+   "inputs": {
+    "op": "construct",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "tol": 1.0,
+    "ang": -0.0
+   }
+  },
+  {
+   "name": "ctor_nan_tolerances",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:96 (NaN compares false: kept, not computed)",
+   "inputs": {
+    "op": "construct",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "tol": "NaN",
+    "ang": "NaN"
+   }
+  },
+  {
+   "name": "ctor_huge_tolerances",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:96",
+   "inputs": {
+    "op": "construct",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "tol": 1e+300,
+    "ang": "-inf"
+   }
+  },
+  {
+   "name": "merge_edge_null_edgeuse",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:6670 (a null edge use succeeds with no edge)",
+   "inputs": {
+    "op": "merge_edge",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "wire",
+      "curve": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      },
+      "t0": 0.0,
+      "t1": 1.0
+     }
+    },
+    "other": {
+     "kind": "graph",
+     "brep": {
+      "kind": "wire",
+      "curve": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      },
+      "t0": 0.0,
+      "t1": 1.0
+     }
+    },
+    "edgeuse": -1
+   }
+  },
+  {
+   "name": "merge_edge_mated_wire",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:7566 (ProcessWiresAndShellVertices merges a mated wire edge)",
+   "inputs": {
+    "op": "merge_edge",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "wire",
+      "curve": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      },
+      "t0": 0.0,
+      "t1": 1.0
+     }
+    },
+    "other": {
+     "kind": "graph",
+     "brep": {
+      "kind": "wire",
+      "curve": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      },
+      "t0": 0.0,
+      "t1": 1.0
+     }
+    },
+    "edgeuse": 0,
+    "region": 0
+   }
+  },
+  {
+   "name": "merge_edge_mated_network_edges",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:7566",
+   "inputs": {
+    "op": "merge_edge",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "network"
+     }
+    },
+    "other": {
+     "kind": "graph",
+     "brep": {
+      "kind": "network"
+     }
+    },
+    "edgeuse": 3
+   }
+  },
+  {
+   "name": "merge_edge_unmated_wire_mated_vertices",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:6744 (MakeWireEdge between mated vertices)",
+   "inputs": {
+    "op": "merge_edge",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "wire",
+      "curve": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      },
+      "t0": 0.0,
+      "t1": 1.0
+     }
+    },
+    "other": {
+     "kind": "graph",
+     "brep": {
+      "kind": "wire",
+      "curve": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      },
+      "t0": 0.0,
+      "t1": 1.0
+     }
+    },
+    "edgeuse": 1,
+    "mates": {
+     "edges": [
+      -1
+     ]
+    }
+   }
+  },
+  {
+   "name": "merge_edge_unmated_vertices",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:6733 (MergeVertex makes shell vertices)",
+   "inputs": {
+    "op": "merge_edge",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "network"
+     }
+    },
+    "other": {
+     "kind": "graph",
+     "brep": {
+      "kind": "network"
+     }
+    },
+    "edgeuse": 2,
+    "mates": {
+     "edges": [
+      -1,
+      -1,
+      -1,
+      -1,
+      -1
+     ],
+     "vertices": [
+      -1,
+      -1,
+      -1,
+      -1
+     ]
+    }
+   }
+  },
+  {
+   "name": "make_faceuse_mated_face",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:6875 (an already mated face is only notified)",
+   "inputs": {
+    "op": "make_faceuse",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "other": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "faceuse": 0,
+    "new_faces": true,
+    "mates": {
+     "faces": [
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "make_faceuse_mated_face_mate_use",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:6862 (the face use on the infinite region's side is used)",
+   "inputs": {
+    "op": "make_faceuse",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "other": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "faceuse": 1,
+    "mates": {
+     "faces": [
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "make_faceuse_square_to_make_face",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:4367 (Boolean face copy: every vertex and edge already mated)",
+   "inputs": {
+    "op": "make_faceuse",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "other": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "faceuse": 0,
+    "new_faces": true
+   }
+  },
+  {
+   "name": "make_faceuse_circle_region_given",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:4367",
+   "inputs": {
+    "op": "make_faceuse",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_circ.smb"
+     }
+    },
+    "other": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_circ.smb"
+     }
+    },
+    "faceuse": 1,
+    "region": 0
+   }
+  },
+  {
+   "name": "make_faceuse_scrambled_vertices",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:7071 (no orientation matches the mated vertex: SM_ERR)",
+   "inputs": {
+    "op": "make_faceuse",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "other": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "faceuse": 0,
+    "mates": {
+     "vertices": [
+      2,
+      0,
+      3,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "make_faceuse_unmated_vertex",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:6965 (MergeVertex makes a shell vertex)",
+   "inputs": {
+    "op": "make_faceuse",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "other": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "faceuse": 0,
+    "mates": {
+     "vertices": [
+      0,
+      1,
+      2,
+      -1
+     ]
+    }
+   }
+  },
+  {
+   "name": "make_faceuse_sphere",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:4367 (closed loop orientation from tangents)",
+   "inputs": {
+    "op": "make_faceuse",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "sphere.smb"
+     }
+    },
+    "other": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "sphere.smb"
+     }
+    },
+    "faceuse": 0
+   }
+  },
+  {
+   "name": "merge_added_face_stitch_api",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:1185 (SmApiStitch(pBrep, pFace), here with a positive tolerance; see UB-167)",
+   "inputs": {
+    "op": "merge_added_face",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "tol": 0.001,
+    "face": 0
+   }
+  },
+  {
+   "name": "merge_added_topology_feature_executive",
+   "upstream_ref": "source/SMLib/src/SmFeatureExecutive.cpp:2127 (faces with their edges and vertices, flags passed explicitly)",
+   "inputs": {
+    "op": "merge_added_topology",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "plane_square.smb"
+     }
+    },
+    "tol": 0.001,
+    "faces": [
+     0
+    ],
+    "edges": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "vertices": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "flags": [
+     false,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "merge_added_topology_gathered_lists",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:5428 (null edge and vertex lists are gathered from the faces)",
+   "inputs": {
+    "op": "merge_added_topology",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "file",
+      "file": "sphere.smb"
+     }
+    },
+    "tol": 0.001,
+    "faces": [
+     0
+    ],
+    "flags": [
+     false,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "merge_added_topology_nothing_added",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:5474 (nothing to add in)",
+   "inputs": {
+    "op": "merge_added_topology",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "network"
+     }
+    },
+    "tol": 0.001,
+    "faces": [],
+    "edges": [],
+    "vertices": [],
+    "flags": [
+     true,
+     false,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "merge_added_topology_wire_subset",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:5499 (master lists are the rest of the B-rep)",
+   "inputs": {
+    "op": "merge_added_topology",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "network"
+     }
+    },
+    "tol": 0.1,
+    "edges": [
+     0,
+     2
+    ],
+    "flags": [
+     true,
+     false,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "merge_added_topology_vertices_glue",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:5735 (StitchVertexPairs within 4x the tolerance)",
+   "inputs": {
+    "op": "merge_added_topology",
+    "primary": {
+     "kind": "graph",
+     "brep": {
+      "kind": "network"
+     }
+    },
+    "tol": 10.0,
+    "faces": [],
+    "edges": [],
+    "vertices": [
+     0,
+     1
+    ],
+    "flags": [
+     false,
+     true,
+     true,
+     false,
+     true
+    ]
+   }
+  }
+ ]
+}

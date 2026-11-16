@@ -1,0 +1,538 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/10965",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/11360",
+ "test": "none: open on SolidCraft's truck kernel (kernel work was paused under tangency-labs/solidcraft#3992); geometry is the report's (torus 35.5 / 5 at the origin, a box cut of y < 0, legs of diameter 10 along -y from the cut faces; length 30 as in the triage's reproduction) and #10966's script lines, replayed on 0.29.0 with solidcraft-cli",
+ "summary": "Joining a cylinder of a torus tube's own diameter onto the cut face of a half torus, coaxial with the tube there, failed on SolidCraft's truck kernel (#10965): the leg's wall and the tube touch tangentially along the cut circle, and the leg's base is the cut face's disc. The report (it names no version): solid.torus major 35.5, minor 5.0 at the origin, a solid.box cut removing the half with y < 0, then two solid.cylinder joins of diameter 10 starting on the ring's cut faces and running along -y; the first join ran about 17 minutes and failed with 'step 3 (solid.cylinder): boolean Union: the operation failed: no result', while legs of diameter 9.9 starting 0.5 mm inside the ring built in seconds. The triage reproduced it on 0.30.1 (1063 s) with legs of length 30 from (+-35.5, 0, 0); the report gives no length, and these cases take 30. #10966 is the same union in the reporter's larger script, at its own place: the torus centred at (115.5, 67.881, 50) and a leg of diameter 10 and height 64.381 starting 0.5 mm inside the ring's end, so it overlaps the ring; that join fails with 'no result' too. Replayed with solidcraft-cli 0.29.0 (truck): the first leg's join fails after 2287 s with 'boolean Union: implausible result volume 11052.2932' (the exact union is 11115.4684), #10966's after 51 s with 'no result'; the ring alone builds after a 'Boolean retry' of the box cut, and the 9.9 legs build in seconds. Not fixed on truck; the `pr` link is SolidCraft's move to solidcore as its only kernel (tangency-labs/solidcraft#11360). The cases are revolve (the torus: the circle of radius 5 at x = 35.5 in the XZ plane turned a full turn about Z, as in 2005-closed-sweep-cuts-torus.json), box, difference, cylinder and union steps; one more makes the ring by one half-turn revolve instead of the cut. Volumes: the half torus pi^2*35.5*5^2 (Pappus), a leg outside the ring pi*r^2*L, and for #10966's leg the sliver it adds where it overlaps the ring, int_0^0.5 int_-5^5 min(2w, 35.5 + w - sqrt((35.5 + w)^2 - t^2)) dz dt with w = sqrt(25 - z^2) (in the plane y = t the leg's chord at height z is |x| in [35.5 - w, 35.5 + w] and the ring's [sqrt((35.5 - w)^2 - t^2), sqrt((35.5 + w)^2 - t^2)]), 0.0052885 mm^3 by scipy dblquad and Gauss-Legendre (to 1e-10). Checked by a randomised QMC over the CSG (scrambled Sobol, 64 replicates of 2^22 points) within 1.13 of its standard errors for four cases (the half-turn revolve's solid is the one-leg case's, so it shares that check); for #10966's the whole body sits at -3.33 (other seed sets -1.39, +0.89, +1.83), so it is also checked in its two parts, each sampled in its own box: the ring within 1.07 and the leg outside the ring within 1.71 of their standard errors (0.012 mm^3), and the sliver alone within 0.54 (2e-5 mm^3). Every case expects one lump, a manifold solid and its volume within 0.01 mm^3, #10966's within 0.001 mm^3 (a fifth of its sliver, so a union that drops the sliver fails). Expected values are analytic; nothing comes from a commercial CAD product.",
+ "cases": [
+  {
+   "name": "half_torus_alone",
+   "note": "The report's ring before the legs: the torus (the circle of radius 5 at x = 35.5 in the XZ plane, turned a full turn about Z) less the box that holds its half with y < 0. On SolidCraft 0.29.0 (truck) the cut builds after 'Boolean retry: tool displacement 2.087304e-4 mm' (8758.15 meshed).",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "torus",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        35.5,
+        0.0
+       ],
+       "radius": 5.0
+      }
+     ],
+     "plane": "xz",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0
+    },
+    {
+     "op": "box",
+     "id": "cutter",
+     "origin": [
+      -45.5,
+      -45.5,
+      -10.0
+     ],
+     "size": [
+      91.0,
+      45.5,
+      20.0
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "torus",
+     "b": "cutter"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 8759.273905967,
+     "tol": 0.01,
+     "formula": "pi^2*35.5*5^2 (the half torus, Pappus); tol 0.01 mm^3"
+    }
+   }
+  },
+  {
+   "name": "one_leg_on_the_cut_face",
+   "note": "The report's failing step: a leg of diameter 10 and length 30 joined on the ring's cut face at x = -35.5, along -y, coaxial with the tube there, so its wall and the tube touch tangentially along the cut circle and its base is the cut face's disc. On SolidCraft 0.29.0 (truck) the join fails after 2287 s: 'step 3 (solid.cylinder): boolean Union: implausible result volume 11052.2932' (in the report and in the triage's reproduction on 0.30.1: 'no result' after about 17 minutes).",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "torus",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        35.5,
+        0.0
+       ],
+       "radius": 5.0
+      }
+     ],
+     "plane": "xz",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0
+    },
+    {
+     "op": "box",
+     "id": "cutter",
+     "origin": [
+      -45.5,
+      -45.5,
+      -10.0
+     ],
+     "size": [
+      91.0,
+      45.5,
+      20.0
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "ring",
+     "a": "torus",
+     "b": "cutter"
+    },
+    {
+     "op": "cylinder",
+     "id": "leg",
+     "origin": [
+      -35.5,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "radius": 5.0,
+     "height": 30.0
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "ring",
+     "b": "leg"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 11115.468396159,
+     "tol": 0.01,
+     "formula": "pi^2*35.5*5^2 (the half torus, Pappus) + pi*5^2*30 (the leg); tol 0.01 mm^3"
+    }
+   }
+  },
+  {
+   "name": "u_shape_both_legs",
+   "note": "The report's U-bolt: legs on both cut faces (x = -35.5, then x = 35.5), joined one after the other.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "torus",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        35.5,
+        0.0
+       ],
+       "radius": 5.0
+      }
+     ],
+     "plane": "xz",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0
+    },
+    {
+     "op": "box",
+     "id": "cutter",
+     "origin": [
+      -45.5,
+      -45.5,
+      -10.0
+     ],
+     "size": [
+      91.0,
+      45.5,
+      20.0
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "ring",
+     "a": "torus",
+     "b": "cutter"
+    },
+    {
+     "op": "cylinder",
+     "id": "leg1",
+     "origin": [
+      -35.5,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "radius": 5.0,
+     "height": 30.0
+    },
+    {
+     "op": "union",
+     "id": "ring_and_leg1",
+     "a": "ring",
+     "b": "leg1"
+    },
+    {
+     "op": "cylinder",
+     "id": "leg2",
+     "origin": [
+      35.5,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "radius": 5.0,
+     "height": 30.0
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "ring_and_leg1",
+     "b": "leg2"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 13471.662886351,
+     "tol": 0.01,
+     "formula": "pi^2*35.5*5^2 (the half torus, Pappus) + 2*pi*5^2*30 (the legs); tol 0.01 mm^3"
+    }
+   }
+  },
+  {
+   "name": "one_leg_on_a_half_turn_revolve",
+   "note": "Not in the report: the ring made by one revolve of a half turn about Z (from +x through +y), so its end at x = -35.5 is the revolve's cap rather than a box cut's face; the same leg joined on it.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "ring",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        35.5,
+        0.0
+       ],
+       "radius": 5.0
+      }
+     ],
+     "plane": "xz",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 180.0
+    },
+    {
+     "op": "cylinder",
+     "id": "leg",
+     "origin": [
+      -35.5,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "radius": 5.0,
+     "height": 30.0
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "ring",
+     "b": "leg"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 11115.468396159,
+     "tol": 0.01,
+     "formula": "pi^2*35.5*5^2 (the half torus, Pappus) + pi*5^2*30 (the leg); tol 0.01 mm^3"
+    }
+   }
+  },
+  {
+   "name": "ubolt_leg_from_inside_the_ring_end",
+   "note": "#10966: the reporter's script at its own place, the torus centred at (115.5, 67.881, 50), the box (70, 22.381, 40) 91 x 45.5 x 20 cutting the half with y < 67.881, and the leg of diameter 10 and height 64.381 along -y from (80, 68.381, 50), 0.5 mm inside the ring's end, so it overlaps the ring by 0.5 mm. Over that overlap the straight leg leaves the curving tube on its outer side by up to 0.5^2/(2*35.5) = 0.0035 mm (at the leg's top and bottom), a sliver of 0.0053 mm^3. Its wall crosses the tube along two curves near its top and bottom (z = 50 +- 5) that start on the cut circle, where the leg's wall and the tube touch tangentially. On SolidCraft 0.29.0 (truck) the join fails after 51 s: 'step 3 (solid.cylinder): boolean Union: the operation failed: no result'.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "torus",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        35.5,
+        0.0
+       ],
+       "radius": 5.0
+      }
+     ],
+     "plane": "xz",
+     "origin": [
+      115.5,
+      67.881,
+      50.0
+     ],
+     "axis_point": [
+      115.5,
+      67.881,
+      50.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0
+    },
+    {
+     "op": "box",
+     "id": "cutter",
+     "origin": [
+      70.0,
+      22.381,
+      40.0
+     ],
+     "size": [
+      91.0,
+      45.5,
+      20.0
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "ring",
+     "a": "torus",
+     "b": "cutter"
+    },
+    {
+     "op": "cylinder",
+     "id": "leg",
+     "origin": [
+      80.0,
+      68.381,
+      50.0
+     ],
+     "axis": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "radius": 5.0,
+     "height": 64.381
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "ring",
+     "b": "leg"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 13776.481202106,
+     "tol": 0.001,
+     "formula": "pi^2*35.5*5^2 (the half torus, Pappus) + pi*5^2*63.881 (the leg below the cut plane) + 0.0052885404 (the leg outside the ring over the 0.5 mm overlap: int_0^0.5 int_-5^5 min(2w, 35.5 + w - sqrt((35.5 + w)^2 - t^2)) dz dt, w = sqrt(25 - z^2)); tol 0.001 mm^3 (a fifth of the sliver, so a union that drops the sliver fails; 7 times the 1e-8 relative accuracy of the volume integral)"
+    }
+   }
+  },
+  {
+   "name": "thinner_legs_from_inside_the_ring",
+   "note": "The report's control: legs of diameter 9.9 and length 30, starting 0.5 mm inside the ring (from y = 0.5), at x = -35.5 then x = 35.5; over the overlap they lie inside the tube. On SolidCraft 0.29.0 (truck) both joins build (13299.05 meshed).",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "torus",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        35.5,
+        0.0
+       ],
+       "radius": 5.0
+      }
+     ],
+     "plane": "xz",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0
+    },
+    {
+     "op": "box",
+     "id": "cutter",
+     "origin": [
+      -45.5,
+      -45.5,
+      -10.0
+     ],
+     "size": [
+      91.0,
+      45.5,
+      20.0
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "ring",
+     "a": "torus",
+     "b": "cutter"
+    },
+    {
+     "op": "cylinder",
+     "id": "leg1",
+     "origin": [
+      -35.5,
+      0.5,
+      0.0
+     ],
+     "axis": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "radius": 4.95,
+     "height": 30.0
+    },
+    {
+     "op": "union",
+     "id": "ring_and_leg1",
+     "a": "ring",
+     "b": "leg1"
+    },
+    {
+     "op": "cylinder",
+     "id": "leg2",
+     "origin": [
+      35.5,
+      0.5,
+      0.0
+     ],
+     "axis": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "radius": 4.95,
+     "height": 30.0
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "ring_and_leg1",
+     "b": "leg2"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 13300.909471647,
+     "tol": 0.01,
+     "formula": "pi^2*35.5*5^2 (the half torus, Pappus) + 2*pi*4.95^2*29.5 (the legs below the cut plane; above it they lie inside the tube); tol 0.01 mm^3"
+    }
+   }
+  }
+ ]
+}

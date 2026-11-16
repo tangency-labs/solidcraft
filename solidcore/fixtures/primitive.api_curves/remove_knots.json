@@ -1,0 +1,528 @@
+{
+ "cases": [
+  {
+   "name": "remove_knots_upstream_line",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1122",
+   "inputs": {
+    "op": "remove_knots",
+    "curve": {
+     "op": "canonical",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ],
+      [
+       2,
+       0,
+       0
+      ]
+     ],
+     "knots": [
+      0,
+      0.5,
+      1
+     ],
+     "mults": [
+      2,
+      1,
+      2
+     ],
+     "degree": 1,
+     "form": 6
+    }
+   }
+  },
+  {
+   "name": "remove_knots_cubic_line",
+   "inputs": {
+    "op": "remove_knots",
+    "curve": {
+     "op": "canonical",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ],
+      [
+       2,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       4,
+       0,
+       0
+      ]
+     ],
+     "knots": [
+      0,
+      0.5,
+      1
+     ],
+     "mults": [
+      4,
+      1,
+      4
+     ],
+     "degree": 3,
+     "form": 6
+    }
+   }
+  },
+  {
+   "name": "remove_knots_kinked_polyline",
+   "inputs": {
+    "op": "remove_knots",
+    "curve": {
+     "op": "canonical",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ],
+      [
+       1,
+       1,
+       0
+      ]
+     ],
+     "knots": [
+      0,
+      0.5,
+      1
+     ],
+     "mults": [
+      2,
+      1,
+      2
+     ],
+     "degree": 1,
+     "form": 6
+    }
+   }
+  },
+  {
+   "name": "remove_knots_nearly_straight",
+   "inputs": {
+    "op": "remove_knots",
+    "curve": {
+     "op": "canonical",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       1e-07,
+       0
+      ],
+      [
+       2,
+       0,
+       0
+      ]
+     ],
+     "knots": [
+      0,
+      0.5,
+      1
+     ],
+     "mults": [
+      2,
+      1,
+      2
+     ],
+     "degree": 1,
+     "form": 6
+    }
+   }
+  },
+  {
+   "name": "remove_knots_bent_beyond_tol",
+   "inputs": {
+    "op": "remove_knots",
+    "curve": {
+     "op": "canonical",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       1e-05,
+       0
+      ],
+      [
+       2,
+       0,
+       0
+      ]
+     ],
+     "knots": [
+      0,
+      0.5,
+      1
+     ],
+     "mults": [
+      2,
+      1,
+      2
+     ],
+     "degree": 1,
+     "form": 6
+    }
+   }
+  },
+  {
+   "name": "remove_knots_double_knot",
+   "inputs": {
+    "op": "remove_knots",
+    "curve": {
+     "op": "canonical",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ],
+      [
+       2,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       4,
+       0,
+       0
+      ]
+     ],
+     "knots": [
+      0,
+      0.5,
+      1
+     ],
+     "mults": [
+      3,
+      2,
+      3
+     ],
+     "degree": 2,
+     "form": 6
+    }
+   }
+  },
+  {
+   "name": "remove_knots_rational",
+   "inputs": {
+    "op": "remove_knots",
+    "curve": {
+     "op": "canonical",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ],
+      [
+       2,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ]
+     ],
+     "knots": [
+      0,
+      0.4,
+      1
+     ],
+     "mults": [
+      3,
+      1,
+      3
+     ],
+     "degree": 2,
+     "form": 6,
+     "weights": [
+      1,
+      2,
+      2,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "remove_knots_bezier",
+   "inputs": {
+    "op": "remove_knots",
+    "curve": {
+     "op": "canonical",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       0
+      ],
+      [
+       3,
+       2,
+       1
+      ],
+      [
+       4,
+       0,
+       0
+      ]
+     ],
+     "knots": [
+      0,
+      1
+     ],
+     "mults": [
+      4,
+      4
+     ],
+     "degree": 3,
+     "form": 6
+    }
+   }
+  },
+  {
+   "name": "remove_knots_line_segment",
+   "inputs": {
+    "op": "remove_knots",
+    "curve": {
+     "op": "line_segment",
+     "start": [
+      0,
+      0,
+      0
+     ],
+     "end": [
+      3,
+      4,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "remove_knots_line",
+   "inputs": {
+    "op": "remove_knots",
+    "curve": {
+     "op": "line",
+     "start": [
+      1,
+      2,
+      3
+     ],
+     "direction": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "remove_knots_circle",
+   "inputs": {
+    "op": "remove_knots",
+    "curve": {
+     "op": "circle",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "radius": 2
+    }
+   }
+  },
+  {
+   "name": "remove_knots_analytic_circle",
+   "inputs": {
+    "op": "remove_knots",
+    "curve": {
+     "op": "analytic_circle",
+     "center": [
+      1,
+      1,
+      0
+     ],
+     "radius": 3
+    }
+   }
+  },
+  {
+   "name": "remove_knots_ellipse",
+   "inputs": {
+    "op": "remove_knots",
+    "curve": {
+     "op": "ellipse",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius1": 4,
+     "radius2": 1
+    }
+   }
+  },
+  {
+   "name": "remove_knots_arc",
+   "inputs": {
+    "op": "remove_knots",
+    "curve": {
+     "op": "arc",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "start_deg": 10,
+     "end_deg": 250
+    }
+   }
+  },
+  {
+   "name": "remove_knots_helix",
+   "inputs": {
+    "op": "remove_knots",
+    "curve": {
+     "op": "helix",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "height": 10,
+     "radius_start": 2,
+     "radius_end": 2,
+     "num_turns": 3,
+     "tolerance": 0.001
+    }
+   }
+  },
+  {
+   "name": "remove_knots_cubic_curve",
+   "inputs": {
+    "op": "remove_knots",
+    "curve": {
+     "op": "curve",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ],
+      [
+       2,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       4,
+       0,
+       0
+      ],
+      [
+       5,
+       0,
+       0
+      ],
+      [
+       6,
+       0,
+       0
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "remove_knots_failed_creation",
+   "inputs": {
+    "op": "remove_knots",
+    "curve": {
+     "op": "line_segment",
+     "start": [
+      0,
+      0,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      0
+     ]
+    }
+   }
+  }
+ ]
+}

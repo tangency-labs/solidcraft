@@ -1,0 +1,6270 @@
+{
+  "cases": [
+    {
+      "name": "ray_empty_boundary_vertex_0",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_1",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_2",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_3",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_4",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_5",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_6",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_7",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_8",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_9",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_10",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_11",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_12",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_13",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_14",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_15",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_16",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_17",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_18",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_19",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_20",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_21",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_22",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_23",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_24",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_25",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_26",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_27",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_28",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_29",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_30",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_31",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_32",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_33",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_34",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_35",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_36",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_37",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_38",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_39",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_40",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_41",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_42",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_43",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_44",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_45",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_46",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_vertex_47",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_48",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_49",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_50",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_51",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_52",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_53",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_54",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_55",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_56",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_57",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_58",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_59",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_60",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_61",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_62",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_63",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_64",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_65",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_66",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_67",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_68",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_69",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_70",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_71",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_72",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_73",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_74",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_75",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_76",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_77",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_78",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_79",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_80",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_81",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_82",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_83",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_84",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_85",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_86",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_87",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_88",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_89",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_90",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_91",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_92",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_93",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_94",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_wire_95",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_96",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_97",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_98",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_99",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_100",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_101",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_102",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_103",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_104",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_105",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_106",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_107",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_108",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_109",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_110",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_111",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_112",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_113",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_114",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_115",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_116",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_117",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_118",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_119",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_120",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_121",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_122",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_123",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_124",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_125",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_126",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_127",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            10000000000.0,
+            10000000000.0,
+            10000000000.0
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_128",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_129",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_130",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_131",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            0,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_132",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_133",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_134",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_135",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_136",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_137",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_138",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_139",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_140",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 0.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_141",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": -1.0
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_142",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1e-09
+        }
+      }
+    },
+    {
+      "name": "ray_empty_boundary_face_143",
+      "upstream_ref": "SmShell.cpp:592 RayFire, native sized-ray unitization and retained point-classification state",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            -3,
+            4,
+            -5
+          ],
+          "direction": [
+            1e-14,
+            0,
+            0
+          ],
+          "tolerance": 1e-07,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "ray_default_bound_vertex",
+      "upstream_ref": "SmShell.cpp:592 RayFire default Brep.CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": null
+        }
+      }
+    },
+    {
+      "name": "ray_default_bound_wire",
+      "upstream_ref": "SmShell.cpp:592 RayFire default Brep.CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": null
+        }
+      }
+    },
+    {
+      "name": "ray_default_bound_face",
+      "upstream_ref": "SmShell.cpp:592 RayFire default Brep.CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": null
+        }
+      }
+    },
+    {
+      "name": "ray_closed_Mouse.smb_147",
+      "upstream_ref": "SmShell.cpp:592 RayFire on real upstream file B-reps; nonempty boundary shape remains topology.face_p2 dependency",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1000.0
+        }
+      }
+    },
+    {
+      "name": "ray_closed_Mouse.smb_148",
+      "upstream_ref": "SmShell.cpp:592 RayFire on real upstream file B-reps; nonempty boundary shape remains topology.face_p2 dependency",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            -1,
+            -2,
+            -3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1000.0
+        }
+      }
+    },
+    {
+      "name": "ray_closed_Mouse.smb_149",
+      "upstream_ref": "SmShell.cpp:592 RayFire on real upstream file B-reps; nonempty boundary shape remains topology.face_p2 dependency",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "ray": {
+          "start": [
+            100,
+            100,
+            100
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1000.0
+        }
+      }
+    },
+    {
+      "name": "ray_closed_Mouse.smb_150",
+      "upstream_ref": "SmShell.cpp:592 RayFire on real upstream file B-reps; nonempty boundary shape remains topology.face_p2 dependency",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "ray": {
+          "start": [
+            100,
+            100,
+            100
+          ],
+          "direction": [
+            -1,
+            -2,
+            -3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1000.0
+        }
+      }
+    },
+    {
+      "name": "ray_closed_box_with_large_fillet.smb_151",
+      "upstream_ref": "SmShell.cpp:592 RayFire on real upstream file B-reps; nonempty boundary shape remains topology.face_p2 dependency",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1000.0
+        }
+      }
+    },
+    {
+      "name": "ray_closed_box_with_large_fillet.smb_152",
+      "upstream_ref": "SmShell.cpp:592 RayFire on real upstream file B-reps; nonempty boundary shape remains topology.face_p2 dependency",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            -1,
+            -2,
+            -3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1000.0
+        }
+      }
+    },
+    {
+      "name": "ray_closed_box_with_large_fillet.smb_153",
+      "upstream_ref": "SmShell.cpp:592 RayFire on real upstream file B-reps; nonempty boundary shape remains topology.face_p2 dependency",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "ray": {
+          "start": [
+            100,
+            100,
+            100
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1000.0
+        }
+      }
+    },
+    {
+      "name": "ray_closed_box_with_large_fillet.smb_154",
+      "upstream_ref": "SmShell.cpp:592 RayFire on real upstream file B-reps; nonempty boundary shape remains topology.face_p2 dependency",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "ray": {
+          "start": [
+            100,
+            100,
+            100
+          ],
+          "direction": [
+            -1,
+            -2,
+            -3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1000.0
+        }
+      }
+    },
+    {
+      "name": "ray_closed_Endcap.smb_155",
+      "upstream_ref": "SmShell.cpp:592 RayFire on real upstream file B-reps; nonempty boundary shape remains topology.face_p2 dependency",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1000.0
+        }
+      }
+    },
+    {
+      "name": "ray_closed_Endcap.smb_156",
+      "upstream_ref": "SmShell.cpp:592 RayFire on real upstream file B-reps; nonempty boundary shape remains topology.face_p2 dependency",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "ray": {
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "direction": [
+            -1,
+            -2,
+            -3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1000.0
+        }
+      }
+    },
+    {
+      "name": "ray_closed_Endcap.smb_157",
+      "upstream_ref": "SmShell.cpp:592 RayFire on real upstream file B-reps; nonempty boundary shape remains topology.face_p2 dependency",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "ray": {
+          "start": [
+            100,
+            100,
+            100
+          ],
+          "direction": [
+            1,
+            2,
+            3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1000.0
+        }
+      }
+    },
+    {
+      "name": "ray_closed_Endcap.smb_158",
+      "upstream_ref": "SmShell.cpp:592 RayFire on real upstream file B-reps; nonempty boundary shape remains topology.face_p2 dependency",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "ray": {
+          "start": [
+            100,
+            100,
+            100
+          ],
+          "direction": [
+            -1,
+            -2,
+            -3
+          ],
+          "tolerance": 1e-07,
+          "radius": 1000.0
+        }
+      }
+    }
+  ]
+}

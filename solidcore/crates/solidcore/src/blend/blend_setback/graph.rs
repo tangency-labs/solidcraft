@@ -1,0 +1,997 @@
+//! The fill of a corner as a graph over the corner's axis (the fork's `sm_SbGraphG1`,
+//! `sm_SbFillFrom`; tangency-labs/smlib 590a7f3, 08d4b02, f1d81f4; smlib#104), built for
+//! either order ([`graph_gk`]). [`super::fill_hole`] takes it for G1 ([`graph_g1`]); a G2
+//! fill keeps the least-energy construction until the graph's certificate meets the seams
+//! where G2 forces `K = 0` (tangency-labs/solidcore#2347).
+//!
+//! The fill keeps the setback split's layout and its continuity by construction, of order k
+//! at the rounds and between its own parts and of order `kf <= k` at the faces
+//! ([`super::FillOrders`]: the rounds' rows 0 .. k, Hahn's connecting map to order k, the
+//! faces' columns 0 .. kf: a setback patch is of degree `2k + 1` across), but every patch is a graph over the plane
+//! square to the corner's axis e (into the material at a convex corner, into the void at a
+//! concave one): the interior map is `F = xi_1 a_1 + xi_2 a_2 + h(xi) e` over the projection
+//! of the base points, and each setback patch's projection along e is fixed by its round's
+//! rows, its speed off the round and F's projection; only heights along e are free. Each
+//! patch's `l`, `m`, `n` are then affine in the heights, and the side its normal faces, `o`,
+//! depends on the projection only: certified of one sign, or the fill folds and is refused.
+//! The body stays convex where `s [[l, m], [m, n]]` is positive semidefinite on every patch;
+//! linear sufficient conditions on the Bernstein coefficient matrices of the patches' pieces
+//! (sector conditions over directions on a half turn) hold the heights to it, by the dual
+//! active-set method ([`super::qp`]), at degree 9 first (proven infeasible there, at every
+//! lower degree: the search stops), then up from the least degree, each result certified
+//! ([`super::certify::certified_convex`]) before it is taken. Nothing in this depends on the
+//! order (`super::convexity`): at order 2 the rows a round or a face fixes (where `K = 0`
+//! along a seam with a cylinder or a plane) carry no free height and are left to the
+//! certificate, which checks them to `1e-12` of their scale.
+//!
+//! Deviations: the fork's `Probe *` is `Option<&mut Probe>`; its `Fill::m_lSolves` and
+//! `m_bUncertified` are [`super::FillStats`]. A probe that asks neither the fill nor its
+//! margin answers feasibility with an empty fill, as the fork's leaves `rFill` empty.
+
+use super::certify::{
+    affine_net, certified_convex, net_surface, sides_on_planes, t_make, AffinePatch,
+};
+use super::convexity::{patch_curvatures, sector_conditions, sector_rows, SectorConditions};
+use super::qp::{dual_qp_rows_with_stats, dual_qp_source, QpOutcome, QpStats};
+use super::{
+    affine_solutions, along_line, axpy, bern_elevate, bern_mul, binomial, el, el_mut, el_ref,
+    monomials, over_patch, second, sm_err, smax, tensor_elevate, Face, Fill, FillOrders, FillStats,
+    Hom, Net, Probe, Refusal, Round, Tensor, GW, GX, HOM_ZERO,
+};
+use crate::error::{Result, SolidError};
+use crate::geom::vector3d::sqrt;
+use crate::math::{Point3, Vec3, PI};
+
+/// `SM_SB_GRAPH_DEPTH`: the certificate's halvings.
+pub(super) const GRAPH_DEPTH: usize = 6;
+
+/// A 2D point or vector (`SmPoint2d`, `SmVector2d`).
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct P2 {
+    pub x: f64,
+    pub y: f64,
+}
+
+/// `sm_SbFillFrom`: the fill's surfaces from its nets.
+pub(super) fn fill_from(
+    nets: &[Net],
+    round: &[usize],
+    face: &[usize],
+    rev: &[bool],
+    degree: usize,
+) -> Result<Fill> {
+    let mut patches = Vec::with_capacity(nets.len());
+    for net in nets {
+        patches.push(net_surface(net)?);
+    }
+    Ok(Fill {
+        patches,
+        round: round.to_vec(),
+        face: face.to_vec(),
+        reversed: rev.to_vec(),
+        degree,
+    })
+}
+
+/// The solution of the 3 x 3 system `A x = b` by Cramer's rule, `None` where
+/// `|det A| <= 1e-12` (the fork's corner vertex: the faces' planes' common point, least
+/// squares; `sm_SbGraphG1` and `sm_SbModelRounds` alike).
+pub(super) fn faces_common_point(faces: &[Face]) -> Option<Vec3> {
+    let mut a = [[0.0; 3]; 3];
+    let mut b = [0.0; 3];
+    for face in faces {
+        let nrm = face.normal;
+        let c = [nrm.x, nrm.y, nrm.z];
+        let d = nrm.dot(face.point);
+        for ((ai, bi), &ci) in a.iter_mut().zip(b.iter_mut()).zip(&c) {
+            for (aij, &cj) in ai.iter_mut().zip(&c) {
+                *aij += ci * cj;
+            }
+            *bi += ci * d;
+        }
+    }
+    let det3 = |m: &[[f64; 3]; 3]| {
+        m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+            - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+    };
+    let det = det3(&a);
+    if !(det.abs() > 1.0e-12) {
+        return None;
+    }
+    let mut x = [0.0; 3];
+    for (k, xk) in x.iter_mut().enumerate() {
+        let mut m = [[0.0; 3]; 3];
+        for ((mi, ai), &bi) in m.iter_mut().zip(&a).zip(&b) {
+            for (j, (mij, &aij)) in mi.iter_mut().zip(ai).enumerate() {
+                *mij = if j == k { bi } else { aij };
+            }
+        }
+        *xk = det3(&m) / det;
+    }
+    Some(Vec3::new(x[0], x[1], x[2]))
+}
+
+/// A face point snapped onto its plane: `h` moved along the normal by its offset, and a
+/// coordinate set exactly where the normal is an axis.
+fn snap(h: &mut Hom, face: &Face) {
+    let nrm = face.normal;
+    let off = nrm.x * h[0] + nrm.y * h[1] + nrm.z * h[2] - nrm.dot(face.point) * h[3];
+    h[0] -= off * nrm.x;
+    h[1] -= off * nrm.y;
+    h[2] -= off * nrm.z;
+    snap_axes(h, face);
+}
+
+/// The coordinates of `h` set exactly to the face's point where its normal is an axis.
+fn snap_axes(h: &mut Hom, face: &Face) {
+    let nrm = face.normal;
+    let w = h[3];
+    for (x, hx) in h.iter_mut().take(3).enumerate() {
+        if nrm.component(x).abs() == 1.0 {
+            *hx = face.point.component(x) * w;
+        }
+    }
+}
+
+/// The offset of `h` from the face's plane (homogeneous).
+fn offset(h: &Hom, face: &Face) -> f64 {
+    let nrm = face.normal;
+    nrm.x * h[0] + nrm.y * h[1] + nrm.z * h[2] - nrm.dot(face.point) * h[3]
+}
+
+/// What the corner's G1 fill is built from (`sm_SbGraphG1`'s arguments).
+pub(super) struct GraphInput<'a, 'r> {
+    /// `crWorldFaces`.
+    pub faces: &'a [Face],
+    /// `crRounds`.
+    pub rounds: &'a [Round<'r>],
+    /// `crWorldJets`.
+    pub jets: &'a [Vec<Vec<Hom>>],
+    /// `crQ`.
+    pub qs: &'a [usize],
+    /// `crRound`.
+    pub round: &'a [usize],
+    /// `crFace`.
+    pub face: &'a [usize],
+    /// `crRev`.
+    pub rev: &'a [bool],
+    /// `dTol`.
+    pub tol: f64,
+}
+
+/// `sm_SbGraphG1`: the G1 fill (module docs), [`graph_gk`] at orders 1, 1.
+pub(super) fn graph_g1(
+    input: &GraphInput<'_, '_>,
+    stats: &mut FillStats,
+    probe: Option<&mut Probe>,
+) -> core::result::Result<Fill, Refusal> {
+    let g1 = FillOrders {
+        rounds: 1,
+        faces: 1,
+    };
+    graph_gk(input, g1, stats, probe)
+}
+
+/// The fill of orders `orders` as a graph over the corner's axis (module docs), with
+/// `order = orders.rounds` (1: G1, 2: G2) and `kf = orders.faces` (at most `order`): its
+/// setback patches of degree `2 order + 1` across, their first `order + 1` rows the round's
+/// (its end row and its derivatives across, at the speed lambda off it) and their last
+/// `order + 1` the interior map's (along the n-gon's edge and its derivatives along the field
+/// d), their first and last `kf + 1` columns on their faces' planes. The rounds' end columns
+/// lie on the faces (within the tolerance), and at order 2 their first and last `kf + 1`
+/// columns, or the fill is refused.
+#[allow(clippy::too_many_lines)] // the fork's one function
+pub(super) fn graph_gk(
+    input: &GraphInput<'_, '_>,
+    orders: FillOrders,
+    stats: &mut FillStats,
+    mut probe: Option<&mut Probe>,
+) -> core::result::Result<Fill, Refusal> {
+    let GraphInput {
+        faces: world_faces,
+        rounds,
+        jets: world_jets,
+        qs,
+        round: cycle_round,
+        face: cycle_face,
+        rev: cycle_rev,
+        tol,
+    } = *input;
+    let FillOrders {
+        rounds: order,
+        faces: kf,
+    } = orders;
+    if !(1..=2).contains(&order) {
+        return Err(Refusal::invalid(
+            "SmBlendSetback: a setback fill is of order 1 (G1) or 2 (G2)",
+        ));
+    }
+    if !(1..=order).contains(&kf) {
+        return Err(Refusal::invalid(
+            "SmBlendSetback: a setback fill meets its faces to order 1 or 2, at most its rounds' order",
+        ));
+    }
+    // the setback patches' degree across
+    let nc = 2 * order + 1;
+    let n = cycle_round.len();
+    let face_at = |m: usize| -> Result<usize> { el(cycle_face, m % n) };
+    // the fill is built and certified about the corner's vertex O, the faces' common point
+    // (least squares): its rounding that of the corner's size, not of its place, and a face
+    // through O an axis plane exactly where it is one in the world
+    let o = faces_common_point(world_faces).ok_or_else(|| {
+        Refusal::invalid("SmBlendSetback: the corner's faces meet in no one point")
+    })?;
+    let mut jets: Vec<Vec<Vec<Hom>>> = world_jets.to_vec();
+    for jr in &mut jets {
+        for jk in jr.iter_mut() {
+            for h in jk.iter_mut() {
+                h[0] -= h[3] * o.x;
+                h[1] -= h[3] * o.y;
+                h[2] -= h[3] * o.z;
+            }
+        }
+    }
+    let mut faces: Vec<Face> = world_faces.to_vec();
+    for f in &mut faces {
+        f.point -= o;
+    }
+    // the nets moved back, the faces' points snapped onto their planes there
+    let to_world = |nets: &mut Vec<Net>| -> Result<()> {
+        for net in nets.iter_mut() {
+            for h in &mut net.pts {
+                h[0] += h[3] * o.x;
+                h[1] += h[3] * o.y;
+                h[2] += h[3] * o.z;
+            }
+        }
+        for m in 0..n {
+            let net = el_mut(nets, m)?;
+            let qv = net.q;
+            for i in (order + 1)..=nc {
+                for c in 0..=kf {
+                    for e in 0..2 {
+                        let col = if e == 0 { c } else { qv - c };
+                        let face = el_ref(world_faces, face_at(m + e)?)?;
+                        snap(el_mut(&mut net.pts, i * (qv + 1) + col)?, face);
+                    }
+                }
+            }
+        }
+        Ok(())
+    };
+
+    // each cycle patch's round rows (columns from face m to face m + 1), the rails' ends and
+    // their directions toward the corner
+    let mut h0s: Vec<Vec<Hom>> = vec![Vec::new(); n];
+    let mut h1s: Vec<Vec<Hom>> = vec![Vec::new(); n];
+    // (order 2: the round's second derivative across, toward the corner)
+    let mut h2s: Vec<Vec<Hom>> = vec![Vec::new(); n];
+    let mut end0 = vec![Point3::ZERO; n];
+    let mut end1 = vec![Point3::ZERO; n];
+    let mut mids = vec![Point3::ZERO; n];
+    let mut dir0 = vec![Vec3::ZERO; n];
+    let mut dir1 = vec![Vec3::ZERO; n];
+    let mut speed0 = vec![0.0; n];
+    let mut speed1 = vec![0.0; n];
+    for m in 0..n {
+        let r = el(cycle_round, m)?;
+        let q = el(qs, r)?;
+        let sign = if el_ref(rounds, r)?.corner_above {
+            1.0
+        } else {
+            -1.0
+        };
+        let jr = el_ref(&jets, r)?;
+        let (j0, j1) = (el_ref(jr, 0)?, el_ref(jr, 1)?);
+        let rev = el(cycle_rev, m)?;
+        let mut h0 = vec![HOM_ZERO; q + 1];
+        let mut h1 = vec![HOM_ZERO; q + 1];
+        let mut h2 = vec![HOM_ZERO; if order >= 2 { q + 1 } else { 0 }];
+        for c in 0..=q {
+            let cc = if rev { q - c } else { c };
+            *el_mut(&mut h0, c)? = el(j0, cc)?;
+            *el_mut(&mut h1, c)? = axpy(&HOM_ZERO, sign, el_ref(j1, cc)?);
+            if order >= 2 {
+                // d2/ds2 of the round run toward the corner: the sign squared
+                *el_mut(&mut h2, c)? = el(el_ref(jr, 2)?, cc)?;
+            }
+        }
+        // the round meets its faces at its end: its end columns (its rail end on the face and
+        // its derivatives along it) on their faces in every row (within tol) and snapped onto
+        // them, as the fill's own face columns are; at order 2 its first and last kf + 1
+        // columns, to the faces' order (at order 1 the end columns only, as the fork's G1
+        // fill checks)
+        let end_cols = if order >= 2 { kf } else { 0 };
+        for e in 0..2 {
+            let face = el_ref(&faces, face_at(m + e)?)?;
+            for c in 0..=end_cols {
+                let col = if e == 0 {
+                    c
+                } else {
+                    q.checked_sub(c).ok_or_else(sm_err)?
+                };
+                for k in 0..=order {
+                    let w0 = el_ref(&h0, col)?[3];
+                    let h = match k {
+                        0 => el_mut(&mut h0, col)?,
+                        1 => el_mut(&mut h1, col)?,
+                        _ => el_mut(&mut h2, col)?,
+                    };
+                    let off = offset(h, face);
+                    if off.abs() > tol * smax(1.0, w0.abs()) {
+                        return Err(Refusal::invalid(
+                            "SmBlendSetback: a round does not meet its faces at its end",
+                        ));
+                    }
+                    if c == 0 {
+                        snap(h, face);
+                    }
+                }
+            }
+        }
+        for e in 0..2 {
+            let col = if e == 0 { 0 } else { q };
+            let a = el(&h0, col)?;
+            let b = el(&h1, col)?;
+            let p = Point3::new(a[0] / a[3], a[1] / a[3], a[2] / a[3]);
+            let t = Vec3::new(
+                (b[0] - p.x * b[3]) / a[3],
+                (b[1] - p.y * b[3]) / a[3],
+                (b[2] - p.z * b[3]) / a[3],
+            );
+            *el_mut(if e == 0 { &mut speed0 } else { &mut speed1 }, m)? = t.length();
+            let t = t.unitize()?;
+            *el_mut(if e == 0 { &mut end0 } else { &mut end1 }, m)? = p;
+            *el_mut(if e == 0 { &mut dir0 } else { &mut dir1 }, m)? = t;
+        }
+        // the section's middle
+        let mut mh = HOM_ZERO;
+        for (c, hc) in h0.iter().enumerate() {
+            mh = axpy(&mh, binomial(q, c)? / 2.0_f64.powf(q as f64), hc);
+        }
+        *el_mut(&mut mids, m)? = Point3::new(mh[0] / mh[3], mh[1] / mh[3], mh[2] / mh[3]);
+        *el_mut(&mut h0s, m)? = h0;
+        *el_mut(&mut h1s, m)? = h1;
+        *el_mut(&mut h2s, m)? = h2;
+    }
+    // convex (the rounds take material away) or concave (they add it), and the axis e into
+    // the convex side
+    let mut sum = Vec3::ZERO;
+    let mut convex = 0;
+    for m in 0..n {
+        let face = el_ref(&faces, el(cycle_face, m)?)?;
+        sum += face.normal;
+        let side = if (el(&mids, m)? - face.point).dot(face.normal) < 0.0 {
+            1
+        } else {
+            -1
+        };
+        if convex != 0 && side != convex {
+            return Err(Refusal::invalid(
+                "SmBlendSetback: a convex G1 fill needs rounds all convex or all concave",
+            ));
+        }
+        convex = side;
+    }
+    let e = (sum * if convex > 0 { -1.0 } else { 1.0 }).unitize()?;
+    let mut a1 = Vec3::new(1.0, 0.0, 0.0);
+    if e.y.abs() < e.x.abs() && e.y.abs() <= e.z.abs() {
+        a1 = Vec3::new(0.0, 1.0, 0.0);
+    } else if e.z.abs() < e.x.abs() && e.z.abs() < e.y.abs() {
+        a1 = Vec3::new(0.0, 0.0, 1.0);
+    }
+    a1 = a1 - e * a1.dot(e);
+    let a1 = a1.unitize()?;
+    let a2 = e.cross(a1);
+    let in_plane = |v: Vec3| P2 {
+        x: v.dot(a1),
+        y: v.dot(a2),
+    };
+
+    // the base points, the domain (their projections), the cross fields and the speeds
+    let mut xi = vec![P2::default(); n];
+    let mut sigma = vec![P2::default(); n];
+    let mut to_x0 = vec![0.0; n];
+    let mut to_x1 = vec![0.0; n];
+    for m in 0..n {
+        let mp = (m + n - 1) % n;
+        let pa = el(&end0, m)?; // patch m's rail on face m
+        let pb = el(&end1, mp)?; // patch m - 1's rail on face m
+        let (ta, tb) = (el(&dir0, m)?, el(&dir1, mp)?);
+        // the rails' crossing: Pa + s Ta = Pb + t Tb, least squares
+        let a11 = ta.dot(ta);
+        let a12 = -ta.dot(tb);
+        let a22 = tb.dot(tb);
+        let d = pb - pa;
+        let b1 = ta.dot(d);
+        let b2 = -tb.dot(d);
+        let det = a11 * a22 - a12 * a12;
+        if !(det.abs() > 1.0e-12) {
+            return Err(Refusal::invalid(
+                "SmBlendSetback: two rails on a face run parallel (no corner region between them)",
+            ));
+        }
+        let s = (b1 * a22 - a12 * b2) / det;
+        let t = (a11 * b2 - a12 * b1) / det;
+        let x = (pa + ta * s + pb + tb * t) * 0.5;
+        let mid_c = (pa + pb) * 0.5;
+        if !(s > 0.0) || !(t > 0.0) {
+            return Err(Refusal::invalid(
+                "SmBlendSetback: two rounds' rails on a face cross behind their ends (no corner region between them)",
+            ));
+        }
+        // the spring curve on face m: the parabola (Pa, X, Pb), as two cubic halves meeting
+        // at its middle B = (Pa + 2 X + Pb) / 4, its tangent there (Pa - Pb) / 2 (sigma_m),
+        // each half's second control point on its rail a third of the way to X (lambda)
+        let base = mid_c + (x - mid_c) * 0.5;
+        *el_mut(&mut xi, m)? = in_plane(base);
+        let sg = in_plane(pa - pb);
+        *el_mut(&mut sigma, m)? = P2 {
+            x: sg.x * 0.5,
+            y: sg.y * 0.5,
+        };
+        *el_mut(&mut to_x0, m)? = s / el(&speed0, m)?;
+        *el_mut(&mut to_x1, mp)? = t / el(&speed1, mp)?;
+    }
+    let nf = n as f64;
+    let mut centre = P2::default();
+    let mut rho = 0.0;
+    for p in &xi {
+        centre = P2 {
+            x: centre.x + p.x / nf,
+            y: centre.y + p.y / nf,
+        };
+    }
+    for p in &xi {
+        let (dx, dy) = (p.x - centre.x, p.y - centre.y);
+        rho = smax(rho, sqrt((dx * dx) + (dy * dy)));
+    }
+    if !(rho > 0.0) {
+        return Err(sm_err().into());
+    }
+    // the domain scaled: x = (xi - centre) / rho
+    let bs: Vec<P2> = xi
+        .iter()
+        .map(|p| P2 {
+            x: (p.x - centre.x) / rho,
+            y: (p.y - centre.y) / rho,
+        })
+        .collect();
+
+    // The degrees: 9 first, then up from the least, for the fill and for a probe that asks
+    // it (the scale search's attempts, as the fork's 3843ddb fills them). Proven unmet at 9
+    // (the QP's certificate), the sector conditions are unmet at every degree, and the
+    // search stops. Else the least degree whose fill is certified, or 9's.
+    let mut top: Vec<Net> = Vec::new();
+    let mut top_degree = 0;
+    let probe_only = probe.as_ref().is_some_and(|p| !p.fill);
+    let mut degrees: Vec<usize> = vec![9];
+    if !probe_only {
+        degrees.extend(nc..9);
+    }
+    'degrees: for &d in &degrees {
+        let mono = monomials(d);
+        let big_m = mono.len();
+        // the unknowns: h's coefficients
+        let unknowns = big_m;
+        let mut qvs = vec![0; n];
+        for (m, qv) in qvs.iter_mut().enumerate() {
+            let q1 = el(qs, el(cycle_round, m)?)? + order;
+            *qv = if q1 > d { q1 } else { d };
+        }
+        let mut patches: Vec<AffinePatch> = vec![AffinePatch::default(); 2 * n];
+        for m in 0..n {
+            let qv = el(&qvs, m)?;
+            // degree nc across: rows 0 .. order the round's, at the speed lambda(v) off it
+            // (linear across, from each rail's distance to its rails' crossing), the rest F's.
+            // The round run as s = lambda(v) u: R_u = lambda h1, R_uu = lambda^2 h2, so
+            // row 1 = row 0 + R_u / nc and row 2 = row 0 + 2 R_u / nc + R_uu / (nc (nc - 1)).
+            let mut rows = vec![vec![HOM_ZERO; qv + 1]; nc + 1];
+            let lam = [el(&to_x0, m)? / nc as f64, el(&to_x1, m)? / nc as f64];
+            let (h0, h1) = (el_ref(&h0s, m)?, el_ref(&h1s, m)?);
+            let h2 = el_ref(&h2s, m)?;
+            let lam2 = {
+                let l = [el(&to_x0, m)?, el(&to_x1, m)?];
+                let mut l2 = bern_mul(&l, &l)?;
+                for x in &mut l2 {
+                    *x /= (nc * (nc - 1)) as f64;
+                }
+                l2
+            };
+            for c in 0..4 {
+                let mut s0 = vec![0.0; h0.len()];
+                let mut s1 = vec![0.0; h0.len()];
+                for j in 0..s0.len() {
+                    *el_mut(&mut s0, j)? = el(el_ref(h0, j)?, c)?;
+                    *el_mut(&mut s1, j)? = el(el_ref(h1, j)?, c)?;
+                }
+                let s1 = bern_mul(&lam, &s1)?;
+                let s0 = bern_elevate(&s0, qv)?;
+                let s1 = bern_elevate(&s1, qv)?;
+                for j in 0..=qv {
+                    *el_mut(el_mut(el_mut(&mut rows, 0)?, j)?, c)? = el(&s0, j)?;
+                    *el_mut(el_mut(el_mut(&mut rows, 1)?, j)?, c)? = el(&s0, j)? + el(&s1, j)?;
+                }
+                if order >= 2 {
+                    let mut s2 = vec![0.0; h2.len()];
+                    for (j, s2j) in s2.iter_mut().enumerate() {
+                        *s2j = el(el_ref(h2, j)?, c)?;
+                    }
+                    let s2 = bern_elevate(&bern_mul(&lam2, &s2)?, qv)?;
+                    for j in 0..=qv {
+                        *el_mut(el_mut(el_mut(&mut rows, 2)?, j)?, c)? =
+                            el(&s0, j)? + 2.0 * el(&s1, j)? + el(&s2, j)?;
+                    }
+                }
+            }
+            // F's projection along edge m and its derivative along the field d (linear in v)
+            let x0 = el(&xi, m)?;
+            let x1 = el(&xi, (m + 1) % n)?;
+            let d0 = el(&sigma, m)?;
+            let s1n = el(&sigma, (m + 1) % n)?;
+            // `sSigma[(m + 1) % n] * -1.0`: negation, bit for bit the product
+            let d1 = P2 {
+                x: -s1n.x,
+                y: -s1n.y,
+            };
+            // (F's projection is linear: its second derivative along d is 0, so row nc - 2
+            // = row nc + 2 (d . grad F) / nc there)
+            for c in 0..3 {
+                let da1 = a1.component(c);
+                let da2 = a2.component(c);
+                let sp = [x0.x * da1 + x0.y * da2, x1.x * da1 + x1.y * da2];
+                let sdp = [d0.x * da1 + d0.y * da2, d1.x * da1 + d1.y * da2];
+                let s3 = bern_elevate(&sp, qv)?;
+                let sde = bern_elevate(&sdp, qv)?;
+                for j in 0..=qv {
+                    *el_mut(el_mut(el_mut(&mut rows, nc)?, j)?, c)? = el(&s3, j)?;
+                    *el_mut(el_mut(el_mut(&mut rows, nc - 1)?, j)?, c)? =
+                        el(&s3, j)? + el(&sde, j)? / nc as f64;
+                    if order >= 2 {
+                        *el_mut(el_mut(el_mut(&mut rows, nc - 2)?, j)?, c)? =
+                            el(&s3, j)? + 2.0 * el(&sde, j)? / nc as f64;
+                    }
+                }
+            }
+            for j in 0..=qv {
+                for i in (nc - order)..=nc {
+                    el_mut(el_mut(&mut rows, i)?, j)?[3] = 1.0;
+                }
+            }
+            // h's monomials along the edge (scaled coordinates) and along the field (d / rho)
+            let (bm, bn) = (el(&bs, m)?, el(&bs, (m + 1) % n)?);
+            let sx = [bm.x, bn.x];
+            let sy = [bm.y, bn.y];
+            let sdx = [d0.x / rho, d1.x / rho];
+            let sdy = [d0.y / rho, d1.y / rho];
+            let mut z1: Vec<Vec<f64>> = vec![Vec::new(); big_m];
+            let mut z2: Vec<Vec<f64>> = vec![Vec::new(); big_m];
+            let mut z3: Vec<Vec<f64>> = vec![Vec::new(); big_m];
+            for (j, &(a, b)) in mono.iter().enumerate() {
+                let mut s1 = vec![0.0; d + 1];
+                if a >= 1 {
+                    let t =
+                        bern_elevate(&bern_mul(&along_line(a - 1, b, &sx, &sy, d - 1)?, &sdx)?, d)?;
+                    for i in 0..=d {
+                        *el_mut(&mut s1, i)? += a as f64 * el(&t, i)?;
+                    }
+                }
+                if b >= 1 {
+                    let t =
+                        bern_elevate(&bern_mul(&along_line(a, b - 1, &sx, &sy, d - 1)?, &sdy)?, d)?;
+                    for i in 0..=d {
+                        *el_mut(&mut s1, i)? += b as f64 * el(&t, i)?;
+                    }
+                }
+                let v0 = bern_elevate(&along_line(a, b, &sx, &sy, d)?, qv)?;
+                let v1 = bern_elevate(&s1, qv)?;
+                let mut z2j = vec![0.0; qv + 1];
+                for i in 0..=qv {
+                    *el_mut(&mut z2j, i)? = el(&v0, i)? + el(&v1, i)? / nc as f64;
+                }
+                if order >= 2 {
+                    // the monomial's second derivative along the field d (d / rho, linear in
+                    // v): a (a - 1) x^(a-2) y^b dx^2 + 2 a b x^(a-1) y^(b-1) dx dy
+                    // + b (b - 1) x^a y^(b-2) dy^2, of degree d
+                    let mut s2 = vec![0.0; d + 1];
+                    let mut add =
+                        |ta: usize, tb: usize, f: f64, p: &[f64], q: &[f64]| -> Result<()> {
+                            let t = bern_elevate(
+                                &bern_mul(&along_line(ta, tb, &sx, &sy, d - 2)?, &bern_mul(p, q)?)?,
+                                d,
+                            )?;
+                            for i in 0..=d {
+                                *el_mut(&mut s2, i)? += f * el(&t, i)?;
+                            }
+                            Ok(())
+                        };
+                    if a >= 2 {
+                        add(a - 2, b, (a * (a - 1)) as f64, &sdx, &sdx)?;
+                    }
+                    if a >= 1 && b >= 1 {
+                        add(a - 1, b - 1, (2 * a * b) as f64, &sdx, &sdy)?;
+                    }
+                    if b >= 2 {
+                        add(a, b - 2, (b * (b - 1)) as f64, &sdy, &sdy)?;
+                    }
+                    let v2 = bern_elevate(&s2, qv)?;
+                    let mut z1j = vec![0.0; qv + 1];
+                    for i in 0..=qv {
+                        *el_mut(&mut z1j, i)? = el(&v0, i)?
+                            + 2.0 * el(&v1, i)? / nc as f64
+                            + el(&v2, i)? / (nc * (nc - 1)) as f64;
+                    }
+                    *el_mut(&mut z1, j)? = z1j;
+                }
+                *el_mut(&mut z3, j)? = v0;
+                *el_mut(&mut z2, j)? = z2j;
+            }
+            // the net
+            let patch = el_mut(&mut patches, m)?;
+            patch.base.p = nc;
+            patch.base.q = qv;
+            patch.base.pts = vec![HOM_ZERO; (nc + 1) * (qv + 1)];
+            for j in 0..=qv {
+                for i in 0..=nc {
+                    *el_mut(&mut patch.base.pts, i * (qv + 1) + j)? = el(el_ref(&rows, i)?, j)?;
+                }
+            }
+            for jm in 0..big_m {
+                let mut z = t_make(nc, qv);
+                for j in 0..=qv {
+                    if order >= 2 {
+                        *el_mut(&mut z.c, (nc - 2) * (qv + 1) + j)? = el(el_ref(&z1, jm)?, j)?;
+                    }
+                    *el_mut(&mut z.c, (nc - 1) * (qv + 1) + j)? = el(el_ref(&z2, jm)?, j)?;
+                    *el_mut(&mut z.c, nc * (qv + 1) + j)? = el(el_ref(&z3, jm)?, j)?;
+                }
+                patch.index.push(jm);
+                patch.z.push(z);
+            }
+        }
+        for q in 0..n {
+            // interior part q: corners (0, 0) the centre, (0, 1) the middle of edge q - 1,
+            // (1, 0) the middle of edge q, (1, 1) B_q
+            let bq = el(&bs, q)?;
+            let bnext = el(&bs, (q + 1) % n)?;
+            let bprev = el(&bs, (q + n - 1) % n)?;
+            let mq = P2 {
+                x: (bq.x + bnext.x) * 0.5,
+                y: (bq.y + bnext.y) * 0.5,
+            };
+            let mp = P2 {
+                x: (bq.x + bprev.x) * 0.5,
+                y: (bq.y + bprev.y) * 0.5,
+            };
+            let sx = Tensor {
+                p: 1,
+                q: 1,
+                c: vec![0.0, mp.x, mq.x, bq.x],
+            };
+            let sy = Tensor {
+                p: 1,
+                q: 1,
+                c: vec![0.0, mp.y, mq.y, bq.y],
+            };
+            let patch = el_mut(&mut patches, n + q)?;
+            patch.base.p = d;
+            patch.base.q = d;
+            patch.base.pts = vec![HOM_ZERO; (d + 1) * (d + 1)];
+            let sxd = tensor_elevate(&sx, d, d)?;
+            let syd = tensor_elevate(&sy, d, d)?;
+            for (i, pt) in patch.base.pts.iter_mut().enumerate() {
+                let xi1 = centre.x + rho * el(&sxd.c, i)?;
+                let xi2 = centre.y + rho * el(&syd.c, i)?;
+                *pt = [
+                    xi1 * a1.x + xi2 * a2.x,
+                    xi1 * a1.y + xi2 * a2.y,
+                    xi1 * a1.z + xi2 * a2.z,
+                    1.0,
+                ];
+            }
+            for (j, &(a, b)) in mono.iter().enumerate() {
+                patch.index.push(j);
+                patch.z.push(over_patch(a, b, &sx, &sy, d)?);
+            }
+        }
+        // the equalities: each setback patch's rows order + 1 .. nc (F's), their first kf + 1
+        // columns on face m's plane and their last kf + 1 on face m + 1's
+        let mut aeq: Vec<f64> = Vec::new();
+        let mut beq: Vec<f64> = Vec::new();
+        for m in 0..n {
+            let patch = el_ref(&patches, m)?;
+            let qv = patch.base.q;
+            for i in (order + 1)..=nc {
+                for c in 0..=kf {
+                    for ee in 0..2 {
+                        let col = if ee == 0 { c } else { qv - c };
+                        let idx = i * (qv + 1) + col;
+                        let face = el_ref(&faces, face_at(m + ee)?)?;
+                        let h = el(&patch.base.pts, idx)?;
+                        let nrm = face.normal;
+                        let mut row = vec![0.0; unknowns];
+                        for (k, &ix) in patch.index.iter().enumerate() {
+                            *el_mut(&mut row, ix)? +=
+                                el(&el_ref(&patch.z, k)?.c, idx)? * nrm.dot(e);
+                        }
+                        aeq.extend_from_slice(&row);
+                        beq.push(-offset(&h, face));
+                    }
+                }
+            }
+        }
+        let mut size = 0.0;
+        for &x in &beq {
+            size = smax(size, x.abs());
+        }
+        let Some(affine) =
+            affine_solutions(aeq, beq.clone(), beq.len(), unknowns, 1.0e-9 * (1.0 + size))?
+        else {
+            continue;
+        };
+        if affine.z.is_empty() {
+            continue;
+        }
+        let (yp, zn) = (affine.x0, affine.z);
+        let free = zn.len();
+
+        // the energy, affine in y: its rows at y = 0 (e0) and their change per unknown (ae,
+        // le x unknowns)
+        let energy_rows = |net: &Net| -> Result<Vec<f64>> {
+            let mut rows = Vec::new();
+            for (&g1x, &g1w) in GX.iter().zip(&GW) {
+                for (&g2x, &g2w) in GX.iter().zip(&GW) {
+                    let r = second(net, g1x, g2x)?;
+                    let w = sqrt(g1w * g2w);
+                    for c in 0..3 {
+                        rows.push(w * r[0].component(c));
+                        rows.push(w * sqrt(2.0) * r[1].component(c));
+                        rows.push(w * r[2].component(c));
+                    }
+                }
+            }
+            Ok(rows)
+        };
+        let mut e0: Vec<f64> = Vec::new();
+        let mut e_start: Vec<usize> = Vec::new();
+        let mut patch_e0: Vec<Vec<f64>> = Vec::with_capacity(2 * n);
+        for patch in &patches {
+            let rows = energy_rows(&patch.base)?;
+            e_start.push(e0.len());
+            e0.extend_from_slice(&rows);
+            patch_e0.push(rows);
+        }
+        let le = e0.len();
+        let mut ae = vec![0.0; le * unknowns];
+        {
+            let mut unit = vec![0.0; unknowns];
+            for (p, patch) in patches.iter().enumerate() {
+                for &u in &patch.index {
+                    *el_mut(&mut unit, u)? = 1.0;
+                    let rows = energy_rows(&affine_net(patch, &unit, e)?)?;
+                    *el_mut(&mut unit, u)? = 0.0;
+                    let start = el(&e_start, p)?;
+                    let base = el_ref(&patch_e0, p)?;
+                    for (i, &ri) in rows.iter().enumerate() {
+                        *el_mut(&mut ae, (start + i) * unknowns + u)? += ri - el(base, i)?;
+                    }
+                }
+            }
+        }
+        // over y = yp + Zn t: B = AE Zn, c = E0 + AE yp; the energy |B t + c|^2
+        let mut bm = vec![0.0; le * free];
+        let mut cv = vec![0.0; le];
+        for i in 0..le {
+            let mut s = el(&e0, i)?;
+            for u in 0..unknowns {
+                s += el(&ae, i * unknowns + u)? * el(&yp, u)?;
+            }
+            *el_mut(&mut cv, i)? = s;
+            for f in 0..free {
+                let mut t = 0.0;
+                let znf = el_ref(&zn, f)?;
+                for u in 0..unknowns {
+                    t += el(&ae, i * unknowns + u)? * el(znf, u)?;
+                }
+                *el_mut(&mut bm, i * free + f)? = t;
+            }
+        }
+        // the nets at t, their face points snapped exactly onto their planes
+        let nets_at = |t: &[f64]| -> Result<Option<Vec<Net>>> {
+            let mut y = yp.clone();
+            for f in 0..free {
+                let znf = el_ref(&zn, f)?;
+                for (u, yu) in y.iter_mut().enumerate() {
+                    *yu += el(znf, u)? * el(t, f)?;
+                }
+            }
+            let mut nets = Vec::with_capacity(2 * n);
+            for patch in &patches {
+                nets.push(affine_net(patch, &y, e)?);
+            }
+            for m in 0..n {
+                let net = el_mut(&mut nets, m)?;
+                let qv = net.q;
+                for i in (order + 1)..=nc {
+                    for c in 0..=kf {
+                        for ee in 0..2 {
+                            let col = if ee == 0 { c } else { qv - c };
+                            let face = el_ref(&faces, face_at(m + ee)?)?;
+                            let h = el_mut(&mut net.pts, i * (qv + 1) + col)?;
+                            let off = offset(h, face);
+                            if off.abs() > tol * h[3] {
+                                return Ok(None);
+                            }
+                            snap(h, face);
+                        }
+                    }
+                }
+            }
+            Ok(Some(nets))
+        };
+
+        // each patch's curvature determinants, affine in y, and the side its normal faces
+        // (o of one sign, certified, or the fill folds)
+        let Ok(curvatures) = patch_curvatures(&patches, e, GRAPH_DEPTH)? else {
+            return Err(Refusal::sm_err(
+                "SmBlendSetback: the fill folds (a patch's normal turns across the corner's axis)",
+            ));
+        };
+        // the energy as a quadratic programme: G = 2 B'B (a least nudge where it leaves a
+        // direction free: the energy only chooses), g = 2 B'c
+        let mut gm = vec![0.0; free * free];
+        let mut gv = vec![0.0; free];
+        let mut trace = 0.0;
+        for a in 0..free {
+            for b in a..free {
+                let mut s = 0.0;
+                for i in 0..le {
+                    s += el(&bm, i * free + a)? * el(&bm, i * free + b)?;
+                }
+                *el_mut(&mut gm, b * free + a)? = 2.0 * s;
+                *el_mut(&mut gm, a * free + b)? = 2.0 * s;
+            }
+            let mut s = 0.0;
+            for i in 0..le {
+                s += el(&bm, i * free + a)? * el(&cv, i)?;
+            }
+            *el_mut(&mut gv, a)? = 2.0 * s;
+            trace += el(&gm, a * free + a)?;
+        }
+        for a in 0..free {
+            *el_mut(&mut gm, a * free + a)? += 1.0e-12 * trace / free as f64;
+        }
+        // each interior part's extra direction: at its base point (its (1, 1)) F's Hessian is
+        // forced singular along sigma (the faces' conditions there); sigma in its (s, t)
+        let mut kernel = vec![-1.0; 2 * n];
+        for q in 0..n {
+            let bq = el(&bs, q)?;
+            let bprev = el(&bs, (q + n - 1) % n)?;
+            let bnext = el(&bs, (q + 1) % n)?;
+            let ds = P2 {
+                x: (bq.x - bprev.x) * 0.5,
+                y: (bq.y - bprev.y) * 0.5,
+            };
+            let dt = P2 {
+                x: (bq.x - bnext.x) * 0.5,
+                y: (bq.y - bnext.y) * 0.5,
+            };
+            let det = ds.x * dt.y - ds.y * dt.x;
+            if !(det.abs() > 0.0) {
+                return Err(sm_err().into());
+            }
+            let sq = el(&sigma, q)?;
+            let a = (sq.x * dt.y - sq.y * dt.x) / det;
+            let b = (ds.x * sq.y - ds.y * sq.x) / det;
+            let mut th = b.atan2(a);
+            if th < 0.0 {
+                th += PI;
+            }
+            if th >= PI {
+                th -= PI;
+            }
+            *el_mut(&mut kernel, n + q)? = th;
+        }
+
+        // the sector conditions on every piece's coefficient matrices, in t: C t >= b
+        if let Some(pr) = probe.as_deref_mut().filter(|p| !p.fill && p.margin) {
+            let SectorConditions { c: cm, b: bv } =
+                sector_conditions(&patches, &curvatures, &kernel, &yp, &zn, free)?;
+            stats.solves += 1;
+            // the least tau with C t + tau >= b (tau >= -1): min tau + eps (|t|^2 + tau^2)
+            let ln = free + 1;
+            let lm = bv.len();
+            let mut gmm = vec![0.0; ln * ln];
+            let mut gvm = vec![0.0; ln];
+            let mut cmm = vec![0.0; lm * ln + ln];
+            let mut bvm = bv.clone();
+            for a in 0..ln {
+                *el_mut(&mut gmm, a * ln + a)? = 1.0e-9;
+            }
+            *el_mut(&mut gvm, free)? = 1.0;
+            for i in 0..lm {
+                for f in 0..free {
+                    *el_mut(&mut cmm, i * ln + f)? = el(&cm, i * free + f)?;
+                }
+                *el_mut(&mut cmm, i * ln + free)? = 1.0;
+            }
+            for f in 0..ln {
+                *el_mut(&mut cmm, lm * ln + f)? = if f == free { 1.0 } else { 0.0 };
+            }
+            bvm.push(-1.0);
+            let mut work = QpStats::default();
+            let outcome = dual_qp_rows_with_stats(
+                &gmm,
+                &gvm,
+                &cmm,
+                &bvm,
+                ln,
+                lm + 1,
+                1.0e-13,
+                false,
+                &mut work,
+            );
+            stats.record_qp_work(work);
+            return match outcome? {
+                QpOutcome::Solved(tm) => {
+                    pr.margin_value = el(&tm, free)?;
+                    Ok(Fill::default())
+                }
+                // SER(eM)
+                QpOutcome::NotDefinite => Err(SolidError::invalid_input(
+                    "blend::blend_setback::graph_g1",
+                    "the margin's programme is not positive definite",
+                )
+                .into()),
+                QpOutcome::Infeasible { .. } => Err(sm_err().into()),
+            };
+        }
+        let rows = sector_rows(&patches, &curvatures, &kernel, &yp, &zn, free)?;
+        stats.solves += 1;
+        let mut work = QpStats::default();
+        let outcome = dual_qp_source(&gm, &gv, &rows, free, 1.0e-13, false, &mut work);
+        stats.record_qp_work(work);
+        let outcome = outcome?;
+        if let Some(pr) = probe.as_deref_mut().filter(|p| !p.fill) {
+            pr.feasible = matches!(outcome, QpOutcome::Solved(_));
+            return Ok(Fill::default());
+        }
+        let t = match outcome {
+            QpOutcome::Solved(t) => t,
+            QpOutcome::Infeasible { proven: true } if d == 9 => break 'degrees,
+            _ => continue,
+        };
+        let Some(mut nets) = nets_at(&t)? else {
+            // SER(netsAt): SM_ERR
+            return Err(sm_err().into());
+        };
+        let plane_sides = sides_on_planes(&nets, n, &faces, cycle_face);
+        if certified_convex(&nets, &plane_sides, e, GRAPH_DEPTH)?.is_err() {
+            continue;
+        }
+        if d == 9 {
+            top = nets;
+            top_degree = d;
+            continue;
+        }
+        to_world(&mut nets)?;
+        return Ok(fill_from(&nets, cycle_round, cycle_face, cycle_rev, d)?);
+    }
+    if !top.is_empty() {
+        to_world(&mut top)?;
+        return Ok(fill_from(
+            &top,
+            cycle_round,
+            cycle_face,
+            cycle_rev,
+            top_degree,
+        )?);
+    }
+    stats.uncertified = true;
+    Err(Refusal::sm_err(if order == 1 {
+        "SmBlendSetback: no G1 fill up to degree 9 is certified convex at these setbacks"
+    } else {
+        "SmBlendSetback: no G2 fill up to degree 9 is certified convex at these setbacks"
+    }))
+}

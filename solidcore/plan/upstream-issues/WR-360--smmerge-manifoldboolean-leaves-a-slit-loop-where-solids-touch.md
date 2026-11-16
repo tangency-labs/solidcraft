@@ -1,0 +1,17 @@
+#### WR-360. `SmMerge::ManifoldBoolean` leaves a slit loop where solids touch along a curve inside a face
+- **Severity:** Wrong result
+- **Area:** Boolean
+- **Location:** `source/SMLib/src/SmMerge.cpp:5051`-`5054`, the end of `SmMerge::ManifoldBoolean` (`rpResult = m_vTI.m_pBrep`). No step removes the loop the imprint makes.
+- **What happens:** a volumetric Boolean of solids that touch along a curve inside a face gives that face an inner loop running along the curve and back, each edge used twice. `SmTrimmingTools::CheckFace` rejects the face: test 3, "Face Loop has bad orientation", and test 4, "Face Loop has zero area". The slit bounds nothing: the regularized result is the two solids touching along the curve, each whole.
+- **Trigger:** issue #746, capi `smlib_test_booleans tangent_cylinders` seed 36. An r 2.5 cylinder along y from (5, 30, 30) rests on top of the box (2.5, 17.5, 20)–(27.5, 42.5, 27.5), and the two are united. The box top gets an inner loop that uses the contact line twice. The Rust test uses the same configuration turned on its side: a 10 cube with an r 2.5 cylinder along Z touching its x = 10 face.
+- **How found:** issue #746 (SolidCraft's boolean runner). Before #488's fix the edge uses had no trims, `CheckFace` skipped the face, and the problem was hidden.
+- **Confirmed:** from the issue's report on the fork; not reproduced on this harness's C++ reference.
+- **Fix:** the fork's `SmBrep::RemoveSlitLoopsWhereSolidsTouch` runs at the end of `ManifoldBoolean`, for union, intersection and difference only. It removes an inner loop only when every one of its edges is used twice by the loop and also bounds another face. The uses are removed as `SmBrep::DeleteFace` removes a face's. `SmBrep::SplitDisconnectedShells` then splits the shells joined only through the loop: a solid's or a void's part gets a region of its own, while a part of the infinite region's shell stays in that region.
+- **Rust port:** opt-in, `Kernel::fixes.remove_slit_loops_where_solids_touch` (off by default, so results match upstream).
+  - `crates/solidcore/src/topology/brep/p3.rs` has `remove_slit_loops_where_solids_touch` and `split_disconnected_shells`. The split is bounded at 1024 per shell, as in the fork.
+  - `crates/solidcore/src/boolean/merge/p4.rs` calls them before `finish_boolean` for union, intersection and difference.
+  - The destroyed edge uses notify on call-local records under their type code and arena index.
+- **Test:** `crates/solidcore/tests/issue_746_slit_loops.rs`.
+  - `issue_746_union_touching_along_a_line_keeps_a_slit_loop_by_default`: the upstream behaviour, a face with two loops.
+  - `issue_746_slit_loop_removed_and_solids_split`: opt-in on, no face with an inner loop, and two solid regions.
+- Fixes tangency-labs/solidcore#746.

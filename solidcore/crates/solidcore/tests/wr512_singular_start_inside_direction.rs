@@ -1,0 +1,178 @@
+//! WR-512 (the singular start's inside direction, #1522, #1576; now the only path) at operation
+//! level: #1522's knife-edge part. A 41 1/6 x 21 plate is joined with the corner a circle of
+//! radius 21 leaves, 10 high, whose arc wall runs out into the back face in a knife edge; its
+//! top front edge is rounded R2, then the arc wall's top edge R2, both picked at the points of
+//! the fork's capi test (tangency-labs/smlib@d37ca80, `capi/tests/ops_kernel.cpp`). The arc
+//! round ends on the front round where both are tangent to the top face, a start point of
+//! their intersection with four directions out of it. Upstream starts the curve along the
+//! first of them, which need not point into either face, and the round fails with 1001; the
+//! port starts along the inside direction nearest the given one and the round builds.
+//!
+//! The pinned C++ (v1.0.1) fails the arc round with 1001 too. With only the fork's line added
+//! to `SmAdvSurfaceIntersector::ComputeSingularityPoint` (`SmAdvSurfaceIntersector.cpp`
+//! recompiled and linked ahead of the pinned `libSMLib.a`) it builds one manifold solid of
+//! volume 9531.3100142533 (`SmApiBrepComputeVolume` at 1e-8), the reference below; with
+//! WR-568's span as well, which the default kernel takes, 9531.3100486849. There is
+//! no closed form: the round's ends, on the front round and into the knife edge, are traced.
+//! Both C++ volumes leak through the rounds' tolerant edges (`SmApiBrepComputeVolume` as this
+//! port's integrator did before #16735): with the gaps closed both bodies are
+//! [`BOTH_ROUNDS_CLOSED`], and each test checks that the C++ figure is within the leak's
+//! bound of it.
+//! #1522's second case (a 20 cube, its top back edge rounded r3, then the end face's top
+//! edge r1) builds to the same volume with and without the fix, in the pinned C++ and in
+//! the port, so it does not reach this guard and is not tested here.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)] // test helpers
+
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
+use solidcore::blend::fillet_executive::api::fillet_edges;
+use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
+use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::kernel::UpstreamFixes;
+use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::Point3;
+use solidcore::primitive::api_primitives::{create_box, create_cylinder};
+use solidcore::query::api_queries::{brep_is_manifold_solid, edge_closest_point};
+use solidcore::topology::brep::p1::regions;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+use solidcore::topology::{Brep, EdgeId};
+use solidcore::Kernel;
+
+/// The plate's length, where the arc wall starts: 62 1/6 - 21.
+const PLATE: f64 = 41.0 + 1.0 / 6.0;
+/// The arc wall's radius, the part's depth.
+const WALL: f64 = 21.0;
+/// Both rounds' radius.
+const RADIUS: f64 = 2.0;
+/// The fork's capi pick on the top front edge.
+const FRONT: [f64; 3] = [20.583333333333332, -21.0, 10.0];
+/// The fork's capi pick on the arc wall's top edge.
+const ARC: [f64; 3] = [48.045114044109852, -5.4635486396119797, 10.0];
+
+/// The pinned C++ with the fork's line: the part after both rounds.
+const BOTH_ROUNDS: f64 = 9531.3100142533;
+/// The same with WR-568's span as well, which the default kernel takes: the fork's one line
+/// in `SmFilletSolver::CalcTorusFilletGeom` (tangency-labs/smlib@985faae) recompiled and
+/// linked ahead too, `SmApiBrepComputeVolume` at 1e-8.
+const BOTH_ROUNDS_SPAN: f64 = 9531.3100486849;
+/// Both bodies' volume with the tolerant edges' gaps closed (#16735; MEASURED, the two agree
+/// to 2e-12): 1.8e-8 and 1.5e-8 over [`BOTH_ROUNDS`] and [`BOTH_ROUNDS_SPAN`].
+const BOTH_ROUNDS_CLOSED: f64 = 9531.310189516603;
+
+/// The plate joined with the corner box less the cylinder, as the fork's capi test builds it.
+fn part(k: &mut Kernel) -> Brep {
+    let corner = create_box(k, Point3::new(PLATE, -WALL, 0.0), WALL, WALL, 10.0).unwrap();
+    let disc = create_cylinder(k, Point3::new(PLATE + WALL, -WALL, 0.0), WALL, 10.0).unwrap();
+    let corner = boolean_difference(k, corner, disc).unwrap();
+    let plate = create_box(k, Point3::new(0.0, -WALL, 0.0), PLATE, WALL, 10.0).unwrap();
+    boolean_union(k, plate, corner).unwrap()
+}
+
+/// The edge nearest `q`, within 0.05.
+fn pick(k: &Kernel, b: &Brep, [x, y, z]: [f64; 3]) -> EdgeId {
+    let q = Point3::new(x, y, z);
+    b.edges()
+        .ids()
+        .filter_map(|e| {
+            edge_closest_point(k, b, e, q)
+                .ok()
+                .map(|c| (e, c.closest.distance))
+        })
+        .filter(|&(_, d)| d <= 0.05)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("edge")
+        .0
+}
+
+/// `SmApiFilletEdges` of the edge at `at`: circular, G2, thumbweight 0.
+fn round(k: &mut Kernel, b: &mut Brep, at: [f64; 3]) -> solidcore::Result<()> {
+    let e = pick(k, b, at);
+    fillet_edges(k, b, &[e], RADIUS, 1, 2, 0.0)
+}
+
+/// The part with its top front edge rounded, then the result of the arc wall's top edge.
+fn both_rounds(k: &mut Kernel) -> (Brep, solidcore::Result<()>) {
+    let mut b = part(k);
+    round(k, &mut b, FRONT).unwrap();
+    let r = round(k, &mut b, ARC);
+    (b, r)
+}
+
+fn volume(k: &Kernel, b: &mut Brep) -> f64 {
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    brep_volume(k, b, 1e-8, &attrs).unwrap()
+}
+
+/// The arc round built one manifold solid that checks clean, of volume `want` within `tol`
+/// relative, and the C++ volume `cpp` is within the old integrator's leak bound of it.
+fn assert_built_to(
+    k: &mut Kernel,
+    b: &mut Brep,
+    r: solidcore::Result<()>,
+    tol: f64,
+    cpp: f64,
+    want: f64,
+) {
+    r.unwrap();
+    let infinite = b.infinite_region();
+    let solids = regions(b, None)
+        .unwrap()
+        .into_iter()
+        .filter(|&r| Some(r) != infinite)
+        .count();
+    assert_eq!(solids, 1);
+    assert!(brep_is_manifold_solid(b).unwrap());
+    let lines = check_brep(k, b, CheckLevel::Level2).unwrap().lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    let v = volume(k, b);
+    println!("volume {v:.10} (reference: {want}, C++ {cpp})");
+    assert!(
+        (v - want).abs() <= tol * want,
+        "volume {v}, expected {want}"
+    );
+    volume_leak::assert_moved_by_the_old_leak(k, b, cpp, v, 1e-8);
+}
+
+/// The default kernel: the C++ body with the fork's line and WR-568's span,
+/// [`BOTH_ROUNDS_SPAN`] (to 1e-9 until #16735, the gate's tolerance; the same construction
+/// and integration on both sides), now [`BOTH_ROUNDS_CLOSED`] to 1e-9.
+#[test]
+fn the_default_kernel_builds_the_arc_round() {
+    let mut k = Kernel::default();
+    let (mut b, r) = both_rounds(&mut k);
+    assert_built_to(
+        &mut k,
+        &mut b,
+        r,
+        1e-9,
+        BOTH_ROUNDS_SPAN,
+        BOTH_ROUNDS_CLOSED,
+    );
+}
+
+/// Every fix with the blend corner End: the arc round's end on the front round, where the
+/// arc wall's top edge runs on tangentially into the front round's end arc on the wall, is
+/// no End at a smooth vertex (tangency-labs/solidcore#2656: the end arc turns into the wall
+/// away from the top edge continued, so the round run on leaves the part). It runs on as
+/// before smlib#124: with the WR-512 line it builds the pinned C++'s body with that line,
+/// [`BOTH_ROUNDS`] (to 1e-8 until #16735; now [`BOTH_ROUNDS_CLOSED`], to 1e-8) (the
+/// fork's End, tangency-labs/smlib@18e96f1, caps it there instead: 9532.2987121741 with
+/// `SmApiFilletEdges` and `SmApiBrepComputeVolume` at 1e-8, 0.99 more).
+#[test]
+fn the_blend_corner_runs_the_arc_round_on_as_the_pinned_with_wr512() {
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let (mut b, r) = both_rounds(&mut k);
+    assert_built_to(&mut k, &mut b, r, 1e-8, BOTH_ROUNDS, BOTH_ROUNDS_CLOSED);
+}

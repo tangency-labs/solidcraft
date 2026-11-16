@@ -1,0 +1,1446 @@
+{
+ "cases": [
+  {
+   "name": "rect_edge_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424",
+   "inputs": {
+    "op": "trim_curve",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      -5,
+      -3,
+      0
+     ],
+     "b": [
+      5,
+      -3,
+      0
+     ]
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "rect_edge_line_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424",
+   "inputs": {
+    "op": "line",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "p": [
+     [
+      -5,
+      -3,
+      0
+     ],
+     [
+      5,
+      -3,
+      0
+     ]
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "rect_edge_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424",
+   "inputs": {
+    "op": "trim_curve",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      5,
+      -3,
+      0
+     ],
+     "b": [
+      5,
+      3,
+      0
+     ]
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "rect_edge_line_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424",
+   "inputs": {
+    "op": "line",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "p": [
+     [
+      5,
+      -3,
+      0
+     ],
+     [
+      5,
+      3,
+      0
+     ]
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "rect_edge_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424",
+   "inputs": {
+    "op": "trim_curve",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      5,
+      3,
+      0
+     ],
+     "b": [
+      -5,
+      3,
+      0
+     ]
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "rect_edge_line_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424",
+   "inputs": {
+    "op": "line",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "p": [
+     [
+      5,
+      3,
+      0
+     ],
+     [
+      -5,
+      3,
+      0
+     ]
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "rect_edge_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424",
+   "inputs": {
+    "op": "trim_curve",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      -5,
+      3,
+      0
+     ],
+     "b": [
+      -5,
+      -3,
+      0
+     ]
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "rect_edge_line_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424",
+   "inputs": {
+    "op": "line",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "p": [
+     [
+      -5,
+      3,
+      0
+     ],
+     [
+      -5,
+      -3,
+      0
+     ]
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "hex_edge_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462",
+   "inputs": {
+    "op": "trim_curve",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      5.0,
+      0.0,
+      0.0
+     ],
+     "b": [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ]
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "hex_edge_line_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462",
+   "inputs": {
+    "op": "line",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "p": [
+     [
+      5.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ]
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "hex_edge_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462",
+   "inputs": {
+    "op": "trim_curve",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ],
+     "b": [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ]
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "hex_edge_line_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462",
+   "inputs": {
+    "op": "line",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "p": [
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ],
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ]
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "hex_edge_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462",
+   "inputs": {
+    "op": "trim_curve",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ],
+     "b": [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ]
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "hex_edge_line_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462",
+   "inputs": {
+    "op": "line",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "p": [
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ],
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ]
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "hex_edge_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462",
+   "inputs": {
+    "op": "trim_curve",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ],
+     "b": [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ]
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "hex_edge_line_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462",
+   "inputs": {
+    "op": "line",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "p": [
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ],
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ]
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "hex_edge_4",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462",
+   "inputs": {
+    "op": "trim_curve",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ],
+     "b": [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ]
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "hex_edge_line_4",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462",
+   "inputs": {
+    "op": "line",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "p": [
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ]
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "hex_edge_5",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462",
+   "inputs": {
+    "op": "trim_curve",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ],
+     "b": [
+      5.0,
+      0.0,
+      0.0
+     ]
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "hex_edge_line_5",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462",
+   "inputs": {
+    "op": "line",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "p": [
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ],
+     [
+      5.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "hex_circle_trim",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462",
+   "inputs": {
+    "op": "trim_curve",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "curve": {
+     "kind": "circle",
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "dom": [
+      0,
+      360
+     ],
+     "r": 5.0
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "hex_circle_ellipse",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462",
+   "inputs": {
+    "op": "ellipse",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -3,
+       5,
+       3
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -3,
+     5,
+     3
+    ],
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "r": [
+     5,
+     5
+    ],
+    "axes": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ],
+    "ivl": [
+     0,
+     360
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "far_rect_line",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424",
+   "inputs": {
+    "op": "line",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       10000000000.0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -5e-10,
+       5,
+       5e-10
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -5e-10,
+     5,
+     5e-10
+    ],
+    "p": [
+     [
+      -5,
+      10000000000.0,
+      0
+     ],
+     [
+      5,
+      10000000000.0,
+      0
+     ]
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "far_rect_trim_width",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424",
+   "inputs": {
+    "op": "trim_curve",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       10000000000.0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -5e-10,
+       5,
+       5e-10
+      ]
+     },
+     "nurb": true
+    },
+    "dom": [
+     -5,
+     -5e-10,
+     5,
+     5e-10
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      -5,
+      9999999999.0,
+      0
+     ],
+     "b": [
+      -5,
+      10000000001.0,
+      0
+     ]
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "far_rect_offset",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424",
+   "inputs": {
+    "op": "offset",
+    "a": {
+     "make": {
+      "kind": "bounded",
+      "o": [
+       0,
+       10000000000.0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       -5,
+       -5e-10,
+       5,
+       5e-10
+      ]
+     },
+     "nurb": true
+    },
+    "dist": 2.5
+   }
+  }
+ ]
+}
