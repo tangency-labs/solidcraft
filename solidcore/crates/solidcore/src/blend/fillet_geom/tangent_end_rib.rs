@@ -238,9 +238,10 @@ pub struct TangentEndRib {
 /// two rails or lie on one section, the rib does not reach its other end, or no station
 /// count gives the rib within tolerance; for a zero-speed rib, when the end surface is
 /// singular at the tangent end, the fillet surface's section leaves its tangent plane
-/// there, or an interpolation's second control point leaves its end; for a `stop`, when it
-/// is off either surface or not strictly between the rails on the other rail's side; those
-/// of the drops, evaluations and fits.
+/// there, or an interpolation's second control point leaves its end; a stage failure
+/// ([`crate::error::blend::BlendFailure::StageFailed`], a defect) for a `stop` off either
+/// surface or not strictly between the rails on the other rail's side; those of the drops,
+/// evaluations and fits.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
 pub fn tangent_end_rib(
     k: &Kernel,
@@ -254,6 +255,8 @@ pub fn tangent_end_rib(
     approx_tol: f64,
 ) -> Result<TangentEndRib> {
     let fail = |what| SolidError::blend_failed(OP_RIB, what);
+    // a stop (#10876) that does not fit the rib is a defect of the corner's construction
+    let stop_failed = || SolidError::blend(OP_RIB, crate::error::blend::BlendFailure::StageFailed);
 
     // both ends on the fillet surface and on the end surface
     let fil_dom = fillet.natural_uv_domain_with_nurb(k)?;
@@ -320,12 +323,12 @@ pub fn tangent_end_rib(
         let d =
             fillet.drop_point::<crate::surface::surface::p4::NoObject>(k, stop, &fil_dom, &opts)?;
         if !d.success || d.gap > approx_tol {
-            return Err(fail("the rib's stop is off the fillet surface"));
+            return Err(stop_failed()); // the rib's stop is off the fillet surface
         }
         let e =
             end.drop_point::<crate::surface::surface::p4::NoObject>(k, stop, &end_dom, &opts)?;
         if !e.success || e.gap > approx_tol {
-            return Err(fail("the rib's stop is off the end surface"));
+            return Err(stop_failed()); // the rib's stop is off the end surface
         }
         let (sigma_stop, alpha_stop) = if section == 0 {
             (d.result_uv.x, d.result_uv.y)
@@ -339,7 +342,7 @@ pub fn tangent_end_rib(
             && (sigma1 - sigma_stop).abs() > tol_sigma
             && (sigma1 - sigma_stop) * (sigma1 - sigma0) > 0.0;
         if !between {
-            return Err(fail("the rib's stop is not between the rails"));
+            return Err(stop_failed()); // the rib's stop is not between the rails
         }
         sigma1 = sigma_stop;
         alpha1 = alpha_stop;

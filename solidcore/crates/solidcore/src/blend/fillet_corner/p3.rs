@@ -624,13 +624,14 @@ impl FilletCorner {
     }
 
     /// A cap across the cliff's tangent seam ([`FilletCorner::seam_cap`]) is closed only by
-    /// its end patch: an error when its end face is not extended (the session cleared
-    /// [`FilletCorner::extended_surface_patch`]), not a corner left open.
+    /// its end patch: when its end face is not extended (the session cleared
+    /// [`FilletCorner::extended_surface_patch`]), a stage failure (a defect), not a corner
+    /// left open.
     fn seam_cap_needs_its_end_patch(&self) -> Result<()> {
         if self.seam_cap.is_some() && !self.extended_surface_patch {
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP_PATCH,
-                "the end face across the cliff's tangent seam is not extended",
+                crate::error::blend::BlendFailure::StageFailed,
             ));
         }
         Ok(())
@@ -1921,7 +1922,7 @@ impl FilletCorner {
     ///
     /// # Errors
     ///
-    /// Those of the patch builders; [`SolidError::Unported`] (`CreateEndPatch`); a blend
+    /// Those of the patch builders; [`SolidError::Unported`] (`CreateEndPatch`); a stage
     /// failure for a seam cap whose end face is not extended.
     pub fn create_corner_patch_nx1(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
         self.seam_cap_needs_its_end_patch()?;

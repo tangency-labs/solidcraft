@@ -1315,6 +1315,14 @@ const OP_EDGE_GEOM: &str = "blend::fillet_corner::p1::calc_corner_edge_geom";
 const OP_DEGENERACY: &str = "blend::fillet_corner::p1::check_and_fix_degeneracy";
 const OP_END_PATCH: &str = "blend::fillet_corner::p1::create_end_patch";
 
+/// `CreateEndPatch`'s failure (`FILEXEC_CORNER_ERR(this, "Corner End Face Creation
+/// Error")`, then `SM_ERR`): the corner's end face could not be made. One site for every
+/// path that makes it (upstream's one face, the seam cap's two).
+#[track_caller]
+fn end_face_not_made() -> SolidError {
+    SolidError::blend_failed(OP_END_PATCH, "the corner's end face could not be made")
+}
+
 /// Not upstream (#2488, with `fillet_round_as_definition`): an End's patch keeps its
 /// definition ([`CornerDefinition::end`]): its support face's surface `support` (the face's
 /// or its extension) and the patch's boundary, the corner's edges' curves; re-certified at
@@ -2346,10 +2354,7 @@ impl FilletCorner {
                         [None, None],
                         Some("Fillet Corner Error: Corner End Face Creation Error"),
                     );
-                    Err(SolidError::blend_failed(
-                        OP_END_PATCH,
-                        "the corner's end face could not be made",
-                    ))
+                    Err(end_face_not_made())
                 }
                 Ok(()) => Ok(()),
             };
@@ -2411,10 +2416,7 @@ impl FilletCorner {
                         Some("Fillet Corner Error: Corner End Face Creation Error"),
                     );
                     // FILEXEC_CORNER_ERR(this, "Corner End Face Creation Error"): a message, then SM_ERR
-                    return Err(SolidError::blend_failed(
-                        OP_END_PATCH,
-                        "the corner's end face could not be made",
-                    ));
+                    return Err(end_face_not_made());
                 }
             }
 
@@ -2459,10 +2461,7 @@ impl FilletCorner {
                 Err(e @ SolidError::InvalidInput { .. }) => Err(e),
                 Err(_) => {
                     (env.note_face_error)(self);
-                    Err(SolidError::blend_failed(
-                        OP_END_PATCH,
-                        "the corner's end face could not be made",
-                    ))
+                    Err(end_face_not_made())
                 }
                 Ok(()) => Ok(()),
             };
@@ -2512,10 +2511,7 @@ impl FilletCorner {
                 Err(_) => {
                     // when MakeFaceBrep() failed - Note FilletError
                     (env.note_face_error)(self);
-                    return Err(SolidError::blend_failed(
-                        OP_END_PATCH,
-                        "the corner's end face could not be made",
-                    ));
+                    return Err(end_face_not_made());
                 }
             }
 
@@ -2709,9 +2705,10 @@ impl FilletCorner {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` when the edges do not close a loop through S, W does not drop onto a side
-    /// edge within the tolerance, or a face is not made; those of the curve copies, trims,
-    /// evaluations and `MakeFaceWithCurves`.
+    /// A stage failure ([`crate::error::blend::BlendFailure::StageFailed`], a defect) when
+    /// the edges do not close a loop through S, W does not drop onto a side edge within the
+    /// tolerance, a part's loop has no normal or a face is not made; those of the curve
+    /// copies, trims, evaluations and `MakeFaceWithCurves`.
     pub(crate) fn make_seam_cap_faces(
         &mut self,
         env: &mut CornerPatchEnv<'_, '_>,
@@ -2719,7 +2716,8 @@ impl FilletCorner {
         wall_surface: &Surface,
     ) -> Result<()> {
         const OP: &str = OP_END_PATCH;
-        let fail = |what| SolidError::blend_failed(OP, what);
+        // a cap that cannot be split or made is a defect of the corner's construction
+        let fail = || SolidError::blend(OP, crate::error::blend::BlendFailure::StageFailed);
         let cap = self
             .seam_cap
             .ok_or_else(|| SolidError::invalid_input(OP, "the corner has no seam cap"))?;
@@ -2742,14 +2740,13 @@ impl FilletCorner {
                 break;
             };
             loop_edges.push(e);
-            at = edge::end_vertex(env.pseudo.brep(), e)?
-                .ok_or_else(|| fail("a cap edge has no end vertex"))?;
+            at = edge::end_vertex(env.pseudo.brep(), e)?.ok_or_else(fail)?; // a cap edge has no end vertex
             if at == cap.split_vertex {
                 break;
             }
         }
         if at != cap.split_vertex || loop_edges.len() != self.edges.len() {
-            return Err(fail("the cap's edges do not close a loop through the seam"));
+            return Err(fail()); // the cap's edges do not close a loop through the seam
         }
         // each edge's curve run from its start vertex to its end vertex (a fillet edge's curve
         // may run either way along its edge)
@@ -2802,8 +2799,7 @@ impl FilletCorner {
                 break;
             }
         }
-        let (cut_at, cut_curve, t_w) =
-            cut.ok_or_else(|| fail("the seam does not meet the cap's side edges"))?;
+        let (cut_at, cut_curve, t_w) = cut.ok_or_else(fail)?; // the seam does not meet the cap's side edges
         let ivl = cut_curve.natural_interval();
         let mut head = cut_curve.copy(env.k)?;
         head.trim(
@@ -2870,7 +2866,7 @@ impl FilletCorner {
                 newell += a.cross(*b);
             }
             let (Some(&p2), Ok(patch_normal)) = (ring.first(), newell.unitize()) else {
-                return Err(fail("a cap part's loop has no normal"));
+                return Err(fail()); // a cap part's loop has no normal
             };
             let loop_orient = loop_orientation(env.k, &net, p2, patch_normal, OP)?;
             let input = FaceCurvesInput {
@@ -2885,7 +2881,7 @@ impl FilletCorner {
         for (input, net, loop_orient) in parts {
             let face = make_face(env, input, net.clone(), loop_orient, OP)?;
             if face.is_none() {
-                return Err(fail("a part of the seam cap is not made"));
+                return Err(fail()); // a part of the seam cap is not made
             }
             self.surface_faces.extend(face);
             self.surfaces.push(net);
