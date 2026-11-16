@@ -83,7 +83,14 @@
 //!   near-ties by comparing the `[0, 1]` fraction `f` with the parameter `dS`, and starts
 //!   the Newton solve (and returns its unconverged answer) at `sSIvl.Evaluate(f)`, which
 //!   for `f = 0` or `1` is the domain boundary, possibly a collapsed corner. The port
-//!   compares, starts at and returns the sampled parameter itself.
+//!   compares, starts at and returns the sampled parameter itself, and takes the input
+//!   parameter `dS` as the first near-best guess when it is in the interval and its
+//!   tangent is defined (the guess nearest the input; where the alignment is the same
+//!   over a stretch, the solve stays at its start, so a sample would replace an input
+//!   that is already an answer). A solve whose answer is aligned worse than its start
+//!   by more than the near-equal tolerance `fTol` (a minimum of the alignment, or past
+//!   a kink downhill), or where the tangent is undefined, counts as not converged;
+//!   upstream accepts any answer of the solve.
 //! - **Projection curve class.** `CreateParallelProjectionCurves` takes a [`Curve`] for
 //!   upstream's `const SmBSplineCurve&`; a curve outside the `SmBSplineCurve` classes
 //!   (B-spline, line, ellipse, hyperbola, parabola), which upstream's type rules out,
@@ -1075,11 +1082,14 @@ impl Surface {
     /// the non-singular tangent best matches `dir` (`FindDegenParamForDirection`):
     /// samples ten parameters, then runs a Newton solve from the best one.
     ///
-    /// Each guess is the sampled parameter where its alignment was measured: the
-    /// near-equal tie-break compares those parameters with the input's, and the Newton
-    /// solve starts at (and an unconverged answer is) the chosen sample. Upstream
-    /// compares the `[0, 1]` sample fractions with the input parameter and starts at
-    /// the fraction mapped onto the whole interval instead (WR-57).
+    /// Each guess is a parameter where its alignment was measured, the input parameter
+    /// (when it is in the interval and its tangent is defined) first, then the samples:
+    /// the near-equal tie-break compares those parameters with the input's, and the
+    /// Newton solve starts at (and an unconverged answer is) the chosen guess. A solve
+    /// ending aligned worse than its start (beyond the near-equal tolerance) has not
+    /// converged. Upstream has no input guess, compares the `[0, 1]` sample fractions
+    /// with the input parameter, starts at the fraction mapped onto the whole interval
+    /// and accepts any answer of the solve (WR-57).
     ///
     /// # Errors
     ///
@@ -1129,8 +1139,6 @@ impl Surface {
         // iteration locals
         let num_guesses = 10usize;
         let mut test_uv = uv;
-        let mut near_best_f = -1.0;
-        let mut near_best_param = 0.5;
         let mut best_f = -1.0;
         let mut best_param = 0.5;
 
@@ -1138,6 +1146,43 @@ impl Surface {
         // domain in a bit.
         let mut sample_domain = s_ivl;
         sample_domain.expand_relative(-0.025);
+
+        // WR-57: the alignment of the unit non-singular tangent with the direction at
+        // a singular parameter, `None` where the tangent is zero (undefined).
+        let alignment_at = |s: f64| -> Result<Option<f64>> {
+            let mut q = uv;
+            if singular_u {
+                q.x = s;
+            } else {
+                q.y = s;
+            }
+            let m = self.evaluate(k, q, 1, 1, flags(Side::Left, Side::Left, true))?;
+            let surf_dt = if singular_u {
+                at(&m, 0, 1)?
+            } else {
+                at(&m, 1, 0)?
+            };
+            Ok(if surf_dt.length_squared() < EFF_ZERO_SQ {
+                None
+            } else {
+                Some(surf_dt.unitize()?.dot(s_dir))
+            })
+        };
+
+        // WR-57: the guesses are parameters, not upstream's [0, 1] fractions. The
+        // input parameter is the first near-best candidate when it is in the interval
+        // and its tangent is defined: of nearly equal guesses the one nearest the
+        // input is kept, and the input is nearest itself. (Where the alignment is the
+        // same over a stretch of parameters, the Newton solve does not move from its
+        // start, so a sample there would be returned instead of the input.)
+        let mut near_best_f = -1.0;
+        let mut near_best_s = sample_domain.evaluate(0.5);
+        if s_ivl.contains_value(ds, 0.0) {
+            if let Some(f) = alignment_at(ds)? {
+                near_best_f = f;
+                near_best_s = ds;
+            }
+        }
 
         // for every sample point - find biggest ( sSurf_dt(si,v) dot Dir) value
         for ii in 0..num_guesses {
@@ -1174,14 +1219,12 @@ impl Surface {
             }
 
             // for nearly equal starting guesses - save the one nearest the input value
-            // (WR-57: the sampled parameters, not upstream's [0, 1] fractions)
             let cand_s = sample_domain.evaluate(this_param);
-            let near_best_s = sample_domain.evaluate(near_best_param);
             if this_f > near_best_f - f_tol
                 && (this_f > near_best_f + f_tol || (cand_s - ds).abs() < (near_best_s - ds).abs())
             {
                 near_best_f = this_f;
-                near_best_param = this_param;
+                near_best_s = cand_s;
             }
         }
 
@@ -1193,25 +1236,28 @@ impl Surface {
             ));
         }
 
-        // solve with NewtonRaphson iteration starting at the near best sample, then
-        // the best sample (WR-57: the sampled parameters, where the alignment was
-        // measured; upstream starts at `s_ivl.evaluate`, which for a fraction of 0 or 1
-        // is the domain boundary, possibly a collapsed corner)
-        let first = singular_param_solve(
-            k,
-            self,
-            uv,
-            s_dir,
-            singular_dir,
-            &s_ivl,
-            sample_domain.evaluate(near_best_param),
-            tol,
-        );
+        // solve with NewtonRaphson iteration starting at the near best guess, then
+        // the best sample (WR-57: the parameters where the alignment was measured;
+        // upstream starts at `s_ivl.evaluate` of the fraction, which for 0 or 1 is the
+        // domain boundary, possibly a collapsed corner)
+        let first =
+            singular_param_solve(k, self, uv, s_dir, singular_dir, &s_ivl, near_best_s, tol);
+        // WR-57: the solve finds where the alignment is stationary, or a kink of it,
+        // and so may end at a minimum or past a kink downhill; a solve whose answer is
+        // aligned worse than its start by more than the near-equal tolerance (or not
+        // at all, where the tangent is undefined) has not found the best alignment
+        // near that start, and counts as not converged.
+        let improves = |t: f64, start_f: f64| -> Result<bool> {
+            Ok(alignment_at(t)?.is_some_and(|f| f >= start_f - f_tol))
+        };
         let (stat_ok, mut found, mut found_t) = match ignored(first)? {
             Some((f, t)) => (true, f, t),
             None => (false, false, 0.0),
         };
-        let mut found_param = near_best_param;
+        if found {
+            found = improves(found_t, near_best_f)?;
+        }
+        let mut found_s = near_best_s;
         if !found {
             // (status ignored upstream; passed on as the fork does)
             (found, found_t) = singular_param_solve(
@@ -1224,15 +1270,14 @@ impl Surface {
                 sample_domain.evaluate(best_param),
                 tol,
             )?;
-            found_param = best_param;
+            if found {
+                found = improves(found_t, best_f)?;
+            }
+            found_s = sample_domain.evaluate(best_param);
         }
 
-        // Leave our best value in the return arg (WR-57: the sample itself)
-        let value = if found {
-            found_t
-        } else {
-            sample_domain.evaluate(found_param)
-        };
+        // Leave our best value in the return arg (WR-57: the guess itself)
+        let value = if found { found_t } else { found_s };
         let mut out = uv;
         if singular_u {
             out.x = value;
@@ -4112,7 +4157,7 @@ mod tests {
                 .unwrap();
             assert!(r.converged);
             let expected = if input_s < 0.5 { 0.0 } else { 1.0 };
-            assert!((r.uv.x - expected).abs() < 1e-9);
+            assert!((r.uv.x - expected).abs() < 1e-9, "{input_s} {r:?}");
         }
 
         // `[0, 360]` angular domain with `input_s = 5.0`: `5.0` is `5.0` from `0.0` vs
@@ -4133,7 +4178,13 @@ mod tests {
             )
             .unwrap();
         assert!(r_deg.converged);
-        assert!(r_deg.uv.x.abs() < 1e-9);
+        // The root is `u = 0` (not `360`). The Newton solve stops at `|F| < 1e-9`, where
+        // `F(u) = -sin(u w) w` with `w = PI / 180` the turn rate of the pole tangent.
+        let w = PI / 180.0;
+        assert!(
+            (0.0..180.0).contains(&r_deg.uv.x) && (r_deg.uv.x * w).sin().abs() * w < 1e-9,
+            "{r_deg:?}"
+        );
 
         // `[0, 2 * PI]` angular domain with `input_s = 0.8` rad (`0.8` from `0.0` vs
         // `2 * PI - 0.8` from `2 * PI`; upstream: `|1.0 - 0.8| = 0.2 < |0.0 - 0.8| = 0.8`).
@@ -4153,7 +4204,11 @@ mod tests {
             )
             .unwrap();
         assert!(r_rad.converged);
-        assert!(r_rad.uv.x.abs() < 1e-9);
+        // (as above, with `w = 1`)
+        assert!(
+            (0.0..PI).contains(&r_rad.uv.x) && r_rad.uv.x.sin().abs() < 1e-9,
+            "{r_rad:?}"
+        );
     }
 
     /// WR-57 (#2209): on B-spline degenerate patches with interior double solutions on
@@ -4240,21 +4295,13 @@ mod tests {
             );
             assert!(r.converged);
             let expected = if input_s < 0.5 { 0.25 } else { 0.75 };
-            assert!((r.uv.x - expected).abs() < 1e-9);
+            assert!((r.uv.x - expected).abs() < 1e-9, "{input_s} {r:?}");
         }
     }
 
-    /// WR-57 (goldens `surface.surface_p7` gen0435): the surface is degree 1 in `u` and
-    /// its first control row is one point, so on the first `u` span
-    /// `S_v(u, v_max) = a(u) * S_v^row1(v_max)` with `a(u) > 0` for `u > u_min`: the unit
-    /// tangent there is exactly `unit(P[1][4] - P[1][3])`, and every `u` of the span
-    /// aligns equally with `dir`. Samples 0 and 1 both lie on it, so the tie-break
-    /// picks the one nearest the input's `u` (1.6e-7 above `u_min`): sample 0. The
-    /// Newton solve starts there. Started at `s_ivl.evaluate(0) = u_min` instead, where
-    /// `a = 0` and the tangent is undefined, it fails (`SM_ERR`); upstream's fraction
-    /// tie-break lands at `u = 1.8101`, the far end of the plateau.
-    #[test]
-    fn wr57_newton_starts_at_the_sample_not_the_collapsed_corner() {
+    /// Goldens `surface.surface_p7` gen0435's surface: degree 1 in `u`, its first control
+    /// row one point; with its `u` knots and `v_max`.
+    fn wr57_gen0435_surface() -> (Surface, [f64; 6], f64) {
         use crate::nurbs::b_spline_surface::BSplineSurfaceForm;
         use crate::nurbs::math::{CPoint, NOW};
 
@@ -4309,6 +4356,22 @@ mod tests {
         let mut bs = BSplineSurface::from_data(3, 4, 1, 3, 5, 8, &net, &u_knots, &v_knots).unwrap();
         bs.set_b_spline_surface_form(BSplineSurfaceForm::HelicalSweep);
         let s = Surface::from(bs);
+        (s, u_knots, v1)
+    }
+
+    /// WR-57 (goldens `surface.surface_p7` gen0435): the surface is degree 1 in `u` and
+    /// its first control row is one point, so on the first `u` span
+    /// `S_v(u, v_max) = a(u) * S_v^row1(v_max)` with `a(u) > 0` for `u > u_min`: the unit
+    /// tangent there is exactly `unit(P[1][4] - P[1][3])`, and every `u` of the span
+    /// aligns equally with `dir`. The input's `u`, 1.6e-7 above `u_min`, is the
+    /// near-best guess; so close to the collapsed corner its Newton solve does not
+    /// converge, and the second solve starts at the best sample, sample 0 (the first of
+    /// the equal samples), and converges there. Started at `s_ivl.evaluate(0) = u_min`
+    /// instead, where `a = 0` and the tangent is undefined, it fails (`SM_ERR`);
+    /// upstream's fraction tie-break lands at `u = 1.8101`, the far end of the plateau.
+    #[test]
+    fn wr57_newton_starts_at_the_sample_not_the_collapsed_corner() {
+        let (s, u_knots, v1) = wr57_gen0435_surface();
         let k = Kernel::default();
 
         let uv = Point2::new(1.7156161692711094, v1);
@@ -4324,7 +4387,7 @@ mod tests {
         let span_end = u_knots[2];
         assert!(r.uv.x > u_min && r.uv.x < span_end, "{r:?}");
 
-        // at the sample nearest the input: sample 0 of the pulled-in sample domain
+        // at the best sample, sample 0 of the pulled-in sample domain
         let sample0 = u_min + 0.025 * (u_knots[5] - u_min);
         assert!(
             (r.uv.x - sample0).abs() < 1e-4,
@@ -4347,6 +4410,33 @@ mod tests {
             (got - want).abs() < 1e-12,
             "alignment {got} vs closed form {want}"
         );
+    }
+
+    /// WR-57 (goldens `topology.brep_mirror` mat0076, which hung): on gen0435's plateau
+    /// (the first `u` span, where every `u` aligns equally with `dir`, see above) an input
+    /// inside the span is itself an answer, and it is kept: it is the near-best guess
+    /// nearest the input, and its Newton solve stops at once (`F = 0`). Started at the
+    /// nearest sample instead (sample 0), the solve stops there and returns it, 0.04
+    /// away; a drop curve inverting points near such a pole then jumps at every step.
+    #[test]
+    fn wr57_plateau_keeps_the_input_parameter() {
+        let (s, u_knots, v1) = wr57_gen0435_surface();
+        let k = Kernel::default();
+        let dir = Vec3::new(0.9109237931558096, -0.11434982158434526, 0.6569538269953288);
+        let u_in = 1.78;
+        assert!(u_knots[0] < u_in && u_in < u_knots[2]);
+        let r = s
+            .find_degen_param_for_direction(
+                &k,
+                Point2::new(u_in, v1),
+                dir,
+                false,
+                SurfParamType::U,
+                1e-9,
+            )
+            .unwrap();
+        assert!(r.converged, "{r:?}");
+        assert_eq!(r.uv, Point2::new(u_in, v1));
     }
 
     /// The global solve failures keep the operation, status, kind and entity of the bare
