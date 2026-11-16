@@ -20,6 +20,8 @@ use solidcore::Vec3;
 
 use common::*;
 use solidcore::kernel::Kernel;
+use solidcore_ops::boolean::boolean;
+use solidcore_ops::sweep::{extrude, Curve, DraftCorner};
 use solidcore_ops::*;
 
 const A: f64 = 12.744_373_655_385_26;
@@ -103,6 +105,66 @@ fn overlapping_rounds_are_refused_and_rounds_that_fit_close() {
         );
         assert!(c.check(CheckLevel::All).unwrap().is_valid());
     }
+}
+
+/// The ring of SolidCraft #18178: a 40 high disc of radius 14.5 less an equilateral triangle of
+/// side 21 about its axis (corners at radius 12.124), whose top ring is 2.376 wide at the
+/// triangle's corners. Chamfered 0.8 on the outer circle and the triangle's three top edges,
+/// the triangle's chamfers meet 0.8 / sin 30 = 1.6 out from each 60 degree corner, at radius
+/// 13.724, past the outer chamfer's contact line at 13.7: the lines cross there for a few
+/// hundredths, which the band check's samples step over, and the chamfer is refused as too
+/// large for the faces (the pieces between the crossings judged too). At 0.5 the corners reach
+/// 13.124 and the outer line lies at 14.0: the four chamfers on the one face stay apart and
+/// build a valid body a little smaller than the part.
+#[test]
+fn chamfers_crossing_at_a_ring_corner_are_refused_and_apart_build() {
+    all_fixes();
+    const C: [[f64; 3]; 3] = [
+        [12.124_355_652_982_143, 0.0, -1.0],
+        [-6.062_177_826_491_071, 10.5, -1.0],
+        [-6.062_177_826_491_071, -10.5, -1.0],
+    ];
+    const EDGES: [[f64; 3]; 4] = [
+        [-14.5, 0.0, 40.0],
+        [3.031_088_913_245_535_6, 5.25, 40.0],
+        [-6.062_177_826_491_071, 0.0, 40.0],
+        [3.031_088_913_245_535_6, -5.25, 40.0],
+    ];
+    let disc = make_cylinder([0.0; 3], 14.5, 40.0).unwrap();
+    let sides: Vec<Curve> = (0..3)
+        .map(|i| Curve::Line {
+            start: C[i],
+            end: C[(i + 1) % 3],
+        })
+        .collect();
+    let triangle = extrude(
+        &sides,
+        [0.0, 0.0, 1.0],
+        42.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let ring = boolean(disc, triangle, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let edges: Vec<usize> = EDGES.iter().map(|&p| edge_at(&ring, p)).collect();
+    let c = ring.copy().unwrap();
+    match blend(&c, Blend::Chamfer, &edges, &[0.8], &[], Corners::Filled) {
+        Err(Error::NoRoom)
+        | Err(Error::TooLarge {
+            why: Some(RoomReason::BandsOverlap),
+            ..
+        }) => {}
+        other => panic!("{other:?}"),
+    }
+    let whole = volume(&ring);
+    let c = ring.copy().unwrap();
+    blend(&c, Blend::Chamfer, &edges, &[0.5], &[], Corners::Filled).unwrap();
+    let v = volume(&c);
+    assert!(v > 0.99 * whole && v < whole, "{v} of {whole}");
+    assert!(c.check(CheckLevel::All).unwrap().is_valid());
 }
 
 /// tan 4 degrees: the slope of the creased wall's turned piece.

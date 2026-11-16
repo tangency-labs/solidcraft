@@ -605,37 +605,6 @@ fn overlap_refusal(e: &Error) -> bool {
     matches!(e, Error::NoRoom | Error::TooLarge { why: Some(crate::RoomReason::BandsOverlap), .. })
 }
 
-/// The reporter's ring of #18178: a 40 high disc of radius 14.5 less an equilateral triangle of
-/// side 21 about its axis, whose top ring is 14.5 - 12.124 = 2.376 wide at the triangle's
-/// corners. Chamfered 0.8 on the outer circle and the triangle's three edges, the triangle's
-/// chamfers meet at each 60 degree corner 0.8 / sin 30 = 1.6 out from it, at radius 13.724, past
-/// the outer chamfer's contact line at 13.7: the two cross by about 0.02 there and the chamfer is
-/// refused as too large for the faces. At 0.5 the corners reach 13.124 and the outer chamfer's
-/// line lies at 14.0: the four chamfers on the one face stay apart and build.
-#[test]
-fn chamfers_meeting_at_a_ring_corner_are_refused_and_apart_build() {
-    use super::sweep::extrude;
-    use crate::sweeps::{Curve, DraftCorner};
-    const EDGES: [[f64; 3]; 4] =
-        [[-14.5, 0.0, 40.0], [3.0310889132455356, 5.25, 40.0], [-6.062177826491071, 0.0, 40.0], [3.0310889132455356, -5.25, 40.0]];
-    let corner = |i: f64| {
-        let a = 2.0 * PI * i / 3.0;
-        [12.124355652982143 * a.cos(), 12.124355652982143 * a.sin(), -1.0]
-    };
-    let ring = move || {
-        let disc = make_cylinder([0.0; 3], 14.5, 40.0).unwrap();
-        let sides: Vec<Curve> = (0..3).map(|i| Curve::Line { start: corner(f64::from(i)), end: corner(f64::from((i + 1) % 3)) }).collect();
-        let triangle = extrude(&sides, [0.0, 0.0, 1.0], 42.0, 0.0, DraftCorner::default(), true).unwrap();
-        boolean(&disc, &triangle, BooleanOp::Subtract).unwrap().unwrap()
-    };
-    let chamfer = move |d: f64| blend(&ring(), Blend::Chamfer, &EDGES, &[d], TOL, &[], &[], Corners::Filled);
-    let overlap = timed("ring_corner_overlap", move || chamfer(0.8).map(|_| ()).unwrap_err());
-    assert!(overlap_refusal(&overlap), "{overlap:?}");
-    let apart = timed("ring_corner_apart", move || volume(&chamfer(0.5).unwrap(), 1e-8).unwrap());
-    let whole = (PI * 14.5 * 14.5 - 3f64.sqrt() / 4.0 * 21.0 * 21.0) * 40.0;
-    assert!(apart > 0.99 * whole && apart < whole, "{apart} of {whole}");
-}
-
 /// The capi's `overflow_goes_first` (fork 241f7ba): R21 on a 20 cube's edge takes all of both faces
 /// that edge lies on, and rounds with it on other edges go after it. With R5 on the corner's other
 /// two edges those edges are gone (the two R5 points flagged) and the result is the R21's alone,
