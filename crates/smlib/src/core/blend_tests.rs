@@ -577,6 +577,28 @@ fn a_cliff_overflow_the_fork_refuses_has_no_room() {
     });
 }
 
+/// Two chamfers that overlap (#18178): a 40 high disc of radius 14.5 with a hole of radius 10 off
+/// centre by 2, so its top ring is 2.5 wide at the narrowest place. A 1.5 chamfer on the outer
+/// circle and on the hole's rim alone each builds, and together they overlap there (1.5 + 1.5 >
+/// 2.5): that is refused as too large for the faces, not as "not a closed solid".
+#[test]
+fn chamfers_that_overlap_are_too_large_not_a_non_solid() {
+    let ring = || {
+        let disc = make_cylinder([0.0; 3], 14.5, 40.0).unwrap();
+        let hole = make_cylinder([2.0, 0.0, -1.0], 10.0, 42.0).unwrap();
+        boolean(&disc, &hole, BooleanOp::Subtract).unwrap().unwrap()
+    };
+    let (outer, rim) = ([-14.5, 0.0, 40.0], [12.0, 0.0, 40.0]);
+    timed("overlap_alone", move || {
+        blend(&ring(), Blend::Chamfer, &[outer], &[1.5], TOL, &[], &[], Corners::Filled).unwrap();
+        blend(&ring(), Blend::Chamfer, &[rim], &[1.5], TOL, &[], &[], Corners::Filled).unwrap();
+    });
+    let both = timed("overlap_both", move || {
+        blend(&ring(), Blend::Chamfer, &[outer, rim], &[1.5; 2], TOL, &[], &[], Corners::Filled).map(|_| ()).unwrap_err()
+    });
+    assert!(matches!(both, Error::NoRoom | Error::TooLarge { .. }), "{both:?}");
+}
+
 /// The capi's `overflow_goes_first` (fork 241f7ba): R21 on a 20 cube's edge takes all of both faces
 /// that edge lies on, and rounds with it on other edges go after it. With R5 on the corner's other
 /// two edges those edges are gone (the two R5 points flagged) and the result is the R21's alone,
