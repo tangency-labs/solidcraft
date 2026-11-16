@@ -358,6 +358,13 @@ impl crate::Feature {
                     checked_plane(&end.plane, 0)?;
                 }
             }
+            K::FrameTrim { to, .. } => {
+                for target in to {
+                    if let crate::frame::TrimTarget::Plane { plane } = target {
+                        checked_plane(plane, 0)?;
+                    }
+                }
+            }
             K::ConstructionPlane { plane }
             | K::Split { plane, .. }
             | K::SplitFace { plane, .. }
@@ -441,6 +448,13 @@ impl crate::Feature {
             K::FrameEndCap { ends, .. } => {
                 for end in ends {
                     remap_plane(&mut end.plane, ids, bodies, 0, occurrences, doc)?;
+                }
+            }
+            K::FrameTrim { to, .. } => {
+                for target in to {
+                    if let crate::frame::TrimTarget::Plane { plane } = target {
+                        remap_plane(plane, ids, bodies, 0, occurrences, doc)?;
+                    }
                 }
             }
             K::ConstructionPlane { plane }
