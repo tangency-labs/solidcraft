@@ -156,10 +156,11 @@ fn issue_1480_union_without_the_extension_keeps_upstream_s_topology() {
     let mut k = kernel(false);
     let (edges, vertices, worst, ratio) = union_edge_ends(&mut k);
     // The end trim alone moves no curve end here: upstream's topology. (Named
-    // `..._keeps_upstream_s_ends` until #17888.) Every end was within 7.5e-6 until WR-306's absorb became the only path (#17888): the eight 1.43e-5 closed
-    // proto edges at the ridge crossings lie inside their vertex's tolerance, so they are
-    // absorbed and the vertex pairs fitted to their edges, which moves those ends to
-    // 1.2200e-5 (MEASURED). Each stays within its vertex's tolerance (3.84e-5; worst
+    // `..._keeps_upstream_s_ends` until #17888.) Every end was within 7.5e-6 until
+    // WR-306's absorb became the only path (#17888): the eight 1.43e-5 closed proto edges
+    // at the ridge crossings lie inside their vertex's tolerance, so they are absorbed and
+    // the vertex pairs fitted to their edges, which moves those ends to 1.2200e-5
+    // (MEASURED). Each stays within its vertex's tolerance (3.84e-5; worst
     // gap / tolerance 0.436), and the union passes level 2 where upstream's had 1.73 mm
     // vertex tolerances (see the WR-469 test below).
     assert_eq!((edges, vertices), (1096, 712));

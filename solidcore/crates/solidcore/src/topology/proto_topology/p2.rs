@@ -2218,9 +2218,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             // Not upstream (WR-306, #1058): a curve whose ends find one vertex definition
             // and that provably lies within that definition's tolerance is that vertex,
             // not a closed edge on it, whether or not it is also shorter than upstream's
-            // test (twice our own tolerance), which stays as it is. Either way the
-            // vertex is marked for ImprintIntersections' fit, as the fork marks every
-            // speck it drops.
+            // test (twice our own tolerance), which stays as it is. Only a curve inside
+            // the vertex's tolerance marks the vertex for ImprintIntersections' fit; a
+            // short curve outside it is dropped as upstream drops it, unmarked.
             let short = len < 2.0 * pe_tol;
             let inside = self.curve_inside_one_vertex(k, &*brep, start, int_curve, &eds)?;
 
