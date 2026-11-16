@@ -4782,9 +4782,14 @@ pub(super) fn ignored_surface_result<T>(r: Result<T>) -> Result<Option<T>> {
 }
 
 /// Whether the generatrix `gen` lies within `tol` of the circle its arc test nominated
-/// (`frame`'s origin and Z axis, `radius`), over its whole NURB ([`on_circle`]); a circle
-/// with no NURB is its own arc ([`crate::curve::ellipse::Ellipse::is_arc`]); any other curve
-/// without an exact NURB form is [`OnCircle::Unproved`].
+/// (`frame`'s origin and Z axis, `radius`).
+///
+/// A circle (an [`crate::curve::ellipse::Ellipse`] of the circle class whose two radii are
+/// equal) is its own arc by definition: its arc test returns its own placement and radius,
+/// not a circle fitted to samples ([`crate::curve::ellipse::Ellipse::is_arc`]), so it is
+/// [`OnCircle::Within`] at any `tol`; its NURB only represents that circle, to rounding.
+/// Any other curve is bounded over its whole NURB ([`on_circle`]), and a curve without an
+/// exact NURB form is [`OnCircle::Unproved`].
 ///
 /// # Errors
 ///
@@ -4795,11 +4800,15 @@ fn generatrix_on_circle(
     radius: f64,
     tol: f64,
 ) -> Result<OnCircle> {
-    let nurb = gen.b_spline_base().and_then(|b| b.gw_nurb());
-    match (nurb, gen.kind()) {
-        (Some(nurb), _) => on_circle(nurb, frame.origin(), frame.z_axis(), radius, tol),
-        (None, CurveKind::Ellipse(e)) if e.is_circle_class() => Ok(OnCircle::Within),
-        (None, _) => Ok(OnCircle::Unproved),
+    if let CurveKind::Ellipse(e) = gen.kind() {
+        // (exact equality: a circle-class ellipse whose radii differ is bounded as a NURB)
+        if e.is_circle_class() && e.x_radius() == e.y_radius() {
+            return Ok(OnCircle::Within);
+        }
+    }
+    match gen.b_spline_base().and_then(|b| b.gw_nurb()) {
+        Some(nurb) => on_circle(nurb, frame.origin(), frame.z_axis(), radius, tol),
+        None => Ok(OnCircle::Unproved),
     }
 }
 
