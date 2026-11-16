@@ -104,7 +104,11 @@ fn flange_window_says_where_the_rule_values_are_changed() {
     h.app.session.selection = vec![Sel::Profile { sketch: sk, index: 0 }];
     h.app.start("sheet.flange");
     h.frames(3);
-    assert!(crate::scenario::rect_of("dialog:caption:Rule").is_some_and(|r| r.width() > 0.0), "the line under the Rule box is shown");
+    let note = crate::scenario::rect_of("dialog:note:sheet_flange_rule_values");
+    assert!(note.is_some_and(|r| r.width() > 0.0), "the note under the Rule box is shown");
+    // The whole sentence is shown: it wraps over lines rather than being cut to one.
+    let line = solidcraft_theme::Tokens::get().font_small * 1.5;
+    assert!(note.is_some_and(|r| r.height() > line + solidcraft_theme::Tokens::get().space_4 * 2.0), "{note:?}");
     let text = solidcraft_ui_text::tr("ui.sheet_flange_rule_values");
     assert!(text.contains(solidcraft_ui_text::tr("cmd.sheet_manage_rules")), "{text}");
 }
