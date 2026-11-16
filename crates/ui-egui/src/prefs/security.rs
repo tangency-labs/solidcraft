@@ -76,6 +76,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
         });
+        ui_kit::settings_section(ui, "reports", app.tr("prefs.reports"), |ui| {
+            setting::report_on_github(app, ui);
+        });
         ui_kit::settings_section(ui, "encryption", app.tr("prefs.security.encryption"), |ui| {
             ui_kit::settings_inline_note(ui, app.tr("prefs.security.encryption_note"));
         });

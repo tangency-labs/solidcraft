@@ -80,7 +80,11 @@ fn shown(row: &str) -> bool {
 fn every_option_reaches_the_command() {
     let mut h = shaft();
     let untouched = params(&h);
-    assert_eq!(untouched.as_object().unwrap().keys().collect::<Vec<_>>(), ["face"], "defaults stay out of the command: {untouched}");
+    assert_eq!(
+        untouched.as_object().unwrap().keys().collect::<Vec<_>>(),
+        ["faces", "single_face_selection"],
+        "default thread options stay out of the command: {untouched}"
+    );
     choose(&mut h, "Form", "Trapezoidal (ISO 2904)");
     choose(&mut h, "Size", "20 mm");
     assert_eq!(params(&h)["designation"], "Tr20x4", "a new size takes its standard pitch");
@@ -97,7 +101,8 @@ fn every_option_reaches_the_command() {
     type_in(&mut h, "Chamfer Depth", "0.5 mm");
     click(&mut h, &["dialog:Modeled"]);
     let mut p = params(&h);
-    p.as_object_mut().unwrap().remove("face");
+    p.as_object_mut().unwrap().remove("faces");
+    p.as_object_mut().unwrap().remove("single_face_selection");
     assert_eq!(
         p,
         json!({
@@ -404,8 +409,9 @@ fn ordinary_thread_face_clicks_replace_the_previous_face() {
         let d = h.app.dialog.as_ref().unwrap();
         assert!(matches!(&d.kind, Kind::Thread { designation, .. } if designation == "M20"));
         let commands = apply_commands(&h.app, d).unwrap();
-        assert!(commands[0].1.get("face").is_some());
-        assert!(commands[0].1.get("faces").is_none());
+        assert!(commands[0].1.get("face").is_none());
+        assert_eq!(commands[0].1["faces"][0]["body"], "Second");
+        assert_eq!(commands[0].1["single_face_selection"], true);
         crate::dialogs::cancel(&mut h.app);
     }
 }
@@ -636,8 +642,9 @@ fn duplicate_face_picks_create_only_one_thread_command() {
     d.inputs[0].items.push(duplicate);
     let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(commands.len(), 1);
-    assert!(commands[0].1.get("face").is_some());
-    assert!(commands[0].1.get("faces").is_none());
+    assert!(commands[0].1.get("face").is_none());
+    assert_eq!(commands[0].1["faces"].as_array().unwrap().len(), 1);
+    assert_eq!(commands[0].1["single_face_selection"], true);
 }
 
 /// A full history still retains the state before every thread of the operation.
@@ -744,6 +751,53 @@ fn an_unchanged_grouped_thread_edit_keeps_its_exact_saved_parameters() {
     assert_eq!(d.inputs[0].items.len(), 2);
     crate::dialogs::run_dialog(&mut h.app, &d).unwrap();
     assert_eq!(h.app.session.doc.feature(id).unwrap().kind, before, "a no-op edit preserves every saved floating-point value");
+}
+
+/// A single selected face retains its body even when another cylinder occupies the same place.
+#[test]
+fn a_single_thread_face_keeps_the_selected_body_when_shafts_coincide() {
+    let mut h = Harness::new();
+    for body in ["A", "B"] {
+        h.app.run("solid.cylinder", json!({"radius":4,"height":8,"body_name":body,"operation":"new"})).unwrap();
+    }
+    h.app.session.selection = vec![thread_face(&h.app, "B")];
+    h.app.start("solid.thread");
+    let d = h.app.dialog.take().unwrap();
+    crate::dialogs::run_dialog(&mut h.app, &d).unwrap();
+    assert_eq!(h.app.session.model.state().threads.iter().map(|thread| thread.body.as_str()).collect::<Vec<_>>(), ["B"]);
+    let id = h.app.session.doc.features.last().unwrap().id;
+    h.app.run("body.rename", json!({"body":"B","name":"Renamed"})).unwrap();
+    let saved = h.app.session.doc.to_json();
+    h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
+    h.app.edit_feature(id);
+    h.frames(2);
+    let d = h.app.dialog.take().unwrap();
+    assert!(!d.inputs[0].multi, "a single selected face still replaces on a click after reopening");
+    assert!(matches!(&d.inputs[0].items[..], [Sel::Face { body, .. }] if body == "Renamed"));
+    crate::dialogs::run_dialog(&mut h.app, &d).unwrap();
+    assert_eq!(h.app.session.model.state().threads.iter().map(|thread| thread.body.as_str()).collect::<Vec<_>>(), ["Renamed"]);
+    let mut d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    d.take_box(&h.app.session, vec![thread_face(&h.app, "A")], true);
+    crate::dialogs::run_dialog(&mut h.app, &d).unwrap();
+    assert_eq!(h.app.session.model.state().threads.iter().map(|thread| thread.body.as_str()).collect::<Vec<_>>(), ["Renamed", "A"]);
+    let d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    assert!(d.inputs[0].multi, "explicitly adding a face switches the saved selection mode");
+}
+
+/// Editing an older point-only thread also retains the body of its replacement face.
+#[test]
+fn editing_a_legacy_thread_can_select_a_coincident_body() {
+    let mut h = Harness::new();
+    for body in ["A", "B"] {
+        h.app.run("solid.cylinder", json!({"radius":4,"height":8,"body_name":body,"operation":"new"})).unwrap();
+    }
+    let id = h.app.run("solid.thread", json!({"face":[4,0,2],"designation":"M8"})).unwrap()["feature"].as_u64().unwrap();
+    let mut d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    assert!(!d.inputs[0].multi);
+    d.take_box(&h.app.session, vec![thread_face(&h.app, "B")], false);
+    crate::dialogs::run_dialog(&mut h.app, &d).unwrap();
+    assert_eq!(h.app.session.model.state().threads.iter().map(|thread| thread.body.as_str()).collect::<Vec<_>>(), ["B"]);
+    assert!(!crate::dialogs::for_feature(&h.app, id, None).unwrap().inputs[0].multi);
 }
 
 /// Cold edit and rename preserve each body's identity, even where two source bodies coincide.

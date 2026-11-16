@@ -8,7 +8,7 @@
 //!
 //! | Rust                       | Kind                                                    |
 //! |----------------------------|---------------------------------------------------------|
-//! | [`Curve::proved_within`]   | a line, a B-spline, and a conic by its rational B-spline |
+//! | [`Curve::proved_near`]     | a line, a B-spline, and a conic by its rational B-spline |
 //! | [`Curve::proved_together`] | both ways                                               |
 //!
 //! **A tube.** A piece of a curve is enclosed by its chord and a radius `rho`: every point
@@ -60,7 +60,7 @@ use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::math::gamma;
 
-const OP: &str = "curve::proximity::proved_within";
+const OP: &str = "curve::proximity::proved_near";
 
 /// How many times a piece is halved at most.
 pub const DEPTH: usize = 32;
@@ -487,7 +487,7 @@ impl Curve {
     /// # Errors
     ///
     /// The kernel's cancellation (a failed evaluation or point drop proves nothing).
-    pub fn proved_within(
+    pub fn proved_near(
         &self,
         k: &Kernel,
         interval: &Extent1d,
@@ -575,11 +575,11 @@ impl Curve {
 
     /// Whether the two curves are proved to stay within `radius` of each other over their
     /// intervals: every point of each within `radius` of the other or in one of the balls
-    /// `ends` ([`Curve::proved_within`] both ways).
+    /// `ends` ([`Curve::proved_near`] both ways).
     ///
     /// # Errors
     ///
-    /// Those of [`Curve::proved_within`].
+    /// Those of [`Curve::proved_near`].
     pub fn proved_together(
         &self,
         k: &Kernel,
@@ -590,8 +590,8 @@ impl Curve {
         ends: &[(Vec3, f64)],
     ) -> Result<bool> {
         Ok(
-            self.proved_within(k, interval, other, other_interval, radius, ends)?
-                && other.proved_within(k, other_interval, self, interval, radius, ends)?,
+            self.proved_near(k, interval, other, other_interval, radius, ends)?
+                && other.proved_near(k, other_interval, self, interval, radius, ends)?,
         )
     }
 }
@@ -686,27 +686,23 @@ mod tests {
         let sagitta = 4.0 * (1.0 - half.cos());
         assert!((sagitta - 1.25e-3).abs() < 1e-6);
         for (a, ia, b, ib) in [(&line, &seg, &circle, &arc), (&circle, &arc, &line, &seg)] {
-            assert!(a
-                .proved_within(&k, ia, b, ib, sagitta * 1.001, &[])
-                .unwrap());
-            assert!(!a
-                .proved_within(&k, ia, b, ib, sagitta * 0.999, &[])
-                .unwrap());
+            assert!(a.proved_near(&k, ia, b, ib, sagitta * 1.001, &[]).unwrap());
+            assert!(!a.proved_near(&k, ia, b, ib, sagitta * 0.999, &[]).unwrap());
         }
         // the whole circle is not within the chord's reach, nor of a kind refused
         let whole = circle.natural_interval();
         assert!(!circle
-            .proved_within(&k, &whole, &line, &seg, 1.0, &[])
+            .proved_near(&k, &whole, &line, &seg, 1.0, &[])
             .unwrap());
         assert!(!line
-            .proved_within(&k, &seg, &circle, &arc, f64::NAN, &[])
+            .proved_near(&k, &seg, &circle, &arc, f64::NAN, &[])
             .unwrap());
         // within half the sagitta only where the chord is in a ball about an end of the arc:
         // balls that reach the chord's middle hold all of it, shorter ones leave the middle
         let half_way = 0.5 * sagitta;
         let balls = |r: f64| [(p, r), (q, r)];
         let within = |ends: &[(Vec3, f64)]| {
-            line.proved_within(&k, &seg, &circle, &arc, half_way, ends)
+            line.proved_near(&k, &seg, &circle, &arc, half_way, ends)
                 .unwrap()
         };
         assert!(!within(&[]));
