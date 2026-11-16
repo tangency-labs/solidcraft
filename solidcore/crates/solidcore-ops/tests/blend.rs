@@ -2044,48 +2044,62 @@ fn the_ledge_corner_rolls_over_across_the_bores_tangent_seam() {
     assert!(report.is_valid(), "{}", report.text);
     assert!(b.is_manifold_solid().unwrap());
     b.check_solid().unwrap();
+    // the app's record holds it (each pcurve runs over its edge's interval), as built and
+    // after a round trip through a .smb file (the case's render reads it back)
+    b.to_record().unwrap();
+    let back = Body::from_smb(b.to_smb(true).unwrap(), true).unwrap();
+    back.to_record().unwrap();
     let want = v0 + ledge_rolled_change(0.5);
-    let v = b.volume(1e-12).unwrap();
-    assert!(rel(v, want) < 1e-11, "{v} {want}");
-    enclosure_holds(&b, want, 1e-3);
-    // the cap's two faces meet along the seam's line from W to S, where the rib's two pieces
-    // meet: S on that line (x = 12, z = 33) at the torus's height h = sqrt((rho - r)(3r - rho))
-    // over its centre plane y = 30 - r, rho = sqrt(ua^2 + r^2) W's distance from A1
-    let r: f64 = 0.5;
-    let ua = ((12.0 + r) * (12.0 + r) - r * r).sqrt() - 12.0;
-    let rho = (ua * ua + r * r).sqrt();
-    let h = ((rho - r) * (3.0 * r - rho)).sqrt();
-    let (w, s) = ([12.0, 30.0, 33.0], [12.0, 30.0 - r + h, 33.0]);
-    let (_, brep) = kernel_copy(&b);
-    let near = |p: Vec3, q: [f64; 3]| (p - Vec3::new(q[0], q[1], q[2])).length() <= 1e-9;
-    let ends = |e: EdgeId| {
-        let v0 = edge::start_vertex(&brep, e).unwrap().unwrap();
-        let v1 = edge::end_vertex(&brep, e).unwrap().unwrap();
-        (
-            brep.vertex(v0).unwrap().point,
-            brep.vertex(v1).unwrap().point,
-        )
-    };
-    let seam: Vec<EdgeId> = brep
-        .edges()
-        .ids()
-        .filter(|&e| {
-            let (p, q) = ends(e);
-            (near(p, w) && near(q, s)) || (near(p, s) && near(q, w))
-        })
-        .collect();
-    assert_eq!(seam.len(), 1, "the cap's seam edge from W to S");
-    let faces = edge::faces(&brep, seam[0], None).unwrap();
-    assert!(faces.len() == 2 && faces[0] != faces[1], "{faces:?}");
-    let at_s = brep
-        .edges()
-        .ids()
-        .filter(|&e| {
-            let (p, q) = ends(e);
-            near(p, s) || near(q, s)
-        })
-        .count();
-    assert_eq!(at_s, 3, "S: the seam edge and the rib's two pieces");
+    // the volume and the seam, on the body as built and as read back from the .smb file
+    for (which, body) in [("built", &b), ("reloaded", &back)] {
+        let v = body.volume(1e-12).unwrap();
+        assert!(rel(v, want) < 1e-11, "{which}: {v} {want}");
+        enclosure_holds(body, want, 1e-3);
+        // the cap's two faces meet along the seam's line from W to S, where the rib's two pieces
+        // meet: S on that line (x = 12, z = 33) at the torus's height h = sqrt((rho - r)(3r - rho))
+        // over its centre plane y = 30 - r, rho = sqrt(ua^2 + r^2) W's distance from A1
+        let r: f64 = 0.5;
+        let ua = ((12.0 + r) * (12.0 + r) - r * r).sqrt() - 12.0;
+        let rho = (ua * ua + r * r).sqrt();
+        let h = ((rho - r) * (3.0 * r - rho)).sqrt();
+        let (w, s) = ([12.0, 30.0, 33.0], [12.0, 30.0 - r + h, 33.0]);
+        let (_, brep) = kernel_copy(body);
+        let near = |p: Vec3, q: [f64; 3]| (p - Vec3::new(q[0], q[1], q[2])).length() <= 1e-9;
+        let ends = |e: EdgeId| {
+            let v0 = edge::start_vertex(&brep, e).unwrap().unwrap();
+            let v1 = edge::end_vertex(&brep, e).unwrap().unwrap();
+            (
+                brep.vertex(v0).unwrap().point,
+                brep.vertex(v1).unwrap().point,
+            )
+        };
+        let seam: Vec<EdgeId> = brep
+            .edges()
+            .ids()
+            .filter(|&e| {
+                let (p, q) = ends(e);
+                (near(p, w) && near(q, s)) || (near(p, s) && near(q, w))
+            })
+            .collect();
+        assert_eq!(seam.len(), 1, "{which}: the cap's seam edge from W to S");
+        let faces = edge::faces(&brep, seam[0], None).unwrap();
+        assert!(
+            faces.len() == 2 && faces[0] != faces[1],
+            "{which}: {faces:?}"
+        );
+        let at_s = brep
+            .edges()
+            .ids()
+            .filter(|&e| {
+                let (p, q) = ends(e);
+                near(p, s) || near(q, s)
+            })
+            .count();
+        assert_eq!(
+            at_s, 3,
+            "{which}: S, the seam edge and the rib's two pieces"
+        );
+    }
 }
 
 /// The ledge's planar twin (#10876): the slab [0, 10] x [-10, 10] x [-10, 0] with the riser
