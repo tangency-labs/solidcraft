@@ -1158,3 +1158,24 @@ fn cross_component_sketch_refs_follow_the_component() {
     let (_, _, off) = crate::view::construction_planes(&s).into_iter().find(|(_, n, _)| n == "Off child").unwrap();
     assert!(near(off.origin, Vec3::new(130.0, 0.0, 5.0)), "{off:?}");
 }
+
+/// #8192: a plane whose origin is length expressions, made in an active component that is moved
+/// and turned, is written in that component's frame still as expressions, so the sketch sits at
+/// the world point the expressions give and follows the parameter.
+#[test]
+fn a_plane_origin_given_as_expressions_maps_into_a_moved_and_turned_component() {
+    let mut s = block_in_component();
+    run(&mut s, "occurrence.move", json!({"occurrence": "C:1", "axis": [0, 0, 1], "angle": "90 deg"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "C:1", "translate": [100, 0, 0], "space": "world"}));
+    run(&mut s, "parameters.add", json!({"name": "station", "expression": "10 mm"}));
+    run(&mut s, "component.activate", json!({"component": "C"}));
+    run(&mut s, "sketch.create", json!({"name": "S", "plane": {"origin": ["station", 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [1, 1]}));
+    run(&mut s, "sketch.finish", json!({}));
+    // The first sketch point is the plane's origin, in the world.
+    for (station, expected) in [("10 mm", Vec3::new(10.0, 0.0, 0.0)), ("20 mm", Vec3::new(20.0, 0.0, 0.0))] {
+        run(&mut s, "parameters.change", json!({"name": "station", "expression": station}));
+        let world = sketch_world_points(&mut s, "S");
+        assert!(world.iter().any(|p| near(*p, expected)), "station {station}: {world:?}");
+    }
+}

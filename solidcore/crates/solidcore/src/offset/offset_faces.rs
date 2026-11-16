@@ -53,6 +53,9 @@
 //!   only looked up by id.
 //! - **Kept attributes** are owned copies ([`Attribute::make_copy`]) instead of heap
 //!   pointers freed by a scope guard.
+//! - **A removal that fails part way** (it deleted the blend face, then failed) is
+//!   refused [`OffsetFacesRefusal::Unsupported`] at once; the fork goes on with the
+//!   blend's dead face.
 //! - **Refusals** return [`SolidError::Upstream`] `SM_ERR` with the refusal and its reason
 //!   on the executive, as the fork's `Refuse` returns `SM_ERR`. A put-back the fillet
 //!   executive fails for a reason other than room also records
@@ -1141,6 +1144,17 @@ impl OffsetFacesExecutive {
                     }
                 };
                 let Some(sharp) = removed else {
+                    // (not in the fork) A removal that failed after it began editing
+                    // has deleted the blend face: the B-rep is half edited and the
+                    // blend's face id names nothing, so no later round or group can
+                    // take it off.
+                    if !crate::topology::brep::p1::faces(b, None)?.contains(&blend) {
+                        return Err(self.refuse(
+                            OffsetFacesRefusal::Unsupported,
+                            "a blend on a moved face failed to come off part way through",
+                            None,
+                        ));
+                    }
                     continue;
                 };
                 let sharp = ner(sharp)?;
@@ -1838,6 +1852,46 @@ mod tests {
         ex.offset_faces(&mut k, &mut b, &[x, y], 1.0).unwrap();
         let got = volume(&k, &mut b);
         assert!((got - 1210.0).abs() <= 1e-9 * 1210.0, "volume {got}");
+    }
+
+    /// Offset Face rebuilds every edge of the body, each new vertex taking the tolerance of
+    /// the original vertex it stands for, not the larger of its edge's two ends: a corner
+    /// of a 10 mm box given 1e-3 leaves the corners along its edges under 1e-3 when the
+    /// bottom is moved down 1, twice (tangency-labs/solidcraft#17624: each offset spread a
+    /// loose tolerance one edge further, until it reached past a short edge and the merge
+    /// joined that edge's ends).
+    #[test]
+    fn a_rebuilt_vertex_keeps_its_own_tolerance() {
+        let mut k = Kernel::default();
+        k.fixes.offset_edges_keep_source_tolerance = true;
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let at = |b: &Brep, x: f64, y: f64, z: f64| {
+            b.vertices()
+                .ids()
+                .find(|&v| {
+                    let p = vertex::point(b, v).unwrap();
+                    (p.x - x).abs() < 1e-6 && (p.y - y).abs() < 1e-6 && (p.z - z).abs() < 1e-6
+                })
+                .unwrap()
+        };
+        let loose = at(&b, 10.0, 10.0, 10.0);
+        vertex::set_tolerance(&mut b, loose, 1e-3, true, true).unwrap();
+        assert!(vertex::tolerance(&b, at(&b, 0.0, 10.0, 10.0)).unwrap() < 1e-3);
+        for step in 1..=2 {
+            let level = -f64::from(step - 1);
+            let bottom = face_where(&b, |p| (p.z - level).abs() < 1e-6);
+            let mut ex = OffsetFacesExecutive::new();
+            ex.offset_faces(&mut k, &mut b, &[bottom], 1.0).unwrap();
+            let want = 1000.0 + 100.0 * f64::from(step);
+            let got = volume(&k, &mut b);
+            assert!((got - want).abs() <= 1e-9 * want, "volume {got}");
+            for (x, y) in [(0.0, 10.0), (10.0, 0.0)] {
+                let v = at(&b, x, y, 10.0);
+                let t = vertex::tolerance(&b, v).unwrap();
+                assert!(t < 1e-3, "after {step}: {t:e}");
+            }
+            assert!(vertex::tolerance(&b, at(&b, 10.0, 10.0, 10.0)).unwrap() >= 1e-3);
+        }
     }
 
     /// A face lies on a plane however far it reaches past the extent the plane was made

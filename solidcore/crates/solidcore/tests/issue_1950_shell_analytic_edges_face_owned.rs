@@ -83,8 +83,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.keep_operand_uv_trims = true;
     f.geometric_g2_continuity = true;
     f.proto_vertex_miss_is_false = true;
-    f.check_loop_vertex_tolerance = true;
-    f.check_loop_projected_seam_ends = true;
     f.cylinder_rebuild_mean_radius = true;
     f.revolve_analytic_profile_faces = true;
     f.join_touching_loops = true;
@@ -101,14 +99,12 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.ellipse_trim_seam_lines_span_cone_height = true;
     f.degenerate_proto_edge_in_one_vertex = true;
     f.new_edge_vertex_tolerance_covers_gap = true;
-    f.torus_signed_gen_curve_interval = true;
     f.point_solve_keeps_triangle_guess = true;
     f.imprint_extends_edge_to_proto_vertex = true;
     f.fillet_point_step_per_point = true;
     f.analytic_copy_keeps_parameterization = true;
     f.offset_extension_from_base = true;
     f.fillet_cleanup_keeps_target_faces = true;
-    f.fillet_nx1_tangent_side_edge = true;
     f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
     f.ssi_tangent_contact_points = true;

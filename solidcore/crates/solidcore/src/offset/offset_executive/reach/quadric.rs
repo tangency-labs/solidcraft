@@ -26,10 +26,10 @@ fn enclosed(x: I3) -> Dv {
     Dv { x, y, z }
 }
 
-/// `1 - axis.axis`, without losing its small value to the rounding of a unit norm.
+/// `1 - axis.axis` (that is, `−δ` for `|axis|² = 1 + δ`), without losing its small value to the rounding of a unit norm.
 /// Exact products are accumulated as an expansion; out-of-range products retain their
 /// rounded enclosure. Zero is kept exact, including cardinal axes.
-fn norm_defect(axis: Vec3) -> Option<Ivl> {
+pub(super) fn norm_defect(axis: Vec3) -> Option<Ivl> {
     let mut expansion = vec![1.0];
     let mut remainder = None;
     for a in [axis.x, axis.y, axis.z] {

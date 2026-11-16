@@ -58,6 +58,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let refs: Vec<&kernel::Body> = idx.iter().filter_map(|i| st.bodies.get(*i).map(|b| &b.body)).collect();
             let sewn = kernel::stitch(&refs, tol)?;
             let Some(mb) = st.bodies.get(first).cloned() else { return Err(DocError::Invalid("body".into())) };
+            let open = sewn.open_edge_count()?;
+            if open > 0 {
+                append_warning(warning, format!("Stitch result `{}` remains open (boundary edges: {open}).", mb.name));
+            }
             if let Some(slot) = st.bodies.get_mut(first) {
                 *slot = ModelBody::new(mb.name, sewn, mb.feature);
             }
