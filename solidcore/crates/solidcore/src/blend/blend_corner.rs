@@ -74,6 +74,7 @@ pub mod join_gap;
 pub mod mixed;
 pub mod on_face;
 pub(crate) mod piece;
+pub mod rollover;
 pub mod setback;
 pub mod swept;
 

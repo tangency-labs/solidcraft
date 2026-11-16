@@ -25,8 +25,8 @@ use crate::{IoError, Result};
 mod export_compatibility;
 mod file_model;
 pub use file_model::{
-    DxfFile, DxfGeometryBounds, Entity as DxfFileEntity, EntityWeight as DxfEntityWeight, Layer as DxfFileLayer, LayerId as DxfLayerId,
-    StandardWeight as DxfStandardWeight,
+    DxfFile, DxfGeometryBounds, DxfSourceBlock, DxfTextRecordKind, DxfTextSource, Entity as DxfFileEntity, EntityWeight as DxfEntityWeight,
+    Layer as DxfFileLayer, LayerId as DxfLayerId, StandardWeight as DxfStandardWeight,
 };
 mod path;
 
@@ -131,6 +131,49 @@ impl DxfTextVerticalAlignment {
 /// The geometry of one entity (millimetres).
 #[derive(Clone, Debug, PartialEq)]
 pub enum DxfShape {
+    /// Original INSERT fields. Block names are DXF symbols, not foreign file
+    /// ownership handles. The SketchImport projection resolves them in this file.
+    Insert {
+        block: String,
+        at: Vec2,
+        scale: Vec2,
+        angle_deg: f64,
+        columns: usize,
+        rows: usize,
+        column_spacing: f64,
+        row_spacing: f64,
+    },
+    /// Source spline data before the sketch consumer's fit/control projection.
+    /// Unlike an owned clamped Spline, these records may carry fit points,
+    /// unclamped knots or source flags. No knots or weights are synthesized.
+    SourceEllipse {
+        c: Vec2,
+        major: Vec2,
+        major_radius: f64,
+        ratio: f64,
+        t0: f64,
+        t1: f64,
+    },
+    SourceSpline {
+        degree: f64,
+        flags: f64,
+        knots: Vec<f64>,
+        ctrl: Vec<Vec2>,
+        fit: Vec<Vec2>,
+        weights: Vec<f64>,
+    },
+    /// Original POLYLINE/LWPOLYLINE vertices, including unrestricted source
+    /// bulges and duplicate points. Owned BulgedPolyline admission stays strict.
+    SourcePolyline {
+        vertices: Vec<DxfVertex>,
+        closed: bool,
+    },
+    /// A source record intentionally omitted by the sketch projection. Retaining
+    /// its actual kind keeps recursive work accounting faithful even when a
+    /// block produces no geometry; geometry or raw tokens are not cached here.
+    SourceOmitted {
+        kind: String,
+    },
     /// A planar POINT at this WCS location, with zero Z and default thickness/normal.
     Point(Vec2),
     Line(Vec2, Vec2),
@@ -263,6 +306,13 @@ impl DxfShape {
     /// Points on the shape (or its control polygon) for the drawing's extents.
     fn sample(&self, out: &mut Vec<Vec2>) -> Result<()> {
         match self {
+            DxfShape::Insert { .. }
+            | DxfShape::SourceSpline { .. }
+            | DxfShape::SourceEllipse { .. }
+            | DxfShape::SourcePolyline { .. }
+            | DxfShape::SourceOmitted { .. } => {
+                return Err(IoError::Invalid("not supported yet: source DXF records require their SketchImport projection".into()));
+            }
             DxfShape::AlignedText { .. } => return Err(IoError::Invalid("aligned DXF TEXT requires explicit layout bounds".into())),
             DxfShape::Point(point) => out.push(*point),
             DxfShape::Line(a, b) => out.extend([*a, *b]),
@@ -744,7 +794,7 @@ pub fn write_dxf_drawing_units(layers: &[DxfLayer], entities: &[DxfEntity], insu
         }
     }
     let layers = layer_list.iter().map(|l| LayerView { name: &l.name, color: l.color, linetype: l.linetype, weight: None });
-    let entities = entities.iter().map(|e| Ok(EntityView { layer: &e.layer, shape: &e.shape, weight: None }));
+    let entities = entities.iter().map(|e| Ok(EntityView { layer: &e.layer, shape: &e.shape, weight: None, source_text: None }));
     write_drawing_views(layers, entities, None, extents.unwrap_or((Vec2::ZERO, Vec2::ZERO)), true, insunits)
 }
 
@@ -766,6 +816,7 @@ struct EntityView<'a> {
     layer: &'a str,
     shape: &'a DxfShape,
     weight: Option<DxfEntityWeight>,
+    source_text: Option<&'a DxfTextSource>,
 }
 
 /// Write owned geometry as AutoCAD 2000 using one group-code backend. Files from
@@ -806,6 +857,9 @@ fn write_dxf_file_limited_with_text_bounds<F>(file: &DxfFile<DxfShape>, bytes: u
 where
     F: FnMut(&DxfShape) -> Result<DxfGeometryBounds>,
 {
+    if file.is_sketch_import() {
+        return Err(IoError::Invalid("not supported yet: writing SketchImport source records requires explicit owned conversion".into()));
+    }
     let bytes = bytes.min(crate::MAX_DRAWING_BYTES);
     let values = values.min(MAX_DXF_FILE_VALUES);
     if file.layers().len() > 1_024 || file.entities().len() > 1_000_000 {
@@ -846,16 +900,27 @@ where
     }
     let layers =
         file.layers().iter().map(|layer| LayerView { name: layer.name(), color: layer.color(), linetype: layer.linetype(), weight: layer.weight() });
-    let entities = file
-        .entities()
-        .iter()
-        .map(|entity| Ok(EntityView { layer: file.layer(entity.layer())?.name(), shape: entity.geometry(), weight: entity.weight() }));
+    let entities = file.entities().iter().map(|entity| {
+        Ok(EntityView {
+            layer: file.layer(entity.layer())?.name(),
+            shape: entity.geometry(),
+            weight: entity.weight(),
+            source_text: entity.source_text(),
+        })
+    });
     write_drawing_views(layers, entities, Some(bytes), extents.unwrap_or((Vec2::ZERO, Vec2::ZERO)), false, 4)
 }
 
 fn shape_preflight(shape: &DxfShape) -> Result<()> {
     let invalid = || IoError::Invalid("invalid or unsupported DXF geometry".into());
     let finite = match shape {
+        DxfShape::Insert { .. }
+        | DxfShape::SourceSpline { .. }
+        | DxfShape::SourceEllipse { .. }
+        | DxfShape::SourcePolyline { .. }
+        | DxfShape::SourceOmitted { .. } => {
+            return Err(IoError::Invalid("not supported yet: source DXF records require their SketchImport projection".into()));
+        }
         DxfShape::BulgedPolyline { vertices, closed } => return admit_bulged(vertices, *closed),
         DxfShape::LwPolyline { verts, closed } => {
             return admit_bulged(&legacy_vertices(verts)?, *closed);
@@ -912,6 +977,13 @@ fn shape_preflight(shape: &DxfShape) -> Result<()> {
 
 fn shape_work(shape: &DxfShape) -> Result<usize> {
     match shape {
+        DxfShape::Insert { .. }
+        | DxfShape::SourceSpline { .. }
+        | DxfShape::SourceEllipse { .. }
+        | DxfShape::SourcePolyline { .. }
+        | DxfShape::SourceOmitted { .. } => {
+            Err(IoError::Invalid("not supported yet: source DXF records require their SketchImport projection".into()))
+        }
         DxfShape::BulgedPolyline { vertices, closed } => {
             let count = vertices.len();
             if !(2..=path::MAX_PATH_ITEMS).contains(&count) {
@@ -956,6 +1028,13 @@ fn shape_emission_preflight(shape: &DxfShape) -> Result<()> {
     let collapse = || IoError::Invalid("DXF geometry loses a required positive value or distinct point/knot span at twelve decimals".into());
     let positive = |value| -> Result<()> { if emitted_number(value)? > 0.0 { Ok(()) } else { Err(collapse()) } };
     match shape {
+        DxfShape::Insert { .. }
+        | DxfShape::SourceSpline { .. }
+        | DxfShape::SourceEllipse { .. }
+        | DxfShape::SourcePolyline { .. }
+        | DxfShape::SourceOmitted { .. } => {
+            return Err(IoError::Invalid("not supported yet: source DXF records require their SketchImport projection".into()));
+        }
         // Fields use X1's round-trip spelling, not the legacy12decimal rule.
         DxfShape::BulgedPolyline { .. } => {}
         DxfShape::LwPolyline { verts, closed } => {
@@ -1057,6 +1136,16 @@ fn extend_extents(extents: Option<(Vec2, Vec2)>, point: Vec2) -> (Vec2, Vec2) {
         let b = solidcore_ops::export_geometry::union_bounds(lo, hi, point, point);
         (b.min, b.max)
     })
+}
+
+fn first_text_anchor(source: Option<&DxfTextSource>, at: Vec2) -> Result<Vec2> {
+    match source {
+        None => Ok(at),
+        Some(source) if source.kind() == DxfTextRecordKind::Text => {
+            source.first_anchor_mm().ok_or_else(|| IoError::Invalid("not supported yet: source TEXT has no first insertion anchor".into()))
+        }
+        Some(_) => Err(IoError::Invalid("not supported yet: MTEXT source requires its own record emission".into())),
+    }
 }
 
 fn write_drawing_views<'a, L, E>(
@@ -1236,6 +1325,13 @@ where
     for (index, e) in entities.enumerate() {
         let e = e?;
         let kind = match e.shape {
+            DxfShape::Insert { .. }
+            | DxfShape::SourceSpline { .. }
+            | DxfShape::SourceEllipse { .. }
+            | DxfShape::SourcePolyline { .. }
+            | DxfShape::SourceOmitted { .. } => {
+                return Err(IoError::Invalid("not supported yet: source DXF records require their SketchImport projection".into()));
+            }
             DxfShape::Point(_) => "POINT",
             DxfShape::Line(..) => "LINE",
             DxfShape::Polyline { .. } | DxfShape::LwPolyline { .. } | DxfShape::BulgedPolyline { .. } => "LWPOLYLINE",
@@ -1268,6 +1364,13 @@ where
                     }
                 }
             }
+            DxfShape::Insert { .. }
+            | DxfShape::SourceSpline { .. }
+            | DxfShape::SourceEllipse { .. }
+            | DxfShape::SourcePolyline { .. }
+            | DxfShape::SourceOmitted { .. } => {
+                return Err(IoError::Invalid("not supported yet: source DXF records require their SketchImport projection".into()));
+            }
             DxfShape::BulgedPolyline { vertices, closed } => {
                 o.code(100, "AcDbPolyline");
                 o.code(90, vertices.len());
@@ -1283,7 +1386,7 @@ where
                 // bounds before reaching Out. The legacy route refuses this
                 // variant in sample(), before writing any final drawing.
                 o.code(100, "AcDbText");
-                o.point(10, *at);
+                o.point(10, first_text_anchor(e.source_text, *at)?);
                 o.num(40, *height);
                 let value =
                     text_value(text).map_err(|error| IoError::Invalid(format!("DXF TEXT entity {} on layer {:?}: {error}", index + 1, e.layer)))?;
@@ -1366,14 +1469,14 @@ where
             }
             DxfShape::Text { at, height, angle_deg, text } => {
                 o.code(100, "AcDbText");
-                o.point(10, *at);
+                o.point(10, first_text_anchor(e.source_text, *at)?);
                 o.num(40, *height);
                 let value =
                     text_value(text).map_err(|error| IoError::Invalid(format!("DXF TEXT entity {} on layer {:?}: {error}", index + 1, e.layer)))?;
                 o.code(1, value);
                 o.num(50, *angle_deg);
-                // Centred (72 = 1): a reader that places the text by the second alignment point
-                // and one that takes the first both put its middle on `at`.
+                // Generated centred text uses coincident anchors. Imported text
+                // keeps its real first source anchor and effective second anchor.
                 o.code(72, 1);
                 o.point(11, *at);
                 o.code(100, "AcDbText");
@@ -1506,6 +1609,7 @@ mod tests {
     use solidcore_record::{Loop2, Seg2};
 
     use super::*;
+    use crate::dxf::{test_wire_entities as entities, test_wire_pairs as pairs, test_wire_table_records as table_records};
     use crate::{Geom2, read_dxf};
 
     // Keep the existing ordinary writer regressions on the new public conversion path.
@@ -1931,27 +2035,6 @@ mod tests {
         *c + *major * t.cos() + major.perp() * (*ratio * t.sin())
     }
 
-    /// A DXF text as (group code, value) pairs.
-    fn pairs(dxf: &str) -> Vec<(i32, String)> {
-        let lines: Vec<&str> = dxf.lines().collect();
-        lines.chunks(2).map(|c| (c[0].trim().parse().unwrap(), c.get(1).unwrap_or(&"").trim().to_string())).collect()
-    }
-
-    /// The entities of the ENTITIES section: their type and group codes.
-    fn entities(dxf: &str) -> Vec<(String, Vec<(i32, String)>)> {
-        let p = pairs(dxf);
-        let start = p.iter().position(|(c, v)| (*c, v.as_str()) == (2, "ENTITIES")).unwrap();
-        let mut out: Vec<(String, Vec<(i32, String)>)> = Vec::new();
-        for (c, v) in &p[start + 1..] {
-            match (*c, v.as_str()) {
-                (0, "ENDSEC") => break,
-                (0, kind) => out.push((kind.to_string(), Vec::new())),
-                _ => out.last_mut().unwrap().1.push((*c, v.clone())),
-            }
-        }
-        out
-    }
-
     fn values(e: &(String, Vec<(i32, String)>), code: i32) -> Vec<f64> {
         e.1.iter().filter(|(c, _)| *c == code).map(|(_, v)| v.parse().unwrap()).collect()
     }
@@ -2152,21 +2235,30 @@ mod tests {
             "{back_nine:?}"
         );
 
-        // The numbers in the file itself, which the reader does not keep: the ellipse...
-        let file = entities(&dxf);
-        assert_eq!(file.iter().map(|e| e.0.as_str()).collect::<Vec<_>>(), ["LINE", "CIRCLE", "ARC", "ELLIPSE", "ELLIPSE", "SPLINE"]);
-        assert!(near(&values(&file[3], 10), &[50.0]) && near(&values(&file[3], 20), &[40.0]) && near(&values(&file[3], 11), &[25.0]));
-        assert!(near(&values(&file[3], 21), &[0.0]) && near(&values(&file[3], 40), &[0.48]) && near(&values(&file[3], 41), &[0.0]));
-        assert!(near(&values(&file[3], 42), &[TAU]) && near(&values(&file[3], 230), &[1.0]));
-        // ...the elliptical arc from parameter 0 to π/2...
-        assert!(near(&values(&file[4], 41), &[0.0]) && near(&values(&file[4], 42), &[FRAC_PI_2]) && near(&values(&file[4], 40), &[0.48]));
-        // ...and the spline: planar, degree 3, eight knots, four control points.
-        let spline = &file[5];
-        assert_eq!(values(spline, 70), [8.0]);
-        assert_eq!((values(spline, 71), values(spline, 72), values(spline, 73), values(spline, 74)), (vec![3.0], vec![8.0], vec![4.0], vec![0.0]));
-        assert!(near(&values(spline, 40), &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]));
-        assert!(near(&values(spline, 10), &[0.0, 5.0, 15.0, 20.0]) && near(&values(spline, 20), &[0.0, 10.0, 10.0, 0.0]));
-        assert!(values(spline, 41).is_empty());
+        // The layered reader keeps the actual ellipse and spline parameters,
+        // including the knots and optional rational weights.
+        let file = crate::read_dxf_file(&dxf).unwrap();
+        let records = file.entities();
+        assert_eq!(records.len(), 6);
+        assert!(matches!(records[0].geometry(), DxfShape::Line(..)));
+        assert!(matches!(records[1].geometry(), DxfShape::Circle { .. }));
+        assert!(matches!(records[2].geometry(), DxfShape::Arc { .. }));
+        let DxfShape::Ellipse { c, major, ratio, t0, t1 } = records[3].geometry() else { panic!("{records:?}") };
+        assert!(near(&[c.x, c.y, major.x, major.y], &[50.0, 40.0, 25.0, 0.0]));
+        assert!(near(&[*ratio, *t0, *t1], &[0.48, 0.0, TAU]));
+        let DxfShape::Ellipse { ratio, t0, t1, .. } = records[4].geometry() else { panic!("{records:?}") };
+        assert!(near(&[*t0, *t1, *ratio], &[0.0, FRAC_PI_2, 0.48]));
+        let DxfShape::Spline { degree, knots, ctrl, weights } = records[5].geometry() else { panic!("{records:?}") };
+        assert_eq!((*degree, knots.len(), ctrl.len()), (3, 8, 4));
+        assert!(near(knots, &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]));
+        assert!(near(&ctrl.iter().map(|p| p.x).collect::<Vec<_>>(), &[0.0, 5.0, 15.0, 20.0]));
+        assert!(near(&ctrl.iter().map(|p| p.y).collect::<Vec<_>>(), &[0.0, 10.0, 10.0, 0.0]));
+        assert!(weights.is_none());
+        // Keep independent wire assertions for the explicit planar normal and
+        // flags, rather than inventing those fields from the semantic model.
+        let wire = entities(&dxf);
+        assert!(near(&values(&wire[3], 230), &[1.0]));
+        assert_eq!((values(&wire[5], 70), values(&wire[5], 74)), (vec![8.0], vec![0.0]));
     }
 
     #[test]
@@ -2174,29 +2266,13 @@ mod tests {
         let hyperbola = seg_shape(&Seg2::Conic { a: Vec2::ZERO, apex: Vec2::new(1.0, 2.0), b: Vec2::new(3.0, 0.0), w: 2.0 });
         let dxf = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape: hyperbola }]).unwrap();
         let e = &entities(&dxf)[0];
+        let file = crate::read_dxf_file(&dxf).unwrap();
+        let DxfShape::Spline { knots, weights: Some(weights), .. } = file.entities()[0].geometry() else { panic!("{file:?}") };
+        assert!(near(weights, &[1.0, 2.0, 1.0]) && near(knots, &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]));
         assert_eq!(values(e, 70), [12.0]);
-        assert!(near(&values(e, 41), &[1.0, 2.0, 1.0]) && near(&values(e, 40), &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]));
         let at = |code: i32| e.1.iter().position(|(c, _)| *c == code).unwrap();
         let last = |code: i32| e.1.iter().rposition(|(c, _)| *c == code).unwrap();
         assert!(last(40) < at(41) && last(41) < at(10), "{:?}", e.1);
-    }
-
-    /// The records of a symbol table, each as its group codes after the type.
-    fn table_records(p: &[(i32, String)], table: &str) -> Vec<Vec<(i32, String)>> {
-        let start = p.iter().position(|(c, v)| (*c, v.as_str()) == (2, table)).unwrap();
-        let mut out: Vec<Vec<(i32, String)>> = Vec::new();
-        for (c, v) in &p[start + 1..] {
-            match (*c, v.as_str()) {
-                (0, "ENDTAB") => break,
-                (0, _) => out.push(Vec::new()),
-                _ => {
-                    if let Some(record) = out.last_mut() {
-                        record.push((*c, v.clone()));
-                    }
-                }
-            }
-        }
-        out
     }
 
     fn field(record: &[(i32, String)], code: i32) -> &str {
@@ -2347,14 +2423,7 @@ mod tests {
         let (height, aspect): (f64, f64) = (field(active, 40).parse().unwrap(), field(active, 41).parse().unwrap());
         assert!(height >= 10.0 && height * aspect >= 30.0, "{height} {aspect}");
         // The root dictionary names the group dictionary, which it owns.
-        let objects = p.iter().position(|(c, v)| (*c, v.as_str()) == (2, "OBJECTS")).unwrap();
-        let mut dictionaries: Vec<Vec<(i32, String)>> = Vec::new();
-        for (c, v) in p[objects + 1..].iter().take_while(|(c, v)| (*c, v.as_str()) != (0, "ENDSEC")) {
-            match c {
-                0 => dictionaries.push(Vec::new()),
-                _ => dictionaries.last_mut().unwrap().push((*c, v.clone())),
-            }
-        }
+        let dictionaries = crate::dxf::test_wire_section_records(&p, "OBJECTS");
         let root = &dictionaries[0];
         let groups = dictionaries.iter().find(|d| field(d, 5) == field(root, 350)).unwrap();
         assert_eq!((field(root, 330), field(root, 3)), ("0", "ACAD_GROUP"));
@@ -2386,15 +2455,7 @@ mod tests {
     /// The objects of the OBJECTS section, or the classes of the CLASSES section, each as its
     /// type and its group codes.
     fn section_objects(p: &[(i32, String)], section: &str) -> Vec<(String, Vec<(i32, String)>)> {
-        let start = p.iter().position(|(c, v)| (*c, v.as_str()) == (2, section)).unwrap();
-        let mut out: Vec<(String, Vec<(i32, String)>)> = Vec::new();
-        for (c, v) in p[start + 1..].iter().take_while(|(c, v)| (*c, v.as_str()) != (0, "ENDSEC")) {
-            match c {
-                0 => out.push((v.clone(), Vec::new())),
-                _ => out.last_mut().unwrap().1.push((*c, v.clone())),
-            }
-        }
-        out
+        crate::dxf::test_wire_section_objects(p, section)
     }
 
     #[test]
@@ -2829,7 +2890,7 @@ mod tests {
 
     // PRIVATE append fragment for dxf_out.rs::tests. NOT APPLIED / NOT RUN.
     // Requires writer44b220e2 and W2 modeldf0d3a33; uses their production APIs
-    // and this area's existing pairs/table_records/entities/field helpers.
+    // and the shared production parser's wire records plus field queries.
 
     #[test]
     fn customized_layer_zero_serializes_once_with_hidden_pattern_and_inherited_weight() {
@@ -3092,5 +3153,23 @@ mod tests {
             copied.entities()[0].geometry(),
             &DxfShape::LwPolyline { verts: vec![(Vec2::new(1.0, 4.0), 1.0), (Vec2::new(5.0, 4.0), 1.0)], closed: true }
         );
+    }
+    #[test]
+    fn flat_profile_167_rectangles_do_not_overflow_a_32_bit_work_estimate() {
+        // 167 * 200_000 * 129 = 4_308_600_000 exceeds u32::MAX,
+        // although these contours contain only 668 actual line entities.
+        assert!(167u64 * 200_000 * 129 > u64::from(u32::MAX));
+        let mut file = DxfFile::for_flat_pattern_export(167, 0, 0).unwrap();
+        let layer = file.declare_layer("OUTLINE", 7, DxfLinetype::Continuous, None).unwrap();
+        for i in 0..167 {
+            let x = f64::from(i) * 2.0;
+            let points = [Vec2::new(x, 0.0), Vec2::new(x + 1.0, 0.0), Vec2::new(x + 1.0, 1.0), Vec2::new(x, 1.0), Vec2::new(x, 0.0)];
+            for pair in points.windows(2) {
+                file.push(layer, DxfShape::Line(pair[0], pair[1]), None).unwrap();
+            }
+        }
+        let output = write_dxf_file(&file).unwrap();
+        assert_eq!(entities(&output).len(), 668);
+        assert!(output.len() < 1_000_000);
     }
 }
