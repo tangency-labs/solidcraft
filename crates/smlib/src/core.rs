@@ -129,7 +129,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.analytic_inversion_answers_apart = true;
     f.fillet_statuses_pass_on = true;
     f.fillet_rail_trim_at_near_knot = true;
-    f.offset_keep_cavity_regions = true;
     f.corner_patch_face_side_twist = true;
     f.boolean_union_refuses_solid_leak = true;
     f.validation_does_not_make_uv_trims = true;
