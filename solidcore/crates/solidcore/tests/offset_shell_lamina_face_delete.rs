@@ -24,8 +24,7 @@
 mod offset_fixture;
 
 use offset_fixture::Notifications;
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::object::ObjectRef;
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::offset::offset_executive::p1::{OffsetExecutive, OffsetOperation};
 use solidcore::offset::offset_executive::p2::SolidOffsetOptions;
 use solidcore::topology::brep::p1 as bp1;
@@ -33,7 +32,7 @@ use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::{Brep, EntityRef, Kernel};
+use solidcore::{Brep, Kernel};
 
 /// The upstream test file, read as the difftest runner reads it; `None` (the test is
 /// skipped) without the pinned upstream checkout.
@@ -53,10 +52,7 @@ fn upstream_part(k: &mut Kernel, name: &str) -> Option<Brep> {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,

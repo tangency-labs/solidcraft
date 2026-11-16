@@ -96,7 +96,8 @@ struct Mesh<'a> {
     tris: &'a mut Vec<[u32; 3]>,
     /// The triangles on each side, by its two nodes in index order.
     sides: BitsMap<(u32, u32), Vec<u32>>,
-    /// The boundary sides, by their two nodes in index order, each as its nodes in loop order.
+    /// The boundary sides, by the two nodes the triangles name them by in index order, each as
+    /// its nodes in loop order.
     fixed: BitsMap<(u32, u32), (u32, u32)>,
     /// Triangles shaping gave up on until they change.
     stuck: Vec<bool>,
@@ -336,12 +337,15 @@ enum Located {
 
 /// Shape the face's triangulation `tris` of nodes `uv` (the first `fixed` of them its boundary,
 /// in `loops`, at the 3D points `pos` has for them), adding nodes, by `rules` on the surface
-/// `point`. `pos` holds every node's 3D point and grows with `uv`.
+/// `point`. `pos` holds every node's 3D point and grows with `uv`. `loops` comes with each
+/// boundary node as the triangles name it (by index; a node past its end names itself): where a
+/// loop passes one point twice, the triangulation has one node there, its first, and each
+/// boundary side is kept by the nodes the triangles name it by.
 pub(crate) fn shape(
     uv: &mut Vec<[f64; 2]>,
     pos: &mut Vec<Vec3>,
     tris: &mut Vec<[u32; 3]>,
-    loops: &[std::ops::Range<usize>],
+    (loops, named): (&[std::ops::Range<usize>], &[u32]),
     caps: (&[(u32, u32)], std::ops::Range<usize>, &std::collections::BTreeSet<u32>),
     point: Point<'_>,
     rules: &Rules,
@@ -352,8 +356,12 @@ pub(crate) fn shape(
         let n = r.len();
         for k in 0..n {
             let (Ok(a), Ok(b)) = (u32::try_from(r.start + k), u32::try_from(r.start + (k + 1) % n)) else { continue };
-            if a != b {
-                fixed.entry(key(a, b)).or_insert((a, b));
+            let name = |i: u32| named.get(i as usize).copied().unwrap_or(i);
+            let (na, nb) = (name(a), name(b));
+            if na != nb {
+                // A side the loops run twice (a slit's two runs, one edge) keeps its first run's
+                // nodes: either names the edge's segment.
+                fixed.entry(key(na, nb)).or_insert((a, b));
             }
         }
     }

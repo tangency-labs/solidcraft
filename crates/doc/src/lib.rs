@@ -16,7 +16,7 @@ pub mod pbr_appearance;
 pub use body_transfer::{valid_transfer_matrix, validate_body_transfer};
 pub mod canvas;
 mod clipboard;
-pub use clipboard::{clone_expression, remap_topology};
+pub use clipboard::{clone_expression, remap_topology, remap_topology_faces};
 pub mod component_color;
 mod component_removal;
 pub use component_removal::RemovedTree;
@@ -94,8 +94,8 @@ pub mod thread_forms;
 pub mod tolerance;
 
 pub use assembly::{
-    BomType, ExpressedMove, ExpressedShift, IDENTITY, MAX_EXPRESSED_MOVES, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence, WorldNames,
-    apply_point, apply_vector, is_identity, is_placement, map_point_expr, map_vector_expr, mat_inverse, mat_mul, rigid,
+    BomType, ExpressedAt, ExpressedMove, ExpressedShift, IDENTITY, MAX_EXPRESSED_MOVES, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence,
+    WorldNames, apply_point, apply_vector, is_identity, is_placement, map_point_expr, map_vector_expr, mat_inverse, mat_mul, rigid,
 };
 pub use document::*;
 pub use eval::cell_grid::{MAX_CUT_CELLS, SLOW_CUT_CELLS};
@@ -109,6 +109,7 @@ pub use eval::{
 };
 pub use eval::{EvalCache, KeptResults};
 pub use expr::Expr;
+pub use feature_geometry::restored_thread_pick;
 pub use names::{BodyName, FeatureId, FeatureName, SketchId, copy_name};
 pub use params::{ParamRow, ParamUser, cycles, name_words_match};
 pub use points::{Dir, FacePick, Position, plain};

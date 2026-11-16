@@ -512,6 +512,43 @@ fn fully_valid_saved_record_restores_without_a_notice() {
 }
 
 #[test]
+fn saved_production_layout_retries_small_startup_without_a_recovery_notice() {
+    for keep_status in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        let layout = h.app.panel_runtime().unwrap().layout().layout().clone();
+        let saved = h.app.prefs();
+        h.call("ui.resize", serde_json::json!({"width":200,"height":100}));
+        h.app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        h.app.load_prefs(&saved);
+        let recovery = h.app.tr("prefs.panel_layout.recovery").to_string();
+        h.frame();
+        let runtime = h.app.panel_runtime.as_ref().unwrap();
+        assert_eq!(runtime.last_error().unwrap().rule, Rule::NoSpace);
+        assert!(runtime.preferences.as_ref().unwrap().pending.is_some());
+        if keep_status {
+            h.app.set_status("An unrelated message", false);
+        }
+        h.frames(3);
+        h.call("ui.resize", serde_json::json!({"width":1600,"height":1000}));
+        h.frames(3);
+        let runtime = h.app.panel_runtime.as_ref().unwrap();
+        let state = runtime.preferences.as_ref().unwrap();
+        assert!(state.pending.is_none() && !state.failed && state.rejected.is_none());
+        assert!(state.reset.is_empty() && state.unread.is_empty());
+        assert_eq!(runtime.runtime().layout().layout(), &layout);
+        assert!(
+            !h.app.messages.iter().any(|message| message.text == recovery),
+            "valid saved layouts must not be reported as unreadable while startup bounds settle"
+        );
+        if keep_status {
+            assert_eq!(h.app.status.as_ref().map(|status| status.0.as_str()), Some("An unrelated message"));
+        } else {
+            assert!(h.app.status.is_none());
+        }
+    }
+}
+
+#[test]
 fn native_window_placement_falls_back_to_a_portable_one_without_native_windows() {
     use commands::LayoutCatalogue as _;
     let mut service = fixture_service(true).unwrap();
@@ -14122,4 +14159,41 @@ fn desktop_panel_windows_reserve_ids_only_after_commit_and_fit_the_current_monit
     adapter.prepare(&create).unwrap();
     adapter.commit(&create);
     assert_ne!(adapter.viewport_id(&host), Some(previous));
+}
+
+#[test]
+fn production_history_resize_paints_and_commits_each_width_above_regular_minimum() {
+    for start in [56.0, 180.0] {
+        for offset in 1..=12 {
+            let mut h = production_content_harness(false, false);
+            let width = crate::ui_kit::history_width(true) + offset as f32;
+            h.app.run("view.history_layout", serde_json::json!({"dock":"left","width":start,"collapsed":false})).unwrap();
+            h.frames(6);
+            let frame = h.app.universal_panel_frame().unwrap();
+            let history = frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap();
+            let edge = HostPointerTarget::Resize { section: history.section.clone(), edge: HostResizeEdge::Right };
+            let at = egui_rect(frame.layout.control(&edge).unwrap().bounds).center();
+            let end = at + egui::vec2(width - history.outer.size.width, 0.0);
+            h.frame_with(vec![egui::Event::PointerMoved(at)]);
+            let button =
+                |pos, pressed| egui::Event::PointerButton { pos, pressed, button: egui::PointerButton::Primary, modifiers: egui::Modifiers::NONE };
+            h.frame_with(vec![button(at, true)]);
+            h.frame_with(vec![egui::Event::PointerMoved(end)]);
+            h.frames(15);
+            let preview = h.app.universal_panel_frame().unwrap().preview.as_ref().expect("held drag has a guide");
+            assert!(preview.rejection.is_none(), "{start} to {width}: {:?}", preview.rejection);
+            assert_eq!(preview.bounds.size.width, width);
+            assert!(
+                h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect)
+                if rect.rect == egui_rect(preview.bounds)
+                && rect.fill == solidcraft_theme::Tokens::get().form_primary.gamma_multiply(0.12))),
+                "guide was not painted at {width} from {start}"
+            );
+            h.frame_with(vec![button(end, false)]);
+            h.frames(4);
+            let frame = h.app.universal_panel_frame().unwrap();
+            let history = frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap();
+            assert_eq!(history.outer.size.width, width);
+        }
+    }
 }

@@ -16,7 +16,7 @@ use crate::prism::profile::{Loop2, Seg2};
 
 use crate::cell_grid::lattice::{Lattice, CIRCLE_SIDES};
 use crate::cell_grid::region::{clip_halfplane, poly_area, Bounds, Convex, Loop, Prim, Region};
-use crate::cell_grid::snap::snap_loop;
+use crate::cell_grid::snap::{piece_hits, simple, snap_loop as snap_loop_by};
 use crate::cell_grid::vec::{ring_next, ring_prev, Vec2Ext};
 use crate::cell_grid::*;
 use crate::prism::profile::cross2;
@@ -628,6 +628,11 @@ fn an_arc_meets_a_convex_polygon_only_where_it_passes_through_it() {
 
 // --- snapping ---
 
+/// A loop snapped with no inset.
+fn snap_loop(lp: &Loop, lat: &Lattice) -> Result<Loop, &'static str> {
+    snap_loop_by(lp, lat, 0)
+}
+
 fn aligned_loop() -> Loop {
     frame_rect(ALIGNED.0, ALIGNED.1, ALIGNED.2, ALIGNED.3)
 }
@@ -676,6 +681,399 @@ fn a_loop_with_an_arc_or_an_off_direction_edge_cannot_snap() {
         snap_loop(&tilted, &lat).err(),
         Some("edge off the lattice directions")
     );
+}
+
+/// The issue's field: x from -45.5 to 47.5, y from -24.5 to 24.5, with a round keep-out of
+/// diameter 14.2 centred at (-39.5, 0) that crosses the left edge and merges into the outer
+/// loop (four lines and an arc). The hexagon lattice has size 10, web 2 and runs at 90 degrees,
+/// so its vertical lattice lines are at x = 6k and the right edge should snap to x = 42.
+fn notched_field_spec() -> CellGridSpec {
+    CellGridSpec {
+        shape: CellShape::Hexagon,
+        size: 10.0,
+        web: 2.0,
+        angle: FRAC_PI_2,
+        clip: Clip::Snap,
+        ..CellGridSpec::default()
+    }
+}
+
+fn notched_field() -> Loop2 {
+    let (cx, r) = (-39.5, 7.1);
+    let y = (r * r - 6.0 * 6.0_f64).sqrt();
+    let a = y.atan2(-6.0);
+    Loop2 {
+        segs: vec![
+            Seg2::Line {
+                a: v(-45.5, -24.5),
+                b: v(47.5, -24.5),
+            },
+            Seg2::Line {
+                a: v(47.5, -24.5),
+                b: v(47.5, 24.5),
+            },
+            Seg2::Line {
+                a: v(47.5, 24.5),
+                b: v(-45.5, 24.5),
+            },
+            Seg2::Line {
+                a: v(-45.5, 24.5),
+                b: v(-45.5, y),
+            },
+            Seg2::Arc {
+                center: v(cx, 0.0),
+                radius: r,
+                start: a,
+                sweep: -2.0 * a,
+            },
+            Seg2::Line {
+                a: v(-45.5, -y),
+                b: v(-45.5, -24.5),
+            },
+        ],
+    }
+}
+
+#[test]
+fn an_arc_in_the_outer_loop_does_not_stop_its_straight_edges_snapping() {
+    let p = run(&[notched_field()], &notched_field_spec());
+    let right = p
+        .cells
+        .iter()
+        .flat_map(vertices)
+        .map(|q| q.x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    // The right edge snaps to the lattice line x = 42: no cell reaches past it. Unsnapped, the
+    // whole cells flush against x = 47 were kept.
+    assert!(right <= 42.0 + 1e-6, "rightmost cell wall at {right}");
+    assert!(p
+        .cells
+        .iter()
+        .flat_map(vertices)
+        .any(|q| (q.x - 42.0).abs() < 1e-6));
+    assert!(p.warnings.is_empty(), "{:?}", p.warnings);
+}
+
+#[test]
+fn a_cubic_keep_out_does_not_stop_an_arc_field_snapping() {
+    // The notched field has an exact arc; the keep-out inside it is a cubic loop, which is
+    // flattened. Only the keep-out is followed as drawn: the field's straight edges still snap.
+    let keep_out = Loop2 {
+        segs: vec![
+            Seg2::Cubic {
+                p0: v(6.0, 0.0),
+                p1: v(6.0, 6.0),
+                p2: v(14.0, 6.0),
+                p3: v(14.0, 0.0),
+            },
+            Seg2::Cubic {
+                p0: v(14.0, 0.0),
+                p1: v(14.0, -6.0),
+                p2: v(6.0, -6.0),
+                p3: v(6.0, 0.0),
+            },
+        ],
+    };
+    let p = run(&[notched_field(), keep_out], &notched_field_spec());
+    let right = p
+        .cells
+        .iter()
+        .flat_map(vertices)
+        .map(|q| q.x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    assert!(right <= 42.0 + 1e-6, "rightmost cell wall at {right}");
+    assert!(
+        p.warnings.iter().any(|w| w.contains("followed")),
+        "{:?}",
+        p.warnings
+    );
+}
+
+#[test]
+fn snapping_a_loop_with_an_arc_keeps_the_arc_and_moves_its_ends_onto_the_snapped_edges() {
+    let lat = Lattice::new(CellShape::Hexagon, 10.0, 2.0, DotGrid::Hexagonal, 8).unwrap();
+    let spec = notched_field_spec();
+    let lp = lattice_loops(&[notched_field()], &spec, &mut Vec::new())
+        .unwrap()
+        .0;
+    let snapped = snap_loop(&lp[0], &lat).unwrap();
+    let arc = snapped
+        .prims
+        .iter()
+        .find_map(|p| match *p {
+            Prim::Arc { r, c, p0, p1, .. } => Some((r, c, p0, p1)),
+            Prim::Line { .. } => None,
+        })
+        .unwrap();
+    assert!((arc.0 - 7.1).abs() < 1e-9);
+    // Both ends are still on the circle, and the ring stays closed.
+    for end in [arc.2, arc.3] {
+        assert!((end.distance(arc.1) - 7.1).abs() < 1e-9);
+    }
+    let n = snapped.prims.len();
+    for k in 0..n {
+        assert!(
+            snapped.prims[k]
+                .end()
+                .distance(snapped.prims[(k + 1) % n].start())
+                < 1e-9
+        );
+    }
+}
+
+/// Whether the straight piece `line` meets `arc` cut into chords of pi/16, as the first version
+/// of the self-intersection test saw arcs.
+fn line_meets_chords_of(arc: &Prim, line: &Prim) -> bool {
+    let Prim::Arc {
+        c, r, a0, sweep, ..
+    } = *arc
+    else {
+        return false;
+    };
+    let n = (sweep.abs() / (PI / 16.0)).ceil().max(1.0) as usize;
+    let pt = |k: usize| {
+        let a = a0 + sweep * k as f64 / n as f64;
+        c + v(r * a.cos(), r * a.sin())
+    };
+    let side = |a: Vec2, b: Vec2, x: Vec2| cross2(b - a, x - a) > 0.0;
+    (0..n).any(|k| {
+        let (p0, p1) = (pt(k), pt(k + 1));
+        let (q0, q1) = (line.start(), line.end());
+        side(p0, p1, q0) != side(p0, p1, q1) && side(q0, q1, p0) != side(q0, q1, p1)
+    })
+}
+
+#[test]
+fn a_snapped_edge_that_cuts_an_arc_between_its_chord_samples_is_found_to_cross_it() {
+    // An arc of radius 10 from 0 to pi/8, closed by two lines through the centre, and a short
+    // stray edge across the arc at pi/32 that starts and ends 0.02 either side of it: the arc's
+    // chords (at pi/16) lie 0.048 inside the circle, so they never reach the edge.
+    let (c, r) = (v(0.0, 0.0), 10.0);
+    let arc = Prim::arc(c, r, 0.0, PI / 8.0);
+    let at = |radius: f64| v(radius * (PI / 32.0).cos(), radius * (PI / 32.0).sin());
+    let ring = [
+        arc,
+        Prim::line(arc.end(), c),
+        Prim::line(c, arc.start()),
+        Prim::line(at(r - 0.02), at(r + 0.02)),
+    ];
+    assert!(
+        !line_meets_chords_of(&arc, &ring[3]),
+        "the sampled test misses the crossing"
+    );
+    assert!(!simple(&ring));
+    // The same edge stopping short of the arc does not cross it.
+    let short = [
+        ring[0],
+        ring[1],
+        ring[2],
+        Prim::line(at(r - 0.04), at(r - 0.02)),
+    ];
+    // (The pieces are a sector and a stray edge, not one closed loop, so the stray is checked
+    // against the arc directly.)
+    assert!(piece_hits(&short[0], &short[3]).is_empty());
+    // Two circles crossing between each other's samples.
+    let other = Prim::arc(v(10.0, 0.0), r, PI * 0.5, PI);
+    assert!(!simple(&[Prim::arc(c, r, -PI / 2.0, PI), other]));
+    assert!(simple(&[
+        Prim::arc(c, r, PI / 2.0, PI),
+        Prim::arc(v(30.0, 0.0), r, PI / 2.0, PI)
+    ]));
+}
+
+/// A field with a round keep-out well inside it: the outer edges and the keep-out can be clipped
+/// by different modes.
+fn keep_out_field() -> Vec<Loop2> {
+    vec![rect(0.3, 0.2, 43.1, 40.7), circle(21.0, 20.0, 4.3)]
+}
+
+fn kind_count(p: &CellGridPlan, kind: CellKind) -> usize {
+    p.cells.iter().filter(|c| c.kind == kind).count()
+}
+
+#[test]
+fn a_keep_out_can_be_clipped_by_another_mode_than_the_field() {
+    let field = keep_out_field();
+    let snap = run(&field, &with_clip(CellShape::Hexagon, Clip::Snap));
+    // The default: the keep-out follows `clip`.
+    let same = CellGridSpec {
+        keepout_clip: Some(Clip::Snap),
+        ..with_clip(CellShape::Hexagon, Clip::Snap)
+    };
+    let same = run(&field, &same);
+    assert_eq!(counts(&snap), counts(&same));
+    assert!((snap.open_area - same.open_area).abs() < 1e-9);
+    assert_eq!(kind_count(&snap, CellKind::Free), 0);
+    // Free round the keep-out only: its cells are trimmed to the circle, the outer edge's are not.
+    let mixed = CellGridSpec {
+        keepout_clip: Some(Clip::Free),
+        ..with_clip(CellShape::Hexagon, Clip::Snap)
+    };
+    let mixed = run(&field, &mixed);
+    let free = kind_count(&mixed, CellKind::Free);
+    assert!(
+        free > 0 && free < mixed.cells.len() / 2,
+        "{free} of {}",
+        mixed.cells.len()
+    );
+    // Cells far from the keep-out are the same as with snap everywhere.
+    let far = |p: &CellGridPlan| {
+        let mut v: Vec<(i64, i64)> = p
+            .cells
+            .iter()
+            .filter(|c| c.center.distance(v(21.0, 20.0)) > 4.3 + 2.0 * P)
+            .map(|c| (c.i, c.j))
+            .collect();
+        v.sort_unstable();
+        v
+    };
+    assert_eq!(far(&mixed), far(&snap));
+    // Whole round the keep-out only: no cell touches the circle, and nothing is trimmed.
+    let whole = CellGridSpec {
+        keepout_clip: Some(Clip::Whole),
+        ..with_clip(CellShape::Hexagon, Clip::Snap)
+    };
+    let whole = run(&field, &whole);
+    assert_eq!(kind_count(&whole, CellKind::Free), 0);
+    assert!(whole.open_area <= snap.open_area + 1e-9);
+}
+
+#[test]
+fn an_edge_that_passes_through_a_vertex_of_the_loop_is_not_simple() {
+    // (0,0) -> (4,4) passes through the vertex (2,2), where the two edges on either side of it
+    // lie on opposite sides: the loop crosses itself there.
+    let pts = [(0.0, 0.0), (4.0, 4.0), (0.0, 4.0), (2.0, 2.0), (3.0, 0.0)];
+    let ring: Vec<Prim> = (0..pts.len())
+        .map(|k| {
+            let (a, b) = (pts[k], pts[(k + 1) % pts.len()]);
+            Prim::line(v(a.0, a.1), v(b.0, b.1))
+        })
+        .collect();
+    assert!(!simple(&ring));
+    // A plain quadrilateral, whose neighbours only meet at their joints, is still simple.
+    let square: Vec<Prim> = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
+        .iter()
+        .zip([(4.0, 0.0), (4.0, 4.0), (0.0, 4.0), (0.0, 0.0)])
+        .map(|(a, b)| Prim::line(v(a.0, a.1), v(b.0, b.1)))
+        .collect();
+    assert!(simple(&square));
+}
+
+#[test]
+fn a_very_long_edge_across_an_arc_is_still_found_to_cross_it() {
+    // The unit right semicircle, and a line from -1e9 to 1e9 through its centre: it meets the
+    // arc's rim at (1, 0). A quadratic with the radius added to terms of 1e18 loses the radius.
+    let arc = Prim::arc(v(0.0, 0.0), 1.0, -FRAC_PI_2, PI);
+    let line = Prim::line(v(-1e9, 0.0), v(1e9, 0.0));
+    assert!(!simple(&[arc, line]));
+}
+
+#[test]
+fn a_circle_meets_a_very_long_segment_where_it_crosses_it() {
+    use crate::cell_grid::region::circle_segment_points;
+    let (pts, n) = circle_segment_points(v(0.0, 0.0), 1.0, v(-1e9, 0.0), v(1e9, 0.0));
+    assert_eq!(n, 2);
+    assert!(pts[0].distance(v(-1.0, 0.0)) < 1e-6 && pts[1].distance(v(1.0, 0.0)) < 1e-6);
+    // A segment that stops short of the circle meets it nowhere; one that ends inside, once.
+    assert_eq!(
+        circle_segment_points(v(0.0, 0.0), 1.0, v(-1e9, 0.0), v(-2.0, 0.0)).1,
+        0
+    );
+    assert_eq!(
+        circle_segment_points(v(0.0, 0.0), 1.0, v(-1e9, 0.0), v(0.0, 0.0)).1,
+        1
+    );
+}
+
+#[test]
+fn pieces_that_overlap_along_a_stretch_are_not_simple() {
+    let ring = |extra: Prim| {
+        [
+            Prim::line(v(0.0, 0.0), v(3.0, 0.0)),
+            Prim::line(v(3.0, 0.0), v(3.0, 3.0)),
+            Prim::line(v(3.0, 3.0), v(0.0, 0.0)),
+            extra,
+        ]
+    };
+    // Only neighbours may meet, and only at their joint: a stray edge that touches the ring
+    // at a point is refused.
+    assert!(!simple(&ring(Prim::line(v(3.0, 0.0), v(3.5, 0.0)))));
+    let apart = ring(Prim::line(v(3.5, 0.0), v(4.0, 0.0)));
+    assert!(apart
+        .iter()
+        .take(3)
+        .all(|p| piece_hits(p, &apart[3]).is_empty()));
+    assert!(!simple(&ring(Prim::line(v(1.0, 0.0), v(2.0, 0.0)))));
+    // Two arcs of one circle: end to end they only touch, overlapping they share a stretch.
+    let (c, r) = (v(0.0, 0.0), 5.0);
+    let touching = [Prim::arc(c, r, 0.0, PI), Prim::arc(c, r, PI, PI)];
+    assert!(simple(&touching));
+    let overlapping = [Prim::arc(c, r, 0.0, PI), Prim::arc(c, r, PI / 2.0, PI)];
+    assert!(!simple(&overlapping));
+    let backwards = [Prim::arc(c, r, 0.0, PI), Prim::arc(c, r, 1.5 * PI, -PI)];
+    assert!(!simple(&backwards));
+}
+
+#[test]
+fn a_snap_inset_moves_each_straight_field_edge_in_by_whole_lattice_lines() {
+    let lat = lattice(CellShape::Hexagon);
+    let field = frame_rect(0.3, 0.2, 60.1, 50.7);
+    let b = |n| snap_loop_by(&field, &lat, n).unwrap().bounds();
+    // The horizontal lattice lines are P / 2 apart (P is the cell pitch), at multiples of it: the
+    // field's y edges 0.2 and 50.7 snap in to 3.1 and 49.6, and each inset moves each of them in
+    // by exactly one more line. Worked out here from the pitch, not from the lattice code.
+    let step = P / 2.0;
+    for n in 0..4u32 {
+        let got = b(n);
+        let want = (step * (1.0 + f64::from(n)), step * (16.0 - f64::from(n)));
+        assert!(
+            (got.y0 - want.0).abs() < 1e-9,
+            "inset {n}: y0 {} not {}",
+            got.y0,
+            want.0
+        );
+        assert!(
+            (got.y1 - want.1).abs() < 1e-9,
+            "inset {n}: y1 {} not {}",
+            got.y1,
+            want.1
+        );
+    }
+    // The vertical edges move in too, by less than a cell column each step.
+    for n in 0..3u32 {
+        let (lo, hi) = (b(n), b(n + 1));
+        assert!(lo.x0 < hi.x0 && hi.x0 - lo.x0 <= H + 1e-9, "{lo:?} {hi:?}");
+        assert!(hi.x1 < lo.x1 && lo.x1 - hi.x1 <= H + 1e-9, "{lo:?} {hi:?}");
+    }
+    // A keep-out (clockwise) is not moved by an inset, whatever the field gets.
+    let hole = frame_rect(10.0, 10.0, 12.0, 11.0).oriented(false);
+    let plain = snap_loop(&hole, &lat).unwrap().bounds();
+    let spec = CellGridSpec {
+        snap_inset: 2,
+        ..with_clip(CellShape::Hexagon, Clip::Snap)
+    };
+    let region = vec![rect(0.3, 0.2, 60.1, 50.7), circle(30.0, 25.0, 2.1)];
+    let moved = run(&region, &spec);
+    let still = run(&region, &with_clip(CellShape::Hexagon, Clip::Snap));
+    assert!(moved.cells.len() < still.cells.len());
+    assert!(moved.open_area < still.open_area);
+    assert!(plain.x0 <= 10.0 && plain.x1 >= 12.0);
+}
+
+#[test]
+fn a_snap_inset_needs_snap_and_a_sane_count() {
+    let with = |clip, snap_inset| CellGridSpec {
+        snap_inset,
+        ..with_clip(CellShape::Hexagon, clip)
+    };
+    let field = [rect(0.3, 0.2, 60.1, 50.7)];
+    assert!(plan(&field, &with(Clip::Snap, 1)).is_ok());
+    assert!(plan(&field, &with(Clip::Free, 1)).is_err());
+    assert!(plan(&field, &with(Clip::Whole, 1)).is_err());
+    assert!(plan(&field, &with(Clip::Snap, MAX_SNAP_INSET + 1)).is_err());
+    // An inset that eats the whole field keeps it as drawn, with a warning, and never panics.
+    let eaten = plan(&field, &with(Clip::Snap, MAX_SNAP_INSET)).unwrap();
+    assert!(!eaten.warnings.is_empty());
 }
 
 #[test]
@@ -814,9 +1212,11 @@ fn a_round_keep_out_leaves_the_cells_around_it_as_single_chord_pieces() {
             .iter()
             .all(|q| q.distance(v(10.0, 10.0)) >= 6.0 - 1e-6));
     }
-    assert!(p.cells.iter().all(|c| vertices(c)
-        .iter()
-        .all(|q| q.distance(v(10.0, 10.0)) >= 6.0 - 1e-6)));
+    assert!(p.cells.iter().all(|c| {
+        vertices(c)
+            .iter()
+            .all(|q| q.distance(v(10.0, 10.0)) >= 6.0 - 1e-6)
+    }));
 }
 
 #[test]
@@ -1338,10 +1738,11 @@ fn free_follows_a_round_field_with_arcs_and_matches_a_fine_polygon_of_it() {
         .filter(|c| c.kind == CellKind::Free)
         .collect();
     assert!(!free.is_empty());
-    assert!(free.iter().any(|c| c
-        .loops
-        .iter()
-        .any(|l| l.segs.iter().any(|s| matches!(s, Seg2::Arc { .. })))));
+    assert!(free.iter().any(|c| {
+        c.loops
+            .iter()
+            .any(|l| l.segs.iter().any(|s| matches!(s, Seg2::Arc { .. })))
+    }));
     assert!(p.open_area < PI * r * r);
 }
 
@@ -1970,4 +2371,503 @@ fn a_triangle_grid_works_at_the_extreme_indices() {
     // Neither the centre nor the key adds the indices.
     let _ = lat.center(i64::MAX, 1);
     assert!(lat.key(i64::MAX, 1) <= 1);
+}
+
+fn has(p: &CellGridPlan, i: i64, j: i64) -> bool {
+    p.cells.iter().any(|c| c.i == i && c.j == j)
+}
+
+fn with_margin(shape: CellShape, margin: f64) -> CellGridSpec {
+    CellGridSpec {
+        size: 10.0,
+        web: 2.0,
+        margin,
+        ..with_clip(shape, Clip::Whole)
+    }
+}
+
+/// A circle of radius `r` about the origin as four rational quadratic arcs (exact).
+fn conic_circle(r: f64) -> Loop2 {
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let quarter = |a: (f64, f64), apex: (f64, f64), b: (f64, f64)| Seg2::Conic {
+        a: v(a.0 * r, a.1 * r),
+        apex: v(apex.0 * r, apex.1 * r),
+        b: v(b.0 * r, b.1 * r),
+        w,
+    };
+    Loop2 {
+        segs: vec![
+            quarter((1.0, 0.0), (1.0, 1.0), (0.0, 1.0)),
+            quarter((0.0, 1.0), (-1.0, 1.0), (-1.0, 0.0)),
+            quarter((-1.0, 0.0), (-1.0, -1.0), (0.0, -1.0)),
+            quarter((0.0, -1.0), (1.0, -1.0), (1.0, 0.0)),
+        ],
+    }
+}
+
+#[test]
+fn a_round_cell_is_tested_as_its_true_circle_not_the_polygon_round_it() {
+    // The cell is a circle of radius 2.5 at the origin; the field's circle is 0.001 mm wider. The
+    // 64-sided polygon round the cell reaches 2.503 and would cross the field's edge.
+    let spec = CellGridSpec {
+        size: 5.0,
+        web: 1.0,
+        ..with_clip(CellShape::Circle, Clip::Whole)
+    };
+    let p = run(&[circle(0.0, 0.0, 2.501)], &spec);
+    assert!(
+        has(&p, 0, 0) && p.cells.len() == 1,
+        "{} cells",
+        p.cells.len()
+    );
+    // The same field drawn as conics, measured on chords less their bound.
+    // (its chords are within 0.001 of it, so it is kept from 0.002 wider than the cell on).
+    let q = run(&[conic_circle(2.504)], &spec);
+    assert!(
+        has(&q, 0, 0) && q.cells.len() == 1,
+        "{} cells",
+        q.cells.len()
+    );
+    // A field narrower than the cell keeps nothing, on either.
+    assert!(run(&[circle(0.0, 0.0, 2.499)], &spec).cells.is_empty());
+    assert!(run(&[conic_circle(2.499)], &spec).cells.is_empty());
+}
+
+#[test]
+fn an_arc_keep_out_drops_the_cells_it_reaches_and_not_the_ones_beside_it() {
+    // Square cells of 10 mm on a 12 mm pitch: cell (1, 0) spans 7 to 17 in X, so a keep-out circle
+    // of radius 6.99 about the origin comes 0.01 short of it and one of 7.01 crosses it.
+    let field = |r: f64| [rect(-60.0, -60.0, 60.0, 60.0), circle(0.0, 0.0, r)];
+    let beside = run(&field(6.99), &with_margin(CellShape::Square, 0.0));
+    assert!(has(&beside, 1, 0) && has(&beside, 0, 1) && has(&beside, -1, 0) && has(&beside, 0, -1));
+    assert!(!has(&beside, 0, 0));
+    let over = run(&field(7.01), &with_margin(CellShape::Square, 0.0));
+    assert!(!has(&over, 1, 0) && !has(&over, 0, 1) && !has(&over, -1, 0) && !has(&over, 0, -1));
+}
+
+#[test]
+fn a_margin_drops_the_cells_nearer_than_it_and_zero_is_whole() {
+    let field = [rect(-60.0, -60.0, 60.0, 60.0), circle(0.0, 0.0, 6.4)];
+    let sized = CellGridSpec {
+        size: 10.0,
+        web: 2.0,
+        ..with_clip(CellShape::Square, Clip::Whole)
+    };
+    let whole = run(&field, &sized);
+    let zero = run(&field, &with_margin(CellShape::Square, 0.0));
+    assert_eq!(zero, whole);
+    // Cell (1, 0) is 0.6 from the keep-out circle.
+    assert!(has(&zero, 1, 0));
+    assert!(has(
+        &run(&field, &with_margin(CellShape::Square, 0.5)),
+        1,
+        0
+    ));
+    let wide = run(&field, &with_margin(CellShape::Square, 0.7));
+    assert!(!has(&wide, 1, 0) && !has(&wide, 0, 1));
+    // The cells beside the field's own edge are measured too: the ring next to x = 60 is 7 from it.
+    assert!(has(
+        &run(&field, &with_margin(CellShape::Square, 6.9)),
+        4,
+        1
+    ));
+    assert!(!has(
+        &run(&field, &with_margin(CellShape::Square, 7.1)),
+        4,
+        1
+    ));
+    // A margin too small to matter changes nothing where no cell lies that close to an edge.
+    let tiny = run(&field, &with_margin(CellShape::Square, 1e-7));
+    assert_eq!(tiny.cells.len(), zero.cells.len());
+}
+
+#[test]
+fn a_margin_that_is_negative_not_a_number_or_huge_is_refused() {
+    let field = [rect(-20.0, -20.0, 20.0, 20.0)];
+    for m in [-1.0, f64::NAN, f64::INFINITY, 1e300, MAX_COORD * 2.0] {
+        let e = plan(&field, &with_margin(CellShape::Square, m)).unwrap_err();
+        assert!(matches!(e, CellGridError::Parameter(_)), "{m}: {e}");
+    }
+    // A margin needs whole cells: snapped and trimmed ones meet the edge by design.
+    for clip in [Clip::Snap, Clip::Free] {
+        let spec = CellGridSpec {
+            margin: 1.0,
+            ..with_clip(CellShape::Square, clip)
+        };
+        assert!(matches!(
+            plan(&field, &spec),
+            Err(CellGridError::Parameter(_))
+        ));
+    }
+}
+
+#[test]
+fn a_spline_loop_does_not_stop_a_straight_keep_out_from_snapping_its_neighbours() {
+    // The keep-out's edges lie off the lattice lines and snap outwards onto them. A field with a
+    // spline in its outer loop must cut the cells beside the keep-out on those lines, as a field
+    // of straight edges does, not keep them whole on the strength of the keep-out as drawn.
+    let keep_out = rect(18.0, 18.0, 25.0, 25.0);
+    let bulged = Loop2 {
+        segs: vec![
+            Seg2::Line {
+                a: v(0.0, 0.0),
+                b: v(40.0, 0.0),
+            },
+            Seg2::Cubic {
+                p0: v(40.0, 0.0),
+                p1: v(55.0, 12.0),
+                p2: v(55.0, 28.0),
+                p3: v(40.0, 40.0),
+            },
+            Seg2::Line {
+                a: v(40.0, 40.0),
+                b: v(0.0, 40.0),
+            },
+            Seg2::Line {
+                a: v(0.0, 40.0),
+                b: v(0.0, 0.0),
+            },
+        ],
+    };
+    let spec = with_clip(CellShape::Hexagon, Clip::Snap);
+    let near = |p: &CellGridPlan| {
+        let mut cells: Vec<(i64, i64, CellKind)> = p
+            .cells
+            .iter()
+            .filter(|c| (c.center - v(21.5, 21.5)).length() < 11.0)
+            .map(|c| (c.i, c.j, c.kind))
+            .collect();
+        cells.sort_by_key(|c| (c.0, c.1));
+        cells
+    };
+    let curved = near(&run(&[bulged, keep_out.clone()], &spec));
+    let straight = near(&run(&[rect(0.0, 0.0, 40.0, 40.0), keep_out], &spec));
+    assert!(
+        straight.iter().any(|c| c.2 == CellKind::Exact),
+        "the keep-out cuts cells on lattice lines"
+    );
+    assert_eq!(curved, straight);
+}
+
+// --- exact distance: chords less their bound on curves, stable at large coordinates ---
+
+/// The first quarter of the cubic `(1e6 (t - 0.002)(t - 0.006)(t + 0.0015), t)`, as a Bézier: it
+/// dips to within 0.00036 of (-0.005, 0.002) in a basin about 0.004 wide in `t`, narrower than the
+/// 1/64 of the curve between two samples.
+fn dipping_cubic() -> Seg2 {
+    const SPAN: f64 = 0.25;
+    let x = |t: f64| 1e6 * (t - 0.002) * (t - 0.006) * (t + 0.0015);
+    let dx = |t: f64| {
+        1e6 * ((t - 0.006) * (t + 0.0015) + (t - 0.002) * (t + 0.0015) + (t - 0.002) * (t - 0.006))
+    };
+    // Its control points: the ends and a third of the end tangents (in the parameter 0..1).
+    let (e0, e1) = (v(x(0.0), 0.0), v(x(SPAN), SPAN));
+    let (t0, t1) = (v(SPAN * dx(0.0), SPAN), v(SPAN * dx(SPAN), SPAN));
+    Seg2::Cubic {
+        p0: e0,
+        p1: e0 + t0 / 3.0,
+        p2: e1 - t1 / 3.0,
+        p3: e1,
+    }
+}
+
+#[test]
+fn a_curve_dipping_between_samples_drops_the_cell_it_reaches() {
+    use crate::cell_grid::exact::{CellOutline, Edge, ExactField};
+    let s = dipping_cubic();
+    let q = v(-0.005, 0.002);
+    let truth = (0..=2_000_000)
+        .map(|i| s.point_at(f64::from(i) / 2_000_000.0).distance(q))
+        .fold(f64::INFINITY, f64::min);
+    assert!(truth < 0.0004 && truth > 0.0003, "{truth}");
+    // 64 samples (and Newton from them) land far from the dip: the basin is missed, 0.017 away.
+    let sampled = (0..=64)
+        .map(|i| s.point_at(f64::from(i) / 64.0).distance(q))
+        .fold(f64::INFINITY, f64::min);
+    assert!(sampled > 0.01, "{sampled}");
+    let edge = Edge::of(&s).unwrap();
+    assert!(edge.within_point(q, truth * 1.01));
+    let field = ExactField::new(vec![edge], 1.0);
+    // Round cells about the point, of radius 0.0004 (the curve is inside it) and 0.0003 (a hair
+    // clear, inside the chords' bound): both dropped, never kept.
+    for r in [0.0004, 0.0003] {
+        assert!(
+            field.meets(&CellOutline::Circle { c: q, r }, 0.0),
+            "radius {r}"
+        );
+    }
+    // Far enough off, a round cell is kept; and a margin reaches the curve from where it stands.
+    assert!(!field.meets(
+        &CellOutline::Circle {
+            c: v(-1.0, 0.002),
+            r: 0.1
+        },
+        0.0
+    ));
+    assert!(field.meets(
+        &CellOutline::Circle {
+            c: v(-1.0, 0.002),
+            r: 0.1
+        },
+        0.9
+    ));
+}
+
+#[test]
+fn a_curve_too_fine_to_follow_is_refused_not_guessed_at() {
+    // A cubic that takes more than the allowed pieces to cut to within 0.001 mm.
+    let wild = Loop2 {
+        segs: vec![
+            Seg2::Cubic {
+                p0: v(0.0, 0.0),
+                p1: v(0.0, 1e5),
+                p2: v(1e5, 1e5),
+                p3: v(1e5, 0.0),
+            },
+            Seg2::Line {
+                a: v(1e5, 0.0),
+                b: v(0.0, 0.0),
+            },
+        ],
+    };
+    let spec = with_clip(CellShape::Hexagon, Clip::Whole);
+    match plan(&[wild], &spec) {
+        Err(CellGridError::Field(m)) => assert!(m.contains("too complex"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// The distance from `p` to the segment `ab`, the long way.
+fn dist_to_side(p: Vec2, a: Vec2, b: Vec2) -> f64 {
+    let d = b - a;
+    let t = ((p - a).dot(d) / d.dot(d)).clamp(0.0, 1.0);
+    p.distance(a + d * t)
+}
+
+#[test]
+fn square_and_hexagon_cells_keep_their_margin_from_a_cubic_within_the_chords_bound() {
+    use crate::cell_grid::exact::{CellOutline, Edge, ExactField};
+    // An arch peaking at (13, 7.5); cells above it. A square with a flat side toward it, a hexagon
+    // with a flat side, and one with a corner toward it: the segment against the curve each way.
+    let arch = Seg2::Cubic {
+        p0: v(0.0, 0.0),
+        p1: v(8.0, 10.0),
+        p2: v(18.0, 10.0),
+        p3: v(26.0, 0.0),
+    };
+    let ngon = |c: Vec2, r: f64, n: usize, turn: f64| -> Vec<Vec2> {
+        (0..n)
+            .map(|k| {
+                let a = turn + std::f64::consts::TAU * k as f64 / n as f64;
+                c + v(a.cos(), a.sin()) * r
+            })
+            .collect()
+    };
+    let cells = [
+        ngon(v(13.0, 10.5), 2.0 * 2.0_f64.sqrt(), 4, FRAC_PI_6 * 1.5),
+        ngon(v(13.0, 10.5), 2.0, 6, 0.0),
+        ngon(v(13.0, 10.5), 2.0, 6, FRAC_PI_6 * 3.0),
+        ngon(v(14.3, 10.5), 2.0, 6, FRAC_PI_6),
+    ];
+    let field = ExactField::new(vec![Edge::of(&arch).unwrap()], 1.0);
+    for (k, pts) in cells.into_iter().enumerate() {
+        let n = pts.len();
+        // The true clearance, from a dense reference of the curve, not the code under test.
+        let truth = (0..=400_000)
+            .map(|i| arch.point_at(f64::from(i) / 400_000.0))
+            .map(|p| {
+                (0..n)
+                    .map(|j| dist_to_side(p, pts[j], pts[(j + 1) % n]))
+                    .fold(f64::INFINITY, f64::min)
+            })
+            .fold(f64::INFINITY, f64::min);
+        assert!(truth > 0.5 && truth < 3.0, "cell {k}: {truth}");
+        let convex = Convex::new(pts).unwrap();
+        let outline = CellOutline::Polygon(&convex);
+        // Two chord bounds (2 * 1e-3) and a little rounding under the clearance: kept.
+        assert!(
+            !field.meets(&outline, truth - 2.0e-3 - 1e-6),
+            "cell {k}: kept at {}",
+            truth - 2.0e-3 - 1e-6
+        );
+        // A hair over it: dropped, as it is for any margin beyond.
+        assert!(field.meets(&outline, truth + 1e-4), "cell {k}: dropped");
+        assert!(field.meets(&outline, truth + 0.5), "cell {k}: dropped far");
+    }
+}
+
+#[test]
+fn a_conic_and_a_segment_are_measured_on_the_curve_not_its_samples() {
+    use crate::cell_grid::exact::Edge;
+    // A quarter of the unit circle as a conic: the segment x + y = 2 is sqrt(2) - 1 from it.
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let edge = Edge::of(&Seg2::Conic {
+        a: v(1.0, 0.0),
+        apex: v(1.0, 1.0),
+        b: v(0.0, 1.0),
+        w,
+    })
+    .unwrap();
+    let gap = 2.0_f64.sqrt() - 1.0;
+    let (a, b) = (v(2.0, 0.0), v(0.0, 2.0));
+    assert!(!edge.within_segment(a, b, gap - 2.1e-3));
+    assert!(edge.within_segment(a, b, gap + 1e-6));
+    assert!(edge.within_segment(v(0.5, 0.5), v(2.0, 2.0), 0.0));
+}
+
+#[test]
+fn a_segment_far_from_the_origin_keeps_its_clearance_from_an_arc() {
+    use crate::cell_grid::exact::Edge;
+    let unit = |a: f64| v(a.cos(), a.sin());
+    let full = Edge::of(&Seg2::Arc {
+        center: v(0.0, 0.0),
+        radius: 1.0,
+        start: 0.0,
+        sweep: std::f64::consts::TAU,
+    })
+    .unwrap();
+    let quarter = Edge::of(&Seg2::Arc {
+        center: v(0.0, 0.0),
+        radius: 1.0,
+        start: 0.0,
+        sweep: FRAC_PI_2,
+    })
+    .unwrap();
+    // The segment 2 mm off the centre, 5e8 long, turned to several sides: 1 mm clear of the
+    // circle, whatever the turn; and the same line moved to 0.5 mm crosses it.
+    for degrees in [0.0, 30.0, 45.0, 60.0, 90.0, 135.0, 225.0] {
+        let t = f64::to_radians(degrees);
+        let (u, n) = (unit(t), unit(t + FRAC_PI_2));
+        for (offset, clear) in [(2.0, true), (0.5, false)] {
+            let (a, b) = (n * offset - u * 2.5e8, n * offset + u * 2.5e8);
+            assert_eq!(full.within_segment(a, b, 0.9), !clear, "{degrees} {offset}");
+            if clear {
+                assert!(full.within_segment(a, b, 1.01), "{degrees} reaches 1 mm");
+            }
+        }
+    }
+    // Axis-aligned, the case of the report: exactly 1 mm clear, the segment from (-2.5e8, 2).
+    let (a, b) = (v(-2.5e8, 2.0), v(2.5e8, 2.0));
+    assert!(!full.within_segment(a, b, 0.999));
+    assert!(full.within_segment(a, b, 1.001));
+    // A quarter arc the line crosses outside of: clear by the arc's end, 0.5 mm.
+    let (a, b) = (v(-2.5e8, -0.5), v(2.5e8, -0.5));
+    assert!(!quarter.within_segment(a, b, 0.49));
+    assert!(quarter.within_segment(a, b, 0.51));
+}
+
+#[test]
+fn conic_chords_stay_within_the_chord_bound_of_the_curve_for_every_weight() {
+    // `flatten` promises chords within 0.001 mm of the curve and the curve within it of the
+    // chords; the keep-or-drop of a cell leans on it. Every dense sample of the curve (uniform in
+    // the parameter, and crowding its ends and its middle, where a large weight turns) lies
+    // within that of the chords, and every chord's midpoint within that of the curve.
+    const TOL: f64 = 1e-3;
+    const DENSE: usize = 20_000;
+    let to_polyline = |pts: &[Vec2], p: Vec2| {
+        pts.windows(2)
+            .map(|w| dist_to_side(p, w[0], w[1]))
+            .fold(f64::INFINITY, f64::min)
+    };
+    // Parameters as pairs `(s, t)` with `s + t = 1`, each held to full precision: near an end of
+    // the curve of a large weight a rounded `t` alone moves the point by more than the tolerance.
+    let mut ts: Vec<(f64, f64)> = (0..=DENSE)
+        .map(|i| (1.0 - i as f64 / DENSE as f64, i as f64 / DENSE as f64))
+        .collect();
+    for k in 0..200 {
+        let e = 10.0_f64.powf(-f64::from(k) / 8.0) * 0.5;
+        ts.extend([
+            (1.0 - e, e),
+            (e, 1.0 - e),
+            (0.5 + e, 0.5 - e),
+            (0.5 - e, 0.5 + e),
+        ]);
+    }
+    ts.sort_by(|p, q| p.1.total_cmp(&q.1));
+    // The point of the conic at `(s, t)`: the weighted mean of its controls, every term positive.
+    let conic_at = |a: Vec2, apex: Vec2, b: Vec2, w: f64, (s, t): (f64, f64)| {
+        let (ka, kb, kw) = (s * s, t * t, 2.0 * w * s * t);
+        (a * ka + apex * kw + b * kb) / (ka + kw + kb)
+    };
+    for w in [1e-12, 1e-6, 0.05, 1.0, 300.0, 1e6, 1e12] {
+        for apex in [v(5.0, 8.0), v(5.0, -3.0), v(9.0, 1.0), v(-40.0, 25.0)] {
+            let seg = Seg2::Conic {
+                a: v(0.0, 0.0),
+                apex,
+                b: v(10.0, 0.0),
+                w,
+            };
+            // None of these needs more than a few hundred pieces: none is refused.
+            let chords =
+                flatten(&seg, TOL).unwrap_or_else(|| panic!("w {w} apex {apex:?} refused"));
+            let dense: Vec<Vec2> = ts
+                .iter()
+                .map(|&st| conic_at(v(0.0, 0.0), apex, v(10.0, 0.0), w, st))
+                .collect();
+            let worst = dense
+                .iter()
+                .map(|&p| to_polyline(&chords, p))
+                .fold(0.0, f64::max);
+            assert!(
+                worst <= TOL,
+                "w {w} apex {apex:?}: a point of the curve is {worst} from the chords"
+            );
+            for pair in chords.windows(2) {
+                let mid = (pair[0] + pair[1]) * 0.5;
+                let near = to_polyline(&dense, mid);
+                assert!(
+                    near <= TOL,
+                    "w {w} apex {apex:?}: a chord's midpoint is {near} from the curve"
+                );
+            }
+        }
+    }
+    // A conic too large for 4096 chords within 0.001 mm is refused, not followed coarsely.
+    let big = Seg2::Conic {
+        a: v(0.0, 0.0),
+        apex: v(5e5, 1e6),
+        b: v(1e6, 0.0),
+        w: 1.0,
+    };
+    assert!(flatten(&big, TOL).is_none());
+    // And a weight that is not positive and finite is refused.
+    for w in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let seg = Seg2::Conic {
+            a: v(0.0, 0.0),
+            apex: v(5.0, 8.0),
+            b: v(10.0, 0.0),
+            w,
+        };
+        assert!(flatten(&seg, TOL).is_none(), "w {w}");
+    }
+}
+
+#[test]
+fn a_conic_whose_chord_is_too_short_to_measure_stays_within_the_tolerance_of_its_chords() {
+    // The squared length of the chord underflows to a subnormal: the height from it is wrong,
+    // so the piece must be bounded by the apex's distance to the nearer end instead.
+    const TOL: f64 = 1e-3;
+    let (a, apex, b, w) = (
+        v(0.0, 0.0),
+        v(5.035e-162, 0.0010001),
+        v(1.007e-161, 0.0),
+        1e12,
+    );
+    let seg = Seg2::Conic { a, apex, b, w };
+    let Some(chords) = flatten(&seg, TOL) else {
+        return;
+    };
+    let conic_at = |t: f64| {
+        let s = 1.0 - t;
+        let (ka, kb, kw) = (s * s, t * t, 2.0 * w * s * t);
+        (a * ka + apex * kw + b * kb) / (ka + kw + kb)
+    };
+    for i in 0..=20_000 {
+        let p = conic_at(f64::from(i) / 20_000.0);
+        let near = chords
+            .windows(2)
+            .map(|c| dist_to_side(p, c[0], c[1]))
+            .fold(f64::INFINITY, f64::min);
+        assert!(near <= TOL, "t {i}/20000: {near} from the chords");
+    }
 }
