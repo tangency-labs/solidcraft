@@ -501,22 +501,28 @@ impl JsonSchema for ViewIdParam {
     }
 }
 
-/// Where a saved view's centre sits on its sheet, in paper millimetres.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum PlaceParam {
-    /// At this point of the sheet, from its lower-left corner.
-    At([f64; 2]),
-    /// Lined up with its parent, this far along the free axis (a projected view only).
-    Aligned(f64),
-}
+/// Where a saved view's centre sits on its sheet, in paper millimetres. Like the parameter types
+/// above, it reads and writes as the record's own [`ViewPlace`] and is there for its schema.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct PlaceParam(pub ViewPlace);
 
-impl From<ViewPlace> for PlaceParam {
-    fn from(place: ViewPlace) -> PlaceParam {
-        match place {
-            ViewPlace::At(at) => PlaceParam::At(at),
-            ViewPlace::Aligned(along) => PlaceParam::Aligned(along),
-        }
+impl JsonSchema for PlaceParam {
+    fn schema_name() -> Cow<'static, str> {
+        "PlaceParam".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        // One object per kind of place, keyed by its name, as the record writes it.
+        let kind = |key: &str, value: Value, description: &str| json!({"type": "object", "properties": {key: value}, "required": [key], "additionalProperties": false, "description": description});
+        let number = json!({"type": "number", "format": "double"});
+        let point = json!({"type": "array", "items": number, "minItems": 2, "maxItems": 2});
+        json_schema!({
+            "description": "Where a saved view's centre sits on its sheet, in paper millimetres.",
+            "oneOf": [
+                kind("at", point, "At this point of the sheet, from its lower-left corner."),
+                kind("aligned", number, "Lined up with its parent, this far along the free axis (a projected view only).")
+            ]
+        })
     }
 }
 

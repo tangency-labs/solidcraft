@@ -524,7 +524,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             _ => None,
         },
         direction: direction(&resolved.basis),
-        place: view.place.into(),
+        place: PlaceParam(view.place),
         settings: SettingsResult {
             scale: setting(resolved.scale, own.scale, |s| s.to_string()),
             visual_style: setting(resolved.visual_style, own.visual_style, snake_name),
@@ -597,7 +597,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
             .map(|chosen| chosen.as_ref().map(|chosen| configuration_of(s, chosen, EDIT)).transpose())
             .transpose()?,
     };
-    let descendants = descendants(s.drawing(EDIT)?, id, |_| true);
+    let descendants: Vec<u64> = s.drawing(EDIT)?.with_projected(&BTreeSet::from([id])).into_iter().filter(|v| *v != id).collect();
     let apart = found.exploded.is_some() || found.pose.is_some() || found.configuration.is_some();
     if apart || set.visual_style.is_some() || set.reference_style.is_some() || set.linked.is_some() {
         let mut staged = Drawing::clone(s.drawing(EDIT)?);
@@ -634,27 +634,6 @@ fn display_set(own: &ViewOverrides) -> usize {
 /// View `id` of `d`, for `cmd`.
 fn find<'a>(d: &'a Drawing, id: u64, cmd: &str) -> Result<&'a View> {
     d.view(id).ok_or_else(|| bad(cmd, format!("the drawing has no view {}", ids::encode(id))))
-}
-
-/// The views projected or cut from view `id`, directly or through others, in the drawing's order:
-/// each one `follows` takes, whose parent is `id` or one of them.
-fn descendants(d: &Drawing, id: u64, follows: impl Fn(&View) -> bool) -> Vec<u64> {
-    let mut found = vec![id];
-    // Each pass adds the views whose parent is found; a chain is at most MAX_VIEW_DEPTH views.
-    for _ in 0..solidcraft_doc::drawing::view::MAX_VIEW_DEPTH {
-        let more: Vec<u64> = d
-            .views
-            .iter()
-            .filter(|v| !found.contains(&v.id) && v.kind.parent().is_some_and(|parent| found.contains(&parent)) && follows(v))
-            .map(|v| v.id)
-            .collect();
-        if more.is_empty() {
-            break;
-        }
-        found.extend(more);
-    }
-    found.retain(|v| *v != id);
-    d.views.iter().map(|v| v.id).filter(|v| found.contains(v)).collect()
 }
 
 /// What an edit's choices name in the design, found there before it changes anything: its exploded
@@ -741,10 +720,7 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet, found: &Found) -> Result<Vec<
         *looking = direction.0;
     }
     if let Some(place) = set.place {
-        view.place = match place {
-            PlaceParam::At(at) => ViewPlace::At(at),
-            PlaceParam::Aligned(along) => ViewPlace::Aligned(along),
-        };
+        view.place = place.0;
     }
     // Placed apart, it needs a letter; then its label is typed over.
     d.give_letter(id).map_err(|e| bad(EDIT, e.to_string()))?;
@@ -1007,24 +983,6 @@ fn setting<T, U>(resolved: Setting<T>, own: Option<T>, show: impl Fn(T) -> U) ->
     SettingResult { value: show(resolved.value), from, parent, set: own.map(&show) }
 }
 
-/// The views lined up with view `id`, directly or through others: the views that go where it goes.
-fn lined_up(d: &Drawing, id: u64) -> Vec<u64> {
-    descendants(d, id, |v| matches!(v.place, ViewPlace::Aligned(_)))
-}
-
-/// `view`'s place moved by `by`: a point moves, and a place lined up with a parent moves along
-/// its free axis, so the views lined up with a moved view stay where they were beside it.
-fn shifted(view: &View, by: Vec2) -> ViewPlace {
-    match (view.place, &view.kind) {
-        (ViewPlace::At([x, y]), _) => ViewPlace::At([x + by.x, y + by.y]),
-        (ViewPlace::Aligned(along), ViewKind::Projected { side, .. }) => ViewPlace::Aligned(along + side.along(by)),
-        (
-            ViewPlace::Aligned(along),
-            ViewKind::Base { .. } | ViewKind::Section { .. } | ViewKind::Pictorial { .. } | ViewKind::Auxiliary { .. } | ViewKind::Flat { .. },
-        ) => ViewPlace::Aligned(along + by.y),
-    }
-}
-
 /// The sheet `named` names in `d` (its id or its one name), and its centre.
 fn sheet_named(d: &Drawing, named: &str, cmd: &str) -> Result<(u64, Vec2)> {
     let at = d.sheet_index(named).map_err(|e| bad(cmd, e.to_string()))?;
@@ -1032,29 +990,12 @@ fn sheet_named(d: &Drawing, named: &str, cmd: &str) -> Result<(u64, Vec2)> {
     Ok((sheet.id, sheet.sheet.size_mm().map_err(|e| bad(cmd, e.to_string()))? * 0.5))
 }
 
-/// `d`'s view `id` placed where it goes dragged to `to` ([`Drawing::place_moved_to`]), given a letter
-/// when that places it apart, and the views that moved: it, then the views lined up with it whose
-/// centres changed, which follow by the record's rule.
-fn drag(d: &mut Drawing, id: u64, to: Vec2, break_alignment: bool, cmd: &str) -> Result<Vec<u64>> {
-    let place = d.place_moved_to(id, to, break_alignment).map_err(|e| bad(cmd, e.to_string()))?;
-    let lined = lined_up(d, id);
-    let centres = |d: &Drawing| lined.iter().map(|v| d.view_centre(*v).ok()).collect::<Vec<_>>();
-    let before = centres(d);
-    if let Some(view) = d.view_index(id).and_then(|at| d.views.get_mut(at)) {
-        Arc::make_mut(view).place = place;
-    }
-    // Placed apart, it needs a letter.
-    d.give_letter(id).map_err(|e| bad(cmd, e.to_string()))?;
-    let went = lined.iter().zip(before.into_iter().zip(centres(d))).filter(|(_, (b, a))| b != a).map(|(v, _)| *v);
-    Ok(std::iter::once(id).chain(went).collect())
-}
-
 fn move_view(s: &mut Session, p: &Value) -> Result<Value> {
     let request: ViewMoveParams = crate::schema::read(DRAG, p)?;
     let id = request.view.0;
-    let moved = s.edit_drawing(DRAG, |d| drag(d, id, request.to_mm.0, request.break_alignment, DRAG))?;
+    let moved = s.edit_drawing(DRAG, |d| d.move_view(id, request.to_mm.0, request.break_alignment).map_err(|e| bad(DRAG, e.to_string())))?;
     let d = s.drawing(DRAG)?;
-    let place = find(d, id, DRAG)?.place.into();
+    let place = PlaceParam(find(d, id, DRAG)?.place);
     let centre = d.view_centre(id).map_err(|e| bad(DRAG, e.to_string()))?;
     let outside = outside_results(crate::drawing_view::outside(s, d, &moved, DRAG)?);
     let followers = moved.iter().skip(1).map(|v| ids::encode(*v)).collect();
@@ -1071,7 +1012,7 @@ fn move_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
         if view.sheet == sheet {
             // Already on it: a position is a move on its sheet, by the one rule.
             return match request.position_mm {
-                Some(to) => Ok((sheet, drag(d, id, to.0, request.break_alignment, MOVE)?)),
+                Some(to) => Ok((sheet, d.move_view(id, to.0, request.break_alignment).map_err(|e| bad(MOVE, e.to_string()))?)),
                 None => Ok((sheet, Vec::new())),
             };
         }
@@ -1085,15 +1026,16 @@ fn move_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
             None if lined => middle,
             None => from,
         };
-        let moved: Vec<u64> = std::iter::once(id).chain(lined_up(d, id)).collect();
-        for view in d.views.iter_mut().filter(|v| moved.contains(&v.id)) {
-            let place = if view.id == id { ViewPlace::At([to.x, to.y]) } else { shifted(view, to - from) };
-            let view = Arc::make_mut(view);
-            view.sheet = sheet;
-            view.place = place;
+        let places = d.places_beside(id, to).map_err(|e| bad(MOVE, e.to_string()))?;
+        for (moved, place) in &places {
+            if let Some(view) = d.view_index(*moved).and_then(|at| d.views.get_mut(at)) {
+                let view = Arc::make_mut(view);
+                view.sheet = sheet;
+                view.place = *place;
+            }
         }
         d.give_letter(id).map_err(|e| bad(MOVE, e.to_string()))?;
-        Ok((sheet, moved))
+        Ok((sheet, places.into_iter().map(|(moved, _)| moved).collect()))
     })?;
     let outside = crate::drawing_view::outside(s, s.drawing(MOVE)?, &views, MOVE)?;
     to_sheet_answer(id, sheet, &views, outside)
@@ -1104,7 +1046,7 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
     let id = request.view.0;
     let record = s.drawing(COPY)?.clone();
     find(&record, id, COPY)?;
-    let linked = lined_up(&record, id);
+    let linked = record.lined_up_with(id);
     let with_linked = match request.with_linked {
         Some(with) => with,
         None if linked.is_empty() => false,
@@ -1132,14 +1074,13 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
     let copy_of = |old: u64| originals.iter().position(|o| *o == old).and_then(|i| copies.get(i)).copied();
     let sheet = s.edit_drawing(COPY, |d| {
         let (sheet, middle) = sheet_named(d, &request.sheet, COPY)?;
-        let from = d.view_centre(id).map_err(|e| bad(COPY, e.to_string()))?;
-        let to = request.position_mm.map_or(middle, |p| p.0);
+        let places = d.places_beside(id, request.position_mm.map_or(middle, |p| p.0)).map_err(|e| bad(COPY, e.to_string()))?;
         let resolved = d.resolve_view(id).map_err(|e| bad(COPY, e.to_string()))?;
         let mut made = Vec::with_capacity(copies.len());
         for (old, new) in originals.iter().zip(&copies) {
             let original = find(d, *old, COPY)?;
-            let mut view = View { id: *new, sheet, ..original.clone() };
-            view.place = shifted(original, to - from);
+            let place = places.iter().find(|(v, _)| v == old).map_or(original.place, |(_, place)| *place);
+            let mut view = View { id: *new, sheet, place, ..original.clone() };
             match &original.kind {
                 // The copy follows none of the views it came from: a projected, pictorial or auxiliary
                 // view copied alone is a base view, looking the way it did, with the settings it had as
@@ -1161,7 +1102,6 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
                         pose: Some(resolved.pose.value.clone()).filter(|pose| *pose != Pose::Designed),
                         configuration: Some(resolved.configuration.value).filter(|row| *row != ViewConfiguration::Active),
                     };
-                    view.place = ViewPlace::At([to.x, to.y]);
                 }
                 ViewKind::Projected { parent, side } => view.kind = ViewKind::Projected { parent: copy_of(*parent).unwrap_or(*parent), side: *side },
                 ViewKind::Section { parent, line } => {
@@ -1312,11 +1252,7 @@ fn projected(s: &mut Session, p: &Value) -> Result<Value> {
         Beside::Side(side) => (ViewKind::Projected { parent, side }, ViewPlace::Aligned(side.along(parent_centre))),
         Beside::Diagonal(diagonal) => (ViewKind::Pictorial { parent, diagonal }, ViewPlace::At([parent_centre.x, parent_centre.y])),
     };
-    let place = match request.place {
-        Some(PlaceParam::At(at)) => ViewPlace::At(at),
-        Some(PlaceParam::Aligned(along)) => ViewPlace::Aligned(along),
-        None => staged_place,
-    };
+    let place = request.place.map_or(staged_place, |place| place.0);
     let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, label: None };
     if request.place.is_none() {
         // Staged on its parent's centre to measure it, then moved until its boundary is the gap past
@@ -1383,11 +1319,7 @@ fn auxiliary(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let toward = auxiliary_side(&basis, what, side).map_err(fold_refused)?;
     let parent_centre = record.view_centre(parent).map_err(|e| bad(AUXILIARY, e.to_string()))?;
-    let place = match request.place {
-        Some(PlaceParam::At(at)) => ViewPlace::At(at),
-        Some(PlaceParam::Aligned(along)) => ViewPlace::Aligned(along),
-        None => ViewPlace::At([parent_centre.x, parent_centre.y]),
-    };
+    let place = request.place.map_or(ViewPlace::At([parent_centre.x, parent_centre.y]), |place| place.0);
     let kind = ViewKind::Auxiliary { parent, toward: [toward.x, toward.y] };
     let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, label: None };
     // Staged (on its parent's centre unless placed): the record's rules, then measured to unfold it.
