@@ -1,5 +1,11 @@
 [
  {
+  "call": "ui.prefs",
+  "params": {
+   "browser_components_open": true
+  }
+ },
+ {
   "note": "The browser's search (#1413): a magnifier in the Browser panel's header opens a field at the top of the panel; typing keeps the matches with their parents, the list narrows them to one kind, and Esc or the \u00d7 ends the search and closes the field."
  },
  {
