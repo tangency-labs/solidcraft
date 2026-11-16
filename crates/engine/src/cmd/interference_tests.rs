@@ -248,3 +248,40 @@ fn an_envelope_stands_in_for_its_components_bodies_when_asked() {
     assert_eq!(names(&named), vec![["Envelope".to_string(), "Lid".to_string()]], "{named}");
     assert_eq!(named["pairs_excluded"], 1, "{named}");
 }
+
+/// A body added to an enveloped component after its envelope, outside the box, is checked on its
+/// own with `envelopes`: the envelope doesn't stand in for what it doesn't hold.
+#[test]
+fn a_body_outside_its_components_envelope_is_checked_on_its_own() {
+    let mut s = Session::default();
+    let cube = |s: &mut Session, name: &str, size: f64, corner: [f64; 3]| {
+        run(s, "solid.box", json!({"length": size, "width": size, "height": size, "corner": corner, "operation": "new", "body_name": name}));
+    };
+    run(&mut s, "component.create", json!({"name": "Bought"}));
+    cube(&mut s, "Housing", 10.0, [0.0, 0.0, 0.0]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "solid.bounding_solid", json!({"component": "Bought", "body_name": "Envelope"}));
+    run(&mut s, "component.activate", json!({"component": "Bought"}));
+    cube(&mut s, "Late", 10.0, [100.0, 0.0, 0.0]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    cube(&mut s, "Other", 10.0, [105.0, 0.0, 0.0]);
+    let env = run(&mut s, "inspect.interference", json!({"envelopes": true}));
+    let hits: Vec<_> = env["interferences"].as_array().unwrap().iter().map(|h| (h["a"].as_str().unwrap(), h["b"].as_str().unwrap())).collect();
+    assert!(hits.iter().any(|&(a, b)| [a, b].contains(&"Late") && [a, b].contains(&"Other")), "{env}");
+}
+
+/// A small overlap with a large envelope is a finding, whichever order the pair comes in: the
+/// shared volume is measured against the smaller body, not the envelope's span.
+#[test]
+fn a_small_overlap_with_a_large_envelope_is_found() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Big"}));
+    run(&mut s, "solid.box", json!({"length": 2000, "width": 2000, "height": 2000, "corner": [0, 0, 0], "body_name": "Frame"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "solid.bounding_solid", json!({"component": "Big", "body_name": "Envelope"}));
+    // 2 x 4 x 4 = 32 mm³ inside the envelope, under the 41.6 mm³ a 2 m box's span allows.
+    run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [1998, 0, 0], "operation": "new", "body_name": "Small"}));
+    let env = run(&mut s, "inspect.interference", json!({"envelopes": true}));
+    assert_eq!(env["count"], 1, "{env}");
+    assert!((f(&env["interferences"][0]["volume_mm3"]) - 32.0).abs() < 1e-6, "{env}");
+}

@@ -290,7 +290,7 @@ impl Session {
     /// assembly's root cutting through its parts, #1234). The command and its preview both ask
     /// this, so the preview never refuses a cut the command makes (#3085).
     pub fn cut_takes_every_body(&self, st: &solidcraft_doc::ModelState) -> bool {
-        !st.bodies.is_empty() && !st.bodies.iter().any(|b| self.doc.model_body_component(b) == self.active_component)
+        !st.bodies.is_empty() && !st.bodies.iter().any(|b| !b.envelope && self.doc.model_body_component(b) == self.active_component)
     }
 }
 
@@ -348,7 +348,7 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
     // wrong type (`add_feature`), so a wrong type cannot make this cut anything. This preview
     // cannot fail, so it reads the list leniently.
     let parts = string_list_or_default(p, "participants");
-    let implicit_all = grouped.is_some() && !st.bodies.iter().any(|body| s.doc.model_body_component(body) == s.active_component);
+    let implicit_all = grouped.is_some() && !st.bodies.iter().any(|body| !body.envelope && s.doc.model_body_component(body) == s.active_component);
     let mut bodies: Vec<_> = if !parts.is_empty() {
         st.bodies.iter().filter(|b| parts.contains(&b.name)).collect()
     } else if implicit_all {
@@ -1276,7 +1276,8 @@ pub fn shown_scope(s: &Session) -> Option<Vec<String>> {
 /// part where it is shown (#3223).
 fn active_scope<'a>(s: &Session, st: &'a solidcraft_doc::ModelState) -> Vec<&'a solidcraft_doc::ModelBody> {
     let active = s.active_component;
-    let own: Vec<_> = st.bodies.iter().filter(|b| s.doc.model_body_component(b) == active).collect();
+    // A component's envelope stands in for its parts in checks only: it is never worked on.
+    let own: Vec<_> = st.bodies.iter().filter(|b| !b.envelope && s.doc.model_body_component(b) == active).collect();
     if !own.is_empty() {
         return own;
     }
@@ -1285,7 +1286,7 @@ fn active_scope<'a>(s: &Session, st: &'a solidcraft_doc::ModelState) -> Vec<&'a 
         .iter()
         .filter(|b| {
             let comp = s.doc.model_body_component(b);
-            if !s.doc.component_within(comp, active) {
+            if b.envelope || !s.doc.component_within(comp, active) {
                 return false;
             }
             let frame = s.doc.component_transform(comp);
@@ -4423,6 +4424,10 @@ fn bounding_solid(s: &mut Session, p: &Value) -> Result<Value> {
 /// `margins` per side) with the feature parameters `p` (`name`, `body_name`). It is made in the
 /// component it bounds, in its frame, as if that component were active.
 pub(crate) fn envelope_in(s: &mut Session, p: &Value, component: u64, margin: Expr, margins: Option<[Expr; 6]>) -> Result<Value> {
+    // Two envelopes of one component would each stand in for the other and its contents.
+    if s.doc.features.iter().any(|f| f.component == component && matches!(f.kind, FeatureKind::BoundingSolid { contents: true, .. })) {
+        return Err(bad("solid.bounding_solid", "the component already has an envelope"));
+    }
     let active = (s.active_component, s.active_occurrence_path.take());
     s.active_component = component;
     let out = add_feature(s, p, FeatureKind::BoundingSolid { bodies: Vec::new(), margin, contents: true, margins });

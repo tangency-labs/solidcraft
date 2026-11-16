@@ -90,6 +90,9 @@ pub struct ModelBody {
     pub split_from: Option<String>,
     /// The look it was imported with, carried through later features.
     pub imported: Option<Arc<crate::appearance::ImportedLook>>,
+    /// A component's envelope (a Bounding Solid of its contents): a stand-in for checks, never
+    /// one of the bodies a feature of its component works on when the feature names none.
+    pub envelope: bool,
     /// [`Body::retained_bytes`] of `body`, measured when a feature made or changed it (0: not
     /// measured), so the evaluation cache's budget does not walk every body after every feature.
     bytes: usize,
@@ -178,6 +181,7 @@ impl ModelBody {
             transferred: false,
             split_from: None,
             imported: None,
+            envelope: false,
             bytes: 0,
             source_key: 0,
             outline: Arc::new(OnceLock::new()),
@@ -189,6 +193,12 @@ impl ModelBody {
     }
 
     /// A surface body: some shell does not close ([`Body::is_surface`]), worked out once.
+    /// Whether a feature `f` that names no bodies works on this one: a body of its component
+    /// (not the component's envelope), or one `f` made itself.
+    pub fn in_default_scope(&self, f: &Feature) -> bool {
+        (self.component == f.component && !self.envelope) || self.feature == f.id
+    }
+
     pub fn is_surface(&self) -> bool {
         !self.body.is_mesh() && self.is_open()
     }
@@ -2187,7 +2197,7 @@ impl PlacementReads {
         let names = if targets.is_empty() { &f.participants } else { &targets };
         let all = names.len() == 1 && names.first().is_some_and(|n| n == "*");
         if all || names.is_empty() {
-            self.bodies.extend(st.bodies.iter().filter(|b| all || b.component == f.component || b.feature == f.id).map(|b| b.name.clone()));
+            self.bodies.extend(st.bodies.iter().filter(|b| all || b.in_default_scope(f)).map(|b| b.name.clone()));
         } else {
             for name in names {
                 self.placed_body(Some(st), name);
@@ -3406,6 +3416,9 @@ impl Model {
         for f in &doc.features {
             feature_component.entry(f.id).or_insert(f.component);
         }
+        // The component envelopes' features: the bodies they made are marked after every feature.
+        let envelopes: std::collections::HashSet<u64> =
+            doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::BoundingSolid { contents: true, .. })).map(|f| f.id).collect();
         let watched = crate::progress::begin(doc.features.len());
         let mut poses = std::collections::HashMap::new();
         // Pose-only features evaluated again for a pose change alone: their new bodies, which
@@ -3811,6 +3824,7 @@ impl Model {
                             }
                         }
                         for b in &mut next.bodies {
+                            b.envelope = envelopes.contains(&b.feature);
                             if !b.transferred {
                                 b.component = match doc.body_components.get(&b.name) {
                                     Some(c) => *c,
@@ -4557,7 +4571,7 @@ fn apply_beside_sheet_cut(
         .filter(|b| {
             !handled.contains(&b.name)
                 && (!skip_surfaces || !b.is_surface())
-                && (all || if effective.is_empty() { b.component == f.component || b.feature == f.id } else { effective.contains(&b.name) })
+                && (all || if effective.is_empty() { b.in_default_scope(f) } else { effective.contains(&b.name) })
         })
         .map(|b| b.name.clone())
         .collect();
@@ -4820,7 +4834,7 @@ pub(crate) fn boolean_scope(state: &ModelState, f: &Feature, targets: &[String])
     let names = state
         .bodies
         .iter()
-        .filter(|b| all || if effective.is_empty() { b.component == f.component || b.feature == f.id } else { effective.contains(&b.name) })
+        .filter(|b| all || if effective.is_empty() { b.in_default_scope(f) } else { effective.contains(&b.name) })
         .map(|b| b.name.clone())
         .collect();
     (!all && !effective.is_empty(), names)
@@ -4902,7 +4916,7 @@ fn apply_traced_with(
     let mut target_idx: Vec<usize> = if all {
         (0..state.bodies.len()).collect()
     } else if targets.is_empty() {
-        (0..state.bodies.len()).filter(|i| state.bodies.get(*i).is_some_and(|b| b.component == f.component || b.feature == f.id)).collect()
+        (0..state.bodies.len()).filter(|i| state.bodies.get(*i).is_some_and(|b| b.in_default_scope(f))).collect()
     } else {
         let mut v = Vec::new();
         for t in targets {
@@ -8851,10 +8865,7 @@ fn path_at(segs: &[kernel::PathSeg], d: f64) -> (Vec3, Vec3) {
 /// `apply_traced` picks a cut's targets).
 fn hole_targets<'a>(st: &'a ModelState, f: &Feature) -> Vec<&'a ModelBody> {
     let all = f.participants.len() == 1 && f.participants.first().is_some_and(|t| t == "*");
-    st.bodies
-        .iter()
-        .filter(|b| all || if f.participants.is_empty() { b.component == f.component || b.feature == f.id } else { f.participants.contains(&b.name) })
-        .collect()
+    st.bodies.iter().filter(|b| all || if f.participants.is_empty() { b.in_default_scope(f) } else { f.participants.contains(&b.name) }).collect()
 }
 
 /// Whether hole tool `tool` is clear of every body the hole cuts, by their exact boxes (#10701).
@@ -8880,9 +8891,7 @@ fn hole_misses(st: &ModelState, f: &Feature, tool: &Body) -> bool {
 fn miss_scope<'a>(st: &'a ModelState, f: &'a Feature, targets: &'a [String]) -> impl Iterator<Item = &'a ModelBody> + 'a {
     let targets = if targets.is_empty() { &f.participants } else { targets };
     let all = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
-    st.bodies
-        .iter()
-        .filter(move |b| all || if targets.is_empty() { b.component == f.component || b.feature == f.id } else { targets.contains(&b.name) })
+    st.bodies.iter().filter(move |b| all || if targets.is_empty() { b.in_default_scope(f) } else { targets.contains(&b.name) })
 }
 
 /// Whether a copy has no material to cut in any of its eligible targets.
@@ -9463,7 +9472,7 @@ fn replay(
             && targets.is_empty()
             && f.participants.is_empty()
             && src.component != f.component
-            && !st.bodies.iter().any(|b| b.component == f.component || b.feature == f.id)
+            && !st.bodies.iter().any(|b| b.in_default_scope(f))
         {
             scoped = Feature { component: src.component, ..f.clone() };
             &scoped
@@ -11074,6 +11083,10 @@ fn eval_feature_kind(
             let m = val(vals, margin, Kind::Length)?;
             let side = |i: usize| margins.as_ref().and_then(|ms| ms.get(i)).map_or(Ok(m), |e| val(vals, e, Kind::Length));
             let (lo, hi) = (Vec3::new(side(0)?, side(2)?, side(4)?), Vec3::new(side(1)?, side(3)?, side(5)?));
+            // An envelope smaller than its contents could miss a contact the parts make.
+            if *contents && [lo.x, lo.y, lo.z, hi.x, hi.y, hi.z].iter().any(|v| *v < 0.0) {
+                return Err(DocError::Invalid("an envelope's margin cannot be negative".into()));
+            }
             let bb = if *contents {
                 crate::envelope::contents_bounds(doc, st, f.component)?
             } else {
@@ -11092,7 +11105,9 @@ fn eval_feature_kind(
             }
             let b = crate::lineage::numbered_tool(kernel::box_solid(min, max)?);
             let name = unique_body_name(st, f.body_names.first().map(String::as_str).unwrap_or("Bounding"));
-            st.bodies.push(ModelBody::traced_new(name, b, f.id));
+            let mut envelope = ModelBody::traced_new(name, b, f.id);
+            envelope.envelope = *contents;
+            st.bodies.push(envelope);
             Ok(())
         }
         FeatureKind::Move { bodies, translate, rotate_axis, origin, angle, copy, copy_frames } => {

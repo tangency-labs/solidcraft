@@ -7,7 +7,7 @@
 use solidcraft_geom::Aabb3;
 use solidcraft_kernel as kernel;
 
-use crate::{DocError, Document, FeatureKind, Mat, ModelBody, ModelState, Result};
+use crate::{DocError, Document, FeatureKind, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, ModelBody, ModelState, Result};
 
 /// Most bodies one envelope bounds (placements times bodies).
 const MAX_PLACED: usize = 200_000;
@@ -26,7 +26,13 @@ pub(crate) fn placed_contents<'a>(doc: &Document, st: &'a ModelState, component:
         }
     }
     let mut out = Vec::new();
-    for (comp, _, m) in doc.placements_within(component) {
+    // A box around part of the contents could miss a contact: refuse a walk that stopped short.
+    let placements = doc.all_placements_within(component).ok_or_else(|| {
+        DocError::Invalid(format!(
+            "the component places more than {MAX_PLACEMENTS} parts or nests them deeper than {MAX_PLACEMENT_DEPTH} levels, too many to bound"
+        ))
+    })?;
+    for (comp, _, m) in placements {
         for b in by_component.get(&comp).into_iter().flatten() {
             if out.len() >= MAX_PLACED {
                 return Err(DocError::Invalid(format!("the component holds more than {MAX_PLACED} placed bodies to bound")));

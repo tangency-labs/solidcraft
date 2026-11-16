@@ -2722,6 +2722,38 @@ fn a_components_envelope_bounds_its_parts_where_they_are_placed() {
     assert!(Session::new(back).model.state().body("Bought Envelope").is_some());
     let e = s.execute("solid.bounding_solid", &json!({"component": "Bought", "bodies": ["Plate"]})).unwrap_err().to_string();
     assert!(e.contains("not both"), "{e}");
+    // A second envelope of the same component is refused: each would stand in for the other.
+    let e = s.execute("solid.bounding_solid", &json!({"component": "Bought"})).unwrap_err().to_string();
+    assert!(e.contains("already has an envelope"), "{e}");
+    // A feature of the component that names no bodies works on its parts, never on its envelope.
+    let volume = |s: &mut Session, b: &str| run(s, "inspect.measure", json!({"bodies": [b]}))["total"]["volume_mm3"].as_f64().unwrap();
+    let envelope = volume(&mut s, "Bought Envelope");
+    run(&mut s, "component.activate", json!({"component": "Bought"}));
+    run(&mut s, "solid.box", json!({"corner": [108, 8, 8], "length": 4, "width": 4, "height": 4, "operation": "cut"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let plate = volume(&mut s, "Plate");
+    assert!((plate - 992.0).abs() < 1e-6, "the plate is cut: {plate}, envelope {envelope} -> {}", volume(&mut s, "Bought Envelope"));
+    assert!((volume(&mut s, "Bought Envelope") - envelope).abs() < 1e-6, "the envelope is left alone");
+}
+
+/// An envelope smaller than its contents could miss a contact: a negative margin, single or for
+/// one side, is refused for an envelope.
+#[test]
+fn an_envelope_refuses_a_negative_margin() {
+    for margins in [json!({"margin": -1}), json!({"margins": [0, 0, 0, 0, "-0.5 mm", 0]})] {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Bought"}));
+        run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let mut p = json!({"component": "Bought", "body_name": "Envelope"});
+        p.as_object_mut().unwrap().extend(margins.as_object().unwrap().clone());
+        let refused = s.execute("solid.bounding_solid", &p);
+        assert!(
+            refused.is_err() || s.model.results.last().is_some_and(|r| r.error.as_deref().is_some_and(|e| e.contains("negative"))),
+            "{margins}: {refused:?}"
+        );
+        assert!(s.model.state().body("Envelope").is_none(), "{margins}");
+    }
 }
 
 /// A body stretched by a non-uniform `solid.scale` keeps its flat faces flat, so a boolean whose

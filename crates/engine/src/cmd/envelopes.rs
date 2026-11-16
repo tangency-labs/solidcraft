@@ -7,7 +7,9 @@
 use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
-use solidcraft_doc::{FeatureKind, ModelState};
+use solidcore_record::Vec3;
+use solidcraft_doc::{FeatureKind, Mat, ModelState};
+use solidcraft_geom::Aabb3;
 
 use crate::params::bad;
 use crate::{Result, Session};
@@ -22,14 +24,27 @@ pub(super) struct Envelopes {
 }
 
 impl Envelopes {
-    /// The envelopes among `world`'s bodies (`world` is the session's world state).
+    /// The envelopes among `world`'s bodies (`world` is the session's world state). A body
+    /// inside an envelope's component is held by that envelope only when it lies inside the box:
+    /// one a later feature added or grew past it is checked on its own. An envelope is held only
+    /// by one of an outer component, never by another of its own.
     pub(super) fn of(s: &Session, world: &ModelState) -> Self {
         let made: HashSet<u64> =
             s.doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::BoundingSolid { contents: true, .. })).map(|f| f.id).collect();
         if made.is_empty() {
             return Self::default();
         }
-        let body_paths: HashMap<String, Vec<u64>> = s.doc.body_frames(&s.model.state()).into_iter().map(|(name, _, path, _)| (name, path)).collect();
+        let model = s.model.state();
+        let frames = s.doc.body_frames_with_source(&model);
+        let body_paths: HashMap<String, Vec<u64>> = frames.iter().map(|(name, _, _, path, _)| (name.clone(), path.clone())).collect();
+        // Each envelope's box in its own frame, and the map from the world into that frame.
+        let boxes: HashMap<&str, (Aabb3, Mat)> = frames
+            .iter()
+            .filter_map(|(name, source, _, _, m)| {
+                let b = model.body(source).filter(|b| made.contains(&b.feature))?;
+                Some((name.as_str(), (b.body.exact_bounds().ok()?, solidcraft_doc::mat_inverse(m)?)))
+            })
+            .collect();
         let mut envelopes: Vec<(String, Vec<u64>)> = world
             .bodies
             .iter()
@@ -41,9 +56,15 @@ impl Envelopes {
         let mut holder = HashMap::new();
         for b in &world.bodies {
             let path = body_paths.get(&b.name).map_or(&[][..], Vec::as_slice);
-            let outer = envelopes.iter().find(|(name, at)| *name != b.name && path.starts_with(at));
-            if let Some((name, _)) = outer {
-                holder.insert(b.name.clone(), name.clone());
+            let is_envelope = made.contains(&b.feature);
+            let candidates = envelopes.iter().filter(|(name, at)| *name != b.name && path.starts_with(at) && (!is_envelope || at.len() < path.len()));
+            let mut world_box = None;
+            for (name, _) in candidates {
+                let bounds = *world_box.get_or_insert_with(|| b.body.exact_bounds().ok());
+                if boxes.get(name.as_str()).zip(bounds).is_some_and(|((env, into), bb)| inside(bb, env, into, b.body.record().tolerance)) {
+                    holder.insert(b.name.clone(), name.clone());
+                    break;
+                }
             }
         }
         Self { paths: envelopes.into_iter().collect(), body_paths, holder }
@@ -73,6 +94,23 @@ impl Envelopes {
         };
         inside(a, b) || inside(b, a)
     }
+}
+
+/// Whether the world box `bb` lies inside the envelope box `env` of a frame `into` maps the
+/// world to, within `tol`: every corner of `bb` taken into that frame lies in `env`.
+fn inside(bb: Aabb3, env: &Aabb3, into: &Mat, tol: f64) -> bool {
+    if bb.is_empty() || env.is_empty() {
+        return false;
+    }
+    let env = env.inflated(tol.max(1e-6));
+    (0..8).all(|k| {
+        let corner = Vec3::new(
+            if k & 1 == 0 { bb.min.x } else { bb.max.x },
+            if k & 2 == 0 { bb.min.y } else { bb.max.y },
+            if k & 4 == 0 { bb.min.z } else { bb.max.z },
+        );
+        env.contains(solidcraft_doc::apply_point(into, corner))
+    })
 }
 
 /// The `envelopes` parameter: true checks each envelope instead of the bodies inside it.

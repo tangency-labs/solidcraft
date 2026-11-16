@@ -39,6 +39,9 @@ struct Job {
     names: (String, String),
     /// Faces of one times faces of the other: the slowest pairs start first.
     cost: usize,
+    /// The size a shared volume is measured against: the first body's, or the smaller one's
+    /// when one is an envelope, so a large envelope does not pass a small overlap as clear.
+    size: f64,
 }
 
 /// What an exact check of one pair came to.
@@ -132,6 +135,7 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
             b: b.body.clone(),
             names: (a.name.clone(), b.name.clone()),
             cost: a.body.face_count().saturating_mul(b.body.face_count()),
+            size: if envelopes.is_envelope(&a.name) || envelopes.is_envelope(&b.name) { a.body.size().min(b.body.size()) } else { a.body.size() },
         });
     }
     let intersected = jobs.len();
@@ -209,12 +213,12 @@ fn round_ms(ms: f64) -> f64 {
 /// The exact check of one pair: the bodies' intersection, measured.
 fn check(job: &Job) -> Done {
     let started = web_time::Instant::now();
-    let (outcome, kernel) = solidcraft_kernel::profile::capture(|| check_pair(&job.a, &job.b, &job.names));
+    let (outcome, kernel) = solidcraft_kernel::profile::capture(|| check_pair(&job.a, &job.b, &job.names, job.size));
     Done { outcome, ms: started.elapsed().as_secs_f64() * 1000.0, kernel }
 }
 
-fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String)) -> Outcome {
-    let threshold = 1e-9 * a.size().max(1.0).powi(3);
+fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String), size: f64) -> Outcome {
+    let threshold = 1e-9 * size.max(1.0).powi(3);
     // A pair whose shared part can't be worked out is reported, not passed as clear.
     let shared = match solidcraft_kernel::boolean(a, b, solidcraft_kernel::BoolOp::Intersect) {
         Ok(Some(o)) => o,

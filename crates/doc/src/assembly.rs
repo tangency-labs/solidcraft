@@ -492,6 +492,13 @@ impl Document {
         crate::occurrence_tree::OccurrenceTree::new(self).placements_from(component, |o| o.transform)
     }
 
+    /// [`Document::placements_within`], or `None` when the walk stopped at a limit before it
+    /// reached every placement.
+    pub fn all_placements_within(&self, component: u64) -> Option<Vec<(u64, Vec<u64>, Mat)>> {
+        let (placements, complete) = crate::occurrence_tree::OccurrenceTree::new(self).walk_from(component, |o| o.transform);
+        complete.then_some(placements)
+    }
+
     /// Every body as the world shows it: its world name ("Body1", or "Body1 (Occ:2)" for a
     /// further instance), its component, the occurrence path, and the transform from the frame
     /// its geometry is in to the world.
