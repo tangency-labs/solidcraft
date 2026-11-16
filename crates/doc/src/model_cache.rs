@@ -22,8 +22,8 @@ pub struct SavedModel {
 
 /// Records refer to these at most.
 const MAX_ITEMS: usize = 1_000_000;
-/// Bodies, sketches, sheet bodies and sketch keys all the states hold together, at most (a state is
-/// a list of clones).
+/// Bodies, sketches, sheet bodies, sketch keys and named face points all the states hold
+/// together, at most (a state is a list of clones).
 const MAX_HELD: usize = 50_000_000;
 /// Longest text a record holds (bytes). A feature's warning can quote every generated name of
 /// the edges it picked: 122,701 characters in one design, whose saved model was refused, so it
@@ -174,9 +174,35 @@ struct Writer {
     sketch_key_sets: Vec<Json>,
     sketch_key_index: HashMap<BTreeMap<u64, u64>, usize>,
     last_sketch_keys: Option<(BTreeMap<u64, u64>, usize)>,
+    /// Face points as resolved before each feature ran, each distinct value once. A state's
+    /// map includes earlier features too; writing those points per state grows quadratically.
+    named_faces: Vec<Json>,
+    named_face_index: HashMap<(u64, Vec<[u64; 3]>), usize>,
 }
 
 impl Writer {
+    fn named_faces(&mut self, faces: &BTreeMap<u64, Vec<Vec3>>) -> Vec<[usize; 2]> {
+        let mut indices = Vec::with_capacity(faces.len());
+        for (&feature, points) in faces {
+            // Signed zero writes differently, so share only points that are identical to the bit.
+            let key = (feature, points.iter().map(|p| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]).collect());
+            let at = match self.named_face_index.get(&key) {
+                Some(at) => *at,
+                None => {
+                    let at = self.named_faces.len();
+                    self.named_faces.push(json!([feature, points]));
+                    self.named_face_index.insert(key, at);
+                    at
+                }
+            };
+            indices.push(at);
+        }
+        // A map has no order. Reordering features can put their ids in reverse timeline order;
+        // sorting by table position keeps the growing set as runs even in that case.
+        indices.sort_unstable();
+        runs(&indices)
+    }
+
     /// The place of `keys` among the sketch-key sets, written the first time a state holds them
     /// (as the changes from the set written last: a later state mostly adds a sketch or two).
     fn sketch_key_set(&mut self, keys: &BTreeMap<u64, u64>) -> usize {
@@ -351,6 +377,7 @@ impl Writer {
             "sheets": sheets, "construct": serde_json::to_value(&st.construct).ok()?,
             "threads": runs(&threads),
             "sketch_key_set": self.sketch_key_set(&st.sketch_keys),
+            "named_faces": self.named_faces(&st.named_faces),
             "blend_edges": serde_json::to_value(&st.blend_edges).ok()?, "fitted": serde_json::to_value(&st.fitted).ok()?,
             "tapered": serde_json::to_value(&st.tapered).ok()?,
         });
@@ -387,6 +414,7 @@ impl Model {
                 "features": features, "states": w.states, "model_bodies": w.model_bodies, "names": w.names, "sketches": w.sketches,
                 "sheets": w.sheets, "threads": w.threads, "validation": self.validation().id(), "rounds": w.rounds,
                 "sketch_key_sets": w.sketch_key_sets,
+                "named_faces": w.named_faces,
             });
             Ok(SavedModel { records, bodies: w.bodies })
         })
@@ -496,10 +524,33 @@ impl SavedModel {
         for t in list("threads")? {
             threads.push(serde_json::from_value::<ThreadInfo>(t.clone()).map_err(|_| bad("saved model: tap marking"))?);
         }
+        // Bound the whole table before decoding any point lists, including unused entries.
+        // Older caches lack this table: refuse them so opening evaluates the missing points.
+        let face_records = list("named_faces")?;
+        let mut point_count = 0usize;
+        for r in face_records {
+            let points = r.get(1).and_then(Json::as_array).ok_or_else(|| bad("saved model: face points"))?;
+            point_count = point_count.saturating_add(points.len());
+            if point_count > MAX_ITEMS {
+                return Err(bad("saved model: face points"));
+            }
+        }
+        let mut face_points = Vec::with_capacity(face_records.len());
+        let mut face_weight = vec![0usize];
+        for r in face_records {
+            let feature = r.get(0).and_then(Json::as_u64).ok_or_else(|| bad("saved model: face points"))?;
+            let points: Vec<Vec3> = serde_json::from_value(parse(r.get(1))?).map_err(|_| bad("saved model: face points"))?;
+            if points.iter().any(|p| !p.x.is_finite() || !p.y.is_finite() || !p.z.is_finite()) {
+                return Err(bad("saved model: face points"));
+            }
+            // Even an empty list costs a map entry in every state that holds it.
+            face_weight.push(face_weight.last().copied().unwrap_or(0).saturating_add(1).saturating_add(points.len()));
+            face_points.push((feature, points));
+        }
         // The sketch-key sets, each the changes from an earlier one (`base`): a short record can
         // stand for a large set, so what they hold counts towards MAX_HELD as they are built.
         let mut key_sets: Vec<BTreeMap<u64, u64>> = Vec::new();
-        let mut held = 0usize;
+        let mut held = point_count.saturating_add(face_points.len());
         for k in list("sketch_key_sets")? {
             // A set is the changes from one before it.
             let base = match k.get("base") {
@@ -536,13 +587,16 @@ impl SavedModel {
                     held = held.saturating_add(run.get(1).and_then(Json::as_u64).and_then(|n| usize::try_from(n).ok()).unwrap_or(usize::MAX));
                 }
             }
-            // A marking is cloned deeply into every state that lists it, so each counts by its
-            // text, not as one item: a run of a large marking repeated cannot exhaust memory.
-            for run in s.get("threads").and_then(Json::as_array).ok_or_else(|| bad("saved model: state"))? {
-                let first = index(run.get(0), threads.len())?;
-                let count = run.get(1).and_then(Json::as_u64).and_then(|n| usize::try_from(n).ok()).ok_or_else(|| bad("saved model: run"))?;
-                let end = first.checked_add(count).filter(|end| *end <= threads.len()).ok_or_else(|| bad("saved model: run"))?;
-                held = held.saturating_add(thread_weight[end].saturating_sub(thread_weight[first]));
+            // These are cloned deeply into every state: count a marking's text and a face
+            // entry's points, so short runs of large records cannot exhaust memory.
+            for (key, weights, len) in [("threads", &thread_weight, threads.len()), ("named_faces", &face_weight, face_points.len())] {
+                for run in s.get(key).and_then(Json::as_array).ok_or_else(|| bad("saved model: state"))? {
+                    let first = index(run.get(0), len)?;
+                    let count = run.get(1).and_then(Json::as_u64).and_then(|n| usize::try_from(n).ok()).ok_or_else(|| bad("saved model: run"))?;
+                    let end = first.checked_add(count).filter(|end| *end <= len).ok_or_else(|| bad("saved model: run"))?;
+                    let weight = weights.get(end).zip(weights.get(first)).ok_or_else(|| bad("saved model: run"))?;
+                    held = held.saturating_add(weight.0.saturating_sub(*weight.1));
+                }
             }
             held = held.saturating_add(s.get("sheets").and_then(Json::as_array).map_or(0, Vec::len));
             held = held.saturating_add(key_sets.get(index(s.get("sketch_key_set"), key_sets.len())?).map_or(0, BTreeMap::len));
@@ -569,8 +623,17 @@ impl SavedModel {
             let field = |key: &str| parse(s.get(key));
             let invalid = |_| bad("saved model: state");
             let sketch_keys = key_sets.get(index(s.get("sketch_key_set"), key_sets.len())?).cloned().ok_or_else(|| bad("saved model: state"))?;
+            let mut named_faces = BTreeMap::new();
+            for i in ids("named_faces", face_points.len())? {
+                let (feature, points) = face_points.get(i).ok_or_else(|| bad("saved model: face points"))?;
+                if named_faces.contains_key(feature) {
+                    return Err(bad("saved model: duplicate face points"));
+                }
+                named_faces.insert(*feature, points.clone());
+            }
             Ok(ModelState {
                 frame_bodies: Default::default(),
+                origin_frames: Default::default(),
                 bodies: ids("bodies", model_bodies.len())?.into_iter().filter_map(|i| model_bodies.get(i).cloned()).collect(),
                 sketches: ids("sketches", sketches.len())?.into_iter().filter_map(|i| sketches.get(i).cloned()).collect(),
                 body_counter: index(s.get("body_counter"), usize::MAX)?,
@@ -592,6 +655,7 @@ impl SavedModel {
                 blend_edges: serde_json::from_value(field("blend_edges")?).map_err(invalid)?,
                 fitted: serde_json::from_value(field("fitted")?).map_err(invalid)?,
                 tapered: serde_json::from_value(field("tapered")?).map_err(invalid)?,
+                named_faces,
                 // A join's notice is for the evaluation that made it, not kept with the cache.
                 kept_separate: BTreeMap::new(),
                 // Not kept either: a saved model's states carry no lineage, so the check of a
@@ -739,7 +803,8 @@ impl SavedModel {
         let sheets = list("sheets").cloned().unwrap_or_default();
         let threads = list("threads").cloned().unwrap_or_default();
         let key_sets = list("sketch_key_sets").cloned().unwrap_or_default();
-        let mut used = [&sheets, &threads, &key_sets].iter().flat_map(|l| bytes(l.as_slice())).fold(0usize, |t, b| t.saturating_add(b));
+        let named_faces = list("named_faces")?.clone();
+        let mut used = [&sheets, &threads, &key_sets, &named_faces].iter().flat_map(|l| bytes(l.as_slice())).fold(0usize, |t, b| t.saturating_add(b));
         for s in std::iter::once(last).chain(order) {
             let (mut adds, mut new_names, mut new_sketches) = (HashMap::new(), std::collections::HashSet::new(), std::collections::HashSet::new());
             let mut records = *state_bytes.get(s)?;
@@ -847,6 +912,7 @@ impl SavedModel {
             "features": out_features, "states": out_states, "model_bodies": out_bodies, "names": kept_of(names.as_slice(), &names_used),
             "sketches": kept_of(sketches.as_slice(), &sketches_used), "sheets": sheets, "threads": threads, "rounds": out_rounds,
             "sketch_key_sets": key_sets,
+            "named_faces": named_faces,
         });
         // The check mode the results were evaluated under, as the model records it (a model
         // that records none stays without one: adopting it is refused either way).
@@ -937,6 +1003,7 @@ impl Model {
                     .map(|v| serde_json::from_value::<kernel::ImportReport>(v.clone()).map(Arc::new).map_err(|_| bad("saved model: import report")))
                     .transpose()?,
                 repair: None,
+                lost_projections: None,
                 ms,
                 skipped: r.get("skipped").and_then(Json::as_bool).ok_or_else(|| bad("saved model: skipped"))?,
                 stale: false,
@@ -987,6 +1054,7 @@ impl Model {
                         warning: r.warning.clone(),
                         import_report: r.import_report.clone(),
                         repair: r.repair.clone(),
+                        lost_projections: None,
                         ms: r.ms,
                         state: r.state.clone(),
                     },

@@ -292,7 +292,7 @@ pub struct FileLoad {
     /// second run doesn't read it again.
     warm: Option<(u64, Box<Session>)>,
     /// Whether the card over the design is showing this frame: the file operation's progress and
-    /// Cancel when the operations panel cannot show its row (Wait for files, off, or no room).
+    /// Cancel when the operations panel cannot show its row (Home, Wait for files, off, or no room).
     pub(crate) card_shown: bool,
     /// Tests: the next load waits before this feature until cancelled.
     #[cfg(test)]
@@ -1533,6 +1533,7 @@ fn behind(app: &mut SolveApp, mut running: Running) {
             crate::operations::ended(app, &key, Outcome::Done);
             if request.kind == Kind::Open {
                 app.home.add_recent(&request.path);
+                crate::documents::design_opened(app, &request.path);
             }
             // A recovered design takes its entry with it into the background tab: saved there
             // first, so the old entry can go without the design being lost to a crash.
@@ -1725,6 +1726,9 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                         app.set_status(note.clone(), false);
                     }
                 }
+                if request.kind == Kind::Open {
+                    crate::documents::design_opened(app, &request.path);
+                }
                 request.answer(Ok(made.result));
             }
             Ok(_) => {
@@ -1808,10 +1812,10 @@ fn load_steps(
 
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // The operations panel shows the file operation as a row with its progress and Cancel; the
-    // card is the fallback where it cannot: "Wait for files to open", the panel turned off, or no
-    // room for it in the view. The panel is laid out after this decision, so the last frame's
+    // card is the fallback where it cannot: Home, "Wait for files to open", the panel turned off,
+    // or no room for it in the view. The panel is laid out after this decision, so the last frame's
     // `panel_drew` says whether it had room (true until the first frame: the default panel fits).
-    let panel_shows = app.preferences.operations_panel && app.operations.panel_drew;
+    let panel_shows = !app.home.open && app.preferences.operations_panel && app.operations.panel_drew;
     app.file_load.card_shown = app.preferences.file_operations_wait || !panel_shows;
     if !app.file_load.card_shown {
         return;

@@ -688,7 +688,8 @@ pub(super) fn assert_keys(schema: Schema, fields: &[&str]) {
 /// (strict's comes from `TypedContract::check` and serde), and the handler may stop first at
 /// one the contract can't see (against the design: a pick that finds nothing, a missing sketch,
 /// an expression that doesn't evaluate; one of two keys, such as `radius` or `diameter`; an
-/// empty list).
+/// empty list). A value a helper reads as another command's (the pick-up's `appearance.chain`
+/// target) names that command with the check off and the one that was called in strict.
 /// Each module's `strict_keeps_todays_errors` calls this with its commands' cases; each runs
 /// after `sketch_rectangle`.
 pub(super) fn assert_strict_keeps_todays_errors(cases: &[(&str, Value)]) {

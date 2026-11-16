@@ -23,10 +23,9 @@
 //! The surface intersection method checks the kernel's cancel token before each face of
 //! its extraneous-face loop (#2756); results are unchanged. SolidCraft changes
 //! (tangency-labs/smlib 54148db, e8f23e0, in `taper_walls`):
-//! [`OffsetCornerType::CurveExtension`] and, under opt-in
-//! `fixes.taper_tangent_corner_planes` (WR-521), linear-extension corners of a profile
-//! of lines and arcs build their walls exactly and may refuse a corner; the refusal
-//! is a return value, not out-params.
+//! [`OffsetCornerType::CurveExtension`] and linear-extension corners of a profile of
+//! lines and arcs (WR-521) build their walls exactly and may refuse a corner; the
+//! refusal is a return value, not out-params.
 
 use super::taper_walls::{
     curvature_keeping_walls, has_corner, lines_and_arcs, CornerRefusal, WallsInput,
@@ -35,11 +34,11 @@ use super::{as_bspline, PrimitiveCreationAccess};
 use crate::curve::composite_curve::{
     CompositeCurve, OffsetCornerType, OffsetDirection, OffsetMapAttribute, OffsetParams,
 };
-use crate::curve::curve::p3::{compute_crvs_normal, crvs_fix_gaps};
+use crate::curve::curve::p3::{compute_crvs_normal_written, crvs_fix_gaps};
 use crate::curve::curve::p4::fix_chain_curves_list;
 use crate::curve::curve::p5::crvs_cleanup;
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, ignored, passed_on, Result, SolidError};
+use crate::error::{ignore_status, ignored, passed_on, status_passed_on, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -159,8 +158,9 @@ impl PrimitiveCreation {
     /// intersection fallback finds no offsets; those of the chaining, merge and
     /// topology steps that upstream does not ignore; `InvalidInput` for a corner
     /// refused under [`OffsetCornerType::CurveExtension`] or
-    /// `fixes.taper_tangent_corner_planes` (see
-    /// [`Self::create_taper_extrude_with_refusal`]).
+    /// [`OffsetCornerType::LinearExtension`] (see
+    /// [`Self::create_taper_extrude_with_refusal`]), and for a height within the B-rep's
+    /// tolerance where those rules build the walls.
     pub fn create_taper_extrude(
         &mut self,
         a: &mut impl PrimitiveCreationAccess,
@@ -190,12 +190,11 @@ impl PrimitiveCreation {
     /// [`Self::create_taper_extrude`] reporting a refused corner: `Ok(Some(refusal))`
     /// is the fork's `SM_ERR_INVALID_INPUT` with `pOptRefusal` and
     /// `pOptRefusedCorner` set (SolidCraft change, tangency-labs/smlib 54148db): with
-    /// [`OffsetCornerType::CurveExtension`], or linear-extension corners under
-    /// `fixes.taper_tangent_corner_planes` (WR-521), a profile of lines and circular
-    /// arcs with a sharp corner gets walls that continue as themselves (or as their
-    /// tangent planes) to meet along their exact seams, and a corner they cannot
-    /// close is refused, the target left as it was. `CurveExtension` on a profile
-    /// without a sharp corner is `LinearExtension`.
+    /// [`OffsetCornerType::CurveExtension`], or linear-extension corners (WR-521), a
+    /// profile of lines and circular arcs with a sharp corner gets walls that continue
+    /// as themselves (or as their tangent planes) to meet along their exact seams, and
+    /// a corner they cannot close is refused, the target left as it was.
+    /// `CurveExtension` on a profile without a sharp corner is `LinearExtension`.
     ///
     /// # Errors
     ///
@@ -278,8 +277,9 @@ fn taper(
 
     if normal.length_squared() < 0.00001 {
         // compute the normal from curve sample points (zeroed before it can fail)
-        *normal = ignored(passed_on(compute_crvs_normal(a.kernel(brep)?, &input), p)?)?
-            .unwrap_or(Vec3::ZERO);
+        let (written, status) = compute_crvs_normal_written(a.kernel(brep)?, &input)?;
+        status_passed_on(status, p)?;
+        *normal = written;
         // snap curves to Z axis when close
         if normal.z > 0.98 {
             normal.x = 0.0;
@@ -293,8 +293,8 @@ fn taper(
         }
     } else {
         // check that the curves order conforms to the specified input normal
-        let computed = ignored(passed_on(compute_crvs_normal(a.kernel(brep)?, &input), p)?)?
-            .unwrap_or(Vec3::ZERO);
+        let (computed, status) = compute_crvs_normal_written(a.kernel(brep)?, &input)?;
+        status_passed_on(status, p)?;
         let angle = ignored(passed_on(computed.angle_between(*normal), p)?)?.unwrap_or(0.0);
         if (angle - PI).abs() < 0.0001 {
             // reverse all the curves, then rechain them
@@ -390,11 +390,10 @@ fn taper(
     // SolidCraft change (tangency-labs/smlib 54148db, e8f23e0): walls that keep their
     // curvature at the corners. Without a sharp corner the three corner rules give the
     // same walls, which the offset method builds. The tangent rule too, for lines and
-    // arcs (opt-in `fixes.taper_tangent_corner_planes`, WR-521): their walls continue
-    // exactly as their tangent planes. Other curves keep the offset method.
+    // arcs (WR-521): their walls continue exactly as their tangent planes. Other curves
+    // keep the offset method.
     let mut corner = corner;
-    let tangent_rule = a.kernel(brep)?.fixes.taper_tangent_corner_planes
-        && corner == OffsetCornerType::LinearExtension;
+    let tangent_rule = corner == OffsetCornerType::LinearExtension;
     let has_corner = (corner == OffsetCornerType::CurveExtension || tangent_rule)
         && has_corner(a.kernel(brep)?, &composite, *normal);
     let mut exact = false;
@@ -410,6 +409,14 @@ fn taper(
     let mut empty_offsets = false;
     let mut trim_curves: Vec<Curve> = Vec::new();
 
+    if (keep_curvature || tangent_planes) && (!height.is_finite() || height.abs() <= brep_tol) {
+        // the far end lies on the profile within the tolerance (no walls to build), or
+        // nowhere
+        return Err(SolidError::invalid_input(
+            OP,
+            "the draft height must be finite and its size over the B-rep's tolerance",
+        ));
+    }
     if keep_curvature || tangent_planes {
         let walls = curvature_keeping_walls(
             a,

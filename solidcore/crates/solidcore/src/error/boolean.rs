@@ -131,6 +131,21 @@ pub enum BooleanFailure {
         /// The entity of the other operand it was asked to be related to.
         asked: PlacedEntity,
     },
+    /// A vertex the imprint makes one from exactly placed points within their summed
+    /// tolerances needs tolerance `needed` to cover the gaps that construction leaves (twice
+    /// the largest certified gap to a curve end or plane at it), and that ball would reach a
+    /// vertex it does not bound (the far vertex of one of its edges). A merged vertex fits
+    /// only when its tolerance plus that vertex's is less than their distance: a tolerance
+    /// below `fits_below` (the distance less the other vertex's tolerance, the smallest over
+    /// the vertices it would reach), so its points must lie less than half of it apart.
+    /// `None` when no tolerance fits (a vertex it would reach is closer than its own
+    /// tolerance).
+    MergedVertexReaches {
+        /// The tolerance the merged vertex needs.
+        needed: f64,
+        /// The tolerance that fits: anything below it reaches no vertex it does not bound.
+        fits_below: Option<f64>,
+    },
 }
 
 impl BooleanFailure {
@@ -139,18 +154,20 @@ impl BooleanFailure {
     pub fn entity(&self) -> Option<EntityRef> {
         match *self {
             Self::SolidLeaks { face } => Some(EntityRef::Face(face)),
-            Self::StageFailed { .. } | Self::EntityMissing { .. } | Self::RelateConflict { .. } => {
-                None
-            }
+            Self::StageFailed { .. }
+            | Self::EntityMissing { .. }
+            | Self::RelateConflict { .. }
+            | Self::MergedVertexReaches { .. } => None,
         }
     }
 
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::StageFailed { .. } | Self::SolidLeaks { .. } | Self::RelateConflict { .. } => {
-                SM_ERR
-            }
+            Self::StageFailed { .. }
+            | Self::SolidLeaks { .. }
+            | Self::RelateConflict { .. }
+            | Self::MergedVertexReaches { .. } => SM_ERR,
             Self::EntityMissing { .. } => SM_ERR_NULL_POINTER,
         }
     }
@@ -159,9 +176,10 @@ impl BooleanFailure {
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
-            Self::StageFailed { .. } | Self::SolidLeaks { .. } | Self::RelateConflict { .. } => {
-                ErrorKind::Failed
-            }
+            Self::StageFailed { .. }
+            | Self::SolidLeaks { .. }
+            | Self::RelateConflict { .. }
+            | Self::MergedVertexReaches { .. } => ErrorKind::Failed,
             Self::EntityMissing { .. } => ErrorKind::Missing,
         }
     }
@@ -189,6 +207,25 @@ impl core::fmt::Display for BooleanFailure {
                 "{} failed: {entity} of {side} is related to {mate} and was asked for {asked}: \
                  another entity is already related to the other one",
                 BooleanStage::Relate
+            ),
+            Self::MergedVertexReaches {
+                needed,
+                fits_below: Some(fits),
+            } => write!(
+                f,
+                "{} failed: a merged vertex needs tolerance {needed} to cover its certified \
+                 gaps, which reaches a vertex it does not bound; a tolerance below {fits} fits",
+                BooleanStage::Imprint
+            ),
+            Self::MergedVertexReaches {
+                needed,
+                fits_below: None,
+            } => write!(
+                f,
+                "{} failed: a merged vertex needs tolerance {needed} to cover its certified \
+                 gaps, which reaches a vertex it does not bound; no tolerance fits (a vertex \
+                 it would reach lies within its own tolerance of it)",
+                BooleanStage::Imprint
             ),
         }
     }

@@ -196,7 +196,14 @@ pub struct ExpressedShift {
     /// In the occurrence's parent frame (mm).
     pub shift: Vec3,
     /// What each of its expressed moves works out to now, in order.
-    pub at: Vec<[f64; 3]>,
+    pub at: Vec<ExpressedAt>,
+}
+
+/// What an [`ExpressedMove`]'s expressions work out to: the translation and the turn's origin.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ExpressedAt {
+    pub translate: [f64; 3],
+    pub origin: [f64; 3],
 }
 
 /// How many expressed moves one occurrence keeps.
@@ -222,27 +229,84 @@ pub struct ExpressedMove {
     /// moves to another parent. Older designs read as local.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub world: bool,
+    /// Per axis, the expression typed for the point the move turns about (`origin`), `None` for a
+    /// number. A move without a turn has no use for it and keeps none.
+    #[serde(default, skip_serializing_if = "origin_is_numbers")]
+    pub origin: [Option<String>; 3],
+    /// What `origin` worked out to when it was last applied (mm, along `frame`'s axes).
+    #[serde(default, skip_serializing_if = "is_zero3")]
+    pub origin_at: [f64; 3],
+    /// The move's turn (a rotation matrix, along the axes it was typed in), which makes the point
+    /// it turns about move the occurrence by the part of it the turn leaves behind.
+    #[serde(default = "identity", skip_serializing_if = "is_identity")]
+    pub rotation: Mat,
+    /// Made with `move_grounded`: it moves the occurrence on a parameter change even while the
+    /// occurrence is grounded. Without it a grounded occurrence stays put.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub grounded_ok: bool,
+}
+
+fn origin_is_numbers(o: &[Option<String>; 3]) -> bool {
+    o.iter().all(Option::is_none)
+}
+
+fn is_zero3(v: &[f64; 3]) -> bool {
+    *v == [0.0; 3]
 }
 
 impl ExpressedMove {
-    /// The translation the expressions give now, or why they can't: an unknown name, a wrong
-    /// unit, or a length too large.
-    pub fn eval(&self, params: &crate::joints::Params) -> Result<[f64; 3]> {
-        let mut out = self.at;
-        for (slot, e) in out.iter_mut().zip(&self.translate) {
-            let Some(e) = e else { continue };
-            let v = params.eval(e, crate::expr::Kind::Length).map_err(|err| DocError::Invalid(format!("translate `{e}`: {err}")))?;
-            if !v.is_finite() || v.abs() > 1e9 {
-                return Err(DocError::Invalid(format!("translate `{e}` gives {v}")));
+    /// What the expressions give now, or why they can't: an unknown name, a wrong unit, or a
+    /// length too large.
+    pub fn eval(&self, params: &crate::joints::Params) -> Result<ExpressedAt> {
+        let one = |what: &str, exprs: &[Option<String>; 3], from: [f64; 3]| -> Result<[f64; 3]> {
+            let mut out = from;
+            for (slot, e) in out.iter_mut().zip(exprs) {
+                let Some(e) = e else { continue };
+                let v = params.eval(e, crate::expr::Kind::Length).map_err(|err| DocError::Invalid(format!("{what} `{e}`: {err}")))?;
+                if !v.is_finite() || v.abs() > 1e9 {
+                    return Err(DocError::Invalid(format!("{what} `{e}` gives {v}")));
+                }
+                *slot = v;
             }
-            *slot = v;
-        }
-        Ok(out)
+            Ok(out)
+        };
+        Ok(ExpressedAt { translate: one("translate", &self.translate, self.at)?, origin: one("origin", &self.origin, self.origin_at)? })
     }
 
-    /// The expressions it keeps, with the axis each moves along.
-    pub fn exprs(&self) -> impl Iterator<Item = (&'static str, &str)> {
-        ["x", "y", "z"].into_iter().zip(&self.translate).filter_map(|(axis, e)| e.as_deref().map(|e| (axis, e)))
+    /// What the move was last applied with.
+    pub fn applied(&self) -> ExpressedAt {
+        ExpressedAt { translate: self.at, origin: self.origin_at }
+    }
+
+    /// How far the move takes the occurrence in its parent's frame when its expressions work out
+    /// to `now` instead of what they did: the translation's change, plus the change of the point
+    /// the turn is about taken round (`origin - R origin`).
+    pub fn shift(&self, now: &ExpressedAt) -> Vec3 {
+        let d = |a: [f64; 3], b: [f64; 3]| Vec3::new(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+        let o = d(now.origin, self.origin_at);
+        // The primitive refuses only a number that is not finite: `now.origin` is bounded by `eval`
+        // and `rotation` is a rigid matrix the commands checked, so for a stored move it does not
+        // fail. Were it to, no extra move (the turn's own part is gone) is the safe reading.
+        let kept = solidcore_ops::affine::pivot_displacement(&self.rotation, [o.x, o.y, o.z]).map_or(Vec3::ZERO, |k| Vec3::new(k[0], k[1], k[2]));
+        apply_vector(&self.frame, d(now.translate, self.at) + kept)
+    }
+
+    /// The expressions it keeps, with what each is for (`translate y`, `origin x`).
+    pub fn exprs(&self) -> Vec<(String, &str)> {
+        let mut out = Vec::new();
+        for (what, list) in [("translate", &self.translate), ("origin", &self.origin)] {
+            for (axis, e) in ["x", "y", "z"].into_iter().zip(list) {
+                if let Some(e) = e.as_deref() {
+                    out.push((format!("{what} {axis}"), e));
+                }
+            }
+        }
+        out
+    }
+
+    /// Every expression it keeps, to change.
+    pub fn exprs_mut(&mut self) -> impl Iterator<Item = &mut String> {
+        self.translate.iter_mut().chain(self.origin.iter_mut()).flatten()
     }
 }
 
@@ -539,15 +603,17 @@ impl Document {
             let mut shift = Vec3::ZERO;
             let mut at = Vec::with_capacity(o.expressed_moves.len());
             for m in &o.expressed_moves {
-                let now = m.eval(&params).unwrap_or(m.at);
-                let d = Vec3::new(now[0] - m.at[0], now[1] - m.at[1], now[2] - m.at[2]);
-                shift += apply_vector(&m.frame, d);
+                let now = m.eval(&params).unwrap_or_else(|_| m.applied());
+                // A grounded occurrence stays put, except for the moves made with `move_grounded`.
+                // The others keep up with the parameters all the same, so that ungrounding it
+                // later doesn't jump by everything that changed meanwhile.
+                if !o.grounded || m.grounded_ok {
+                    shift += m.shift(&now);
+                }
                 at.push(now);
             }
-            if o.grounded {
-                // A grounded occurrence stays put, but its moves keep up with the parameters so
-                // that ungrounding it later doesn't jump by everything that changed meanwhile.
-                if o.expressed_moves.iter().zip(&at).any(|(m, now)| m.at != *now) {
+            if shift == Vec3::ZERO {
+                if o.expressed_moves.iter().zip(&at).any(|(m, now)| m.applied() != *now) {
                     out.push(ExpressedShift { occurrence: o.id, shift: Vec3::ZERO, at });
                 }
                 continue;
@@ -571,7 +637,7 @@ impl Document {
                 }
             }
             for (m, at) in o.expressed_moves.iter_mut().zip(&s.at) {
-                m.at = *at;
+                (m.at, m.origin_at) = (at.translate, at.origin);
             }
         }
     }

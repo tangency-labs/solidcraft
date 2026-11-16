@@ -1,5 +1,5 @@
 //! Contracts and result types for the commands in `cmd/sketch_3d.rs`: `sketch.line3d`,
-//! `sketch.spline3d`, `sketch.point3d` and `sketch.move3d`.
+//! `sketch.spline3d`, `sketch.arc3d`, `sketch.point3d` and `sketch.move3d`.
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether the sketch has 3D Sketch on, a wire
@@ -53,6 +53,32 @@ pub struct Spline3dParams {
     pub sketch: Option<SketchTarget>,
 }
 
+/// Draw an exact circular arc through three world points: it starts at `start`, bends
+/// through `through` and ends at `end`. Needs 3D Sketch on for the sketch
+/// (`sketch.options` with `sketch_3d: true`). One undo step. Three points on one line, or
+/// two that are the same point, stay the handler's to refuse.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = ends_required)]
+pub struct Arc3dParams {
+    // Optional in the type and required in the schema, as `Line3dParams::points`: left out,
+    // the handler refuses the call with its own "`start` must be a point [x, y, z]".
+    /// The arc's first end, as a world point [x, y, z] in mm.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "WorldPoint")]
+    pub start: Option<WorldPoint>,
+    /// A point the arc bends through, between its two ends, as a world point [x, y, z] in mm.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "WorldPoint")]
+    pub through: Option<WorldPoint>,
+    /// The arc's other end, as a world point [x, y, z] in mm.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "WorldPoint")]
+    pub end: Option<WorldPoint>,
+    /// The sketch to draw in: its feature id or its name. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
 /// Draw a 3D point at a world point. Needs 3D Sketch on for the sketch (`sketch.options` with
 /// `sketch_3d: true`). One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -68,8 +94,8 @@ pub struct Point3dParams {
     pub sketch: Option<SketchTarget>,
 }
 
-/// Move one fit point of a drawn 3D curve or point, to a world point or by a world offset. The
-/// points joined to it move too. One undo step.
+/// Move one fit point of a drawn 3D curve or point, or a point on the sketch plane, to a world
+/// point or by a world offset. The points joined to it move too. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = move_required)]
 pub struct Move3dParams {
@@ -78,6 +104,13 @@ pub struct Move3dParams {
     #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "WireId")]
     pub wire: Option<WireId>,
+    /// Instead of `wire`: a point on the sketch plane (`l1.end`, `p3`: a line's end, a fit point
+    /// of a spline, a lone point). The lines and fit-point splines through it, or the lone
+    /// point, become drawn 3D curves through the same places first; their constraints and
+    /// dimensions go. Needs 3D Sketch on.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PlanePointId")]
+    pub point: Option<PlanePointId>,
     /// Which fit point of the curve (0 is the first), below 500. Default: 0.
     #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "FitIndex")]
@@ -110,9 +143,22 @@ fn point_required(schema: &mut Schema) {
     require(schema, "point");
 }
 
+fn ends_required(schema: &mut Schema) {
+    require(schema, "start");
+    require(schema, "through");
+    require(schema, "end");
+}
+
 fn move_required(schema: &mut Schema) {
-    require(schema, "wire");
-    schema.insert("anyOf".into(), json!([{"required": ["to"]}, {"required": ["by"]}]));
+    schema.insert(
+        "allOf".into(),
+        json!([
+            {"anyOf": [{"required": ["wire"]}, {"required": ["point"]}]},
+            {"not": {"required": ["wire", "point"]}},
+            {"not": {"required": ["point", "index"]}},
+            {"anyOf": [{"required": ["to"]}, {"required": ["by"]}]},
+        ]),
+    );
 }
 
 /// The `points` of `sketch.line3d` and `sketch.spline3d`: a list of 2 to 500 points, as their
@@ -222,6 +268,32 @@ impl JsonSchema for WireId {
     }
 }
 
+/// The `point` of `sketch.move3d`: a sketch point reference (`p3`, `l1.end`). Whether the
+/// sketch has that point is the handler's to check.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlanePointId(pub String);
+
+impl<'de> Deserialize<'de> for PlanePointId {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(s) => Ok(PlanePointId(s)),
+            _ => Err(D::Error::custom("must be a sketch point id")),
+        }
+    }
+}
+
+impl JsonSchema for PlanePointId {
+    fn schema_name() -> Cow<'static, str> {
+        "PlanePointId".into()
+    }
+    fn inline_schema() -> bool {
+        true
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"type": "string"})
+    }
+}
+
 /// The `index` of `sketch.move3d`: a whole number below 500, as the handler reads it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FitIndex(pub usize);
@@ -249,10 +321,10 @@ impl JsonSchema for FitIndex {
     }
 }
 
-/// What `sketch.line3d` and `sketch.spline3d` return.
+/// What `sketch.line3d`, `sketch.spline3d` and `sketch.arc3d` return.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct Curves3dResult {
-    /// The ids of the curves drawn: one per segment for a line, one for a spline.
+    /// The ids of the curves drawn: one per segment for a line, one for a spline or an arc.
     pub curves: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
@@ -286,6 +358,15 @@ pub struct Point3dResult {
 pub struct Move3dResult {
     /// How many fit points moved: the one asked for and the points joined to it.
     pub moved: usize,
+    /// With `point`: the drawn 3D curves the plane geometry through it became.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub curves: Vec<String>,
+    /// With `point`: the drawn curve the moved point is on now (the first of `curves`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wire: Option<String>,
+    /// With `point`: which fit point of `wire` it is, for moving it again with `wire` and `index`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
