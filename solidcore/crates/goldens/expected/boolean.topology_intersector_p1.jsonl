@@ -822,12 +822,12 @@
 {"case":"gen0797","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[1e+20,1e+20,1.9e+21]],"n":19}}}
 {"case":"gen0798","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[2317.0000400000004,2325.0000400000004,69372.00138]],"n":37}}}
 {"case":"gen0799","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[266.00002,274.00002,2295.00033]],"n":25}}}
-{"case":"merged_disk.smb_cone.smb","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,35.0,0.0,34.0,26.0,1007.0,27.0,0.0,0.0,0.0,0.0,0.0,1e+20]}}
+{"case":"merged_disk.smb_cone.smb","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[2e+20,2e+20,4.3e+21]],"n":25}}}
 {"case":"merged_disk.smb_sphere.smb","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[2e+20,2e+20,3.1e+21]],"n":19}}}
 {"case":"merged_disk.smb_torus.smb","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[2e+20,2e+20,3.1e+21]],"n":19}}}
-{"case":"merged_plane_square.smb_cone.smb","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,35.0,0.0,34.0,26.0,1007.0,27.0,0.0,0.0,0.0,0.0,0.0,1e+20]}}
-{"case":"merged_plane_square.smb_sphere.smb","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,35.0,0.0,34.0,26.0,1007.0,27.0,0.0,0.0,0.0,0.0,0.0,1e+20]}}
-{"case":"merged_plane_square.smb_torus.smb","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,35.0,0.0,34.0,26.0,1007.0,27.0,0.0,0.0,0.0,0.0,0.0,1e+20]}}
+{"case":"merged_plane_square.smb_cone.smb","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[2e+20,2e+20,4.3e+21]],"n":25}}}
+{"case":"merged_plane_square.smb_sphere.smb","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[2e+20,2e+20,6.1e+21]],"n":37}}}
+{"case":"merged_plane_square.smb_torus.smb","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[2e+20,2e+20,6.1e+21]],"n":37}}}
 {"case":"network_context_only","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[123.50201000000001,147.50201,2889.46823]],"n":43}}}
 {"case":"network_edge_class","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[4e+20,4e+20,2.36e+22]],"n":107}}}
 {"case":"network_mates","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[3103.1001,3109.1001,49156.40167000001]],"n":64}}}
