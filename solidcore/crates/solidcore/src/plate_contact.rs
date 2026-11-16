@@ -22,6 +22,7 @@
 //! | [`passes_through`]     | none     |
 //! | [`PairSkip`], [`PairJoint`], [`pair`] | none |
 //! | [`with_swap`]          | none     |
+//! | [`pair_at`]            | none     |
 
 use crate::error::{Result, SolidError};
 use crate::math::{Point3, Vec3};
@@ -767,6 +768,190 @@ pub fn with_swap<J>(
         }
         other => Ok(other),
     }
+}
+
+/// One face of a body as [`pair_at`] reads it over a frame: its outward plane when it is planar,
+/// and its vertices' least and greatest heights.
+#[derive(Clone, Copy, Debug)]
+struct FaceRead {
+    face: crate::topology::FaceId,
+    plane: Option<Plane>,
+    low: f64,
+    high: f64,
+}
+
+/// Every face of `b` read over `frame` ([`FaceRead`]); nothing is changed and no region is built.
+fn read_faces(
+    k: &crate::kernel::Kernel,
+    b: &crate::topology::Brep,
+    frame: &crate::eval::Frame,
+    tol: f64,
+) -> Result<Vec<FaceRead>> {
+    let read = std::cell::RefCell::new(Vec::new());
+    crate::prism::sheet::planar_face_regions(k, b, frame, tol, |face, normal| {
+        let loops = crate::query::api_queries::face_get_boundary_loops(b, face)?;
+        let (mut low, mut high, mut at) = (f64::INFINITY, f64::NEG_INFINITY, None);
+        for &e in &loops.edges {
+            let ends = [
+                crate::topology::edge::start_vertex(b, e)?,
+                crate::topology::edge::end_vertex(b, e)?,
+            ];
+            for v in ends.into_iter().flatten() {
+                let q = b.vertex(v)?.point;
+                let h = crate::prism::profile::height(frame, q);
+                low = low.min(h);
+                high = high.max(h);
+                at.get_or_insert(q);
+            }
+        }
+        let plane = match (normal, at) {
+            (Some(normal), Some(at)) => {
+                let natural = crate::prism::measure::outward_is_natural(b, face).ok_or(
+                    SolidError::Unsupported {
+                        operation: OP,
+                        reason: "a face whose outward side is not decided",
+                    },
+                )?;
+                Some(Plane::through(at, if natural { normal } else { -normal })?)
+            }
+            _ => None,
+        };
+        read.borrow_mut().push(FaceRead {
+            face,
+            plane,
+            low,
+            high,
+        });
+        Ok(false)
+    })?;
+    Ok(read.into_inner())
+}
+
+/// The frame of `p`: its origin the foot of the perpendicular from the world origin, its x axis
+/// the world axis least along `n` made square to `n`, its y axis `n × x` (so `x × y = n`).
+fn frame_of(p: Plane) -> Result<crate::eval::Frame> {
+    let n = p.normal;
+    let (ax, ay, az) = (n.x.abs(), n.y.abs(), n.z.abs());
+    let e = if ax <= ay && ax <= az {
+        Vec3::X
+    } else if ay <= az {
+        Vec3::Y
+    } else {
+        Vec3::Z
+    };
+    let x = finite_unit(e - n * e.dot(n))?;
+    let y = n.cross(x);
+    let o = n * p.offset;
+    Ok(crate::eval::Frame {
+        origin: [o.x, o.y, o.z],
+        x_axis: [x.x, x.y, x.z],
+        y_axis: [y.x, y.y, y.z],
+    })
+}
+
+/// The pair (T, S) at `p` read from the two bodies and decided by [`pair`] (design v2 5.3, 5.4):
+/// S's faces in `p` facing `n` (every vertex within `tol` of it), T's footprint on `p`
+/// ([`footprint_on`]) and the touch level of T's first planar face facing `−n` within `tol`
+/// ([`touch_offset`]); T's section by `p` ([`footprint_across`]) only when that is no touch over
+/// an area of S's face; the bodies' distance ([`boundary_distance`], on copies, bracketed to
+/// `tol`) only when neither holds. The strip Σ is the first footprint region sharing an area with
+/// S's faces (its extent stands for the strip's: no boolean runs); the candidates are T's planar
+/// faces; the rise is the greatest height of T's vertices over `p`. Neither body is changed.
+///
+/// [`boundary_distance`]: crate::query::contact::boundary_distance
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for `tol` not positive and finite or a bad plane;
+/// `Unsupported` for an overlap or a distance not decided, a face whose outward side is not
+/// decided; those of the reads, the section and [`pair`].
+pub fn pair_at(
+    k: &mut crate::kernel::Kernel,
+    t: &crate::topology::Brep,
+    s: &crate::topology::Brep,
+    p: Plane,
+    tol: f64,
+) -> Result<core::result::Result<PairJoint, PairSkip>> {
+    use crate::prism::profile::{regions_overlap, Region2};
+    if !(tol.is_finite() && tol > 0.0) {
+        return Err(invalid("tol must be positive and finite"));
+    }
+    check_plane(p)?;
+    let n = p.normal;
+    let frame = frame_of(p)?;
+    let t_faces = read_faces(k, t, &frame, tol)?;
+    let up = SQUARE_SLACK.cos();
+    let s_on: Vec<_> = read_faces(k, s, &frame, tol)?
+        .into_iter()
+        .filter(|f| {
+            f.plane.is_some_and(|q| q.normal.dot(n) >= up) && f.low >= -tol && f.high <= tol
+        })
+        .map(|f| f.face)
+        .collect();
+    let s_regions =
+        crate::prism::sheet::planar_face_regions(k, s, &frame, tol, |f, _| Ok(s_on.contains(&f)))?
+            .regions;
+    let on_s = |a: &Region2| -> Result<bool> {
+        for b in &s_regions {
+            match regions_overlap(a, b, tol) {
+                Some(true) => return Ok(true),
+                Some(false) => {}
+                None => {
+                    return Err(SolidError::Unsupported {
+                        operation: OP,
+                        reason: "whether the tab plate meets the slot plate's face is not decided",
+                    })
+                }
+            }
+        }
+        Ok(false)
+    };
+    let mut sigma = None;
+    for r in footprint_on(k, t, &frame, tol)? {
+        if on_s(&r)? {
+            sigma = Some(r);
+            break;
+        }
+    }
+    let mut touch = None;
+    for q in t_faces.iter().filter_map(|f| f.plane) {
+        if let Some(delta) = touch_offset(q, p, tol)? {
+            touch = Some(delta);
+            break;
+        }
+    }
+    let on_has_area = sigma.is_some();
+    let mut across_has_area = false;
+    if !(on_has_area && touch.is_some()) {
+        for r in footprint_across(k, t, &frame, tol)? {
+            if on_s(&r)? {
+                sigma = Some(r);
+                across_has_area = true;
+                break;
+            }
+        }
+    }
+    let how = contact(on_has_area, touch, across_has_area, tol, || {
+        let mut a = crate::topology::brep::p3::brep_copy(k, t)?;
+        let mut b = crate::topology::brep::p3::brep_copy(k, s)?;
+        let c = crate::query::contact::boundary_distance(k, &mut a, &mut b, tol)?;
+        match c.verdict {
+            crate::geom::certified::Verdict::Yes => Ok(c.upper),
+            _ => Err(SolidError::Unsupported {
+                operation: OP,
+                reason: "the plates' distance is not decided",
+            }),
+        }
+    })?;
+    let candidates: Vec<Plane> = t_faces.iter().filter_map(|f| f.plane).collect();
+    let rise = t_faces
+        .iter()
+        .map(|f| f.high)
+        .fold(f64::NEG_INFINITY, f64::max);
+    pair(how, &candidates, n, rise, tol, |m| match &sigma {
+        Some(r) => strip_extent(r, &frame, m, tol),
+        None => Err(invalid("there is no strip")),
+    })
 }
 
 /// A face bounding the strip Σ across it (along `w`), as [`eased_edge`] reads it.

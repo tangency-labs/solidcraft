@@ -35,7 +35,7 @@ fn array(p: Point3) -> [f64; 3] {
 /// A copy of `body`'s kernel body, the body released at once: the contact test takes its
 /// operands mutably (for its classifications' caches) and never edits the caller's, and a
 /// body tested against itself is locked only once at a time.
-fn copy_of(k: &mut Kernel, body: &Body) -> solidcore::Result<Brep> {
+pub(crate) fn copy_of(k: &mut Kernel, body: &Body) -> solidcore::Result<Brep> {
     let b = body.lock();
     brep_copy(k, &b)
 }
@@ -54,7 +54,7 @@ fn decided(contact: &Contact, other: usize) -> Result<bool> {
     }
 }
 
-fn poisoned(bodies: &[&Body]) -> Result<()> {
+pub(crate) fn poisoned(bodies: &[&Body]) -> Result<()> {
     if bodies.iter().any(|b| b.is_poisoned()) {
         return Err(Error::Internal(
             "contact: a body was left unfinished by an earlier panic".to_owned(),

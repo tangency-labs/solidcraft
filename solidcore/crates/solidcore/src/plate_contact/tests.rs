@@ -625,3 +625,40 @@ fn a_skip_whose_reverse_is_a_joint_is_swapped() {
         Err(PairSkip::NotSquare(Some(85.0)))
     );
 }
+
+/// The pair read from the bodies on F: Bottom (0,0,0)–(160,100,6), P its top (z = 6, n = +z).
+/// Wall standing on P: a touch at 0, Wall's y pair, 6 thick. Wall sunk 3 into Bottom (from
+/// z = 3): an overlap, the same pair. Wall lifted to z = 10: no contact, 4 apart. A 100 × 50 × 6
+/// slab lying flat on P: face to face, `not_square` with no angle. tol 0: refused.
+#[test]
+fn the_pair_read_from_the_bodies() {
+    let mut k = crate::kernel::Kernel::default();
+    let bottom = box_solid(&mut k, [0.0, 0.0, 0.0], [160.0, 100.0, 6.0]);
+    let p = plane(0.0, 0.0, 6.0, 0.0, 0.0, 1.0);
+    let wall = wall_solid(&mut k);
+    let got = pair_at(&mut k, &wall, &bottom, p, TOL)
+        .expect("wall")
+        .expect("joint");
+    assert_eq!(got.contact, Contact::Touch { delta: 0.0 });
+    assert!((got.faces.thickness - 6.0).abs() < 1e-9, "{got:?}");
+    assert_eq!(got.faces.b.normal, Vec3::Y);
+    let sunk = box_solid(&mut k, [20.0, 30.0, 3.0], [140.0, 36.0, 66.0]);
+    let got = pair_at(&mut k, &sunk, &bottom, p, TOL)
+        .expect("sunk")
+        .expect("joint");
+    assert_eq!(got.contact, Contact::Overlap);
+    assert!((got.faces.thickness - 6.0).abs() < 1e-9, "{got:?}");
+    let lifted = box_solid(&mut k, [20.0, 30.0, 10.0], [140.0, 36.0, 66.0]);
+    match pair_at(&mut k, &lifted, &bottom, p, TOL).expect("lifted") {
+        Err(PairSkip::Contact(Contact::NoContact { distance })) => {
+            assert!((distance - 4.0).abs() < 1e-2, "{distance}");
+        }
+        other => panic!("{other:?}"),
+    }
+    let slab = box_solid(&mut k, [0.0, 0.0, 6.0], [100.0, 50.0, 12.0]);
+    assert_eq!(
+        pair_at(&mut k, &slab, &bottom, p, TOL).expect("slab"),
+        Err(PairSkip::NotSquare(None))
+    );
+    assert!(pair_at(&mut k, &wall, &bottom, p, 0.0).is_err());
+}
