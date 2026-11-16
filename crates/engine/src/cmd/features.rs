@@ -2707,7 +2707,8 @@ fn finish_pattern(
     bodies: Vec<String>,
 ) -> Result<Value> {
     let comps = string_list(UNKNOWN_COMMAND, p, "components")?;
-    if comps.is_empty() {
+    let paths = pattern_occurrences(p, "pattern (components)")?;
+    if comps.is_empty() && paths.is_empty() {
         let copied = bodies.clone();
         let reply = add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies: bodies.into_iter().map(BodyName).collect() })?;
         // The pattern is added either way: when it made no copies (the feature failed to
@@ -2733,13 +2734,45 @@ fn finish_pattern(
             made.push(s.doc_mut().add_occurrence(id, src.parent, solidcraft_doc::mat_mul(m, &src.transform))?);
         }
     }
+    // A placement picked by its path is placed again beside itself, in the component holding it,
+    // moved as the pattern moves it in the world: so a part placed several times, or inside a
+    // subassembly, is patterned from the placement picked, not from its first one.
+    for path in &paths {
+        let lost = || bad(cmd, format!("no placement {path:?}"));
+        let (last, parent_path) = path.split_last().ok_or_else(lost)?;
+        let (parent, frame) = s.doc.path_placement(parent_path).ok_or_else(lost)?;
+        let o = s.doc.occurrences.iter().find(|o| o.id == *last && o.parent == parent).cloned().ok_or_else(lost)?;
+        let inverse = solidcraft_doc::mat_inverse(&frame).ok_or_else(|| bad(cmd, format!("the placement {path:?} is held in a singular frame")))?;
+        for m in &mats {
+            let moved = solidcraft_doc::mat_mul(&inverse, &solidcraft_doc::mat_mul(m, &frame));
+            made.push(s.doc_mut().add_occurrence(o.component, parent, solidcraft_doc::mat_mul(&moved, &o.transform))?);
+        }
+    }
     Ok(json!({"occurrences": made}))
 }
 
+/// The placements a pattern places again (`occurrences`: occurrence paths from the root, each a
+/// list of occurrence ids), empty when it names none.
+fn pattern_occurrences(p: &Value, cmd: &str) -> Result<Vec<Vec<u64>>> {
+    let Some(list) = p.get("occurrences") else { return Ok(Vec::new()) };
+    let paths: Vec<Vec<u64>> = list
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|path| path.as_array().and_then(|ids| ids.iter().map(Value::as_u64).collect::<Option<Vec<u64>>>()).filter(|ids| !ids.is_empty()))
+        .collect::<Option<_>>()
+        .ok_or_else(|| bad(cmd, "`occurrences` must list occurrence paths, each a list of occurrence ids"))?;
+    if paths.len() > 1000 {
+        return Err(bad(cmd, "`occurrences` must list at most 1000 occurrence paths"));
+    }
+    Ok(paths)
+}
+
 /// What a pattern copies: features (replayed), bodies (`bodies: [names]`), or components
-/// (`components: [names]`, placed again as occurrences).
+/// (`components: [names]`, or `occurrences: [paths]` for particular placements, placed again as
+/// occurrences).
 fn pattern_sources(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<solidcraft_doc::FeatureId>, Vec<String>)> {
-    if !string_list(cmd, p, "components")?.is_empty() {
+    if !string_list(cmd, p, "components")?.is_empty() || !pattern_occurrences(p, cmd)?.is_empty() {
         return Ok((Vec::new(), Vec::new()));
     }
     let bodies = string_list(cmd, p, "bodies")?;
