@@ -607,6 +607,17 @@ mod tests {
     /// none).
     #[test]
     fn every_transform_meets_the_wr507_wr508_certificate() {
+        // Every case reads an upstream file: without the checkout, skip as
+        // `successful_near_singular_transform_is_valid_or_known` does.
+        let case = crate::case::regression_case(&Runner, SCALED[0]);
+        let input: Inputs = case.parse().unwrap();
+        if let Err(error) = path(&input) {
+            assert!(
+                std::env::var_os("SOLIDCORE_REQUIRE_UPSTREAM").is_none(),
+                "required transform fixture is unavailable: {error}"
+            );
+            return;
+        }
         let fired = super::super::topology_brep_p5::transform_certificate::replay_matches_golden(
             &Runner,
         );
