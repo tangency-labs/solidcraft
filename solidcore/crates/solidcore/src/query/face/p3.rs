@@ -155,6 +155,7 @@ use crate::query::face::p2::{
     PointClassifyOptions,
 };
 use crate::query::r#loop::contains_uv_point;
+use crate::surface::plane::Plane;
 use crate::surface::surface::p2::SurfaceEval;
 use crate::surface::surface::p4::global_point_solve_starts;
 use crate::surface::surface::p5::DropPointOptions;
@@ -501,26 +502,32 @@ pub fn calculate_tight_bounding_box_into(
     } // end loop on Vertices
 
     // Edges:
-    let edges = face_edges(b, f)?;
-    let has_edges = !edges.is_empty();
-    for e in edges {
+    // (not upstream: whether an edge gave a box; an edge without curve gives none, as
+    // upstream's `CalculateTightBoundingBox` returns without setting it)
+    let mut has_edge_boxes = false;
+    for e in face_edges(b, f)? {
         // Get this Edge's tight box
-        let e_bbox = qe::calculate_tight_bounding_box(k, b, e)?.unwrap_or_default();
-        face_bbox = face_bbox.union(&e_bbox);
+        if let Some(e_bbox) = qe::calculate_tight_bounding_box(k, b, e)? {
+            has_edge_boxes = true;
+            face_bbox = face_bbox.union(&e_bbox);
+        }
     } // end loop on Edges
 
-    // Not upstream: a face with no edge (its trim was smaller than the tolerance, or a
-    // loop of a lone vertex) has a box so far of its vertices at most. The search below
-    // stands on that box: it passes over a cell that is monotone, or wholly outside the
-    // face, because the edges already hold the extreme. With no edges that premise fails:
-    // an empty box's inverted bounds would come back as points (+-1e20 on every axis), and
-    // a vertex's point would cut the face short. A plane's early return below would leave
-    // the box empty too. The face's points are the surface's over the face's domain, so
-    // each side is that domain's own bound as the search bounds a cell it leaves unsolved
-    // (`unsolved_cell_top`): the control-point hull of the surface's subpatch over the
-    // domain plus its rounding, else the surface's loose box over it; the vertices are
-    // unioned in.
-    if !has_edges {
+    // Not upstream: a face with no edge box (no edge: its trim was smaller than the
+    // tolerance, or a loop of a lone vertex; or edges without curves) has a box so far of
+    // its vertices at most. The search below stands on that box: it passes over a cell
+    // that is monotone, or wholly outside the face, because the edges already hold the
+    // extreme. Without edge boxes that premise fails: an empty box's inverted bounds would
+    // come back as points (+-1e20 on every axis), and a vertex's point would cut the face
+    // short. A plane's early return below would leave the box empty too. The face's points
+    // are the surface's over the face's domain, so each side is that domain's own bound as
+    // the search bounds a cell it leaves unsolved (`unsolved_cell_top`): the control-point
+    // hull of the surface's subpatch over the domain plus its rounding, else the surface's
+    // loose box over it. A plane evaluates analytically, not through that subpatch's base,
+    // so its analytic box ([`plane_evaluation_box`]) is unioned in. The vertices are
+    // unioned in. Over the whole domain the hull can be loose (a sphere or torus face
+    // bounded only by lone vertices); it holds the face, which is what the box must do.
+    if !has_edge_boxes {
         let uv_domain = b.face(f)?.uv_domain;
         let patch = cell_patch(k, surface, &uv_domain)?;
         let top = |dir: Vec3| -> Result<f64> {
@@ -537,7 +544,16 @@ pub fn calculate_tight_bounding_box_into(
             -top(Vec3::new(0.0, -1.0, 0.0))?,
             -top(Vec3::new(0.0, 0.0, -1.0))?,
         );
-        let hull_box = Extent3d::from_points(min, max);
+        let mut hull_box = Extent3d::from_points(min, max);
+        if let SurfaceKind::Plane(plane) = surface.kind() {
+            let analytic = plane_evaluation_box(plane, &uv_domain).ok_or_else(|| {
+                SolidError::invalid_input(
+                    OP_TIGHT,
+                    "a planar face without edges has no finite box over its domain",
+                )
+            })?;
+            hull_box = hull_box.union(&analytic);
+        }
         *out = if is_empty_box(&face_bbox) {
             hull_box
         } else {
@@ -1147,6 +1163,55 @@ fn cell_sub_surface(surface: &Surface, patch: BSplineSurface) -> Surface {
     sub
 }
 
+/// A box holding the plane's points over `domain`, both as [`Plane::evaluate_point`]
+/// computes them and as they are exactly: `O + u su X + v sv Y` at the parameter clamped to
+/// the analytic domain (unless out-of-bounds evaluation is on). The clamp is monotone in
+/// each parameter, so the clamped domain is the rectangle of the clamped corners, and the
+/// plane is affine, so its exact extremes lie at those four corners. Per coordinate `c`,
+/// with `m = |O_c| + U |su| |X_c| + V |sv| |Y_c|` (`U`, `V` the largest clamped
+/// `|u|`, `|v|`), the evaluation (two products and two sums per coordinate) is within
+/// `gamma(4) m` of the exact point (Higham's standard model), so every computed corner is
+/// within `E = gamma(6) m` (which also absorbs the rounding of `m` itself) of the exact
+/// one, and every computed point within `E` of an exact point: the corners' values widened
+/// by `2E` hold both, and a third `E` holds the rounding of the widening sums. `None` when
+/// a bound is not finite.
+fn plane_evaluation_box(plane: &Plane, domain: &Extent2d) -> Option<Extent3d> {
+    let analytic = plane.step_uv_domain();
+    let clamp = |uv: Point2| {
+        if !plane.is_out_of_bounds_enabled() && !analytic.contains_point(uv, 0.0) {
+            analytic.clamp_point(uv)
+        } else {
+            uv
+        }
+    };
+    let (lo, hi) = (clamp(domain.min()), clamp(domain.max()));
+    let corners = [lo, Point2::new(hi.x, lo.y), Point2::new(lo.x, hi.y), hi];
+    let position = plane.position();
+    let (o, x, y) = (position.origin(), position.x_axis(), position.y_axis());
+    let scale = plane.uv_scale();
+    let su = lo.x.abs().max(hi.x.abs()) * scale.x.abs();
+    let sv = lo.y.abs().max(hi.y.abs()) * scale.y.abs();
+    let widen =
+        |oc: f64, xc: f64, yc: f64| 3.0 * gamma(6) * (oc.abs() + su * xc.abs() + sv * yc.abs());
+    let reach = Vec3::new(
+        widen(o.x, x.x, y.x),
+        widen(o.y, x.y, y.y),
+        widen(o.z, x.z, y.z),
+    );
+    let mut min = plane.evaluate_point(lo);
+    let mut max = min;
+    for uv in corners {
+        let p = plane.evaluate_point(uv);
+        min = Point3::new(min.x.min(p.x), min.y.min(p.y), min.z.min(p.z));
+        max = Point3::new(max.x.max(p.x), max.y.max(p.y), max.z.max(p.z));
+    }
+    let (min, max) = (min - reach, max + reach);
+    let finite = [min.x, min.y, min.z, max.x, max.y, max.z]
+        .iter()
+        .all(|c| c.is_finite());
+    finite.then(|| Extent3d::from_points(min, max))
+}
+
 /// The greatest `S . dir` the surface's loose box over `cell` allows.
 fn loose_top(
     k: &Kernel,
@@ -1209,7 +1274,7 @@ fn unsolved_cell_top(
     } else {
         Err(SolidError::invalid_input(
             OP_TIGHT,
-            "a face cell the tight box cannot solve (one left at the search's limits, or a face without edges) has no finite bound",
+            "a face cell the tight box cannot solve (one left at the search's limits, or a face without edge boxes) has no finite bound",
         ))
     }
 }
@@ -3779,6 +3844,95 @@ mod tests {
     fn tight_box_of_a_planar_face_without_edges_is_its_planes_box() {
         let plane = Plane::from_normal(Vec3::new(0.0, 0.0, 2.0), Vec3::new(0.0, 0.0, 1.0));
         edgeless_face_box_holds_its_surface(&Surface::from(plane));
+    }
+
+    /// A plane evaluates analytically (`O + u su X + v sv Y`), not through its bilinear
+    /// base: its edgeless box holds the analytic points over the domain, the four corners
+    /// and points between them, and stays within a few roundings of their box (a plane at
+    /// z 2, so z is 2 to rounding).
+    #[test]
+    fn edgeless_plane_box_holds_its_analytic_points() {
+        let plane = Plane::new(
+            Point3::new(3.0, -7.0, 2.0),
+            Vec3::new(0.6, 0.8, 0.0),
+            Vec3::new(-0.8, 0.6, 0.0),
+            Vec2::new(1.7, 0.3),
+            &Extent2d::from_bounds(-50.0, -50.0, 50.0, 50.0),
+        );
+        let domain = Extent2d::from_bounds(-11.3, 4.1, 23.9, 17.7);
+        let bx = plane_evaluation_box(&plane, &domain).expect("finite");
+        let (lo, hi) = (bx.min(), bx.max());
+        let mut exact_lo = Point3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+        let mut exact_hi = -exact_lo;
+        for i in 0..=20 {
+            for j in 0..=20 {
+                let uv = domain.evaluate(f64::from(i) / 20.0, f64::from(j) / 20.0);
+                let p = plane.evaluate_point(uv);
+                assert!(
+                    p.x >= lo.x && p.y >= lo.y && p.z >= lo.z,
+                    "{p:?} below {lo:?}"
+                );
+                assert!(
+                    p.x <= hi.x && p.y <= hi.y && p.z <= hi.z,
+                    "{p:?} above {hi:?}"
+                );
+                exact_lo = Point3::new(
+                    exact_lo.x.min(p.x),
+                    exact_lo.y.min(p.y),
+                    exact_lo.z.min(p.z),
+                );
+                exact_hi = Point3::new(
+                    exact_hi.x.max(p.x),
+                    exact_hi.y.max(p.y),
+                    exact_hi.z.max(p.z),
+                );
+            }
+        }
+        for (a, b) in [(lo, exact_lo), (exact_hi, hi)] {
+            let gap = b - a;
+            assert!(
+                gap.x <= 1e-12 && gap.y <= 1e-12 && gap.z <= 1e-14,
+                "widened by {gap:?}"
+            );
+        }
+        // past the analytic domain the plane clamps, so the box ends where the clamp does
+        let past = plane_evaluation_box(&plane, &Extent2d::from_bounds(40.0, 40.0, 90.0, 90.0));
+        let inside = plane_evaluation_box(&plane, &Extent2d::from_bounds(40.0, 40.0, 50.0, 50.0));
+        assert_eq!(past, inside);
+    }
+
+    /// A face whose edges have no curves gives no edge box, so the search's premise (the
+    /// edges hold the face's extremes) fails as for a face without edges: the box is the
+    /// surface's over the face's domain, holding the crown's peak and its trim corners.
+    #[test]
+    fn tight_box_of_a_face_whose_edges_have_no_curves_is_its_surfaces_box() {
+        let (k, mut b, f) = crowned_trimmed_face(0.0);
+        let edges = face_edges(&b, f).unwrap();
+        assert!(!edges.is_empty());
+        for e in edges {
+            b.edge_mut(e).unwrap().curve = None;
+        }
+        let bx = calculate_tight_bounding_box(&k, &b, f).unwrap();
+        let (lo, hi) = (bx.min(), bx.max());
+        let surface = crowned_height_field(0.0);
+        let domain = b.face(f).unwrap().uv_domain;
+        for (s, t) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0), (0.5, 0.5)] {
+            let p = surface.evaluate_point(&k, domain.evaluate(s, t)).unwrap();
+            assert!(
+                p.x >= lo.x
+                    && p.y >= lo.y
+                    && p.z >= lo.z
+                    && p.x <= hi.x
+                    && p.y <= hi.y
+                    && p.z <= hi.z,
+                "{p:?} outside {lo:?} .. {hi:?}"
+            );
+        }
+        assert!(hi.z >= 4.0, "the crown's peak: z max {}", hi.z);
+        assert!(
+            lo.x.is_finite() && hi.x.is_finite() && hi.x - lo.x < 1e3,
+            "{lo:?} .. {hi:?}"
+        );
     }
 
     fn edgeless_face_box_holds_its_surface(surface: &Surface) {
