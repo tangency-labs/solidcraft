@@ -1,0 +1,18 @@
+[
+    {
+        "note": "#11134: an edge and its end vertex picked in the Plane tool make a plane square to the edge through that point, where picking the same two once fell into Plane Through Axis And Point and its on-axis refusal (#15334)."
+    },
+    {
+        "call": "engine.execute",
+        "params": {
+            "command": "solid.box",
+            "params": {"length": 40, "width": 30, "height": 20, "body_name": "Base"}
+        }
+    },
+    {"start": "construct.plane"},
+    {"click": {"world": [20, 0, 0]}},
+    {"click": {"world": [40, 0, 0]}},
+    {"expect": {"dialog": "square_to_line"}},
+    {"widget": "OK"},
+    {"expect": {"errors": 0, "features": 2}}
+]

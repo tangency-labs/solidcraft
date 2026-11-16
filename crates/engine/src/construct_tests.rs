@@ -213,6 +213,72 @@ fn plane_through_axis_and_point_accepts_straight_model_and_sketch_lines() {
     assert!(parallel(plane(&s, "Side").normal(), Vec3::Y));
 }
 
+#[test]
+fn plane_through_point_square_to_line_takes_a_point_on_or_off_the_line() {
+    let mut s = Session::default();
+    run(&mut s, "construct.plane.square_to_line", json!({"line": {"axis": "Z"}, "point": {"point": [0, 0, 5]}, "name": "Cap"}));
+    let pl = plane(&s, "Cap");
+    assert!(parallel(pl.normal(), Vec3::Z), "{pl:?}");
+    assert!(on_plane(&pl, Vec3::new(0.0, 0.0, 5.0)));
+    assert!(!on_plane(&pl, Vec3::new(0.0, 0.0, 6.0)));
+    run(&mut s, "construct.plane.square_to_line", json!({"line": {"axis": "Z"}, "point": {"point": [10, 20, 30]}, "name": "Wall"}));
+    let pl = plane(&s, "Wall");
+    assert!(parallel(pl.normal(), Vec3::Z), "{pl:?}");
+    assert!(on_plane(&pl, Vec3::new(10.0, 20.0, 30.0)));
+    assert!(!on_plane(&pl, Vec3::new(10.0, 20.0, 31.0)));
+    // An edge and its end vertex, the picks of #15334, make the plane square to the edge there.
+    let mut p = part();
+    run(&mut p, "construct.plane.square_to_line", json!({"line": {"edge": [20, 0, 0]}, "point": {"vertex": [40, 30, 0]}, "name": "End"}));
+    let pl = plane(&p, "End");
+    assert!(parallel(pl.normal(), Vec3::X), "{pl:?}");
+    assert!(on_plane(&pl, Vec3::new(40.0, 30.0, 0.0)));
+    assert!(on_plane(&pl, Vec3::new(40.0, 0.0, 20.0)));
+}
+
+#[test]
+fn plane_through_point_square_to_line_accepts_a_model_edge_a_face_axis_and_a_sketch_line() {
+    let mut s = part();
+    let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    let line = run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
+    let curve = line["curves"][0].as_str().unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "construct.plane.square_to_line", json!({"line": {"sketch": sk, "curve": curve}, "point": {"point": [0, 0, 10]}, "name": "Side"}));
+    let pl = plane(&s, "Side");
+    assert!(parallel(pl.normal(), Vec3::X), "{pl:?}");
+    assert!(on_plane(&pl, Vec3::new(0.0, 0.0, 10.0)));
+    run(&mut s, "construct.plane.square_to_line", json!({"line": {"face": [65, 0, 5]}, "point": {"point": [0, 0, 3]}, "name": "Bore"}));
+    assert!(parallel(plane(&s, "Bore").normal(), Vec3::Z), "a cylinder face gives its axis");
+}
+
+#[test]
+fn plane_through_point_square_to_line_follows_renamed_sources_edits_undo_and_reopen() {
+    let mut s = Session::default();
+    run(&mut s, "construct.axis.two_points", json!({"a": {"point": [5, 6, 7]}, "b": {"point": [5, 6, 17]}, "name": "Spine"}));
+    run(&mut s, "construct.point.vertex", json!({"point": {"point": [15, 6, 7]}, "name": "Pin"}));
+    run(&mut s, "construct.plane.square_to_line", json!({"line": {"axis": "Spine"}, "point": {"construct_point": "Pin"}, "name": "Ward"}));
+    assert!(parallel(plane(&s, "Ward").normal(), Vec3::Z));
+    run(&mut s, "timeline.rename", json!({"feature": "Spine", "name": "Mast"}));
+    run(&mut s, "timeline.rename", json!({"feature": "Pin", "name": "Peg"}));
+    let definition = run(&mut s, "timeline.inspect", json!({"feature": "Ward"}));
+    assert_eq!(definition["definition"]["plane"]["line"]["name"], "Mast");
+    assert_eq!(definition["definition"]["plane"]["point"]["name"], "Peg");
+    run(&mut s, "timeline.edit", json!({"feature": "Peg", "set": {"def.point": {"type": "point", "p": [5, 16, 7]}}}));
+    let pl = plane(&s, "Ward");
+    assert!(parallel(pl.normal(), Vec3::Z), "the plane stays square to the axis when the point moves");
+    assert!(on_plane(&pl, Vec3::new(5.0, 16.0, 7.0)));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(on_plane(&plane(&s, "Ward"), Vec3::new(15.0, 6.0, 7.0)), "undo puts the point back");
+    run(&mut s, "edit.redo", json!({}));
+    let reopened = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
+    let mut cold = Session::new(reopened);
+    cold.refresh();
+    assert!(cold.model.results.iter().all(|r| r.error.is_none()), "{:?}", cold.model.results);
+    let pl = plane(&cold, "Ward");
+    assert!(parallel(pl.normal(), Vec3::Z));
+    assert!(on_plane(&pl, Vec3::new(5.0, 16.0, 7.0)));
+    run(&mut cold, "sketch.create", json!({"plane": "Ward"}));
+}
+
 /// Issue #12851: construct.plane.axis_point with an edge pick whose circle centre lies on the
 /// axis (e.g. rim of a cylinder or revolved torus). The centre is on the axis, so resolving the
 /// edge pick to the centre would refuse with "the point is on the axis". Instead, resolve to the
