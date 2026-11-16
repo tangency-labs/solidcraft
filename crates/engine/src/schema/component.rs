@@ -12,7 +12,7 @@ use solidcraft_doc::Occurrence;
 
 use super::check::{located, whole};
 use super::component_link::{ComponentRef, component_key, require};
-use super::types::{IdOrName, Point3, PointExpr3, not_blank_pattern, present};
+use super::types::{IdOrName, LengthExpr, Point3, PointExpr3, not_blank_pattern, present};
 use crate::params;
 
 /// Edit a linked component's design in place. In the app window: open the design it links in a
@@ -1130,6 +1130,55 @@ pub struct UnlockResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Keep a component's features in the design but out of the History bar (`component.hide_history`),
+/// or put them back (`component.show_history`). A component inside one that is hidden is left out of
+/// the bar too; the design itself never is, and its features always show.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_required)]
+pub struct HistoryVisibilityParams {
+    // Optional in the type and required in the schema (`component_required`).
+    /// The component, by id or name.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+}
+
+/// Give a component the next colour of the Component Colors palette (`component.cycle_color`). The
+/// colour is shared by every instance of the component and is separate from its appearances.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_required)]
+pub struct CycleColorParams {
+    // Optional in the type and required in the schema (`component_required`).
+    /// The component, by id or name.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+}
+
+/// What both commands return: the component they changed and how its history sits now.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct HistoryVisibilityResult {
+    /// The component, by id.
+    pub component: u64,
+    /// Whether its features are left out of the History bar now.
+    pub history_hidden: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `component.cycle_color` returns: the component it changed and the colour it has now.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CycleColorResult {
+    /// The component, by id.
+    pub component: u64,
+    /// Its identification colour now, as red, green and blue.
+    pub color: [u8; 3],
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 // ---------------------------------------------------------------------------------------------
 // The occurrence commands, Capture and Revert Position, Move Bodies and Sketches to Component and
 // Paste New (#13186).
@@ -1222,7 +1271,17 @@ fn move_translate_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<MoveTran
     move_point_value::<D::Error>(v, "translate", true).map(|p| p.map(MoveTranslate::Point))
 }
 move_point!(axis_key, "axis", false);
-move_point!(origin_key, "origin", true);
+
+/// `occurrence.move`'s `origin`, as `translate`: three numbers or length expressions (#8192).
+fn move_origin_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<MoveTranslate>, D::Error> {
+    let v = Value::deserialize(d)?;
+    if matches!(&v, Value::Array(a) if a.len() == 3 && a.iter().any(Value::is_string)) {
+        return PointExpr3::deserialize(&v)
+            .map(|p| Some(MoveTranslate::Exprs(p)))
+            .map_err(|_| D::Error::custom(whole("origin entries must be numbers or length expressions")));
+    }
+    move_point_value::<D::Error>(v, "origin", true).map(|p| p.map(MoveTranslate::Point))
+}
 move_point!(at_key, "at", true);
 move_point!(point_key, "point", true);
 
@@ -1344,6 +1403,38 @@ impl JsonSchema for MatrixParam {
                 {"type": "array", "items": {"type": "number"}, "minItems": 12, "maxItems": 12},
                 {"type": "array", "items": {"type": "number"}, "minItems": 16, "maxItems": 16},
                 {"type": "array", "items": row, "minItems": 3, "maxItems": 4}
+            ]
+        })
+    }
+}
+
+/// `matrix` of `occurrence.move` and `file.insert_step`: as [`MatrixParam`], and the translation
+/// column (the last entry of each of the first three rows) may be length expressions that name
+/// parameters (#8192), which the placed occurrence then follows.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExprMatrixParam(pub Value);
+
+impl<'de> Deserialize<'de> for ExprMatrixParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d).map(ExprMatrixParam)
+    }
+}
+
+impl JsonSchema for ExprMatrixParam {
+    fn schema_name() -> Cow<'static, str> {
+        "MoveMatrixExprs".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let n = json!({"type": "number"});
+        let e = generator.subschema_for::<LengthExpr>();
+        let row = json!({"type": "array", "prefixItems": [n, n, n, e], "items": false, "minItems": 4, "maxItems": 4});
+        let last = json!({"type": "array", "items": n, "minItems": 4, "maxItems": 4});
+        json_schema!({
+            "description": "A rigid move as a row-major 3x4 (12 numbers) or 4x4 (16 numbers) matrix, flat or as 3 or 4 rows of 4. The translation column (the 4th entry of each of the first three rows) may be a number in mm or a length expression; one that names a parameter is kept, and the occurrence follows the parameter.",
+            "anyOf": [
+                {"type": "array", "prefixItems": [n, n, n, e, n, n, n, e, n, n, n, e], "items": false, "minItems": 12, "maxItems": 12},
+                {"type": "array", "prefixItems": [n, n, n, e, n, n, n, e, n, n, n, e, n, n, n, n], "items": false, "minItems": 16, "maxItems": 16},
+                {"type": "array", "prefixItems": [row, row, row, last], "items": false, "minItems": 3, "maxItems": 4}
             ]
         })
     }
@@ -1743,7 +1834,9 @@ pub struct MoveKeys {
     #[serde(default, deserialize_with = "move_space", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "MoveSpace")]
     pub space: Option<MoveSpace>,
-    /// Move by this much, in mm. Default: no move. Not with `matrix`.
+    /// Move by this much, in mm: numbers or length expressions. An occurrence moved by
+    /// expressions that name parameters keeps them and moves with them. Default: no move. Not with
+    /// `matrix`.
     #[serde(default, deserialize_with = "move_translate_key", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointExpr3")]
     pub translate: Option<MoveTranslate>,
@@ -1755,16 +1848,17 @@ pub struct MoveKeys {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "MoveAngle")]
     pub angle: Option<MoveAngle>,
-    /// The point the turn is about, in mm. Default: the origin. Not with `matrix`.
-    #[serde(default, deserialize_with = "origin_key", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Point3")]
-    pub origin: Option<Point3>,
+    /// The point the turn is about, in mm, numbers or length expressions (kept when they name
+    /// parameters, as `translate`'s are). Default: the origin. Not with `matrix`.
+    #[serde(default, deserialize_with = "move_origin_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PointExpr3")]
+    pub origin: Option<MoveTranslate>,
     /// A rigid move instead of `translate`, `axis`, `angle` and `origin`: a rotation and a
     /// translation. One that is a rotation only up to `tolerance` is made exact; a scale, shear or
-    /// mirror is refused.
+    /// mirror is refused. Its translation column may be length expressions (#8192).
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "MatrixParam")]
-    pub matrix: Option<MatrixParam>,
+    #[schemars(with = "ExprMatrixParam")]
+    pub matrix: Option<ExprMatrixParam>,
     /// Absolute placement (#12150): where the occurrence goes in `space`, not a move. Not with
     /// `translate`, `axis`, `angle`, `origin`, `matrix`, `to_matrix` or `base_transform`.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
@@ -1839,7 +1933,10 @@ impl<'de> Deserialize<'de> for MoveParams {
                 return Err(D::Error::custom(whole(format!("give either matrix or {key}, not both"))));
             }
             let tolerance = crate::cmd::matrix_tolerance(&value, "").map_err(|e| D::Error::custom(whole(refusal(e))))?;
-            crate::cmd::rigid_matrix(value.get("matrix").unwrap_or(&Value::Null), tolerance, "").map_err(|e| D::Error::custom(whole(refusal(e))))?;
+            // The translation column may be length expressions (#8192); the handler evaluates them.
+            let (numbers, _) = crate::cmd::matrix_with_exprs(value.get("matrix").unwrap_or(&Value::Null), |_| Ok(0.0), "")
+                .map_err(|e| D::Error::custom(whole(refusal(e))))?;
+            crate::cmd::rigid_matrix(&numbers, tolerance, "").map_err(|e| D::Error::custom(whole(refusal(e))))?;
             return staged(&value, &[&["space"], &["path"]]).map(MoveParams);
         }
         value = without(value, &["tolerance"]);

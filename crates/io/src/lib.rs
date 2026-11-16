@@ -8,6 +8,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod airfoil;
 pub mod catalog;
 mod design;
 pub mod design_lock;
@@ -42,14 +43,22 @@ pub mod safe_write;
 pub mod safe_zip;
 mod sketch2d;
 mod svg;
+/// Explicit development-test seams; absent from ordinary production builds.
+#[cfg(any(test, feature = "dxf-legacy-baseline-tests"))]
+pub mod test_support {
+    pub use crate::dxf_out::{DxfEntity, DxfLayer, legacy_dxf_baseline};
+}
 mod threemf;
 pub mod urdf;
 pub mod vfs;
 
-pub use dxf::{DxfWriteOptions, read_dxf, write_dxf, write_dxf_entities, write_dxf_opts};
+pub use airfoil::{Airfoil, AirfoilFormat, MAX_AIRFOIL_BYTES, MAX_AIRFOIL_POINTS, read_airfoil};
+pub use dxf::{DxfReadProfile, DxfWriteOptions, read_dxf, read_dxf_file, read_dxf_file_with_profile, write_dxf, write_dxf_entities, write_dxf_opts};
 pub use dxf_out::{
-    DxfEntity, DxfLayer, DxfLinetype, DxfShape, loop_lwpolyline, loop_lwpolyline_scaled, loop_shapes, seg_shape, write_dxf_drawing,
-    write_dxf_drawing_units,
+    DxfEntity, DxfEntityWeight, DxfFile, DxfFileEntity, DxfFileLayer, DxfGeometryBounds, DxfLayer, DxfLayerId, DxfLinetype, DxfPath, DxfPathStyle,
+    DxfShape, DxfSourceBlock, DxfStandardWeight, DxfTextHorizontalAlignment, DxfTextRecordKind, DxfTextSource, DxfTextVerticalAlignment, DxfVertex,
+    admit_path, loop_lwpolyline, loop_lwpolyline_scaled, path_shapes, write_dxf_drawing, write_dxf_drawing_units, write_dxf_file,
+    write_dxf_file_with_text_bounds,
 };
 pub use legacy_dir::{APP_ID, LEGACY_APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
 pub use safe_write::{backup_path, write_atomic};

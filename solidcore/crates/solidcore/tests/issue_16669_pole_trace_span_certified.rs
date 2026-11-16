@@ -43,8 +43,13 @@ fn bezier_spans(c: &BSplineCurve) -> (Vec<f64>, Vec<Vec3>) {
 /// The r 6 ball about (0, 50 − 1e-6, 20), its seam turned by `turn` about z, against the
 /// r 50 cylinder about the x axis: the intersection passes the ball's pole 1e-6 away and
 /// crosses the seam δ/sin(turn) from it. Every span of every traced curve's UV image on
-/// the ball is certified within the trace's tolerance of the 3D curve's span (PROVEN:
-/// `sphere_bezier_image`, an outward-rounded interval bound, not samples).
+/// the ball is certified within the trace's tolerance of the 3D curve's span.
+///
+/// PROVEN for the Bezier control points as given: `sphere_bezier_image` is an
+/// outward-rounded interval bound, not samples, and it bounds the image the evaluator gives,
+/// with UV points clamped to the ball's domain. ARGUED: the control points come from knot
+/// insertion in floating point, whose rounding (about 1e-16 relative) is negligible
+/// against the tolerance of 0.017.
 #[test]
 fn every_traced_span_near_a_sphere_pole_maps_onto_its_3d_span() {
     let k = &Kernel::default();

@@ -129,6 +129,11 @@ impl PointExprs {
         [("Point X", &self.x), ("Point Y", &self.y)].into_iter().filter_map(|(what, e)| e.as_ref().map(|e| (what, e))).collect()
     }
 
+    /// The expressions as text, such as `x = "w", y = "h / 2"`.
+    pub fn describe(&self) -> String {
+        [("x", &self.x), ("y", &self.y)].into_iter().filter_map(|(c, e)| e.as_ref().map(|e| format!("{c} = \"{e}\""))).collect::<Vec<_>>().join(", ")
+    }
+
     /// Mutable view of [`PointExprs::list`], for renaming the parameters they refer to.
     pub fn list_mut(&mut self) -> Vec<&mut String> {
         [&mut self.x, &mut self.y].into_iter().filter_map(Option::as_mut).collect()
@@ -1344,6 +1349,105 @@ impl Sketch {
     /// A drawing tied to the origin scales about the origin; one drawn away from it scales about
     /// its own middle and stays where it was drawn (#11043), unless `about_origin` asks for the
     /// origin anyway (the behaviour before #11043).
+    /// Move the free side of a sided distance dimension to the opposite side of its reference at
+    /// `mag` so a negative typed distance flips the sketch instead of failing validation. Returns
+    /// false for intrinsic sizes (length, radius, diameter) or when neither side can move.
+    pub fn flip_for_negative_dimension(&mut self, k: &ConstraintKind, mag: f64) -> bool {
+        let movable = |sk: &Sketch, i: usize| sk.points.get(i).is_some_and(|pt| !pt.fixed && pt.link.is_none());
+        let line_ends = |sk: &Sketch, l: usize| match sk.curves.get(l).map(|c| &c.kind) {
+            Some(CurveKind::Line { a, b }) => Some((*a, *b)),
+            _ => None,
+        };
+        match *k {
+            ConstraintKind::DistanceX { p, q, .. } => {
+                let (Some(pp), Some(pq)) = (self.point(p), self.point(q)) else { return false };
+                if movable(self, q) {
+                    let dx = pq.x - pp.x;
+                    let side = if dx.abs() > 1e-9 { -dx.signum() } else { -1.0 };
+                    if let Some(pt) = self.points.get_mut(q) {
+                        pt.pos.x = pp.x + side * mag;
+                    }
+                    true
+                } else if movable(self, p) {
+                    let dx = pp.x - pq.x;
+                    let side = if dx.abs() > 1e-9 { -dx.signum() } else { 1.0 };
+                    if let Some(pt) = self.points.get_mut(p) {
+                        pt.pos.x = pq.x + side * mag;
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            ConstraintKind::DistanceY { p, q, .. } => {
+                let (Some(pp), Some(pq)) = (self.point(p), self.point(q)) else { return false };
+                if movable(self, q) {
+                    let dy = pq.y - pp.y;
+                    let side = if dy.abs() > 1e-9 { -dy.signum() } else { -1.0 };
+                    if let Some(pt) = self.points.get_mut(q) {
+                        pt.pos.y = pp.y + side * mag;
+                    }
+                    true
+                } else if movable(self, p) {
+                    let dy = pp.y - pq.y;
+                    let side = if dy.abs() > 1e-9 { -dy.signum() } else { 1.0 };
+                    if let Some(pt) = self.points.get_mut(p) {
+                        pt.pos.y = pq.y + side * mag;
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            ConstraintKind::Distance { p, q, .. } => {
+                let (Some(pp), Some(pq)) = (self.point(p), self.point(q)) else { return false };
+                let dir = (pq - pp).normalized().unwrap_or(Vec2::X);
+                if movable(self, q) {
+                    if let Some(pt) = self.points.get_mut(q) {
+                        pt.pos = pp - dir * mag;
+                    }
+                    true
+                } else if movable(self, p) {
+                    if let Some(pt) = self.points.get_mut(p) {
+                        pt.pos = pq + dir * mag;
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            ConstraintKind::PointLineDistance { p, l, .. } | ConstraintKind::LinearDiameter { p, l, .. } => {
+                let d = if matches!(k, ConstraintKind::LinearDiameter { .. }) { mag * 0.5 } else { mag };
+                let Some((ia, ib)) = line_ends(self, l) else { return false };
+                let (Some(la), Some(lb)) = (self.point(ia), self.point(ib)) else { return false };
+                let Some(u) = (lb - la).normalized() else { return false };
+                let n = Vec2::new(-u.y, u.x);
+                let Some(pp) = self.point(p) else { return false };
+                let signed = n.dot(pp - la);
+                let side = if signed.abs() > 1e-9 { -signed.signum() } else { -1.0 };
+                if movable(self, p) {
+                    let proj = pp - n * signed;
+                    if let Some(pt) = self.points.get_mut(p) {
+                        pt.pos = proj + n * (side * d);
+                    }
+                    true
+                } else if movable(self, ia) && movable(self, ib) {
+                    let delta = n * (signed - side * d);
+                    if let Some(pt) = self.points.get_mut(ia) {
+                        pt.pos += delta;
+                    }
+                    if let Some(pt) = self.points.get_mut(ib) {
+                        pt.pos += delta;
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
     pub fn scaled_for_first_dimension(&self, factor: f64, dimension: &ConstraintKind, about_origin: bool) -> Option<Sketch> {
         if !(factor.is_finite() && (1e-6..=1e6).contains(&factor)) {
             return None;
