@@ -13,6 +13,7 @@
 pub mod export_geometry;
 pub mod extrude;
 pub mod fit;
+pub mod import_geometry;
 pub mod measure;
 pub mod path_export;
 pub mod placement;

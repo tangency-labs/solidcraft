@@ -287,8 +287,6 @@ crate::dialog_descriptor::dialog_descriptors! {
                 suggested: Option<String>,
                 /// The picks used for the suggestion, so an unchanged dialog does no geometry work.
                 of: Vec<Sel>,
-                /// A body-qualified feature keeps the plural constructor when edited down to one face.
-                grouped: bool,
                 options: crate::dialogs_thread::Options,
             },
             /// A rib (one wall along open curves) or a web (a wall per curve).
@@ -1045,14 +1043,7 @@ impl Dialog {
                 vec![SelInput::new("Body to split", BODIES, false), SelInput::new("Splitting tool", PLANES | FACES | AXES, false)],
             ),
             "solid.thread" => Dialog::new(
-                Kind::Thread {
-                    designation: String::new(),
-                    length: String::new(),
-                    suggested: None,
-                    of: Vec::new(),
-                    grouped: false,
-                    options: Default::default(),
-                },
+                Kind::Thread { designation: String::new(), length: String::new(), suggested: None, of: Vec::new(), options: Default::default() },
                 crate::dialogs_thread::inputs(),
             ),
             "material.assign" => {
@@ -2168,6 +2159,16 @@ impl Dialog {
 /// the edges the feature rounds: it ends where a concave edge runs on as a convex one, which
 /// the display mesh cannot tell.
 fn fillet_edges(s: &Session, sel: &Sel, chain: bool) -> Vec<Sel> {
+    // A viewport click can land exactly at a shared vertex. Keep the selected edge's
+    // identity, but give the command a point on its interior so the engine does not
+    // interpret that point as an ambiguous request for every incident edge (#7661, #13155).
+    let interior_pick = match sel {
+        Sel::Edge { body, index, .. } => crate::open_meshing::session_world(s)
+            .body(body)
+            .and_then(|b| b.mesh().edges.get(*index).map(|edge| Sel::Edge { body: body.clone(), index: *index, point: polyline_mid(edge) })),
+        _ => None,
+    };
+    let sel = interior_pick.as_ref().unwrap_or(sel);
     let mut picked = crate::viewport::picked_selection(s, sel);
     if chain
         && let Sel::Edge { body, index, point } = sel
@@ -6333,12 +6334,13 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "faces")?;
             ("solid.offset_face", with_single_body(json!({"faces": face_points(0)}), sels(d, 0)))
         }
-        Kind::Thread { designation, length, suggested, grouped, options, .. } => {
+        Kind::Thread { designation, length, suggested, options, .. } => {
             need(0, "a cylindrical face")?;
             let mut common = Value::Object(d.extra.clone());
             if let Some(params) = common.as_object_mut() {
                 params.remove("face");
                 params.remove("faces");
+                params.remove("single_face_selection");
             }
             if !designation.trim().is_empty() && suggested.as_deref() != Some(designation.as_str()) {
                 common["designation"] = json!(designation.trim());
@@ -6355,13 +6357,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     faces.push(json!({"body": body, "point": pt(*point)}));
                 }
             }
-            if let [face] = faces.as_slice()
-                && !*grouped
-            {
-                common["face"] = face["point"].clone();
-            } else {
-                common["faces"] = json!(faces);
+            if faces.len() == 1 && d.inputs.first().is_some_and(|input| !input.multi) {
+                common["single_face_selection"] = json!(true);
             }
+            common["faces"] = json!(faces);
             return Ok(vec![("solid.thread".to_string(), common)]);
         }
         Kind::Material { index, editor } => {
@@ -8536,18 +8535,21 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        kind @ FeatureKind::Move { bodies, .. } => {
+        kind @ FeatureKind::Move { bodies, copy_frames, .. } => {
             let mut d = start("solid.move")?;
             // Move stores distances in the first body's frame, which can differ from the
             // feature's component. Refill the world distances that the command accepts.
-            let frame = bodies
+            let frame = copy_frames
                 .first()
-                .and_then(|body| {
-                    s.placed_document()
-                        .body_frames_with_source(&s.model.state())
-                        .into_iter()
-                        .find(|(world, own, ..)| world == &**body || own == &**body)
-                        .map(|(.., frame)| frame)
+                .map(|m| solidcraft_engine::doc::mat_mul(&feature_frame(s, f.component), m))
+                .or_else(|| {
+                    bodies.first().and_then(|body| {
+                        s.placed_document()
+                            .body_frames_with_source(&s.model.state())
+                            .into_iter()
+                            .find(|(world, own, ..)| world == &**body || own == &**body)
+                            .map(|(.., frame)| frame)
+                    })
                 })
                 .unwrap_or_else(|| feature_frame(s, f.component));
             crate::dialogs_move::for_feature(&s.doc, &mut d, kind, &frame);
@@ -8660,6 +8662,8 @@ mod refused_ok_tests {
                 added: [2; 4],
                 new_body: [3; 4],
                 removed: [4; 4],
+                lost: [6; 4],
+                selected: [7; 4],
                 mirrored: [6; 4],
                 edge: [5; 4],
                 ghost: false,
@@ -9585,6 +9589,22 @@ mod preselected_sketch_line_tests {
     //! Fillet and Chamfer, which take edges and no sketch curves, take it as that edge.
     use super::*;
     use crate::scenario::Harness;
+
+    #[test]
+    fn fillet_preselection_moves_a_vertex_click_onto_the_selected_edge() {
+        let mut h = Harness::new();
+        assert!(h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 25, "body_name": "B"})).is_ok());
+        let Ok(state) = h.app.session.world_state() else { panic!("missing state") };
+        let Some(body) = state.body("B") else { panic!("missing body B") };
+        let Some(edge) = body.mesh().edges.iter().position(|points| {
+            points.iter().any(|p| p.dist(Vec3::new(40.0, 0.0, 25.0)) < 1e-6) && points.iter().any(|p| p.dist(Vec3::new(40.0, 30.0, 25.0)) < 1e-6)
+        }) else {
+            panic!("top rear edge missing");
+        };
+        let picked = Sel::Edge { body: "B".into(), index: edge, point: Vec3::new(40.0, 0.0, 25.0) };
+        let result = fillet_edges(&h.app.session, &picked, false);
+        assert!(matches!(result.as_slice(), [Sel::Edge { point, .. }] if point.dist(Vec3::new(40.0, 15.0, 25.0)) < 1e-6), "{result:?}");
+    }
 
     /// A 40 × 30 × 10 box made from a sketch on its top face, with that sketch shown.
     fn box_under_its_sketch(h: &mut Harness) {
