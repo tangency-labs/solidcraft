@@ -87,7 +87,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.transform_model_size_from_body_box = true;
     f.uv_trim_corner_end_points_only = true;
     f.bspline_trim_preserves_uv_spans = true;
-    f.proto_edge_self_loop_on_vertex_degenerate = true;
     f.boolean_vertex_by_best_crossing = true;
     f.classify_edge_interval = true;
     f.degenerate_proto_edge_in_one_vertex = true;
@@ -130,7 +129,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.analytic_inversion_answers_apart = true;
     f.fillet_statuses_pass_on = true;
     f.fillet_rail_trim_at_near_knot = true;
-    f.offset_keep_cavity_regions = true;
     f.corner_patch_face_side_twist = true;
     f.boolean_union_refuses_solid_leak = true;
     f.validation_does_not_make_uv_trims = true;

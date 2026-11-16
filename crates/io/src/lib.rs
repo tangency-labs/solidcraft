@@ -15,7 +15,11 @@ pub mod design_lock;
 mod design_metadata;
 mod dxf;
 mod dxf_out;
+mod excellon;
 pub mod formats;
+mod gerber;
+mod gerber_area;
+mod gerber_set;
 mod glb;
 pub use design::{
     DesignCompression, DesignContainerReader, DesignPreview, FileKind, ImportCache, OpenPgpSignature, OpenPgpSigner, ProvenanceChain,
@@ -59,6 +63,11 @@ pub use dxf_out::{
     DxfShape, DxfSourceBlock, DxfStandardWeight, DxfTextHorizontalAlignment, DxfTextRecordKind, DxfTextSource, DxfTextVerticalAlignment, DxfVertex,
     admit_path, loop_lwpolyline, loop_lwpolyline_scaled, path_shapes, write_dxf_drawing, write_dxf_drawing_units, write_dxf_file,
     write_dxf_file_with_text_bounds,
+};
+pub use excellon::{DrillArc, DrillHit, DrillSlot, Drills, read_excellon};
+pub use gerber::{GerberLayer, GerberOutline, read_gerber_layer, read_gerber_outline};
+pub use gerber_set::{
+    BOARD_EXTENSIONS, BoardJob, GerberSet, MAX_SET_FILES, SetFile, SetRole, classify_set, is_zip_path, read_gerber_set, zip_entries,
 };
 pub use legacy_dir::{APP_ID, LEGACY_APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
 pub use safe_write::{backup_path, write_atomic};
