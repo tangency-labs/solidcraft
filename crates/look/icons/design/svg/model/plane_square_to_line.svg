@@ -1,6 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <title>Plane through point, square to line</title>
-  <path d="M20 10L54 26L44 54L10 38Z" fill="#b9ddf8" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="0.1 5"/>
-  <path d="M14 54L50 10" fill="none" stroke="currentColor" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
-  <circle cx="32" cy="32" r="3.1" fill="currentColor"/>
+  <path d="M26 26L48 36L40 54L18 44Z" fill="#b9ddf8" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="0.1 5"/>
+  <path d="M33 40L33 6" fill="none" stroke="currentColor" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M33 33L39.4 35.9L39.4 42.9" fill="none" stroke="currentColor" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="33" cy="40" r="3.1" fill="currentColor"/>
 </svg>
