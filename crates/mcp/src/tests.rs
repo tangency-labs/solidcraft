@@ -1850,6 +1850,34 @@ fn tool_unknown_command_errors_suggest_close_ids() {
 }
 
 #[test]
+fn tool_unknown_commands_suggest_equivalent_verbs() {
+    let mut s = server();
+    for (id, wanted) in [
+        ("note.create", "note.add"),
+        ("NOTE.CREATE", "note.add"),
+        ("note.new", "note.add"),
+        ("note.remove", "note.delete"),
+        ("parameters.create", "parameters.add"),
+        ("render.lights.create", "render.lights.add"),
+        ("render.lights.delete", "render.lights.remove"),
+    ] {
+        for name in ["describe_command", "execute", "batch"] {
+            let step = json!({"command": id, "params": {}});
+            let args = match name {
+                "describe_command" => json!({"id": id}),
+                "batch" => json!({"commands": [step]}),
+                _ => step,
+            };
+            let r = raw_tool(&mut s, name, args);
+            assert_eq!(r["result"]["isError"], true, "{r}");
+            let text = r["result"]["content"][0]["text"].as_str().unwrap();
+            let prefix = if name == "describe_command" { "did you mean" } else { "closest:" };
+            assert!(text.contains(&format!("{prefix} `{wanted}`")), "{name}: {text}");
+        }
+    }
+}
+
+#[test]
 fn tool_unknown_command_errors_explain_packed_params() {
     let mut s = server();
     for id in ["solid.cube {side: 20}", "solid.box(20)"] {
