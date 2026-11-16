@@ -380,7 +380,7 @@ fn wr567_a_near_arc_off_the_middle_follows_its_curvature() {
 /// agreed with the circle, and the circle shortcut decided the collapse from the radius: at
 /// `r` and `2 r` towards the centre the face was dropped (`Ok(None)`). The generatrix is not
 /// in a plane through the axis: the collapse test is refused on both sides and no offset is
-/// dropped.
+/// dropped. A zero offset stays `false` (its offset is the surface itself).
 #[test]
 fn wr567_a_tilted_circle_is_refused() {
     let k = Kernel::default();
@@ -406,6 +406,10 @@ fn wr567_a_tilted_circle_is_refused() {
             "{d}"
         );
     }
+    // a zero offset is the surface itself: no point passes its centre of curvature
+    // (`surface.offset_surface` gen1943 offsets a tilted circle's revolution by 0)
+    assert!(!s.offset_collapses(&k, 0.0, 1e-7).unwrap());
+    assert!(s.create_offset_surface(&k, 0.0, 1e-7).unwrap().is_some());
 }
 
 /// A generatrix whose bulge comes exactly to the tolerance (its peak deviation from the

@@ -2711,8 +2711,8 @@ impl Surface {
     /// the generatrix lies in a plane through the axis and bends to one side). `k` is the
     /// curvature vector of the generatrix-direction iso-curve and `N` the surface normal,
     /// both at the middle of the natural UV domain: only the side is read there. A failed
-    /// arc test or evaluation, a generatrix point proved off the circle, or a pole there,
-    /// is `false`.
+    /// arc test or evaluation, a generatrix point proved off the circle, a pole there, or a
+    /// zero offset (the surface itself), is `false`.
     ///
     /// # Errors
     ///
@@ -2803,6 +2803,12 @@ impl Surface {
         // folds) and bend to one side all along (so the side read here holds everywhere),
         // and its radius of curvature less the offset must be below `tol` at every point,
         // or at least `tol` at every point ([`meridian_collapse`]). Anything else is refused.
+        // A zero offset is the surface itself: no point moves, so none passes its centre of
+        // curvature, whatever the generatrix (as a circle of radius `tol` or less is `false`
+        // above).
+        if signed_offset_distance == 0.0 {
+            return Ok(false);
+        }
         let Some(nurb) = gen.b_spline_base().and_then(|b| b.gw_nurb()) else {
             return Err(SolidError::Unsupported {
                 operation: OP_REV_COLLAPSE,
