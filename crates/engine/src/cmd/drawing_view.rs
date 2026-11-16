@@ -1471,6 +1471,7 @@ fn plan_standard(s: &mut Session, record: &Drawing, request: StandardParams) -> 
             place: ViewPlace::At([0.0, 0.0]),
             settings: ViewOverrides::default(),
             reference_shown_percent: 0.0,
+            label: None,
         })]);
     }
     let [main, top, right, iso] = ids;
@@ -1485,6 +1486,7 @@ fn plan_standard(s: &mut Session, record: &Drawing, request: StandardParams) -> 
             place: ViewPlace::At([at.x, at.y]),
             settings: ViewOverrides { scale: Some(scale), ..ViewOverrides::default() },
             reference_shown_percent: 0.0,
+            label: None,
         };
         let projected = |id, side: ProjectedSide, at: Vec2| View {
             id,
@@ -1493,6 +1495,7 @@ fn plan_standard(s: &mut Session, record: &Drawing, request: StandardParams) -> 
             place: ViewPlace::Aligned(side.along(at)),
             settings: ViewOverrides::default(),
             reference_shown_percent: 0.0,
+            label: None,
         };
         let mut views = vec![base(main, direction, at[0]), projected(top, top_side, at[1]), projected(right, right_side, at[2])];
         if with_iso {
