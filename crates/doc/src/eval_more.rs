@@ -75,7 +75,11 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             Ok(())
         }
         FeatureKind::Rib { .. } => {
-            let tools = rib_tools(vals, st, f, None)?;
+            // The rib is built against the bodies where its sketch is drawn: a body of another,
+            // moved component is met where it is shown (#17655), whether it takes part or only
+            // stops the wall.
+            let shown = targets_as_shown(st, f, &["*".to_string()])?;
+            let tools = rib_tools(vals, &shown, f, None)?;
             apply_op(doc, st, f, tools, Operation::Join, &[])
         }
         FeatureKind::ReplaceFace { faces, target, body } => {
@@ -398,9 +402,20 @@ fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: O
             (None, None) => Err(DocError::Invalid("the rib curves do not face a body (give a depth)".into())),
         }
     };
+    // An end of the curves often sits exactly on a wall (a rib from wall to wall), where the
+    // body's inside is ambiguous; search from just inside the curve there, so the end does not
+    // read the wall it touches as the body ahead and the end face stays square.
+    let nudge = len / samples as f64 * 0.01;
     let mut wall: Vec<(Vec2, f64)> = Vec::with_capacity(along.len());
-    for q in &along {
-        let h = across(*q)?;
+    for (i, q) in along.iter().enumerate() {
+        let from = if i == 0 {
+            point_on_polyline(&pts, nudge)
+        } else if i == samples {
+            point_on_polyline(&pts, len - nudge)
+        } else {
+            *q
+        };
+        let h = across(from)?;
         // A run-on end meets the wall it reaches between two samples, where the run across the
         // plane jumps (from the far side to straight into that wall): find the jump closely, so
         // the outline does not cut a wedge off the corner there. Looked for wherever the run
@@ -671,17 +686,8 @@ fn sheet_for(st: &ModelState, body: &Option<crate::BodyName>, pick: Option<Vec3>
 /// against counts as touched.
 fn on_sheet_material(st: &ModelState, i: usize, p: Vec3) -> bool {
     let Some(mb) = st.sheets.get(i).and_then(|sh| st.body(&sh.body)) else { return true };
-    let mesh = mb.mesh();
-    if mesh.triangles.is_empty() {
-        return true;
-    }
-    // Twice the display mesh's chord tolerance (see `ModelBody::mesh`), and a quarter of the
-    // thickness: on a large thin sheet the first steps from a point on its face clean through
-    // it, so a point on the face would touch nothing (#685).
     let step = 2.0 * (mb.body.size() * 1e-3).max(1e-3);
-    let thin = st.sheets.get(i).map_or(step, |sh| (sh.t * 0.25).min(step));
-    let offsets = [-step, -thin, 0.0, thin, step];
-    offsets.iter().any(|&dx| offsets.iter().any(|&dy| offsets.iter().any(|&dz| mesh.contains(p + Vec3::new(dx, dy, dz)))))
+    mb.body.nearest_face(p).is_none_or(|(d, _)| d <= step * 2.0)
 }
 
 /// A region mirrored in the sketch x axis (y → −y), exactly: free-form curves through their

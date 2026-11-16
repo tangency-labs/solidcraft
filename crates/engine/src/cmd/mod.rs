@@ -20,6 +20,8 @@ macro_rules! planned {
     };
 }
 
+mod board_import;
+mod board_layers;
 mod bom;
 pub(crate) mod browser;
 mod cell_grid;
@@ -89,7 +91,7 @@ pub mod mass_properties;
 mod material_properties;
 mod materials;
 mod measure_exact;
-mod measure_sel;
+pub(crate) mod measure_sel;
 mod measure_shape;
 mod mesh;
 mod metadata;
@@ -103,7 +105,7 @@ mod section;
 mod selection;
 pub mod settings;
 pub(crate) use clipboard::{component_path_form, copy_keys};
-pub(crate) use component::matrix::{rigid as rigid_matrix, tolerance as matrix_tolerance};
+pub(crate) use component::matrix::{rigid as rigid_matrix, tolerance as matrix_tolerance, with_exprs as matrix_with_exprs};
 pub(crate) use component::{base_transform, move_vector};
 pub(crate) use measure_sel::{measure_items, shape_of};
 pub(crate) use measure_shape::Shape;
@@ -158,6 +160,7 @@ mod surface;
 mod surface_analysis;
 mod surface_boundary;
 mod surface_match;
+mod tab_views;
 mod view_dxf;
 mod view_navigation;
 
@@ -400,6 +403,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(parameters::COMMANDS.iter());
     v.extend(parameter_sweep::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());
+    v.extend(board_import::COMMANDS.iter());
     v.extend(print_face::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
@@ -411,6 +415,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(libraries::COMMANDS.iter());
     v.extend(section::COMMANDS.iter());
     v.extend(view_navigation::COMMANDS.iter());
+    v.extend(tab_views::COMMANDS.iter());
     v.extend(view_dxf::COMMANDS.iter());
     v.extend(settings::COMMANDS.iter());
     v.extend(diagnostics::COMMANDS.iter());

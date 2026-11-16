@@ -17,7 +17,7 @@ use solidcraft_doc::joints::{self, Joint, JointKind};
 use solidcraft_doc::{Document, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, ModelState, Occurrence, apply_point, mat_inverse, mat_mul};
 use solidcraft_geom::Mesh;
 
-use crate::{IoError, Result, export_mesh, stl_binary, weld, weld_eps};
+use crate::{IoError, Result, export_mesh_noted, stl_binary, weld, weld_eps};
 
 /// Mass (kg) and inertia (kg m²) of a link with no massive body: Gazebo drops massless links.
 const TOKEN_MASS: f64 = 1e-6;
@@ -226,7 +226,8 @@ fn parts(doc: &Document, st: &ModelState, stem: &str, names: &mut Names, out: &m
         let (mut visual, mut collision) = (Mesh::default(), Mesh::default());
         let (mut masses, mut color, mut open) = (Vec::new(), None, false);
         for b in st.bodies.iter().filter(|b| doc.model_body_component(b) == c) {
-            let mut m = export_mesh(&b.body)?;
+            let (mut m, notes) = export_mesh_noted(&b.body, crate::MeshQuality::Standard)?;
+            out.warnings.extend(notes.into_iter().map(|n| format!("body `{}`: {n}", b.name)));
             if let Some(o) = doc.model_body_offset(b) {
                 for p in &mut m.positions {
                     *p = apply_point(o, *p);

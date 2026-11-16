@@ -1847,9 +1847,7 @@ fn run_rust_geom(op: &OpIn) -> Result<Vec<f64>, Fail> {
         } => {
             let mut a = Point2::new(uv1[0], uv1[1]);
             let mut s = Vec2::new(shift[0], shift[1]);
-            let k = Kernel::default();
             let r = fp2::check_seam_crossing(
-                &k,
                 &mut a,
                 Point2::new(uv2[0], uv2[1]),
                 &Extent2d::from_bounds(dom[0], dom[1], dom[2], dom[3]),
@@ -2222,6 +2220,175 @@ mod tests {
         let i: Inputs = serde_json::from_str(FUZZ00020).unwrap();
         let rust = run_rust(&i).unwrap_err().to_string();
         assert_eq!(rust, format!("export: {CONTRACT}"));
+    }
+
+    /// The 130 `GetPointsInFace` rows the WR-86 fix moved (the expectations commit of
+    /// the flag's retirement).
+    const POINTS_MOVED: [&str; 130] = [
+    "extra00023", "extra00034", "extra00056", "extra00073", "extra00094", "extra00103",
+    "extra00115", "extra00128", "extra00135", "extra00138", "extra00156", "extra00170",
+    "extra00207", "extra00224", "extra00242", "extra00250", "extra00295", "extra00387",
+    "extra00416", "extra00449", "extra00471", "extra00496", "extra00529", "extra00541",
+    "extra00548", "extra00557", "extra00601", "extra00634", "extra00641", "extra00666",
+    "extra00688", "extra00710", "extra00734", "extra00755", "extra00775", "extra00776",
+    "extra00798", "extra00815", "extra00875", "extra00879", "extra00919", "extra00944",
+    "extra00950", "extra00951", "extra00954", "extra00978", "extra00993", "extra01014",
+    "extra01018", "extra01019", "extra01050", "extra01062", "extra01129", "extra01136",
+    "extra01139", "extra01141", "extra01145", "extra01170", "extra01190", "extra01211",
+    "extra01219", "extra01252", "extra01260", "extra01287", "extra01299", "extra01360",
+    "extra01386", "extra01404", "extra01439", "extra01452", "gen0010", "points_bss_1",
+    "points_bss_2", "points_bss_5", "points_bss_huge_1", "points_bss_huge_2", "points_bss_huge_5",
+    "points_bss_pinched_1", "points_bss_pinched_2", "points_bss_pinched_5", "points_bss_sub_1",
+    "points_bss_sub_100", "points_bss_sub_2", "points_bss_sub_30", "points_bss_sub_31",
+    "points_bss_sub_5", "points_bss_tiny_1", "points_bss_tiny_2", "points_bss_tiny_5",
+    "points_dom_above_eff_zero_1", "points_dom_above_eff_zero_4", "points_dom_huge_1",
+    "points_dom_huge_4", "points_dom_negative_1", "points_dom_negative_4", "points_dom_offset_1",
+    "points_dom_offset_4", "points_file_cone.smb_0", "points_file_cone.smb_1",
+    "points_file_cone.smb_2", "points_file_plane_square.smb_0", "points_file_plane_square.smb_1",
+    "points_file_plane_square.smb_2", "points_file_sphere.smb_0", "points_file_sphere.smb_1",
+    "points_file_sphere.smb_2", "points_file_torus.smb_0", "points_file_torus.smb_1",
+    "points_file_torus.smb_2", "points_file_toruswvy.smb_0", "points_file_toruswvy.smb_1",
+    "points_file_toruswvy.smb_2", "points_file_vase_rev.smb_0", "points_file_vase_rev.smb_1",
+    "points_file_vase_rev.smb_2", "points_plane_1", "points_plane_100", "points_plane_2",
+    "points_plane_30", "points_plane_31", "points_plane_5", "points_plane_box_side_1",
+    "points_plane_box_side_2", "points_plane_box_side_5", "points_plane_tilted_1",
+    "points_plane_tilted_100", "points_plane_tilted_2", "points_plane_tilted_30",
+    "points_plane_tilted_31", "points_plane_tilted_5",
+    ];
+
+    /// The `GetPointsInFace` cases on a rectangularly trimmed face that sample (status 0,
+    /// a positive count): every one of them is certified below.
+    const POINTS_RECTANGULAR: usize = 171;
+
+    /// glibc's `RAND_MAX`, as `topology::face::p2`'s `rand_dither` draws against it.
+    const RAND_MAX: f64 = 2_147_483_647.0;
+
+    /// Certificate for the `GetPointsInFace` rows on rectangularly trimmed faces (WR-86):
+    /// every such case of the unit (fixtures and the generated extras) is rebuilt as
+    /// [`run_rust`] builds it, sampled again on the same default kernel, and each point is
+    /// checked against the closed-form grid: column `c` of `n' = min(count, 30)` at
+    /// `u = umin + (c + 1) L_u / (n' + 1)`, row `j` of `J` at `v = vmin + (j + 1) L_v /
+    /// (J + 1)` plus a dither of at most `(RAND_MAX - floor(RAND_MAX / 2)) / (1.2
+    /// RAND_MAX)` of a row (none for one point), each to its rounding, so every point lies
+    /// strictly inside the face's UV domain. The case's recorded row must be this sample's
+    /// projection, its 3D points and normals the surface's there. The certified cases must
+    /// be exactly the [`POINTS_RECTANGULAR`] such cases, each with a committed golden row,
+    /// and include every row of [`POINTS_MOVED`].
+    #[test]
+    fn rectangular_face_points_are_the_domain_grid() {
+        use solidcore::nurbs::knots::Side;
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        let golden = std::fs::read_to_string(
+            crate::case::repo_root().join("crates/goldens/expected/topology.face_p2.jsonl"),
+        )
+        .unwrap();
+        let golden: std::collections::BTreeSet<String> = golden
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter_map(|v| v.get("case")?.as_str().map(str::to_string))
+            .collect();
+        // the dither's largest size in rows, and its rounding (the draw's floor is exact;
+        // the subtraction, the product and the quotient round)
+        let half = (RAND_MAX / 2.0).floor();
+        let dither = (RAND_MAX - half).max(half) / (1.2 * RAND_MAX) * (1.0 + 4.0 * f64::EPSILON);
+        let mut covered = std::collections::BTreeSet::new();
+        for case in &cases {
+            let name = &case.name;
+            let i: Inputs = case.parse().unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            let OpIn::Points { .. } = &i.op else {
+                continue;
+            };
+            let out = run_rust(&i).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            // a refused sample (a status, no state) has no grid to check
+            let Some(row) = out.values.get("state").cloned() else {
+                continue;
+            };
+            let mut k = Kernel::default();
+            let brep = i.brep.as_ref().unwrap();
+            let path = path_of(&i).unwrap();
+            let (mut b, c) = own_brep(&mut k, brep, &path, i.validate_only, i.init_gaps)
+                .unwrap()
+                .unwrap_or_else(|_| panic!("{name}: the B-rep run_rust built is refused"));
+            let Ok(OpIn::Points { f, count, dom }) = resolve(&i.op, &counts_of(c)) else {
+                panic!("{name}: the op run_rust resolved is refused");
+            };
+            let fid = FaceId::from_index(f as u32);
+            if let Some(d) = dom {
+                fp2::set_uv_domain(&mut b, fid, &Extent2d::from_bounds(d[0], d[1], d[2], d[3]))
+                    .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            }
+            let face = b.face(fid).unwrap().clone();
+            // deliberate skips: another face (the unchanged trimmed branch), a status, or
+            // nothing to sample
+            if face.rectangular_trim != 1 || row.first().copied() != Some(0.0) || count == 0 {
+                continue;
+            }
+            let mut k = Kernel::default();
+            let r = fp2::points_in_face(&mut k, &mut b, fid, count).unwrap();
+            assert_eq!(r.uv.len() as u64, count, "{name}: point count");
+            let (u_ivl, v_ivl) = (face.uv_domain.u_interval(), face.uv_domain.v_interval());
+            let (umin, vmin, lu, lv) = (u_ivl.min(), v_ivl.min(), u_ivl.length(), v_ivl.length());
+            let cols = count.min(30);
+            let rows = count.div_ceil(cols);
+            let du = lu / (cols + 1) as f64;
+            let dv = lv / (rows + 1) as f64;
+            let eps = f64::EPSILON;
+            for (p, uv) in r.uv.iter().enumerate() {
+                let (col, j) = (p as u64 / rows, p as u64 % rows);
+                let u_want = umin + (col + 1) as f64 * du;
+                // the sampler and u_want each round once in the product and once in the
+                // sum (the shared increment's rounding cancels), each within eps of a
+                // magnitude below |umin| + L_u
+                let u_slack = 4.0 * eps * (umin.abs() + lu);
+                assert!(
+                    (uv.x - u_want).abs() <= u_slack,
+                    "{name}: point {p} u {} not {u_want}",
+                    uv.x
+                );
+                // likewise 2 roundings in the sampler's row and 2 in v_centre, plus the
+                // dither's product and its addition
+                let v_centre = vmin + (j + 1) as f64 * dv;
+                let v_slack = if count > 1 { dither * dv } else { 0.0 }
+                    + 6.0 * eps * (vmin.abs() + lv);
+                assert!(
+                    (uv.y - v_centre).abs() <= v_slack,
+                    "{name}: point {p} v {} not within {v_slack} of {v_centre}",
+                    uv.y
+                );
+                assert!(
+                    uv.x > umin && uv.x < umin + lu && uv.y > vmin && uv.y < vmin + lv,
+                    "{name}: point {p} {uv:?} outside the domain"
+                );
+            }
+            // the recorded row is this sample (its projection for more than one point)
+            let mut body = vec![0.0, r.uv.len() as f64];
+            body.extend(r.uv.iter().flat_map(|p| [p.x, p.y]));
+            body.extend(r.pv.iter().flat_map(|p| [p.x, p.y, p.z]));
+            assert_eq!(project_points(&body, count, &face, dom), row, "{name}: row");
+            // its 3D points and normals are the surface's at those UVs
+            let surf = face.surface.as_ref().unwrap();
+            for (p, uv) in r.uv.iter().enumerate() {
+                let pnt = surf
+                    .evaluate_point(&k, *uv)
+                    .unwrap_or_else(|e| panic!("{name}: point {p}: {e:?}"));
+                assert_eq!(r.pv[2 * p], pnt, "{name}: point {p}");
+                let nrm = surf
+                    .evaluate_normal(&k, *uv, Side::Left, Side::Left)
+                    .unwrap_or_else(|e| panic!("{name}: normal {p}: {e:?}"));
+                assert_eq!(r.pv[2 * p + 1], nrm, "{name}: normal {p}");
+            }
+            assert!(golden.contains(name), "{name}: no committed golden row");
+            covered.insert(name.clone());
+        }
+        println!("POINTS_GRID covered {}: {covered:?}", covered.len());
+        assert_eq!(covered.len(), POINTS_RECTANGULAR);
+        for name in POINTS_MOVED {
+            assert!(covered.contains(name), "{name}: a moved row is not certified");
+        }
     }
 
     /// The inputs of nightly fuzz case `topology.face_p2/fuzz00020`.

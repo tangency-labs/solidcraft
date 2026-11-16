@@ -108,7 +108,7 @@
 //! - **Recursion.** `sm_CoverOtherCoincidentFace` recurses once (its second call has
 //!   `bRefineDomains` set); no other recursion.
 //! - **Not upstream: a stored-domain cover stays within one period** (the fork's
-//!   tangency-labs/smlib@b518bbe, under `Kernel::fixes.cover_wraps_across_closed_seam`):
+//!   tangency-labs/smlib@b518bbe, with WR-599's cover across a wrapped seam):
 //!   `sm_CoverOtherCoincidentFace` passes `bRefineDomains` as the cover's
 //!   `bAcrossWrappedSeams`, so only its trim-derived attempt crosses a wrapped seam.
 //! - **Unported callees** return [`SolidError::Unported`]: `SmBrep::GetInfiniteRegion`
@@ -351,12 +351,9 @@ fn cover_other_coincident_surface(
                 "covered surface owned by another face",
             ));
         };
-        // (passed on with the opt-in fix: the fork's `SER` in CoverCoincidentSurface,
-        // WR-663, tangency-labs/smlib 21dcf69)
-        crate::error::ignore_or_pass_on(
-            crate::topology::face::p1::remove_uv_trim_curves(b, face),
-            k.fixes.query_statuses_pass_on,
-        )?;
+        // (passed on: the fork's `SER` in CoverCoincidentSurface, WR-663,
+        // tangency-labs/smlib 21dcf69)
+        crate::topology::face::p1::remove_uv_trim_curves(b, face)?;
     }
     Ok(Cover {
         max_dist: r.max_dist,
@@ -1848,8 +1845,8 @@ fn cover_other_coincident_face(
         }
     }
 
-    // SolidCraft fork (tangency-labs/smlib@b518bbe), under
-    // `Kernel::fixes.cover_wraps_across_closed_seam`: across a seam the covering surface
+    // SolidCraft fork (tangency-labs/smlib@b518bbe), with WR-599's cover across a
+    // wrapped seam: across a seam the covering surface
     // wraps only on the trim-derived bounds. The stored domains are conservative and may
     // be the faces' whole surfaces: across the seam they cover too, and the merged face
     // took them as its domain (360 x 208 for half-turn faces whose trims span 180 x 3).
@@ -2967,7 +2964,7 @@ fn set_curve_with_identity(
 /// `GetBlendEdgeuse`: the edge use bounding the sector to fillet (an
 /// [`OrientType::Same`] edge use of an interior region for a solid, of the concave
 /// side for a shell); `None` for a lamina edge, an edge between tangent faces (within
-/// 2 degrees; half a degree with `fixes.fillet_half_degree_crease`, WR-621) or an
+/// half a degree, `CREASE_ANGLE`; upstream 2 degrees, WR-621) or an
 /// inconsistent edge use.
 ///
 /// # Errors
@@ -3015,7 +3012,7 @@ pub fn blend_edgeuse_or_why(
 ) -> Result<core::result::Result<EdgeuseId, NotBlendable>> {
     Ok(match blend_edgeuse_unless(k, b, e)? {
         // smooth where the faces are tangent all along it, at the same angle
-        Err(NotBlendable::Tangent) if is_tangent_edge(k, b, e, 90.0 - crease_angle(k), false)? => {
+        Err(NotBlendable::Tangent) if is_tangent_edge(k, b, e, 90.0 - CREASE_ANGLE, false)? => {
             Err(NotBlendable::Smooth)
         }
         r => r,
@@ -3023,18 +3020,11 @@ pub fn blend_edgeuse_or_why(
 }
 
 /// The largest angle (degrees) between the binormal of one face and the normal of the
-/// other at which [`blend_edgeuse`] takes the faces as tangent: 88 degrees, 89.5 with
-/// `fixes.fillet_half_degree_crease`.
-pub(crate) fn crease_angle(k: &Kernel) -> f64 {
-    // set max nonTangent angle to 88 degrees. With `fillet_half_degree_crease` (WR-621,
-    // fork 2e8758b) 89.5 degrees: faces within half a degree of each other are tangent, a
-    // crease of 0.5 to 2 degrees is an edge the model means and is filleted
-    if k.fixes.fillet_half_degree_crease {
-        89.5
-    } else {
-        88.0
-    }
-}
+/// other at which [`blend_edgeuse`] takes the faces as tangent: 89.5 degrees, so faces
+/// within half a degree of each other are tangent and a crease of 0.5 to 2 degrees is an
+/// edge the model means and is filleted (WR-621, the fork's 2e8758b; upstream's 88
+/// degrees refuses such a crease as tangent).
+pub(crate) const CREASE_ANGLE: f64 = 89.5;
 
 /// A shell step-off keeps partial output only for an ordinary numerical failure.
 fn shell_step_off_status(status: Result<()>) -> Result<()> {
@@ -3115,7 +3105,7 @@ fn blend_edgeuse_unless(
     };
     let mut cur1 = eu1::radial(b, cur0)?.ok_or_else(|| null("GetBlendEdgeuse: no radial"))?;
 
-    // test for smooth edge - don't fillet edges within 2 degrees of tangent
+    // test for smooth edge - don't fillet edges within half a degree of tangent (WR-621)
     let test_param = b.edge(e)?.interval.evaluate(0.34);
 
     // get normalized normal and binormals from the two edgeuses at a common point
@@ -3130,7 +3120,7 @@ fn blend_edgeuse_unless(
     let (fu_normal, fu_normal2) = (ev0.face_normal, ev1.face_normal);
     let (bin_vec, bin_vec2) = (ev0.binormal, ev1.binormal);
 
-    let max_dot = (crease_angle(k) * PI / 180.0).cos();
+    let max_dot = (CREASE_ANGLE * PI / 180.0).cos();
 
     // the faces are tangent and can't be filleted. With `fillet_knife_edge_rounds`
     // (WR-570, fork b7ec55b) only when their binormals point away from each other (the

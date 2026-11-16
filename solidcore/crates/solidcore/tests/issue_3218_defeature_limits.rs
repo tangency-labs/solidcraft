@@ -27,8 +27,7 @@
 use solidcore::blend::feature_executive::{FeatureExecutive, KeptFeature, RebuildBrepType};
 use solidcore::error::defeature::DefeatureFailure;
 use solidcore::error::{Reason, SM_ERR};
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::object::ObjectRef;
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::mass::enclosure::enclose_volume;
 use solidcore::surface::implicit::AnalyticSupport;
 use solidcore::topology::brep::p1 as bp1;
@@ -55,10 +54,7 @@ fn read(k: &mut Kernel, file: &str) -> Option<Brep> {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,

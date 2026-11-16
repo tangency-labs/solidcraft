@@ -28,6 +28,10 @@ use super::boolean_merge_p1::graph_owned;
 use super::topology_vertexuse::{path_of, BrepIn};
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 
+// The case's transform certificate log (test builds only).
+#[cfg(test)]
+use super::topology_brep_p5::transform_certificate::Fired as CertificateLog;
+
 /// The runner of `SmBrep::Mirror`.
 pub struct Runner;
 
@@ -197,12 +201,12 @@ fn clear_logical_lists(b: &mut Brep) -> SolidResult<()> {
     Ok(())
 }
 
-impl UnitDiff for Runner {
-    fn id(&self) -> &'static str {
-        "topology.brep_mirror"
-    }
-
-    fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+impl Runner {
+    /// [`UnitDiff::run_rust`], with the case's certificate log in test builds.
+    fn run(
+        case: &Case,
+        #[cfg(test)] log: &mut CertificateLog,
+    ) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
         let mut k = Kernel::default();
         // the Rust reader's B-rep of the same file, its geometry owners named by the
@@ -216,10 +220,20 @@ impl UnitDiff for Runner {
         b.set_editing_enabled(i.editing);
         let plane = Axis2Placement::new(v(i.origin), v(i.x), v(i.y));
         let mut run = || -> SolidResult<Vec<f64>> {
+            // (the input, for the certificate's step-by-step replay)
+            #[cfg(test)]
+            let input = b.clone_standing_for_self().expect("certificate input copy");
             let r = match &i.matrix {
                 Some(m) => transform_matrix(&mut k, &mut b, m, i.scale_tol),
                 None => mirror(&mut k, &mut b, &plane),
             };
+            // (a mirror's own vertex tolerance updates are not `Transform`'s: only the
+            // 4x4 transforms are checked, one `Transform` step at a time)
+            #[cfg(test)]
+            if let (Ok(()), Some(m)) = (&r, &i.matrix) {
+                replay_certified(&mut k, input, &b, m, i.scale_tol, log)
+                    .expect("certificate replay");
+            }
             let st = status(r)?;
             let mut record = vec![st];
             record.extend(geometry(&k, &b, true)?);
@@ -235,6 +249,31 @@ impl UnitDiff for Runner {
             }
             Err(e) => Output::unported(&e).ok_or_else(|| herr(e)),
         }
+    }
+}
+
+#[cfg(test)]
+impl super::topology_brep_p5::transform_certificate::Certified for Runner {
+    fn run_certified(
+        &self,
+        case: &Case,
+        log: &mut CertificateLog,
+    ) -> Result<Output, HarnessError> {
+        Self::run(case, log)
+    }
+}
+
+impl UnitDiff for Runner {
+    fn id(&self) -> &'static str {
+        "topology.brep_mirror"
+    }
+
+    fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+        Self::run(
+            case,
+            #[cfg(test)]
+            &mut CertificateLog::default(),
+        )
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
@@ -403,4 +442,240 @@ pub(super) fn normalize_face_shells(b: &mut Brep) -> SolidResult<()> {
             .collect();
     }
     Ok(())
+}
+
+/// One step of `SmBrep::Transform(const double[4][4])`, as `transform_matrix` makes it.
+#[cfg(test)]
+enum Step {
+    /// `SmBrep::Transform(placement, scale, bScaleTol)`.
+    Transform(Axis2Placement, Option<Vec3>, bool),
+    /// `SmBrep::Mirror(plane)`.
+    Mirror(Axis2Placement),
+}
+
+/// The steps `transform_matrix` takes for the matrix `m`, built as it builds them:
+/// one scaled transform when the rows are orthogonal and right-handed, else the SVD's
+/// `V` transform, a mirror when `V` is left-handed, then the `U^T` transform scaled by
+/// the singular values, and, when `U^T` is left-handed, a mirror and the translation.
+/// `None` when the matrix does not decompose (the transform then fails).
+#[cfg(test)]
+fn matrix_steps(m: &[[f64; 4]; 4], scale_tol: bool) -> SolidResult<Option<Vec<Step>>> {
+    use solidcore::geom::matrix::Matrix;
+    use solidcore::math::{EFF_ZERO, EFF_ZERO_RAD, HALF_PI};
+    let [m0, m1, m2, m3] = m;
+    let row0 = Vec3::new(m0[0], m0[1], m0[2]);
+    let row1 = Vec3::new(m1[0], m1[1], m1[2]);
+    let row2 = Vec3::new(m2[0], m2[1], m2[2]);
+    let disp = Vec3::new(m3[0], m3[1], m3[2]);
+    // (a failed `AngleBetween` reports 0, as `transform_matrix` takes it by default)
+    if row0.dot(row1).abs() < EFF_ZERO
+        && row0.cross(row1).angle_between(row2).unwrap_or(0.0) <= EFF_ZERO_RAD
+    {
+        let (l0, l1, l2) = (row0.length(), row1.length(), row2.length());
+        let placement = Axis2Placement::new(disp, row0 / l0, row1 / l1);
+        return Ok(Some(vec![Step::Transform(
+            placement,
+            Some(Vec3::new(l0, l1, l2)),
+            scale_tol,
+        )]));
+    }
+    let mut sv = Matrix::from_row_major(
+        3,
+        3,
+        vec![
+            row0.x, row0.y, row0.z, row1.x, row1.y, row1.z, row2.x, row2.y, row2.z,
+        ],
+    )?;
+    let Ok((d, mut ut)) = sv.sv_decompose() else {
+        return Ok(None);
+    };
+    ut.transpose()?;
+    let vec = |m: &Matrix, r: usize| match m.row(r) {
+        Some([x, y, z]) => Vec3::new(*x, *y, *z),
+        _ => Vec3::new(f64::NAN, f64::NAN, f64::NAN),
+    };
+    let dv = |i: usize| d.get(i).copied().unwrap_or(f64::NAN);
+    let (vx, vy, vz) = (vec(&sv, 0), vec(&sv, 1), vec(&sv, 2));
+    let (utx, uty, utz) = (vec(&ut, 0), vec(&ut, 1), vec(&ut, 2));
+    let mut transform_v = Axis2Placement::IDENTITY;
+    // (`transform_matrix` ignores `SetCanonical`'s status)
+    let _ = transform_v.set_canonical(Vec3::ZERO, vx / vx.length(), vy / vy.length());
+    let scale_v = Vec3::new(vx.length(), vy.length(), vz.length());
+    let scale_ut = Vec3::new(
+        utx.length() * dv(0),
+        uty.length() * dv(1),
+        utz.length() * dv(2),
+    );
+    let mirror_v = vx.cross(vy).angle_between(vz).unwrap_or(0.0) > HALF_PI;
+    let mirror_ut = utx.cross(uty).angle_between(utz).unwrap_or(0.0) > HALF_PI;
+    let mut steps = vec![Step::Transform(transform_v, Some(scale_v), scale_tol)];
+    if mirror_v {
+        steps.push(Step::Mirror(transform_v));
+    }
+    let mut transform_ut = Axis2Placement::IDENTITY;
+    if mirror_ut {
+        let _ = transform_ut.set_canonical(Vec3::ZERO, utx / utx.length(), uty / uty.length());
+        steps.push(Step::Transform(transform_ut, Some(scale_ut), scale_tol));
+        steps.push(Step::Mirror(transform_ut));
+        let _ = transform_ut.set_canonical(disp, Vec3::X, Vec3::Y);
+        steps.push(Step::Transform(transform_ut, None, true));
+    } else {
+        let _ = transform_ut.set_canonical(disp, utx / utx.length(), uty / uty.length());
+        steps.push(Step::Transform(transform_ut, Some(scale_ut), scale_tol));
+    }
+    Ok(Some(steps))
+}
+
+/// Replays `transform_matrix`'s steps on a copy of its input, putting each `Transform`
+/// step through the WR-507 / WR-508 tolerance certificate
+/// (`topology_brep_p5::transform_certificate`), and panics unless the replay ends with
+/// the transformed body's tolerances and model size estimate, bit for bit. The mirrors
+/// between the steps are flag-independent and may change vertex tolerances themselves.
+#[cfg(test)]
+fn replay_certified(
+    k: &mut Kernel,
+    mut copy: Brep,
+    result: &Brep,
+    m: &[[f64; 4]; 4],
+    scale_tol: bool,
+    log: &mut CertificateLog,
+) -> SolidResult<()> {
+    use super::topology_brep_p5::transform_certificate::Snapshot;
+    let Some(steps) = matrix_steps(m, scale_tol)? else {
+        panic!("brep_mirror: a successful transform's matrix did not decompose");
+    };
+    for step in &steps {
+        match step {
+            Step::Transform(placement, scale, scale_tol) => {
+                let before = Snapshot::before_transform(k, &copy, *scale)?;
+                solidcore::topology::brep::p5::transform(k, &mut copy, placement, *scale, *scale_tol)?;
+                before.check(k, &mut copy, *scale, *scale_tol, "brep_mirror step", log)?;
+            }
+            Step::Mirror(plane) => mirror(k, &mut copy, plane)?,
+        }
+    }
+    let (replayed, got) = (Snapshot::of(k, &copy)?, Snapshot::of(k, result)?);
+    assert!(
+        replayed.unchanged(&got),
+        "brep_mirror: the step replay does not reproduce the transform's tolerances"
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+
+    /// The rows WR-507 / WR-508 moved whose decomposition has a scaled `Transform` step.
+    const SCALED: [&str; 22] = [
+        "mat0009",
+        "mat0010",
+        "mat0014",
+        "mat0017",
+        "mat0019",
+        "mat0026",
+        "mat0027",
+        "mat0032",
+        "mat0033",
+        "mat0042",
+        "mat0043",
+        "mat0044",
+        "mat0048",
+        "mat0058",
+        "mat0068",
+        "mat0069",
+        "mat0074",
+        "mat0077",
+        "mat0078",
+        "mat0080",
+        "mat0083",
+        "mat0090",
+    ];
+    /// The rows WR-507 / WR-508 moved whose steps all have a scale of 1: no tolerance
+    /// changes and the model size estimate stays unset (upstream set it from the vertex box).
+    const UNIT_SCALE: [&str; 3] = [
+        "mat0041",
+        "mat0059",
+        "mat0091",
+    ];
+
+    /// Every case replays, and each 4x4 transform goes through the WR-507 / WR-508
+    /// tolerance certificate (`topology_brep_p5::transform_certificate`): these are all
+    /// of this unit's rows that moved when those flags were retired (the mirrors move
+    /// none).
+    #[test]
+    fn every_transform_meets_the_wr507_wr508_certificate() {
+        // Every case reads an upstream file: without the checkout, skip as
+        // `successful_near_singular_transform_is_valid_or_known` does.
+        let case = crate::case::regression_case(&Runner, SCALED[0]);
+        let input: Inputs = case.parse().unwrap();
+        if let Err(error) = path(&input) {
+            assert!(
+                std::env::var_os("SOLIDCORE_REQUIRE_UPSTREAM").is_none(),
+                "required transform fixture is unavailable: {error}"
+            );
+            return;
+        }
+        let fired = super::super::topology_brep_p5::transform_certificate::replay_matches_golden(
+            &Runner,
+        );
+        for c in SCALED {
+            let f = fired.get(c).unwrap_or_else(|| panic!("moved row {c} is not a case"));
+            assert!(f.scaled > 0, "{c}: {f:?}");
+        }
+        for c in UNIT_SCALE {
+            let f = fired.get(c).unwrap_or_else(|| panic!("moved row {c} is not a case"));
+            assert!(f.unscaled > 0 && f.scaled == 0, "{c}: {f:?}");
+        }
+    }
+
+    #[test]
+    fn successful_near_singular_transform_is_valid_or_known() {
+        let case = crate::case::regression_case(&Runner, "mat0076");
+        let input: Inputs = case.parse().unwrap();
+        let file = match path(&input) {
+            Ok(file) => file,
+            Err(error) => {
+                assert!(
+                    std::env::var_os("SOLIDCORE_REQUIRE_UPSTREAM").is_none(),
+                    "required transform fixture is unavailable: {error}"
+                );
+                return;
+            }
+        };
+        let read = || {
+            let mut kernel = Kernel::default();
+            let body = crate::own_reader::read_file_rebuild(&mut kernel, &file, input.rebuild)
+                .unwrap()
+                .unwrap();
+            (kernel, body)
+        };
+        // Check the input on an independent read, preserving the operation's evaluation order.
+        let (mut input_kernel, mut original) = read();
+        let input_check = check_brep(&mut input_kernel, &mut original, CheckLevel::Level2).unwrap();
+        assert!(input_check.is_valid(), "the input must be valid: {input_check:?}");
+
+        let (mut kernel, mut body) = read();
+        body.set_editing_enabled(input.editing);
+        let transformed = transform_matrix(
+            &mut kernel,
+            &mut body,
+            input.matrix.as_ref().unwrap(),
+            input.scale_tol,
+        );
+        let validity = if transformed.is_ok() {
+            check_brep(&mut kernel, &mut body, CheckLevel::Level2).map(|check| check.is_valid())
+        } else {
+            Ok(true) // A refusal does not claim a valid transformed body.
+        };
+        let invalid_success = !matches!(validity, Ok(true));
+        let known = crate::golden::known_failing(&crate::golden::default_dir(), Runner.id()).unwrap();
+        assert_eq!(
+            invalid_success,
+            known.contains_key(&case.name),
+            "a successful transform of a valid input must remain valid or be tracked as known wrong; \
+             a repaired case must leave that classification: result={transformed:?}, validity={validity:?}"
+        );
+    }
 }

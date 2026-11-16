@@ -836,7 +836,7 @@
 {"case":"rectangle_face_point_imprint_far","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,24.0,0.0,1.0,1.0,0.0]}}
 {"case":"rectangle_face_point_imprint_on_surface","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,24.0,0.0,0.0,2e-6,1.0]}}
 {"case":"rectangle_face_point_imprint_outside","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,24.0,0.0,1.0,0.2,0.0]}}
-{"case":"rectangle_face_vertex_face_intersect","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[36.0,36.0,175.0]],"n":17}}}
+{"case":"rectangle_face_vertex_face_intersect","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,25.0,1006.0]}}
 {"case":"reversed_line_join_edge_class","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[4e+20,4e+20,2.27e+22]],"n":98}}}
 {"case":"reversed_line_join_split_other","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,22.0,0.0,1.0,22.0,0.0,1.0,23.0,0.0,0.0,1e+20,0.0,0.0,0.0]}}
 {"case":"scale_huge","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[1e+20,1e+20,1.7e+21]],"n":39}}}

@@ -1239,7 +1239,7 @@ fn view_list(s: &mut Session, _p: &Value) -> Result<Value> {
 
 /// The keys whose strings name bodies, alone or in a list (`body`, `targets`…), at any depth of a
 /// feature: its own fields and the face, edge and link references inside it.
-const BODY_KEYS: [&str; 5] = ["body", "bodies", "target", "targets", "tools"];
+const BODY_KEYS: [&str; 6] = ["body", "bodies", "target", "target_bodies", "targets", "tools"];
 
 /// Replace the body name `old` with `new` where a string names a body (the value of one of
 /// [`BODY_KEYS`]); other strings equal to it (sketch text, plane and feature names, expressions)
@@ -1546,6 +1546,9 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
         for b in f.participants.iter_mut().filter(|b| **b == old) {
             *b = name.to_string();
         }
+        // Every typed body reference, those outside `BODY_KEYS` too: a sweep along a body's
+        // edges (`path_body`) or a mutual surface trim (`with`) (#17386).
+        f.kind.remap_bodies(&BTreeMap::from([(old.clone(), name.to_string())]));
         if let FeatureKind::Sketch { plane, .. } = &mut f.kind {
             solidcraft_doc::sheet::rename_plane_sheet_body(plane, &old, name);
         }
@@ -1644,7 +1647,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
             _ => None,
         })
         .cloned();
-    let plane = super::sketch::plane_ref(&trial, p, cmd)?;
+    let plane = super::sketch::plane_ref_numbers(&trial, p, cmd)?;
     if super::sketch::face::is_face(p) {
         super::sketch::face::capture_positions(&mut trial, &plane)?;
     }

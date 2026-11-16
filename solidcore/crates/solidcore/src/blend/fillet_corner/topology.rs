@@ -551,7 +551,7 @@ impl FilletCorner {
         // the one reached past it round the vertex (tangency-labs/smlib@d5ebcb3, WR-457).
         let mut corner_sides = sides;
         let mut corner_total = total;
-        if k.fixes.fillet_nx1_tangent_side_edge && !closed_side && total > 3 {
+        if !closed_side && total > 3 {
             let tol_deg = crate::math::rad_to_deg(self.tangency_tol_radians);
             for kk in 0..2 {
                 let other = 1 - kk;
@@ -585,9 +585,6 @@ impl FilletCorner {
                         // continuing a boss's base circle past a wall. The rail on the side
                         // face runs alongside it and never meets it; the round ends on
                         // the end face past it (tangency-labs/smlib@420e47d, WR-499).
-                        if !k.fixes.fillet_nx1_opposite_continuation_side_edge {
-                            break;
-                        }
                         let filleted_edge = edge_of(target, filleted)?;
                         let next_edge = edge_of(target, next)?;
                         if passed_continuation
