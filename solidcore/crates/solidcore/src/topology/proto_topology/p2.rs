@@ -284,6 +284,22 @@ pub trait ProtoBrep<O>: ProtoGeometry<O> + ProtoTopology<O> {
             "harness:proto-brep-coincident-edge",
         ))
     }
+    /// Not upstream (WR-580, #1519): `SmEdge::SetTolerance(dTol, bUpdateOnlyIfLarger =
+    /// TRUE, bCascadeToBndries = TRUE)` on `edge`, read when an imprint takes an edge the face
+    /// already has as its definition's edge: the edge's tolerance (and its vertices') rises
+    /// to the bound the two curves were proved within, as the edge it replaces would have
+    /// carried it.
+    ///
+    /// # Errors
+    ///
+    /// Those of the setter; an owner with no B-rep behind its handles (the default body)
+    /// returns [`SolidError::Unported`] under a `harness:` label.
+    fn raise_edge_tolerance(&mut self, _k: &Kernel, _edge: O, _tolerance: f64) -> Result<()> {
+        Err(SolidError::unported(
+            "SmEdge::SetTolerance (no B-rep behind the handles)",
+            "harness:proto-brep-edge-tolerance",
+        ))
+    }
     /// `SmBrep::SqueezeEdge(pEdge, pSurvivingVertex)` on the B-rep `brep` (called by
     /// `topology.proto_topology_p3` on `GetWhichBrep`): the owner of a real B-rep
     /// implements it with `topology::brep::p3::squeeze_edge`.
@@ -1085,7 +1101,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
     /// Not upstream (WR-580, #1519): the edge Brep2's face of definition `ed` already has
     /// between `start` and `end` (the definition's vertices in Brep2) along the definition's
-    /// curve, which is then the definition's edge in Brep2; `None` when the face has none.
+    /// curve, which is then the definition's edge in Brep2, with the bound the two curves
+    /// were proved within; `None` when the face has none.
     ///
     /// An edge qualifies when it is an edge of the face joining the two vertices
     /// (`SmVertex::GetCommonEdges`, `SmEdge::IsConnectedToFace`) and its curve over its
@@ -1104,7 +1121,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         ed: EdgeDefId,
         start: O,
         end: O,
-    ) -> Result<Option<O>> {
+    ) -> Result<Option<(O, f64)>> {
         let d = self.ed_ref(ed)?;
         let Some(curve) = d.xsect_curve_3d() else {
             return Ok(None);
@@ -1126,7 +1143,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 .edge_interval(edge)
                 .ok_or(dangling("edge handle is unknown"))?;
             if curve_runs_along(k, curve, &interval, edge_curve, &edge_interval, tol)? {
-                return Ok(Some(edge));
+                return Ok(Some((edge, tol)));
             }
         }
         Ok(None)
@@ -1270,7 +1287,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // edge is this edge in Brep2: imprinted again, the face had two coincident edges, and
         // the merge put a copy of the boundary edge beside this one in Brep1 (`SmFace` tests
         // 33 and 34). The fork takes it on `SmTools::FindCoincidentEdge`'s 30 samples; here
-        // only an enclosure of the two whole curves takes it (`along_face_edge`).
+        // only an enclosure of the two whole curves takes it (`along_face_edge`). The edge
+        // then carries the bound the enclosure proved, as the edge it stands for would
+        // have (`this_tol` below): relating it to Brep1's edge only raises both to the
+        // larger of their own tolerances.
         let along_edge2 = if type2 == PointClassType::Face && start_vtx2 != end_vtx2 {
             self.along_face_edge(k, brep, ed, start_vtx2, end_vtx2)?
         } else {
@@ -1279,7 +1299,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
         // Now do Brep 2.
         let d = self.ed_ref(ed)?;
-        if let Some(edge) = along_edge2 {
+        if let Some((edge, bound)) = along_edge2 {
+            *edited = true;
+            brep.raise_edge_tolerance(k, edge, bound)?;
             self.ed_mut(ed)?.set_final_edge(2, Some(edge));
         } else if type2 == PointClassType::Face {
             // m_pXSectCurve3d went into Brep1. Make a copy for the other Brep (status
