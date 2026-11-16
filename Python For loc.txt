@@ -1,0 +1,15 @@
+import json
+
+with open('assets/locales/en.json', 'r', encoding='utf-8') as f:
+    en = json.load(f)
+with open('assets/locales/bg.json', 'r', encoding='utf-8') as f:
+    bg = json.load(f)
+
+missing = {k: v for k, v in en.items() if k not in bg}
+
+# Записваме първите 250 липсващи ключа като основа за batch-2
+batch2 = dict(list(missing.items())[:250])
+with open('assets/locales/pending/bulgarian-batch-2.json', 'w', encoding='utf-8') as f:
+    json.dump({"bg": batch2}, f, ensure_ascii=False, indent=2)
+
+print(f"Общо липсващи: {len(missing)}. Записани в batch-2: {len(batch2)}")

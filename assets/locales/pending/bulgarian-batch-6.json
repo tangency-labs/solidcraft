@@ -50,7 +50,7 @@
     "cmd.surface_boundary": "Гранична повърхност",
     "cmd.surface_extrude": "Изтегляне на повърхност",
     "cmd.surface_fair": "Изглаждане на повърхност",
-    "cmd.surface_fillet": "Фаска на повърхност",
+    "cmd.surface_fillet": "Заобляне на повърхност",
     "cmd.surface_loft": "Повърхност по секции (лофт)",
     "cmd.surface_match": "Съгласуване на повърхност",
     "cmd.surface_offset": "Отместване на повърхност",
