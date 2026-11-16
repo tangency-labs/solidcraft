@@ -1034,11 +1034,11 @@ mod tests {
     /// `intersect.surface_intersector_p5` gen0236). The boundary search finds a
     /// touching point at A's corner and a start point within the tolerance of it,
     /// which traces no curve. The touching point used to be dropped for that start
-    /// point, leaving no answer; it is now added once the start point has traced
-    /// nothing (WR-51 made the start point test a real distance of the tolerance,
+    /// point, leaving no answer; it is now added at the end, since no curve found
+    /// covers it (WR-51 made the start point test a real distance of the tolerance,
     /// which reaches this start point).
     #[test]
-    fn a_touching_point_left_for_an_untraced_start_point_is_kept() {
+    fn a_touching_point_no_curve_covers_is_kept() {
         let k = &Kernel::default();
         let la = 17_328.120_691_213_055;
         let lb = 11_527.965_487_154_615;
