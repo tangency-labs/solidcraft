@@ -921,7 +921,15 @@ pub(super) mod transform_certificate {
                 "{what}: model size {} against the box diagonal {size}",
                 after.size
             );
-            let zone = b.tolerance();
+            // The zone is derived from the certified size, not read back from the body, and
+            // the body's own tolerance must be that zone.
+            let zone = solidcore::geom::tol::size_estimate_to_zone_tol_3d(size);
+            assert_eq!(
+                b.tolerance().to_bits(),
+                zone.to_bits(),
+                "{what}: body tolerance {} against the zone {zone} of size {size}",
+                b.tolerance()
+            );
             for (name, old, new) in [
                 ("vertex", &self.vertices, &after.vertices),
                 ("edge", &self.edges, &after.edges),
