@@ -7360,9 +7360,33 @@ fn feature_tools_with_constructor(
             };
             // From Object on a flat face at a slant starts on the face, so both ends follow its
             // slope, unless the design was built when it started at the face's level. With To
-            // Object or through all the extrude still starts at that level.
-            let from_slope =
-                from_face.filter(|_| !extent.from_level && extent.to.is_none() && !extent.through_all).and_then(|face| slanted_plane(&tst, face, n));
+            // Object, through all or a taper, or on a face within 5 degrees of running along the
+            // extrusion (where the profile's shadow on it is long and thin), it still starts at
+            // that level, and the feature's warning says so.
+            let slanted_from = from_face.filter(|_| !extent.from_level).and_then(|face| slanted_plane(&tst, face, n));
+            let tapered = match &extent.taper {
+                Some(tp) => val(vals, tp, Kind::Angle)? != 0.0,
+                None => false,
+            };
+            let level_because = match &slanted_from {
+                None => None,
+                Some(_) if extent.to.is_some() => Some("To Object is set"),
+                Some(_) if extent.through_all => Some("Through All is set"),
+                Some(_) if tapered => Some("the extrude is tapered"),
+                Some(slope) if slope.normal().dot(n).abs() < FROM_SLOPE_LEAST_SINE => {
+                    Some("the face is within 5 degrees of running along the extrusion")
+                }
+                Some(_) => None,
+            };
+            if let Some(why) = level_because {
+                append_warning(
+                    warning,
+                    format!(
+                        "From Object starts on a plane parallel to the sketch, where the slanted face meets the middle of the profiles, not on the face itself, because {why}"
+                    ),
+                );
+            }
+            let from_slope = slanted_from.filter(|_| level_because.is_none());
             // Whether the extrusion runs toward the To object: false when a To offset carries the
             // end back across the start, so the tool never reaches the object's face.
             let mut toward_to = true;
@@ -7497,7 +7521,13 @@ fn feature_tools_with_constructor(
                 && let Some(tb) = tst.bodies.get(bi)
             {
                 let m = tb.mesh();
-                let hs: Vec<f64> = m.positions.iter().map(|q| (*q - ss.plane.origin).dot(n) - off).collect();
+                let mut hs: Vec<f64> = m.positions.iter().map(|q| (*q - ss.plane.origin).dot(n) - off).collect();
+                // A flat face at a slant: where its plane, extended past the face, lies over the
+                // profiles too, so a profile that overhangs the face still reaches it.
+                if let Some(slope) = to_face.and_then(|face| slanted_plane(&tst, face, n)) {
+                    let (rise_lo, rise_hi) = slope_rise(&slope, &ss.plane, &regions, off);
+                    hs.extend([rise_lo, rise_hi]);
+                }
                 let margin = tb.body.size() * 0.05 + 1.0 + to_offset.abs();
                 if hi > 0.0 {
                     hi = hs.iter().cloned().fold(hi, f64::max) + margin;
@@ -9794,14 +9824,17 @@ fn trim_to_face(tools: Vec<Traced>, target: &ModelBody, face: usize, plane: &Pla
     }
     if !on_face {
         let n = plane.normal();
-        let trimmed = trim_to_body(tools.clone(), target, |q: Vec3| ((q - plane.origin).dot(n) - start).abs())?;
+        let from_start = |q: Vec3| ((q - plane.origin).dot(n) - start).abs();
+        let trimmed = trim_to_body(tools.clone(), target, from_start)?;
         if trimmed.iter().any(|t| kernel::has_cap_at(&t.body, plane, far, far - start)) {
             // Part of the profile lies beyond the face's edges. A flat face at a slant then ends
-            // the tools at its plane, extended past those edges.
+            // the tools at its plane, extended past those edges, or at the target body where
+            // they meet its material first, as they do where the profile lies over it.
             if let Some(kernel::FaceSurface::Plane { normal, point }) = kernel::face_surface(&target.body, face)
                 && let Some(face_plane) = Plane::from_normal(point, normal.vec())
             {
-                return trim_to_plane(tools, &face_plane, plane, start, far);
+                let planed = trim_to_plane(tools, &face_plane, plane, start, far)?;
+                return trim_to_body(planed, target, from_start);
             }
             return Err(DocError::Invalid("the profile reaches past the To face".into()));
         }
@@ -9964,6 +9997,11 @@ fn offset_sheet(target: &ModelBody, face: usize, near: Vec3, travel: Vec3, offse
         _ => Ok(sheet),
     }
 }
+/// The sine of the least angle between a From Object face and the extrusion for the extrude to
+/// start on the face (5 degrees): nearer to running along it, the profile's shadow on the face
+/// is long and thin, the prism over it many times the extrude's length, and the extrude starts
+/// at the face's level instead.
+const FROM_SLOPE_LEAST_SINE: f64 = 0.087_155_742_747_658_17;
 
 /// The plane of face `(body, face)` when it is flat and at a slant to `n`: neither square to it
 /// nor running along it.
@@ -9992,18 +10030,33 @@ fn slope_rise(slope: &Plane, plane: &Plane, regions: &[Region2], level: f64) -> 
 /// Each tool's part between `slope` moved `lo` and `hi` along `n` (the extrusion direction).
 fn trim_between_slopes(tools: Vec<Traced>, slope: &Plane, n: Vec3, lo: f64, hi: f64) -> Result<Vec<Traced>> {
     let with_normal = n.dot(slope.normal()) > 0.0;
-    let mut out = Vec::new();
     let moved = |d: f64| Plane { origin: slope.origin + n * d, ..*slope };
+    let mut out = Vec::new();
     for t in &tools {
-        let Some(above) = kernel::half_space(&t.body, &moved(lo), with_normal)?.0 else { continue };
-        if let Some(part) = kernel::half_space(&above, &moved(hi), !with_normal)?.0 {
-            out.push(Traced::step(part, &[t]));
+        // The two ends are named as a two-sided extrude's caps are, by the end they close:
+        // both may lie on one side of the sketch plane, so their height can't tell them apart.
+        let Some(above) = half_space_traced(t, &moved(lo), with_normal, "bottom")? else { continue };
+        if let Some(part) = half_space_traced(&above, &moved(hi), !with_normal, "top")? {
+            out.push(part);
         }
     }
     if out.is_empty() {
         return Err(DocError::Invalid("nothing lies between the From face and the extrude's end".into()));
     }
     Ok(out)
+}
+
+/// `input`'s part on one side of `plane` ([`kernel::half_space`]), its history carried through
+/// the cut: the part's faces of `input` keep their roles, and its face in the plane takes the
+/// role `cap`, as a cap of the extrude the part ends.
+fn half_space_traced(input: &Traced, plane: &Plane, positive: bool, cap: &str) -> Result<Option<Traced>> {
+    let (part, tool) = kernel::half_space(&input.body, plane, positive)?;
+    let Some(part) = part else { return Ok(None) };
+    // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
+    let cap = Some(cap.to_string());
+    let caps = if positive { [cap, None] } else { [None, cap] };
+    let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, thin: None }.tool(tool, None);
+    Ok(Some(Traced::step(part, &[input, &tool])))
 }
 
 /// Tools run from `start` to `far` along `plane`'s normal, cut back to `face_plane` (a plane at a
@@ -10018,13 +10071,14 @@ fn trim_to_plane(tools: Vec<Traced>, face_plane: &Plane, plane: &Plane, start: f
     // Along the travel, the side of the plane before it is the negative one when the travel
     // runs with the plane's normal.
     let positive = across < 0.0;
+    let cap = crate::lineage::extrude_cap_role(far);
     let mut out = Vec::new();
     for t in &tools {
-        if let Some(part) = kernel::half_space(&t.body, face_plane, positive)?.0 {
-            if kernel::has_cap_at(&part, plane, far, far - start) {
+        if let Some(part) = half_space_traced(t, face_plane, positive, &cap)? {
+            if kernel::has_cap_at(&part.body, plane, far, far - start) {
                 return Err(DocError::Invalid("the profile reaches past the To face".into()));
             }
-            out.push(Traced::step(part, &[t]));
+            out.push(part);
         }
     }
     if out.is_empty() {
