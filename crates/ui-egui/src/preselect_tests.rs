@@ -1853,7 +1853,8 @@ fn thread_size_suggestion_follows_picks_without_overwriting_manual_sizes() {
         (large.clone(), "M20"),
         (large.clone(), "M20"),
         (small.clone(), "M8"),
-        (unsupported, ""),
+        // Past the coarse table the size is filled in with its pitch, and the next face replaces it.
+        (unsupported, "M100x4"),
         (small.clone(), "M8"),
         (planar, ""),
     ] {

@@ -137,13 +137,15 @@ fn weld(mesh: &crate::meshbody::TriMesh, tolerance: f64) -> Result<Body> {
         };
         remap.push(i);
     }
-    // A triangle of no area (its corners on one line, or welded into one another) adds no
-    // surface, so it is dropped rather than refused (#4561); the closed-manifold check that
-    // follows still refuses a mesh that needed it to close. Only the vertices the kept triangles
-    // use stay, so a dropped triangle's corner cannot widen the part's extent.
-    let mut used: Vec<Option<u32>> = vec![None; positions.len()];
-    let mut kept_positions: Vec<Vec3> = Vec::new();
-    let mut triangles = Vec::with_capacity(mesh.triangles.len());
+    // A triangle of no area adds no surface, so it is dropped rather than refused (#4561); the
+    // closed-manifold check that follows still refuses a mesh that needed it to close. A sliver
+    // whose three distinct corners lie on one line is the exception that matters (#17885): its
+    // long edge is used by one other triangle and its two short edges by two more, so dropping it
+    // leaves a T-junction and refuses a mesh that is closed. It is resolved instead, by splitting
+    // that neighbour across the long edge at the sliver's middle corner. Only the vertices the
+    // kept triangles use stay, so a dropped triangle's corner cannot widen the part's extent.
+    let mut kept: Vec<[u32; 3]> = Vec::with_capacity(mesh.triangles.len());
+    let mut slivers: Vec<(u32, u32, u32)> = Vec::new();
     for t in &mesh.triangles {
         let (Some(&a), Some(&b), Some(&c)) = (remap.get(t[0] as usize), remap.get(t[1] as usize), remap.get(t[2] as usize)) else {
             return Err(invalid("missing triangle vertex"));
@@ -151,9 +153,24 @@ fn weld(mesh: &crate::meshbody::TriMesh, tolerance: f64) -> Result<Body> {
         let (Some(&pa), Some(&pb), Some(&pc)) = (positions.get(a as usize), positions.get(b as usize), positions.get(c as usize)) else {
             return Err(invalid("missing triangle vertex"));
         };
-        if (pb - pa).cross(pc - pa).normalized().is_none() {
-            continue;
+        if (pb - pa).cross(pc - pa).normalized().is_some() {
+            kept.push([a, b, c]);
+        } else if a != b && b != c && c != a {
+            // Three distinct corners on one line: the middle one is opposite the longest edge.
+            let long = [(pa.dist(pb), c, a, b), (pb.dist(pc), a, b, c), (pc.dist(pa), b, c, a)]
+                .into_iter()
+                .max_by(|x, y| x.0.total_cmp(&y.0))
+                .map(|(_, middle, u, v)| (u, v, middle));
+            slivers.extend(long);
         }
+    }
+    if !slivers.is_empty() {
+        resolve_slivers(&mut kept, &slivers);
+    }
+    let mut used: Vec<Option<u32>> = vec![None; positions.len()];
+    let mut kept_positions: Vec<Vec3> = Vec::new();
+    let mut triangles = Vec::with_capacity(kept.len());
+    for [a, b, c] in kept {
         let mut keep = |i: u32| -> Result<u32> {
             let slot = used.get_mut(i as usize).ok_or_else(|| invalid("missing triangle vertex"))?;
             if let Some(k) = *slot {
@@ -170,6 +187,38 @@ fn weld(mesh: &crate::meshbody::TriMesh, tolerance: f64) -> Result<Body> {
         return Err(invalid("the mesh has no triangle of any area"));
     }
     crate::mesh_body(&kept_positions, &triangles)
+}
+
+/// Resolve each collinear sliver `(u, v, middle)` (its long edge `u`-`v`, `middle` between them)
+/// by splitting the one kept triangle on that edge into two at `middle`, keeping its orientation.
+/// A sliver whose long edge has no single neighbour is left dropped, as before.
+fn resolve_slivers(kept: &mut Vec<[u32; 3]>, slivers: &[(u32, u32, u32)]) {
+    let edge = |a: u32, b: u32| (a.min(b), a.max(b));
+    let mut users = BTreeMap::<(u32, u32), Vec<usize>>::new();
+    for (i, t) in kept.iter().enumerate() {
+        for k in 0..3 {
+            users.entry(edge(t[k], t[(k + 1) % 3])).or_default().push(i);
+        }
+    }
+    for &(u, v, middle) in slivers {
+        let Some(&[i]) = users.get(&edge(u, v)).map(Vec::as_slice) else { continue };
+        let t = kept[i];
+        let Some(k) = (0..3).find(|&k| edge(t[k], t[(k + 1) % 3]) == edge(u, v)) else { continue };
+        let (x, y, z) = (t[k], t[(k + 1) % 3], t[(k + 2) % 3]);
+        for k in 0..3 {
+            if let Some(list) = users.get_mut(&edge(t[k], t[(k + 1) % 3])) {
+                list.retain(|&j| j != i);
+            }
+        }
+        let j = kept.len();
+        kept[i] = [x, middle, z];
+        kept.push([middle, y, z]);
+        for (index, tri) in [(i, kept[i]), (j, kept[j])] {
+            for k in 0..3 {
+                users.entry(edge(tri[k], tri[(k + 1) % 3])).or_default().push(index);
+            }
+        }
+    }
 }
 
 fn extrusion(mesh: &crate::meshbody::TriMesh, axis: Vec3, tolerance: f64) -> Result<Option<Body>> {
@@ -898,6 +947,33 @@ mod tests {
         let [solidcore_record::Seg2::Arc { center: c, radius: r, sweep, .. }] = fitted.segs.as_slice() else { panic!("not one arc: {fitted:?}") };
         assert!(c.dist(center) < 1e-9 && (r - radius).abs() < 1e-9, "centre {c:?}, radius {r}");
         assert!((sweep.abs() - std::f64::consts::TAU).abs() < 1e-9, "sweep {sweep}");
+    }
+
+    /// #17885: a tetrahedron closed apart from a zero-area sliver (one edge carries a middle
+    /// vertex, one face is split there, the other is not, and the sliver `x, m, y` joins them)
+    /// converts, with the same volume, instead of being refused for the T-junction that dropping
+    /// the sliver leaves.
+    #[test]
+    fn a_collinear_sliver_is_resolved_not_dropped() {
+        let positions = vec![Vec3::ZERO, Vec3::new(10., 0., 0.), Vec3::new(0., 10., 0.), Vec3::new(0., 0., 10.), Vec3::new(5., 0., 0.)];
+        let (a, b, c, d, m) = (0u32, 1u32, 2u32, 3u32, 4u32);
+        let centre = Vec3::new(2.5, 2.5, 2.5);
+        let oriented = outward(&positions, &[[a, b, c], [a, b, d], [a, c, d], [b, c, d]], centre);
+        let (abc, abd) = (oriented[0], oriented[1]);
+        // The directed edge of `abc` along a-b, and the face `abd` split at the middle vertex.
+        let k = (0..3).find(|&k| [abc[k], abc[(k + 1) % 3]].iter().all(|v| *v == a || *v == b)).unwrap();
+        let (x, y) = (abc[k], abc[(k + 1) % 3]);
+        let k = (0..3).find(|&k| abd[k] == y && abd[(k + 1) % 3] == x).unwrap();
+        let r = abd[(k + 2) % 3];
+        let mut triangles = vec![abc, oriented[2], oriented[3], [y, m, r], [m, x, r]];
+        let whole = crate::mesh_body(&positions, &triangles).unwrap();
+        assert!(convert_prismatic_mesh(&whole, 0.05).is_err(), "without the sliver the T-junction is open");
+        triangles.push([x, m, y]);
+        let mesh = crate::mesh_body(&positions, &triangles).unwrap();
+        let converted = convert_prismatic_mesh(&mesh, 0.05).unwrap();
+        assert!(converted.validity().is_empty());
+        let volume = converted.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap().measure().volume;
+        assert!((volume - 1000. / 6.).abs() < 1e-6, "{volume}");
     }
 
     #[test]
