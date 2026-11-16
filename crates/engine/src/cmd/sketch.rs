@@ -1303,11 +1303,12 @@ pub(super) fn create_sketch_with_plane(s: &mut Session, p: &Value, plane: PlaneR
 }
 
 /// A new sketch on `plane`, as `sketch.create` replies.
-fn sketch_on_plane(s: &mut Session, p: &Value, plane: PlaneRef, internal_body: Option<(&str, usize)>) -> Result<CreateResult> {
+fn sketch_on_plane(s: &mut Session, p: &Value, mut plane: PlaneRef, internal_body: Option<(&str, usize)>) -> Result<CreateResult> {
     let before = entry_point(s);
     if face::is_face(p) {
         face::capture_positions(s, &plane)?;
     }
+    solidcraft_doc::capture_sketch_plane_placement(&s.design_document(), &mut plane, s.active_component, &s.active_component_frame())?;
     // Validate the plane resolves.
     let (vals, _) = s.doc.param_values();
     s.doc.resolve_plane_in(&vals, &plane, 0, s.active_component, Some(&s.model.state()))?;

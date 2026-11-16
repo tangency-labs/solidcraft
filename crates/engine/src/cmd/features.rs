@@ -3094,7 +3094,7 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
     use solidcraft_doc::PlaneRef;
     const WANT: &str = PLANE_FORMS;
     let construction = |r: &str| match s.doc.find_feature(r) {
-        Some(f) if matches!(f.kind, FeatureKind::ConstructionPlane { .. }) => Ok(PlaneRef::Construction { feature: f.id.into() }),
+        Some(f) if matches!(f.kind, FeatureKind::ConstructionPlane { .. }) => Ok(PlaneRef::Construction { feature: f.id.into(), placement: None }),
         Some(f) => Err(bad(cmd, format!("`{}` is not a construction plane (a plane is {WANT})", f.name))),
         None => Err(bad(cmd, format!("no plane `{r}` (a plane is {WANT})"))),
     };

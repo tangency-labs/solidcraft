@@ -70,8 +70,12 @@
 //! - **`SmFindPCExtremaEFO::Evaluate`** is implemented for [`Curve`] (it calls the
 //!   virtual `IsDegenerate`). An infinite evaluated tangent returns `SM_ERR`
 //!   instead of looping forever while dividing infinity by ten; finite tangents
-//!   retain upstream's exact scaling operations and order. The separate
-//!   [`MAX_PC_SCALE_STEPS`] cap is retained as a backstop and returns
+//!   retain upstream's exact scaling operations and order. For the minimisation that
+//!   decides an intersection, `F` and `F'` are divided by `|C'|` where it is below 1
+//!   (not upstream, #17735): the step is unchanged, and the `|F| < SM_EFF_ZERO` stop,
+//!   which left the foot up to `SM_EFF_ZERO / |C'|` along a short curve from a point on
+//!   it (beyond the intersection's tolerance), leaves it at most `SM_EFF_ZERO`. The
+//!   separate [`MAX_PC_SCALE_STEPS`] cap is retained as a backstop and returns
 //!   [`SolidError::InvalidInput`] after 400 divisions (a finite tangent needs at
 //!   most 310). Upstream loops forever on the infinite rational B-spline tangent
 //!   in fuzz `curve.curve_p9` fuzz01222.
@@ -839,7 +843,8 @@ impl EvalFunction for FindPcExtremaEfo<'_, Curve> {
     /// `SmFindPCExtremaEFO::Evaluate`: `F = (C(t) - P) . C'(t)` and
     /// `F' = C'.C' + (C - P).C''` (the second order term limited to `-0.95 C'.C'`,
     /// negated for [`SolverOperation::Maximize`]), all scaled by the power of ten
-    /// picked at the first call to keep `|C'|^2 <= 1e4`. Found when the gap or its
+    /// picked at the first call to keep `|C'|^2 <= 1e4`; when intersecting, both divided
+    /// by `|C'|` where it is below 1 (not upstream, #17735). Found when the gap or its
     /// squared angle from the normal plane is below the squared tolerance. A zero
     /// tangent is a solution on a degenerate curve and `SM_ERR` otherwise; a zero gap
     /// is `SM_ERR` when maximising.
@@ -953,6 +958,21 @@ impl EvalFunction for FindPcExtremaEfo<'_, Curve> {
         if self.solver_operation == SolverOperation::Maximize {
             // Let - sign of FofT rule
             out.f_prime = -out.f_prime;
+        }
+
+        // (not upstream, #17735) For an intersection, along a tangent shorter than 1, F
+        // and F' are divided by |C'|: F is then the gap along the unit tangent and the
+        // Newton step -F/F' is unchanged. The solve stops at |F| < SM_EFF_ZERO, and
+        // F = (C - P) . C' is that gap times |C'|: undivided, a short tangent stopped it
+        // with the foot up to SM_EFF_ZERO / |C'| along the curve from the point, so a point
+        // on a 0.03 mm cubic was found 2e-11 off it and its intersection within the scaled
+        // zero (1.5e-11) reported no point. Divided, the stop leaves the foot at most
+        // SM_EFF_ZERO along the curve whatever its tangent (|C'| >= 1 already did). The
+        // tangent is not zero here (the test above).
+        if self.intersecting && tan_dot_tan < 1.0 {
+            let tan_len = tan_dot_tan.sqrt();
+            out.f /= tan_len;
+            out.f_prime /= tan_len;
         }
 
         // Done when GapSize goes to zero
@@ -1207,6 +1227,28 @@ impl Curve {
         opts: &PointSolveOptions<'_>,
         guess: f64,
     ) -> Result<(bool, Solution<O>)> {
+        self.local_point_solve_held(k, interval, op, test_point, opts, guess, false)
+    }
+
+    /// [`Curve::local_point_solve`] for a minimisation that decides an intersection
+    /// when `intersecting` (not upstream, #17735): the Newton solve's stop is then held
+    /// within `SM_EFF_ZERO` of the point along the curve
+    /// ([`FindPcExtremaEfo::intersecting`]), as the curve/point global solver's
+    /// intersection asks of the minimisation it solves.
+    ///
+    /// # Errors
+    ///
+    /// As [`Curve::local_point_solve`].
+    pub(crate) fn local_point_solve_held<O: Copy>(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        op: SolverOperation,
+        test_point: Point3,
+        opts: &PointSolveOptions<'_>,
+        guess: f64,
+        intersecting: bool,
+    ) -> Result<(bool, Solution<O>)> {
         let mut solution = Solution::new();
 
         // Final solution will be within the interval.
@@ -1321,6 +1363,7 @@ impl Curve {
             EFF_ZERO_SQ, // NR iter stops when gapSize or Angle from Perp gets smaller than SM_EFF_ZERO
             op,
         );
+        efo.intersecting = intersecting;
         let mut ls = LocalSolve1d::with_interval(*interval, false);
         // acceptable accuracy when Func(t) < tolerance
         let r = match ls.solve_it(&mut efo, guess, 1.0e-8) {
