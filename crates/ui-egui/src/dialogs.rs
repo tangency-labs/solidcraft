@@ -1395,7 +1395,7 @@ impl Dialog {
         }
         *of = picks.to_vec();
         *suggested = crate::dialogs_thread::suggested(s, picks, options);
-        *designation = suggested.clone().unwrap_or_default();
+        *designation = suggested.clone().or_else(|| crate::dialogs_thread::large_size(s, picks, options)).unwrap_or_default();
     }
 
     pub fn rename(feature: u64, name: &str) -> Dialog {
