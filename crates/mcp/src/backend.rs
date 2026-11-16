@@ -10,7 +10,7 @@ use solidcraft_engine::view::Guides;
 use solidcraft_viewport::StandardView;
 
 /// Something that answers control-channel methods: `engine.execute`, `engine.commands`,
-/// `document.inspect`, `ui.view`, `ui.render`, `ui.screenshot`, `control.running`, and
+/// `document.inspect`, `ui.help` (build metadata), `ui.view`, `ui.render`, `ui.screenshot`, `control.running`, and
 /// `control.pending` (the result of a request that was still running when its call returned:
 /// `{pending: what | null, done?, reply?, lost?, running_s?}`).
 pub trait Backend {
@@ -176,6 +176,9 @@ impl Headless {
             "engine.script" => s.run_script(&p).map(Value::from).map_err(|e| e.to_string()),
             "engine.commands" => s.execute("engine.commands", &json!({})).map_err(|e| e.to_string()),
             "document.inspect" => s.execute("document.inspect", &p).map_err(|e| e.to_string()),
+            "ui.help" if p.get("item").is_none_or(Value::is_null) => {
+                Ok(json!({"version": env!("CARGO_PKG_VERSION"), "commit": solidcraft_engine::io::SOURCE_COMMIT}))
+            }
             "ui.view" => {
                 let v = str_p("view").unwrap_or("home");
                 match v {

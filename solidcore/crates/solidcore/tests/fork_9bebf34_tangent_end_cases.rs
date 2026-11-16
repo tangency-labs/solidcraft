@@ -407,7 +407,7 @@ const PASSES: Mark = Mark {
 
 const CHAMFERS_AT_CD47EFD: &str = "status 1001: SmFillet3x2MixedConvexityCorner, Vertex Computation Failure, where the two chamfers meet at the tangent seam (the corner, not the tangent ends: each chamfer alone passes)";
 const DRAFTED_ROUNDS: &str = "status 1001 before any geometry: the corner where the front top edge runs tangent into the concave arc, on the cone, is of no kind SMLib's blend corners take";
-/// The drafted peg here is the tangent rule's (`taper_tangent_corner_planes`, WR-521), whose
+/// The drafted peg here is the tangent rule's (WR-521), whose
 /// arc walls are their exact cones since the fork's 3ae7bfa (WR-521's addendum of
 /// 2026-11-02), so the bar's and the disc's cone walls are one face.
 const DRAFTED_HERE: &str = "on the tangent rule's cone walls the round builds within the box and checks clean (the rounds together remove 11.97)";

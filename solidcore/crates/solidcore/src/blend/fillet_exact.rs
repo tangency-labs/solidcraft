@@ -476,7 +476,12 @@ fn quadric_of_surface(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Re
         } else {
             match Sphere::is_nurb_surface_sphere_on(k, bss, 1.0, this) {
                 Ok(Some(s)) => sphere = Some((s.base().position().origin(), s.radius())),
-                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                Err(e)
+                    if matches!(
+                        e,
+                        SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                    ) || e.is_not_certified() =>
+                {
                     return Err(e)
                 }
                 // no sphere, or TRUE without a sphere (its SER statuses)
@@ -485,7 +490,12 @@ fn quadric_of_surface(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Re
             if sphere.is_none() {
                 match Torus::is_nurb_surface_torus(k, bss, 1.0) {
                     Ok(Some(t)) => torus = Some(TorusData::of(&t)),
-                    Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                    Err(e)
+                        if matches!(
+                            e,
+                            SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                        ) || e.is_not_certified() =>
+                    {
                         return Err(e)
                     }
                     // no torus, or TRUE without a torus (its SER statuses)
@@ -641,9 +651,11 @@ impl BlendQuadric {
         o
     }
 
-    /// Not the fork (#2405): the foot of `m` on a plane or cylinder, the point of it
-    /// nearest `m` (on a cylinder, along `m`'s radial line from the axis); `None` for other
-    /// kinds and for `m` on a cylinder's axis.
+    /// Not the fork (#2405): the foot of `m` on a plane, cylinder, sphere or cone, the point
+    /// of it nearest `m` (on a cylinder, along `m`'s radial line from the axis; on a sphere,
+    /// along the line from its centre; on a cone, on the line of the nappe in the half-plane
+    /// through the axis and `m`, #17263); `None` for other kinds and for `m` on a cylinder's
+    /// or cone's axis or at a sphere's centre.
     #[must_use]
     pub fn foot(&self, m: Point3) -> Option<Point3> {
         match self.kind {
@@ -652,6 +664,16 @@ impl BlendQuadric {
                 let axis = self.point + self.dir * (m - self.point).dot(self.dir);
                 let radial = (m - axis).unitize().ok()?;
                 Some(axis + radial * self.radius)
+            }
+            QuadricKind::Sphere => {
+                let radial = (m - self.point).unitize().ok()?;
+                Some(self.point + radial * self.radius)
+            }
+            QuadricKind::Cone => {
+                let w = m - self.point;
+                let radial = across(w, self.dir).unitize().ok()?;
+                let nappe = radial * self.angle.sin() + self.dir * self.angle.cos();
+                Some(self.point + nappe * w.dot(nappe))
             }
             _ => None,
         }
@@ -1751,6 +1773,31 @@ fn meridian(q: &BlendQuadric, a: Point3, d: Vec3) -> Option<Meridian> {
         },
         _ => return None,
     })
+}
+
+/// Not the fork (#17263): the ball's centre of a circle spine in the half-plane through the
+/// axis and `near`: the crossing of the offsets' meridians nearest `near` (as
+/// [`class_surface`]'s torus takes it), turned into that half-plane. `None` for a blend
+/// that is not a circle spine, `near` on the axis, an offset with no meridian and offsets
+/// whose meridians do not cross.
+#[must_use]
+pub fn circle_spine_station(blend: &ExactBlend, near: Point3) -> Option<Point3> {
+    if blend.spine != BlendSpine::Circle {
+        return None;
+    }
+    let (a, d) = (blend.point, blend.dir);
+    let ma = meridian(&blend.offsets[0], a, d)?;
+    let mb = meridian(&blend.offsets[1], a, d)?;
+    let w = near - a;
+    let radial = across(w, d);
+    let at = Point2::new(radial.length(), w.dot(d));
+    let radial = radial.unitize().ok()?;
+    let dist = |x: &Point2| (x.x - at.x).hypot(x.y - at.y);
+    let spine = meridians_cross(ma, mb)
+        .into_iter()
+        .filter(|x| x.x >= 0.0)
+        .min_by(|x, y| dist(x).total_cmp(&dist(y)))?;
+    Some(a + d * spine.y + radial * spine.x)
 }
 
 /// The crossings of two meridians (at most two).

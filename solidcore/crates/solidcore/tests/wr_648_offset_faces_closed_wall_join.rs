@@ -3,8 +3,8 @@
 //! away) has its low top moved up 10 onto the high top's plane, or its high top moved
 //! down 10 onto the low top's plane, through the face move (`SmOffsetFacesExecutive`).
 //! The move closes the step's wall to nothing and the wall goes (WR-566); the faces
-//! either side of it, a moved face and one that stayed, then meet on one plane. With
-//! `local_operation_closes_walls_to_nothing` the edge between them goes as well: the
+//! either side of it, a moved face and one that stayed, then meet on one plane, and the
+//! edge between them goes as well: the
 //! result is the plain 40 x 30 x 20 box (24000) or 40 x 30 x 10 box (12000), 6 faces
 //! (7 before 9504880).
 #![allow(
@@ -25,10 +25,9 @@ use solidcore::query::api_queries::brep_is_manifold_solid;
 use solidcore::topology::{Brep, FaceId};
 use solidcore::Kernel;
 
-fn kernel(fixed: bool) -> Kernel {
+fn kernel() -> Kernel {
     let mut k = Kernel::default();
     k.fixes.local_operation_step_walls = true;
-    k.fixes.local_operation_closes_walls_to_nothing = fixed;
     k
 }
 
@@ -68,8 +67,8 @@ fn top_at(k: &Kernel, b: &Brep, z: f64) -> FaceId {
 }
 
 /// The top at `z` moved by `d` along its outward normal; the face count and volume.
-fn move_top(fixed: bool, z: f64, d: f64) -> (usize, f64) {
-    let mut k = kernel(fixed);
+fn move_top(z: f64, d: f64) -> (usize, f64) {
+    let mut k = kernel();
     let mut b = stepped(&mut k);
     let top = top_at(&k, &b, z);
     let mut ex = OffsetFacesExecutive::new();
@@ -85,29 +84,14 @@ fn near(got: f64, want: f64) -> bool {
 
 #[test]
 fn wr_648_low_top_up_onto_the_high_top_is_one_face() {
-    let (faces, v) = move_top(true, 10.0, 10.0);
+    let (faces, v) = move_top(10.0, 10.0);
     assert!(near(v, 24000.0), "volume {v}");
     assert_eq!(faces, 6);
 }
 
 #[test]
 fn wr_648_high_top_down_onto_the_low_top_is_one_face() {
-    let (faces, v) = move_top(true, 20.0, -10.0);
+    let (faces, v) = move_top(20.0, -10.0);
     assert!(near(v, 12000.0), "volume {v}");
     assert_eq!(faces, 6);
-}
-
-/// Without the opt-in the closed wall is refused (`SM_ERR_OFFSET_EDGE_VANISHES`, WR-566),
-/// as before.
-#[test]
-fn wr_648_without_the_opt_in_the_closed_wall_is_refused() {
-    for (z, d) in [(10.0, 10.0), (20.0, -10.0)] {
-        let mut k = kernel(false);
-        let mut b = stepped(&mut k);
-        let top = top_at(&k, &b, z);
-        match OffsetFacesExecutive::new().offset_faces(&mut k, &mut b, &[top], d) {
-            Err(e) => assert_eq!(e.sm_status(), Some(1043), "z = {z}"),
-            other => panic!("z = {z}: {other:?}"),
-        }
-    }
 }

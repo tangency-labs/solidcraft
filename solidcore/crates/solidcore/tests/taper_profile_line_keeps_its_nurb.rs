@@ -118,20 +118,27 @@ fn assert_frustum(label: &str, pass_on: bool, angle: f64, v: f64, want: f64, rel
     );
 }
 
-/// The square of four lines drafts to the same body as the square of B-spline segments.
+/// The square of four lines drafts to the same frustum as the square of B-spline segments.
+/// Its lines take the tangent corner rule (WR-521), whose walls meet at corner edges: 4
+/// walls and 2 caps both ways. The splines take the offset method, which drafted outward
+/// splits each corner into flat triangles coplanar with the walls beside them (14 faces),
+/// so the face counts differ outward; the volumes are both the closed form.
 #[test]
 fn a_square_of_lines_drafts_like_the_square_of_splines() {
     for pass_on in [false, true] {
         for angle in [5.0, -5.0] {
             let (spline_faces, spline_v) = draft("splines", pass_on, &square([false; 4]), angle);
+            let corner_triangles = if angle < 0.0 { 8 } else { 0 };
+            assert_eq!(
+                spline_faces,
+                6 + corner_triangles,
+                "splines, pass_on {pass_on}, angle {angle}"
+            );
             let (faces, v) = draft("lines", pass_on, &square([true; 4]), angle);
             let want = square_frustum(angle);
             assert_frustum("splines", pass_on, angle, spline_v, want, 1e-12);
             assert_frustum("lines", pass_on, angle, v, want, 1e-12);
-            assert_eq!(
-                faces, spline_faces,
-                "lines, pass_on {pass_on}, angle {angle}"
-            );
+            assert_eq!(faces, 6, "lines, pass_on {pass_on}, angle {angle}");
         }
     }
 }

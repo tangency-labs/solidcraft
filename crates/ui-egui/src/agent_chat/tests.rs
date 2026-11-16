@@ -185,6 +185,8 @@ fn select_all_in_the_transcript_takes_the_whole_conversation() {
         [(crate::ui_kit::LayoutMode::Docked, false), (crate::ui_kit::LayoutMode::Floating, false), (crate::ui_kit::LayoutMode::Floating, true)];
     for (dark, (layout, popped)) in [true, false].into_iter().flat_map(|dark| layouts.map(|l| (dark, l))) {
         let mut h = transcript_clipboard_harness(layout);
+        // The thought is shown open, so the test sees that it is drawn but not highlighted.
+        h.app.preferences.agent_thinking_folded = false;
         h.app.preferences.theme = if dark { "dark" } else { "light" }.into();
         h.app.ui.dark = dark;
         if popped {
@@ -5552,6 +5554,27 @@ fn a_picture_only_prompt_and_a_thought_have_no_copy_message_action() {
     assert!(solidcraft_ui_registry::handle_at("agent_chat:copy:0").is_none(), "a picture-only prompt hides the text-copy action");
     assert!(solidcraft_ui_registry::handle_at("agent_chat:copy:1").is_none(), "a thought has no copy action");
     assert!(h.widget("Copy message").is_none(), "nothing to click");
+}
+
+/// #17072: a reply's thinking starts folded under a Thinking header, and its arrow opens it;
+/// with `agent_thinking_folded` off it is shown open, as before.
+#[test]
+fn a_thought_starts_folded_and_its_arrow_opens_it() {
+    for folded in [true, false] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
+        h.app.preferences.agent_thinking_folded = folded;
+        h.call("ui.agent_chat", json!({"open": true}));
+        h.frames(3);
+        h.app.agent_chat.items.push(Item::Agent { thought: true, text: "pondering the plate".into() });
+        h.frames(3);
+        assert!(h.widget("Thinking").is_some(), "the header, folded = {folded}");
+        assert_eq!(h.widget("pondering the plate").is_some(), !folded, "the thinking shows only when open");
+        let arrow = solidcraft_ui_registry::handle_at("agent_chat:thought:0").expect("the thought's arrow");
+        h.call("ui.click", json!({"x": arrow.x, "y": arrow.y}));
+        h.frames(3);
+        assert_eq!(h.widget("pondering the plate").is_some(), folded, "the arrow turns it over");
+    }
 }
 
 fn shared_assistant_harness() -> (crate::scenario::Harness, Script) {

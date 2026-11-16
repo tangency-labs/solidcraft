@@ -6,9 +6,9 @@
 //! The hole lies 4 = 2 x 2 from the front face, so shelled 2 the hole wall's offset
 //! (r 5) is tangent to the front wall's offset (y = 2) at (22.5, 2): the offset face on
 //! z = 0 has loops that touch without crossing, the walls meet along a line and the
-//! offset bounds no solid there. With `offset_resolve_crossing_loops` the shell fails with
-//! `SM_ERR_OFFSET_WALLS_TOUCH` (1042), not `SM_ERR_BAD_INTERSECTIONS` (1027) as the fork
-//! did before a759622. Thicknesses 1.5 and 2.5 (loops apart or crossing) build.
+//! offset bounds no solid there. The shell fails with `SM_ERR_OFFSET_WALLS_TOUCH` (1042),
+//! not `SM_ERR_BAD_INTERSECTIONS` (1027) as the fork did before a759622. Thicknesses 1.5
+//! and 2.5 (loops apart or crossing) build.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -19,6 +19,8 @@
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use offset_fixture::{planar_faces_at, volume, Notifications};
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::error::offset::{OffsetFailure, WallContact};
@@ -40,7 +42,6 @@ fn part(k: &mut Kernel) -> Brep {
 
 fn shell(distance: f64) -> (Kernel, solidcore::Result<Brep>) {
     let mut k = Kernel::default();
-    k.fixes.offset_resolve_crossing_loops = true;
     let mut part = part(&mut k);
     let bottom = planar_faces_at(&k, &part, 2, 0.0);
     assert_eq!(bottom.len(), 1);
@@ -120,7 +121,6 @@ fn issue_1442_thinner_and_thicker_walls_still_build() {
 /// tangent at (1.5, 20) and the walls touch.
 fn plate_shell(hole_x: f64) -> (Kernel, solidcore::Result<Brep>) {
     let mut k = Kernel::default();
-    k.fixes.offset_resolve_crossing_loops = true;
     let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 40.0, 10.0).unwrap();
     let hole = create_cylinder(&mut k, Point3::new(hole_x, 20.0, -1.0), 2.0, 12.0).unwrap();
     let part = boolean_difference(&mut k, plate, hole).unwrap();
@@ -145,10 +145,13 @@ fn issue_1442_plate_hole_crossing_side_still_resolved() {
     let want = 40.0 * 40.0 * 10.0 - pi * 2.0 * 2.0 * 10.0 - cavity;
     let v = volume(&k, &mut b).unwrap();
     // to the integrator's 1e-6, and main's value (bit-identical with the flag on and off
-    // there) to 1e-12
+    // there) to 1e-12. Main's value was 4554.583387224843 (7.1e-9 short of the closed form)
+    // until `brep_volume` closed the tolerant edges' gaps (#16735); now 2.1e-9 short
+    // (MEASURED), the move within the old leak bound.
     assert!((v - want).abs() <= 1e-6 * want, "{v} vs {want}");
-    let pinned = 4_554.583_387_224_843_f64;
+    let pinned = 4_554.583_409_746_097_f64;
     assert!((v - pinned).abs() <= 1e-12 * pinned, "{v} vs {pinned}");
+    volume_leak::assert_moved_by_the_old_leak(&k, &mut b, 4_554.583_387_224_843, pinned, 1e-6);
 }
 
 #[test]

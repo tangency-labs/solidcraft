@@ -1,0 +1,724 @@
+{
+  "area": "frames",
+  "bodies": {
+    "b15": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          1.0,
+          -0.0
+        ],
+        "distance": 1180.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                1.0,
+                -0.0
+              ],
+              "center": [
+                1080.0,
+                -90.0,
+                818.0
+              ],
+              "end": 4.71238898038469,
+              "radius": 10.0,
+              "reference": [
+                -1.0,
+                0.0,
+                0.0
+              ],
+              "start": 3.141592653589793
+            }
+          },
+          {
+            "line": {
+              "end": [
+                1000.0,
+                -90.0,
+                808.0
+              ],
+              "start": [
+                1080.0,
+                -90.0,
+                808.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                1.0,
+                -0.0
+              ],
+              "center": [
+                1000.0,
+                -90.0,
+                818.0
+              ],
+              "end": 0.0,
+              "radius": 10.0,
+              "reference": [
+                -1.0,
+                0.0,
+                0.0
+              ],
+              "start": -1.5707963267948966
+            }
+          },
+          {
+            "line": {
+              "end": [
+                990.0,
+                -90.0,
+                898.0
+              ],
+              "start": [
+                990.0,
+                -90.0,
+                818.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                1.0,
+                -0.0
+              ],
+              "center": [
+                1000.0,
+                -90.0,
+                898.0
+              ],
+              "end": 1.5707963267948966,
+              "radius": 10.0,
+              "reference": [
+                -1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.0
+            }
+          },
+          {
+            "line": {
+              "end": [
+                1080.0,
+                -90.0,
+                908.0
+              ],
+              "start": [
+                1000.0,
+                -90.0,
+                908.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                1.0,
+                -0.0
+              ],
+              "center": [
+                1080.0,
+                -90.0,
+                898.0
+              ],
+              "end": 3.141592653589793,
+              "radius": 10.0,
+              "reference": [
+                -1.0,
+                0.0,
+                0.0
+              ],
+              "start": 1.5707963267948966
+            }
+          },
+          {
+            "line": {
+              "end": [
+                1090.0,
+                -90.0,
+                818.0
+              ],
+              "start": [
+                1090.0,
+                -90.0,
+                898.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                1085.0,
+                -90.0,
+                898.0
+              ],
+              "start": [
+                1085.0,
+                -90.0,
+                818.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                -0.0,
+                -1.0,
+                0.0
+              ],
+              "center": [
+                1080.0,
+                -90.0,
+                898.0
+              ],
+              "end": -1.5707963267948966,
+              "radius": 5.0,
+              "reference": [
+                -1.0,
+                0.0,
+                0.0
+              ],
+              "start": -3.141592653589793
+            }
+          },
+          {
+            "line": {
+              "end": [
+                1000.0,
+                -90.0,
+                903.0
+              ],
+              "start": [
+                1080.0,
+                -90.0,
+                903.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                -0.0,
+                -1.0,
+                0.0
+              ],
+              "center": [
+                1000.0,
+                -90.0,
+                898.0
+              ],
+              "end": 0.0,
+              "radius": 5.0,
+              "reference": [
+                -1.0,
+                0.0,
+                0.0
+              ],
+              "start": -1.5707963267948966
+            }
+          },
+          {
+            "line": {
+              "end": [
+                995.0,
+                -90.0,
+                818.0
+              ],
+              "start": [
+                995.0,
+                -90.0,
+                898.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                -0.0,
+                -1.0,
+                0.0
+              ],
+              "center": [
+                1000.0,
+                -90.0,
+                818.0
+              ],
+              "end": 1.5707963267948966,
+              "radius": 5.0,
+              "reference": [
+                -1.0,
+                0.0,
+                0.0
+              ],
+              "start": -0.0
+            }
+          },
+          {
+            "line": {
+              "end": [
+                1080.0,
+                -90.0,
+                813.0
+              ],
+              "start": [
+                1000.0,
+                -90.0,
+                813.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                -0.0,
+                -1.0,
+                0.0
+              ],
+              "center": [
+                1080.0,
+                -90.0,
+                818.0
+              ],
+              "end": -3.141592653589793,
+              "radius": 5.0,
+              "reference": [
+                -1.0,
+                0.0,
+                0.0
+              ],
+              "start": -4.71238898038469
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b3"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.7071067811865476,
+          -0.7071067811865476,
+          0.0
+        ],
+        "distance": 4645.333084018939,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                4054.7465245800104,
+                4054.7465245800104,
+                -3787.333084018939
+              ],
+              "start": [
+                -2514.7465245800104,
+                -2514.7465245800104,
+                -3787.333084018939
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                4054.7465245800104,
+                4054.7465245800104,
+                5503.333084018939
+              ],
+              "start": [
+                4054.7465245800104,
+                4054.7465245800104,
+                -3787.333084018939
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -2514.7465245800104,
+                -2514.7465245800104,
+                5503.333084018939
+              ],
+              "start": [
+                4054.7465245800104,
+                4054.7465245800104,
+                5503.333084018939
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -2514.7465245800104,
+                -2514.7465245800104,
+                -3787.333084018939
+              ],
+              "start": [
+                -2514.7465245800104,
+                -2514.7465245800104,
+                5503.333084018939
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "intersect"
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b12"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.7071067811865476,
+          -0.7071067811865476,
+          0.0
+        ],
+        "distance": 4645.333084018939,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                770.0,
+                7339.493049160021,
+                -3787.333084018939
+              ],
+              "start": [
+                -5799.493049160021,
+                770.0,
+                -3787.333084018939
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                770.0,
+                7339.493049160021,
+                5503.333084018939
+              ],
+              "start": [
+                770.0,
+                7339.493049160021,
+                -3787.333084018939
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -5799.493049160021,
+                770.0,
+                5503.333084018939
+              ],
+              "start": [
+                770.0,
+                7339.493049160021,
+                5503.333084018939
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -5799.493049160021,
+                770.0,
+                -3787.333084018939
+              ],
+              "start": [
+                -5799.493049160021,
+                770.0,
+                5503.333084018939
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b16"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b18"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b18",
+        "b19"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "op": "intersect"
+      }
+    }
+  ],
+  "case": "11673-mitre-split-of-a-rounded-rect-tube",
+  "expected": {
+    "body_count": 2,
+    "method": "section A = outer 100 x 100 square with r 10 corners less the inner 90 x 90 square with r 5 corners (the wall's offset of the outer radius) = 100^2 - (4 - pi) 10^2 - (90^2 - (4 - pi) 5^2) = 1835.6194 mm^2; the member runs 1180 mm along y (line y -90 to 1090), so V = 1180 A = 2166030.95. The plane x = y meets the member's axis (x 1040) at y 1040 and every point of the section (x 990 to 1090) inside the member's length, so a piece's volume is A times the distance along y from the section's centroid's cut to that end: Tube 1130 A = 2074249.98 (y -90 to 1040), Tube (1) 50 A = 91780.97 (to y 1090). Two bodies.",
+    "results": [
+      {
+        "json": {
+          "total": {
+            "volume_mm3": 2074249.98
+          }
+        },
+        "step": 6
+      },
+      {
+        "json": {
+          "total": {
+            "volume_mm3": 91780.97
+          }
+        },
+        "step": 7
+      }
+    ],
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#11673"
+    ],
+    "volume_mm3": 2166030.95,
+    "what": "a 45 degree Split Body through a rounded 100 x 100 x 5 rect_tube frame member, at the mitre of a frame corner 50 mm from the member's end: refused on 0.40.0-rc.1 as 'Edgeuses out of tolerance' (gap 3.24e-5 against 2e-5), depending on where the member sits"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 93,
+      "faces": 35,
+      "vertices": 62
+    }
+  },
+  "records": "11673-mitre-split-of-a-rounded-rect-tube.bodies.json.gz",
+  "result": [
+    {
+      "body": "Tube",
+      "made": "b11"
+    },
+    {
+      "body": "Tube (1)",
+      "made": "b20"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 875275.5347129001,
+      "body_count": 2,
+      "edges": 93,
+      "faces": 35,
+      "vertices": 62,
+      "volume_mm3": 2166030.945746151
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#11673"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "a 45 degree Split Body through a rounded 100 x 100 x 5 rect_tube frame member, at the mitre of a frame corner 50 mm from the member's end: refused on 0.40.0-rc.1 as 'Edgeuses out of tolerance' (gap 3.24e-5 against 2e-5), depending on where the member sits",
+  "why_not": []
+}

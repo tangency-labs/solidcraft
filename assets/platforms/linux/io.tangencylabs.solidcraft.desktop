@@ -2,7 +2,7 @@
 Type=Application
 Name=SolidCraft
 GenericName=3D CAD
-Comment=Parametric 3D CAD: sketch, constrain, extrude, and change a parameter to rebuild
+Comment=Parametric 3D CAD
 Exec=solidcraft %f
 TryExec=solidcraft
 Icon=io.tangencylabs.solidcraft

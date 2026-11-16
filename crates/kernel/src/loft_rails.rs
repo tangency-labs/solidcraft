@@ -294,6 +294,7 @@ pub(crate) fn railed(sections: &[Section], closed: bool, rails: &[Vec<Vec3>], fi
     }
     let size = bounds.diagonal();
     let tol = (size * 1e-4).max(1e-6);
+    let sections = &section_planes(sections, &ctrl, tol);
     // The sections' parameters along the loft: in proportion to the mean distance between their
     // curves' starts.
     let mut along = vec![0.0];
@@ -352,8 +353,7 @@ pub(crate) fn railed(sections: &[Section], closed: bool, rails: &[Vec<Vec3>], fi
         let d = d.normalized().ok_or_else(|| KernelError::Invalid("two loft sections sit on top of each other".into()))?;
         Ok((middle_at(v)?, d))
     };
-    let start = centroid(lead).ok_or_else(|| fail("sections"))?;
-    let rails: Vec<Rail> = rails.iter().map(|r| rail(r, start, sections, tol)).collect::<Result<_>>()?;
+    let rails: Vec<Rail> = rails.iter().map(|r| rail(r, sections, tol)).collect::<Result<_>>()?;
     if let [a, b] = &rails[..]
         && a.anchors.iter().zip(&b.anchors).any(|(p, q)| p.on.dist(q.on) <= tol)
     {
@@ -493,52 +493,61 @@ pub(crate) fn section_normals(sections: &[Section], direction: impl Fn(f64) -> O
     normals
 }
 
-/// The rail `pts` from its end nearer `start` (the first section's middle), and where it meets
-/// each section, on the section's curve within `tol`.
-///
-/// A rail runs from the first section to the last: it meets the last section at its end. In
-/// between it meets each section where it first crosses the section's plane after the section
-/// before. The end is not a crossing: a rail that lies in the last section's plane (a keel drawn
-/// in the bow's sketch plane) crosses that plane all along, first at the far section, and meets the
-/// section only where it ends.
-fn rail(pts: &[Vec3], start: Vec3, sections: &[Section], tol: f64) -> Result<Rail> {
-    let mut pts =
-        crate::sweep_path::clean(pts).map_err(|_| KernelError::Invalid("a guide rail needs 2…100000 finite points along its length".into()))?;
-    if let (Some(a), Some(b)) = (pts.first(), pts.last())
-        && b.dist(start) < a.dist(start)
-    {
-        pts.reverse();
-    }
-    let not_reached = |i: usize| {
-        KernelError::Invalid(format!(
-            "a guide rail does not reach section {}: a rail has to run from the first section to the last, through every one",
-            i + 1
-        ))
+/// Orient the rail toward the first outline, then check that it meets every section in order.
+/// It meets every section but the last at the first crossing after the section before, and the
+/// last at the first crossing walking back from the end. Thus a rail may run on past either end.
+fn rail(pts: &[Vec3], sections: &[Section], tol: f64) -> Result<Rail> {
+    let pts = crate::sweep_path::clean(pts).map_err(|_| KernelError::Invalid("a guide rail needs 2…100000 finite points along its length".into()))?;
+    let mut reversed = pts.clone();
+    reversed.reverse();
+    let endpoint_distance = |points: &[Vec3]| {
+        points
+            .first()
+            .and_then(|point| sections.first().and_then(|section| nearest_on(&section.curves, *point)))
+            .map_or(f64::INFINITY, |(_, _, distance)| distance)
     };
-    let mut cursor = (0usize, 0.0f64);
-    let mut anchors = Vec::with_capacity(sections.len());
-    for (i, s) in sections.iter().enumerate() {
-        let (plane, curves) = (&s.plane, &s.curves);
-        let (hit, at) = if i + 1 == sections.len() {
-            let end = *pts.last().ok_or_else(|| not_reached(i))?;
-            if plane.height(end).abs() > tol {
-                return Err(not_reached(i));
-            }
-            (end, (pts.len().saturating_sub(2), 1.0))
-        } else {
-            crate::sweep_path::rail_crossing(&pts, plane.origin, plane.normal(), cursor, tol).ok_or_else(|| not_reached(i))?
-        };
-        cursor = at;
-        let (g, on, d) = nearest_on(curves, hit).ok_or_else(|| KernelError::Failed("loft rails: section".into()))?;
-        if d > tol {
-            return Err(KernelError::Invalid(format!(
-                "a guide rail crosses section {}'s plane {d:.3} mm from its curves: a rail has to pass through every section",
+    let (first, second) = if endpoint_distance(&reversed) < endpoint_distance(&pts) { (&reversed, &pts) } else { (&pts, &reversed) };
+    let validate = |points: &[Vec3]| -> Result<Vec<Anchor>> {
+        let mut cursor = (0usize, 0.0f64);
+        let not_reached = |i: usize| {
+            KernelError::Invalid(format!(
+                "a guide rail does not reach section {}: a rail has to run from the first section to the last, through every one",
                 i + 1
-            )));
+            ))
+        };
+        let mut anchors = Vec::with_capacity(sections.len());
+        for (i, section) in sections.iter().enumerate() {
+            let (hit, at) = if i + 1 == sections.len() {
+                let back: Vec<Vec3> = points.iter().rev().copied().collect();
+                let (hit, (k, u)) = crate::sweep_path::rail_crossing(&back, section.plane.origin, section.plane.normal(), (0, 0.0), tol)
+                    .ok_or_else(|| not_reached(i))?;
+                let at = (points.len().saturating_sub(2).saturating_sub(k), 1.0 - u);
+                if at < cursor {
+                    return Err(not_reached(i));
+                }
+                (hit, at)
+            } else {
+                crate::sweep_path::rail_crossing(points, section.plane.origin, section.plane.normal(), cursor, tol).ok_or_else(|| not_reached(i))?
+            };
+            cursor = at;
+            let (g, on, d) = nearest_on(&section.curves, hit).ok_or_else(|| KernelError::Failed("loft rails: section".into()))?;
+            if d > tol {
+                return Err(KernelError::Invalid(format!(
+                    "a guide rail crosses section {}'s plane {d:.3} mm from its curves: a rail has to pass through every section",
+                    i + 1
+                )));
+            }
+            anchors.push(Anchor { g, on, nudge: on - hit, at });
         }
-        anchors.push(Anchor { g, on, nudge: on - hit, at });
+        Ok(anchors)
+    };
+    match validate(first) {
+        Ok(anchors) => Ok(Rail { pts: first.to_vec(), anchors }),
+        Err(first_error) => match validate(second) {
+            Ok(anchors) => Ok(Rail { pts: second.to_vec(), anchors }),
+            Err(_) => Err(first_error),
+        },
     }
-    Ok(Rail { pts, anchors })
 }
 
 /// The point of a section (its curves) nearest `p`: as a wire parameter, the point, and how far
@@ -588,6 +597,42 @@ pub(crate) fn interpolate_g(g0: f64, g1: f64, f: f64, n: usize, closed: bool) ->
 fn wire_point(section: &[CurveN<4>], g: f64) -> Result<Vec3> {
     let k = (g.floor().max(0.0) as usize).min(section.len().saturating_sub(1));
     section.get(k).and_then(|c| point_at(c, g - k as f64)).ok_or_else(|| KernelError::Failed("loft rails: section".into()))
+}
+
+/// The sections with the planes the rails meet them in; `ctrl` holds each section's control
+/// points. A section whose curves run along one line lies in every plane through that line, so
+/// the plane of the sketch it was drawn in says nothing about the loft. It takes the plane
+/// through its line that faces most nearly as the nearest curved section does, or along the loft
+/// when every section is straight. A curved section's curves fix its plane (#4056).
+fn section_planes(sections: &[Section], ctrl: &[Vec<Vec<Vec3>>], tol: f64) -> Vec<Section> {
+    let lines: Vec<Option<Vec3>> = ctrl.iter().map(|s| line_of(&s.iter().flatten().copied().collect::<Vec<_>>(), tol)).collect();
+    let middles: Vec<Option<Vec3>> = sections.iter().map(|s| centroid(&s.curves)).collect();
+    let curved = |j: usize| lines.get(j).is_some_and(Option::is_none);
+    let plane = |i: usize| -> Option<Plane> {
+        let (Some(d), Some(mid)) = (lines.get(i).copied().flatten(), middles.get(i).copied().flatten()) else { return None };
+        let nearest = (1..sections.len()).flat_map(|k| [i.checked_sub(k), Some(i + k)]).flatten().find(|j| curved(*j));
+        let facing = nearest.and_then(|j| sections.get(j)).map(|s| s.plane.normal());
+        let next = middles.get(i + 1).copied().flatten();
+        let prev = i.checked_sub(1).and_then(|j| middles.get(j).copied().flatten());
+        let along = next.map(|q| q - mid).or_else(|| prev.map(|q| mid - q));
+        // The first way to face that is not along the line itself, turned square to it.
+        [facing, along]
+            .into_iter()
+            .flatten()
+            .filter_map(|r| r.normalized())
+            .map(|r| r - d * r.dot(d))
+            .find(|n| n.len() > 1e-6)
+            .and_then(|n| Plane::new(mid, d, n.cross(d)))
+    };
+    sections.iter().enumerate().map(|(i, s)| Section { plane: plane(i).unwrap_or(s.plane), ..s.clone() }).collect()
+}
+
+/// The direction of the line every point of `pts` lies on (within `tol`), if there is one.
+fn line_of(pts: &[Vec3], tol: f64) -> Option<Vec3> {
+    let a = *pts.first()?;
+    let far = pts.iter().copied().max_by(|p, q| p.dist(a).total_cmp(&q.dist(a)))?;
+    let d = (far - a).normalized()?;
+    pts.iter().all(|p| (*p - a - d * (*p - a).dot(d)).len() <= tol).then_some(d)
 }
 
 /// The middle of a section: the centroid of its curves by length, ∫ x ds / ∫ ds, each knot
