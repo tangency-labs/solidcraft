@@ -79,12 +79,15 @@ pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
     let (part, read) = match &job.source {
         Source::Oriented(part) => (part.clone(), None),
         Source::Item { item, units } => {
-            let (mut part, read) = smlib_part(ex, *item, *units).or_else(|refused| surface_part(ex, *item, *units, refused))?;
+            let (mut part, mut read) = smlib_part(ex, *item, *units).or_else(|refused| surface_part(ex, *item, *units, refused))?;
             if part.refused.is_none() {
                 part.check = solidcraft_profile::scope("import", "step.check", || crate::validation::failing_check(&part.body)).unwrap_or_else(|e| {
                     log::debug!(target: "step", "the check of item #{item} could not run: {e}");
                     None
                 });
+                if part.check.is_some() {
+                    solidcraft_profile::scope("import", "step.heal", || heal(&mut part, &mut read, *item));
+                }
             }
             (Arc::new(part), Some(read))
         }
@@ -94,6 +97,32 @@ pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
     // Counted on the part (a placement meshes the same faces).
     let missing = if job.check_mesh { solidcraft_profile::scope("import", "step.mesh_check", || part.body.unmeshed_faces()) } else { 0 };
     Ok(Made { body, missing, part, read })
+}
+
+/// A part whose check fails, healed of its tolerance-scale defects
+/// ([`crate::heal_tolerance_defects`]) when that can be proved and leaves the check failing
+/// fewer tests: its body, its faces' file faces (the heal only removes faces) and its check
+/// replaced, and a note of what was done. Otherwise left as it is.
+pub(super) fn heal(part: &mut Part, read: &mut Vec<Note>, item: u64) {
+    let (body, heal) = match crate::tolerance_heal::heal_tolerance_defects(&part.body) {
+        Ok(Some(healed)) => healed,
+        Ok(None) => return,
+        Err(e) => {
+            log::debug!(target: "step", "the heal of item #{item} could not run: {e}");
+            return;
+        }
+    };
+    let Some(face_origin) = heal.face_source.iter().map(|&f| part.face_origin.get(f).copied()).collect::<Option<Vec<u64>>>() else {
+        log::debug!(target: "step", "the heal of item #{item} named a face the part does not have");
+        return;
+    };
+    part.check = crate::validation::failing_check(&body).unwrap_or_else(|e| {
+        log::debug!(target: "step", "the check of item #{item}'s healed body could not run: {e}");
+        None
+    });
+    part.body = body;
+    part.face_origin = face_origin;
+    read.push(Note::Repaired(format!("healed SMLib's check failures: {}", heal.summary())));
 }
 
 /// The part's body where its instance goes: the very same body at the identity (it keeps the

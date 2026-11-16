@@ -92,6 +92,11 @@ pub struct RepairDone {
     pub modelling: bool,
     /// Its volume, mm³, when it is a closed solid.
     pub volume: Option<f64>,
+    /// The tolerance-scale defects SMLib's check fails that were healed first (edges shorter
+    /// than their tolerance, sliver faces between coincident edges, curve pieces of no length),
+    /// in a line; face indices in the rest of the report are the healed part's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub healed: Option<String>,
 }
 
 /// What `body.repair` returns.

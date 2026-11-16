@@ -107,12 +107,15 @@ pub struct RepairReport {
     pub closed: bool,
     /// Whether SMLib takes the result as it is.
     pub modelling: bool,
+    /// The tolerance-scale defects SMLib's check fails that were healed first
+    /// ([`crate::heal_tolerance_defects`]); face indices after it are the healed part's.
+    pub healed: Option<crate::ToleranceHeal>,
 }
 
 impl RepairReport {
     /// Whether the repair changed anything.
     pub fn changed(&self) -> bool {
-        !self.rebuilt.is_empty() || !self.sewn.is_empty() || self.holes.iter().any(|h| h.patched)
+        self.healed.is_some() || !self.rebuilt.is_empty() || !self.sewn.is_empty() || self.holes.iter().any(|h| h.patched)
     }
 }
 
@@ -133,9 +136,33 @@ pub fn repair(body: &Body, opts: &RepairOptions) -> Result<(Body, RepairReport)>
     if !(opts.gap.is_finite() && opts.gap > 0.0 && opts.gap <= 1.0) {
         return Err(invalid("the gap to sew must be more than 0 and at most 1 mm"));
     }
+    let mut report = RepairReport {
+        faces: [body.record().faces.len(), 0],
+        largest_edge_tolerance: [largest_tolerance(body.record()), 0.0],
+        ..RepairReport::default()
+    };
+
+    // 0. A part SMLib takes whose check fails: its tolerance-scale defects healed first (on a
+    // copy, kept only when the check fails fewer tests and no new kind).
+    // The heal runs the check itself and gives the part back when it passes.
+    let healed = if body.smlib().is_ok() {
+        // a heal that cannot run leaves the repair to the steps below
+        crate::tolerance_heal::heal_tolerance_defects(body).unwrap_or_else(|e| {
+            log::debug!(target: "repair", "the tolerance heal could not run: {e}");
+            None
+        })
+    } else {
+        None
+    };
+    let body = match healed {
+        Some((healed, heal)) => {
+            report.healed = Some(heal);
+            std::borrow::Cow::Owned(healed)
+        }
+        None => std::borrow::Cow::Borrowed(body),
+    };
+    let body: &Body = &body;
     let before = body.record();
-    let mut report =
-        RepairReport { faces: [before.faces.len(), 0], largest_edge_tolerance: [largest_tolerance(before), 0.0], ..RepairReport::default() };
 
     // 1. Faces SMLib refuses on their own, rebuilt from their surfaces.
     let mut record = before.clone();

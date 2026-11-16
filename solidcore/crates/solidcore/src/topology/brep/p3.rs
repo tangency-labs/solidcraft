@@ -3645,8 +3645,28 @@ pub fn collapse_zero_area_two_edge_faces(
     b: &mut Brep,
     env: &mut NotifyEnv<'_>,
 ) -> Result<bool> {
+    let faces = p1::faces(b, None)?;
+    collapse_zero_area_two_edge_faces_among(k, b, env, &faces)
+}
+
+/// [`collapse_zero_area_two_edge_faces`] over `faces` only (in their order): a caller that
+/// has proved which faces are slivers (`crate::heal::tolerance_defects`) collapses those and
+/// leaves every other face as it is. A face of `faces` already gone is skipped.
+///
+/// # Errors
+///
+/// As [`collapse_zero_area_two_edge_faces`].
+pub fn collapse_zero_area_two_edge_faces_among(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    faces: &[FaceId],
+) -> Result<bool> {
     let mut collapsed = false;
-    for f in p1::faces(b, None)? {
+    for &f in faces {
+        if b.face(f).is_err() {
+            continue;
+        }
         let loops = face2::loops(b, f, false, None)?;
         let [l] = loops[..] else {
             continue;

@@ -3974,3 +3974,213 @@ fn a_solid_with_edges_shorter_than_the_stated_tolerance_is_read_at_its_own() {
     assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
     assert_eq!(imp.bodies[0].body.record().tolerance, 0.01);
 }
+
+/// A closed polyhedron record from its corners and its faces (cycles of corner indices,
+/// counter-clockwise seen from outside): planar faces, straight edges and pcurves, every edge
+/// and vertex at `tol` and the body at a fiftieth of it.
+fn polyhedron_record(corners: &[[f64; 3]], cycles: &[&[usize]], tol: f64) -> solidcore_record::brep::Brep {
+    use solidcore_record::brep::{Curve, Curve2, Edge, EdgeUseRef, Face, Loop, OrientedEdge, OrientedFace, Region, Shell, Surface, Vertex};
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let cross = |a: [f64; 3], b: [f64; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    let unit = |a: [f64; 3]| {
+        let n = dot(a, a).sqrt();
+        [a[0] / n, a[1] / n, a[2] / n]
+    };
+    let mut edge_of = std::collections::HashMap::new();
+    let mut ends: Vec<(usize, usize)> = Vec::new();
+    let mut uses: Vec<Vec<EdgeUseRef>> = Vec::new();
+    let mut faces = Vec::new();
+    for (fi, cycle) in cycles.iter().enumerate() {
+        let o = corners[cycle[0]];
+        let x = unit(sub(corners[cycle[1]], o));
+        let z = unit(cross(x, sub(corners[cycle[cycle.len() - 1]], o)));
+        let y = cross(z, x);
+        let uv = |p: [f64; 3]| [dot(sub(p, o), x), dot(sub(p, o), y)];
+        let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+        let mut edges = Vec::new();
+        for k in 0..cycle.len() {
+            let (a, b) = (cycle[k], cycle[(k + 1) % cycle.len()]);
+            let (e, forward) = match edge_of.get(&(b, a)) {
+                Some(&e) => (e, false),
+                None => {
+                    edge_of.insert((a, b), ends.len() as u32);
+                    ends.push((a, b));
+                    uses.push(Vec::new());
+                    (ends.len() as u32 - 1, true)
+                }
+            };
+            uses[e as usize].push(EdgeUseRef { face: fi as u32, r#loop: 0, position: k as u32, upper: !forward });
+            let (s, t) = ends[e as usize];
+            for p in [uv(corners[s]), uv(corners[t])] {
+                for i in 0..2 {
+                    lo[i] = lo[i].min(p[i]);
+                    hi[i] = hi[i].max(p[i]);
+                }
+            }
+            edges.push(OrientedEdge {
+                edge: e,
+                forward,
+                pcurve: Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![uv(corners[s]), uv(corners[t])] },
+            });
+        }
+        faces.push(Face {
+            nurbs: None,
+            surface: Surface::Plane { origin: o, u_axis: x, v_axis: y },
+            domain: [[lo[0], hi[0]], [lo[1], hi[1]]],
+            loops: vec![Loop::Edges { edges }],
+        });
+    }
+    let mut vertex_of = std::collections::HashMap::new();
+    let mut vertices = Vec::new();
+    let edges = ends
+        .iter()
+        .zip(uses)
+        .map(|(&(s, t), uses)| {
+            let mut number = |c: usize| {
+                *vertex_of.entry(c).or_insert_with(|| {
+                    vertices.push(Vertex { point: corners[c], tolerance: tol });
+                    vertices.len() as u32 - 1
+                })
+            };
+            let vs = [number(s), number(t)];
+            Edge { nurbs: None, curve: Curve::Line { start: corners[s], end: corners[t] }, interval: [0.0, 1.0], vertices: vs, tolerance: tol, uses }
+        })
+        .collect();
+    solidcore_record::brep::Brep {
+        version: solidcore_record::brep::VERSION,
+        tolerance: tol / 50.0,
+        regions: vec![Region { shells: vec![0], void: false }, Region { shells: vec![0], void: false }],
+        shells: vec![Shell::Faces { faces: (0..cycles.len() as u32).map(|face| OrientedFace { face, forward: true }).collect(), wires: vec![] }],
+        faces,
+        edges,
+        vertices,
+    }
+}
+
+/// A 10 mm box whose top steps up by `step` along y = 5 (a riser `step` high between the two
+/// halves of the top), as a STEP file whose stated accuracy is `accuracy`, with the corner at
+/// (10, 0, 0) written `gap` off its three edges.
+fn hair_step_step_file(step: f64, gap: f64, accuracy: f64) -> String {
+    let h = 10.0 + step;
+    let corners = [
+        [0.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0],
+        [10.0, 10.0, 0.0],
+        [0.0, 10.0, 0.0],
+        [0.0, 0.0, 10.0],
+        [10.0, 0.0, 10.0],
+        [10.0, 5.0, 10.0],
+        [0.0, 5.0, 10.0],
+        [0.0, 5.0, h],
+        [10.0, 5.0, h],
+        [10.0, 10.0, h],
+        [0.0, 10.0, h],
+    ];
+    let cycles: [&[usize]; 8] =
+        [&[0, 3, 2, 1], &[4, 5, 6, 7], &[7, 6, 9, 8], &[8, 9, 10, 11], &[0, 1, 5, 4], &[2, 3, 11, 10], &[1, 2, 10, 9, 6, 5], &[0, 4, 7, 8, 11, 3]];
+    let mut rec = polyhedron_record(&corners, &cycles, accuracy);
+    if let Some(v) = rec.vertices.iter_mut().find(|v| v.point == [10.0, 0.0, 0.0]) {
+        v.point = [10.0, 0.0, gap];
+    }
+    let body = Body::from_record(rec).unwrap();
+    let text = step_export(&[&body], "Stepped").unwrap();
+    let stated = format!("UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE({accuracy:.17E}");
+    let at = text.find("UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(").expect("the export states its accuracy");
+    let end = at + text[at..].find(')').unwrap();
+    format!("{}{stated}{}", &text[..at], &text[end..])
+}
+
+/// The heal at import is honest about what it cannot do: the hair step itself is read at a
+/// finer tolerance (the reader's own answer to edges shorter than the stated tolerance), so it
+/// imports clean and nothing is healed; with a corner off its edges past the edges'
+/// tolerance (SMLib's pointer stage fails it, which no tolerance-scale heal reaches) it still
+/// needs repair, and no heal is claimed.
+#[test]
+fn a_hair_step_file_imports_clean_and_a_real_gap_still_needs_repair() {
+    let healed = |imp: &StepImport| imp.warnings.iter().any(|w| w.contains("healed SMLib's check failures"));
+    let needs = |imp: &StepImport| imp.report.issues.iter().any(|i| matches!(i.kind, IssueKind::NeedsRepair));
+    let clean = step_import(&hair_step_step_file(3e-4, 0.0, 1e-3)).unwrap();
+    assert_eq!(clean.bodies.len(), 1);
+    assert!(!needs(&clean) && !healed(&clean), "{:?}", clean.warnings);
+    assert_eq!(crate::validation::failing_check(&clean.bodies[0].body).unwrap(), None);
+    for (gap, accuracy) in [(4e-4, 1e-3), (4e-4, 5e-4), (6e-4, 1e-3)] {
+        let imp = step_import(&hair_step_step_file(3e-4, gap, accuracy)).unwrap();
+        assert!(needs(&imp) && !healed(&imp), "{gap} {accuracy}: {:?}", imp.warnings);
+        assert!(crate::validation::failing_check(&imp.bodies[0].body).unwrap().is_some());
+    }
+}
+
+/// The hair-step box as a body (no gap, every tolerance `tol`).
+fn hair_step_body(step: f64, tol: f64) -> Body {
+    let h = 10.0 + step;
+    let corners = [
+        [0.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0],
+        [10.0, 10.0, 0.0],
+        [0.0, 10.0, 0.0],
+        [0.0, 0.0, 10.0],
+        [10.0, 0.0, 10.0],
+        [10.0, 5.0, 10.0],
+        [0.0, 5.0, 10.0],
+        [0.0, 5.0, h],
+        [10.0, 5.0, h],
+        [10.0, 10.0, h],
+        [0.0, 10.0, h],
+    ];
+    let cycles: [&[usize]; 8] =
+        [&[0, 3, 2, 1], &[4, 5, 6, 7], &[7, 6, 9, 8], &[8, 9, 10, 11], &[0, 1, 5, 4], &[2, 3, 11, 10], &[1, 2, 10, 9, 6, 5], &[0, 4, 7, 8, 11, 3]];
+    Body::from_record(polyhedron_record(&corners, &cycles, tol)).unwrap()
+}
+
+/// The import's heal step on a part whose check fails (the reader itself reads the synthetic
+/// hair-step file at a finer tolerance, so the file never reaches it): the riser goes, the
+/// part's check passes, every face left keeps its own file face, and the import notes the heal.
+#[test]
+fn an_imported_part_whose_check_fails_is_healed_where_it_is_read() {
+    use super::parallel::{Note, Part, heal};
+    let body = hair_step_body(3e-4, 1e-3);
+    let check = crate::validation::failing_check(&body).unwrap();
+    assert!(check.is_some());
+    let faces = body.face_count();
+    assert_eq!(faces, 8);
+    let origin: Vec<u64> = (100..100 + faces as u64).collect();
+    let mut part = Part { body, closed: true, file_faces: faces, face_origin: origin.clone(), refused: None, check };
+    let mut read = Vec::new();
+    heal(&mut part, &mut read, 7);
+    assert_eq!(part.check, None);
+    assert_eq!(part.body.face_count(), 7);
+    assert_eq!(crate::validation::failing_check(&part.body).unwrap(), None);
+    // the riser (the record's third face, file face 102) is the one face gone
+    let mut kept = part.face_origin.clone();
+    kept.sort_unstable();
+    assert_eq!(kept, [100, 101, 103, 104, 105, 106, 107]);
+    let [Note::Repaired(note)] = &read[..] else { panic!("one Repaired note: {}", read.len()) };
+    assert!(note.contains("2 edges shorter than their tolerance collapsed") && note.contains("1 sliver faces"), "{note}");
+
+    // a part whose check passes is left as it is, with no note
+    let clean = hair_step_body(3e-3, 1e-3);
+    assert_eq!(crate::validation::failing_check(&clean).unwrap(), None);
+    let mut part = Part { body: clean, closed: true, file_faces: 8, face_origin: origin.clone(), refused: None, check: None };
+    let mut read = Vec::new();
+    heal(&mut part, &mut read, 7);
+    assert!(read.is_empty());
+    assert_eq!(part.face_origin, origin);
+}
+
+/// Repair heals a part's tolerance-scale defects first: the hair step's riser, its end edges
+/// shorter than their tolerance, goes, and the part passes SMLib's full check (#17689).
+#[test]
+fn repair_heals_a_hair_step_that_fails_the_check() {
+    let body = hair_step_body(3e-4, 1e-3);
+    assert!(crate::validation::failing_check(&body).unwrap().is_some());
+    let (out, report) = crate::repair(&body, &crate::RepairOptions { gap: 0.01, patch_holes: false }).unwrap();
+    let healed = report.healed.as_ref().expect("the heal ran");
+    assert_eq!((healed.squeezed_edges, healed.collapsed_faces), (2, 1), "{healed:?}");
+    assert_eq!(healed.failed, [7, 0]);
+    assert!(report.changed());
+    assert_eq!(out.face_count(), 7);
+    assert_eq!(crate::validation::failing_check(&out).unwrap(), None);
+    let (v0, v1) = (measure(&body).unwrap().volume, measure(&out).unwrap().volume);
+    assert!((v1 - v0).abs() <= 601.0 * healed.largest_bound, "{v0} {v1}");
+}

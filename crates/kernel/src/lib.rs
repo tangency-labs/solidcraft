@@ -152,6 +152,7 @@ mod thin_face_tests;
 mod thread_display_tests;
 #[cfg(test)]
 mod thread_tests;
+mod tolerance_heal;
 mod topo;
 mod tspline;
 #[cfg(test)]
@@ -244,6 +245,7 @@ pub use surfaces::{
     stitch, sweep_sheet, sweep_sheet_points, sweep_sheet_points_with, sweep_sheet_with, thicken, unstitch,
 };
 pub use sweep_path::{RailFit, SweepControl, SweepOrientation, sweep_path, sweep_path_with};
+pub use tolerance_heal::{ToleranceHeal, heal_tolerance_defects};
 pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at, material_in_ring};
 pub use topo::{TopoCounts, merged_topology, seam_flags, whole_edge};
 pub use tspline::tspline_sheet;
