@@ -875,6 +875,19 @@ mod fold_witness_tests {
         (n / n.length(), n.length())
     }
 
+    /// The rounding bound `2 γ_4 |Du| |Dv|` of `s`'s normal at `uv`, at or below which the
+    /// fold rule gives the normal no direction.
+    fn normal_noise(s: &Surface, uv: Point2) -> f64 {
+        let mut s = s.clone();
+        let SurfaceKind::BSpline(b) = s.kind_mut() else {
+            panic!("not a B-spline surface")
+        };
+        *b.out_of_bounds_enabled_mut() = true;
+        let k = Kernel::default();
+        let d = s.evaluate_step(&k, uv, 1, 1, EvaluateFlags::default()).unwrap();
+        2.0 * solidcore::nurbs::math::gamma(4) * d[1][0].length() * d[0][1].length()
+    }
+
     /// gen2303 keeps its cover (as on main): the only witness the fork's rule had was the
     /// normal at the corner (-0.938, 0) of the surface's own domain, which is exactly
     /// zero (a degenerate point, no direction). Every drop of the cover is within the
@@ -910,8 +923,9 @@ mod fold_witness_tests {
     ];
 
     /// Each refusal names its reversed pair, and the pair is recomputed here from the
-    /// surface's own derivatives: the two normals exist (not zero), their dot product is
-    /// the one reported and is negative, and the pair is one grid step apart in one
+    /// surface's own derivatives: both normals are longer than their rounding bound (so
+    /// have a direction), their dot product is the one reported and is negative, and the
+    /// pair is one grid step apart in one
     /// parameter, in the continuation past the surface's own domain.
     #[test]
     fn six_folded_continuations_refuse_with_their_reversed_pair() {
@@ -929,7 +943,10 @@ mod fold_witness_tests {
             assert!(uv.x == neighbour.x || uv.y == neighbour.y, "gen{index:04}");
             let (n0, l0) = unit_normal(&input, uv);
             let (n1, l1) = unit_normal(&input, neighbour);
-            assert!(l0 > 0.0 && l1 > 0.0, "gen{index:04}: {l0} {l1}");
+            assert!(
+                l0 > normal_noise(&input, uv) && l1 > normal_noise(&input, neighbour),
+                "gen{index:04}: {l0} {l1}"
+            );
             // Exact: a refused cover has not changed the surface, so these are the
             // evaluations and the arithmetic the rule did.
             assert_eq!(n0.dot(n1), dot, "gen{index:04}");

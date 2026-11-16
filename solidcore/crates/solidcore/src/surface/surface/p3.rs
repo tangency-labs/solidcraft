@@ -1633,7 +1633,9 @@ impl Surface {
                 let Some((normal, length, noise)) = self.step_normal_with_noise(k, uv)? else {
                     return Ok(Some(ContinuationFold::NotEvaluated { uv }));
                 };
-                if !length.is_finite() {
+                // A non-finite normal, or a bound that overflowed (it would skip a sample
+                // that has a direction), refuses.
+                if !length.is_finite() || !noise.is_finite() {
                     return Ok(Some(ContinuationFold::NotEvaluated { uv }));
                 }
                 // No direction: within the cross product's own rounding (also an exact
