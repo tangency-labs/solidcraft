@@ -16,7 +16,7 @@ use solidcore::Vec3;
 
 use crate::vec::VecExt as _;
 
-use super::{PoleCap, SplitSide, cap_ring, edges, on_edges, size};
+use super::{PoleCap, SplitSide, cap_fan, cap_ring, edges, on_edges, ring_off_boundary, size};
 
 fn record(body: &solidcore_ops::Body) -> brep::Brep {
     body.to_record().expect("the body's record").0
@@ -385,6 +385,54 @@ fn a_box_on_the_mesh_path_keeps_its_angle_and_its_side() {
     assert_closed(&w, "box");
 }
 
+/// The kernel rig's `booleans/4431-tapered-text-cut-over-block-edge`, its body `Body1` as
+/// SolidCraft exports it (frozen in `tests/data`). Its face 330 is a spline sliver 1 mm long and
+/// 7e-5 mm wide at its base, tapering to a side collapsed to one point (a pole, within its
+/// vertices' tolerance of 2e-5 mm). Its top quarter is narrower than that reach, so the node of
+/// its loop below the pole, 0.25 mm from it, is a pole too by the kernel's classifier: the pole
+/// caps took only the pole's copies as a cap and refused the face ("a pole next to another pole
+/// on its loop"). Meshed at SolidCraft's export spec (a chord of 1/5000 of its size), it meshes:
+/// the run of pole nodes is one cap, every face has triangles, nothing folds, and the body's
+/// mesh is closed.
+#[test]
+fn a_sliver_narrower_than_its_pole_reach_meshes_on_the_mesh_path() {
+    let b = crate::fixtures::fixture("rig_tapered_text_cut_over_block_edge");
+    // SolidCraft's size of the body (`Body::size`): the box diagonal of its vertices and of each
+    // edge's points at a quarter, a half and three quarters of its interval.
+    let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    let mut add = |p: [f64; 3]| {
+        for k in 0..3 {
+            lo[k] = lo[k].min(p[k]);
+            hi[k] = hi[k].max(p[k]);
+        }
+    };
+    for v in &b.vertices {
+        add(v.point);
+    }
+    for e in &b.edges {
+        let curve = solidcore_convert::curve(e.parameters()).expect("the edge's curve");
+        let c = solidcore::eval::CurveEval::new(&curve).expect("evaluates");
+        let [t0, t1] = e.interval;
+        for i in 1..4 {
+            let p = c.point(t0 + (t1 - t0) * f64::from(i) / 4.0).expect("on the curve");
+            add([p.x, p.y, p.z]);
+        }
+    }
+    let size = length(sub(P::new(hi[0], hi[1], hi[2]), P::new(lo[0], lo[1], lo[2])));
+    let spec = MeshSpec::chord(crate::MeshTolerance::export_of(size).chord);
+    let (plan, _) = meshed(&b, &spec, size, None);
+    let (m, refused) = plan.evaluate();
+    assert!(refused.is_empty(), "{refused:?}");
+    let mut faces: Vec<u32> = m.tri_face.clone();
+    faces.sort_unstable();
+    faces.dedup();
+    assert_eq!(faces.len(), b.faces.len(), "every face has triangles");
+    assert_nothing_folds(&m, "sliver body");
+    let (w, refused) = plan.welded();
+    assert!(refused.is_empty(), "{refused:?}");
+    assert_closed(&w, "sliver body");
+}
+
 /// A cylinder's wall, shaped by its triangles in 3D, keeps 20 degrees (FieldCraft's trial at
 /// e728f90e: 0.08 degrees on a cylinder's side, shaped in (u, v) and then flipped toward the
 /// surface's normals as the display is).
@@ -588,3 +636,120 @@ fn a_pole_ring_is_even_round_the_pole_in_3d() {
     }
 }
 
+
+/// The (u, v) points and 3D points of a cap test: ring nodes 0..=5 along v = 0 from (0, 0) to
+/// (1, 0), and the run's nodes from 10 on, at the given (u, v) (their 3D points: the same, at
+/// z = 0).
+fn cap_case(run: &[[f64; 2]]) -> (Vec<[f64; 2]>, Vec<Vec3>) {
+    let mut uv = vec![[f64::NAN; 2]; 10 + run.len()];
+    for (k, q) in uv.iter_mut().enumerate().take(6) {
+        *q = [k as f64 / 5.0, 0.0];
+    }
+    for (k, q) in run.iter().enumerate() {
+        uv[10 + k] = *q;
+    }
+    let pos = uv.iter().map(|q| Vec3::new(q[0], q[1], 0.0)).collect();
+    (uv, pos)
+}
+
+/// Every ring segment of `ring` is in exactly one triangle of `tris`, every triangle is
+/// counter-clockwise in (u, v), and the triangles cover the polygon of the ring and the run.
+fn assert_fan_covers(tris: &[[u32; 3]], ring: &[usize], run: &[usize], uv: &[[f64; 2]]) {
+    let area = |[a, b, c]: [usize; 3]| {
+        let (qa, qb, qc) = (uv[a], uv[b], uv[c]);
+        0.5 * ((qb[0] - qa[0]) * (qc[1] - qa[1]) - (qb[1] - qa[1]) * (qc[0] - qa[0]))
+    };
+    for w in ring.windows(2) {
+        let uses = tris.iter().filter(|t| t.contains(&(w[0] as u32)) && t.contains(&(w[1] as u32))).count();
+        assert_eq!(uses, 1, "ring segment {w:?} in {uses} triangles: {tris:?}");
+    }
+    let mut sum = 0.0;
+    for t in tris {
+        let a = area(t.map(|i| i as usize));
+        assert!(a > 0.0, "triangle {t:?} is not counter-clockwise: {a}");
+        sum += a;
+    }
+    // The polygon: the ring from its start to its end, then the run back.
+    let poly: Vec<usize> = ring.iter().copied().chain(run.iter().rev().copied()).collect();
+    let whole: f64 = (0..poly.len()).map(|k| {
+        let (p, q) = (uv[poly[k]], uv[poly[(k + 1) % poly.len()]]);
+        0.5 * (p[0] * q[1] - q[0] * p[1])
+    }).sum();
+    assert!((sum - whole).abs() <= 1e-12, "the fan covers {sum}, the cap {whole}");
+}
+
+/// A run of poles at two points is fanned from each to an even share of the ring's inner nodes,
+/// with one triangle where they meet; the fan covers the cap once.
+#[test]
+fn a_pole_run_at_two_points_is_fanned_evenly() {
+    let run = [[0.4, 1.0], [0.6, 1.0]];
+    let (uv, pos) = cap_case(&run);
+    let ring = [0, 1, 2, 3, 4, 5];
+    let tris = cap_fan(&[10, 11], &ring, &uv, &pos).expect("fanned");
+    assert_fan_covers(&tris, &ring, &[10, 11], &uv);
+    // Four inner segments, two each, then the ring's last segment from the last point.
+    let from = |c: u32| tris.iter().filter(|t| t.contains(&c) && !t.contains(&(if c == 10 { 11 } else { 10 }))).count();
+    assert_eq!((from(10), from(11)), (2, 3), "{tris:?}");
+}
+
+/// A run at more points than the ring has inner nodes still covers the cap once.
+#[test]
+fn a_pole_run_at_more_points_than_inner_nodes_is_fanned() {
+    let run = [[0.3, 1.0], [0.5, 1.0], [0.7, 1.0]];
+    let (uv, pos) = cap_case(&run);
+    let ring = [0, 2, 4, 5];
+    let tris = cap_fan(&[10, 11, 12], &ring, &uv, &pos).expect("fanned");
+    assert_fan_covers(&tris, &ring, &[10, 11, 12], &uv);
+}
+
+/// A run that bends toward the ring past what its share of the ring can see would fan into
+/// overlapping triangles: it is not fanned.
+#[test]
+fn a_pole_run_bending_toward_its_ring_is_not_fanned_over_itself() {
+    let run = [[0.3, 1.0], [0.5, 0.1], [0.7, 1.0]];
+    let (uv, pos) = cap_case(&run);
+    assert!(cap_fan(&[10, 11, 12], &[0, 2, 4, 5], &uv, &pos).is_none());
+}
+
+/// A run at two points needs an inner node on its ring; copies of one point do not.
+#[test]
+fn a_pole_run_at_two_points_needs_an_inner_ring_node() {
+    let (uv, pos) = cap_case(&[[0.4, 1.0], [0.6, 1.0]]);
+    assert!(cap_fan(&[10, 11], &[0, 5], &uv, &pos).is_none());
+    let (uv, mut pos) = cap_case(&[[0.4, 1.0], [0.6, 1.0]]);
+    pos[11] = pos[10];
+    let tris = cap_fan(&[10, 11], &[0, 5], &uv, &pos).expect("one point");
+    assert_fan_covers(&tris, &[0, 5], &[10, 11], &uv);
+}
+
+/// The ring line from (0, 0) to (1, 0) with the pole above it at (0.5, 1): the loop's other
+/// nodes, and the sides it asks to split.
+fn ring_hits(rest: &[[f64; 2]], hole: &[[f64; 2]], pole: [f64; 2]) -> Vec<SplitSide> {
+    // Loop: before (0), pole (1), after (2), then the rest; the hole is a loop of its own.
+    let mut uvs = vec![[0.0, 0.0], pole, [1.0, 0.0]];
+    uvs.extend_from_slice(rest);
+    let outer = 0..uvs.len();
+    uvs.extend_from_slice(hole);
+    let ranges = [outer.clone(), outer.end..uvs.len()];
+    let fixed: Vec<Vec3> = uvs.iter().map(|q| Vec3::new(q[0], q[1], 0.0)).collect();
+    let cap = PoleCap { lp: 0, copies: vec![1], before: 0, after: 2 };
+    ring_off_boundary(&cap, &uvs, &fixed, &ranges)
+}
+
+/// The ring is moved only where a node of a loop lies on it or on the pole's side of it within
+/// its span: not for nodes beyond its ends or across it, nor where the pole's side is unknown.
+#[test]
+fn a_pole_ring_is_moved_only_off_a_boundary_it_meets() {
+    let below = [[0.5, -1.0]];
+    assert!(ring_hits(&below, &[], [0.5, 1.0]).is_empty(), "the rest of the loop lies across the ring");
+    assert_eq!(ring_hits(&[[1.5, 0.0], [0.5, -1.0], [-0.5, 0.0]], &[], [0.5, 1.0]).len(), 0, "nodes beyond its ends");
+    assert_eq!(ring_hits(&[[0.0, -1.0], [0.0, 0.0]], &[], [0.5, 1.0]).len(), 0, "a node at its start (t = 0)");
+    let on = ring_hits(&[[0.5, 0.0], [0.5, -1.0]], &[], [0.5, 1.0]);
+    assert_eq!(on.len(), 2, "a node on the ring");
+    assert!(on.iter().all(|s| s.at == [0.5]));
+    assert_eq!(ring_hits(&below, &[[0.5, 0.3], [0.6, 0.4], [0.4, 0.4]], [0.5, 1.0]).len(), 2, "a hole on the pole's side");
+    // Its upper nodes past the ring's ends, its lower one across it: only its sides cross.
+    assert_eq!(ring_hits(&below, &[[-0.1, 0.2], [1.1, 0.2], [0.5, -0.1]], [0.5, 1.0]).len(), 2, "a hole reaching over the ring");
+    assert!(ring_hits(&[[0.5, 0.0]], &[], [0.5, f64::NAN]).is_empty(), "no pole side: no split");
+    assert!(ring_hits(&[[0.5, 0.0]], &[], [0.5, 0.0]).is_empty(), "the pole on the ring line: no split");
+}
