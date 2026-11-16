@@ -147,7 +147,7 @@ pub(crate) fn show_editor(app: &mut SolveApp, ctx: &egui::Context) {
                                             |ui| {
                                                 for (id, name) in &catalog {
                                                     if !needle.is_empty()
-                                                        && !name.to_lowercase().contains(&needle)
+                                                        && !solidcraft_ui_text::tr_label(name).to_lowercase().contains(&needle)
                                                         && !id.to_lowercase().contains(&needle)
                                                     {
                                                         continue;
