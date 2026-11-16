@@ -57,6 +57,8 @@ pub struct Form {
     pub angle: String,
     pub margin: String,
     pub avoid_margin: String,
+    /// Copies may hang over the face's edges (only their centres on the face).
+    pub overhang: bool,
     pub flip: bool,
     /// The instances go into a browser group (on by default).
     pub group: bool,
@@ -96,6 +98,7 @@ impl Default for Form {
             angle: String::new(),
             margin: String::new(),
             avoid_margin: String::new(),
+            overhang: false,
             flip: false,
             group: true,
             attract: false,
@@ -150,6 +153,9 @@ pub(crate) fn draw(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
         enter |= hint_row(ui, "Grid angle", &mut f.angle, "none");
     }
     enter |= hint_row(ui, "Edge margin", &mut f.margin, "none");
+    form_row(ui, "", |ui| {
+        ui_kit::checkbox(ui, "Allow overhang", &mut f.overhang);
+    });
     if avoiding {
         enter |= hint_row(ui, "Avoid margin", &mut f.avoid_margin, "none");
     }
@@ -223,6 +229,9 @@ pub(crate) fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
     put("margin", &f.margin);
     if f.layout == 1 {
         p["staggered"] = json!(true);
+    }
+    if f.overhang {
+        p["overhang"] = json!(true);
     }
     if f.flip {
         p["flip"] = json!(true);
@@ -300,7 +309,9 @@ pub(crate) fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
 
 /// The dialog's values for a saved face pattern.
 pub(crate) fn form_of(pattern: &PatternKind) -> Option<Form> {
-    let PatternKind::Face { face, count1, count2, staggered, random, angle, margin, avoid, flip, anchor: _, attract } = pattern else { return None };
+    let PatternKind::Face { face, count1, count2, staggered, random, angle, margin, overhang, avoid, flip, anchor: _, attract } = pattern else {
+        return None;
+    };
     let s = |e: &Option<solidcraft_engine::doc::Expr>| e.as_deref().map(str::to_string).unwrap_or_default();
     let mut f = Form {
         count1: count1.to_string(),
@@ -308,6 +319,7 @@ pub(crate) fn form_of(pattern: &PatternKind) -> Option<Form> {
         layout: usize::from(*staggered),
         angle: s(angle),
         margin: s(margin),
+        overhang: *overhang,
         flip: *flip,
         saved_face: serde_json::to_value(face).ok(),
         ..Form::default()

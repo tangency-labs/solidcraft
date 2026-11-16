@@ -1110,6 +1110,11 @@ pub struct PatternFaceParams {
     /// measured from the copy itself. Default: 0.
     #[serde(default)]
     pub margin: Option<LengthExpr>,
+    /// Copies may hang over the face's edges and holes: only each copy's centre has to be on the
+    /// face, and the edge margin is measured from it. Default: false (every copy lies wholly on
+    /// the face).
+    #[serde(default)]
+    pub overhang: Option<bool>,
     /// Geometry no copy may come near.
     #[serde(default)]
     pub avoid: Option<AvoidParams>,

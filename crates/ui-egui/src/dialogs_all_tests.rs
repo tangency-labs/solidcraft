@@ -941,6 +941,8 @@ fn face_pattern_attractors_come_from_the_advanced_option() {
         f.scale_far = "0.5".into();
         f.falloff = 1;
         f.group = false;
+        // The fixture's cylinders, 20 mm across, stand on a side face 5 mm tall: they hang over it.
+        f.overhang = true;
     }
     set_attractor_inputs(&mut d, true);
     let near = edge_sel(&h.app.session, Vec3::new(10.0, 0.0, 5.0)).unwrap();
@@ -977,7 +979,8 @@ fn face_pattern_attractors_come_from_the_advanced_option() {
 }
 
 /// Pattern on Face's Avoid pick takes bodies and points but not edges; with picks, the dialog sends
-/// them with the avoid margin, and an edit brings them back as picks.
+/// them with the avoid margin, and an edit brings them back as picks. Allow overhang goes and
+/// comes back with them.
 #[test]
 fn face_pattern_avoid_sends_its_picks_and_margin_and_restores_them() {
     use crate::dialogs_face_pattern::AVOID;
@@ -987,21 +990,23 @@ fn face_pattern_avoid_sends_its_picks_and_margin_and_restores_them() {
     assert!(avoid.multi && avoid.accept & BODIES != 0 && avoid.accept & EDGES == 0, "{:?}", avoid.accept);
     let (_, plain) = apply_commands(&h.app, &d).unwrap().remove(0);
     assert!(plain.get("avoid").is_none(), "nothing avoided until picked: {plain}");
+    assert!(plain.get("overhang").is_none(), "no overhang by default: {plain}");
     d.inputs.iter_mut().find(|i| i.label == AVOID).unwrap().items = vec![Sel::Body { name: "Body2".into() }];
     if let Kind::FacePattern(f) = &mut d.kind {
         f.margin = "1 mm".into();
         f.avoid_margin = "2 mm".into();
+        f.overhang = true;
     }
     let (command, params) = apply_commands(&h.app, &d).unwrap().remove(0);
     assert_eq!(params["avoid"], json!({"bodies": ["Body2"], "margin": "2 mm"}), "{params}");
-    assert_eq!(params["margin"], json!("1 mm"), "{params}");
+    assert_eq!((&params["margin"], &params["overhang"]), (&json!("1 mm"), &json!(true)), "{params}");
     let reply = h.app.run(&command, params).unwrap();
     let feature = reply["feature"].as_u64().unwrap();
     let edit = super::for_feature(&h.app, feature, None).expect("the pattern opens for editing");
     let picks = edit.inputs.iter().find(|i| i.label == AVOID).map(|i| i.items.clone()).unwrap_or_default();
     assert_eq!(picks, vec![Sel::Body { name: "Body2".into() }]);
     let Kind::FacePattern(f) = &edit.kind else { panic!("{:?}", edit.kind) };
-    assert_eq!((f.margin.as_str(), f.avoid_margin.as_str()), ("1 mm", "2 mm"));
+    assert_eq!((f.margin.as_str(), f.avoid_margin.as_str(), f.overhang), ("1 mm", "2 mm", true));
     let (_, again) = apply_commands(&h.app, &edit).unwrap().remove(0);
     assert_eq!(again["params"]["avoid"], json!({"bodies": ["Body2"], "margin": "2 mm"}), "{again}");
 }
@@ -1017,6 +1022,8 @@ fn face_pattern_random_layout_sends_and_restores_its_noise() {
         f.random_count = "7".into();
         f.seed = "42".into();
         f.noise = 3;
+        // The fixture's cylinders, 20 mm across, stand on a side face 5 mm tall: they hang over it.
+        f.overhang = true;
     }
     let (command, params) = apply_commands(&h.app, &d).unwrap().remove(0);
     assert_eq!(params["random"], json!({"count": "7", "seed": 42, "noise": "brown"}), "{params}");

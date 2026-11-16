@@ -2,6 +2,7 @@
   "en": {
     "cmd.solid.pattern.face": "Pattern on Face",
     "help.solid.pattern.face": "Repeats the selected bodies over a face, on a grid or at random places, each instance standing along the face's normal; under Advanced, attractors vary each instance's size, height and turn. Use it for studs, perforations and textures on flat or curved faces.",
+    "ui.face_pattern.allow_overhang": "Allow overhang",
     "ui.face_pattern.attract_note": "Each instance changes with its distance to the nearest attractor",
     "ui.face_pattern.attractors": "Attractors",
     "ui.face_pattern.avoid": "Avoid",
@@ -39,6 +40,7 @@
   "de": {
     "cmd.solid.pattern.face": "Muster auf Fläche",
     "help.solid.pattern.face": "Wiederholt die gewählten Körper über eine Fläche, im Raster oder an zufälligen Stellen, jede Instanz entlang der Flächennormale; unter Erweitert ändern Attraktoren Größe, Höhe und Drehung jeder Instanz. Für Noppen, Lochungen und Texturen auf ebenen oder gekrümmten Flächen.",
+    "ui.face_pattern.allow_overhang": "Überhang zulassen",
     "ui.face_pattern.attract_note": "Jede Instanz ändert sich mit ihrem Abstand zum nächsten Attraktor",
     "ui.face_pattern.attractors": "Attraktoren",
     "ui.face_pattern.avoid": "Meiden",
@@ -76,6 +78,7 @@
   "ar": {
     "cmd.solid.pattern.face": "نمط على وجه",
     "help.solid.pattern.face": "يكرر الأجسام المحددة على وجه، في شبكة أو في أماكن عشوائية، وكل نسخة قائمة على العمودي على الوجه؛ ضمن الخيارات المتقدمة تغيّر عناصر الجذب حجم كل نسخة وارتفاعها ودورانها. استخدمه للنتوءات والثقوب والملمس على الأوجه المستوية أو المنحنية.",
+    "ui.face_pattern.allow_overhang": "السماح بالبروز",
     "ui.face_pattern.attract_note": "تتغير كل نسخة بحسب بعدها عن أقرب عنصر جذب",
     "ui.face_pattern.attractors": "نقاط الجذب",
     "ui.face_pattern.avoid": "تجنب",
@@ -113,6 +116,7 @@
   "he": {
     "cmd.solid.pattern.face": "תבנית על פאה",
     "help.solid.pattern.face": "חוזר על הגופים הנבחרים על פני פאה, ברשת או במקומות אקראיים, כל מופע עומד לאורך הנורמל של הפאה; תחת מתקדם, גורמי משיכה משנים את הגודל, הגובה והסיבוב של כל מופע. לבליטות, לניקובים ולמרקמים על פאות שטוחות או מעוקלות.",
+    "ui.face_pattern.allow_overhang": "אפשר בליטה",
     "ui.face_pattern.attract_note": "כל מופע משתנה לפי מרחקו מגורם המשיכה הקרוב ביותר",
     "ui.face_pattern.attractors": "נקודות משיכה",
     "ui.face_pattern.avoid": "הימנעות",
@@ -150,6 +154,7 @@
   "ja": {
     "cmd.solid.pattern.face": "面上のパターン",
     "help.solid.pattern.face": "選択したボディを面上に格子状またはランダムな位置に繰り返し、各インスタンスを面の法線方向に立てます。詳細設定ではアトラクターで各インスタンスの大きさ・高さ・回転を変えられます。平面や曲面上の突起、穴、テクスチャーに使います。",
+    "ui.face_pattern.allow_overhang": "はみ出しを許可",
     "ui.face_pattern.attract_note": "各インスタンスは最も近いアトラクターからの距離に応じて変化します",
     "ui.face_pattern.attractors": "アトラクター",
     "ui.face_pattern.avoid": "回避",
@@ -187,6 +192,7 @@
   "vi": {
     "cmd.solid.pattern.face": "Mẫu trên mặt",
     "help.solid.pattern.face": "Lặp lại các thân đã chọn trên một mặt, theo lưới hoặc tại vị trí ngẫu nhiên, mỗi thể hiện đứng theo pháp tuyến của mặt; trong phần Nâng cao, các điểm hút thay đổi kích thước, độ cao và góc xoay của từng thể hiện. Dùng cho núm, lỗ đục và vân trên mặt phẳng hoặc cong.",
+    "ui.face_pattern.allow_overhang": "Cho phép nhô ra",
     "ui.face_pattern.attract_note": "Mỗi thể hiện thay đổi theo khoảng cách tới điểm hút gần nhất",
     "ui.face_pattern.attractors": "Điểm hút",
     "ui.face_pattern.avoid": "Tránh",
@@ -224,6 +230,7 @@
   "zh": {
     "cmd.solid.pattern.face": "面上阵列",
     "help.solid.pattern.face": "在一个面上按网格或随机位置重复所选实体，每个实例沿面的法向竖立；在“高级”中，吸引对象可改变每个实例的大小、高度和旋转。用于平面或曲面上的凸点、孔和纹理。",
+    "ui.face_pattern.allow_overhang": "允许悬出",
     "ui.face_pattern.attract_note": "每个实例随其到最近吸引对象的距离而变化",
     "ui.face_pattern.attractors": "吸引点",
     "ui.face_pattern.avoid": "避开",
@@ -261,6 +268,7 @@
   "ko": {
     "cmd.solid.pattern.face": "면 위 패턴",
     "help.solid.pattern.face": "선택한 바디를 면 위에 격자 또는 무작위 위치로 반복하며 각 인스턴스를 면의 법선 방향으로 세웁니다. 고급에서 어트랙터로 각 인스턴스의 크기, 높이, 회전을 바꿀 수 있습니다. 평면이나 곡면의 돌기, 구멍, 질감에 사용합니다.",
+    "ui.face_pattern.allow_overhang": "돌출 허용",
     "ui.face_pattern.attract_note": "각 인스턴스는 가장 가까운 어트랙터까지의 거리에 따라 달라집니다",
     "ui.face_pattern.attractors": "어트랙터",
     "ui.face_pattern.avoid": "회피",

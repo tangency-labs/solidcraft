@@ -3117,6 +3117,11 @@ pub enum PatternKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Edge margin")]
         margin: Option<Expr>,
+        /// Copies may hang over the face's edges and holes: only each copy's centre has to be on
+        /// the face, and the edge margin is measured from that centre. Off, every copy lies
+        /// wholly on the face, clear of its edges even at an edge margin of 0.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        overhang: bool,
         /// Geometry no copy may come near.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         avoid: Option<Box<Avoid>>,
