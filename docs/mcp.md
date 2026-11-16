@@ -33,6 +33,13 @@ solidcraft --control 7878 &
 solidcraft-cli mcp --connect 127.0.0.1:7878
 ```
 
+Picking geometry with `execute` `view.pick` requires a connection to the running SolidCraft
+app. It is unavailable with `--headless` or when automatic discovery starts a headless session.
+`frame: "model"` chooses the pixels of a rendered model image; it does not enable headless MCP
+picking. The app handles this command outside the engine registry, so `list_commands` and
+`describe_command` do not include it, even when connected. See `ui.pick` in the
+[control protocol](control-protocol.md) for pixel and ray parameters.
+
 ### The app listens when turned on
 
 The desktop app opens its control channel on `127.0.0.1:27878` (or the next free port when that
@@ -104,7 +111,12 @@ Tool calls read, write and delete files only inside the server's folders:
 - the server's own scratch folder (a new private `solidcraft-mcp-*` folder in the temporary
   folder), where `screenshot` without a `path` goes;
 - every `--allow-path DIR` (repeat it for more). A folder named here is reached in full,
-  hidden files included.
+  hidden files included. A folder that does not exist (or can't be resolved) is left out and
+  stderr says so (`allow-path DIR ignored: it doesn't exist`); the server still starts. In a
+  server that decides paths itself (not bridged to the app with `--connect`), a refused path
+  under it names that `--allow-path` in the error. A folder that does not exist yet is not
+  accepted: create it, then name it. `--require-allow-path` makes the server refuse to start
+  when every `--allow-path` is unusable.
 
 The CLI removes its own scratch folder if it is empty when the MCP command returns, including
 after a startup error. A nonempty scratch folder is kept, so saved files are not deleted.
@@ -323,6 +335,7 @@ The `skill_reference` tool returns these documents from the copies built into So
 
 | Tool | Arguments | What it does |
 |---|---|---|
+| `version` | none | The SolidCraft build answering the call: `{version, commit, mode}`. Connected sessions report the app's version and commit with `mode: "app"`; headless sessions report their own build with `mode: "headless"`. `commit` is `"unknown"` when unavailable, including builds without Git. This reads metadata without opening Help or returning diagnostics. Call it on its own, outside a batch. |
 | `list_commands` | `filter?`, `prefix?`, `panel?`, `compact?`, `fields?`, `limit?`, `offset?` | The command catalog: id, label, tab/panel, shortcut, parameter docs, enabled now. `filter` matches id, label, tab and panel. `prefix` keeps the ids that start with it (`"sketch."`) and `panel` the commands of one whole toolbar panel or tab (`"Modify"`), both ignoring case. `compact: true` keeps only `id` and `label` of each entry, about an eighth of the size; `fields` keeps the keys it lists instead. `limit` and `offset` page the matches, and the reply becomes `{commands, total, offset, next_offset}` (`next_offset` is null on the last page). With none of these the reply is the whole catalog, about 350 KB. |
 | `describe_command` | `id` | One command's parameter docs (`params`) and, for commands with a typed contract (every new command, and more of the older ones as they are converted), the JSON Schemas (2020-12) of its parameters (`input`) and of a successful result (`output`); `null` for the others. The same as `execute` `engine.describe {command}`. |
 | `execute` | `command`, `params?`, `verbose?` (default true), `expect?` | Run any command with JSON parameters (`list_commands` shows them). Failures leave the design unchanged. A feature command replies with the feature (`feature`, `name`), every body (`bodies`) and the bodies it created, changed and removed (`created_bodies`, `changed_bodies`, `removed_bodies`). `verbose: false` uses the same compact reply as `batch`. `expect` checks the design after the command, as it does for `batch` (see below). |
@@ -519,7 +532,10 @@ changed body even when no body name was added or removed. Sketch replies keep ne
 IDs under `created` and omit only identical top-level `points`, `curves`,
 `constraints` and `dimensions` lists. When a sketch command creates more points than
 its new curves have ends (the poles of an offset's splines), `created.points` becomes
-`created.point_count`: refer to those curves by their ids. Other fields and errors are unchanged;
+`created.point_count`: refer to those curves by their ids. A `sketch.move_points` reply gives
+`moved_count` and `reached` (true when every point reached its target) instead of the `moved`
+list, and lists only the moves that missed under `not_reached` (`point`, `to`, `at`).
+Other fields and errors are unchanged;
 inspection commands still return their complete results. Compaction uses the
 engine's reply directly, without an additional design-inspection request.
 

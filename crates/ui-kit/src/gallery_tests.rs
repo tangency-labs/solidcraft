@@ -1437,11 +1437,8 @@ pub const ELEMENTS: &[Element] = &[
             sort_header(ui, "Name", &mut Sort::Ascending);
         });
     }),
-    element!("plus_header", |ui, _| {
-        ui.allocate_ui(vec2(140.0, row_height()), |ui| {
-            ui.set_min_size(vec2(140.0, row_height()));
-            plus_header(ui, |_| {});
-        });
+    element!("add_column_button", |ui, _| {
+        add_column_button(ui, |_| {});
     }),
     element!("table_custom", |ui, _| {
         table_custom(ui, "custom", &[Column::new("Name", 1.0)], "Empty", |ui, table| {
@@ -1744,6 +1741,9 @@ pub const ELEMENTS: &[Element] = &[
     }),
     element!("expr_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         expr_row(ui, "Gallery", &mut s.value);
+    }),
+    element!("action_row", "dialog:action:gallery", Some("dialog:action:gallery"), |ui, _| {
+        action_row(ui, "gallery", "Option");
     }),
     element!("value_row", "dialog:row:Gallery", None, |ui, _| {
         value_row(ui, "Gallery", "XY plane");
@@ -2701,6 +2701,53 @@ fn preset_card_and_help_icon_behave() {
         let help = help_icon(ui, "Help text");
         assert!(help.rect.width() > 8.0 && help.rect.width() < 20.0);
     });
+}
+
+/// The (i) shows its text after a click or a key, not only on hover: a click opens the popover, a
+/// click outside closes it, and Enter or Space on the focused icon opens it again until Escape closes it.
+#[test]
+fn help_icon_opens_its_text_on_a_click_or_a_key() {
+    use super::preferences_cards::help_icon;
+    use super::test_support::{frame, frame_cursor, key, pointer};
+    let ctx = super::test_support::context();
+    let focus = std::cell::Cell::new(false);
+    let mut draw = |ui: &mut Ui| {
+        let response = help_icon(ui, "Help text");
+        if focus.replace(false) {
+            response.request_focus();
+        }
+    };
+    let popover = || solidcraft_ui_registry::rect_of("prefs:help_icon:popover");
+    frame(&ctx, vec![], &mut draw);
+    let at = solidcraft_ui_registry::handle_at("prefs:help_icon").expect("the icon publishes its handle");
+    assert_eq!(frame_cursor(&ctx, at, &mut draw), egui::CursorIcon::PointingHand);
+    for pressed in [true, false] {
+        frame(&ctx, pointer(at, pressed), &mut draw);
+    }
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_some(), "a click on the icon opens the popover");
+    let outside = egui::pos2(300.0, 390.0);
+    for pressed in [true, false] {
+        frame(&ctx, pointer(outside, pressed), &mut draw);
+    }
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_none(), "a click outside closes the popover");
+    focus.set(true);
+    frame(&ctx, vec![], &mut draw);
+    frame(&ctx, key(egui::Key::Enter), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_some(), "Enter on the focused icon opens the popover");
+    frame(&ctx, key(egui::Key::Escape), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_none(), "Escape closes the popover");
+    focus.set(true);
+    frame(&ctx, vec![], &mut draw);
+    frame(&ctx, key(egui::Key::Space), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_some(), "Space on the focused icon opens the popover");
+    frame(&ctx, key(egui::Key::Escape), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_none(), "Escape closes the popover again");
 }
 
 /// Light and dark boards of the shared Preferences widgets and of every figure, rendered on the CPU.

@@ -58,6 +58,9 @@
 //! | [`FaceCacheTarget`], `solve_with_face_caches` (crate) | `smsurf_GetSurfaceCache` of a face's surface inside the solves |
 //!
 //! Deviations:
+//! - **Passed-on statuses (WR-658).** The statuses SMLib drops are returned, as the
+//!   fork returns them, except a tolerance update refused as too small, which is a
+//!   no-op (`tolerance_updated`).
 //! - **Opt-in fix (WR-306, #1058).** With `Kernel::fixes.degenerate_proto_edge_in_one_vertex`,
 //!   `ImprintIntersections` fits each final vertex of a proto vertex that absorbed a
 //!   degenerate proto edge to its edges (`IntersectorBrep::vertex_update_edge_intervals`)
@@ -178,8 +181,8 @@ pub const MAX_FACE_LIST: usize = 1 << 16;
 
 use crate::curve::curve::p2::{Curve, CurveKind};
 use crate::curve::curve::p8::CurveIntersectOptions;
-use crate::error::boolean::BooleanStage;
-use crate::error::{Result, SolidError};
+use crate::error::boolean::{BooleanFailure, BooleanStage, PlacedEntity, RelateSide};
+use crate::error::{Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -198,8 +201,10 @@ use crate::kernel::Kernel;
 use crate::math::{max2, min2, Point2, Point3, BIG_DOUBLE, EFF_ZERO, PI};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::math::gamma;
 use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::surface_cache;
+use crate::surface::surface::p2::SurfaceKind;
 use crate::surface::surface::p2::TsectCurveType;
 use crate::surface::surface::p5::{DropPoint, DropPointOptions};
 use crate::surface::surface::Surface;
@@ -207,11 +212,38 @@ use crate::surface::surface_cache::face_context::{
     prepare_face_surface_cache, prepare_face_surface_cache_state, FaceQueries, PreparedFaceQueries,
 };
 use crate::surface::surface_cache::SurfaceCache;
+use crate::topology::proto_topology::p2::exactly_placed;
 use crate::topology::proto_topology::{ProtoBrep, ProtoTopologyManager};
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, VertexId};
 use crate::EntityRef;
 
 const OP: &str = "boolean::topology_intersector::p1";
+
+/// Not upstream (WR-658, #16956): the result of a tolerance update whose status SMLib
+/// drops, with the refusal of a gap and tolerance both below `SM_EFF_ZERO`
+/// ([`GeomFailure::ToleranceTooSmall`](crate::error::geom::GeomFailure::ToleranceTooSmall))
+/// read as done. `UpdateObjectTolerance` refuses them before touching the object
+/// ("If both input gap and tol are zero, there's nothing to do"), and the raise it was
+/// asked for (only if larger, to less than `SM_EFF_ZERO`) changes no tolerance by a
+/// distance the kernel tells apart from zero, so the vertex, edge or face is as a
+/// successful update leaves it. With `check_gaps` the update would also raise the
+/// tolerances of the object's neighbours to its measured gaps; that is skipped, as
+/// upstream skips it. Every other error is returned, as the fork returns it, and so is
+/// this one for a non-finite `gap` (`max2` reads a NaN gap as the tolerance `0`).
+fn tolerance_updated(gap: f64, r: Result<()>) -> Result<()> {
+    match r {
+        Err(e)
+            if gap.is_finite()
+                && matches!(
+                    e.geom_failure(),
+                    Some(crate::error::geom::GeomFailure::ToleranceTooSmall { .. })
+                ) =>
+        {
+            Ok(())
+        }
+        r => r,
+    }
+}
 const OP_CHECK_SSI: &str = "boolean::topology_intersector::p1::check_if_have_existing_ssi";
 const OP_RELATE: &str = "boolean::topology_intersector::p1::relate";
 const OP_LOWEST: &str = "boolean::topology_intersector::p1::find_first_lowest_dimension_sol";
@@ -221,6 +253,7 @@ const OP_SPLIT_TWO: &str = "boolean::topology_intersector::p1::test_and_split_tw
 const OP_IMPRINT_FACE: &str = "boolean::topology_intersector::p1::test_and_imprint_face";
 const OP_FFC: &str = "boolean::topology_intersector::p1::face_face_coincidence";
 const OP_FACE_FACE: &str = "boolean::topology_intersector::p1::face_face_intersect";
+const OP_CERTIFIED_GAPS: &str = "boolean::topology_intersector::p1::certified_vertex_gaps";
 
 /// A dereference of a null pointer or a deleted object upstream (undefined
 /// behaviour).
@@ -1197,6 +1230,164 @@ pub struct TopologyIntersector<O> {
     subset: Option<BTreeSet<O>>,
     /// `m_pProtoTopoMgr`.
     pub(super) proto_topo_mgr: Option<ProtoTopologyManager<O>>,
+    /// Not upstream: the operand vertices put on the other operand's line edges before
+    /// intersecting (`split_edges_at_vertices`), as pairs (B-rep 1's vertex, B-rep 2's).
+    pub(super) vertices_on_edges: Vec<(O, O)>,
+}
+
+/// Not upstream: the tolerances vertex `v` and its edges need to cover the gaps between
+/// the vertex and the curve ends and planes incident to it or to `mates` (the other
+/// operand's vertex of the same definition, which the merge makes one with `v` at either
+/// point), each a distance between computed points (or a point and a plane) plus its
+/// rounding: an edge whose curve end lies farther from `v` than its tolerance, with that
+/// gap; and `v`, with twice its largest gap, when that passes its tolerance (`AssertValid`
+/// checks a vertex's gaps against half of it). A curve end is the end of the edge's
+/// interval nearer `v` (the farther for a closed edge): for an edge longer than twice the
+/// gap that is the end at its vertex. The vertex's growth comes with its reach (the far
+/// vertex of each of the edges, a lower bound of its distance and its tolerance), which
+/// the caller checks once every growth is known ([`first_reaching`]).
+///
+/// # Errors
+///
+/// Those of the topology walks and the curve evaluations.
+fn certified_vertex_gaps<O: ClassObject>(
+    k: &Kernel,
+    brep: &impl IntersectorBrep<O>,
+    v: O,
+    mates: &[O],
+) -> Result<CertifiedGaps<O>> {
+    let Some((b, EntityRef::Vertex(vid))) = ClassGeometry::topology_entity(brep, v) else {
+        return Ok((Vec::new(), None));
+    };
+    let point = b.vertex(vid)?.point;
+    let own_tolerance = b.vertex(vid)?.tolerance;
+    let rounded = |p: Point3, q: Point3| p.distance(q) + gamma(8) * (p.length() + q.length());
+    let mut out = Vec::new();
+    let mut gap: f64 = 0.0;
+    let mut reach = Vec::new();
+    for o in std::iter::once(v).chain(mates.iter().copied()) {
+        let Some((ob, EntityRef::Vertex(ovid))) = ClassGeometry::topology_entity(brep, o) else {
+            continue;
+        };
+        for e in vertex::edges(ob, ovid, None)? {
+            let ed = ob.edge(e)?;
+            let Some(curve) = ed.curve.as_ref() else {
+                continue;
+            };
+            let (start, end) = (edge::start_vertex(ob, e)?, edge::end_vertex(ob, e)?);
+            let ends = [
+                curve.evaluate_point(k, ed.interval.min())?,
+                curve.evaluate_point(k, ed.interval.max())?,
+            ];
+            let edge_gap = if start == end {
+                max2(rounded(point, ends[0]), rounded(point, ends[1]))
+            } else {
+                min2(rounded(point, ends[0]), rounded(point, ends[1]))
+            };
+            if edge_gap > ed.tolerance {
+                if let Some(h) = brep.topology_handle_in(ob, EntityRef::Edge(e)) {
+                    out.push((h, edge_gap));
+                }
+            }
+            gap = max2(gap, edge_gap);
+            let far = if start == Some(ovid) { end } else { start };
+            if let Some(far) = far.filter(|&f| f != ovid) {
+                let f = ob.vertex(far)?;
+                // the distance less its rounding: a lower bound
+                let apart =
+                    point.distance(f.point) - gamma(8) * (point.length() + f.point.length());
+                let handle = brep.topology_handle_in(ob, EntityRef::Vertex(far));
+                reach.push((handle, apart, f.tolerance));
+            }
+        }
+        for f in vertex::faces(ob, ovid)? {
+            let Some(SurfaceKind::Plane(plane)) = ob.face(f)?.surface.as_ref().map(Surface::kind)
+            else {
+                continue;
+            };
+            let position = plane.position();
+            let normal = position.z_axis();
+            let length = normal.length();
+            let usable = length > 0.0;
+            if !usable {
+                continue;
+            }
+            let w = point - position.origin();
+            let face_gap = (w.dot(normal) / length).abs()
+                + gamma(8) * (point.length() + position.origin().length() + w.length());
+            gap = max2(gap, face_gap);
+        }
+    }
+    let tolerance = zone_tol3d(k, 2.0 * gap);
+    let growth = (tolerance > own_tolerance).then_some(Growth {
+        vertex: v,
+        tolerance,
+        reach,
+    });
+    Ok((out, growth))
+}
+
+/// What [`certified_vertex_gaps`] returns: the edges to grow, each with its tolerance, and
+/// the vertex's own growth, if any.
+type CertifiedGaps<O> = (Vec<(O, f64)>, Option<Growth<O>>);
+
+/// Not upstream (#15718): a vertex tolerance to grow, with the vertices its ball must not
+/// reach: for each, its handle (`None` when it has none), a lower bound of its distance
+/// and its stored tolerance.
+pub(crate) struct Growth<K> {
+    /// The vertex.
+    pub(crate) vertex: K,
+    /// Its grown tolerance.
+    pub(crate) tolerance: f64,
+    /// `(far vertex, distance lower bound, stored tolerance)` per far vertex.
+    pub(crate) reach: Vec<(Option<K>, f64, f64)>,
+}
+
+/// Not upstream (#15718): the first of `growths` whose grown ball would reach one of its far
+/// vertices, judged against every growth at once, with the tolerance below which it would
+/// fit ([`room_left`]); `None` when all fit. A far vertex that grows too is taken at its
+/// grown tolerance (the larger of it and its stored one), so two growths that each fit
+/// beside the other's old ball but overlap together are refused, and the growths are
+/// applied all or none. A NaN distance passes no test and refuses.
+pub(crate) fn first_reaching<K: Copy + PartialEq>(
+    growths: &[Growth<K>],
+) -> Option<(K, f64, Option<f64>)> {
+    for g in growths {
+        let reach: Vec<(f64, f64)> = g
+            .reach
+            .iter()
+            .map(|&(far, apart, stored)| {
+                let grown = growths
+                    .iter()
+                    .filter(|h| far == Some(h.vertex))
+                    .fold(stored, |t, h| t.max(h.tolerance));
+                (apart, grown)
+            })
+            .collect();
+        if !reach
+            .iter()
+            .all(|&(apart, far_tol)| g.tolerance + far_tol < apart)
+        {
+            return Some((g.vertex, g.tolerance, room_left(&reach)));
+        }
+    }
+    None
+}
+
+/// Not upstream (#15718): the tolerance a vertex's ball may have without reaching any of
+/// the vertices in `reach` (each a lower bound of its distance, and its own tolerance):
+/// the smallest distance less tolerance, or `None` when that is not positive or any value
+/// is NaN (no tolerance fits).
+pub(crate) fn room_left(reach: &[(f64, f64)]) -> Option<f64> {
+    let mut fits = f64::INFINITY;
+    for &(apart, far_tol) in reach {
+        let room = apart - far_tol;
+        if room.is_nan() {
+            return None;
+        }
+        fits = fits.min(room);
+    }
+    (fits > 0.0).then_some(fits)
 }
 
 /// What [`test_and_split_two_edges`] returns.
@@ -1339,6 +1530,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             intersection_table: None,
             subset: None,
             proto_topo_mgr: None,
+            vertices_on_edges: Vec::new(),
         }
     }
 
@@ -1649,18 +1841,23 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let oth = self.other_mate(brep_topo);
         let brp = self.brep_mate(other_topo);
 
+        // #16098: the refusal places the entity, its mate and the one asked for by their points
         if oth.is_some() && oth != other_topo {
-            return Err(SolidError::boolean_stage_failed(
+            return Err(SolidError::boolean_relate_conflict(
                 OP_RELATE,
-                BooleanStage::Relate,
-                "another entity is already related to the other one",
+                RelateSide::Brep,
+                Self::place(brep, brep_topo),
+                Self::place(brep, oth),
+                Self::place(brep, other_topo),
             ));
         }
         if brp.is_some() && brp != brep_topo {
-            return Err(SolidError::boolean_stage_failed(
+            return Err(SolidError::boolean_relate_conflict(
                 OP_RELATE,
-                BooleanStage::Relate,
-                "another entity is already related to the other one",
+                RelateSide::Other,
+                Self::place(brep, other_topo),
+                Self::place(brep, brp),
+                Self::place(brep, brep_topo),
             ));
         }
 
@@ -1700,6 +1897,29 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let o_to_b = self.o_to_b.as_mut().ok_or(dangling("no mate maps"))?;
         o_to_b.insert(other_topo, brep_topo);
         Ok(())
+    }
+
+    /// Where `object` is, for a refused [`Self::relate`]: a vertex's point, an edge's end
+    /// points. It only reads; a kind without points or a walk that fails leaves it unplaced.
+    fn place(brep: &impl IntersectorBrep<O>, object: Option<O>) -> PlacedEntity {
+        let Some(o) = object else {
+            return PlacedEntity::Unplaced;
+        };
+        let point = |v: Option<O>| v.and_then(|v| brep.vertex_point(v).ok());
+        match o.class_kind() {
+            ClassObjectKind::Vertex => {
+                point(Some(o)).map_or(PlacedEntity::Unplaced, PlacedEntity::Vertex)
+            }
+            ClassObjectKind::Edge => {
+                let start = brep.edge_start_vertex(o).ok().flatten();
+                let end = start.and_then(|s| brep.edge_other_vertex(o, Some(s)).ok().flatten());
+                match (point(start), point(end)) {
+                    (Some(a), Some(b)) => PlacedEntity::Edge(a, b),
+                    _ => PlacedEntity::Unplaced,
+                }
+            }
+            _ => PlacedEntity::Unplaced,
+        }
     }
 
     /// The two `SetTolerance` lines of `Relate`: each object gets the other's
@@ -1941,6 +2161,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 deleted.extend(d);
             }
         }
+        // Not upstream (WR-214): a proto edge from a proto vertex back to itself that can
+        // be neither split nor dropped refuses the Boolean, though a proto edge's error
+        // only warns here.
+        if let Some(refusal) = mgr.take_self_loop_refusal() {
+            return Err(refusal);
+        }
 
         // Resolve OverlappingPEs (SE_MSG: the status only warns)
         if let Some(d) = ignore_soft(mgr.resolve_overlapping_proto_edges(k, brep, approx_tol))? {
@@ -2076,12 +2302,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 } else {
                     *failure_edited |= edited;
                     // Delete its curves, which would have been consumed if Imprint() had worked.
-                    ignore_soft(crate::error::passed_on(
-                        mgr.proto_edge_mut(pe)
-                            .ok_or(dangling("proto edge is deleted"))?
-                            .remove_edge_definition(ed),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    mgr.proto_edge_mut(pe)
+                        .ok_or(dangling("proto edge is deleted"))?
+                        .remove_edge_definition(ed)?;
                     deleted.extend(mgr.delete_edge_definition(ed));
                     // jj--: the next definition took this slot
                 }
@@ -2173,6 +2396,66 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // 2026-10-31, glue failure).
                 record(Err(e), ret)?;
             }
+        }
+
+        // Not upstream: each vertex an exactly placed vertex definition made (both source
+        // objects a vertex, a line edge or a plane face) covers the gaps the construction
+        // left between it and the curve ends and planes incident to it or to the other
+        // operand's vertex of the definition (the merge makes the two one, at either
+        // point; WR-306's fit covers its mate the same way). Its definition
+        // took one point for exactly placed points within their summed tolerances
+        // (`EXACT_TOL_FACTOR`), so an edge from one of the others ends a known distance
+        // off it: a distance between two computed points, or from a point to a plane,
+        // exact to rounding (`docs/validity-and-tolerances.md` §8, a construction's
+        // bound). The vertex's tolerance grows to twice its largest gap (`AssertValid`
+        // checks half of it), an edge's to its own curve end's gap, and a growth whose
+        // ball would reach the far vertex of one of its edges, at that vertex's grown
+        // tolerance when it grows too, is refused before any is applied.
+        let mut grow: Vec<(O, f64)> = Vec::new();
+        let mut growths: Vec<Growth<O>> = Vec::new();
+        let pvs = mgr.proto_vertices().to_vec();
+        for pv in pvs {
+            let Some(proto_vertex) = mgr.proto_vertex(pv) else {
+                continue;
+            };
+            for &vd in proto_vertex.vertex_definitions() {
+                let Some(def) = mgr.vertex_def(vd) else {
+                    continue;
+                };
+                if !(exactly_placed(&*brep, def.src_topo(1))
+                    && exactly_placed(&*brep, def.src_topo(2)))
+                {
+                    continue;
+                }
+                let mut finals = Vec::new();
+                for v in [def.final_vertex(1), def.final_vertex(2)]
+                    .into_iter()
+                    .flatten()
+                {
+                    if brep.vertex_brep(v)?.is_some() {
+                        finals.push(v);
+                    }
+                }
+                for &v in &finals {
+                    let mates: Vec<O> = finals.iter().copied().filter(|&m| m != v).collect();
+                    let (edges, growth) = certified_vertex_gaps(k, &*brep, v, &mates)?;
+                    grow.extend(edges);
+                    if let Some(g) = &growth {
+                        grow.push((g.vertex, g.tolerance));
+                    }
+                    growths.extend(growth);
+                }
+            }
+        }
+        if let Some((_, needed, fits_below)) = first_reaching(&growths) {
+            return Err(Failure::new(
+                OP_CERTIFIED_GAPS,
+                BooleanFailure::MergedVertexReaches { needed, fits_below },
+            )
+            .into_error());
+        }
+        for (o, tolerance) in grow {
+            brep.set_topology_tolerance(k, o, tolerance, true, true)?;
         }
 
         Ok(())
@@ -2280,10 +2563,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     let mid = 0.5 * (v_point + new_point);
                     brep.set_vertex_point(k, v, mid)?;
 
-                    ignore_soft(crate::error::passed_on(
-                        brep.glue_vertices(k, v_brep, v, new_vertex, None),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    brep.glue_vertices(k, v_brep, v, new_vertex, None)?;
                     add_unique(&mut out.processed_verts, v);
                     if let Some(slot) = verts.get_mut(ii) {
                         *slot = None;
@@ -2294,14 +2574,14 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     // Set max distance.
                     out.max_vertex_gap = max2(out.max_vertex_gap, dist_to_face);
 
-                    ignore_soft(crate::error::passed_on(
+                    tolerance_updated(
+                        dist_to_face,
                         brep.update_object_tolerance(k, v, dist_to_face, 0.0, false),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
-                    ignore_soft(crate::error::passed_on(
+                    )?;
+                    tolerance_updated(
+                        dist_to_face,
                         brep.update_object_tolerance(k, face, dist_to_face, 0.0, false),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    )?;
                 } else {
                     // Set min distance, if it didn't split due to being
                     // too far away (as opposed to being at a vertex).
@@ -2394,15 +2674,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             let this_edges_faces = brep.edge_faces(edge)?;
 
             // Find all input faces close to this edge.
-            let mut e_bbox = ignore_soft(crate::error::passed_on(
-                brep.edge_bounding_box(k, edge),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?
-            .unwrap_or_else(Extent3d::new);
+            let mut e_bbox = brep.edge_bounding_box(k, edge)?;
             e_bbox.expand_absolute(edge_zone_tol_3d);
-            // (sFBBox is declared with sEBBox: a failed CalculateBoundingBox keeps the
-            // previous face's box)
-            let mut f_bbox = Extent3d::new();
+            // (upstream declares sFBBox with sEBBox, so a failed CalculateBoundingBox keeps
+            // the previous face's box; fork e7ebc8d passes the failure on: `SER`)
             for &face in faces {
                 let Some(face) = face else {
                     continue;
@@ -2417,12 +2692,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 }
 
                 // BBox check.
-                if let Some(b) = ignore_soft(crate::error::passed_on(
-                    brep.face_calculate_bounding_box(k, face, false),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)? {
-                    f_bbox = b;
-                }
+                let f_bbox = brep.face_calculate_bounding_box(k, face, false)?;
                 if e_bbox.are_disjoint(&f_bbox, face_zone_tol_3d) {
                     continue;
                 }
@@ -2446,19 +2716,15 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // (the edge's curve is dereferenced here, after the connected-face and box
                 // filters)
                 let curve = edge_curve.ok_or(dangling("edge without curve"))?;
-                let solutions = ignore_soft(crate::error::passed_on(
-                    surface_global_curve_intersect(
-                        k,
-                        brep,
-                        surf,
-                        &face_domain,
-                        curve,
-                        &edge_domain,
-                        this_tol,
-                    ),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?
-                .unwrap_or_else(SolutionArray::new);
+                let solutions = surface_global_curve_intersect(
+                    k,
+                    brep,
+                    surf,
+                    &face_domain,
+                    curve,
+                    &edge_domain,
+                    this_tol,
+                )?;
 
                 let num_sols = solutions.len();
 
@@ -2494,10 +2760,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     if interior {
                         // this tol is unlikely to be correct - check it
                         let mut point_class = PointClassification::new(face_zone_tol_3d);
-                        ignore_soft(crate::error::passed_on(
-                            brep.face_point_classify(k, face, uv, &mut point_class),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?;
+                        brep.face_point_classify(k, face, uv, &mut point_class)?;
 
                         match point_class.point_class() {
                             PointClassType::Unknown => {
@@ -2561,13 +2824,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             // Find the point -- make sure they're the same. Can err if pEdge was edited by prior loop iteration
             let mut edge_pt = eval_curve_point(k, brep, curve, param)?;
             // (the status is ignored upstream: UNDEF on failure)
-            let face_pt = ignore_soft(crate::error::passed_on(
-                brep.surface(surf)
-                    .ok_or(dangling("surface handle cannot be resolved"))?
-                    .evaluate_point(k, uv),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?
-            .unwrap_or(Point3::UNDEF);
+            let face_pt = brep
+                .surface(surf)
+                .ok_or(dangling("surface handle cannot be resolved"))?
+                .evaluate_point(k, uv)?;
 
             let face_tol = brep
                 .topology_tolerance(face)
@@ -2631,15 +2891,15 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             let check_gaps = this_deviation > this_tol / 4.0;
             // (UpdateObjectTolerance of a null topology returns SM_SUCCESS)
             if let Some(fv) = new_face_vtx {
-                ignore_soft(crate::error::passed_on(
+                tolerance_updated(
+                    this_deviation,
                     brep.update_object_tolerance(k, fv, this_deviation, 0.0, check_gaps),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                )?;
             }
-            ignore_soft(crate::error::passed_on(
+            tolerance_updated(
+                this_deviation,
                 brep.update_object_tolerance(k, face, this_deviation, 0.0, false),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            )?;
 
             // Check interior of Edge -- all edges in sEdgesSplitFromThis.
             let mut interior = false;
@@ -2703,25 +2963,25 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     .topology_tolerance(this_split_edge)
                     .ok_or(dangling("edge handle is unknown"))?;
                 if let Some(e1) = e1 {
-                    ignore_soft(crate::error::passed_on(
+                    tolerance_updated(
+                        this_deviation,
                         brep.update_object_tolerance(k, e1, this_deviation, split_tol, false),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    )?;
                 }
                 let split_tol = brep
                     .topology_tolerance(this_split_edge)
                     .ok_or(dangling("edge handle is unknown"))?;
                 if let Some(e2) = e2 {
-                    ignore_soft(crate::error::passed_on(
+                    tolerance_updated(
+                        this_deviation,
                         brep.update_object_tolerance(k, e2, this_deviation, split_tol, false),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    )?;
                 }
                 if let Some(v) = v {
-                    ignore_soft(crate::error::passed_on(
+                    tolerance_updated(
+                        this_deviation,
                         brep.update_object_tolerance(k, v, this_deviation, 0.0, check_gaps),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    )?;
                 }
                 v
             } else {
@@ -2771,18 +3031,15 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 let mid = 0.5 * (ev_pt + fv_pt);
                 brep.set_vertex_point(k, ev, mid)?;
 
-                ignore_soft(crate::error::passed_on(
-                    brep.glue_vertices(k, f_brep, ev, fv, None),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                brep.glue_vertices(k, f_brep, ev, fv, None)?;
 
                 // Set max distance.
                 out.max_vertex_gap = max2(out.max_vertex_gap, this_deviation);
 
-                ignore_soft(crate::error::passed_on(
+                tolerance_updated(
+                    this_deviation,
                     brep.update_object_tolerance(k, ev, this_deviation, 0.0, check_gaps),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                )?;
             } else {
                 // Set min distance, if it didn't split due to being
                 // too far away (as opposed to being at a vertex).
@@ -2887,20 +3144,16 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // In the SmMerge::MergeAddedTopology routine, by now all coincident edges should have common edges
                 let mut are_coincident = false;
                 if !common_edges.is_empty() {
-                    // (upstream passes the angle tolerance as the 3D tolerance; the status is
-                    // ignored, bAreCoincident stays FALSE)
-                    let (coincident, _max_dist) = ignore_soft(crate::error::passed_on(
-                        surface_coincidence_check(
-                            k,
-                            brep,
-                            surf1,
-                            surf2,
-                            self.this_ang_tol_rad,
-                            false,
-                        ),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?
-                    .unwrap_or((false, 0.0));
+                    // (upstream passes the angle tolerance as the 3D tolerance and ignores the
+                    // status, leaving bAreCoincident FALSE; passed on here, WR-658)
+                    let (coincident, _max_dist) = surface_coincidence_check(
+                        k,
+                        brep,
+                        surf1,
+                        surf2,
+                        self.this_ang_tol_rad,
+                        false,
+                    )?;
                     are_coincident = coincident;
                     if are_coincident {
                         jj += 1;
@@ -2910,28 +3163,17 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
                 // If we arrive here, we are ready to intersect the faces
                 let ang_tol_deg = 180.0 / PI * self.this_ang_tol_rad;
-                // (the status is ignored: on failure the output arrays stay empty)
-                let mut fi = ignore_soft(crate::error::passed_on(
-                    brep.face_intersect(
-                        k,
-                        face1,
-                        face2,
-                        self.this_approx_tol_3d,
-                        ang_tol_deg,
-                        FaceIntersectWants::default(),
-                        Some(are_coincident),
-                    ),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?
-                .unwrap_or_else(|| FaceIntersection {
-                    curves_3d: Vec::new(),
-                    cc1: Vec::new(),
-                    cc2: Vec::new(),
-                    cc_curves: [Vec::new(), Vec::new(), Vec::new()],
-                    this_uv_curves: Vec::new(),
-                    other_uv_curves: Vec::new(),
-                    points_3d: Vec::new(),
-                });
+                // (upstream ignores the status: on failure the output arrays stay empty;
+                // passed on here, WR-658)
+                let mut fi = brep.face_intersect(
+                    k,
+                    face1,
+                    face2,
+                    self.this_approx_tol_3d,
+                    ang_tol_deg,
+                    FaceIntersectWants::default(),
+                    Some(are_coincident),
+                )?;
                 let _ = (&fi.curves_3d, &fi.cc_curves); // deleted by SmObjsDelete
 
                 // In this loop we imprint each intersection as an edge (upstream indexes
@@ -2948,18 +3190,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                             .cc1
                             .get_mut(kk)
                             .ok_or(dangling("classification lists differ"))?;
-                        ignore_soft(crate::error::passed_on(
-                            cc1.set_point_class_parameters_mut(k, brep, true),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?;
+                        cc1.set_point_class_parameters_mut(k, brep, true)?;
                         let cc2 = fi
                             .cc2
                             .get_mut(kk)
                             .ok_or(dangling("classification lists differ"))?;
-                        ignore_soft(crate::error::passed_on(
-                            cc2.set_point_class_parameters_mut(k, brep, true),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?;
+                        cc2.set_point_class_parameters_mut(k, brep, true)?;
                     }
 
                     // For each interval in the classification
@@ -3105,25 +3341,23 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         add_unique(&mut out.processed_faces, face1);
                         add_unique(&mut out.processed_faces, face2);
 
-                        // We want only one edge shared between the faces (the status is
-                        // ignored; GlueEdgesGeneral returns SM_SUCCESS at once for a null
-                        // edge, which MakeEdgeInFace leaves when it makes none)
+                        // We want only one edge shared between the faces (upstream ignores
+                        // the status, passed on here, WR-658; GlueEdgesGeneral returns
+                        // SM_SUCCESS at once for a null edge, which MakeEdgeInFace leaves
+                        // when it makes none)
                         if let (Some(e1), Some(e2)) = (new_edge1, new_edge2) {
                             // m_pBrep->GlueEdgesGeneral(pNewEdge1, SM_OT_SAME, 0.0,
                             // bDoRegionNesting, pNewEdge2) (pInsideFaceuses NULL)
-                            ignore_soft(crate::error::passed_on(
-                                brep.brep_glue_edges_general(
-                                    k,
-                                    this_brep,
-                                    Some(e1),
-                                    OrientType::Same,
-                                    0.0,
-                                    do_region_nesting,
-                                    Some(e2),
-                                    None,
-                                ),
-                                k.fixes.brep_edit_statuses_pass_on,
-                            )?)?;
+                            brep.brep_glue_edges_general(
+                                k,
+                                this_brep,
+                                Some(e1),
+                                OrientType::Same,
+                                0.0,
+                                do_region_nesting,
+                                Some(e2),
+                                None,
+                            )?;
                         }
                         out.new_edges.push(new_edge1);
                     } // end for each SmCurveInterval
@@ -3197,90 +3431,46 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let mut f2 = pc2
             .face_object()
             .ok_or(dangling("classification without face"))?;
-        // (FindObjPoint3d's status is ignored: the point stays UNDEF on failure)
-        let mut pt = ignore_soft(crate::error::passed_on(
-            pc1.find_obj_point_3d(k, brep),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?
-        .unwrap_or(Point3::UNDEF);
+        // (upstream ignores FindObjPoint3d's status, leaving the point UNDEF on failure;
+        // passed on here, WR-658)
+        let mut pt = pc1.find_obj_point_3d(k, brep)?;
 
         // This classification may be outdated. Check and update. Will either be face or vertex
         let mut uv1 = pc1.uv_param();
         let mut uv2 = pc2.uv_param();
-        // (every status below is ignored upstream)
-        ignore_soft(crate::error::passed_on(
-            brep.face_point_3d_classify(k, f1, pt, tol, false, pc1, Some(uv1)),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
-        ignore_soft(crate::error::passed_on(
-            brep.face_point_3d_classify(k, f2, pt, tol, false, pc2, Some(uv2)),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        // (every status below is ignored upstream and passed on here, WR-658)
+        brep.face_point_3d_classify(k, f1, pt, tol, false, pc1, Some(uv1))?;
+        brep.face_point_3d_classify(k, f2, pt, tol, false, pc2, Some(uv2))?;
 
         // The CC may be unknow when a new face was created prior. m_vMid was updated, so check that face
         if pc1.point_class() == PointClassType::Unknown {
             f1 = mid1
                 .face_object()
                 .ok_or(dangling("classification without face"))?;
-            ignore_soft(crate::error::passed_on(
-                brep.face_point_3d_classify(k, f1, pt, tol, false, pc1, Some(uv1)),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            brep.face_point_3d_classify(k, f1, pt, tol, false, pc1, Some(uv1))?;
         }
         if pc2.point_class() == PointClassType::Unknown {
             f2 = mid2
                 .face_object()
                 .ok_or(dangling("classification without face"))?;
-            ignore_soft(crate::error::passed_on(
-                brep.face_point_3d_classify(k, f2, pt, tol, false, pc2, Some(uv2)),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            brep.face_point_3d_classify(k, f2, pt, tol, false, pc2, Some(uv2))?;
         }
 
         // We have intersecting 3dcurves. Imprint the point as a vertex on each face.
         // Glue the vertices, then keep going
         if pc1.point_class() == PointClassType::Face {
-            let v1 = ignore_soft(crate::error::passed_on(
-                brep.make_vertex_loop(this_brep, f1, pt),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?
-            .map(|(_loop1, v)| v);
+            let v1 = brep.make_vertex_loop(this_brep, f1, pt)?.1;
 
-            pt = ignore_soft(crate::error::passed_on(
-                pc2.find_obj_point_3d(k, brep),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?
-            .unwrap_or(Point3::UNDEF);
-            let v2 = ignore_soft(crate::error::passed_on(
-                brep.make_vertex_loop(this_brep, f2, pt),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?
-            .map(|(_loop2, v)| v);
+            pt = pc2.find_obj_point_3d(k, brep)?;
+            let v2 = brep.make_vertex_loop(this_brep, f2, pt)?.1;
 
-            // (two null vertices are equal: GlueVertices returns SM_SUCCESS at once; one
-            // null vertex is dereferenced by GlueVertices)
-            match (v1, v2) {
-                (Some(v1), Some(v2)) => {
-                    ignore_soft(crate::error::passed_on(
-                        brep.glue_vertices(k, this_brep, v1, v2, None),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
-                }
-                (None, None) => {}
-                _ => return Err(dangling("GlueVertices of one null vertex")),
-            }
+            brep.glue_vertices(k, this_brep, v1, v2, None)?;
 
             // Update classifications
             uv1 = pc1.uv_param();
             uv2 = pc2.uv_param();
-            ignore_soft(crate::error::passed_on(
-                brep.face_point_3d_classify(k, f1, pt, tol, false, pc1, Some(uv1)),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
-            ignore_soft(crate::error::passed_on(
-                brep.face_point_3d_classify(k, f2, pt, tol, false, pc2, Some(uv2)),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            brep.face_point_3d_classify(k, f1, pt, tol, false, pc1, Some(uv1))?;
+            brep.face_point_3d_classify(k, f2, pt, tol, false, pc2, Some(uv2))?;
         }
         Ok(())
     }
@@ -3314,28 +3504,22 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let old_face = ci.mid.face_object();
 
         // (the face and vertices are passed as they are, null or not: MakeEdgeInFace
-        // checks them itself. The status is ignored: a failed MakeEdgeInFace leaves the
-        // edge and face null, and the curve copy stays in the store as upstream leaks it)
-        let made = ignore_soft(crate::error::passed_on(
-            brep_make_edge_in_face(
-                k,
-                brep,
-                this_brep,
-                old_face,
-                v1,
-                v2,
-                copy_c,
-                uv_copy_c,
-                ivl,
-                OrientType::Same,
-                self.this_approx_tol_3d,
-            ),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
-        Ok(match made {
-            Some((new_edge, _new_loop, new_face)) => (new_edge, new_face),
-            None => (None, None),
-        })
+        // checks them itself. Upstream ignores the status: a failed MakeEdgeInFace leaves
+        // the edge and face null and leaks the curve copy; passed on here, WR-658)
+        let (new_edge, _new_loop, new_face) = brep_make_edge_in_face(
+            k,
+            brep,
+            this_brep,
+            old_face,
+            v1,
+            v2,
+            copy_c,
+            uv_copy_c,
+            ivl,
+            OrientType::Same,
+            self.this_approx_tol_3d,
+        )?;
+        Ok((new_edge, new_face))
     }
 
     /// The "Classification update" loops of `FaceFaceIntersect`: after a face split,
@@ -3360,33 +3544,27 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
                 if let Some(this_face) = this_face {
                     let uv = ci.mid.uv_param();
-                    ignore_soft(crate::error::passed_on(
-                        brep.face_point_3d_classify(
-                            k,
-                            this_face,
-                            pt,
-                            approx_tol_3d,
-                            false,
-                            &mut ci.mid,
-                            Some(uv),
-                        ),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    brep.face_point_3d_classify(
+                        k,
+                        this_face,
+                        pt,
+                        approx_tol_3d,
+                        false,
+                        &mut ci.mid,
+                        Some(uv),
+                    )?;
                 }
                 if ci.mid.point_class() != PointClassType::Face && this_face.is_some() {
                     let uv = ci.mid.uv_param();
-                    ignore_soft(crate::error::passed_on(
-                        brep.face_point_3d_classify(
-                            k,
-                            new_face,
-                            pt,
-                            approx_tol_3d,
-                            false,
-                            &mut ci.mid,
-                            Some(uv),
-                        ),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    brep.face_point_3d_classify(
+                        k,
+                        new_face,
+                        pt,
+                        approx_tol_3d,
+                        false,
+                        &mut ci.mid,
+                        Some(uv),
+                    )?;
                 }
             }
         }
@@ -3503,34 +3681,26 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
                         let s1 = surf1.ok_or(dangling("face without surface"))?;
                         let s2 = surf2.ok_or(dangling("face without surface"))?;
-                        // (the statuses are ignored: a failed drop has bOk == FALSE and
-                        // dGap == SM_BIG_DOUBLE)
-                        let pt_3d1 = ignore_soft(crate::error::passed_on(
-                            brep.surface(s1)
-                                .ok_or(dangling("surface handle cannot be resolved"))?
-                                .evaluate_point(k, guess_uv1),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?
-                        .unwrap_or(Point3::UNDEF);
-                        let dropped: Option<DropPoint<O>> = ignore_soft(crate::error::passed_on(
-                            brep.surface(s2)
-                                .ok_or(dangling("surface handle cannot be resolved"))?
-                                .drop_point(
-                                    k,
-                                    pt_3d1,
-                                    &domain2,
-                                    &DropPointOptions {
-                                        guess_uv: Some(guess_uv2),
-                                        ..DropPointOptions::default()
-                                    },
-                                ),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?;
-                        let (ok, dropped_gap) = match dropped {
-                            Some(d) => (d.success, d.gap),
-                            None => (false, BIG_DOUBLE),
-                        };
-                        gap = dropped_gap;
+                        // (the statuses are ignored upstream, where a failed drop has
+                        // bOk == FALSE and dGap == SM_BIG_DOUBLE; fork e7ebc8d passes them on)
+                        let pt_3d1 = brep
+                            .surface(s1)
+                            .ok_or(dangling("surface handle cannot be resolved"))?
+                            .evaluate_point(k, guess_uv1)?;
+                        let dropped: DropPoint<O> = brep
+                            .surface(s2)
+                            .ok_or(dangling("surface handle cannot be resolved"))?
+                            .drop_point(
+                                k,
+                                pt_3d1,
+                                &domain2,
+                                &DropPointOptions {
+                                    guess_uv: Some(guess_uv2),
+                                    ..DropPointOptions::default()
+                                },
+                            )?;
+                        let ok = dropped.success;
+                        gap = dropped.gap;
                         if ok && gap <= self.this_approx_tol_3d {
                             coin_faces = true;
 
@@ -3563,10 +3733,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         let old_tol = brep
                             .topology_tolerance(del_face)
                             .ok_or(dangling("face handle is unknown"))?;
-                        ignore_soft(crate::error::passed_on(
-                            brep.brep_delete_face(k, f_brep, del_face),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?;
+                        brep.brep_delete_face(k, f_brep, del_face)?;
 
                         // Add to the output lists.
                         // In the case of three or more faces all coincident (or
@@ -3581,10 +3748,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         out.processed_faces.push(sav_face);
                         out.deleted_faces.push(del_face);
 
-                        ignore_soft(crate::error::passed_on(
-                            brep.update_object_tolerance(k, sav_face, gap, old_tol, false),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?;
+                        brep.update_object_tolerance(k, sav_face, gap, old_tol, false)?;
 
                         if del_face == face1 {
                             if let Some(slot) = faces_of_edge.get_mut(jj) {
@@ -4369,17 +4533,11 @@ pub fn intersect_shell_vertices<O: ClassObject + SolutionObject + Ord>(
             .ok_or(dangling("solution without objects"))?;
         pc2.load_from_intersection(vtx_zone_tol, object, &sol.start, 0, BIG_DOUBLE)?;
 
-        // the status of FindOrCreateProtoVertex is not checked
+        // upstream does not check FindOrCreateProtoVertex's status; passed on here, WR-658
         if swap_order {
-            ignore_soft(crate::error::passed_on(
-                mgr.find_or_create_proto_vertex_pcs(k, geometry, &mut pc2, &mut pc1),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            mgr.find_or_create_proto_vertex_pcs(k, geometry, &mut pc2, &mut pc1)?;
         } else {
-            ignore_soft(crate::error::passed_on(
-                mgr.find_or_create_proto_vertex_pcs(k, geometry, &mut pc1, &mut pc2),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            mgr.find_or_create_proto_vertex_pcs(k, geometry, &mut pc1, &mut pc2)?;
         }
     } // end for each m_Brep Vertex
 
@@ -4516,31 +4674,25 @@ pub fn intersect_wire_lamina_edges<O: ClassObject + SolutionObject + Ord>(
             let mut ci2 = *crv_class2.at(jj)?;
             let approx_tol = ti_approx_tol_3d; // m_pTI->GetThisApproxTol3d() in FindOrCreateProtoEdge
             if swap_order {
-                ignore_soft(crate::error::passed_on(
-                    mgr.find_or_create_proto_edge(
-                        k,
-                        geometry,
-                        approx_tol,
-                        &crv_class2,
-                        &mut ci2,
-                        &crv_class1,
-                        &mut ci1,
-                    ),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                mgr.find_or_create_proto_edge(
+                    k,
+                    geometry,
+                    approx_tol,
+                    &crv_class2,
+                    &mut ci2,
+                    &crv_class1,
+                    &mut ci1,
+                )?;
             } else {
-                ignore_soft(crate::error::passed_on(
-                    mgr.find_or_create_proto_edge(
-                        k,
-                        geometry,
-                        approx_tol,
-                        &crv_class1,
-                        &mut ci1,
-                        &crv_class2,
-                        &mut ci2,
-                    ),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                mgr.find_or_create_proto_edge(
+                    k,
+                    geometry,
+                    approx_tol,
+                    &crv_class1,
+                    &mut ci1,
+                    &crv_class2,
+                    &mut ci2,
+                )?;
             }
             *crv_class1.at_mut(jj)? = ci1;
             *crv_class2.at_mut(jj)? = ci2;
@@ -4550,8 +4702,8 @@ pub fn intersect_wire_lamina_edges<O: ClassObject + SolutionObject + Ord>(
     Ok(())
 }
 
-/// `EvaluatePoint` of the curve behind `curve` at `t`; `SM_UNDEF` when the
-/// evaluation fails (the status is not checked upstream).
+/// `EvaluatePoint` of the curve behind `curve` at `t`. Upstream does not check the
+/// status (`SM_UNDEF` on failure); the fork passes it on (e7ebc8d: `SER`).
 pub(super) fn eval_curve_point<O: ClassObject>(
     k: &Kernel,
     geometry: &impl IntersectorBrep<O>,
@@ -4561,11 +4713,7 @@ pub(super) fn eval_curve_point<O: ClassObject>(
     let c = geometry
         .curve(curve)
         .ok_or(dangling("curve handle cannot be resolved"))?;
-    Ok(ignore_soft(crate::error::passed_on(
-        c.evaluate_point(k, t),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?
-    .unwrap_or(Point3::UNDEF))
+    c.evaluate_point(k, t)
 }
 
 /// `sm_SetEdgeClass(rCurveClass, pEdge)`: sets the first interval of a classification
@@ -4959,10 +5107,7 @@ pub fn test_and_split_two_edges<O: ClassObject + SolutionObject + Ord>(
         let mid = 0.5 * (p1 + p2);
         geometry.set_vertex_point(k, new_v1, mid)?;
 
-        ignore_soft(crate::error::passed_on(
-            geometry.glue_vertices(k, brep, new_v1, new_v2, None),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        geometry.glue_vertices(k, brep, new_v1, new_v2, None)?;
 
         out.new_verts.push(new_v1); // This one will survive.
     }
@@ -5030,10 +5175,7 @@ pub fn test_and_imprint_face<O: ClassObject + SolutionObject + Ord>(
     let mut point_class: PointClassification<O> = PointClassification::new(src_zone_tol_3d);
 
     // the status is not checked upstream
-    ignore_soft(crate::error::passed_on(
-        geometry.face_point_classify(k, face, dropped.result_uv, &mut point_class),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    geometry.face_point_classify(k, face, dropped.result_uv, &mut point_class)?;
 
     match point_class.point_class() {
         PointClassType::Unknown => {
@@ -5482,6 +5624,33 @@ mod tests {
         assert_eq!(trim_owner_face(&candidates[1..2], on_b, eu), None);
     }
     use super::*;
+
+    /// #15718: two merged vertices 3 apart that each grow to 1.6 fit beside each other's
+    /// old tolerance (1.6 + 1e-6 < 3) but not beside each other's grown one (3.2 > 3):
+    /// judged together, the first is refused with 3 - 1.6 = 1.4 as the tolerance that
+    /// fits. Alone, either fits.
+    #[test]
+    fn growths_are_judged_against_each_other_s_grown_tolerance() {
+        let g = |vertex: u8, far: u8| Growth {
+            vertex,
+            tolerance: 1.6,
+            reach: vec![(Some(far), 3.0, 1e-6), (None, 5.0, 1e-6)],
+        };
+        let both = [g(1, 2), g(2, 1)];
+        let Some((v, needed, fits)) = first_reaching(&both) else {
+            panic!("the overlapping growths are refused");
+        };
+        assert_eq!((v, needed), (1, 1.6));
+        assert!((fits.unwrap() - 1.4).abs() < 1e-12, "{fits:?}");
+        assert!(first_reaching(&both[..1]).is_none());
+        assert!(first_reaching(&both[1..]).is_none());
+        let nan = [Growth {
+            vertex: 1u8,
+            tolerance: 1.0,
+            reach: vec![(None, f64::NAN, 0.0)],
+        }];
+        assert_eq!(first_reaching(&nan), Some((1, 1.0, None)));
+    }
     use crate::geom::extent1d::Extent1d;
     use crate::geom::solution_array::{Solution, SolutionArray};
     use crate::math::Vec3;
@@ -5809,5 +5978,78 @@ mod tests {
         assert_eq!(m.primary(8), Some(1));
         assert_eq!(m.other(2), None);
         assert_eq!(m.primary(9), None);
+    }
+
+    #[test]
+    fn a_tolerance_update_below_zero_is_a_no_op_and_other_errors_stay() {
+        use super::*;
+        use crate::geom::tol::{update_object_tolerance, TopologyToUpdate};
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+                .unwrap();
+        let v = b.vertices().ids().next().unwrap();
+        let e = b.edges().ids().next().unwrap();
+        let f = b.faces().ids().next().unwrap();
+        let before = (
+            vertex::tolerance(&b, v).unwrap(),
+            edge::tolerance(&b, e).unwrap(),
+            crate::topology::face::p2::tolerance(&b, f).unwrap(),
+        );
+        // the gaps the four moved rows record (1e-15 and below) and exact zero, with and
+        // without the gap pass
+        for (gap, check_gaps) in [
+            (0.0, false),
+            (1.0e-15, true),
+            (4.9e-15, false),
+            (9.9e-13, true),
+        ] {
+            for topo in [
+                TopologyToUpdate::Vertex(v),
+                TopologyToUpdate::Edge(e),
+                TopologyToUpdate::Face(f),
+            ] {
+                let r = update_object_tolerance(&k, &mut b, Some(topo), gap, 0.0, check_gaps);
+                assert!(r.is_err(), "{gap} is refused as too small");
+                assert_eq!(tolerance_updated(gap, r), Ok(()));
+            }
+        }
+        let after = (
+            vertex::tolerance(&b, v).unwrap(),
+            edge::tolerance(&b, e).unwrap(),
+            crate::topology::face::p2::tolerance(&b, f).unwrap(),
+        );
+        assert_eq!(after, before);
+        assert_eq!(
+            (
+                b.faces().ids().count(),
+                b.edges().ids().count(),
+                b.vertices().ids().count()
+            ),
+            (6, 12, 8)
+        );
+        // the boundary: 1.001 * gap at SM_EFF_ZERO is a real update
+        let r = update_object_tolerance(
+            &k,
+            &mut b,
+            Some(TopologyToUpdate::Vertex(v)),
+            1.0e-12,
+            0.0,
+            false,
+        );
+        assert!(r.is_ok(), "{r:?}");
+        assert!(vertex::tolerance(&b, v).unwrap() >= 1.001e-12);
+        // a NaN gap reads as the tolerance 0 and is refused; that refusal stays
+        let r = update_object_tolerance(
+            &k,
+            &mut b,
+            Some(TopologyToUpdate::Vertex(v)),
+            f64::NAN,
+            0.0,
+            false,
+        );
+        assert!(tolerance_updated(f64::NAN, r).is_err());
+        let other = SolidError::invalid_input("test", "another failure");
+        assert_eq!(tolerance_updated(0.0, Err(other.clone())), Err(other));
     }
 }

@@ -1192,6 +1192,24 @@ impl ui_kit::Expressions for DocExpressions {
     fn parse_length_mm(&self, text: &str, scale: f64) -> Option<f64> {
         crate::prefs::parse_length_mm(text, scale)
     }
+
+    fn scrub_step(&self, unit: &str, half_height_mm: Option<f64>, current_value: f64) -> f64 {
+        match solidcraft_engine::doc::expr::unit_info(unit) {
+            Some((solidcraft_engine::doc::expr::Kind::Angle, _)) => {
+                if unit.trim().eq_ignore_ascii_case("rad") {
+                    0.01
+                } else {
+                    1.0
+                }
+            }
+            Some((solidcraft_engine::doc::expr::Kind::Length, scale)) if scale > 0.0 => {
+                let hh_mm = half_height_mm.unwrap_or(100.0);
+                let hh_unit = hh_mm / scale;
+                ui_kit::snap_to_125((hh_unit * 0.001).max(1e-9))
+            }
+            _ => ui_kit::scrub_step(current_value),
+        }
+    }
 }
 
 /// Give the kit's value fields in `ctx` SolidCraft's expressions, unless they have them already.

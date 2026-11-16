@@ -426,6 +426,100 @@ fn rel(a: f64, b: f64) -> f64 {
 }
 
 #[test]
+fn version_tool_is_read_only_and_takes_no_arguments() {
+    let def = tool_definitions().into_iter().find(|d| d["name"] == "version").expect("version tool");
+    assert_eq!(def["annotations"]["readOnlyHint"], true);
+    assert_eq!(def["annotations"]["destructiveHint"], false);
+    assert_eq!(def["inputSchema"]["additionalProperties"], false);
+    assert_eq!(def["inputSchema"]["properties"], json!({}));
+}
+
+fn version_reply(backend: &mut dyn crate::Backend, args: Value) -> Value {
+    let reply = crate::tools::call_tool(backend, "version", &args);
+    assert_ne!(reply["isError"], true, "{reply}");
+    serde_json::from_str(reply["content"][0]["text"].as_str().unwrap()).unwrap()
+}
+
+#[test]
+fn version_identifies_the_headless_build_without_changing_the_design() {
+    use crate::Backend;
+    let mut backend = Headless::default();
+    let before = (backend.session.revision, backend.session.undo.len(), backend.session.is_dirty());
+    assert_eq!(
+        version_reply(&mut backend, json!({})),
+        json!({"version": env!("CARGO_PKG_VERSION"), "commit": solidcraft_engine::io::SOURCE_COMMIT, "mode": "headless"})
+    );
+    assert_eq!((backend.session.revision, backend.session.undo.len(), backend.session.is_dirty()), before);
+    assert!(backend.call("ui.help", json!({"item": "about"})).is_err());
+    assert!(solidcraft_engine::control_pending::reads_only("ui.help", &json!({})));
+    assert!(!solidcraft_engine::control_pending::reads_only("ui.help", &json!({"item": "about"})));
+}
+
+#[test]
+fn version_reports_the_apps_build_without_diagnostics_or_help_actions() {
+    let mut backend = Answers {
+        calls: Vec::new(),
+        answer: Box::new(|_, _| Ok(json!({"version": "0.12.3", "commit": "abc1234", "diagnostics": "private app details", "built": "2026-01-01"}))),
+    };
+    assert_eq!(version_reply(&mut backend, json!({"item": "about"})), json!({"version": "0.12.3", "commit": "abc1234", "mode": "app"}));
+    assert_eq!(backend.calls, [("ui.help".into(), json!({}))]);
+}
+
+#[test]
+fn version_reports_unavailable_metadata_without_substituting_the_servers_build() {
+    for (answer, message) in [
+        (Err("app unavailable".to_string()), "app unavailable"),
+        (Ok(json!({})), "version"),
+        (Ok(json!({"version": 42, "commit": "abc1234"})), "version"),
+        (Ok(json!({"version": "0.12.3", "commit": 42})), "commit"),
+    ] {
+        let mut backend = Answers { calls: Vec::new(), answer: Box::new(move |_, _| answer.clone()) };
+        let reply = crate::tools::call_tool(&mut backend, "version", &json!({}));
+        assert_eq!(reply["isError"], true, "{reply}");
+        assert!(reply["content"][0]["text"].as_str().unwrap().contains(message), "{reply}");
+    }
+    for answer in [json!({"version": "0.12.3"}), json!({"version": "0.12.3", "commit": null})] {
+        let mut backend = Answers { calls: Vec::new(), answer: Box::new(move |_, _| Ok(answer.clone())) };
+        assert_eq!(version_reply(&mut backend, json!({})), json!({"version": "0.12.3", "commit": "unknown", "mode": "app"}));
+    }
+}
+
+#[test]
+fn version_uses_the_backend_found_during_automatic_discovery() {
+    use crate::Backend;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let (addr, seen) = scripted_app(|req| {
+        assert_eq!(req["method"], "ui.help");
+        json!({"ok": true, "result": {"version": "0.12.3", "commit": "abc1234"}})
+    });
+    let port = Rc::new(Cell::new(None));
+    let discover = port.clone();
+    let mut auto = crate::Auto::new(Headless::default(), Box::new(move || discover.get()), Some("0123456789abcdef0123456789abcdef"));
+    assert_eq!(version_reply(&mut auto, json!({}))["mode"], "headless");
+    port.set(Some(addr.parse::<std::net::SocketAddr>().unwrap().port()));
+    assert!(!auto.has_ui());
+    assert_eq!(version_reply(&mut auto, json!({})), json!({"version": "0.12.3", "commit": "abc1234", "mode": "app"}));
+    assert!(auto.has_ui());
+
+    let mut headless = Headless::default();
+    headless.session.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
+    let mut kept = crate::Auto::new(headless, Box::new(move || port.get()), None);
+    assert_eq!(version_reply(&mut kept, json!({}))["mode"], "headless");
+    assert!(!kept.has_ui());
+    assert_eq!(seen.lock().unwrap().1, ["ui.help"]);
+}
+
+#[test]
+fn version_is_refused_in_batches_including_execute_wrappers() {
+    for step in [json!({"command": "version"}), json!({"command": "execute", "params": {"command": "version"}})] {
+        let (backend, reply, error) = recorded_batch(Ok(json!({})), json!({"commands": [{"command": "solid.box"}, step]}));
+        assert!(error && backend.calls.is_empty(), "{reply}");
+        assert!(reply["failed"]["error"].as_str().unwrap().contains("version"), "{reply}");
+    }
+}
+
+#[test]
 fn handshake_and_tools_list() {
     let mut s = server();
     let init =
@@ -441,6 +535,7 @@ fn handshake_and_tools_list() {
     let tools = call(&mut s, 4, "tools/list", json!({}));
     let names: Vec<&str> = tools["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
     for want in [
+        "version",
         "list_commands",
         "describe_command",
         "execute",
@@ -2742,6 +2837,36 @@ fn compact_sketch_replies_count_spline_poles() {
     assert_eq!(rectangle["created"]["points"].as_array().map(Vec::len), Some(4), "{rectangle}");
 }
 
+/// #15864: a compact `sketch.move_points` reply counts the moves and lists only the ones that
+/// missed their targets; the full reply still lists every move.
+#[test]
+fn compact_move_points_reply_lists_only_missed_moves() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "sketch.create", "params": {"plane": "XY", "name": "A"}}));
+    tool(
+        &mut s,
+        "execute",
+        json!({"command": "sketch.spline.fit_point", "params": {"points": [[10, 0], [0, 10], [-10, 0], [0, -10]], "periodic": true}}),
+    );
+    let moves =
+        json!([{"point": "p1", "to": [12, 0]}, {"point": "p2", "to": [0, 12]}, {"point": "p3", "to": [-12, 0]}, {"point": "p4", "to": [0, -12]}]);
+    let full = tool(&mut s, "execute", json!({"command": "sketch.move_points", "params": {"moves": moves}}));
+    assert_eq!(full["moved"].as_array().map(Vec::len), Some(4), "{full}");
+    let compact = tool(&mut s, "execute", json!({"command": "sketch.move_points", "params": {"moves": moves}, "verbose": false}));
+    assert_eq!((&compact["moved_count"], &compact["reached"]), (&json!(4), &json!(true)), "{compact}");
+    assert!(compact.get("moved").is_none() && compact.get("not_reached").is_none() && compact.get("created").is_none(), "{compact}");
+    assert!(compact.to_string().len() * 3 < full.to_string().len(), "compact is far smaller: {compact}");
+    // A point held by a fixed constraint cannot reach its target: only that move is listed.
+    tool(&mut s, "execute", json!({"command": "sketch.constraint.fix", "params": {"entities": ["p1"]}}));
+    let held = json!([{"point": "p1", "to": [20, 0]}, {"point": "p2", "to": [0, 14]}]);
+    let compact = tool(&mut s, "execute", json!({"command": "sketch.move_points", "params": {"moves": held}, "verbose": false}));
+    assert_eq!((&compact["moved_count"], &compact["reached"]), (&json!(2), &json!(false)), "{compact}");
+    let missed = compact["not_reached"].as_array().cloned().unwrap_or_default();
+    assert_eq!(missed.len(), 1, "{compact}");
+    assert_eq!((&missed[0]["point"], &missed[0]["to"]), (&json!("p1"), &json!([20.0, 0.0])), "{compact}");
+    assert!(missed[0]["at"].is_array() && missed[0].get("reached").is_none(), "{compact}");
+}
+
 /// A connected app sees exactly one engine call; no inventory inspection is needed.
 #[test]
 fn compact_execute_uses_one_backend_call_and_keeps_removed_bodies() {
@@ -3457,9 +3582,18 @@ fn tool_annotations_tell_the_whole_truth() {
     for name in ["execute", "batch", "save", "export", "open", "screenshot"] {
         assert_eq!(hints(name), (false, true, true), "{name}");
     }
-    for name in
-        ["list_commands", "describe_command", "inspect_design", "measure", "body_topology", "crash_reports", "skill_reference", "running", "pending"]
-    {
+    for name in [
+        "version",
+        "list_commands",
+        "describe_command",
+        "inspect_design",
+        "measure",
+        "body_topology",
+        "crash_reports",
+        "skill_reference",
+        "running",
+        "pending",
+    ] {
         assert_eq!(hints(name), (true, false, false), "{name}");
     }
     assert_eq!(hints("new_design"), (false, true, false));
@@ -4268,15 +4402,16 @@ fn inspect_text(s: &mut Server, args: Value) -> (bool, String) {
     (r["result"]["isError"] == json!(true), r["result"]["content"][0]["text"].as_str().unwrap_or_default().to_string())
 }
 
-/// No tool argument has a list of types and an `enum` together: some OpenAI-compatible
-/// endpoints (Moonshot) refuse every tool when one does, so the agent chat could not start
-/// a turn (#15306). The tool itself checks the words such an argument takes.
+/// No tool schema has a list of types, and no argument of several types has an `enum`. Gemini
+/// refuses a list of types (#16257); some OpenAI-compatible endpoints (Moonshot) refuse every
+/// tool when an argument of several types has an `enum` (#15306), so the agent chat could not
+/// start a turn. Several types are an `anyOf`; the tool itself checks the words it takes.
 #[test]
-fn no_tool_argument_has_a_list_of_types_with_an_enum() {
+fn no_tool_schema_has_a_list_of_types() {
     fn mixed(path: &str, schema: &Value, found: &mut Vec<String>) {
         match schema {
             Value::Object(o) => {
-                if o.get("type").is_some_and(Value::is_array) && o.contains_key("enum") {
+                if o.get("type").is_some_and(Value::is_array) || (o.contains_key("anyOf") && o.contains_key("enum")) {
                     found.push(path.to_string());
                 }
                 for (k, v) in o {
@@ -4308,7 +4443,7 @@ fn inspect_design_is_unchanged_without_compact_output() {
     let defs = tool_definitions();
     let def = defs.iter().find(|d| d["name"] == "inspect_design").unwrap();
     assert_eq!(def["inputSchema"]["properties"]["sketches"]["type"], "boolean", "{def}");
-    assert_eq!(def["inputSchema"]["properties"]["bodies"]["type"], json!(["boolean", "string"]), "no list of names: {def}");
+    assert_eq!(def["inputSchema"]["properties"]["bodies"]["anyOf"], json!([{"type": "boolean"}, {"type": "string"}]), "no list of names: {def}");
     let listed = call(&mut s, 1, "tools/list", json!({}));
     assert!(listed["result"]["tools"].as_array().unwrap().iter().any(|t| t == def), "tools/list serves the default definition");
 
@@ -4403,7 +4538,7 @@ impl crate::Backend for AppWithPrefs {
 fn inspect_design_is_compact(s: &mut Server) -> bool {
     let listed = call(s, 1, "tools/list", json!({}));
     let def = listed["result"]["tools"].as_array().and_then(|t| t.iter().find(|d| d["name"] == "inspect_design")).cloned().unwrap_or_default();
-    def["inputSchema"]["properties"]["bodies"]["type"].as_array().is_some_and(|t| t.contains(&json!("array")))
+    def["inputSchema"]["properties"]["bodies"]["anyOf"].as_array().is_some_and(|t| t.iter().any(|alt| alt["type"] == "array"))
 }
 
 /// The app's Preferences turn compact output on for a bridged server; it asks until the app

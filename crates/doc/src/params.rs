@@ -781,9 +781,9 @@ impl Document {
                 out.push(ParamUser::Feature { feature: f.id, name: f.name.clone(), input: "Position".into() });
             }
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-                for c in &sketch.constraints {
-                    if c.param.as_deref() == Some(name) {
-                        out.push(ParamUser::Dimension { feature: f.id, name: f.name.clone(), constraint: c.id.clone() });
+                for (id, param) in sketch.dimension_param_ids() {
+                    if param == name {
+                        out.push(ParamUser::Dimension { feature: f.id, name: f.name.clone(), constraint: id.to_string() });
                     }
                 }
                 for pattern in &sketch.patterns {
@@ -812,9 +812,10 @@ impl Document {
         let uses = |e: &str| expr::references(e).iter().any(|r| r == name);
         let rule_uses = |field: &str, e: &str| rule_references(field, e).iter().any(|r| r == name);
         for o in &self.occurrences {
-            let axes: BTreeSet<&str> = o.expressed_moves.iter().flat_map(|m| m.exprs()).filter(|(_, e)| uses(e)).map(|(axis, _)| axis).collect();
-            for axis in axes {
-                out.push(ParamUser::Occurrence { occurrence: o.id, name: o.name.clone(), input: format!("translate {axis}") });
+            let inputs: BTreeSet<String> =
+                o.expressed_moves.iter().flat_map(|m| m.exprs()).filter(|(_, e)| uses(e)).map(|(input, _)| input).collect();
+            for input in inputs {
+                out.push(ParamUser::Occurrence { occurrence: o.id, name: o.name.clone(), input });
             }
         }
         for r in &self.sheet.rules {
@@ -928,9 +929,9 @@ impl Document {
                 }
             }
             if let FeatureKind::Sketch { sketch, .. } = &mut f.kind {
-                for c in &mut sketch.constraints {
-                    if c.param.as_deref() == Some(old) {
-                        c.param = Some(new.to_string());
+                for param in sketch.dimension_params_mut() {
+                    if param.as_deref() == Some(old) {
+                        *param = Some(new.to_string());
                         n += 1;
                     }
                 }
@@ -990,7 +991,7 @@ impl Document {
                 }
             }
         }
-        for e in self.occurrences.iter_mut().flat_map(|o| &mut o.expressed_moves).flat_map(|m| m.translate.iter_mut().flatten()) {
+        for e in self.occurrences.iter_mut().flat_map(|o| &mut o.expressed_moves).flat_map(|m| m.exprs_mut()) {
             let r = expr::rename_reference(e, old, new);
             if r != *e {
                 *e = r;
@@ -1060,7 +1061,7 @@ impl Document {
         for f in &self.features {
             let mut names: BTreeSet<String> = f.param_names.iter().filter(|n| !n.is_empty()).cloned().collect();
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-                names.extend(sketch.constraints.iter().filter_map(|c| c.param.clone()));
+                names.extend(sketch.dimension_params().into_iter().cloned());
             }
             names.extend(self.feature_reads(f));
             out.extend(names.into_iter().map(|n| (format!("Feature:{}", f.name), n)));
@@ -1115,7 +1116,7 @@ impl Document {
             hit |= (sheet && f.kind.is_sheet()) || (plastic && f.kind.is_plastic());
             hit |= f.kind.expressions().iter().any(|e| expr::references(e).iter().any(|r| affected.contains(r)));
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-                hit |= sketch.constraints.iter().any(|c| c.param.as_ref().is_some_and(|p| affected.contains(p)));
+                hit |= sketch.dimension_params().into_iter().any(|p| affected.contains(p));
                 hit |= sketch.patterns.iter().flat_map(|p| p.expressions.values()).any(|e| expr::references(e).iter().any(|r| affected.contains(r)));
                 hit |= sketch.text_exprs().iter().any(|(_, e)| expr::references(e).iter().any(|r| affected.contains(r)));
                 hit |= sketch.text_word_exprs().iter().any(|e| crate::text_params::references(e).iter().any(|r| affected.contains(r)));

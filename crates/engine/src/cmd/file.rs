@@ -37,7 +37,7 @@ use crate::schema::save::{SaveAsParams, SaveParams, SaveResult, SignedSave};
 use crate::schema::save_mesh::{SaveMeshResult, SlicerDelivery};
 use crate::schema::slicers::{SlicerInfo, SlicersParams, SlicersResult};
 use crate::schema::{TypedContract, output_schema_for};
-use crate::{EngineError, Result, Session};
+use crate::{EngineError, Result, Session, store_link_names};
 
 const INSERT_MESH_CONTRACT: TypedContract<InsertMeshParams> = TypedContract::new();
 const INSERT_STEP_CONTRACT: TypedContract<InsertStepParams> = TypedContract::new();
@@ -56,13 +56,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&OPEN_CONTRACT)
         .output(output_schema_for::<OpenResult>)
-        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
+        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); for a KiCad PCB: thickness?: board thickness in mm (default from the board); components?: bool (default true); copper?: \"overlay\" (default: flat copper just above the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); silkscreen?: bool (default true: the silk shapes and text); color?: \"#rrggbb\" or [r, g, b] (board substrate colour); representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
     CommandSpec::new("file.insert_step", "Insert STEP", crate::checked!("file.insert_step", insert_step))
         .at("SOLID", "INSERT")
         .icon("import")
         .contract(&INSERT_STEP_CONTRACT)
         .output(output_schema_for::<StepInserted>)
-        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
+        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it, its translation column (entries 4, 8 and 12) numbers or length expressions: one that names a parameter is kept, and the import follows the parameter when it changes (a grounded one stays); a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
     CommandSpec::new("file.insert_mesh", "Insert Mesh", crate::checked!("file.insert_mesh", insert_mesh))
         .at("SOLID", "INSERT")
         .icon("import")
@@ -143,7 +143,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_OBJ_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
-        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard) → {path, bytes, format, files}: OBJ, with the colours of the bodies in a material library (`.mtl`) next to it"),
+        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard) → {path, bytes, format, files, warnings?}: OBJ, with the colours of the bodies in a material library (`.mtl`) next to it"),
     CommandSpec::new("file.export_urdf", "Export URDF", crate::checked!("file.export_urdf", export_urdf_cmd))
         .icon("export")
         .noundo()
@@ -612,12 +612,18 @@ fn add_mesh(
     crease_angle: Option<f64>,
 ) -> Result<Value> {
     let err = |e: solidcraft_io::IoError| EngineError::Other(format!("{path}: {e}"));
-    let bytes = solidcraft_io::vfs::read(path, solidcraft_io::MAX_3MF_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let gltf = solidcraft_io::is_gltf_path(path);
+    // A glTF file is read up to the limit for STEP and import files, which Preferences raise (#17446).
+    let bytes = if gltf {
+        solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step)
+    } else {
+        solidcraft_io::vfs::read(path, solidcraft_io::MAX_3MF_BYTES)
+    }
+    .map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let (mut mf, plan, looks) = if gltf {
         let dir = std::path::Path::new(path).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
         let mut load =
-            |name: &str| solidcraft_io::vfs::read(&dir.join(name).to_string_lossy(), solidcraft_io::MAX_GLTF_BYTES).map_err(|e| e.to_string());
+            |name: &str| solidcraft_io::limits::read(&dir.join(name).to_string_lossy(), solidcraft_io::limits::Kind::Step).map_err(|e| e.to_string());
         let mut g = solidcraft_io::read_gltf(&bytes, path, &mut load).map_err(err)?;
         if !import::mesh_plan_fits(&g.plan) {
             g.flatten();
@@ -768,9 +774,17 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "only STEP, IGES, FreeCAD and Rhino files (.step, .stp, .igs, .iges, .fcstd, .3dm) can be inserted"));
     }
     let options = step_options(p, cmd)?;
+    // The translation column may be length expressions that name parameters (#8192): the
+    // occurrence keeps them and follows them.
+    let mut kept = [None, None, None];
     let placement = match p.get("matrix") {
         None | Some(Value::Null) => None,
-        Some(m) => Some(super::component::matrix::rigid(m, super::component::matrix::tolerance(p, cmd)?, cmd)?),
+        Some(m) => {
+            let (numbers, names) =
+                super::component::matrix::with_exprs(m, |e| s.doc.eval(e, solidcraft_doc::expr::Kind::Length).map_err(|err| err.to_string()), cmd)?;
+            kept = names;
+            Some(super::component::matrix::rigid(&numbers, super::component::matrix::tolerance(p, cmd)?, cmd)?)
+        }
     };
     let mut out = add_step(s, path, str_(p, "name"), &options)?;
     if let Some(m) = placement {
@@ -781,11 +795,404 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
                 return Err(bad(cmd, "`matrix` moves the import out of a rigid placement within 1e9 mm"));
             }
             o.transform = placed;
+            if kept.iter().any(Option::is_some) {
+                let at = [m[3][0], m[3][1], m[3][2]];
+                o.expressed_moves.push(solidcraft_doc::ExpressedMove {
+                    translate: kept,
+                    at,
+                    frame: solidcraft_doc::IDENTITY,
+                    world: false,
+                    origin: Default::default(),
+                    origin_at: [0.0; 3],
+                    rotation: solidcraft_doc::IDENTITY,
+                    grounded_ok: false,
+                });
+            }
             out["transform"] = json!(o.transform);
         }
         s.refresh();
     }
     Ok(out)
+}
+
+/// The KiCad import options a command's parameters name.
+fn kicad_options(p: &Value, cmd: &str) -> Result<solidcraft_io::KicadOptions> {
+    let mut options = solidcraft_io::KicadOptions::default();
+    if let Some(v) = p.get("thickness").filter(|v| !v.is_null()) {
+        let value = v.as_f64().ok_or_else(|| bad(cmd, "`thickness` must be a finite number"))?;
+        if !value.is_finite() || value <= 0.0 || value > 1000.0 {
+            return Err(bad(cmd, "`thickness` must be greater than 0 and at most 1000 mm"));
+        }
+        options.thickness = Some(value);
+    }
+    for (key, slot) in [("components", &mut options.components), ("silkscreen", &mut options.silkscreen)] {
+        if let Some(v) = p.get(key).filter(|v| !v.is_null()) {
+            *slot = v.as_bool().ok_or_else(|| bad(cmd, format!("`{key}` must be true or false")))?;
+        }
+    }
+    if let Some(v) = p.get("copper").filter(|v| !v.is_null()) {
+        options.copper = match v.as_bool() {
+            Some(true) => solidcraft_io::KicadCopper::Mesh,
+            Some(false) => solidcraft_io::KicadCopper::None,
+            None => {
+                let name = v.as_str().ok_or_else(|| bad(cmd, "`copper` must be true, false, \"none\", \"overlay\" or \"mesh\""))?;
+                solidcraft_io::KicadCopper::parse(name).ok_or_else(|| bad(cmd, "`copper` must be \"none\", \"overlay\" or \"mesh\""))?
+            }
+        };
+    }
+    if let Some(v) = p.get("color").filter(|v| !v.is_null()) {
+        options.color = Some(parse_kicad_color(v).ok_or_else(|| bad(cmd, "`color` must be \"#rrggbb\" or [r, g, b] with values 0-255"))?);
+    }
+    if let Some(v) = p.get("representation").or(p.get("mode")).filter(|v| !v.is_null()) {
+        let name = v.as_str().ok_or_else(|| bad(cmd, "`representation` must be \"mesh\""))?;
+        options.representation = solidcraft_io::KicadRepresentation::parse(name).ok_or_else(|| bad(cmd, "`representation` must be \"mesh\""))?;
+        if options.representation == solidcraft_io::KicadRepresentation::Brep {
+            return Err(EngineError::Other("not supported yet: B-rep KiCad imports (choose mesh)".into()));
+        }
+    }
+    Ok(options)
+}
+
+fn parse_kicad_color(v: &Value) -> Option<[u8; 3]> {
+    if let Some(s) = v.as_str() {
+        let hex = s.trim().trim_start_matches('#');
+        let expand = |c: u8| c * 17;
+        return match hex.len() {
+            3 => Some([
+                expand(u8::from_str_radix(hex.get(0..1)?, 16).ok()?),
+                expand(u8::from_str_radix(hex.get(1..2)?, 16).ok()?),
+                expand(u8::from_str_radix(hex.get(2..3)?, 16).ok()?),
+            ]),
+            6 => Some([
+                u8::from_str_radix(hex.get(0..2)?, 16).ok()?,
+                u8::from_str_radix(hex.get(2..4)?, 16).ok()?,
+                u8::from_str_radix(hex.get(4..6)?, 16).ok()?,
+            ]),
+            _ => None,
+        };
+    }
+    let values = v.as_array()?;
+    if values.len() != 3 {
+        return None;
+    }
+    let mut out = [0u8; 3];
+    for (i, value) in values.iter().enumerate() {
+        let n = value.as_f64()?;
+        if !n.is_finite() || !(0.0..=255.0).contains(&n) {
+            return None;
+        }
+        out[i] = n.round() as u8;
+    }
+    Some(out)
+}
+
+fn add_kicad(s: &mut Session, path: &str, name: Option<&str>, options: &solidcraft_io::KicadOptions) -> Result<Value> {
+    let board_path = solidcraft_io::kicad_board_path(std::path::Path::new(path)).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let board_path = board_path.to_string_lossy();
+    let bytes =
+        solidcraft_io::vfs::read(&board_path, solidcraft_io::MAX_KICAD_BYTES).map_err(|e| EngineError::Other(format!("{board_path}: {e}")))?;
+    let model_dir = std::path::Path::new(board_path.as_ref()).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+    let paths = KicadPaths::current();
+    let mut load = |model: &str| {
+        let resolved = paths.resolve(model, &model_dir).map_err(|e| e.to_string())?;
+        // A board names its models; they follow the same rule as any other path a document names.
+        solidcraft_io::vfs::check_design_path(&resolved, Some(board_path.as_ref())).map_err(|e| e.to_string())?;
+        read_kicad_model(&resolved).map_err(|e| format!("{resolved}: {e}"))
+    };
+    let imported =
+        solidcraft_io::read_kicad(&bytes, &board_path, options, &mut load).map_err(|e| EngineError::Other(format!("{board_path}: {e}")))?;
+    let feature = imported.feature;
+    let feature_name = name.filter(|n| !n.trim().is_empty()).unwrap_or(&feature.name).to_string();
+    let component_name = import::component_name(path, name);
+    let tree = if imported.plan.places.is_empty() { import::Tree::Flat } else { import::Tree::Mesh(&imported.plan) };
+    // A board hides none of its own bodies; its layers are all wanted.
+    let (id, placed) = import::add_in_component(s, feature.kind, &feature_name, feature.body_names, &[], &component_name, tree)?;
+    // The board stands at the origin: its lower-left outline corner goes to X = Y = 0, not to the
+    // coordinates KiCad stores, which put a board anywhere on the project sheet.
+    if let Some(corner) = imported.corner {
+        at_origin(s, &placed, corner);
+    }
+    // A solid board is a STEP import of its own, in the board's component: the mesh feature holds
+    // the copper, silkscreen and models, this holds the substrate.
+    let mut features = vec![id];
+    if let Some(step) = imported.board_step {
+        features.push(import::add_step_in_component(s, placed.component, "board.step", step, &feature_name)?);
+    }
+    let bodies: Vec<String> = features.iter().flat_map(|feature| created_bodies(s, *feature)).collect();
+    let mut out = json!({"path": path, "board_path": board_path, "feature": id, "name": feature_name, "bodies": bodies, "created_bodies": bodies, "warnings": feature.warnings});
+    // The component the board was placed in, as the other imports report theirs.
+    out["component"] = json!(placed.component);
+    out["component_name"] = json!(placed.name);
+    out["occurrence"] = json!(placed.occurrence);
+    if placed.components > 0 {
+        out["subcomponents"] = json!(placed.components);
+        out["rigid_joints"] = json!(placed.joints.len());
+    }
+    if features.len() > 1 {
+        out["board_solid"] = json!(true);
+    }
+    Ok(out)
+}
+
+/// Move an import's component so that the board's lower-left corner `corner` sits at the origin,
+/// contents and all: the occurrence takes the shift, so the design's Z = 0 stays the board's top.
+fn at_origin(s: &mut Session, placed: &import::Placed, corner: [f64; 2]) {
+    let Some(occurrence) = placed.occurrence else { return };
+    let shift =
+        solidcraft_doc::rigid(solidcore_record::Vec3::new(-corner[0], -corner[1], 0.0), solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0);
+    if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occurrence) {
+        o.transform = shift;
+    }
+    s.refresh();
+}
+
+/// What a KiCad model reference's `${…}`/`%…%`/`$…` variables can resolve to on this machine.
+///
+/// The names are the board's, not ours: a board drawn in KiCad 8 says `${KICAD8_3DMODEL_DIR}`
+/// while KiCad 10 may be installed, so the version in a name decides nothing. A variable is
+/// looked up in the shell first (it wins), then in KiCad's own variable table (Preferences →
+/// Configure Paths, which is the only place KiCad defines them on Linux: it sets no environment
+/// variable), and any `KICAD<n>_3DMODEL_DIR`/`KISYS3DMOD` finally lands in the 3D library that is
+/// actually installed here.
+struct KicadPaths {
+    configured: Vec<(String, String)>,
+    library: Option<std::path::PathBuf>,
+}
+
+impl KicadPaths {
+    fn current() -> Self {
+        Self { configured: kicad_configured_variables(), library: installed_kicad_3dmodel_dir() }
+    }
+
+    fn get(&self, name: &str) -> Option<String> {
+        if let Ok(value) = std::env::var(name)
+            && !value.is_empty()
+        {
+            return Some(value);
+        }
+        if let Some((_, value)) = self.configured.iter().find(|(key, value)| key.eq_ignore_ascii_case(name) && !value.is_empty()) {
+            return Some(value.clone());
+        }
+        if is_kicad_3dmodel_variable(name) {
+            return self.library.as_ref().map(|dir| dir.to_string_lossy().into_owned());
+        }
+        None
+    }
+
+    fn resolve(&self, path: &str, model_dir: &std::path::Path) -> std::io::Result<String> {
+        let mut expanded = String::with_capacity(path.len());
+        let mut chars = path.chars().peekable();
+        while let Some(ch) = chars.next() {
+            let name = match ch {
+                '$' if chars.peek() == Some(&'{') => {
+                    chars.next();
+                    Some(read_kicad_env_name(&mut chars, '}')?)
+                }
+                '%' => Some(read_kicad_env_name(&mut chars, '%')?),
+                '$' => {
+                    let mut name = String::new();
+                    while chars.peek().is_some_and(|c| c.is_ascii_alphanumeric() || *c == '_') {
+                        if let Some(c) = chars.next() {
+                            name.push(c);
+                        }
+                    }
+                    if name.is_empty() {
+                        expanded.push('$');
+                        continue;
+                    }
+                    Some(name)
+                }
+                _ => None,
+            };
+            if let Some(name) = name {
+                if name.is_empty() {
+                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty environment variable in model path"));
+                }
+                if name == "KIPRJMOD" {
+                    expanded.push_str(&model_dir.to_string_lossy());
+                } else {
+                    expanded.push_str(
+                        &self
+                            .get(&name)
+                            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, format!("unresolved environment variable `{name}`")))?,
+                    );
+                }
+            } else {
+                expanded.push(ch);
+            }
+        }
+        let resolved = std::path::Path::new(&expanded);
+        let resolved = if resolved.is_absolute() { resolved.to_path_buf() } else { model_dir.join(resolved) };
+        Ok(resolved.to_string_lossy().into_owned())
+    }
+}
+
+/// KiCad's own variable table — `environment.vars` in `kicad_common.json` — from the newest
+/// KiCad configured here: `~/.config/kicad/<version>` on Linux (`$XDG_CONFIG_HOME` when set),
+/// `%APPDATA%\kicad\<version>` on Windows, `~/Library/Preferences/kicad/<version>` on macOS.
+#[cfg(target_arch = "wasm32")]
+fn kicad_configured_variables() -> Vec<(String, String)> {
+    // The browser has no KiCad installed and no folders to list.
+    Vec::new()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn kicad_configured_variables() -> Vec<(String, String)> {
+    let mut roots = Vec::new();
+    #[cfg(target_os = "windows")]
+    if let Some(app_data) = std::env::var_os("APPDATA") {
+        roots.push(std::path::PathBuf::from(app_data).join("kicad"));
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(home) = std::env::var_os("HOME") {
+        roots.push(std::path::PathBuf::from(home).join("Library").join("Preferences").join("kicad"));
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Some(config) = std::env::var_os("XDG_CONFIG_HOME").filter(|value| !value.is_empty()) {
+            roots.push(std::path::PathBuf::from(config).join("kicad"));
+        } else if let Some(home) = std::env::var_os("HOME") {
+            roots.push(std::path::PathBuf::from(home).join(".config").join("kicad"));
+        }
+    }
+    for root in roots {
+        // The newest configured version is the one whose paths apply; older ones are kept as a
+        // fallback for a variable the newest no longer defines.
+        let mut versions: Vec<(u32, u32, std::path::PathBuf)> = std::fs::read_dir(&root)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let mut pieces = name.split('.').map(|piece| piece.parse::<u32>().unwrap_or(u32::MAX));
+                let version = (pieces.next()?, pieces.next().unwrap_or(0));
+                (version.0 != u32::MAX && entry.path().is_dir()).then(|| (version.0, version.1, entry.path()))
+            })
+            .collect();
+        versions.sort_by_key(|a| std::cmp::Reverse((a.0, a.1)));
+        versions.push((0, 0, root));
+        let mut variables: Vec<(String, String)> = Vec::new();
+        for (_, _, dir) in versions {
+            let Ok(bytes) = solidcraft_io::vfs::read(&dir.join("kicad_common.json").to_string_lossy(), 16 << 20) else { continue };
+            for (key, value) in kicad_variables_of(&bytes) {
+                if !variables.iter().any(|(name, _)| name.eq_ignore_ascii_case(&key)) {
+                    variables.push((key, value));
+                }
+            }
+        }
+        if !variables.is_empty() {
+            return variables;
+        }
+    }
+    Vec::new()
+}
+
+/// The `environment.vars` table of a `kicad_common.json`, as text. Anything unexpected in the
+/// file (a missing table, a number or `null` where a path belongs) simply is not a variable.
+/// (The browser reads no KiCad settings, so there this is only the tests' entry point.)
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+fn kicad_variables_of(bytes: &[u8]) -> Vec<(String, String)> {
+    let Ok(json) = serde_json::from_slice::<Value>(bytes) else { return Vec::new() };
+    let Some(vars) = json.get("environment").and_then(|e| e.get("vars")).and_then(Value::as_object) else { return Vec::new() };
+    vars.iter()
+        .filter_map(|(name, value)| value.as_str().filter(|text| !text.is_empty()).map(|text| (name.clone(), text.to_string())))
+        .take(256)
+        .collect()
+}
+
+/// Read a footprint's model. KiCad's 3D library ships each model in one format at a time — the
+/// KiCad 10 packages have no VRML at all, while a board drawn with older footprints still names
+/// `….wrl` — so a reference to a file that is not here is answered by the model of the same name
+/// in another format we can read, which is what KiCad's own 3D viewer does.
+fn read_kicad_model(path: &str) -> std::io::Result<solidcraft_io::KicadModelFile> {
+    let named = std::path::Path::new(path);
+    let missing = match read_kicad_model_file(named) {
+        Ok(bytes) => return Ok(solidcraft_io::KicadModelFile { path: path.to_string(), bytes }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => error,
+        Err(error) => return Err(error),
+    };
+    let Some(stem) = named.file_stem() else { return Err(missing) };
+    let Some(dir) = named.parent() else { return Err(missing) };
+    let format = named.extension().and_then(|e| e.to_str()).unwrap_or("");
+    for other in ["step", "stp", "wrl"] {
+        if other.eq_ignore_ascii_case(format) {
+            continue;
+        }
+        // Not `with_extension`: a model named `DIP-14_W7.62mm` has `62mm` as its extension.
+        let mut name = stem.to_os_string();
+        name.push(".");
+        name.push(other);
+        let candidate = dir.join(name);
+        if let Ok(bytes) = read_kicad_model_file(&candidate) {
+            return Ok(solidcraft_io::KicadModelFile { path: candidate.to_string_lossy().into_owned(), bytes });
+        }
+    }
+    Err(missing)
+}
+
+fn read_kicad_model_file(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    let text = path.to_string_lossy();
+    let limit = if solidcraft_io::is_vrml_path(&text) { solidcraft_io::MAX_VRML_BYTES } else { solidcraft_io::MAX_STEP_BYTES };
+    solidcraft_io::vfs::read(&text, limit)
+}
+
+fn is_kicad_3dmodel_variable(name: &str) -> bool {
+    if name == "KISYS3DMOD" {
+        return true;
+    }
+    name.strip_prefix("KICAD")
+        .and_then(|version| version.strip_suffix("_3DMODEL_DIR"))
+        .is_some_and(|version| !version.is_empty() && version.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+fn installed_kicad_3dmodel_dir() -> Option<std::path::PathBuf> {
+    // Told, not inferred: none of the platforms below is the browser, and there it stays empty.
+    let mut candidates: Vec<((u32, u32), std::path::PathBuf)> = Vec::new();
+    #[cfg(target_os = "windows")]
+    {
+        for variable in ["ProgramFiles", "ProgramFiles(x86)"] {
+            let Some(program_files) = std::env::var_os(variable) else { continue };
+            let install_root = std::path::PathBuf::from(program_files).join("KiCad");
+            let direct = install_root.join("share").join("kicad").join("3dmodels");
+            if direct.is_dir() {
+                candidates.push(((0_u32, 0_u32), direct));
+            }
+            let Ok(entries) = std::fs::read_dir(&install_root) else { continue };
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let version_text = name.to_string_lossy();
+                let mut pieces = version_text.split('.').map(|piece| piece.parse::<u32>().unwrap_or(0));
+                let version = (pieces.next().unwrap_or(0), pieces.next().unwrap_or(0));
+                let models = entry.path().join("share").join("kicad").join("3dmodels");
+                if version.0 > 0 && models.is_dir() {
+                    candidates.push((version, models));
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    candidates.extend([((0, 0), std::path::PathBuf::from("/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels"))]);
+    #[cfg(all(unix, not(target_os = "macos")))]
+    candidates.extend([
+        ((0, 0), std::path::PathBuf::from("/usr/share/kicad/3dmodels")),
+        ((0, 0), std::path::PathBuf::from("/usr/local/share/kicad/3dmodels")),
+    ]);
+    candidates.sort_by_key(|(version, _)| *version);
+    candidates.into_iter().rev().map(|(_, path)| path).find(|path| path.is_dir())
+}
+
+fn read_kicad_env_name(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, delimiter: char) -> std::io::Result<String> {
+    let mut name = String::new();
+    for ch in chars.by_ref() {
+        if ch == delimiter {
+            if name.is_empty() {
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty environment variable in model path"));
+            }
+            return Ok(name);
+        }
+        name.push(ch);
+    }
+    Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "unterminated environment variable in model path"))
 }
 
 fn open(s: &mut Session, p: &Value) -> Result<Value> {
@@ -845,10 +1252,16 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
             param_warnings: Vec::new(),
         }));
     }
-    if solidcraft_io::is_step_path(path) || solidcraft_io::is_mesh_path(path) {
+    if solidcraft_io::is_step_path(path) || solidcraft_io::is_mesh_path(path) || solidcraft_io::is_kicad_path(path) {
         // A new, unsaved design holding the file's bodies.
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
-        let (mut fresh, r) = if solidcraft_io::is_step_path(path) {
+        let (mut fresh, r) = if solidcraft_io::is_kicad_path(path) {
+            // KiCad is read into a fresh design here, as a mesh file is.
+            let mut fresh = Session::new(Document::new(&stem));
+            fresh.set_validation(s.validation());
+            let r = add_kicad(&mut fresh, path, None, &kicad_options(p, "doc.open")?)?;
+            (fresh, r)
+        } else if solidcraft_io::is_step_path(path) {
             open_step(path, p, import_cache().as_ref(), s.validation())?
         } else {
             let mut fresh = Session::new(Document::new(&stem));
@@ -863,6 +1276,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
             fresh.active_occurrence_path = Some(fresh.doc.first_path(c));
         }
         fresh.undo.clear();
+        fresh.opened_from_import();
         s.replace_design(fresh);
         let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
         let r: ImportedFile = reply_from(r, "the import")?;
@@ -885,6 +1299,8 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
             content_sha256: r.content_sha256,
             import_reused: r.import_reused,
             history: r.history,
+            board_path: r.board_path,
+            board_solid: r.board_solid,
             param_warnings: Vec::new(),
         }));
     }
@@ -1027,6 +1443,10 @@ struct ImportedFile {
     /// FreeCAD and `history: features` only: the rebuilt history came in.
     #[serde(default)]
     history: Option<String>,
+    #[serde(default)]
+    board_path: Option<String>,
+    #[serde(default)]
+    board_solid: Option<bool>,
 }
 
 /// The name a design never given one by its user is shown under.
@@ -1437,7 +1857,11 @@ impl Session {
         let unpinned = session.doc.reserved_body_names.is_empty() && session.doc.features.iter().all(|f| f.body_names.is_empty());
         let before = session.doc.clone();
         session.pin_body_names();
-        if unpinned || !std::sync::Arc::ptr_eq(&before, &session.doc) {
+        // Links whose design dropped a guessed name as it opened keep the name of what they were
+        // found on, before a change can move it (#17229).
+        session.pin_dropped_link_names();
+        let dropped = session.has_dropped_link_names();
+        if unpinned || dropped || !std::sync::Arc::ptr_eq(&before, &session.doc) {
             session.pin_rolled_back_body_names();
         }
         session.saved = session.doc.clone();
@@ -1462,6 +1886,11 @@ impl Session {
         whole.doc_mut().marker = None;
         whole.model.evaluate_shared(&whole.doc);
         whole.pin_body_names();
+        // The links of a sketch rolled back or skipped here, whose guessed names their design
+        // dropped as it opened (#17229): the whole timeline finds what each is on, and the name
+        // is the one it had at the geometry the design opened with, before an edit moves it.
+        whole.pin_dropped_link_names();
+        let link_pins = self.dropped_link_pins(&whole);
         let pins: Vec<(u64, Vec<String>)> = whole
             .doc
             .features
@@ -1470,12 +1899,12 @@ impl Session {
             .map(|f| (f.id, f.body_names.clone()))
             .collect();
         let reserve: Vec<String> = whole.doc.reserved_body_names.difference(&self.doc.reserved_body_names).cloned().collect();
-        if pins.is_empty() && reserve.is_empty() {
+        if pins.is_empty() && reserve.is_empty() && link_pins.is_empty() {
             return;
         }
         // As `pin_body_names` stores names: the bodies keep the names they have, so no result
         // changes and none is evaluated again.
-        let renamed: Vec<u64> = pins.iter().map(|(id, _)| *id).collect();
+        let renamed: Vec<u64> = pins.iter().map(|(id, _)| *id).chain(link_pins.iter().map(|(id, ..)| *id)).collect();
         let keep = self.model.pinned_prefix(&self.doc, &renamed);
         let doc = self.doc_mut();
         for (id, names) in pins {
@@ -1483,6 +1912,7 @@ impl Session {
                 f.body_names = names;
             }
         }
+        store_link_names(doc, link_pins);
         doc.reserved_body_names.extend(reserve);
         self.model.refingerprint_shared(&self.doc, keep);
     }
@@ -1759,6 +2189,9 @@ fn export_to(
         return export_glb(s, cmd, path, bodies, quality);
     }
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
+    // What meshing the bodies reported (STL and 3MF): each face the mesh path left short of the
+    // smallest angle or the chord tolerance, as the reply's warnings.
+    let mut warnings = Vec::new();
     // A design with components exports as a STEP assembly; otherwise bodies as placed.
     let bytes = if format == Format::Design {
         if !bodies.is_empty() {
@@ -1770,7 +2203,8 @@ fn export_to(
     } else {
         // Bodies carry the colour they are shown in (appearance, material or imported), and the
         // file the design's properties where the format has a place for them.
-        solidcraft_io::export_with_parts(
+        let bytes;
+        (bytes, warnings) = solidcraft_io::export_with_parts_noted(
             &s.doc.painted(&*s.world_state()?),
             bodies,
             parts,
@@ -1779,10 +2213,11 @@ fn export_to(
             &s.doc.metadata,
             quality,
             export_thumbnail(s, format, bodies).as_deref(),
-        )?
+        )?;
+        bytes
     };
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let reply = ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{format:?}"), ..ExportResult::default() };
+    let reply = ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{format:?}"), warnings, ..ExportResult::default() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
@@ -1803,7 +2238,8 @@ fn lay_on_print_faces(p: &Value, cmd: &str, format: Format) -> Result<bool> {
 }
 
 /// Write the bodies as a mesh file (STL or 3MF), each laid on its print face: the file's size, and
-/// which bodies were laid and which were written as they lie.
+/// which bodies were laid and which were written as they lie, with what meshing them reported
+/// among the warnings.
 fn write_laid(
     s: &Session,
     path: &str,
@@ -1816,7 +2252,10 @@ fn write_laid(
     let mut state = s.doc.painted(&*s.world_state()?);
     let laid = print_face::lay_on_print_faces(s, &mut state, bodies, parts);
     let thumbnail = export_thumbnail(s, format, bodies);
-    let bytes = solidcraft_io::export_with_parts(&state, bodies, parts, format, &name, &s.doc.metadata, quality, thumbnail.as_deref())?;
+    let mut laid = laid;
+    let (bytes, notes) =
+        solidcraft_io::export_with_parts_noted(&state, bodies, parts, format, &name, &s.doc.metadata, quality, thumbnail.as_deref())?;
+    laid.warnings.extend(notes);
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok((bytes.len(), laid))
 }
@@ -1946,7 +2385,13 @@ fn export_obj(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io
         }
         written.push(t.clone());
     }
-    Ok(json!({"path": path, "bytes": files.obj.len(), "format": format!("{:?}", Format::Obj), "files": written}))
+    let mut reply = json!({"path": path, "bytes": files.obj.len(), "format": format!("{:?}", Format::Obj), "files": written});
+    // What meshing the bodies reported: each face the mesh path left short of the smallest angle
+    // or the chord tolerance.
+    if !files.warnings.is_empty() {
+        reply["warnings"] = json!(files.warnings);
+    }
+    Ok(reply)
 }
 
 /// The GLB export (#1553): the bodies as placed, with the looks the design shows them in.
@@ -2215,6 +2660,16 @@ mod tests {
         assert!(!has_thumbnail(&mut s, "part.stl"), "STL has no place for a picture");
     }
 
+    /// Three-digit hex colours expand one digit per channel, as CSS does: `#fff` is white.
+    #[test]
+    fn a_three_digit_colour_expands_each_digit() {
+        assert_eq!(parse_kicad_color(&json!("#fff")), Some([255, 255, 255]));
+        assert_eq!(parse_kicad_color(&json!("#1a9")), Some([17, 170, 153]));
+        assert_eq!(parse_kicad_color(&json!("#123456")), Some([0x12, 0x34, 0x56]));
+        assert_eq!(parse_kicad_color(&json!([1, 2, 3])), Some([1, 2, 3]));
+        assert_eq!(parse_kicad_color(&json!("#12")), None);
+    }
+
     /// While the profiler records, a STEP import's reply carries its own profile: the import's
     /// stages and the kernel's calls, as diagnostics.profile reports them.
     #[test]
@@ -2265,6 +2720,53 @@ mod tests {
         other.follow_file_rename("opfs://Plate.solidcraft", "opfs://Bracket.solidcraft");
         assert_eq!(other.path.as_deref(), Some("opfs://Other.solidcraft"));
         assert_eq!(other.doc.name, "Other");
+    }
+
+    /// Every placement of a part is its first placement's triangles, moved: a copy moved by a
+    /// translation that rounds (0.1, 1/3, 7.3) and a copy turned 45° about z (whose box, and so
+    /// whose own size, is not the part's) are exported with the same triangles, their points the
+    /// first placement's carried by the placement, to the file's precision (3MF with face tags
+    /// writes full precision).
+    #[test]
+    fn every_placement_of_a_part_exports_its_first_placements_triangles_moved() {
+        use solidcraft_geom::prelude::*;
+        let dir = std::env::temp_dir().join(format!("solidcraft-placed-copies-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("copies.3mf").to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.execute("component.create", &json!({"name": "Part"})).unwrap();
+        s.execute("solid.box", &json!({"length": 30, "width": 20, "height": 10, "body_name": "Base"})).unwrap();
+        s.execute("solid.cylinder", &json!({"radius": 5, "height": 10, "base": [10, 10, 10], "operation": "new", "body_name": "Boss"})).unwrap();
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        s.execute("occurrence.copy", &json!({"component": "Part", "translate": [0.1, 1.0 / 3.0, 7.3]})).unwrap();
+        let turned = s.execute("occurrence.copy", &json!({"component": "Part", "translate": [60, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": turned, "angle": "45 deg", "axis": [0, 0, 1], "origin": [60, 0, 0]})).unwrap();
+        s.execute("file.export", &json!({"path": path, "format": "3mf-tagged"})).unwrap();
+        let (objects, _) = solidcraft_io::read_3mf(&std::fs::read(&path).unwrap()).unwrap();
+        let world = s.world_state().unwrap();
+        for part in ["Base", "Boss"] {
+            let placed: Vec<_> = world.bodies.iter().filter(|b| b.definition_name() == part).collect();
+            assert_eq!(placed.len(), 3, "{part}: three placements");
+            let object = |name: &str| objects.iter().find(|o| o.name == name).unwrap_or_else(|| panic!("no object {name}"));
+            let first = object(&placed[0].name);
+            let inv = solidcraft_doc::mat_inverse(&placed[0].source_transform).unwrap();
+            for copy in &placed[1..] {
+                let o = object(&copy.name);
+                assert_eq!(o.triangles.len(), first.triangles.len(), "{}", copy.name);
+                assert_eq!(o.positions.len(), first.positions.len(), "{}", copy.name);
+                let rel = solidcraft_doc::mat_mul(&copy.source_transform, &inv);
+                let far = first
+                    .positions
+                    .iter()
+                    .map(|p| {
+                        let q = solidcraft_doc::apply_point(&rel, *p);
+                        o.positions.iter().map(|r| r.dist(q)).fold(f64::INFINITY, f64::min)
+                    })
+                    .fold(0.0, f64::max);
+                assert!(far < 1e-9 * 100.0, "{}: a point of the first placement, moved, is {far} mm from the copy's", copy.name);
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// #8139: with `objects: "component"` a 3MF has one object for each placement of a component
@@ -2502,16 +3004,37 @@ mod tests {
             assert!(bytes.starts_with(signature), "{cmd}");
         }
         // The triangles `file.export` writes (the 80-byte header holds the file's name), 84 + 50
-        // bytes each. A planar face is exact for any triangulation of its outline, so the mesher
-        // gives each of the box's six faces two triangles (kernel test `a_box_is_two_triangles_a_face`).
+        // bytes each, as many as the OBJ export's. The 20 x 10 x 5 box is meshed on the mesh path,
+        // shaped to the smallest angle, so its faces take nodes inside them (it was two triangles a
+        // face on the display path, kernel test `a_box_is_two_triangles_a_face`). Whatever their
+        // number: the OBJ's welded mesh is a sphere's (f = 2v - 4), no triangle is sharper than
+        // the smallest angle, and the STL's area and volume are the box's to f32 rounding.
         s.execute("file.export", &json!({"path": at("box.stl")})).unwrap();
         assert_eq!(std::fs::read(at("StlBinary.txt")).unwrap()[80..], std::fs::read(at("box.stl")).unwrap()[80..]);
-        let triangles = 6 * 2;
+        let obj = std::fs::read_to_string(at("Obj.txt")).unwrap();
+        let triangles = obj.lines().filter(|l| l.starts_with("f ")).count();
+        let vertices = obj.lines().filter(|l| l.starts_with("v ")).count();
+        assert_eq!(triangles, 2 * vertices - 4, "{obj}");
         let stl = std::fs::read(at("box.stl")).unwrap();
         assert_eq!(u32::from_le_bytes([stl[80], stl[81], stl[82], stl[83]]), u32::try_from(triangles).unwrap());
         assert_eq!(stl.len(), 84 + 50 * triangles);
-        let obj = std::fs::read_to_string(at("Obj.txt")).unwrap();
-        assert_eq!(obj.lines().filter(|l| l.starts_with("f ")).count(), triangles, "{obj}");
+        use solidcraft_geom::prelude::*;
+        let (mut area, mut volume) = (0.0f64, 0.0f64);
+        for t in solidcraft_io::read_stl(&stl).unwrap() {
+            let p = |k: usize| solidcore_record::Vec3::new(t[k][0] as f64, t[k][1] as f64, t[k][2] as f64);
+            let (a, b, c) = (p(0), p(1), p(2));
+            let corner = |a: solidcore_record::Vec3, b: solidcore_record::Vec3, c: solidcore_record::Vec3| {
+                (b - a).cross(c - a).len().atan2((b - a).dot(c - a)).to_degrees()
+            };
+            let smallest = corner(a, b, c).min(corner(b, c, a)).min(corner(c, a, b));
+            // f32 coordinates move a corner by well under 1e-3 degrees on sides of a millimetre.
+            assert!(smallest >= solidcraft_kernel::MESH_MIN_ANGLE - 1e-3, "{smallest}°");
+            area += (b - a).cross(c - a).len() / 2.0;
+            volume += a.dot(b.cross(c)) / 6.0;
+        }
+        // f32 rounding of coordinates up to 20 mm (under 1e-6 mm each) over 700 mm² of faces.
+        assert!((area - 700.0).abs() < 1e-3, "{area}");
+        assert!((volume - 1000.0).abs() < 1e-3, "{volume}");
         let r = s.execute("file.export_urdf", &json!({"path": at("robot.urdf")})).unwrap();
         assert_eq!(r["format"], "Urdf");
         assert!(std::fs::read_to_string(at("robot.urdf")).unwrap().contains("<robot"));
@@ -3908,7 +4431,12 @@ mod tests {
         for f in formats::FORMATS {
             if let Some(import) = &f.import {
                 for o in import.options {
-                    for id in ["doc.open", if import.target == formats::ImportTarget::Mesh { "file.insert_mesh" } else { "file.insert_step" }] {
+                    let ids: &[&str] = match import.target {
+                        formats::ImportTarget::Mesh => &["doc.open", "file.insert_mesh"],
+                        formats::ImportTarget::Kicad => &["doc.open"],
+                        _ => &["doc.open", "file.insert_step"],
+                    };
+                    for id in ids {
                         assert!(params_of(id).contains(o.param), "{}: `{}` is not a documented parameter of {id}", f.id, o.param);
                     }
                 }

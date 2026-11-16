@@ -296,6 +296,31 @@ fn points_classify_exactly_against_the_body() {
     assert_eq!(hollow.classify_point(Vec3::X * 40.0).unwrap(), OnBoundary, "the cavity's wall");
 }
 
+/// A point just inside a cylinder's wall is inside it wherever the cylinder's seam lies (#16748). A
+/// ray from it along +x crosses the wall at a grazing angle near the cylinder's silhouette; where
+/// the seam put the patch boundaries so that one patch held both of the line's roots, the ray
+/// missed the wall it leaves by and the point read as outside (a 0.1 round of a primitive
+/// cylinder's rim was refused as too large). Points 0.03 mm inside a radius 10 wall, every half
+/// degree round it, for the seams a primitive (0.6131 rad) and others have.
+#[test]
+fn points_just_inside_a_cylinder_wall_are_inside_at_any_seam() {
+    use crate::{PointClass::Inside, build::extrude};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
+    for seam in [0.0_f64, 10.0, 20.0, 35.13, 45.0, 60.0, 90.0, 130.0] {
+        let region = Region2 { outer: Loop2::circle_from(Vec2::ZERO, 10.0, seam.to_radians()), holes: vec![] };
+        let body = extrude(&Plane::XY, &[region], 0.0, 20.0).unwrap().pop().unwrap();
+        let points: Vec<Vec3> = (0..720)
+            .map(|i| {
+                let a = (f64::from(i) * 0.5).to_radians();
+                Vec3::new(9.97 * a.cos(), 9.97 * a.sin(), 10.0)
+            })
+            .collect();
+        let outside: Vec<f64> =
+            body.classify_points(&points).unwrap().into_iter().enumerate().filter(|(_, c)| *c != Inside).map(|(i, _)| i as f64 * 0.5).collect();
+        assert!(outside.is_empty(), "seam {seam} deg: points at these angles read as not inside: {outside:?}");
+    }
+}
+
 /// A mesh body's triangles are its shape: on them within the record's tolerance, else inside or
 /// outside by the rays' crossings.
 #[test]
@@ -307,4 +332,13 @@ fn points_classify_against_a_mesh_body() {
     assert_eq!(m.classify_point(Vec3::new(5.0, 5.0, 5.0)).unwrap(), Outside);
     assert_eq!(m.classify_point(Vec3::new(1.0, 1.0, 0.0)).unwrap(), OnBoundary);
     assert_eq!(m.classify_point(Vec3::X * 10.0).unwrap(), OnBoundary);
+}
+
+#[test]
+fn point_lies_on_face_answers_through_solidcore() {
+    // The query itself is tested in solidcore-ops (`tests/measure.rs`); this is the wrapper.
+    let body = cube(10.0);
+    let found = (0..body.record().faces.len()).filter_map(|f| body.point_lies_on_face(f, Vec3::new(10.0, 3.0, -4.0), 1e-6).ok().flatten()).count();
+    assert_eq!(found, 1);
+    assert_eq!(body.point_lies_on_face(99, Vec3::ZERO, 1e-6).unwrap(), None);
 }

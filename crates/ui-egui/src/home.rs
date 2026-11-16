@@ -234,7 +234,8 @@ fn decode_thumbnail(bytes: Vec<u8>) -> Option<egui::ColorImage> {
     limits.max_alloc = Some((THUMB[0] * THUMB[1] * 8) as u64);
     reader.limits(limits);
     let image = reader.decode().ok()?.to_rgba8();
-    (image.width() as usize == THUMB[0] && image.height() as usize == THUMB[1])
+    // A capture with no visible pixels is unusable: try the portable picture or rebuild it.
+    (image.width() as usize == THUMB[0] && image.height() as usize == THUMB[1] && image.as_raw().iter().skip(3).step_by(4).any(|alpha| *alpha != 0))
         .then(|| egui::ColorImage::from_rgba_unmultiplied(THUMB, image.as_raw()))
 }
 
@@ -609,8 +610,7 @@ pub fn open_recent(app: &mut SolveApp, path: &str) {
         app.set_status(format!("{path} is no longer there"), true);
         return;
     }
-    app.home.open = false;
-    app.open_path_async(path);
+    app.open_chosen_file(path);
 }
 
 /// Find out whether the recent files are there: on a thread, so the page never waits on a drive.
@@ -687,6 +687,8 @@ enum FileAction {
     Shortcuts,
     Crashes,
     About,
+    /// Open this link of [`crate::links::LINKS`] in the browser.
+    Link(&'static str),
     /// Recover (true) or discard the recoverable design at this index.
     Recovery(usize, bool),
     /// The recent design at this index in `HomeState::recent`.
@@ -716,6 +718,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !app.help.menu
         && !egui::Popup::is_any_open(ui.ctx())
         && app.issue_report.draft.is_none()
+        // A file waiting for its unit is asked on this page too (#15598): its Escape gives the
+        // question up, and does not close the page behind it.
+        && app.mesh_units.is_none()
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
         app.home.open = false;
@@ -825,7 +830,7 @@ fn rail(app: &SolveApp) -> Vec<start_page::RailItem<'_, FileAction>> {
         ("home:crashes", app.tr("home.crashes").into(), String::new(), None, true, FileAction::Crashes),
         ("home:about", app.tr_label("About SolidCraft").into(), String::new(), None, true, FileAction::About),
     ];
-    let mut rail = Vec::with_capacity(nav.len() + 2);
+    let mut rail = Vec::with_capacity(nav.len() + 2 + crate::links::LINKS.len() + 1);
     for (index, (id, label, shortcut, section, enabled, chosen)) in nav.into_iter().enumerate() {
         if index == 4 || index == 8 {
             rail.push(start_page::RailItem::Separator);
@@ -837,6 +842,18 @@ fn rail(app: &SolveApp) -> Vec<start_page::RailItem<'_, FileAction>> {
             selected: section == Some(app.home.section),
             enabled: enabled && !busy,
             chosen,
+        }));
+    }
+    // Support and community links, always listed; the status bar's buttons are optional.
+    rail.push(start_page::RailItem::Separator);
+    for link in crate::links::LINKS {
+        rail.push(start_page::RailItem::Entry(start_page::RailEntry {
+            id: format!("home:{}", link.id).into(),
+            label: solidcraft_ui_text::tr(link.label).into(),
+            shortcut: String::new().into(),
+            selected: false,
+            enabled: true,
+            chosen: FileAction::Link(link.id),
         }));
     }
     rail
@@ -1099,7 +1116,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
         }
         FileAction::Open => app.pick_open(|app, path| {
             if let Some(path) = path {
-                app.open_path_async(&path);
+                app.open_chosen_file(&path);
             }
         }),
         FileAction::Import => {
@@ -1140,6 +1157,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
         }
         FileAction::Crashes => crate::help::run(app, ctx, "crashes"),
         FileAction::About => crate::help::run(app, ctx, "about"),
+        FileAction::Link(id) => crate::help::run(app, ctx, id),
         FileAction::Recovery(index, recover) => {
             if let Some(entry) = app.recoverable.get(index).cloned() {
                 crate::recovery_ui::apply(app, entry, recover);
@@ -1349,6 +1367,65 @@ mod tests {
         std::fs::remove_file(path).unwrap();
         assert!(decode_thumbnail(vec![0; 600_000]).is_none());
         assert!(decode_thumbnail(vec![0; 24]).is_none());
+    }
+
+    #[test]
+    fn fully_transparent_thumbnails_are_rejected_but_partial_transparency_is_kept() {
+        for pixel in [[0, 0, 0, 0], [64, 128, 192, 0]] {
+            let rgba = pixel.repeat(THUMB[0] * THUMB[1]);
+            let png = solidcraft_viewport::png(THUMB[0], THUMB[1], rgba).unwrap();
+            assert!(decode_thumbnail(png).is_none(), "a picture with no visible pixels must be regenerated");
+        }
+        let mut rgba = vec![0; THUMB[0] * THUMB[1] * 4];
+        rgba[..4].copy_from_slice(&[64, 128, 192, 128]);
+        let png = solidcraft_viewport::png(THUMB[0], THUMB[1], rgba.clone()).unwrap();
+        let image = decode_thumbnail(png).unwrap();
+        assert_eq!(image, egui::ColorImage::from_rgba_unmultiplied(THUMB, &rgba));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn transparent_recent_pictures_use_a_visible_portable_picture_or_regenerate_the_cache() {
+        if !crate::gpu::test_picture_renderer() {
+            return;
+        }
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let own = std::env::temp_dir().join(format!("solidcraft-transparent-pictures-{}-{nonce}", std::process::id()));
+        TEST_PICTURES.with(|d| *d.borrow_mut() = Some(own.join("pictures")));
+        std::fs::create_dir_all(&own).unwrap();
+        let blank = solidcraft_viewport::png(THUMB[0], THUMB[1], vec![0; THUMB[0] * THUMB[1] * 4]).unwrap();
+        let visible = solidcraft_viewport::png(THUMB[0], THUMB[1], vec![128; THUMB[0] * THUMB[1] * 4]).unwrap();
+        let mut session = Session::default();
+        session.execute("solid.box", &serde_json::json!({"length":10,"width":20,"height":30})).unwrap();
+        for (name, embedded) in [("visible", &visible), ("blank", &blank)] {
+            let bytes = solidcraft_engine::io::write_design_container_with_thumbnail(
+                &session.doc,
+                solidcraft_engine::io::DesignCompression::Fast,
+                None,
+                None,
+                Some(embedded),
+            )
+            .unwrap();
+            let path = own.join(format!("{name}.sc"));
+            std::fs::write(&path, &bytes).unwrap();
+            let key = path.to_string_lossy().into_owned();
+            let cache = cache_path(&key).unwrap();
+            std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
+            std::fs::write(&cache, &blank).unwrap();
+            let (_, image, _) = make(&key);
+            let image = image.unwrap();
+            assert!(image.pixels.iter().any(|pixel| pixel.a() != 0), "{name}: Home must show visible pixels");
+            assert_eq!(std::fs::read(&path).unwrap(), bytes, "recovering a picture must not change the design");
+            if name == "visible" {
+                assert_eq!(image, decode_thumbnail(visible.clone()).unwrap());
+                assert_eq!(std::fs::read(&cache).unwrap(), blank, "a valid portable picture avoids rendering");
+            } else {
+                assert_eq!(cached(&key).unwrap(), image, "regeneration replaces the unusable cache entry");
+                assert_ne!(std::fs::read(&cache).unwrap(), blank);
+            }
+        }
+        std::fs::remove_dir_all(own).unwrap();
+        TEST_PICTURES.with(|d| *d.borrow_mut() = None);
     }
 
     /// A picture Home still reads is kept by the sweep of old pictures; one no design reads any

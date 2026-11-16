@@ -1,9 +1,11 @@
 //! The Plugins menu, and the dialog each plugin entry gets from its input schema.
 //!
 //! The menu sits after File in the application bar (desktop builds only; the web build runs no
-//! plugins). "Install plugin…" comes first, then one row per entry of each installed plugin,
-//! labelled by the entry's `menu` slot when it declares one, else by its name. A plugin with more
-//! than one entry gets a submenu named after the plugin.
+//! plugins). "Install plugin…" comes first, then one row per command of each installed plugin
+//! that is turned on in Preferences › Plugins, labelled by [`command_title`]. A plugin with more
+//! than one command gets a submenu named after the plugin. The Model tab of the ribbon has a
+//! Plugins group with one button per command ([`ribbon_buttons`]). A plugin turned off shows in
+//! neither place, and nothing opens or runs until the user picks one specific command.
 //!
 //! Choosing an entry opens a dialog built from its `input_schema`: a number field, a whole number
 //! field, a checkbox, a dropdown or a text field per property. Parts of a schema this dialog does
@@ -15,7 +17,6 @@
 //! one undo step. Nothing here runs plugin code in any other way, and programmatic calls never
 //! open this dialog.
 
-use std::collections::BTreeSet;
 use std::path::Path;
 
 use serde_json::{Map, Value, json};
@@ -27,6 +28,9 @@ use crate::ui_kit::BackingTooltipExt as _;
 /// The menu row that installs a plugin.
 const INSTALL: &str = "install";
 
+/// The start of a plugin command's ribbon button id: `plugin_entry:<plugin id>:<entry name>`.
+pub(crate) const RIBBON_PREFIX: &str = "plugin_entry:";
+
 /// The menu's state, and the open entry dialog.
 #[derive(Default)]
 pub(crate) struct State {
@@ -37,28 +41,31 @@ pub(crate) struct State {
     opened_pass: u64,
     /// The left edge of the Plugins button, where the menu opens.
     x: f32,
+    /// Where the menu's top is: the app bar's bottom, unless the ribbon's Plugins group opened it.
+    y: Option<f32>,
     /// The plugins listed when the menu last opened.
     pub(crate) listed: Vec<Listed>,
-    pub(crate) dialog: Option<EntryDialog>,
-    /// The run waiting in the control queue: its request's serial and the session it is for.
-    pending: Option<(u64, u64)>,
+    /// `listed` has been read at least once since the plugins last changed (the ribbon reads it
+    /// once rather than every frame).
+    pub(crate) loaded: bool,
+    /// The open entry dialogs, oldest first: each plugin entry has its own, with its own window,
+    /// title and field values, so several can be open at once.
+    pub(crate) dialogs: Vec<EntryDialog>,
+    /// The next dialog's id.
+    next_dialog: u64,
+    /// The runs waiting in the control queue: each one's request serial and the session it is for.
+    pending: Vec<(u64, u64)>,
 }
 
-/// An installed plugin, as its package read when the menu opened.
-#[derive(Clone, Debug)]
-pub(crate) struct Listed {
-    pub(crate) id: String,
-    pub(crate) name: String,
-    pub(crate) version: String,
-    pub(crate) description: String,
-    pub(crate) path: String,
-    /// The package's content hash, which `plugin.run` checks.
-    pub(crate) approval: String,
-    pub(crate) disabled: bool,
-    /// The sensitive command groups the manifest asks for.
-    pub(crate) groups: BTreeSet<String>,
-    pub(crate) entries: Vec<solidcraft_engine::plugin::Entry>,
+#[cfg(test)]
+impl State {
+    /// The most recently opened entry dialog.
+    pub(crate) fn dialog(&self) -> Option<&EntryDialog> {
+        self.dialogs.last()
+    }
 }
+
+pub(crate) use crate::plugins::Plugin as Listed;
 
 /// One property of an entry's input schema, as a field of the dialog.
 #[derive(Clone, Debug, PartialEq)]
@@ -87,8 +94,12 @@ pub(crate) enum Kind {
         unit: Option<String>,
     },
     Boolean,
-    /// A string from a fixed list.
-    Choice(Vec<String>),
+    /// A string from a fixed list: the values sent, and the titles shown for them (a value's own
+    /// text when the schema gives it no title).
+    Choice {
+        values: Vec<String>,
+        titles: Vec<String>,
+    },
     Text {
         min_length: Option<usize>,
         max_length: Option<usize>,
@@ -151,11 +162,13 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
     // Only keywords the dialog draws or checks before Run turns on; any other constraint
     // (`pattern`, `const`, `items`, `oneOf`, ...) would let an invalid value through.
     let kind = p.get("type")?.as_str()?;
-    let allowed: &[&str] = match (kind, p.contains_key("enum")) {
+    let choice = p.contains_key("enum") || p.contains_key("oneOf");
+    let allowed: &[&str] = match (kind, choice) {
         ("number", false) => &["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"],
         ("integer", false) => &["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"],
         ("boolean", false) => &[],
-        ("string", true) => &["enum"],
+        // A list of values, or of `{"const": value, "title": shown}` options; not both.
+        ("string", true) if p.contains_key("enum") != p.contains_key("oneOf") => &["enum", "oneOf"],
         ("string", false) => &["minLength", "maxLength", "format"],
         _ => return None,
     };
@@ -179,7 +192,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
     let unit = text("unit").or_else(|| text("x-unit")).or_else(|| text("units"));
     let default = p.get("default");
     let (kind, input) = match kind {
-        "number" if !p.contains_key("enum") => {
+        "number" if !choice => {
             // `exclusiveMinimum` as a number (draft 6+); a boolean beside `minimum` (draft 4).
             let (min, exclusive_min) = match (number("exclusiveMinimum"), number("minimum")) {
                 (Some(e), Some(m)) if m > e => (Some(m), false),
@@ -206,7 +219,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
             };
             (Kind::Number { min, max, exclusive_min, exclusive_max, step, unit }, input)
         }
-        "integer" if !p.contains_key("enum") => {
+        "integer" if !choice => {
             let (min, max) = (integer_bound(p, true)?, integer_bound(p, false)?);
             if let (Some(lo), Some(hi)) = (min, max)
                 && lo > hi
@@ -220,25 +233,51 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
             (Kind::Integer { min, max, unit }, input)
         }
         "boolean" => (Kind::Boolean, Input::Boolean(default.and_then(Value::as_bool).unwrap_or(false))),
-        "string" => match p.get("enum") {
-            Some(options) => {
-                let options: Vec<String> = options.as_array()?.iter().map(|o| o.as_str().map(str::to_owned)).collect::<Option<_>>()?;
-                if options.is_empty() {
-                    return None;
-                }
-                let chosen = default.and_then(Value::as_str).and_then(|d| options.iter().position(|o| o == d));
-                (Kind::Choice(options), Input::Choice(chosen))
-            }
-            None => {
-                let length = |k: &str| p.get(k).and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok());
-                let input = Input::Text(default.and_then(Value::as_str).unwrap_or_default().to_owned());
-                (Kind::Text { min_length: length("minLength"), max_length: length("maxLength") }, input)
-            }
-        },
+        "string" if choice => {
+            let (values, titles) = choices(p)?;
+            let chosen = default.and_then(Value::as_str).and_then(|d| values.iter().position(|o| o == d));
+            (Kind::Choice { values, titles }, Input::Choice(chosen))
+        }
+        "string" => {
+            let length = |k: &str| p.get(k).and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok());
+            let input = Input::Text(default.and_then(Value::as_str).unwrap_or_default().to_owned());
+            (Kind::Text { min_length: length("minLength"), max_length: length("maxLength") }, input)
+        }
         _ => return None,
     };
     let label = text("title").unwrap_or_else(|| key.to_owned());
     Some((Field { key: key.to_owned(), label, tip: text("description"), required, kind }, input))
+}
+
+/// A choice's values and the titles shown for them, from `enum` (each value shown as it is) or
+/// `oneOf` (each option exactly `{"const": value}` plus an optional `title` and `description`).
+/// `None` for an empty list, a value that is not a string, a repeated value, or an option with
+/// any other keyword, which this dialog could not check.
+fn choices(p: &Map<String, Value>) -> Option<(Vec<String>, Vec<String>)> {
+    let (values, titles): (Vec<String>, Vec<String>) = match (p.get("enum"), p.get("oneOf")) {
+        (Some(values), None) => values.as_array()?.iter().map(|v| v.as_str().map(|v| (v.to_owned(), v.to_owned()))).collect::<Option<Vec<_>>>()?,
+        (None, Some(options)) => options
+            .as_array()?
+            .iter()
+            .map(|option| {
+                let option = option.as_object()?;
+                if option.keys().any(|k| !matches!(k.as_str(), "const" | "title" | "description")) {
+                    return None;
+                }
+                let value = option.get("const")?.as_str()?.to_owned();
+                let title = match option.get("title") {
+                    None => value.clone(),
+                    Some(title) => Some(title.as_str()?.trim()).filter(|t| !t.is_empty()).map_or_else(|| value.clone(), str::to_owned),
+                };
+                Some((value, title))
+            })
+            .collect::<Option<Vec<_>>>()?,
+        _ => return None,
+    }
+    .into_iter()
+    .unzip();
+    let distinct: std::collections::BTreeSet<&String> = values.iter().collect();
+    (!values.is_empty() && distinct.len() == values.len()).then_some((values, titles))
 }
 
 /// The parameters the fields make, or why Run stays off. An optional field left empty is left out,
@@ -260,8 +299,8 @@ pub(crate) fn params(fields: &[(Field, Input)]) -> Result<Value, Problem> {
                 t => Some(json!(t.parse::<i64>().map_err(|_| invalid())?)),
             },
             (Kind::Boolean, Input::Boolean(b)) => Some(json!(b)),
-            (Kind::Choice(_), Input::Choice(None)) => None,
-            (Kind::Choice(options), Input::Choice(Some(index))) => Some(json!(options.get(*index).ok_or_else(invalid)?)),
+            (Kind::Choice { .. }, Input::Choice(None)) => None,
+            (Kind::Choice { values, .. }, Input::Choice(Some(index))) => Some(json!(values.get(*index).ok_or_else(invalid)?)),
             (Kind::Text { .. }, Input::Text(text)) if text.is_empty() => None,
             (Kind::Text { .. }, Input::Text(text)) => Some(json!(text)),
             _ => return Err(invalid()),
@@ -314,65 +353,106 @@ fn within(kind: &Kind, value: &Value) -> bool {
             let n = s.chars().count();
             min_length.is_none_or(|m| n >= m) && max_length.is_none_or(|m| n <= m)
         }),
-        Kind::Boolean | Kind::Choice(_) => true,
+        Kind::Boolean | Kind::Choice { .. } => true,
     }
 }
 
-/// An entry's label in the menu: its first `menu` slot's name, else the entry's own name.
-pub(crate) fn entry_label(entry: &solidcraft_engine::plugin::Entry) -> String {
+/// A plugin command's title, in the menu, on its ribbon button and on its dialog: the entry's
+/// `menu` slot name when it declares one, else the plugin's name when the plugin has this one
+/// command, else the entry's own name.
+pub(crate) fn command_title(plugin: &Listed, entry: &solidcraft_engine::plugin::Entry) -> String {
+    match slot_name(entry, "menu") {
+        Some(name) => name,
+        None if plugin.entries.len() == 1 => plugin.name.clone(),
+        None => entry.name.clone(),
+    }
+}
+
+/// The name of the entry's first slot of `kind` (`menu` or `ribbon`).
+fn slot_name(entry: &solidcraft_engine::plugin::Entry, kind: &str) -> Option<String> {
     entry
         .slots
         .iter()
         .filter_map(|slot| serde_json::to_value(slot).ok())
-        .find(|slot| slot["kind"] == "menu")
-        .and_then(|slot| slot["name"].as_str().map(str::to_owned))
-        .unwrap_or_else(|| entry.name.clone())
+        .find(|slot| slot["kind"] == kind)
+        .and_then(|slot| slot["name"].as_str().map(str::trim).filter(|n| !n.is_empty()).map(str::to_owned))
+}
+
+/// Whether the user has `plugin` turned on in Preferences › Plugins (read live, so turning it off
+/// hides it at once).
+pub(crate) fn shown(app: &SolveApp, plugin: &Listed) -> bool {
+    crate::plugins::enabled(app, &plugin.id)
+}
+
+/// One plugin command's button in the ribbon's Plugins group.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RibbonButton {
+    /// `plugin_entry:<plugin id>:<entry name>`.
+    pub(crate) id: String,
+    /// The label under the button: the entry's `ribbon` slot name, else its [`command_title`].
+    pub(crate) label: String,
+    /// Its accessible name and hover text: the plugin's name, and the command's when it differs.
+    pub(crate) name: String,
+    /// A kit icon name. Manifests have no icon of their own yet: the generic plugin icon.
+    pub(crate) icon: &'static str,
+}
+
+/// The ribbon's Plugins group: one button per command of each plugin that is turned on, in the
+/// menu's order. Empty on the web build, which runs no plugins.
+pub(crate) fn ribbon_buttons(app: &SolveApp) -> Vec<RibbonButton> {
+    if cfg!(target_arch = "wasm32") {
+        return Vec::new();
+    }
+    let mut buttons = Vec::new();
+    for plugin in app.plugin_menu.listed.iter().filter(|p| shown(app, p)) {
+        for entry in &plugin.entries {
+            let title = command_title(plugin, entry);
+            let name = if title == plugin.name { title.clone() } else { format!("{}: {title}", plugin.name) };
+            buttons.push(RibbonButton {
+                id: format!("{RIBBON_PREFIX}{}:{}", plugin.id, entry.name),
+                label: slot_name(entry, "ribbon").unwrap_or(title),
+                name,
+                icon: "prefs_plugins",
+            });
+        }
+    }
+    buttons
+}
+
+/// Read the installed plugins when they have not been read since they last changed.
+pub(crate) fn ensure_listed(app: &mut SolveApp) {
+    if !app.plugin_menu.loaded && !cfg!(target_arch = "wasm32") {
+        refresh(app);
+    }
+}
+
+/// Open the dialog of the ribbon button `id` (`plugin_entry:<plugin id>:<entry name>`). Returns
+/// whether `id` was a plugin command's.
+pub(crate) fn choose_ribbon(app: &mut SolveApp, id: &str) -> bool {
+    let Some((plugin, entry)) = id.strip_prefix(RIBBON_PREFIX).and_then(|rest| rest.split_once(':')) else { return false };
+    let found = app.plugin_menu.listed.iter().enumerate().find(|(_, p)| p.id == plugin).and_then(|(p, listed)| {
+        let e = listed.entries.iter().position(|e| e.name == entry)?;
+        Some((p, e))
+    });
+    if let Some((p, e)) = found {
+        open_entry(app, p, e);
+    }
+    true
 }
 
 /// The command groups `plugin` asks for that the user has not granted.
 pub(crate) fn missing_groups(app: &SolveApp, plugin: &Listed) -> Vec<String> {
-    plugin.groups.iter().filter(|g| !app.session.plugin_state.command_groups.contains(*g)).cloned().collect()
+    let granted = app.session.plugin_state.grants.get(&plugin.id);
+    plugin.groups.iter().filter(|g| granted.is_none_or(|grants| !grants.command_groups.contains(*g))).cloned().collect()
 }
 
 /// The plugins installed in `dir` and those inspected this session, by name. Reading a package
 /// runs none of its code.
 pub(crate) fn list(app: &SolveApp, dir: Option<&Path>) -> Vec<Listed> {
-    // A package the session inspected explicitly comes first: when an installed folder has the
-    // same id, the inspected one is what `plugin.run` was pointed at, as the engine keeps it.
-    let mut paths: Vec<String> = app.session.plugin_state.packages.values().cloned().collect();
-    if let Some(dir) = dir
-        && let Ok(folders) = std::fs::read_dir(dir)
-    {
-        let mut found: Vec<String> = folders
-            .flatten()
-            .filter(|f| f.file_type().is_ok_and(|t| t.is_dir()) && !f.file_name().to_string_lossy().starts_with('.'))
-            .take(1024)
-            .map(|f| f.path().to_string_lossy().into_owned())
-            .collect();
-        found.sort();
-        paths.extend(found);
+    let (mut listed, _) = crate::plugins::inventory(dir, app.session.plugin_state.packages.values());
+    for plugin in &mut listed {
+        plugin.disabled = !crate::plugins::enabled(app, &plugin.id);
     }
-    let mut seen = BTreeSet::new();
-    let mut listed: Vec<Listed> = paths
-        .iter()
-        .filter_map(|path| solidcraft_engine::plugin::read_package(path).ok().map(|p| (path, p)))
-        .filter_map(|(path, package)| {
-            let runtime = package.manifest.runtime?;
-            let id = package.manifest.id;
-            seen.insert(id.clone()).then(|| Listed {
-                disabled: app.preferences.disabled_plugins.contains(&id),
-                id,
-                name: package.manifest.name,
-                version: package.manifest.version,
-                description: package.manifest.description,
-                path: path.clone(),
-                approval: package.approval,
-                groups: runtime.permissions.command_groups,
-                entries: runtime.entries,
-            })
-        })
-        .collect();
-    listed.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
     listed
 }
 
@@ -381,15 +461,18 @@ pub(crate) fn rows(app: &SolveApp) -> Vec<crate::app_bar::FileRow> {
     use crate::app_bar::{FileItem, FileRow};
     let item = |id: String, label: String, enabled: bool| FileRow::Item(FileItem { id, label, key: String::new(), icon: String::new(), enabled });
     let mut rows = vec![item(INSTALL.into(), app.tr("ui.plugin_menu_install").into(), true), FileRow::Separator];
-    if app.plugin_menu.listed.is_empty() {
+    if app.plugin_menu.listed.iter().all(|plugin| plugin.entries.is_empty()) {
         rows.push(item("empty".into(), app.tr("ui.plugin_menu_empty").into(), false));
+    } else if !app.plugin_menu.listed.iter().any(|p| shown(app, p)) {
+        rows.push(item("empty".into(), app.tr("ui.plugin_menu_all_off").into(), false));
     }
-    for (p, plugin) in app.plugin_menu.listed.iter().enumerate() {
+    // A plugin turned off in Preferences › Plugins is left out; the others keep their index.
+    for (p, plugin) in app.plugin_menu.listed.iter().enumerate().filter(|(_, p)| shown(app, p) && !p.entries.is_empty()) {
         let entries: Vec<FileRow> = plugin
             .entries
             .iter()
             .enumerate()
-            .map(|(e, entry)| item(format!("entry:{p}:{e}"), format!("{}…", entry_label(entry)), !plugin.disabled))
+            .map(|(e, entry)| item(format!("entry:{p}:{e}"), format!("{}…", command_title(plugin, entry)), true))
             .collect();
         match <[FileRow; 1]>::try_from(entries) {
             Ok([one]) => rows.push(one),
@@ -406,6 +489,7 @@ pub(crate) fn toggle(app: &mut SolveApp, ctx: &egui::Context, rect: egui::Rect) 
     state.open = !state.open;
     state.opened_pass = ctx.cumulative_pass_nr();
     state.x = rect.left();
+    state.y = None;
     if state.open {
         // One menu at a time: File closes.
         ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu"), false));
@@ -413,9 +497,16 @@ pub(crate) fn toggle(app: &mut SolveApp, ctx: &egui::Context, rect: egui::Rect) 
     }
 }
 
+/// The ribbon's Plugins group label at `rect` was clicked: open the Plugins menu below it, or
+/// close it.
+pub(crate) fn toggle_below(app: &mut SolveApp, ctx: &egui::Context, rect: egui::Rect) {
+    toggle(app, ctx, rect);
+    app.plugin_menu.y = Some(rect.bottom());
+}
+
 /// Read the installed plugins again, as the menu shows them when it opens.
 pub(crate) fn refresh(app: &mut SolveApp) {
-    app.plugin_menu.listed = list(app, crate::plugins::plugins_dir().as_deref());
+    app.plugin_menu.listed = list(app, app.session.plugin_state.plugins_dir().as_deref());
 }
 
 /// Where the File menu holds the Plugins menu (a narrow app bar): a submenu of the same rows,
@@ -459,7 +550,7 @@ pub(crate) fn menu(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let rows = rows(app);
-    let at = egui::pos2(app.plugin_menu.x, crate::app_bar::HEIGHT);
+    let at = egui::pos2(app.plugin_menu.x, app.plugin_menu.y.unwrap_or(crate::app_bar::HEIGHT));
     let just_opened = app.plugin_menu.opened_pass == ctx.cumulative_pass_nr();
     let out = crate::app_bar::file_menu(ctx, &rows, at, egui::Id::unique("sc_plugins_area"), just_opened);
     if out.close {
@@ -477,6 +568,8 @@ pub(crate) fn install_plugin_action(app: &mut SolveApp) {
 
 /// The dialog of one plugin entry.
 pub(crate) struct EntryDialog {
+    /// Names this dialog's window and its runs; no other open dialog has it.
+    pub(crate) id: u64,
     pub(crate) plugin: Listed,
     /// The session (design tab) the dialog was opened on: Run acts on that design only.
     pub(crate) session: u64,
@@ -501,9 +594,21 @@ pub(crate) struct Running {
 pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
     let Some(plugin) = app.plugin_menu.listed.get(p).cloned() else { return };
     let Some(entry) = plugin.entries.get(e) else { return };
+    if !shown(app, &plugin) {
+        return;
+    }
+    // The entry's dialog is already open on this design: it keeps its values, and stays where it
+    // is. Another design's dialog for the same entry belongs to that design.
+    let session = app.session.uid;
+    if app.plugin_menu.dialogs.iter().any(|d| d.plugin.id == plugin.id && d.entry == entry.name && d.session == session) {
+        return;
+    }
     let fields = form(&entry.input_schema);
-    app.plugin_menu.dialog = Some(EntryDialog {
-        label: entry_label(entry),
+    let id = app.plugin_menu.next_dialog;
+    app.plugin_menu.next_dialog += 1;
+    app.plugin_menu.dialogs.push(EntryDialog {
+        id,
+        label: command_title(&plugin, entry),
         entry: entry.name.clone(),
         read: entry.effect == solidcraft_engine::plugin::Effect::Read,
         fields,
@@ -521,7 +626,7 @@ impl EntryDialog {
         if self.session != app.session.uid {
             return Err(app.tr("ui.plugin_dialog_other_design").into());
         }
-        if self.plugin.disabled {
+        if !shown(app, &self.plugin) {
             return Err(app.tr("ui.plugin_dialog_disabled").into());
         }
         let missing = missing_groups(app, &self.plugin);
@@ -536,10 +641,17 @@ impl EntryDialog {
     }
 }
 
-/// Run the open dialog's entry: one `plugin.run` request with the package's content hash, queued
-/// as the control channel's are, so it computes on its worker and lands as one undo step.
+/// Run the most recently opened dialog's entry.
+#[cfg(test)]
 pub(crate) fn run(app: &mut SolveApp) -> Result<(), String> {
-    let Some(dialog) = app.plugin_menu.dialog.as_ref() else { return Ok(()) };
+    let Some(id) = app.plugin_menu.dialog().map(|d| d.id) else { return Ok(()) };
+    run_dialog(app, id)
+}
+
+/// Run the entry of dialog `id`: one `plugin.run` request with the package's content hash, queued
+/// as the control channel's are, so it computes on its worker and lands as one undo step.
+pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
+    let Some(dialog) = app.plugin_menu.dialogs.iter().find(|d| d.id == id) else { return Ok(()) };
     if dialog.running.is_some() {
         return Ok(());
     }
@@ -548,9 +660,9 @@ pub(crate) fn run(app: &mut SolveApp) -> Result<(), String> {
         "path": dialog.plugin.path, "approval": dialog.plugin.approval, "entry": dialog.entry, "params": params}});
     let (req, reply) = solidcraft_control::ControlRequest::new("engine.execute", request);
     let ticket = req.ticket.clone();
-    app.plugin_menu.pending = Some((req.serial, app.session.uid));
+    app.plugin_menu.pending.push((req.serial, app.session.uid));
     app.control_held.push_back(req);
-    if let Some(dialog) = app.plugin_menu.dialog.as_mut() {
+    if let Some(dialog) = app.plugin_menu.dialogs.iter_mut().find(|d| d.id == id) {
         dialog.running = Some(Running { reply, ticket });
         dialog.error = None;
         dialog.result = None;
@@ -561,19 +673,23 @@ pub(crate) fn run(app: &mut SolveApp) -> Result<(), String> {
 /// A queued run is for the design its dialog was opened on: refused, when its turn comes, if
 /// another design tab is active by then.
 pub(crate) fn check_dispatch(app: &mut SolveApp, req: &solidcraft_control::ControlRequest) -> Result<(), String> {
-    match app.plugin_menu.pending {
-        Some((serial, session)) if serial == req.serial => {
-            app.plugin_menu.pending = None;
-            if session == app.session.uid { Ok(()) } else { Err(app.tr("ui.plugin_dialog_other_design").into()) }
-        }
-        _ => Ok(()),
+    let Some(at) = app.plugin_menu.pending.iter().position(|(serial, _)| *serial == req.serial) else { return Ok(()) };
+    let (_, session) = app.plugin_menu.pending.remove(at);
+    if session == app.session.uid { Ok(()) } else { Err(app.tr("ui.plugin_dialog_other_design").into()) }
+}
+
+/// Take the finished runs' replies: an edit closes its dialog, a read shows its result, an error
+/// stays in its dialog.
+pub(crate) fn poll(app: &mut SolveApp) {
+    let ids: Vec<u64> = app.plugin_menu.dialogs.iter().map(|d| d.id).collect();
+    for id in ids {
+        poll_dialog(app, id);
     }
 }
 
-/// Take a finished run's reply: an edit closes the dialog, a read shows its result, an error
-/// stays in the dialog.
-pub(crate) fn poll(app: &mut SolveApp) {
-    let Some(dialog) = app.plugin_menu.dialog.as_mut() else { return };
+fn poll_dialog(app: &mut SolveApp, id: u64) {
+    let Some(at) = app.plugin_menu.dialogs.iter().position(|d| d.id == id) else { return };
+    let dialog = &mut app.plugin_menu.dialogs[at];
     let Some(running) = &dialog.running else { return };
     let reply = match running.reply.try_recv() {
         Ok(reply) => reply,
@@ -593,45 +709,56 @@ pub(crate) fn poll(app: &mut SolveApp) {
         return;
     }
     let done = solidcraft_ui_text::format("ui.plugin_dialog_done", &[("entry", &dialog.label)]);
-    app.plugin_menu.dialog = None;
+    app.plugin_menu.dialogs.remove(at);
     app.set_status(done, false);
 }
 
-/// Draw the open entry dialog.
+/// Draw every open entry dialog, each in its own window.
 pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     poll(app);
-    let Some(mut dialog) = app.plugin_menu.dialog.take() else { return };
+    for mut dialog in std::mem::take(&mut app.plugin_menu.dialogs) {
+        let id = dialog.id;
+        let (stays, run_it) = show_dialog(app, ctx, &mut dialog);
+        if !stays {
+            continue;
+        }
+        app.plugin_menu.dialogs.push(dialog);
+        if run_it
+            && let Err(error) = run_dialog(app, id)
+            && let Some(dialog) = app.plugin_menu.dialogs.iter_mut().find(|d| d.id == id)
+        {
+            dialog.error = Some(error);
+        }
+    }
+}
+
+/// Draw one dialog. Returns whether it stays open, and whether Run was pressed.
+fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog) -> (bool, bool) {
     let ready = dialog.ready(app);
     let running = dialog.running.is_some();
     if running {
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
-    let title = format!("{} — {}", dialog.plugin.name, dialog.label);
+    // Just the command's own title ("Gears"): no plugin or menu name after it.
+    let title = dialog.label.clone();
     let (run_label, close_label) = (app.tr("ui.plugin_dialog_run").to_owned(), app.tr(if dialog.read { "ui.close" } else { "ui.cancel" }).to_owned());
-    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_plugin_entry"), "prefs_plugins", &title)
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_plugin_entry").with(dialog.id), "prefs_plugins", &title)
         .fields()
         .actions(&run_label, &close_label, None)
-        .show(ctx, ready.is_ok() && !running, |ui| body(app, ui, &mut dialog, ready.as_ref().err()));
+        .show(ctx, ready.is_ok() && !running, |ui| body(app, ui, dialog, ready.as_ref().err()));
     for (handle, key) in [("plugin_dialog:run", "dialog:ok"), ("plugin_dialog:cancel", "dialog:cancel")] {
         if let Some(at) = crate::scenario::handle_at(key) {
             crate::scenario::publish_handle(handle, at);
         }
     }
-    let close = closed || action == ui_kit::Action::Cancel;
-    if close {
+    if closed || action == ui_kit::Action::Cancel {
         // A run still computing is stopped: nothing of it is applied.
         if let Some(running) = &dialog.running {
             running.ticket.stop();
         }
-        return;
+        return (false, false);
     }
-    app.plugin_menu.dialog = Some(dialog);
-    if action == ui_kit::Action::Ok
-        && let Err(error) = run(app)
-        && let Some(dialog) = app.plugin_menu.dialog.as_mut()
-    {
-        dialog.error = Some(error);
-    }
+    (true, action == ui_kit::Action::Ok)
 }
 
 fn body(app: &SolveApp, ui: &mut egui::Ui, dialog: &mut EntryDialog, why_not: Option<&String>) {
@@ -646,7 +773,7 @@ fn body(app: &SolveApp, ui: &mut egui::Ui, dialog: &mut EntryDialog, why_not: Op
     let other_design = dialog.session != app.session.uid;
     if other_design {
         ui_kit::status_line(ui, app.tr("ui.plugin_dialog_other_design"), ui_kit::StatusTone::Warning);
-    } else if plugin.disabled {
+    } else if !shown(app, plugin) {
         ui_kit::status_line(ui, app.tr("ui.plugin_dialog_disabled"), ui_kit::StatusTone::Warning);
     } else if !missing.is_empty() {
         let asks = solidcraft_ui_text::format("ui.plugin_dialog_needs_groups", &[("groups", &missing.join(", "))]);
@@ -674,7 +801,7 @@ fn body(app: &SolveApp, ui: &mut egui::Ui, dialog: &mut EntryDialog, why_not: Op
         ui_kit::status_line(ui, error, ui_kit::StatusTone::Error);
     } else if let Some(why) = why_not
         && dialog.fields.as_ref().is_some_and(|f| !f.is_empty())
-        && !plugin.disabled
+        && shown(app, plugin)
         && !other_design
         && missing.is_empty()
     {
@@ -712,11 +839,11 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, field: &Field, input: &mut Input
             ui_kit::row(ui, &label, |ui| ui_kit::text_field_reserving(ui, text, &hint, 0.0).1)
         }
         (Kind::Boolean, Input::Boolean(value)) => ui_kit::checkbox(ui, &label, value),
-        (Kind::Choice(options), Input::Choice(chosen)) => {
+        (Kind::Choice { titles, .. }, Input::Choice(chosen)) => {
             // Until something is chosen the dropdown leads with "Choose…", which is not a value.
             let choose = app.tr("ui.plugin_dialog_choose").to_owned();
             let lead = chosen.is_none();
-            let shown: Vec<&str> = lead.then_some(choose.as_str()).into_iter().chain(options.iter().map(String::as_str)).collect();
+            let shown: Vec<&str> = lead.then_some(choose.as_str()).into_iter().chain(titles.iter().map(String::as_str)).collect();
             let mut index = chosen.unwrap_or(0);
             let response = ui_kit::row(ui, &label, |ui| ui_kit::dropdown(ui, &format!("plugin_field_{}", field.key), &mut index, &shown));
             *chosen = if lead { index.checked_sub(1) } else { Some(index) };

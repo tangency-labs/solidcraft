@@ -1051,6 +1051,32 @@ fn end_caps_refuse_bad_picks_and_values_atomically() {
     assert!(rel(v, 38.0 * 38.0 * 2.0) < 1e-9, "{v}");
 }
 
+/// Members longer than 810 mm mirrored as bodies measure as their sources, across a named plane
+/// and across a plane by origin and normal: SMLib's mirror gave each straight edge as a B-spline
+/// 1,234,567 edge lengths long, which the copy's measure refused ("invalid B-rep record: flat
+/// arrays", #14413, #15379).
+#[test]
+fn long_members_mirrored_as_bodies_measure_as_their_sources() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rails"}));
+    run(&mut s, "sketch.line", json!({"points": [[100, 0], [100, 1100]]}));
+    run(&mut s, "sketch.line", json!({"points": [[300, -200], [300, 1800]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let channel = json!({"kind": "channel", "height": 152.4, "width": 76.2, "web": 6.4, "flange": 9, "root_radius": 12.2, "toe_radius": 2.4});
+    run(&mut s, "frame.member", json!({"sketch": "Rails", "lines": ["l1"], "profile": channel, "body_name": "Channel"}));
+    run(&mut s, "frame.member", json!({"sketch": "Rails", "lines": ["l2"], "profile": tube(), "body_name": "Tube"}));
+    run(&mut s, "solid.mirror", json!({"bodies": ["Channel", "Tube"], "plane": "YZ"}));
+    run(&mut s, "solid.mirror", json!({"bodies": ["Channel"], "plane": {"origin": [1000, 0, 0], "normal": [1, 0, 0]}}));
+    let bs = bodies(&mut s);
+    let get = |name: &str| bs.iter().find(|b| b.0 == name).cloned().unwrap_or_else(|| panic!("no {name} in {bs:?}"));
+    for (source, copy, x0) in [("Channel", "Channel (2)", 0.0), ("Tube", "Tube (2)", 0.0), ("Channel", "Channel (3)", 1000.0)] {
+        let (a, b) = (get(source), get(copy));
+        assert!(rel(b.1, a.1) < 1e-9, "{copy}: volume {} against {}", b.1, a.1);
+        // Mirrored in x = x0: x runs the other way, y and z stay.
+        assert!(near3(b.2, [2.0 * x0 - a.3[0], a.2[1], a.2[2]]) && near3(b.3, [2.0 * x0 - a.2[0], a.3[1], a.3[2]]), "{copy}: {b:?} from {a:?}");
+    }
+}
+
 /// A frame member feature mirrors and patterns as a feature: each copy is every member it made,
 /// placed by the mirror or the pattern, and the copies follow the member's lines. Mirroring the
 /// feature was refused ("cannot be patterned or mirrored yet").

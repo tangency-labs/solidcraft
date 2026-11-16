@@ -27,6 +27,16 @@ fn nightlies_count_as_the_release_they_follow() {
     assert!(is_newer("v0.10.0", "0.9.0-nightly.20261014.36.1"));
 }
 
+#[test]
+fn test_builds_are_recognised() {
+    assert!(is_test_version("0.43.0-test+abc1234"));
+    assert!(is_test_version("0.43.0-test"));
+    assert!(!is_test_version("0.43.0"));
+    assert!(!is_test_version("0.43.0-rc.1"));
+    assert!(!is_test_version("0.43.0-nightly.20261115.7.1"));
+    assert!(!is_test_version("not a version"));
+}
+
 fn probe(os: &str, release: bool, env: &[(&str, &str)], exe: &str, files: &[&str]) -> InstallKind {
     let env: BTreeMap<String, String> = env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
     let files: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
@@ -753,10 +763,10 @@ fn unavailable_preferences_show_disabled_update_controls_and_real_values() {
                 _ => solidcraft_ui_text::format("update.prefs_dev", &[("version", current_version())]),
             };
             assert!(
-                tree.nodes.iter().any(|(_, node)| node.role() == Role::Label && node.value() == Some(note.as_str())),
-                "the platform help stays accessible"
+                tree.nodes.iter().any(|(_, node)| node.role() == Role::Button && node.label() == Some(note.as_str()) && !node.is_disabled()),
+                "the platform help stays accessible as an enabled help button"
             );
-            assert!(!texts.contains(&note.as_str()), "the longer explanation stays in hover help");
+            assert!(!texts.contains(&note.as_str()), "the longer explanation stays behind the help icon");
             assert!(crate::scenario::rect_of("prefs:updates_help").is_some());
             h.step(&json!({"click":{"handle":"prefs:check_now"}})).unwrap();
             h.step(&json!({"widget":"Check at start and once a day"})).unwrap();

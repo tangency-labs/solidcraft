@@ -16,7 +16,7 @@
 //! | [`FilletCorner::new`] with [`FilletCornerKind::Open`] | `SmFilletOpenCorner::SmFilletOpenCorner`           |
 //! | [`FilletCorner::new`] with [`FilletCornerKind::Degenerate`] | `SmFilletDegenerateCorner::SmFilletDegenerateCorner` |
 //! | [`FilletCorner::corner_type`], [`FilletCornerKind::name`] | `GetCornerType`, `GetName` (per derived class)   |
-//! | [`FilletCorner::create`] | `SmFilletCorner::Create` (with `fixes.fillet_corner_per_vertex_fan`, the fork's knife-edge refusal of a two-edge corner, `e418750`, WR-665; with `fixes.fillet_refuse_mixed_corner_crossing_rails`, not upstream, the refusal of a 3x2 mixed-convexity corner whose rails cross, WR-710) |
+//! | [`FilletCorner::create`] | `SmFilletCorner::Create` (with the fork's knife-edge refusal of a two-edge corner, `e418750`, WR-665; not upstream, the refusal of a 3x2 mixed-convexity corner whose rails cross, WR-710) |
 //! | [`FilletCorner::is_mitre`], [`FilletCorner::filleted_edgeuses`] | the fork's `SmFilletNx2Corner::IsMitre`, `GetFilletedEdgeuses` (`9ba2b12`, WR-634) |
 //! | [`FilletCorner::create_with_solver_lookup`] | `Create` with borrowed executive solvers |
 //! | [`FilletCorner::calc_corner_geom`]                 | `SmFilletCorner::CalcCornerGeom`                      |
@@ -27,8 +27,8 @@
 //! | [`FilletExecutiveData`]                            | the `SmFilletExecutive` members the corner code reads and writes (`m_vEdgeuseSolverMap`, `GetFilletSolverOfEdgeuse`; `m_vExtendedSurfacesMap` for unit `blend.fillet_corner_p1`; CO-PORTED from `blend.fillet_executive_p1`) |
 //!
 //! Deviations:
-//! - **The fork's mitre gap patch** (WR-644, tangency-labs/smlib@2223108, opt-in
-//!   `Kernel::fixes.fillet_mitre_gap_patch`): `adjust_topology_nx2` builds the concave
+//! - **The fork's mitre gap patch** (WR-644, tangency-labs/smlib@2223108):
+//!   `adjust_topology_nx2` builds the concave
 //!   corner's topology for a mitre whose rails meet the side edge apart
 //!   ([`FilletCorner::bevel_gap_patch`]), and the Nx2 corner patch then fills only the gap.
 //! - **Object model.** The class hierarchy is one [`FilletCorner`] record with a
@@ -288,8 +288,7 @@ pub struct FilletCorner {
     /// `m_bBevelGapPatch` (the fork's, WR-644, tangency-labs/smlib@2223108; `FALSE` from
     /// the constructor): a bevel (mitre) whose rails meet the side edge at two places, the
     /// gap between them on the side face's continuation filled by a patch
-    /// (`SmFilletNx2Corner::AdjustTopology`). Set only with
-    /// `fixes.fillet_mitre_gap_patch`.
+    /// (`SmFilletNx2Corner::AdjustTopology`).
     pub bevel_gap_patch: bool,
     /// `m_bExtendedSurfacePatch`.
     pub extended_surface_patch: bool,
@@ -340,6 +339,38 @@ pub struct FilletCorner {
     /// The fork's `m_pEndCap` (smlib 41a39ec, WR-697): an End at a smooth vertex's plane
     /// square to its edge there (`GetEndCapSurface`), set by its topology.
     pub end_cap: Option<Surface>,
+    /// Not upstream (solidcore-native): for each rail of an Nx1 end that ends inside the face
+    /// it rolled onto ([`crate::blend::fillet_corner::topology::nx1_end::TurnedBack`]), the cap
+    /// edge along the foot edge's continuation there (an `SM_FE_ON_EXTEND_EDGE` fillet edge).
+    /// Such a cap has an edge for each piece, four or five in all
+    /// ([`FilletCorner::turned_back_cap`]).
+    pub(crate) turned_back_arcs: [Option<EdgeId>; 2],
+    /// Not upstream (#10876): the corner is made by the second pass of the blend corner's
+    /// Roll-over ([`crate::blend::blend_corner::rollover`]), the concave chain's: a rail end
+    /// is looked for across the cliff's tangent seam as well. Set only on the second pass's corner
+    /// at V, where the concave chain meets the cliff.
+    pub roll_over: bool,
+    /// Not upstream (#10876): the Roll-over's End across the cliff's tangent seam
+    /// ([`crate::blend::blend_corner::rollover::seam_end`]), set by its topology: the end rib is
+    /// two fillet edges, on the end face and on the wall, meeting at the seam, and the cap is
+    /// two faces, one on each, split along the seam's line ([`FilletCorner::wide_cap`]).
+    pub(crate) seam_cap: Option<SeamCap>,
+}
+
+/// Not upstream (#10876): an Nx1 End whose rib and cap span the end face and the wall across
+/// the cliff's tangent seam ([`FilletCorner::seam_cap`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SeamCap {
+    /// The fillet vertex S where the rib crosses the seam's line (placed by the topology).
+    pub split_vertex: VertexId,
+    /// The corner's rail end that is not the tangent end (on the wall's rim).
+    pub rail_vertex: VertexId,
+    /// The end face, the cap piece at the tangent end lies on (its extension).
+    pub end_face: FaceId,
+    /// The wall, the cap piece at the rail end lies on (its extension).
+    pub wall: FaceId,
+    /// W, where the seam meets the cap's side edge: the caps' other common point.
+    pub seam_point: Point3,
 }
 
 /// What the corner methods operate on besides the corner itself.
@@ -555,8 +586,14 @@ pub(super) fn primary_eu(pseudo: &FilletBrep, e: EdgeId, op: &'static str) -> Re
         .ok_or_else(|| SolidError::blend_missing(op, "the edge's primary edge use"))
 }
 
-/// The largest offset of `solver`'s surfaces (a round's radius, a chamfer's setback): how far
-/// its ball's centre stands off the faces. `0` where it has no offset surface yet.
+/// The largest offset of `solver`'s surfaces: how far its section's centre (a round's ball
+/// centre, the corner of a chamfer's offset planes) stands off each face, a round's radius
+/// and a chamfer's `(d' - d cos w) / sin w` off the face with setback `d` (`d'` on the other,
+/// wedge angle `w`), not its setbacks. #16627: the centre lies on its side face's offset at
+/// this distance, so where the side faces meet at an angle `a` the shared section of a Join
+/// stands at most `2 size tan(a / 2)` off the blends
+/// (`blend_corner::join_within_xsect_tolerance_deg` derives it). `0` where it has no offset
+/// surface yet.
 ///
 /// # Errors
 ///
@@ -572,6 +609,34 @@ fn round_size(solver: &FilletSolver) -> Result<f64> {
 }
 
 impl FilletCorner {
+    /// Not upstream (solidcore-native): whether this Nx1 end's cap runs along a foot edge's
+    /// continuation inside the face a rail rolled onto ([`FilletCorner::turned_back_arcs`]).
+    #[must_use]
+    pub(crate) fn turned_back_cap(&self) -> bool {
+        self.turned_back_arcs.iter().any(Option::is_some)
+    }
+
+    /// Not upstream: an Nx1 cap of more than three edges, built as an end patch: a
+    /// turned-back cap ([`FilletCorner::turned_back_cap`]) or a cap across the cliff's tangent
+    /// seam ([`FilletCorner::seam_cap`], four edges, two faces).
+    pub(crate) fn wide_cap(&self) -> bool {
+        self.turned_back_cap() || self.seam_cap.is_some()
+    }
+
+    /// A cap across the cliff's tangent seam ([`FilletCorner::seam_cap`]) is closed only by
+    /// its end patch: when its end face is not extended (the session cleared
+    /// [`FilletCorner::extended_surface_patch`]), a stage failure (a defect), not a corner
+    /// left open.
+    fn seam_cap_needs_its_end_patch(&self) -> Result<()> {
+        if self.seam_cap.is_some() && !self.extended_surface_patch {
+            return Err(SolidError::blend(
+                OP_PATCH,
+                crate::error::blend::BlendFailure::StageFailed,
+            ));
+        }
+        Ok(())
+    }
+
     /// `SmFilletCorner(crContext, cpVertex, pSolverEUs, pAllEUs, pExec, dApproxTol3d,
     /// dTangencyTolRadians)` and the derived constructors (CO-PORTED, module docs):
     /// no fillet vertices, edges or surfaces, every flag off except
@@ -621,6 +686,9 @@ impl FilletCorner {
             setback: None,
             mixed: None,
             end_cap: None,
+            turned_back_arcs: [None, None],
+            roll_over: false,
+            seam_cap: None,
         }
     }
 
@@ -725,11 +793,12 @@ impl FilletCorner {
     /// clockwise neighbour, radial partner or edge, a filleted edge use without a
     /// solver (or a solver id past `solvers`) or a solver without surface generator
     /// (upstream dereferences them), and a walk that does not close; those of the
-    /// sector convexity test; [`SolidError::Unported`] (module docs). With
-    /// `fixes.fillet_refuse_mixed_corner_crossing_rails` (WR-710, not upstream),
-    /// [`SolidError::Unsupported`] with the reason [`MIXED_CORNER_RAILS_CROSS`] for a 3x2
+    /// sector convexity test; [`SolidError::Unported`] (module docs). Not upstream
+    /// (WR-710), [`SolidError::Unsupported`] with the reason [`MIXED_CORNER_RAILS_CROSS`] for a 3x2
     /// mixed-convexity corner whose two filleted edges leave the vertex along one
-    /// tangent, so their rails cross before the corner.
+    /// tangent, so their rails cross before the corner. [`SolidError::Unsupported`] with
+    /// the reason [`MIXED_CORNER_OF_FOUR_EDGES`] for a convex and a concave blend at a
+    /// vertex of four edges that are not the blend corner's Mixed one (#10876).
     pub fn create(
         k: &Kernel,
         b: &mut Brep,
@@ -744,6 +813,8 @@ impl FilletCorner {
             vertex,
             solver_eus,
             &exec.earlier_pass_faces,
+            // the base solvers do not tell a variable-radius law: none is taken as constant
+            |_| false,
             |edge_use| {
                 exec.fillet_solver_of_edgeuse(edge_use)
                     .and_then(|id| usize::try_from(id.0).ok())
@@ -760,6 +831,10 @@ impl FilletCorner {
     /// `solver_of` resolves each filleted edge use to its actual borrowed solver
     /// base. Lookups occur in `solver_eus` order after the topology walk, where the
     /// native factory reads tolerances and the surface generator. No solver is copied.
+    /// `constant_offsets` tells whether an edge use's solver keeps its offsets constant
+    /// along the edge (`OffsetRadiiCanChange` false: rounds and the two-offset chamfers, by
+    /// construction): only such blends may take the second-order Join bound
+    /// (`blend_corner::join_gap`, #13911).
     ///
     /// # Errors
     ///
@@ -771,7 +846,40 @@ impl FilletCorner {
         vertex: VertexId,
         solver_eus: &[EdgeuseId],
         earlier_pass_faces: &[FaceId],
+        constant_offsets: impl Fn(EdgeuseId) -> bool,
         solver_of: impl Fn(EdgeuseId) -> Result<&'solver FilletSolver>,
+    ) -> Result<Option<Self>> {
+        Self::create_noting_roll_overs(
+            k,
+            b,
+            vertex,
+            solver_eus,
+            earlier_pass_faces,
+            constant_offsets,
+            solver_of,
+            None,
+        )
+    }
+
+    /// [`Self::create_with_solver_lookup`], noting in `roll_overs` (when given) the vertex it
+    /// refuses as a convex and a concave round meeting at four edges
+    /// ([`MIXED_CORNER_OF_FOUR_EDGES`]) where that vertex is the blend corner's Roll-over
+    /// ([`crate::blend::blend_corner::rollover::classify_roll_over`]; not upstream, #10876).
+    /// The refusal is the same either way: the Roll-over is built by the caller, in two
+    /// passes.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::create_with_solver_lookup`] and the classification.
+    pub fn create_noting_roll_overs<'solver>(
+        k: &Kernel,
+        b: &mut Brep,
+        vertex: VertexId,
+        solver_eus: &[EdgeuseId],
+        earlier_pass_faces: &[FaceId],
+        constant_offsets: impl Fn(EdgeuseId) -> bool,
+        solver_of: impl Fn(EdgeuseId) -> Result<&'solver FilletSolver>,
+        mut roll_overs: Option<&mut Vec<crate::blend::blend_corner::rollover::RollOver>>,
     ) -> Result<Option<Self>> {
         // get number of edgeuses connected to this vertex to be filleted
         let total_solver_eus = solver_eus.len();
@@ -985,31 +1093,28 @@ impl FilletCorner {
                 let eu1_ = *solver_eus
                     .get(1)
                     .ok_or_else(|| invalid(OP_CREATE, "second filleted edge use"))?;
-                // The fork's (WR-665, tangency-labs/smlib@e418750, opt-in
-                // `fillet_corner_per_vertex_fan`): no two-edge corner is built where an edge
-                // not blended there is a knife edge (its faces folded back on each other,
-                // as where a hole's wall touches the bottom face along a line): the
-                // corners take its faces to meet at an angle.
+                // The fork's (WR-665, tangency-labs/smlib@e418750): no two-edge corner is
+                // built where an edge not blended there is a knife edge (its faces folded
+                // back on each other, as where a hole's wall touches the bottom face along
+                // a line): the corners take its faces to meet at an angle.
                 let mut knife = false;
-                if k.fixes.fillet_corner_per_vertex_fan {
-                    let e0 = edge_of(b, eu0)?;
-                    let e1 = edge_of(b, eu1_)?;
-                    for &other in &all_eus {
-                        if knife {
-                            break;
-                        }
-                        let e = edge_of(b, other)?;
-                        if e != e0
-                            && e != e1
-                            && crate::blend::fillet_solver::p5::is_knife_edge(
-                                k,
-                                b,
-                                e,
-                                tangency_tol_radians,
-                            )?
-                        {
-                            knife = true;
-                        }
+                let e0 = edge_of(b, eu0)?;
+                let e1 = edge_of(b, eu1_)?;
+                for &other in &all_eus {
+                    if knife {
+                        break;
+                    }
+                    let e = edge_of(b, other)?;
+                    if e != e0
+                        && e != e1
+                        && crate::blend::fillet_solver::p5::is_knife_edge(
+                            k,
+                            b,
+                            e,
+                            tangency_tol_radians,
+                        )?
+                    {
+                        knife = true;
                     }
                 }
                 if knife {
@@ -1062,6 +1167,38 @@ impl FilletCorner {
                             } else {
                                 Some(false)
                             };
+                            // Not upstream (#10876): of four edges, a convex and a concave
+                            // blend that are not the Mixed corner have no corner. The
+                            // Turn below is for blends of one convexity: on their common
+                            // face a convex blend lies in the material and a concave one
+                            // outside it, so the two meet only on that face, at any size,
+                            // and there is no crossing to mitre them on.
+                            if mixed != Some(true)
+                                && total_eus == 4
+                                && eu2::is_convex_radial_sector(k, b, eu0, 4, false, 0.0)?
+                                    != eu2::is_convex_radial_sector(k, b, eu1_, 4, false, 0.0)?
+                            {
+                                // a classification that fails is no Roll-over: the
+                                // refusal stands
+                                if let Some(noted) = roll_overs.as_mut() {
+                                    match crate::blend::blend_corner::rollover::classify_roll_over(
+                                        k,
+                                        b,
+                                        vertex,
+                                        solver_eus,
+                                        &all_eus,
+                                        tan_tol_deg,
+                                    ) {
+                                        Ok(Some(found)) => noted.push(found),
+                                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                                        Ok(None) | Err(_) => {}
+                                    }
+                                }
+                                return Err(SolidError::Unsupported {
+                                    operation: OP_CREATE,
+                                    reason: MIXED_CORNER_OF_FOUR_EDGES,
+                                });
+                            }
                             if mixed == Some(true) {
                                 let mut c = make(FilletCornerKind::NByTwo);
                                 c.blend = Some(crate::blend::blend_corner::BlendCorner {
@@ -1075,22 +1212,19 @@ impl FilletCorner {
                                 if mixed.is_none() {
                                     return Ok(None); // MSG: Corner Case Not Implemented
                                 }
-                                // Not upstream (WR-710, opt-in
-                                // `fillet_refuse_mixed_corner_crossing_rails`, #2256):
+                                // Not upstream (WR-710, #2256):
                                 // where the two edges leave the vertex along one tangent,
                                 // their common face closes to a cusp there and the rails
                                 // cross before the corner; the corner patch built across
                                 // them leaves the faces, so the corner is refused.
-                                if k.fixes.fillet_refuse_mixed_corner_crossing_rails
-                                    && mixed_corner_rails_cross(
-                                        k,
-                                        b,
-                                        vertex,
-                                        edge_of(b, eu0)?,
-                                        edge_of(b, eu1_)?,
-                                        tan_tol_deg,
-                                    )?
-                                {
+                                if mixed_corner_rails_cross(
+                                    k,
+                                    b,
+                                    vertex,
+                                    edge_of(b, eu0)?,
+                                    edge_of(b, eu1_)?,
+                                    tan_tol_deg,
+                                )? {
                                     return Err(SolidError::Unsupported {
                                         operation: OP_CREATE,
                                         reason: MIXED_CORNER_RAILS_CROSS,
@@ -1102,12 +1236,70 @@ impl FilletCorner {
                                 // one convexity among three or four edges are the blend
                                 // corner's (SmBlendCorner::Classify: a Turn or a Join), built
                                 // by the two-blend construction moved from SmFilletNx2Corner
-                                // the blends join only where their balls are one within
-                                // the corner's tolerance (`blend_corner::join_tolerance_deg`)
+                                // the blends join only where their sections at the joint
+                                // vertex stand strictly within the B-rep's intersection
+                                // tolerance, which the check holds every vertex to (#16627;
+                                // `blend_corner::join_within_xsect_tolerance_deg`), a first-order
+                                // gap only where the shared section lies behind the second
+                                // blend's end; over it the gap is of second order (#13911;
+                                // `blend_corner::join_gap`)
                                 let mut size = 0.0_f64;
+                                let mut blends = Vec::with_capacity(2);
                                 for &eu in solver_eus {
-                                    size = size.max(round_size(solver_of(eu)?)?);
+                                    let solver = solver_of(eu)?;
+                                    size = size.max(round_size(solver)?);
+                                    let mut faces = [(None, 0.0); 2];
+                                    for (rail, slot) in faces.iter_mut().enumerate() {
+                                        let face = match solver.edgeuse(rail)? {
+                                            Some(rail_eu) => eu1::face(b, rail_eu)?,
+                                            None => None,
+                                        };
+                                        // only offsets fixed along the edge are a
+                                        // constant reach: rounds, and two-distance and
+                                        // distance-angle chamfers (constant-radius
+                                        // solvers whose two offsets are fixed once at
+                                        // preparation, `session::two_offsets`), by
+                                        // construction. A variable-radius law, or a
+                                        // constant-distance section (its offsets solved
+                                        // per section), gets no offset, so the over-side
+                                        // bound refuses it
+                                        let offset = if constant_offsets(eu) {
+                                            solver.surface(rail)?.map_or(f64::NAN, |s| {
+                                                s.surface.offset_distance().abs()
+                                            })
+                                        } else {
+                                            f64::NAN
+                                        };
+                                        *slot = (face, offset);
+                                    }
+                                    blends.push(crate::blend::blend_corner::join_gap::JoinBlend {
+                                        eu,
+                                        faces,
+                                    });
                                 }
+                                let xsect_tol =
+                                    crate::topology::vertex::corner::xsect_tol_3d_of_brep(k, b);
+                                let behind_deg =
+                                    crate::blend::blend_corner::join_within_xsect_tolerance_deg(
+                                        size,
+                                        xsect_tol,
+                                        tan_tol_deg,
+                                    );
+                                let join_deg = match blends.as_slice() {
+                                    [first, second] => {
+                                        crate::blend::blend_corner::join_gap::join_tolerance_deg(
+                                            k,
+                                            b,
+                                            vertex,
+                                            [first, second],
+                                            &all_eus,
+                                            xsect_tol,
+                                            tan_tol_deg,
+                                            behind_deg,
+                                        )?
+                                    }
+                                    _ => behind_deg,
+                                };
                                 let blend = crate::blend::blend_corner::classify(
                                     k,
                                     b,
@@ -1115,11 +1307,7 @@ impl FilletCorner {
                                     solver_eus,
                                     &all_eus,
                                     tan_tol_deg,
-                                    crate::blend::blend_corner::join_tolerance_deg(
-                                        size,
-                                        approx_tol_3d,
-                                        tan_tol_deg,
-                                    ),
+                                    join_deg,
                                 )?;
                                 let mut c = make(FilletCornerKind::NByTwo);
                                 c.blend = Some(blend);
@@ -1726,13 +1914,19 @@ impl FilletCorner {
 
     /// `SmFilletNx1Corner::CreateCornerPatch`: with three fillet edges an end patch
     /// from the extended side face (`CreateEndPatch`) or the default patch; otherwise
-    /// nothing.
+    /// nothing. Not upstream: a turned-back cap ([`FilletCorner::turned_back_cap`], four or
+    /// five edges) takes the end patch when its end face is extended, and nothing otherwise
+    /// (the default patch is three-sided). A cap across the cliff's tangent seam
+    /// ([`FilletCorner::seam_cap`], #10876) takes the end patch too (its two faces), and
+    /// fails when its end face is not extended: no other patch closes it.
     ///
     /// # Errors
     ///
-    /// Those of the patch builders; [`SolidError::Unported`] (`CreateEndPatch`).
+    /// Those of the patch builders; [`SolidError::Unported`] (`CreateEndPatch`); a stage
+    /// failure for a seam cap whose end face is not extended.
     pub fn create_corner_patch_nx1(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
-        if self.edges.len() == 3 {
+        self.seam_cap_needs_its_end_patch()?;
+        if self.edges.len() == 3 || (self.wide_cap() && self.extended_surface_patch) {
             if self.extended_surface_patch {
                 self.create_end_patch(env)?;
             } else {
@@ -1755,7 +1949,8 @@ impl FilletCorner {
         extended_surface: impl Fn(FaceId) -> Option<Surface>,
         note_end_face_error: &mut dyn FnMut(&FilletCorner),
     ) -> Result<()> {
-        if self.edges.len() == 3 {
+        self.seam_cap_needs_its_end_patch()?;
+        if self.edges.len() == 3 || (self.wide_cap() && self.extended_surface_patch) {
             if self.extended_surface_patch {
                 let mut end_env = CornerPatchEnv {
                     k: &mut *env.k,
@@ -2126,16 +2321,14 @@ impl FilletCorner {
                 continue;
             }
 
-            // The fork's (WR-644, tangency-labs/smlib@2223108, opt-in
-            // `fixes.fillet_mitre_gap_patch`): two rounds mitred at the common face's
-            // concave corner whose rails meet the side edge at two places. The larger
-            // round cut by the side face, and the smaller round's rail, run on past the
-            // side edge onto the side face's continuation, where they meet the mitre's
-            // curve: the gap is filled by a patch on the side face's extended surface, as
-            // at a corner of mixed convexity whose rounds are swept, the mitre's curve
-            // taking the place of the swept face (`CreateCornerPatch`).
-            if k.fixes.fillet_mitre_gap_patch
-                && self.all_eus.as_ref().map_or(0, Vec::len) == 3
+            // The fork's (WR-644, tangency-labs/smlib@2223108): two rounds mitred at the
+            // common face's concave corner whose rails meet the side edge at two places.
+            // The larger round cut by the side face, and the smaller round's rail, run on
+            // past the side edge onto the side face's continuation, where they meet the
+            // mitre's curve: the gap is filled by a patch on the side face's extended
+            // surface, as at a corner of mixed convexity whose rounds are swept, the
+            // mitre's curve taking the place of the swept face (`CreateCornerPatch`).
+            if self.all_eus.as_ref().map_or(0, Vec::len) == 3
                 && p1::check_face_complimentary_corner_concavity(
                     k,
                     target,
@@ -2378,8 +2571,16 @@ fn bspline_part_mut(kind: &mut CurveKind) -> Option<&mut BSplineCurve> {
     }
 }
 
-/// The reason of the [`SolidError::Unsupported`] that [`FilletCorner::create`] returns,
-/// with `Kernel::fixes.fillet_refuse_mixed_corner_crossing_rails` (WR-710, #2256), for a
+/// Not upstream (#10876): the reason [`FilletCorner::create`] refuses a corner of four edges
+/// where a convex and a concave blend meet, other than the Mixed corner (one continuing
+/// the other across a tangent seam).
+pub const MIXED_CORNER_OF_FOUR_EDGES: &str = "a convex and a concave round meeting at a \
+    vertex of four edges are not supported unless one continues the other across a tangent \
+    seam: they lie on opposite sides of their faces there and have no crossing to mitre on, \
+    at any size (#10876)";
+
+/// The reason of the [`SolidError::Unsupported`] that [`FilletCorner::create`] returns
+/// (WR-710, #2256) for a
 /// corner of two filleted edges of differing convexity whose rails cross before the
 /// corner (see [`FilletCorner::create`]).
 pub const MIXED_CORNER_RAILS_CROSS: &str =
@@ -2747,17 +2948,24 @@ mod tests {
             solver.fsg = Some(crate::blend::fillet_solver::p1::FilletSurfaceGenerator::Linear);
         }
         let seen = RefCell::new(Vec::new());
-        let corner =
-            FilletCorner::create_with_solver_lookup(&k, &mut b, vertex, &outgoing, &[], |eu| {
+        let corner = FilletCorner::create_with_solver_lookup(
+            &k,
+            &mut b,
+            vertex,
+            &outgoing,
+            &[],
+            |_| true,
+            |eu| {
                 seen.borrow_mut().push(eu);
                 let index = outgoing
                     .iter()
                     .position(|&candidate| candidate == eu)
                     .unwrap();
                 Ok(solvers.get(index).unwrap())
-            })
-            .unwrap()
-            .unwrap();
+            },
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(*seen.borrow(), outgoing);
         assert_eq!(corner.kind, FilletCornerKind::ConvexNByN);
         assert_eq!(corner.approx_tol_3d, 0.01);
@@ -2765,16 +2973,23 @@ mod tests {
 
         // The next factory call sees the same owned solver's updated state.
         solvers.get_mut(1).unwrap().approx_tol_3d = 0.001;
-        let corner =
-            FilletCorner::create_with_solver_lookup(&k, &mut b, vertex, &outgoing, &[], |eu| {
+        let corner = FilletCorner::create_with_solver_lookup(
+            &k,
+            &mut b,
+            vertex,
+            &outgoing,
+            &[],
+            |_| true,
+            |eu| {
                 let index = outgoing
                     .iter()
                     .position(|&candidate| candidate == eu)
                     .unwrap();
                 Ok(solvers.get(index).unwrap())
-            })
-            .unwrap()
-            .unwrap();
+            },
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(corner.approx_tol_3d, 0.001);
     }
 
@@ -2788,26 +3003,40 @@ mod tests {
         solver.fsg = Some(crate::blend::fillet_solver::p1::FilletSurfaceGenerator::Linear);
         let seen = RefCell::new(Vec::new());
         let failure = invalid("factory_lookup_test", "second solver unavailable");
-        let result =
-            FilletCorner::create_with_solver_lookup(&k, &mut b, vertex, &outgoing, &[], |eu| {
+        let result = FilletCorner::create_with_solver_lookup(
+            &k,
+            &mut b,
+            vertex,
+            &outgoing,
+            &[],
+            |_| true,
+            |eu| {
                 seen.borrow_mut().push(eu);
                 if seen.borrow().len() == 2 {
                     Err(failure.clone())
                 } else {
                     Ok(&solver)
                 }
-            });
+            },
+        );
         assert_eq!(result.unwrap_err(), failure);
         assert_eq!(*seen.borrow(), outgoing.get(..2).unwrap());
 
         // Invalid topology fails before the first native solver read.
         seen.borrow_mut().clear();
         b.edgeuse_mut(*outgoing.first().unwrap()).unwrap().cw = None;
-        let result =
-            FilletCorner::create_with_solver_lookup(&k, &mut b, vertex, &outgoing, &[], |eu| {
+        let result = FilletCorner::create_with_solver_lookup(
+            &k,
+            &mut b,
+            vertex,
+            &outgoing,
+            &[],
+            |_| true,
+            |eu| {
                 seen.borrow_mut().push(eu);
                 Ok(&solver)
-            });
+            },
+        );
         assert!(result.is_err());
         assert!(seen.borrow().is_empty());
     }

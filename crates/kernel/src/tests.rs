@@ -154,6 +154,33 @@ fn revolve_adjacent_profiles_on_the_axis() {
     assert!(rel(measure(&cut).unwrap().volume, want) < 1e-3, "{} vs {want}", measure(&cut).unwrap().volume);
 }
 
+/// #17516: a plate with a spline dome drawn against the axis (a line up the axis, a short line
+/// to the spline's end, the spline down to the rim), as the sketch solver leaves it: the
+/// spline's end and the short line's top 3.8e-9 mm past the axis. That is on the axis, so the
+/// whole turn builds, with the volume pi times the integral of x^2 dy round the profile. The
+/// same profile with the spline's end 1 mm past the axis crosses it and is refused before the
+/// kernel builds anything.
+#[test]
+fn revolve_a_spline_dome_ending_a_hair_past_the_axis() {
+    let profile = |x: f64| Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(50.0, 0.0) },
+                Seg2::Line { a: Vec2::new(50.0, 0.0), b: Vec2::new(50.0, 2.4) },
+                Seg2::Cubic { p0: Vec2::new(50.0, 2.4), p1: Vec2::new(35.0, 2.4), p2: Vec2::new(16.0, 8.5), p3: Vec2::new(x, 8.5) },
+                Seg2::Line { a: Vec2::new(x, 8.5), b: Vec2::new(0.0, 2.4) },
+                Seg2::Line { a: Vec2::new(0.0, 2.4), b: Vec2::new(0.0, 0.0) },
+            ],
+        },
+        holes: vec![],
+    };
+    let b = revolve(&Plane::XZ, &[profile(-3.8e-9)], Vec2::ZERO, Vec2::Y, 2.0 * PI).unwrap().pop().unwrap();
+    let volume = measure(&b).unwrap().volume;
+    assert!(rel(volume, 33608.582428514645) < 1e-7, "{volume}");
+    let crossing = revolve(&Plane::XZ, &[profile(-1.0)], Vec2::ZERO, Vec2::Y, 2.0 * PI).unwrap_err().to_string();
+    assert!(crossing.contains("the profile crosses the revolve axis"), "{crossing}");
+}
+
 #[test]
 fn chamfer_and_step() {
     let b = box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0)).unwrap();
@@ -180,6 +207,27 @@ fn a_cylinder_rim_round_goes_to_step_as_its_torus() {
     let pappus = PI * big * big * height - 2.0 * PI * (big - r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI))) * (1.0 - PI / 4.0) * r * r;
     assert!(rel(a, pappus) < 1e-7 && rel(b, pappus) < 1e-7, "{a} {b} {pappus}");
 }
+/// A small round of a cylinder's rim builds whether the cylinder is the primitive (its seam at an
+/// odd angle) or an extruded circle (#16748: the primitive's was refused as larger than its faces
+/// allow, at any radius up to about a twentieth of the cylinder's). Pappus: the round takes off
+/// 2 pi (R - r (10 - 3 pi) / (3 (4 - pi))) (1 - pi / 4) r^2.
+#[test]
+fn a_small_rim_round_builds_on_a_primitive_cylinder_as_on_an_extruded_one() {
+    let (big, height) = (10.0, 20.0);
+    let primitive = cylinder(Vec3::ZERO, Vec3::Z, big, height).unwrap();
+    let circle = Region2 { outer: Loop2::circle(Vec2::ZERO, big), holes: vec![] };
+    let extruded = extrude(&Plane::XY, &[circle], 0.0, height).unwrap().pop().unwrap();
+    let rim = Vec3::new(7.0711, 7.0711, height);
+    // Pappus' closed form, pi R^2 h - 2 pi (R - r (10 - 3 pi) / (3 (4 - pi))) (1 - pi / 4) r^2.
+    for (r, want) in [(0.1, 6283.050770054479), (0.5, 6279.851997607429)] {
+        for (name, body) in [("primitive", &primitive), ("extruded", &extruded)] {
+            let round = fillet(body, &[rim], r).unwrap_or_else(|e| panic!("{name} cylinder, round {r}: {e}"));
+            let volume = measure(&round).unwrap().volume;
+            assert!(rel(volume, want) < 1e-7, "{name} cylinder, round {r}: {volume} vs {want}");
+        }
+    }
+}
+
 #[test]
 fn hostile_inputs_are_errors() {
     assert!(extrude(&Plane::XY, &[rect(1.0, 1.0)], 0.0, 0.0).is_err());
@@ -2371,6 +2419,59 @@ fn raise_band_on_a_rounded_rim() {
     }
 }
 
+/// A lip wider than its rim (#16742): the band reaches past the rim's outer wall, so what is left of
+/// the face is the underside of the overhang. It faces down, away from the rim's top, and the
+/// ring's two edges round with a small fillet. Volume added is the band's area times its height.
+#[test]
+fn raise_band_wider_than_its_rim_leaves_a_downward_underside() {
+    let cup = extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(Vec2::ZERO, 20.0), holes: vec![] }], 0.0, 15.0).unwrap().pop().unwrap();
+    let sh = shell(&cup, &[Vec3::new(0.0, 0.0, 15.0)], 1.0).unwrap();
+    let v0 = measure(&sh).unwrap().volume;
+    // The rim is 1 wide (r 19 to 20); the band is 3 wide, to r 22.
+    let lip = raise_band(&sh, Vec3::new(19.5, 0.0, 15.0), 3.0, 2.0, false).unwrap();
+    assert!(lip.validity().is_empty(), "{:?}", lip.validity());
+    let band = PI * (22.0 * 22.0 - 19.0 * 19.0) * 2.0;
+    let v = measure(&lip).unwrap().volume;
+    assert!(rel(v, v0 + band) < 1e-5, "{v} vs {}", v0 + band);
+    // The ring r 20 to 22 at z 15 faces down.
+    let mesh = lip.mesh(&MeshTolerance::chord(0.05)).unwrap();
+    let mut seen = 0;
+    for t in &mesh.triangles {
+        let Some([a, b, c]) = mesh.tri(t) else { continue };
+        let (m, n) = ((a + b + c) * (1.0 / 3.0), (b - a).cross(c - a));
+        let r = (m.x * m.x + m.y * m.y).sqrt();
+        if (m.z - 15.0).abs() < 1e-9 && r > 20.1 && r < 21.9 {
+            assert!(n.z < 0.0, "the underside faces up at r {r}: {n:?}");
+            seen += 1;
+        }
+    }
+    assert!(seen > 0, "no underside triangles");
+    // Both edges of the ring round at 0.1.
+    for at in [Vec3::new(20.0, 0.0, 15.0), Vec3::new(22.0, 0.0, 15.0)] {
+        let f = fillet(&lip, &[at], 0.1).unwrap();
+        assert!(f.validity().is_empty(), "{at:?}: {:?}", f.validity());
+    }
+    let both = fillet(&lip, &[Vec3::new(20.0, 0.0, 15.0), Vec3::new(22.0, 0.0, 15.0)], 0.1).unwrap();
+    assert!(both.validity().is_empty(), "{:?}", both.validity());
+}
+
+/// A band exactly as wide as the rim leaves no face beside it, and one whose far edge crosses the
+/// rim's other edge in places only leaves a face with no single side: both are refused by name.
+#[test]
+fn raise_band_refuses_a_band_as_wide_as_the_rim_and_one_that_crosses_it_in_part() {
+    let cup = extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(Vec2::ZERO, 20.0), holes: vec![] }], 0.0, 15.0).unwrap().pop().unwrap();
+    let sh = shell(&cup, &[Vec3::new(0.0, 0.0, 15.0)], 1.0).unwrap();
+    let r = raise_band(&sh, Vec3::new(19.5, 0.0, 15.0), 1.0, 2.0, false);
+    assert_eq!(r.err(), Some(KernelError::Lip(LipRefusal::BandFillsRim)));
+    // A tube with its bore off the axis: the wall is 5 wide at +x only.
+    let tube = Region2 { outer: Loop2::circle(Vec2::ZERO, 20.0), holes: vec![Loop2::circle(Vec2::new(10.0, 0.0), 5.0)] };
+    let tube = extrude(&Plane::XY, &[tube], 0.0, 15.0).unwrap().pop().unwrap();
+    let r = raise_band(&tube, Vec3::new(-10.0, 0.0, 15.0), 6.0, 2.0, false);
+    assert_eq!(r.err(), Some(KernelError::Lip(LipRefusal::BandCrossesRim)));
+    // Narrower than the narrowest part of the wall it still builds.
+    assert!(raise_band(&tube, Vec3::new(-10.0, 0.0, 15.0), 4.0, 2.0, false).is_ok());
+}
+
 #[test]
 fn orientation_mesh_reuses_missing_face_check_at_matching_tolerance() {
     for scale in [0.001, 1.0, 1000.0] {
@@ -2512,6 +2613,443 @@ fn loft_pairs_the_vertices_of_matching_non_convex_sections() {
     assert!(m.centroid.x.abs() < 0.05, "centre of mass x {}", m.centroid.x);
 }
 
+/// #11849: a 25 × 15 rectangle ending in a point (two tangent arcs meeting at (37, 7.5)) lofted
+/// 15 up to a 40.4 × 25 slot, both symmetric about y = 7.5. The slot's four segments had to become
+/// five, and splitting its longest one in half split a long side (40.4) rather than the round end
+/// (39.3): the loft twisted, its seams ran diagonally and its centre of mass sat at y = 7.363.
+/// Each slot vertex pairs with the corner it lines up with and the point with the middle of the
+/// round end.
+#[test]
+fn loft_pairs_a_point_with_the_middle_of_a_round_end() {
+    let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) };
+    // A counter-clockwise arc about `c` from `a` to `b`.
+    let arc = |c: (f64, f64), a: (f64, f64), b: (f64, f64)| {
+        let start = (a.1 - c.1).atan2(a.0 - c.0);
+        let sweep = ((b.1 - c.1).atan2(b.0 - c.0) - start).rem_euclid(2.0 * PI);
+        Seg2::Arc { center: Vec2::new(c.0, c.1), radius: Vec2::new(a.0 - c.0, a.1 - c.1).len(), start, sweep }
+    };
+    let tip = (37.0, 7.5);
+    let point = Loop2 {
+        segs: vec![
+            line((0.0, 0.0), (25.0, 0.0)),
+            arc((25.0, 13.35), (25.0, 0.0), tip),
+            arc((25.0, 1.65), tip, (25.0, 15.0)),
+            line((25.0, 15.0), (0.0, 15.0)),
+            line((0.0, 15.0), (0.0, 0.0)),
+        ],
+    };
+    let x = 35.4;
+    let slot = Loop2 {
+        segs: vec![
+            line((-5.0, 20.0), (-5.0, -5.0)),
+            line((-5.0, -5.0), (x, -5.0)),
+            arc((x, 7.5), (x, -5.0), (x, 20.0)),
+            line((x, 20.0), (-5.0, 20.0)),
+        ],
+    };
+    let secs = [(Plane::XY, point), (Plane::XY.offset(15.0), slot)];
+    let body = loft(&secs).unwrap();
+    let m = measure(&body).unwrap();
+    assert!((m.centroid.y - 7.5).abs() < 1e-6, "centre of mass y {}", m.centroid.y);
+    let at = |p: Vec3| body.record().vertices.iter().any(|v| Vec3::from(v.point).dist(p) < 1e-6);
+    assert!(at(Vec3::new(x + 12.5, 7.5, 15.0)), "the round end splits at its middle");
+    assert_eq!(body.record().vertices.len(), 10);
+    // The same with the sections given the other way round.
+    let back = [secs[1].clone(), secs[0].clone()];
+    let m = measure(&loft(&back).unwrap()).unwrap();
+    assert!((m.centroid.y - 7.5).abs() < 1e-6, "reversed: centre of mass y {}", m.centroid.y);
+}
+
+/// The loft's sections as its walls are built through them ([`crate::build::loft_numbered_loops`]):
+/// in the order given, each cut to the vertices it shares with the others.
+fn matched_sections(secs: &[(Plane, Loop2)]) -> Vec<Loop2> {
+    let numbered: Vec<_> = secs.iter().map(|(p, _)| *p).zip(crate::numbered::number_loops(secs.iter().map(|(_, l)| l))).collect();
+    let reversed = crate::build::loft_reversed(secs).unwrap();
+    let mut out: Vec<Loop2> = crate::build::loft_numbered_loops(&numbered, reversed).unwrap().into_iter().map(|(_, l)| l.lp).collect();
+    if reversed {
+        out.reverse();
+    }
+    out
+}
+
+/// The two ends of every edge of `body`.
+fn edge_ends(body: &Body) -> Vec<(Vec3, Vec3)> {
+    let r = body.record();
+    let point = |k: u32| r.vertices.get(k as usize).map(|v| Vec3::from(v.point));
+    r.edges.iter().filter_map(|e| Some((point(e.vertices[0])?, point(e.vertices[1])?))).collect()
+}
+
+/// Whether an edge of `body` runs from `p` to `q` (either way).
+fn joins(body: &Body, p: Vec3, q: Vec3) -> bool {
+    edge_ends(body).iter().any(|&(a, b)| (a.dist(p) < 1e-6 && b.dist(q) < 1e-6) || (a.dist(q) < 1e-6 && b.dist(p) < 1e-6))
+}
+
+/// The ends of the edges of `body` that run from `p` to a point with `x` = `to_x`.
+fn joined_to(body: &Body, p: Vec3, to_x: f64) -> Vec<Vec3> {
+    edge_ends(body)
+        .into_iter()
+        .filter_map(|(a, b)| {
+            if a.dist(p) < 1e-6 {
+                Some(b)
+            } else if b.dist(p) < 1e-6 {
+                Some(a)
+            } else {
+                None
+            }
+        })
+        .filter(|q| (q.x - to_x).abs() < 1e-6)
+        .collect()
+}
+
+/// Two hood profiles (a thin band with a hooked lip at each end) on the planes x = 29 and x = 50:
+/// 17 and 18 vertices, and each has a vertex the other lacks, on a straight side or nearly so (the
+/// second's right side has a point on it at (27.6, 40.8), its left side one at (-22.8, 41.25); the
+/// first's arch one at (-11.25, 48.47)). Splitting the one with fewer vertices to 18 shifted one
+/// of the lips by a vertex, so its seams ran diagonally across it (and an earlier rule sheared the
+/// whole top band). Each corner now pairs with the corner it lines up with, and each of the three
+/// extra vertices splits the other profile's side where it lands: 19 vertices in each section.
+const HOOD_A: [(f64, f64); 17] = [
+    (22.275732672046672, 42.4194875370215),
+    (24.15373450104431, 42.5852135407361),
+    (24.15373450104431, 46.40321410660799),
+    (13.601185077757782, 48.265425651573544),
+    (-7.956143139645345, 49.24551439515723),
+    (-11.252079715296125, 48.4718337596306),
+    (-18.555464567800477, 45.80523471830436),
+    (-18.50202907367915, 43.007831671402265),
+    (-17.2, 42.906809746055835),
+    (-17.2, 41.46),
+    (-18.723959594727756, 41.251188115959096),
+    (-22.8, 41.251188115959096),
+    (-22.8, 52.6),
+    (27.600000000000005, 52.6),
+    (27.600000000000005, 40.800000000000004),
+    (24.1, 40.800000000000004),
+    (22.31070331305888, 40.957898711557526),
+];
+
+/// The second hood profile ([`HOOD_A`]).
+const HOOD_B: [(f64, f64); 18] = [
+    (-22.8, 41.251188115959096),
+    (-22.8, 52.6),
+    (27.600000000000005, 52.6),
+    (27.600000000000005, 40.800000000000004),
+    (27.600000000000005, 38.0),
+    (24.0, 38.0),
+    (22.405477280919964, 38.20705014188878),
+    (22.405477280919964, 39.550000000000004),
+    (24.924192673472707, 39.772267172447684),
+    (24.924192673472707, 42.84813511542108),
+    (15.250770475114546, 45.97354789328374),
+    (-9.315605172301247, 47.10818298471791),
+    (-19.42968353817282, 42.3110290048853),
+    (-19.42968353817282, 40.25972628736644),
+    (-17.525020629683333, 40.10220901755372),
+    (-17.525020629683333, 38.64960388282376),
+    (-19.327507117348198, 38.51668382378396),
+    (-22.398563727493077, 38.51668382378396),
+];
+
+/// A hood profile on the plane x = `x` (sketch x along Y, sketch y along Z).
+fn hood_section(x: f64, points: &[(f64, f64)]) -> (Plane, Loop2) {
+    let plane = Plane::new(Vec3::new(x, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap();
+    (plane, Loop2::polygon(&points.iter().map(|&(u, v)| Vec2::new(u, v)).collect::<Vec<_>>()))
+}
+
+#[test]
+fn loft_pairs_the_corners_of_two_profiles_that_each_have_a_vertex_the_other_lacks() {
+    let secs = [hood_section(29.0, &HOOD_A), hood_section(50.0, &HOOD_B)];
+    let counts: Vec<usize> = matched_sections(&secs).iter().map(|l| l.segs.len()).collect();
+    assert_eq!(counts, [19, 19], "19 vertices in each section");
+    let body = loft(&secs).unwrap();
+    let at = |x: f64, p: (f64, f64)| Vec3::new(x, p.0, p.1);
+    // Each corner of the first profile joins the corner of the second it lines up with.
+    let pairs = [
+        (0, 7),
+        (1, 8),
+        (2, 9),
+        (3, 10),
+        (4, 11),
+        (6, 12),
+        (7, 13),
+        (8, 14),
+        (9, 15),
+        (10, 16),
+        (11, 17),
+        (12, 1),
+        (13, 2),
+        (14, 4),
+        (15, 5),
+        (16, 6),
+    ];
+    for (i, j) in pairs {
+        assert!(joins(&body, at(29.0, HOOD_A[i]), at(50.0, HOOD_B[j])), "{:?} joins {:?}", HOOD_A[i], HOOD_B[j]);
+    }
+    // The second profile's point on its left side splits the first's left side: the wall there
+    // stays in the plane y = -22.8. (Its point on the right side, where both right sides are
+    // straight, leaves the right wall one flat face in y = 27.6, between the corner pairs.)
+    let ends = joined_to(&body, at(50.0, HOOD_B[0]), 29.0);
+    assert!(ends.len() == 1 && ends.iter().all(|q| (q.y + 22.8).abs() < 1e-9 && q.z > 41.25 && q.z < 52.6), "{:?} joins {ends:?}", HOOD_B[0]);
+    let right = matched_sections(&secs);
+    let lone = right[1].segs.iter().position(|s| s.start().dist(Vec2::new(HOOD_B[3].0, HOOD_B[3].1)) < 1e-9).unwrap();
+    let partner = right[0].segs[lone].start();
+    assert!((partner.x - 27.6).abs() < 1e-9 && partner.y > 40.8 && partner.y < 52.6, "the right side's point pairs with {partner:?}");
+    // The first profile's vertex on its arch splits the second's arch between the corners
+    // either side of it.
+    let ends = joined_to(&body, at(29.0, HOOD_A[5]), 50.0);
+    let (p, q) = (Vec2::new(HOOD_B[11].0, HOOD_B[11].1), Vec2::new(HOOD_B[12].0, HOOD_B[12].1));
+    assert_eq!(ends.len(), 1);
+    assert!(
+        ends.iter().all(|e| {
+            let r = Vec2::new(e.y, e.z);
+            (r - p).cross(q - p).abs() < 1e-9 * (q - p).len2() && (r - p).dot(q - p) > 0.0 && (r - q).dot(p - q) > 0.0
+        }),
+        "the arch vertex joins {ends:?}"
+    );
+    // The sections given the other way round build the same body.
+    let v = measure(&body).unwrap().volume;
+    let back = measure(&loft(&[secs[1].clone(), secs[0].clone()]).unwrap()).unwrap().volume;
+    assert!(rel(back, v) < 1e-9, "{back} vs {v}");
+}
+
+/// A 40 x 20 rectangle with a point in the middle of its left side lofted 30 up to one with a
+/// point in the middle of its right side. Both have five vertices, so nothing was split: the
+/// vertices were paired in turn from the best start, which twisted two side faces (the left
+/// side's point joined a corner). Each point now splits the other rectangle's side: six vertices
+/// each, every side face flat, and the loft is the 40 x 20 x 30 box.
+#[test]
+fn loft_splits_a_straight_side_at_a_point_only_the_other_section_has() {
+    let poly = |p: &[(f64, f64)]| Loop2::polygon(&p.iter().map(|&(x, y)| Vec2::new(x, y)).collect::<Vec<_>>());
+    let left = poly(&[(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0), (0.0, 10.0)]);
+    let right = poly(&[(0.0, 0.0), (40.0, 0.0), (40.0, 10.0), (40.0, 20.0), (0.0, 20.0)]);
+    let secs = [(Plane::XY, left), (Plane::XY.offset(30.0), right)];
+    let matched = matched_sections(&secs);
+    let points = |l: &Loop2| l.segs.iter().map(|s| s.start()).collect::<Vec<_>>();
+    assert_eq!(points(&matched[0]), points(&matched[1]), "each vertex runs straight up");
+    assert_eq!(matched[0].segs.len(), 6);
+    let body = loft(&secs).unwrap();
+    let m = measure(&body).unwrap();
+    assert!(rel(m.volume, 24_000.0) < 1e-9, "{}", m.volume);
+    for (x, y) in [(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)] {
+        assert!(joins(&body, Vec3::new(x, y, 0.0), Vec3::new(x, y, 30.0)), "({x}, {y}) runs straight up");
+    }
+}
+
+/// A 40 x 20 rectangle lofted 20 up to the same rectangle with its corners rounded (radius 4).
+/// Each corner joins a point near the middle of its rounded corner, and the rounded corners' ends
+/// split the rectangle's sides next to the corners: the loft is symmetric about both middle
+/// planes. Pairing a corner with one end of its rounded corner made it lopsided.
+#[test]
+fn loft_joins_a_corner_to_the_middle_of_a_rounded_corner() {
+    let (w, h, r) = (40.0, 20.0, 4.0);
+    let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) };
+    let corner = |c: (f64, f64), start: f64| Seg2::Arc { center: Vec2::new(c.0, c.1), radius: r, start, sweep: PI / 2.0 };
+    let rounded = Loop2 {
+        segs: vec![
+            line((r, 0.0), (w - r, 0.0)),
+            corner((w - r, r), -PI / 2.0),
+            line((w, r), (w, h - r)),
+            corner((w - r, h - r), 0.0),
+            line((w - r, h), (r, h)),
+            corner((r, h - r), PI / 2.0),
+            line((0.0, h - r), (0.0, r)),
+            corner((r, r), PI),
+        ],
+    };
+    let square = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(w, 0.0), Vec2::new(w, h), Vec2::new(0.0, h)]);
+    for secs in [
+        [(Plane::XY, square.clone()), (Plane::XY.offset(20.0), rounded.clone())],
+        [(Plane::XY, rounded.clone()), (Plane::XY.offset(20.0), square.clone())],
+    ] {
+        assert!(matched_sections(&secs).iter().all(|l| l.segs.len() == 12), "12 vertices in each section");
+        let body = loft(&secs).unwrap();
+        let m = measure(&body).unwrap();
+        assert!((m.centroid.x - w / 2.0).abs() < 1e-9 && (m.centroid.y - h / 2.0).abs() < 1e-9, "centre of mass {:?}", m.centroid);
+        let z = if secs[0].1.segs.len() == 4 { 0.0 } else { 20.0 };
+        for (x, y, cx, cy) in [(0.0, 0.0, r, r), (w, 0.0, w - r, r), (w, h, w - r, h - r), (0.0, h, r, h - r)] {
+            let ends = edge_ends(&body)
+                .into_iter()
+                .filter_map(|(a, b)| {
+                    if a.dist(Vec3::new(x, y, z)) < 1e-6 {
+                        Some(b)
+                    } else if b.dist(Vec3::new(x, y, z)) < 1e-6 {
+                        Some(a)
+                    } else {
+                        None
+                    }
+                })
+                .filter(|q| (q.z - 20.0 + z).abs() < 1e-6)
+                .collect::<Vec<_>>();
+            // On the rounded corner, within 10 degrees of its middle.
+            let (c, diagonal) = (Vec2::new(cx, cy), Vec2::new(x - cx, y - cy));
+            let near_middle = |q: &Vec3| {
+                let d = Vec2::new(q.x, q.y) - c;
+                (d.len() - r).abs() < 1e-9 && d.dot(diagonal) / (d.len() * diagonal.len()) > (10.0f64).to_radians().cos()
+            };
+            assert!(ends.len() == 1 && ends.iter().all(near_middle), "corner ({x}, {y}) joins {ends:?}");
+        }
+    }
+}
+
+/// Three sections, the first hood profile, the second, then the first again ([`HOOD_A`]): the
+/// middle one gains the vertex only the outer ones have, and that vertex pairs with theirs, so all
+/// three get the same 19 vertices and the outer two are cut alike.
+#[test]
+fn loft_through_three_sections_pairs_each_with_the_next() {
+    let secs = [hood_section(29.0, &HOOD_A), hood_section(50.0, &HOOD_B), hood_section(71.0, &HOOD_A)];
+    let matched = matched_sections(&secs);
+    let counts: Vec<usize> = matched.iter().map(|l| l.segs.len()).collect();
+    assert_eq!(counts, [19, 19, 19]);
+    let (first, last) = (&matched[0].segs, &matched[2].segs);
+    for (a, b) in first.iter().zip(last) {
+        assert!(a.start().dist(b.start()) < 1e-9, "{:?} vs {:?}", a.start(), b.start());
+    }
+    // Vertex for vertex, the middle section's are the second profile's corners where the outer
+    // ones have the first's.
+    let middle: Vec<Vec2> = matched[1].segs.iter().map(|s| s.start()).collect();
+    for (i, j) in [(15, 5), (10, 16), (14, 4)] {
+        let a = Vec2::new(HOOD_A[i].0, HOOD_A[i].1);
+        let k = first.iter().position(|s| s.start().dist(a) < 1e-9).unwrap();
+        assert!(middle[k].dist(Vec2::new(HOOD_B[j].0, HOOD_B[j].1)) < 1e-9, "{a:?} pairs with {:?}", middle[k]);
+    }
+    // The loft through them is symmetric about the middle section's plane.
+    let m = measure(&loft(&secs).unwrap()).unwrap();
+    assert!((m.centroid.x - 50.0).abs() < 1e-6, "centre of mass {:?}", m.centroid);
+}
+
+/// A corner drawn twice (a segment of no length) is left out of the matching: the loft is the
+/// box it was before the matching paired the sections' vertices.
+#[test]
+fn loft_builds_through_a_section_with_a_segment_of_no_length() {
+    let poly = |p: &[(f64, f64)]| Loop2::polygon(&p.iter().map(|&(x, y)| Vec2::new(x, y)).collect::<Vec<_>>());
+    let mut twice = poly(&[(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)]);
+    twice.segs.insert(1, Seg2::Line { a: Vec2::new(40.0, 0.0), b: Vec2::new(40.0, 0.0) });
+    let plain = poly(&[(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)]);
+    let m = measure(&loft(&[(Plane::XY, twice), (Plane::XY.offset(10.0), plain)]).unwrap()).unwrap();
+    assert!(rel(m.volume, 8000.0) < 1e-9, "{}", m.volume);
+    assert_eq!(m.faces, 6, "four walls and two caps");
+    assert!(m.bbox.min.dist(Vec3::ZERO) < 1e-9 && m.bbox.max.dist(Vec3::new(40.0, 20.0, 10.0)) < 1e-9, "{:?}", m.bbox);
+}
+
+/// Two 5000-gons (a grid of their pairing would be past its bound): paired through a band of
+/// the grid, the loft builds, the regular prism to 1e-9.
+#[test]
+fn loft_through_sections_too_large_to_pair_builds() {
+    let n = 5000;
+    let gon = |r: f64| Loop2::polygon(&(0..n).map(|k| Vec2::from_angle(k as f64 * std::f64::consts::TAU / n as f64) * r).collect::<Vec<_>>());
+    let m = measure(&loft(&[(Plane::XY, gon(10.0)), (Plane::XY.offset(10.0), gon(10.0))]).unwrap()).unwrap();
+    let area = n as f64 / 2.0 * 100.0 * (std::f64::consts::TAU / n as f64).sin();
+    assert!(rel(m.volume, area * 10.0) < 1e-9, "{} vs {}", m.volume, area * 10.0);
+}
+
+/// The re-splitting that sections too large to match fall back to
+/// ([`crate::build::resplit_numbered_loops`]), on a small case: a 40 x 20 rectangle and the same
+/// rectangle with its bottom in thirds, numbered from its top right corner. The rectangle takes
+/// the most segments a section has (six) by halving its longest sides, the top first, each half
+/// over the side it came from; the thirded one is not split; and each is turned once, to the
+/// start whose vertices line up best (the largest sum of dot products of their directions from
+/// the centroids) with those of the same number in the section it follows (the rectangle follows
+/// the thirded one, which has the most segments, and the thirded one follows the rectangle).
+#[test]
+fn sections_too_large_to_match_are_re_split_and_turned_once() {
+    let poly = |p: &[(f64, f64)]| Loop2::polygon(&p.iter().map(|&(x, y)| Vec2::new(x, y)).collect::<Vec<_>>());
+    let rect = poly(&[(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)]);
+    let thirds = poly(&[(40.0, 20.0), (0.0, 20.0), (0.0, 0.0), (40.0 / 3.0, 0.0), (80.0 / 3.0, 0.0), (40.0, 0.0)]);
+    let secs = [(Plane::XY, rect), (Plane::XY.offset(10.0), thirds.clone())];
+    let numbered: Vec<_> = secs.iter().map(|(p, _)| *p).zip(crate::numbered::number_loops(secs.iter().map(|(_, l)| l))).collect();
+    let out = crate::build::resplit_numbered_loops(&numbered).unwrap();
+    let [(_, a), (_, b)] = out.as_slice() else { panic!("two sections") };
+    assert_eq!((a.lp.segs.len(), b.lp.segs.len()), (6, 6));
+    assert!(a.lp.segs.iter().all(|s| (s.length() - 20.0).abs() < 1e-12), "the long sides halved: {:?}", a.lp.segs);
+    // Every half runs over the side it came from (the rectangle's segments are 0..4, bottom,
+    // right, top, left), in the order round the rectangle, from wherever it was turned to start.
+    let sides: Vec<usize> = a.from.iter().map(|f| *f.first().unwrap()).collect();
+    let round = [0, 0, 1, 2, 2, 3];
+    assert!((0..6).any(|k| (0..6).all(|i| sides[i] == round[(i + k) % 6])), "{:?}", a.from);
+    // The thirded section is not split: its segments as given, in their order round.
+    let starts = |l: &Loop2| l.segs.iter().map(Seg2::start).collect::<Vec<_>>();
+    let given = starts(&thirds);
+    let (sa, sb) = (starts(&a.lp), starts(&b.lp));
+    assert!((0..6).any(|k| (0..6).all(|i| sb[i] == given[(i + k) % 6])), "{sb:?}");
+    // Each is turned to the best start against the one it follows: no turn of it fits better.
+    let fit = |pts: &[Vec2], of: &Loop2, to: &[Vec2], to_of: &Loop2, k: usize| -> f64 {
+        let (c, d) = (of.centroid(), to_of.centroid());
+        (0..6).map(|i| (pts[(i + k) % 6] - c).dot(to[i] - d)).sum()
+    };
+    for k in 1..6 {
+        assert!(fit(&sa, &a.lp, &given, &thirds, 0) >= fit(&sa, &a.lp, &given, &thirds, k) - 1e-9, "the rectangle turned by {k} fits better");
+        assert!(fit(&sb, &b.lp, &sa, &a.lp, 0) >= fit(&sb, &b.lp, &sa, &a.lp, k) - 1e-9, "the thirded one turned by {k} fits better");
+    }
+}
+
+/// The 40 x 20 rectangle in `n` segments, all but three of them along its bottom side (or its
+/// top side).
+fn rectangle_split_along(top: bool, n: usize) -> Loop2 {
+    let split = n - 3;
+    let along = |k: usize| 40.0 * k as f64 / split as f64;
+    let mut pts = vec![Vec2::new(0.0, 0.0)];
+    if top {
+        pts.extend([Vec2::new(40.0, 0.0), Vec2::new(40.0, 20.0)]);
+        pts.extend((1..split).map(|k| Vec2::new(40.0 - along(k), 20.0)));
+        pts.push(Vec2::new(0.0, 20.0));
+    } else {
+        pts.extend((1..split).map(|k| Vec2::new(along(k), 0.0)));
+        pts.extend([Vec2::new(40.0, 0.0), Vec2::new(40.0, 20.0), Vec2::new(0.0, 20.0)]);
+    }
+    Loop2::polygon(&pts)
+}
+
+/// Two sections of 12 000 segments whose vertices do not pair (one's along the bottom of the
+/// rectangle, the other's along its top): solidcore's match would give each about 24 000
+/// segments, past the kernel's 20 000, so the ops call gives `None` and the sections are re-split
+/// as main split them, 12 000 each ([`crate::build::loft_numbered_loops`]). The solid loft of them
+/// is still refused, as on main: 24 000 curves are past the smlib wrapper's `MAX_CURVES` (16 384)
+/// whichever way they are matched. (A solid loft whose match is past 20 000 a section is always
+/// past that bound re-split too; the surface loft, which skins each column on its own, is what
+/// this fallback builds.)
+#[test]
+fn sections_whose_match_is_past_the_segment_bound_are_re_split() {
+    let n = 12_000;
+    let secs = [(Plane::XY, rectangle_split_along(false, n)), (Plane::XY.offset(10.0), rectangle_split_along(true, n))];
+    let given: Vec<_> = secs.iter().map(|(p, l)| solidcore_ops::sweep::LoftSection { plane: *p, segs: l.segs.clone() }).collect();
+    assert!(solidcore_ops::sweep::match_loft_sections(&given, 20_000).unwrap().is_none(), "the match is past the bound");
+    for l in matched_sections(&secs) {
+        assert_eq!(l.segs.len(), n, "re-split to the most segments a section has");
+    }
+    assert!(loft(&secs).is_err(), "24 000 curves are past the wrapper's bound, as on main");
+}
+
+/// A 40 x 0.001 strip whose bottom side is cut at `cuts` of the points 40 k / 8200 (k = 1 to
+/// 8199): each of `missing` left out.
+fn strip_cut_at(missing: &[usize]) -> Loop2 {
+    let mut pts = vec![Vec2::new(0.0, 0.0)];
+    pts.extend((1..8200).filter(|k| !missing.contains(k)).map(|k| Vec2::new(40.0 * k as f64 / 8200.0, 0.0)));
+    pts.extend([Vec2::new(40.0, 0.0), Vec2::new(40.0, 0.001), Vec2::new(0.0, 0.001)]);
+    Loop2::polygon(&pts)
+}
+
+/// Two sections of 8103 segments each, a 40 x 0.001 strip whose bottom side is cut at the same
+/// points except 100 that each leaves out where the other has one (30 points apart, so pairing
+/// them would shift 30 pairs a step along). Those 200 vertices do not pair: matching gives each
+/// section 8203 segments, 16 406 curves in all, past the 16 384 the smlib wrapper takes (`MAX_CURVES`), so the sections
+/// are re-split as before the matching (each to the most segments a section has, numbered from
+/// where they line up best), 16 206 curves, and the loft builds: the strip's prism, as the
+/// sections are the same strip. Main refuses no fewer: two sections of 12 000 segments are
+/// 24 000 curves, past the wrapper's bound whichever way they are matched.
+#[test]
+fn loft_through_sections_whose_match_is_past_the_skins_bound_builds() {
+    let left: Vec<usize> = (0..100).map(|i| 50 + 80 * i).collect();
+    let right: Vec<usize> = left.iter().map(|k| k + 30).collect();
+    let secs = [(Plane::XY, strip_cut_at(&left)), (Plane::XY.offset(10.0), strip_cut_at(&right))];
+    let given: Vec<_> = secs.iter().map(|(p, l)| solidcore_ops::sweep::LoftSection { plane: *p, segs: l.segs.clone() }).collect();
+    let matched: Vec<usize> = solidcore_ops::sweep::match_loft_sections(&given, 20_000).unwrap().unwrap().iter().map(|m| m.segs.len()).collect();
+    assert_eq!(matched, vec![8203, 8203], "the 200 lone vertices cut the other section");
+    assert!(matched.iter().sum::<usize>() > solidcraft_smlib::sweeps::MAX_CURVES);
+    let m = measure(&loft(&secs).unwrap()).unwrap();
+    assert!(rel(m.volume, 40.0 * 0.001 * 10.0) < 1e-9, "{}", m.volume);
+    assert!(m.bbox.min.dist(Vec3::ZERO) < 1e-9 && m.bbox.max.dist(Vec3::new(40.0, 0.001, 10.0)) < 1e-9, "{:?}", m.bbox);
+}
+
 /// A plate 3 m long and 2 mm thick with ten holes of radius `r` along a diagonal, turned by
 /// `tilt` about the X axis and read back from STEP (each rim is then two half circles).
 fn long_plate_with_small_holes(r: f64, tilt: f64) -> (Body, Vec<Vec3>) {
@@ -2602,5 +3140,177 @@ fn a_round_on_a_boss_tilted_a_few_degrees_is_built() {
         // turned: to 1 % of the round's
         let bound = if deg == 0.0 { 1e-9 * before } else { 1e-2 * square };
         assert!((added - square).abs() <= bound, "{deg} degrees: adds {added}, square {square}");
+    }
+}
+
+/// The record edge passing nearest `p` (its exact curve sampled along its interval).
+fn edge_near(b: &Body, p: Vec3) -> usize {
+    let record = b.record();
+    let off = |e: &solidcore_record::brep::Edge| {
+        let c = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).unwrap();
+        let [t0, t1] = e.interval;
+        (0..=1024).filter_map(|k| c.point(t0 + (t1 - t0) * k as f64 / 1024.0)).map(|q| q.dist(p)).fold(f64::INFINITY, f64::min)
+    };
+    let (i, d) = record.edges.iter().map(off).enumerate().min_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
+    assert!(d < 0.05, "no edge passes near {p:?} (nearest {i} at {d})");
+    i
+}
+
+/// A ball of radius 12.5 resting on the origin, a 10 wide slot cut from its top down to z = 15
+/// right through it: walls at x = ±5 (`walls_x`) or at y = ±5.
+fn slotted_ball(walls_x: bool) -> Body {
+    let ball = sphere(Vec3::new(0.0, 0.0, 12.5), 12.5).unwrap();
+    let (a, b) =
+        if walls_x { (Vec3::new(-5.0, -20.0, 15.0), Vec3::new(5.0, 20.0, 30.0)) } else { (Vec3::new(-20.0, -5.0, 15.0), Vec3::new(20.0, 5.0, 30.0)) };
+    let slotted = boolean(&ball, &box_solid(a, b).unwrap(), BoolOp::Cut).unwrap().unwrap();
+    assert!(slotted.validity().is_empty(), "{:?}", slotted.validity());
+    slotted
+}
+
+/// The ball's seam (its meridian at y = 0, x > 0) ends on the slot's rim, at the top of the x = +5
+/// wall's arc: that arc is two record edges, the x = -5 arc one (#16122). They are one edge each
+/// to the user; nothing else joins.
+#[test]
+fn a_slot_arc_split_by_a_balls_seam_is_one_whole_edge() {
+    let b = slotted_ball(true);
+    let mesh = b.mesh(&MeshTolerance::chord(1e-3)).unwrap();
+    let seams = seam_flags(&b, &mesh);
+    let (top, z) = (12.5 + (12.5f64 * 12.5 - 25.0).sqrt(), 21.5376);
+    let (plus_a, plus_b) = (edge_near(&b, Vec3::new(5.0, 7.0407, z)), edge_near(&b, Vec3::new(5.0, -7.0407, z)));
+    assert_ne!(plus_a, plus_b, "the seam splits the x = +5 arc");
+    let both = {
+        let mut v = vec![plus_a, plus_b];
+        v.sort_unstable();
+        v
+    };
+    assert_eq!(whole_edge(&b, plus_a), both);
+    assert_eq!(whole_edge(&b, plus_b), both);
+    let minus = edge_near(&b, Vec3::new(-5.0, 0.0, top));
+    assert_eq!(whole_edge(&b, minus), vec![minus]);
+    let seam = edge_near(&b, Vec3::new(12.5 * 0.5f64.sqrt(), 0.0, 12.5 - 12.5 * 0.5f64.sqrt()));
+    assert!(seams[seam], "the meridian at y = 0 is the seam");
+    for e in [
+        seam,
+        edge_near(&b, Vec3::new(0.0, 12.2474, 15.0)),
+        edge_near(&b, Vec3::new(0.0, -12.2474, 15.0)),
+        edge_near(&b, Vec3::new(5.0, 0.0, 15.0)),
+        edge_near(&b, Vec3::new(-5.0, 0.0, 15.0)),
+    ] {
+        assert_eq!(whole_edge(&b, e), vec![e], "edge {e}");
+    }
+    for e in [b.record().edges.len(), 10_000, usize::MAX] {
+        assert_eq!(whole_edge(&b, e), vec![e]);
+    }
+}
+
+/// The slot turned a quarter: the seam ends on the +x floor arc, whose two pieces are one edge;
+/// the wall arcs are whole. The -x floor arc comes in two pieces as well, at (-12.2474, 0, 15),
+/// a vertex no other edge reaches: two pieces of one edge, between the same faces, running on
+/// into each other, which are one edge too.
+#[test]
+fn a_floor_arc_split_by_a_balls_seam_is_one_whole_edge() {
+    let b = slotted_ball(false);
+    let y = 2.4774;
+    for x in [11.9943, -11.9943] {
+        let pieces = [edge_near(&b, Vec3::new(x, y, 15.0)), edge_near(&b, Vec3::new(x, -y, 15.0))];
+        assert_ne!(pieces[0], pieces[1], "the floor arc at x = {x} is two record edges");
+        let mut both = pieces.to_vec();
+        both.sort_unstable();
+        for e in pieces {
+            assert_eq!(whole_edge(&b, e), both, "x = {x}");
+        }
+    }
+    // Nothing but the two pieces meets at the -x floor arc's middle vertex.
+    let record = b.record();
+    let middle = record.vertices.iter().position(|v| Vec3::from(v.point).dist(Vec3::new(-12.5 * 0.96f64.sqrt(), 0.0, 15.0)) < 1e-6).unwrap();
+    assert_eq!(record.edges.iter().filter(|e| e.vertices.contains(&(middle as u32))).count(), 2);
+    let top = 12.5 + (12.5f64 * 12.5 - 25.0).sqrt();
+    for p in [Vec3::new(0.0, 5.0, top), Vec3::new(0.0, -5.0, top)] {
+        let e = edge_near(&b, p);
+        assert_eq!(whole_edge(&b, e), vec![e]);
+    }
+}
+
+/// A real corner, two tangent arcs of different radii, and an authored split keep their edges
+/// apart, each stopped by the edge that is not a seam at their vertex (the arcs' by the line
+/// between their two sides); a cylinder's rim, split by the side's seams, is gathered whole and
+/// the walk ends. No body built here reaches the face pair or the tangency rule alone: see
+/// `runs_on`.
+#[test]
+fn whole_edge_keeps_corners_tangent_arcs_and_authored_splits_apart() {
+    let block = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    for e in 0..block.record().edges.len() {
+        assert_eq!(whole_edge(&block, e), vec![e], "box edge {e}");
+    }
+    // An arc of radius 10 running on tangentially into one of radius 20 at (10, 0). Their sides
+    // are two surfaces, so the upright line between them is not a seam and stops the walk.
+    let outline = Loop2 {
+        segs: vec![
+            Seg2::Arc { center: Vec2::ZERO, radius: 10.0, start: -PI / 2.0, sweep: PI / 2.0 },
+            Seg2::Arc { center: Vec2::new(-10.0, 0.0), radius: 20.0, start: 0.0, sweep: PI / 2.0 },
+            Seg2::Line { a: Vec2::new(-10.0, 20.0), b: Vec2::new(-10.0, -10.0) },
+            Seg2::Line { a: Vec2::new(-10.0, -10.0), b: Vec2::new(0.0, -10.0) },
+        ],
+    };
+    let cam = extrude(&Plane::XY, &[Region2 { outer: outline, holes: vec![] }], 0.0, 5.0).unwrap().pop().unwrap();
+    let s = 0.5f64.sqrt();
+    let small = edge_near(&cam, Vec3::new(10.0 * s, -10.0 * s, 5.0));
+    let large = edge_near(&cam, Vec3::new(-10.0 + 20.0 * s, 20.0 * s, 5.0));
+    assert_ne!(small, large);
+    assert_eq!(whole_edge(&cam, small), vec![small]);
+    assert_eq!(whole_edge(&cam, large), vec![large]);
+    // Split Face on the block's +x side along z = 5 divides its vertical edges there.
+    let side = block.faces(0.01).unwrap().iter().position(|f| f.plane_normal.is_some_and(|n| n.dot(Vec3::X) > 0.99)).unwrap();
+    let split = split_faces(&block, &[side], &SplitTool::Plane(Plane { origin: Vec3::new(0.0, 0.0, 5.0), ..Plane::XY })).unwrap();
+    let (low, high) = (edge_near(&split, Vec3::new(10.0, 0.0, 2.5)), edge_near(&split, Vec3::new(10.0, 0.0, 7.5)));
+    assert_ne!(low, high);
+    assert_eq!(whole_edge(&split, low), vec![low]);
+    assert_eq!(whole_edge(&split, high), vec![high]);
+    // Split Face across a cylinder's side, through its axis: its rim's pieces stay apart at the
+    // authored line, though the side's pieces are one surface.
+    let pin = cylinder(Vec3::ZERO, Vec3::Z, 5.0, 10.0).unwrap();
+    let round: Vec<usize> = (0..pin.record().faces.len())
+        .filter(|f| !matches!(crate::offset::surf_of(pin.record(), *f), Some(crate::offset::Surf::Plane { .. })))
+        .collect();
+    let cut_pin = split_faces(&pin, &round, &SplitTool::Plane(Plane::YZ)).unwrap();
+    let rim = |b: &Body| -> Vec<usize> {
+        let r = b.record();
+        (0..r.edges.len())
+            .filter(|e| {
+                crate::heal::edge_points(r, *e as u32)
+                    .iter()
+                    .all(|p| (p.z - 10.0).abs() < 1e-6 && ((p.x * p.x + p.y * p.y).sqrt() - 5.0).abs() < 1e-6)
+            })
+            .collect()
+    };
+    for e in rim(&cut_pin) {
+        let whole = whole_edge(&cut_pin, e);
+        let pts: Vec<Vec3> = whole.iter().flat_map(|w| crate::heal::edge_points(cut_pin.record(), *w as u32)).collect();
+        assert!(pts.iter().all(|p| p.x >= -1e-6) || pts.iter().all(|p| p.x <= 1e-6), "rim piece {e} gathers {whole:?} across the split at x = 0");
+    }
+    // A whole rim is one closed edge, itself alone.
+    let whole_rim = rim(&pin);
+    assert_eq!(whole_rim.len(), 1);
+    assert_eq!(whole_edge(&pin, whole_rim[0]), whole_rim);
+    // A slot across the pin's top: the side's seam ends on one of the rim's two arcs, which is
+    // two edges and one to the user; the other arc is one edge.
+    let slotted = boolean(&pin, &box_solid(Vec3::new(-1.0, -10.0, 9.0), Vec3::new(1.0, 10.0, 12.0)).unwrap(), BoolOp::Cut).unwrap().unwrap();
+    let arcs = rim(&slotted);
+    assert_eq!(arcs.len(), 3, "{arcs:?}");
+    let mut split: Vec<usize> = arcs.iter().copied().filter(|e| whole_edge(&slotted, *e).len() == 2).collect();
+    split.sort_unstable();
+    assert_eq!(split.len(), 2, "{arcs:?}");
+    for e in &arcs {
+        assert_eq!(whole_edge(&slotted, *e), if split.contains(e) { split.clone() } else { vec![*e] });
+    }
+    // The ball with its top cut off level: its rim is a closed ring of pieces meeting where the
+    // seam ends. The walk gathers the ring and stops.
+    let ball = sphere(Vec3::new(0.0, 0.0, 12.5), 12.5).unwrap();
+    let capped = boolean(&ball, &box_solid(Vec3::new(-20.0, -20.0, 15.0), Vec3::new(20.0, 20.0, 30.0)).unwrap(), BoolOp::Cut).unwrap().unwrap();
+    let r = capped.record();
+    let ring: Vec<usize> = (0..r.edges.len()).filter(|e| crate::heal::edge_points(r, *e as u32).iter().all(|p| (p.z - 15.0).abs() < 1e-6)).collect();
+    assert!(ring.len() >= 2, "{ring:?}");
+    for &e in &ring {
+        assert_eq!(whole_edge(&capped, e), ring, "ring {ring:?}");
     }
 }
