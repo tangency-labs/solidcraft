@@ -37,6 +37,7 @@ use solidcore::primitive::api_curves::create_arc;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::surface::procedural_blend::ProceduralBlend;
 use solidcore::surface::surface::p2::SurfaceKind;
+use solidcore::surface::surface::Surface;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p1;
 use solidcore::topology::brep::p2::is_manifold_solid;
