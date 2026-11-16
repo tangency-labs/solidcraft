@@ -6,7 +6,7 @@ use solidcraft_engine::geom::drawing_sheet::{Orientation, PaperSize};
 use solidcraft_theme::Tokens;
 
 use crate::SolveApp;
-use crate::ui_kit::{self, BackingTooltipExt as _, Button, Container, Surface};
+use crate::ui_kit::{self, BackingTooltipExt as _, Container, Surface, type_face::RichTextExt as _};
 
 const SIZES: &[(&str, PaperSize)] =
     &[("a4", PaperSize::A4), ("a3", PaperSize::A3), ("a2", PaperSize::A2), ("a1", PaperSize::A1), ("a0", PaperSize::A0)];
@@ -49,14 +49,18 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect) {
     ui.scope_builder(egui::UiBuilder::new().max_rect(bounds), |ui| {
         ui.set_clip_rect(ui.clip_rect().intersect(bounds));
         let container = Container::new(ui.ctx(), Surface::Panel);
-        let frame = container.edge_frame(t.panel).corner_radius(t.radius_lg).stroke(Stroke::new(1.0, t.border)).inner_margin(t.space_24);
+        let frame = container.edge_frame(t.dialog_body).corner_radius(t.radius_lg).stroke(Stroke::new(1.0, t.dialog_border)).inner_margin(t.space_24);
         container.show_frame(ui, frame, bounds, |ui| {
             egui::ScrollArea::vertical().id_salt("drawing_first_sheet").min_scrolled_height(0.0).show(ui, |ui| {
                 ui.set_width((width - t.space_24 * 2.0).max(0.0));
-                let title = solidcraft_ui_text::format("ui.drawing_first.title", &[("name", &app.session.doc.name)]);
                 ui.vertical_centered(|ui| {
-                    ui.heading(RichText::new(title).strong());
-                    ui.label(tr(if app.session.doc.features.is_empty() { "ui.drawing_first.empty_model" } else { "ui.drawing_first.subtitle" }));
+                    ui.label(RichText::new(tr("ui.drawing_first.title")).size(t.font_start_title).semibold().color(t.form_ink));
+                    let subtitle = if app.session.doc.features.is_empty() {
+                        tr("ui.drawing_first.empty_model").to_owned()
+                    } else {
+                        solidcraft_ui_text::format("ui.drawing_first.subtitle", &[("name", &app.session.doc.name)])
+                    };
+                    ui.label(RichText::new(subtitle).size(t.font_intro).color(t.form_dim));
                 });
                 ui.add_space(t.space_16);
                 let enabled = can_create(app);
@@ -72,7 +76,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect) {
                     ui.add_space(t.space_12);
                     let paper = super::panels::size_caption(size);
                     let defaults = solidcraft_ui_text::format("ui.drawing_first.defaults", &[("paper", &paper)]);
-                    ui.vertical_centered(|ui| ui.label(RichText::new(defaults).size(t.font_small).color(t.text_dim)));
+                    ui.vertical_centered(|ui| ui.label(RichText::new(defaults).size(t.font_caption).medium().color(t.form_dim)));
                 }
                 match chosen {
                     Some(Choice::Blank) => app.drawing_workspace.first_sheet = Some(blank),
@@ -100,13 +104,11 @@ fn card(ui: &mut egui::Ui, choice: Choice, enabled: bool, picker: bool) -> Optio
         .show_frame(ui, frame, bounds, |ui| {
             thumbnail(ui, &choice);
             ui.add_space(t.space_8);
-            ui.heading(RichText::new(tr(title)).strong());
-            ui.label(tr(description));
+            ui.label(RichText::new(tr(title)).size(t.font_article_heading).semibold().color(t.form_ink));
+            ui.label(RichText::new(tr(description)).size(t.font_label).color(t.form_dim));
             ui.add_space(t.space_8);
-            let style = if enabled && matches!(choice, Choice::Blank) { Button::Primary } else { Button::Enabled(enabled) };
             let id = format!("drawing:first:{target}");
-            let (_, button_rect) = ui.allocate_space(vec2(ui.available_width(), t.control_height));
-            let button = ui_kit::button_at(ui, &id, button_rect, tr(action), style);
+            let button = ui_kit::wide_form_button(ui, tr(action), matches!(choice, Choice::Blank), enabled);
             crate::scenario::publish_target(&id, button.rect);
             button.backing_on_disabled_hover_text(tr("ui.drawing_first.unavailable")).clicked().then_some(choice)
         })
@@ -116,14 +118,19 @@ fn card(ui: &mut egui::Ui, choice: Choice, enabled: bool, picker: bool) -> Optio
 fn thumbnail(ui: &mut egui::Ui, choice: &Choice) {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_24 * 4.0), Sense::hover());
-    ui.painter().rect_filled(rect, t.radius_sm, t.field);
+    let (background, ink) = match choice {
+        Choice::Standard => (t.form_soft, t.form_tab_ink),
+        Choice::Blank => (t.sheet_soft, t.sheet_ink),
+        Choice::Template => (t.render_soft, t.render_ink),
+    };
+    ui.painter().rect_filled(rect, t.radius_sm, background);
     let width = (rect.width() - t.space_16).clamp(0.0, t.space_24 * 5.0);
     if width <= 0.0 {
         return;
     }
     let paper = Rect::from_center_size(rect.center(), vec2(width, width * 0.7));
-    let line = Stroke::new(1.0, t.paper_ink);
-    ui.painter().rect(paper, 0.0, t.paper_white, line, egui::StrokeKind::Inside);
+    let line = Stroke::new(1.0, ink);
+    ui.painter().rect(paper, t.radius_sm, t.paper_white, Stroke::new(1.0, t.figure_line), egui::StrokeKind::Inside);
     let content = paper.shrink(width * 0.10);
     match choice {
         Choice::Standard => {
