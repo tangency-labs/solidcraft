@@ -63,7 +63,8 @@
 //! - **Contacts at curve ends (WR-455).** After the global solve's refinement, a point
 //!   solution whose contact runs on to an end of either curve's interval moves to that
 //!   end (`sm_MoveContactsToCurveEnds`, the fork's tangency-labs/smlib@51eefa5), so a
-//!   tangential contact is not placed inside the curve. Upstream leaves it inside.
+//!   tangential contact is not placed inside the curve. Upstream leaves it inside. Not for
+//!   a self intersection, where the stretch test would compare the curve with itself.
 
 use crate::curve::curve::p1::refine_cc_solutions;
 use crate::curve::curve::p2::{at, CciGlobalSolver, Curve};
@@ -219,6 +220,14 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
                     continue;
                 }
                 let drop_t = dropped.parameter;
+                // A stretch of one point on the drop curve cannot be measured: the
+                // second gap below drops the end curve's samples onto that one-point
+                // interval, the local solves fail, and failed samples count as no gap, so
+                // the test would pass a closed curve's whole turn (goldens `curve.curve_p8`
+                // gen2153). Such a solution stays where it is.
+                if drop_t == sol_on_drop {
+                    continue;
+                }
                 // the curves within tolerance of one another over the whole stretch, on
                 // each curve (one way alone passes a closed curve's whole turn against the
                 // one point of a line it touches at its start)
@@ -976,20 +985,26 @@ impl Curve {
 
         // Refine Range solutions.
         refine(k, &mut sols, &named)?;
-        move_contacts_to_curve_ends(
-            k,
-            self,
-            interval,
-            other,
-            other_interval,
-            dist_tol,
-            &mut sols,
-        )?;
+        let self_intersect = core::ptr::eq(tree1, tree2);
+        // Not for a self intersection: there the "other" curve is this curve, so the
+        // stretch test compares the curve with itself and always passes, and the move
+        // would carry a real self intersection (a closed curve's seam) onto the trivial
+        // diagonal, where it is dropped below.
+        if !self_intersect {
+            move_contacts_to_curve_ends(
+                k,
+                self,
+                interval,
+                other,
+                other_interval,
+                dist_tol,
+                &mut sols,
+            )?;
+        }
 
         // Now sort through the intersections looking for cases to combine, split, or
         // convert from 'coincident maybe' intervals to point intersections.
 
-        let self_intersect = core::ptr::eq(tree1, tree2);
         if self_intersect {
             // Remove all self intersections from beginning of list
             while let Some(curr) = sols.get(0) {
