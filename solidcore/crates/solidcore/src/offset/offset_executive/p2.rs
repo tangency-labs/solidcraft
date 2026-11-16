@@ -276,6 +276,70 @@ fn refuse_singular_offset(
     }
 }
 
+/// Halvings [`refuse_collapsed_face`] takes to name its distance: past 64 the interval is
+/// below the spacing of doubles at the distance (2^-52 of it), so more change nothing.
+const MAX_COLLAPSE_HALVINGS: u32 = 64;
+
+/// Not upstream (#15409): refuses `face`, whose offset by `distance` from `faceuse` (the
+/// executive's distance, on the faceuse's side) leaves it less than `tol` (the body's
+/// tolerance), with [`OffsetFailure::Collapses`] reporting `asked` (the distance signed as the
+/// operation takes it), where its surface says so
+/// ([`crate::surface::surface::Surface::offset_collapses`] at the faceuse's sign and `tol`,
+/// strictly: a leftover of exactly `tol` is a surface): a cone, cylinder, sphere or torus (or a
+/// ball patch, a round's definition, a revolution's arc) offset onto its spine, past it, or
+/// within the tolerance of it. It names the largest distance whose leftover is still `tol`,
+/// bisected on that same condition (linear in the distance for every kind, so monotone),
+/// within [`MAX_COLLAPSE_HALVINGS`] halvings. The refusal is returned (`Some`), not raised;
+/// a face whose offset keeps more than the tolerance gives `None`.
+///
+/// # Errors
+///
+/// Those of reading the face and its surface's collapse test.
+fn refuse_collapsed_face(
+    kernel: &Kernel,
+    original: &Brep,
+    face: FaceId,
+    faceuse: FaceuseId,
+    distance: f64,
+    asked: f64,
+    tol: f64,
+    operation: &'static str,
+) -> Result<Option<SolidError>> {
+    let sign = if original.faceuse(faceuse)?.orientation == OrientType::Opposite {
+        -1.0
+    } else {
+        1.0
+    };
+    let Some(surface) = crate::topology::face::p2::surface(original, face)? else {
+        return Ok(None);
+    };
+    let collapses = |t: f64| surface.offset_collapses(kernel, sign * t, tol);
+    if !collapses(distance)? {
+        return Ok(None);
+    }
+    // (signed: `lo` never collapses, `hi` always does)
+    let (mut lo, mut hi) = (0.0_f64, distance);
+    for _ in 0..MAX_COLLAPSE_HALVINGS {
+        let mid = 0.5 * (lo + hi);
+        if collapses(mid)? {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    Ok(Some(
+        Failure::new(
+            operation,
+            OffsetFailure::Collapses {
+                face,
+                distance: asked,
+                radius: lo.abs(),
+            },
+        )
+        .into_error(),
+    ))
+}
+
 /// Not upstream (WR-718, #2350 S1): refuses the offset of `face` (whose implicit offset
 /// surface is `offset`) when it folds on the face's parameter box
 /// ([`crate::offset::construction::sheets::certify_regular`]), naming the largest wall
@@ -619,6 +683,7 @@ impl OffsetExecutive {
             // (CreateCurvesFromFace resets it); the vertex caps reuse it below.
             let mut loop_points = Vec::new();
             let faces = bp1::faces(original, None)?;
+            self.pending_collapse = None;
             for id in faces {
                 kernel.check_cancelled(OP_SOLID)?;
                 if self.shell_faces().contains(&id) {
@@ -758,6 +823,26 @@ impl OffsetExecutive {
             }
             // cpp:1046: delete the temporary, if PiecewiseMerge left one.
             let _ = self.take_offset_brep();
+            // Not upstream (#15409): a face of the solid whose offset collapsed was left out
+            // above, as upstream (`if ( sOffsetSurface == NULL ) continue;`) and the fork
+            // (`if ( bCollapses ) continue;`) leave it, or kept less than the body's tolerance,
+            // which the merge's intersections do not cut. Where the merged result is then no
+            // longer the manifold solid its input was (`lost_manifold`, the rule `offset_brep`
+            // holds every merged offset to), it is refused by that cause, naming the largest
+            // distance at which the face still offsets, not by the generic unsoundness. A
+            // result that is still a manifold solid is returned, and so is one with no face
+            // (#2092: every face collapsed, nothing is left).
+            if let Some(refusal) = self.pending_collapse.take() {
+                if self.merge_results()
+                    && !result.face_list().is_empty()
+                    && lost_manifold(brep_is_closed_manifold(&result)?, || {
+                        brep_is_manifold_solid(original)
+                    })?
+                    .is_some()
+                {
+                    return Err(refusal);
+                }
+            }
             Ok(result)
         })
     }
@@ -1491,6 +1576,37 @@ impl OffsetExecutive {
                 refuse_singular_offset(kernel, original, id, offset, operation)?;
                 refuse_folding_offset(kernel, original, id, offset, operation)?;
             }
+        }
+        // Not upstream (#15409): on the solid path a face whose offset collapses gets no
+        // surface, and upstream (`if ( sOffsetSurface == NULL ) continue;`) and the fork
+        // (`if ( bCollapses ) continue;`) leave it out of the offset, returning what is left as
+        // a success: a solid cylinder inset past its radius as its two caps, a sphere as
+        // nothing. A face whose offset keeps a surface but shrinks it below the body's
+        // tolerance (a radius left under it) is degenerate by the body's own measure: the
+        // merge's intersections, at that tolerance, find no curve on it (a cylinder's cap
+        // circles are not cut), and the result is the same loose caps. Either face is kept as
+        // the cause (`pending_collapse`, the first), with the largest distance whose leftover
+        // is still the tolerance; `do_solid_offset` raises it where the merged result lost
+        // the input's manifold.
+        if !extended
+            && self.pending_collapse.is_none()
+            && self.local_faces.is_empty()
+            && self.operation() != OffsetOperation::LocalOperation
+        {
+            self.pending_collapse = refuse_collapsed_face(
+                kernel,
+                original,
+                id,
+                faceuse,
+                self.offset_distance(),
+                if self.inset() {
+                    -self.offset_distance()
+                } else {
+                    self.offset_distance()
+                },
+                original.tolerance(),
+                operation,
+            )?;
         }
         // Not upstream (WR-346, tangency-labs/solidcore#397), opt-in
         // `Kernel::fixes.offset_collapsed_rounds_mated`: an inset face whose offset collapses (a

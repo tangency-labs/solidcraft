@@ -109,7 +109,10 @@ pub enum OffsetFailure {
         face: FaceId,
         /// The offset distance asked for (signed, as the operation takes it).
         distance: f64,
-        /// The radius of curvature the face attains on the displaced side.
+        /// The radius of curvature the face attains on the displaced side; for a face whose
+        /// offset is left less than the body's tolerance (#15409), the largest distance at which
+        /// it still builds: its radius on that side (a cylinder's, sphere's or torus's; a cone's
+        /// larger one) less the body's tolerance, over the cosine of a cone's half-angle.
         radius: f64,
     },
     /// Loops of the offset of `face` touch without crossing, so the offset walls they
