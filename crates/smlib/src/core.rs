@@ -114,7 +114,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_trim_status = true;
     f.sweep_statuses_pass_on = true;
     f.ssi_proto_topology_statuses_pass_on = true;
-    f.analytic_inversion_answers_apart = true;
     f.fillet_statuses_pass_on = true;
     f.fillet_rail_trim_at_near_knot = true;
     f.corner_patch_face_side_twist = true;

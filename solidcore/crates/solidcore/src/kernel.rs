@@ -640,13 +640,6 @@ pub struct UpstreamFixes {
     /// `sm_IsInterior`, `sm_AreOverlapping`, `sm_WhichPVToCombine`) (WR-662, #2009 group
     /// C; tangency-labs/smlib bcc6f01). Off by default for pinned parity.
     pub ssi_proto_topology_statuses_pass_on: bool,
-    /// Analytic `STEPInversion` (sphere, surface of revolution, so cone and cylinder) tells
-    /// its answers (off the surface, outside the sweep) apart from real failures, and the
-    /// cone and sphere intersection callers that read the location after a failed
-    /// inversion pass the failure on instead of reading "exterior" and dropping a point
-    /// or curve (WR-662, #2009 group C; tangency-labs/smlib dfc7cb6). Off by default for
-    /// pinned parity.
-    pub analytic_inversion_answers_apart: bool,
     /// `SmCone::CreateIsoCircleFromPoint` as the SolidCraft fork has it (WR-704;
     /// tangency-labs/smlib 1279539, with 672a437's `SER` on the NURB conversion): the
     /// circle's STEP height is the reference point's projection onto the axis clamped to
