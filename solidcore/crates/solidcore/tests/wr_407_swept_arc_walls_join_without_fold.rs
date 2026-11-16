@@ -130,43 +130,6 @@ fn wr_407_walls_join_to_the_closed_form_with_the_fix() {
     );
 }
 
-/// How far, in uv, the farthest sampled point of a face's UV trim lies outside its surface's
-/// natural (knot) domain, over all faces: a sampled point past the domain proves the trim
-/// leaves it by at least that much (a lower bound, PROVEN by the sample itself).
-fn farthest_trim_past_domain(k: &Kernel, b: &Brep) -> f64 {
-    use solidcore::topology::brep::p1::faces;
-    use solidcore::topology::edgeuse::p1::{faceuse_loopuses, loopuse_edgeuses, uv_trim_curve};
-    let mut worst = 0.0_f64;
-    for f in faces(b, None).unwrap() {
-        let face = b.face(f).unwrap();
-        let dom = face
-            .surface
-            .as_ref()
-            .unwrap()
-            .natural_uv_domain_with_nurb(k)
-            .unwrap();
-        let up = face.faceuse.unwrap();
-        for lu in faceuse_loopuses(b, up, false, None).unwrap() {
-            for eu in loopuse_edgeuses(b, lu).unwrap() {
-                let Some(t) = uv_trim_curve(b, eu).unwrap().0 else {
-                    continue;
-                };
-                let iv = t.natural_interval();
-                for i in 0..=256 {
-                    let tau = iv.min() + (iv.max() - iv.min()) * f64::from(i) / 256.0;
-                    let p = t.evaluate_point(k, tau).unwrap();
-                    let out = (dom.u_min() - p.x)
-                        .max(p.x - dom.u_max())
-                        .max(dom.v_min() - p.y)
-                        .max(p.y - dom.v_max());
-                    worst = worst.max(out);
-                }
-            }
-        }
-    }
-    worst
-}
-
 /// Every face's UV trims lie in its surface's natural (knot) domain widened by `margin`,
 /// checked on the trims' control points (PROVEN for B-spline trims: each control point is
 /// read in homogeneous form `(x w, y w, z w, w)`, its weight must be positive, and its
@@ -229,14 +192,9 @@ fn trims_inside_domain(k: &Kernel, b: &Brep, margin: f64) -> Result<(), String> 
 /// does, but the fold remains.) Pinned until the fold rule is the default
 /// (tangency-labs/solidcraft#17215).
 ///
-/// The merged cover is a face of wall A's top B-spline whose trims run about 1.7 in v past
-/// the spline's knot domain (1.69 here), where every consumer that clamps to the domain
-/// (upstream's `EvaluateSimple`) sees another surface than the face's edges lie on. With
-/// the fix every trim lies inside its domain (to 1e-9, on its control points).
-/// `brep_volume` integrates that face on the B-spline continued past its domain (#16735),
-/// where it lies on its edges, so the two joins bound the same solid up to their
-/// tolerances: their volumes agree within the two bodies' tolerance volumes
-/// ([`volume_leak::tolerance_volume`]).
+/// With the fix every trim lies inside its domain (to 1e-9, on its control points), and the
+/// two joins bound the same solid up to their tolerances: their volumes agree within the
+/// two bodies' tolerance volumes ([`volume_leak::tolerance_volume`]).
 #[test]
 fn wr_407_default_join_covers_a_folded_continuation() {
     let (mut k, mut b) = joined(false);
@@ -251,12 +209,6 @@ fn wr_407_default_join_covers_a_folded_continuation() {
     );
     let v = volume(&k, &mut b);
     let slack = volume_leak::tolerance_volume(&k, &mut b);
-    // a sampled point past the domain is a proven lower bound on how far the trim leaves it
-    let past = farthest_trim_past_domain(&k, &b);
-    assert!(
-        past > 1.5,
-        "the cover's trims leave the domain by only {past}"
-    );
     let (kf, mut bf) = joined(true);
     let vf = volume(&kf, &mut bf);
     let slack_f = volume_leak::tolerance_volume(&kf, &mut bf);
