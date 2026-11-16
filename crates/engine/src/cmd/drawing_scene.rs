@@ -41,7 +41,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(STATUS, "Drawing Status
     .doc_only()
     .contract(&STATUS_CONTRACT)
     .output(output_schema_for::<DrawingStatusResult>)
-    .params("→ {views: [{view, sheet, status: current|out_of_date|placeholder|failed, reason?}], dimensions: [{dimension, status: ok|overridden|ambiguous|suppressed|lost|unmeasurable, why?, out_of_date?: true when its sheet shows it as it last was, or not at all}], waiting: how many views are out of date, held?: true when a deferred drawing's views or dimensions out of date wait for drawing.update}. current: drawn, from the model and with the settings the view has now. A dimension's status is its reading from the model now; out_of_date says the sheet doesn't show that yet: its view is out of date, or it was read from another model or record than it has now (as drawing.scene's out_of_date lists it). Balloons aren't listed: drawing.balloon.inspect reads each one. Read-only: nothing is drawn, and each body a dimension names is read once for the call."),
+    .params("→ {views: [{view, sheet, status: current|out_of_date|placeholder|failed, reason?}], dimensions: [{dimension, status: ok|overridden|ambiguous|suppressed|lost|unmeasurable, why?, out_of_date?: true when its sheet shows it as it last was, or not at all}], waiting: how many views are out of date, held?: true when a deferred drawing's views or dimensions out of date wait for drawing.update}. current: drawn, from the model and with the settings the view has now. current, out_of_date and waiting say what the sheet page shows: the page draws the views one at a time. drawing.scene and an export of an automatic drawing draw every view from the model at once and don't change them, so without a sheet page (the CLI, MCP) views can stay out_of_date while scenes and exports show them whole.A dimension's status is its reading from the model now; out_of_date says the sheet doesn't show that yet: its view is out of date, or it was read from another model or record than it has now (as drawing.scene's out_of_date lists it). Balloons aren't listed: drawing.balloon.inspect reads each one. Read-only: nothing is drawn, and each body a dimension names is read once for the call."),
     CommandSpec::new(UPDATE, "Update Drawing", crate::checked!("drawing.update", update))
     .icon("update")
     .in_drawing()
@@ -49,7 +49,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(STATUS, "Drawing Status
     .doc_only()
     .contract(&UPDATE_CONTRACT)
     .output(output_schema_for::<DrawingUpdateResult>)
-    .params("→ {waiting}: a deferred drawing's views may draw from the model as it is now, until that moves on; waiting: how many are out of date until they are drawn. Nothing is drawn here: the sheet page draws them, as drawing.scene or an export of their sheet does. A drawing that isn't deferred follows the model already."),
+    .params("→ {waiting}: a deferred drawing's views may draw from the model as it is now, until that moves on; waiting: how many are out of date until they are drawn. Nothing is drawn here: the sheet page draws them, and for a deferred drawing so do drawing.scene and an export of their sheet. A drawing that isn't deferred follows the model already: its scenes and exports draw from the model at once, and waiting counts only what the sheet page hasn't drawn yet."),
     CommandSpec::new(HIT, "What Is Under a Point", crate::checked!("drawing.scene.hit", hit))
     .icon("inspect")
     .in_drawing()
