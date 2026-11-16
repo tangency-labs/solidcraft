@@ -446,6 +446,7 @@ fn surface_sweep(s: &mut Session, p: &Value) -> Result<Value> {
             scale,
             rails,
             rail_fit,
+            spline_as_samples: false,
         },
     )
 }

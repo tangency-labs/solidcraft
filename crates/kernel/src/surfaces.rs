@@ -1824,6 +1824,8 @@ mod tests {
         assert!(sweep_sheet(&Plane::XY, std::slice::from_ref(&line), &[no_axis]).is_err());
         assert!(sweep_sheet_points(&Plane::XY, std::slice::from_ref(&line), &[Vec3::ZERO]).is_err());
         assert!(sweep_sheet_points(&Plane::XY, std::slice::from_ref(&line), &[Vec3::ZERO, Vec3::new(f64::NAN, 0.0, 0.0)]).is_err());
+        let nan = crate::PointPath::polyline(vec![Vec3::ZERO, Vec3::new(0.0, 0.0, f64::NAN), Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, 10.0)]);
+        assert!(sweep_sheet_point_path_with(&Plane::XY, std::slice::from_ref(&line), &nan, &crate::SweepControl::default()).is_err());
     }
 
     /// Sheets lofted between open lines and closed loops: a ruled strip (even when the second
