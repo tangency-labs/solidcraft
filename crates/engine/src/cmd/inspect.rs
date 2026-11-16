@@ -298,17 +298,7 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
             b.density_g_cm3 = Some(rho);
             b.mass_g = Some(v * rho / 1000.0);
         }
-        // Only Measure exposes sheet boundary counts; document.inspect keeps kernel counts.
-        if let Some(sheet) = definitions.sheets.iter().find(|sheet| sheet.body == source) {
-            let (df, de, dv) = sheet.round_hole_correction();
-            match &mut b.measurement.outcome {
-                BodyOutcome::Measured(f) => {
-                    f.faces = count(f.kernel.faces) + df;
-                    f.edges = count(f.kernel.edges) + de;
-                    f.vertices = count(f.kernel.vertices) + dv;
-                }
-                BodyOutcome::Failed(x) => (x.faces, x.edges, x.vertices) = (Some(df), Some(de), Some(dv)),
-            }
+        if definitions.sheets.iter().any(|sheet| sheet.body == source) {
             b.sheet_metal = Some(true);
         }
         bodies.push(b);
