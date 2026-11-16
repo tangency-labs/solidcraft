@@ -991,6 +991,41 @@ fn inspect_design_lists_joint_definitions() {
     }
 }
 
+/// A backend whose `joint.list` fails, as an app busy or from before the summary might.
+struct NoJointList(Headless);
+impl crate::Backend for NoJointList {
+    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        if params.get("command").and_then(Value::as_str) == Some("joint.list") {
+            return Err("joint.list unavailable".into());
+        }
+        crate::Backend::call(&mut self.0, method, params)
+    }
+    fn has_ui(&self) -> bool {
+        false
+    }
+    fn in_process(&self) -> bool {
+        true
+    }
+    fn describe(&self) -> String {
+        "headless without joint.list".into()
+    }
+}
+
+/// `joints: "summary"` when the summary can't be had still says what the filter left out.
+#[test]
+fn inspect_design_keeps_the_omitted_count_without_a_summary() {
+    let mut s = Server::new(Box::new(NoJointList(Headless::default())));
+    let mut exec = |command: &str, params: Value| tool(&mut s, "execute", json!({"command": command, "params": params}));
+    exec("component.create", json!({"name": "Kit", "grounded": false}));
+    for name in ["P1", "P2"] {
+        exec("component.create", json!({"name": name, "parent": "Kit", "activate": false, "grounded": false}));
+    }
+    exec("joint.rigid_group", json!({"occurrences": ["Kit", "P1", "P2"]}));
+    let d = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false, "joints": "summary"}));
+    assert_eq!(d["joint_summary"]["omitted"], json!({"joints": 2, "by_type": {"rigid": 2}}), "{d}");
+    assert!(d["joint_summary"]["error"].as_str().is_some_and(|e| e.contains("joint.list unavailable")), "{d}");
+}
+
 /// `set_parameter` takes the new value as `value` or as `expression` (the name parameters.change
 /// uses), which it used to refuse instead of forwarding.
 #[test]

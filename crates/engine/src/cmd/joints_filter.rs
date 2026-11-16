@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use serde_json::Value;
 use solidcraft_doc::Document;
-use solidcraft_doc::joints::JointKind;
+use solidcraft_doc::joints::{Joint, JointKind};
 
 use super::occurrence_id;
 use crate::params::{bad, bool_};
@@ -32,6 +32,15 @@ pub(super) struct Row<'a> {
     pub ends: &'a [u64],
     /// Whether it holds a component's contents together (an imported assembly's placements).
     pub holds_contents: bool,
+}
+
+/// A joint's ends as a [`Row`] gives them: its two occurrences and, for an origin on a later copy
+/// of a sub-assembly, the occurrences below the copy down to the part it was picked on
+/// ([`JointOrigin::inside`](solidcraft_doc::joints::JointOrigin::inside)), so naming that part finds it.
+pub(super) fn ends(j: &Joint) -> Vec<u64> {
+    let mut ends = vec![j.a.occurrence, j.b.occurrence];
+    ends.extend(j.a.inside.iter().chain(&j.b.inside).copied());
+    ends
 }
 
 /// Which rows a reply keeps, from the call's `kinds`, `exclude_rigid`, `exclude_rigid_groups`,

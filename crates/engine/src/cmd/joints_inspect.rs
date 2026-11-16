@@ -26,7 +26,7 @@ pub(super) fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             let groups = if rows.needs_groups() { contents_groups(&s.doc) } else { Default::default() };
             let mut ids = Vec::new();
             for j in &s.doc.assembly.joints {
-                let ends = [j.a.occurrence, j.b.occurrence];
+                let ends = super::filter::ends(j);
                 if rows.keeps(&Row { kind: j.kind, suppressed: j.suppressed, ends: &ends, holds_contents: groups.contains_key(&j.id) }) {
                     ids.push(j.id);
                 } else {

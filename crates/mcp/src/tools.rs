@@ -1389,12 +1389,16 @@ fn design_joints(b: &mut dyn Backend, a: &Map<String, Value>, d: &mut Value) {
     if j["joints"].as_array().is_some_and(|v| !v.is_empty()) {
         d["joints"] = j["joints"].clone();
     }
-    // Something left out: the summary says what and where. `kinds: []` keeps no rows.
-    if j.get("omitted").is_some()
-        && let Ok(list) = exec(b, "joint.list", json!({"summary": true, "quiet": true, "kinds": []}))
-        && let Some(summary) = list.get("summary")
-    {
-        d["joint_summary"] = summary.clone();
+    // Something left out: the summary says what and where. `kinds: []` keeps no rows. Without
+    // one, what was left out and why there is no summary, so the reply never hides joints.
+    if let Some(omitted) = j.get("omitted") {
+        d["joint_summary"] = match exec(b, "joint.list", json!({"summary": true, "quiet": true, "kinds": []})) {
+            Ok(list) => match list.get("summary") {
+                Some(summary) => summary.clone(),
+                None => json!({"omitted": omitted, "error": "joint.list gave no summary"}),
+            },
+            Err(e) => json!({"omitted": omitted, "error": e}),
+        };
     }
 }
 

@@ -442,7 +442,7 @@ pub(crate) fn cannot_move(s: &Session, sol: &joints::Solution, id: u64) -> Optio
 
 /// Joint chains joined to nothing grounded, which the solver places none of: each chain's
 /// occurrences and joints, by name.
-fn floating_chains(s: &Session, sol: &joints::Solution) -> Vec<FloatingChain> {
+fn floating_chains(s: &Session, sol: &joints::Solution) -> Vec<(BTreeSet<u64>, FloatingChain)> {
     let placed = |o: u64| o == 0 || sol.world.contains_key(&o);
     let errors: BTreeSet<u64> = sol.errors.iter().map(|e| e.0).collect();
     let mut next: BTreeMap<u64, Vec<(u64, &Joint)>> = BTreeMap::new();
@@ -468,10 +468,13 @@ fn floating_chains(s: &Session, sol: &joints::Solution) -> Vec<FloatingChain> {
                 }
             }
         }
-        out.push(FloatingChain {
-            occurrences: occs.iter().map(|o| occurrence_name(s, *o)).collect(),
-            joints: js.iter().map(|(_, n)| (*n).to_string()).collect(),
-        });
+        out.push((
+            js.iter().map(|(id, _)| *id).collect(),
+            FloatingChain {
+                occurrences: occs.iter().map(|o| occurrence_name(s, *o)).collect(),
+                joints: js.iter().map(|(_, n)| (*n).to_string()).collect(),
+            },
+        ));
     }
     out
 }
@@ -2408,7 +2411,7 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
         .joints
         .iter()
         .filter(|j| {
-            let ends = [j.a.occurrence, j.b.occurrence];
+            let ends = filter::ends(j);
             let row = filter::Row { kind: j.kind, suppressed: j.suppressed, ends: &ends, holds_contents: groups.contains_key(&j.id) };
             let keep = rows.keeps(&row);
             if !keep {
@@ -2447,12 +2450,13 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
     filter::narrow_dof(&mut solved.dof, rows.occurrence_set(), bool_(p, "dof_free_only").unwrap_or(false), &mut omitted);
     let mut floating = floating_chains(s, &sol);
     if rows.any() {
-        // Only the chains holding a joint the filters keep.
-        let kept: BTreeSet<&str> = js.iter().map(|j| j.name.as_str()).collect();
+        // Only the chains holding a joint the filters keep, by id: two joints can share a name.
+        let kept: BTreeSet<u64> = js.iter().map(|j| j.id).collect();
         let before = floating.len();
-        floating.retain(|c| c.joints.iter().any(|n| kept.contains(n.as_str())));
+        floating.retain(|(ids, _)| ids.iter().any(|id| kept.contains(id)));
         omitted.floating = before - floating.len();
     }
+    let floating = floating.into_iter().map(|(_, c)| c).collect();
     let out = ListJointsResult {
         solved,
         joints: js,

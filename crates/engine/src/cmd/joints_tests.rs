@@ -2138,6 +2138,37 @@ fn a_turret_on_a_floating_pedestal_says_it_moves_nothing() {
     assert_eq!(run(&mut s, "joint.list", json!({}))["floating"], json!([]));
 }
 
+/// Two floating chains whose joints share a name: a filter keeps the chain of the joint it keeps,
+/// told apart by id, and counts the other as left out.
+#[test]
+fn a_filtered_list_tells_floating_chains_apart_by_joint_not_name() {
+    let mut s = Session::default();
+    let parts = [
+        ("Base", [-50.0, 0.0, 0.0]),
+        ("Arm", [-40.0, 0.0, 0.0]),
+        ("P", [0.0, 0.0, 0.0]),
+        ("Q", [10.0, 0.0, 0.0]),
+        ("R", [50.0, 0.0, 0.0]),
+        ("T", [60.0, 0.0, 0.0]),
+    ];
+    for (name, corner) in parts {
+        part(&mut s, name, corner);
+    }
+    // A grounded base with its own joint, as in the turret above: the chains below join neither.
+    let g = occ(&s, "Base");
+    run(&mut s, "occurrence.ground", json!({"occurrence": g, "grounded": true}));
+    pin(&mut s, "revolute", "Shoulder", "Base", "Arm", Vec3::new(-40.0, 1.0, 1.0), Vec3::Y);
+    pin(&mut s, "slider", "Glide", "P", "Q", Vec3::new(5.0, 1.0, 1.0), Vec3::X);
+    pin(&mut s, "revolute", "Hinge", "R", "T", Vec3::new(55.0, 1.0, 1.0), Vec3::Y);
+    run(&mut s, "joint.edit", json!({"joint": "Glide", "name": "Same"}));
+    run(&mut s, "joint.edit", json!({"joint": "Hinge", "name": "Same"}));
+    let all = run(&mut s, "joint.list", json!({}));
+    assert_eq!(all["floating"].as_array().map(Vec::len), Some(2), "{all}");
+    let l = run(&mut s, "joint.list", json!({"kinds": ["revolute"]}));
+    assert_eq!(l["floating"], json!([{"occurrences": ["R:1", "T:1"], "joints": ["Same"]}]), "{l}");
+    assert_eq!(l["omitted"]["floating"], 1, "{l}");
+}
+
 /// `quiet: true` leaves the per-occurrence lists out of joint answers, and `moved` says whether
 /// a drive moved anything: driving a joint to where it is moves nothing, with no reason given.
 #[test]
@@ -3282,6 +3313,11 @@ fn a_joint_origin_on_a_repeated_sub_assembly_stays_on_the_copy_it_was_picked_on(
         let sides = run(&mut s, "joint.inspect", json!({}))["joints"][0].clone();
         assert_eq!((&sides["a"]["occurrence"], &sides["a"]["inside"]), (&json!(second), &json!([header])), "{how}: {sides}");
         assert!(sides["b"].get("inside").is_none(), "{how}: {sides}");
+        // Filtering by the part it was picked on finds it, as filtering by the copy does.
+        for named in [header, second] {
+            let kept = run(&mut s, "joint.list", json!({"occurrences": [named]}));
+            assert_eq!(kept["joints"].as_array().map(Vec::len), Some(1), "{how}, {named}: {kept}");
+        }
         // It follows that copy when it moves, and keeps it through saving and opening again.
         run(&mut s, "occurrence.move", json!({"occurrence": second, "translate": [0, 20, 0], "move_grounded": true}));
         assert!(near(probe_centre(&s), Vec3::new(95.0, 45.0, 11.0)), "{how}: {:?}", probe_centre(&s));
