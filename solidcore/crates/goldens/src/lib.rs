@@ -39,6 +39,7 @@ pub mod solidcraft;
 pub mod soundness;
 pub mod ssi;
 pub mod step;
+pub(crate) mod trim_hook;
 #[cfg(test)]
 pub(crate) mod trims_on_edges;
 pub mod util;

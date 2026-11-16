@@ -618,3 +618,96 @@ mod local_operation {
         assert_eq!(ROWS.len(), 67);
     }
 }
+
+/// The rows of `boolean.merge_p4` and `topology.brep_p7` the copy moves: their outputs write
+/// whole bodies (`topology.brep_p10`'s snapshot, `p7`'s destination graph), where the move is
+/// a UV trim block that main left empty. A row is certified by
+/// * **replay**: the case's Rust side, run again, has the output digest ([`digest`]) recorded
+///   for this branch, so the run is the row;
+/// * **only trims moved**: run again with every edge use's trim cleared on each body the
+///   unit writes ([`crate::trim_hook`]) just before it is written, its output has the digest
+///   main's (7d4445c0c) code has run alike, so every value but the trim blocks is main's,
+///   bit for bit;
+/// * **trims on edges**: every trim each written body holds lies on its edge within the
+///   edge's tolerance ([`crate::trims_on_edges`], rounded interval arithmetic), so each
+///   added trim is the edge's own.
+mod trim_blocks {
+    use super::digest;
+    use crate::trim_hook::with_hook;
+    use crate::trims_on_edges::{certify_brep, TrimCertificate};
+    use crate::UnitDiff;
+    use solidcore::kernel::Kernel;
+    use solidcore::topology::Brep;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    struct Row {
+        case: &'static str,
+        new: u64,
+        main: u64,
+    }
+
+    fn clear_trims(b: &mut Brep) {
+        let ids: Vec<_> = b.edgeuses().ids().collect();
+        for eu in ids {
+            b.edgeuse_mut(eu).unwrap().uv_trim_curve = None;
+        }
+    }
+
+    /// Certifies `rows` of `runner`'s unit (see the module docs); the trims certified.
+    fn certify(runner: &dyn UnitDiff, rows: &[Row]) -> usize {
+        let mut trims = 0;
+        for row in rows {
+            let case = crate::case::regression_case(runner, row.case);
+            let certs: Rc<RefCell<Vec<TrimCertificate>>> = Rc::default();
+            let sink = Rc::clone(&certs);
+            let name = row.case;
+            let out = with_hook(
+                Box::new(move |b: &mut Brep| {
+                    let k = Kernel::default();
+                    let c = certify_brep(&k, b).unwrap_or_else(|e| panic!("{name}: {e}"));
+                    sink.borrow_mut().extend(c);
+                }),
+                || runner.run_rust(&case),
+            )
+            .unwrap();
+            assert_eq!(
+                digest(&out.values, &out.ints),
+                row.new,
+                "{name}: not the row"
+            );
+            let blind = with_hook(Box::new(clear_trims), || runner.run_rust(&case)).unwrap();
+            assert_eq!(
+                digest(&blind.values, &blind.ints),
+                row.main,
+                "{name}: more than the trims moved"
+            );
+            let certs = certs.borrow();
+            assert!(!certs.is_empty(), "{name}: no trims");
+            for c in certs.iter() {
+                assert!(c.holds(), "{name}: {c:?}");
+            }
+            eprintln!("{name}: {} trims certified on their edges", certs.len());
+            trims += certs.len();
+        }
+        trims
+    }
+
+    /// The 15 `boolean.merge_p4` rows.
+    #[test]
+    fn merge_p4_rows_are_certified() {
+        let trims = certify(&crate::units::boolean_merge_p4::Runner, MERGE_P4);
+        eprintln!("{} rows, {trims} trims", MERGE_P4.len());
+        assert_eq!(MERGE_P4.len(), 15);
+    }
+
+    /// The 9 `topology.brep_p7` rows.
+    #[test]
+    fn brep_p7_rows_are_certified() {
+        let trims = certify(&crate::units::topology_brep_p7::Runner, BREP_P7);
+        eprintln!("{} rows, {trims} trims", BREP_P7.len());
+        assert_eq!(BREP_P7.len(), 9);
+    }
+
+    include!("operand_trim_rows/trim_blocks.rs");
+}
