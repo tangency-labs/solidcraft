@@ -195,6 +195,170 @@ fn drop_on(
     Ok(d.success.then_some((d.parameter, d.distance)))
 }
 
+/// The point where `crease` meets `other`, found from `start` by projecting onto each in
+/// turn (both continued over their natural intervals): `None` when a drop fails or the
+/// projections do not settle within `tol` of each other.
+fn crease_meets(
+    k: &Kernel,
+    crease: &Curve,
+    other: &Curve,
+    start: Point3,
+    tol: f64,
+) -> Result<Option<Point3>> {
+    let mut x = start;
+    for _ in 0..64 {
+        let Some((t, _)) = drop_on(k, crease, &crease.natural_interval(), x)? else {
+            return Ok(None);
+        };
+        let on_crease = crease.evaluate_point(k, t)?;
+        let Some((u, _)) = drop_on(k, other, &other.natural_interval(), on_crease)? else {
+            return Ok(None);
+        };
+        let on_other = other.evaluate_point(k, u)?;
+        let step = on_other.distance(x);
+        x = on_other;
+        if on_crease.distance(on_other) <= tol * 1e-6 && step <= tol * 1e-6 {
+            return Ok(Some(on_crease));
+        }
+    }
+    Ok(None)
+}
+
+/// `e`'s curve trimmed to run from `from` to `to` (each dropped onto it), reversed when
+/// they run against its parameter, as the edge's new 3D curve with its UV trims cleared
+/// (`SmBrep::ReplaceCurve`'s edit on the notification environment).
+fn replace_edge_curve(
+    k: &Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    e: EdgeId,
+    curve: &Curve,
+    from: Point3,
+    to: Point3,
+) -> Result<()> {
+    let natural = curve.natural_interval();
+    let (Some((t0, _)), Some((t1, _))) = (
+        drop_on(k, curve, &natural, from)?,
+        drop_on(k, curve, &natural, to)?,
+    ) else {
+        return Err(SolidError::blend_failed(
+            OP,
+            "a crease edge's end does not drop onto it",
+        ));
+    };
+    let mut piece = curve.copy(k)?;
+    let (lo, hi) = if t0 < t1 { (t0, t1) } else { (t1, t0) };
+    let mut ivl = crate::geom::extent1d::Extent1d::from_min_max(lo, hi);
+    if ivl != piece.natural_interval() {
+        piece.trim(
+            k,
+            &mut ivl,
+            crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+        )?;
+    }
+    if t0 > t1 {
+        let old = piece.natural_interval();
+        piece.reverse_parameterization(k, &old)?;
+    }
+    edge::replace_3d_curve(b, e, Some(piece), env)?;
+    for eu in edge::edgeuses(b, e, None, None)? {
+        let _ = eu1::set_uv_trim_curve(b, eu, eu1::UvTrimCurveArg::Null, 0.0, true, None)?;
+    }
+    Ok(())
+}
+
+/// WR-717 (#17633): moves the body edge `e` of face `f`, which `crease` runs along within
+/// the trim's tolerance, onto the crease, so that the sheet's boundary is imprinted and
+/// sewn where it is instead of being drawn to the edge. Each end vertex goes to where the
+/// crease meets the vertex's other edge on `f` (the edge's own curve, so that edge keeps
+/// its geometry and is only trimmed or run on to it); the edge takes the crease's piece
+/// between them. Edges at a moved vertex whose curve passes through its new point are
+/// trimmed to it. Nothing moves when an end cannot be found within `on_tol`.
+#[allow(clippy::too_many_arguments)] // the edit's inputs
+fn move_edge_onto_crease(
+    k: &Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    f: FaceId,
+    e: EdgeId,
+    crease: &Curve,
+    tol: f64,
+    on_tol: f64,
+) -> Result<bool> {
+    let (Some(sv), Some(ev)) = edge::start_end_vertices(b, e)? else {
+        return Ok(false);
+    };
+    if sv == ev {
+        return Ok(false);
+    }
+    let mut ends = Vec::with_capacity(2);
+    for v in [sv, ev] {
+        let p = vertex::point(b, v)?;
+        let mut q = None;
+        for e2 in vertex::edges(b, v, Some(f))? {
+            if e2 == e {
+                continue;
+            }
+            let other = edge_curve(k, b, e2)?;
+            q = crease_meets(k, crease, &other, p, tol)?;
+            if q.is_some() {
+                break;
+            }
+        }
+        let q = match q {
+            Some(q) => q,
+            None => match drop_on(k, crease, &crease.natural_interval(), p)? {
+                Some((t, _)) => crease.evaluate_point(k, t)?,
+                None => return Ok(false),
+            },
+        };
+        if q.distance(p) > on_tol {
+            return Ok(false);
+        }
+        ends.push((v, p, q));
+    }
+    if ends.iter().all(|&(_, p, q)| p.distance(q) <= tol * 1e-6) {
+        return Ok(false);
+    }
+    let (Some(&(_, _, qs)), Some(&(_, _, qe))) = (ends.first(), ends.get(1)) else {
+        return Ok(false);
+    };
+    replace_edge_curve(k, b, env, e, crease, qs, qe)?;
+    for &(v, _, q) in &ends {
+        let this = (env.key_of)(EntityRef::Vertex(v));
+        let key_of = env.key_of;
+        let vu_ref = |vu: crate::topology::VertexuseId| key_of(EntityRef::Vertexuse(vu));
+        vertex::set_point(
+            b,
+            v,
+            q,
+            &mut *env.records,
+            &mut *env.attributes,
+            env.context.as_deref_mut(),
+            this,
+            &vu_ref,
+        )?;
+        for e2 in vertex::edges(b, v, None)? {
+            if e2 == e {
+                continue;
+            }
+            let curve = edge_curve(k, b, e2)?;
+            let Some((_, dist)) = drop_on(k, &curve, &curve.natural_interval(), q)? else {
+                continue;
+            };
+            if dist > tol * 1e-6 {
+                continue;
+            }
+            let (Some(a), Some(z)) = edge::start_end_vertices(b, e2)? else {
+                continue;
+            };
+            let (pa, pz) = (vertex::point(b, a)?, vertex::point(b, z)?);
+            replace_edge_curve(k, b, env, e2, &curve, pa, pz)?;
+        }
+    }
+    Ok(true)
+}
+
 /// A refusal with its fillet error and typed reason.
 const fn refusal(
     code: FilletErrorType,
@@ -856,6 +1020,8 @@ impl FilletSession<'_> {
         let body_tol = self.objects.target.tolerance();
         // WR-717: the creases that run along an edge of the face they cross
         let mut edge_creases: Vec<Curve> = Vec::new();
+        // #17633: each such crease with the face it crosses
+        let mut face_creases: Vec<(FaceId, Curve)> = Vec::new();
         // WR-717: the body's edges those creases stand for
         let mut crease_edges: Vec<EdgeId> = Vec::new();
         for s in crate::topology::brep::p1::faces(&sheet, None)? {
@@ -946,6 +1112,7 @@ impl FilletSession<'_> {
                     }
                     for c in in_face.get(first..).unwrap_or_default() {
                         edge_creases.push(c.copy(k)?);
+                        face_creases.push((f, c.copy(k)?));
                     }
                 }
                 let before = pieces.len();
@@ -1139,6 +1306,27 @@ impl FilletSession<'_> {
                     }
                     extensions.extend(made);
                 }
+            }
+        }
+
+        // #17633 (WR-717): each body edge a crease runs along moves onto the crease
+        // first, so that the sheet's boundary is imprinted on its faces and sewn where it
+        // lies, not drawn the crease's gap to the edge (a section's end on an end face
+        // drawn to the old vertex skews the end face's outline by that gap)
+        for (f, c) in &face_creases {
+            for e in face::p4::edges(self.objects.target, *f, None, false, None)? {
+                let curve = edge_curve(k, self.objects.target, e)?;
+                let mid = curve
+                    .evaluate_point(k, edge::interval(self.objects.target, e)?.evaluate(0.5))?;
+                let Some((_, dist)) = drop_on(k, c, &c.natural_interval(), mid)? else {
+                    continue;
+                };
+                if dist > tol {
+                    continue;
+                }
+                self.with_target_env(k, |k, b, env, _| {
+                    move_edge_onto_crease(k, b, env, *f, e, c, tol, on_tol)
+                })?;
             }
         }
 
