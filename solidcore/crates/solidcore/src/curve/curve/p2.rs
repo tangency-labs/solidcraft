@@ -1803,8 +1803,16 @@ impl Curve {
     ) -> Result<LineIntersection> {
         match &self.kind {
             CurveKind::Ellipse(c) => {
-                let r =
-                    c.intersect_with_line(k, interval, other, other_interval, tol, None, None)?;
+                let r = c.intersect_with_line(
+                    k,
+                    interval,
+                    other,
+                    other_interval,
+                    tol,
+                    0.0,
+                    None,
+                    None,
+                )?;
                 Ok(LineIntersection {
                     solutions: r.solutions,
                     needs_more_intersections: r.needs_more_intersections,

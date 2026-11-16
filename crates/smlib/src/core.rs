@@ -75,7 +75,6 @@ impl Body {
 pub(crate) fn fixes() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
     f.fillet_refuse_face_consuming_blends = true;
-    f.fillet_vertex_error_diagnostics = true;
     f.fillet_chamfer_cone_on_arc = true;
     f.offset_extended_edges_mated = true;
     f.keep_operand_uv_trims = true;
@@ -106,7 +105,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.analytic_copy_keeps_parameterization = true;
     f.offset_extension_from_base = true;
     f.fillet_cleanup_keeps_target_faces = true;
-    f.fillet_nx1_tangent_side_edge = true;
     f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
     f.ssi_trace_tangent_curves_once = true;
@@ -114,11 +112,9 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.local_operation_box_holds_new_surfaces = true;
     f.shell_edges_on_analytics_exact = true;
     f.fillet_patch_keeps_fillet_edges = true;
-    f.boolean_splits_definition_across_split = true;
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;
     f.local_operation_step_walls = true;
-    f.edge_check_orders_tangent_faces = true;
     f.thicken_planar_side_walls = true;
     f.fillet_knife_edge_rounds = true;
     f.revolution_round_offset_collapses = true;
@@ -126,11 +122,9 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.imprint_reuses_coincident_face_edge = true;
     f.linear_sweep_arc_is_cylinder = true;
     f.fillet_trace_reaches_rails = true;
-    f.delete_vertex_joins_seam_iso_curve = true;
     f.box_face_failures_propagate = true;
     f.fillet_removal_takes_ring_fillets = true;
     // The fork's commits that reached `SMLIB_REV` at eaa998a (tangency-labs/smlib#68, #69, #70).
-    f.fillet_trim_inside_by_best_dot = true;
     f.curve_loop_normal_from_area = true;
     // The fork's commits in `SMLIB_REV` 2fc375f, ported to solidcore since.
     f.offset_extension_as_itself = true;
@@ -142,7 +136,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.simple_coincidence_crossing_is_point = true;
     f.fillet_trim_status = true;
     f.brep_edit_statuses_pass_on = true;
-    f.fillet_run_on_bspline_trims = true;
     f.query_statuses_pass_on = true;
     f.sweep_statuses_pass_on = true;
     f.ssi_proto_topology_statuses_pass_on = true;
@@ -168,7 +161,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.geometric_g2_continuity = true;
     f.degen_param_tiebreak_uses_actual_param = true;
     f.local_surface_intersect_guards_max_boundary_retry = true;
-    f.validate_tolerances_fixes_reported_gaps = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
@@ -525,6 +517,18 @@ mod tests {
         for name in HELD_BACK {
             assert!(flags.contains(&(*name, false)), "{name} is on or gone: drop it from HELD_BACK");
         }
+    }
+
+    /// solidcore's tests and kernel rig read this preset from `kernel_cases/fixes.json`: the file
+    /// names exactly the flags `fixes()` turns on.
+    #[test]
+    fn the_kernel_corpus_fix_list_is_this_preset() {
+        let listed: Vec<String> = serde_json::from_str(include_str!("../../../solidcore/crates/solidcore/tests/kernel_cases/fixes.json")).unwrap();
+        let mut listed: Vec<&str> = listed.iter().map(String::as_str).collect();
+        listed.sort_unstable();
+        let mut on: Vec<&str> = fixes().flags().filter(|(_, on)| *on).map(|(name, _)| name).collect();
+        on.sort_unstable();
+        assert_eq!(listed, on, "kernel_cases/fixes.json must list exactly the flags fixes() turns on");
     }
 
     #[test]

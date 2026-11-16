@@ -2891,6 +2891,11 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         }
         // Joins, cuts and intersects meet their targets where those are placed (#3383).
         kind if drawn_tools_change_bodies(kind) => reads.drawn_targets(st, f),
+        // So does a hole at sketch points, in its sketch's frame (#17623).
+        FeatureKind::Hole { points: Some(sp), .. } => {
+            frame = doc.feature(sp.sketch.0).map(|s| doc.component_transform(s.component));
+            reads.drawn_targets(st, f);
+        }
         FeatureKind::Sketch { plane, sketch } => {
             match crate::face_anchor::plane_face_anchor(plane) {
                 // Read in the frame of the placement it was drawn in, its face through the
@@ -6416,6 +6421,11 @@ fn hole_feature_tools(
     f: &Feature,
 ) -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
     let FeatureKind::Hole { diameter, depth, hole, to, .. } = &f.kind else { return Err(DocError::Invalid("not a hole".into())) };
+    // A hole at sketch points is drilled in its sketch's frame: the bodies it cuts are met where
+    // they are shown, so a body of another, moved component is drilled only where the hole
+    // reaches it there (#17623).
+    let shown = targets_as_shown(st, f, &[])?;
+    let st: &ModelState = &shown;
     let (spots, dir) = hole_spots(doc, vals, st, f)?;
     if spots.is_empty() || spots.len() > 10_000 {
         return Err(DocError::Invalid("a hole needs 1…10000 points".into()));
@@ -11186,18 +11196,30 @@ fn drawn_tools_change_bodies(kind: &FeatureKind) -> bool {
     }
 }
 
+/// The component whose frame a feature's drawn tools are made in: its own for a feature with
+/// drawn tools (see [`drawn_tools_change_bodies`]), and its sketch's for a hole at sketch points,
+/// whose points are kept in that sketch's frame (#17623). `None` for every other feature: a hole
+/// at a picked position is kept in the frame of the body it was picked on.
+fn tools_component(doc: &Document, f: &Feature) -> Option<u64> {
+    match &f.kind {
+        FeatureKind::Hole { points: Some(sp), .. } => doc.feature(sp.sketch.0).map(|s| s.component),
+        kind if drawn_tools_change_bodies(kind) => Some(f.component),
+        _ => None,
+    }
+}
+
 /// The frames of [`TOOL_FRAMES`] for the feature being evaluated; what was there before is put
 /// back when it is dropped.
 struct ToolFrames(Vec<(String, Mat)>);
 
 impl ToolFrames {
-    /// For a feature with drawn tools (see [`drawn_tools_change_bodies`]): the bodies placed
-    /// differently from its component, so its tools meet them where they are shown (#3383).
+    /// For a feature with drawn tools (see [`tools_component`]): the bodies placed differently
+    /// from the component its tools are made in, so they meet them where they are shown (#3383).
     fn install(doc: &Document, f: &Feature, st: &ModelState) -> Option<ToolFrames> {
-        if !drawn_tools_change_bodies(&f.kind) || (doc.occurrences.is_empty() && doc.body_offsets.is_empty()) {
+        if doc.occurrences.is_empty() && doc.body_offsets.is_empty() {
             return None;
         }
-        let frame = doc.component_transform(f.component);
+        let frame = doc.component_transform(tools_component(doc, f)?);
         let frames: Vec<(String, Mat)> = st
             .bodies
             .iter()
