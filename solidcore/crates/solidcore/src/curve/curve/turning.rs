@@ -63,8 +63,8 @@ impl Bern {
         let mut e = self.e.clone();
         let q = v.len().min(e.len());
         let mut left = Self {
-            v: Vec::with_capacity(q),
-            e: Vec::with_capacity(q),
+            v: Vec::new(),
+            e: Vec::new(),
         };
         let mut right = left.clone();
         for r in 0..q {
@@ -437,8 +437,8 @@ fn bspline_pieces(nl: &NlCurve, axis: usize) -> Result<Option<Vec<Piece>>> {
             let q = 2 * p - 1;
             let g = gamma(p + 11);
             let mut num = Bern {
-                v: Vec::with_capacity(q + 1),
-                e: Vec::with_capacity(q + 1),
+                v: Vec::new(),
+                e: Vec::new(),
             };
             for m in 0..=q {
                 let (mut sum, mut mag, mut ext) = (0.0_f64, 0.0_f64, 0.0_f64);
@@ -460,8 +460,8 @@ fn bspline_pieces(nl: &NlCurve, axis: usize) -> Result<Option<Vec<Piece>>> {
             num
         } else {
             let mut num = Bern {
-                v: Vec::with_capacity(p),
-                e: Vec::with_capacity(p),
+                v: Vec::new(),
+                e: Vec::new(),
             };
             for (a, b) in hs.iter().skip(1).zip(&hs) {
                 let c = pf * (a.0 - b.0);
