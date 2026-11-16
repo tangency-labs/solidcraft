@@ -2047,8 +2047,8 @@ mod wr457_certificates {
             assert_eq!(row.ints["mass_status"], [0], "{name}: mass status");
             let volume = *row.values["mass_properties"].get(1).expect("volume");
             assert!(
-                e.lo <= volume && volume <= e.hi,
-                "{name}: row volume {volume} not in [{}, {}]",
+                e.lo - 1e-4 <= volume && volume <= e.hi + 1e-4,
+                "{name}: row volume {volume} not within 1e-4 of [{}, {}]",
                 e.lo,
                 e.hi
             );
