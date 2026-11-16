@@ -335,6 +335,15 @@ fn unit(name: &str) -> Option<Value> {
     })
 }
 
+const INCH_MM: f64 = 25.4;
+const FOOT_MM: f64 = 304.8;
+
+/// Whether `id` names a length unit of this size in millimetres, whatever its spelling (`in` and
+/// `inch`).
+fn is_length_unit(id: &str, mm: f64) -> bool {
+    unit(id).is_some_and(|u| u.len == 1 && u.ang == 0 && u.v == mm)
+}
+
 fn is_constant(id: &str) -> bool {
     CONSTANTS.contains(&id)
 }
@@ -774,7 +783,7 @@ impl Parser<'_> {
                 base = mul(base, d, true)?;
             }
             if self.unit_at(self.pos) {
-                let feet = matches!(self.peek(), Some(Tok::Id(id)) if id == "ft");
+                let feet = matches!(self.peek(), Some(Tok::Id(id)) if is_length_unit(id, FOOT_MM));
                 let u = self.power(false)?;
                 let whole = mul(base, u, false)?;
                 return if feet { self.with_inches(whole) } else { Ok(whole) };
@@ -798,7 +807,7 @@ impl Parser<'_> {
             return Ok(feet);
         }
         let fraction = matches!((self.toks.get(start + 1), self.toks.get(start + 2)), (Some(Tok::Op('/')), Some(Tok::Num(_))));
-        if !matches!(self.toks.get(start + if fraction { 3 } else { 1 }), Some(Tok::Id(id)) if id == "in") {
+        if !matches!(self.toks.get(start + if fraction { 3 } else { 1 }), Some(Tok::Id(id)) if is_length_unit(id, INCH_MM)) {
             return Ok(feet);
         }
         let inches = self.power(true)?;
@@ -1838,6 +1847,9 @@ mod tests {
             ("5'3\"", 63.0),
             ("5' 3\"", 63.0),
             ("5 ft 3 in", 63.0),
+            ("5 ft 3 inch", 63.0),
+            ("5 ft 3 1/2 inch", 63.5),
+            ("5 ft 1/2 inch", 60.5),
             ("5′3″", 63.0),
             ("5' 3 1/2\"", 63.5),
             ("5' 1/2\"", 60.5),
