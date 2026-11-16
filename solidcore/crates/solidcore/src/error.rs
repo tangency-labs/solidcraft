@@ -19,7 +19,6 @@
 //! | [`SolidError::Cancelled`], [`SolidError::cancelled`], [`SolidError::is_cancelled`] | (none: cooperative cancellation on [`crate::Kernel`]) |
 //! | [`SolidError::invalid_input`] | (none: out-of-range reads / null dereferences upstream) |
 //! | `ignored`, `ignore_status` (crate) | a call whose `SmStatus` upstream ignores    |
-//! | `checked_or_ignored` (crate) | per-call opt-in status policy (#483); legacy helpers unchanged |
 //! | `native_failure` (crate)  | a call whose failing `SmStatus` upstream handles (internal errors propagate) |
 //! | `?` operator                | `SER(...)` / `NER(...)` (return on error)        |
 //! | [`SolidError::Failed`], [`Failure`], [`Reason`] | none: a failure in solidcore's own terms (#2615) |
@@ -153,16 +152,6 @@ pub(crate) fn native_failure<T>(r: Result<T>) -> Result<Option<T>> {
 /// [`SolidError::PreparationRequired`].
 pub(crate) fn ignore_status<T>(r: Result<T>) -> Result<()> {
     ignored(r).map(|_| ())
-}
-
-/// Select the status policy of one audited call. Checked mode returns the original
-/// error before its output is read; legacy mode preserves `ignored` unchanged.
-pub(crate) fn checked_or_ignored<T>(r: Result<T>, checked: bool) -> Result<Option<T>> {
-    if checked {
-        r.map(Some)
-    } else {
-        ignored(r)
-    }
 }
 
 /// One call whose status SMLib drops and the fork passes on (`SER(...)`): with `pass_on`

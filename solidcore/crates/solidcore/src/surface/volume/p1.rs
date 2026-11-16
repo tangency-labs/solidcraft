@@ -65,7 +65,9 @@
 //!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
 //!   cloning and dropping of nested geometry (no limit upstream).
 //! - **Kinds.** The class hierarchy is the [`VolumeKind`] enum: [`VolumeKind::Base`]
-//!   is a plain `SmVolume` (as made by the slicing copy in `IsLineInParamDomain`),
+//!   is a plain `SmVolume` (upstream's slicing copy in `IsLineInParamDomain` makes
+//!   one; the port copies the simple map with its kind instead, so the compounded
+//!   check evaluates through it),
 //!   [`VolumeKind::Transform`] holds the [`Transform`] matrix of an `SmTransform`,
 //!   [`VolumeKind::BSpline`] the [`BSplineVolume`] of an `SmBSplineVolume` (unit
 //!   `surface.b_spline_volume`; its `HasDiscontinuitiesSimple`,
@@ -819,10 +821,12 @@ impl Volume {
                 (start, end)
             };
 
-            // build curve in OutSpace = NextInSpace: a plain SmVolume copy of the
-            // simple map (the slicing copy constructor)
-            let mut simple = Self::copy_from(self, true)?;
-            simple.kind = VolumeKind::Base;
+            // build curve in OutSpace = NextInSpace over a copy of the simple map.
+            // Upstream copies with `SmVolume sSimpleVolume(*this, TRUE)`, which slices
+            // the derived map off: the plain `SmVolume` cannot evaluate, so the check
+            // ran on nothing. The copy keeps its kind, as `IsCurveInParamDomain`'s
+            // virtual `Copy(TRUE)` does.
+            let simple = Self::copy_from(self, true)?;
             let line = Line::from_points(start_in, end_in, 3);
             let next_in_space_curve =
                 Curve::from(CrvInVolume::new(Curve::from(line), false, simple, 0, 0)?);

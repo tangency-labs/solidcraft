@@ -39,7 +39,6 @@
   "bspline_trim_keeps_rational_end_spans",
   "proto_edge_self_loop_on_vertex_degenerate",
   "brep_edit_statuses_pass_on",
-  "query_statuses_pass_on",
   "sweep_statuses_pass_on",
   "ssi_proto_topology_statuses_pass_on",
   "analytic_inversion_answers_apart",

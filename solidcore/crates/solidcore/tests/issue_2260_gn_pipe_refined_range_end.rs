@@ -2,14 +2,14 @@
 //! SolidCraft's flag profile (tangency-labs/solidcraft#8526
 //! at c494a18, `crates/smlib/src/core.rs` `fixes()`, 292 flags), reported on #2260.
 //!
-//! With `query_statuses_pass_on` (tangency-labs/smlib 8311f8e) `sm_RefineCCSolutions`
-//! passed on `Inversion`'s `SM_ERR` for a curve/curve range solution's end refined
+//! Passing on the statuses SMLib drops (WR-663, tangency-labs/smlib 8311f8e),
+//! `sm_RefineCCSolutions` passed on `Inversion`'s `SM_ERR` for a curve/curve range solution's end refined
 //! 2e-15 past the range (12.149466823226815 against the range's max 12.149466823226813,
 //! while the round's insertion classifies a curve on a face), so the fillet failed with
 //! 1001. The body the boolean builds with `keep_operand_uv_trims` and the offset extension
 //! flags is what puts an end there. The fork's later 8ea6a20 takes such a parameter as
 //! the answer it is and leaves an end alone only for a range with no fraction; solidcore
-//! now does that under the same flag (#2264).
+//! now does that too (#2264).
 //!
 //! Expected volume: the tangency-labs/smlib 729f893 build run on the same construction by
 //! `SmApiBrepComputeVolume`, 40267.709270590589 at accuracy 1e-7 (3bc54a4 and c596548
@@ -112,7 +112,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "proto_edge_splits_at_captured_vertices",
     "proto_edge_split_upper_keeps_the_old_max",
     "proto_vertex_miss_is_false",
-    "query_statuses_pass_on",
     "revolution_round_offset_collapses",
     "revolve_analytic_profile_faces",
     "revolve_holed_profile_void",
@@ -203,22 +202,10 @@ fn solidcraft_profile_pipe_gn_round_completes() {
     check_round(SOLIDCRAFT_C494A18);
 }
 
-/// The four flags the failure needed together (`keep_operand_uv_trims`,
-/// `query_statuses_pass_on`, `offset_extension_from_base`, `offset_extension_as_itself`).
+/// The flags the failure needed together with the passed-on query statuses
+/// (`keep_operand_uv_trims`, `offset_extension_from_base`, `offset_extension_as_itself`).
 #[test]
 fn reduced_profile_pipe_gn_round_completes() {
-    check_round(&[
-        "keep_operand_uv_trims",
-        "query_statuses_pass_on",
-        "offset_extension_from_base",
-        "offset_extension_as_itself",
-    ]);
-}
-
-/// Without `query_statuses_pass_on` the status is dropped, as upstream, and the round
-/// completes with the same volume.
-#[test]
-fn without_pass_on_pipe_gn_round_completes() {
     check_round(&[
         "keep_operand_uv_trims",
         "offset_extension_from_base",

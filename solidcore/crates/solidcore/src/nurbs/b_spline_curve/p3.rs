@@ -37,19 +37,19 @@
 //! - **Join in place.** `JoinWith` hands `this` and the other curve to
 //!   `CreateByJoining`, which may elevate or flatten them in place; the port moves both
 //!   into the segment slice and back, so the other curve sees the same edits.
-//! - **Ignored statuses.** Where upstream ignores a status (the `TrimGap` evaluations,
-//!   extensions, trims and control point edits, `SubdivideAtDiscontinuity`'s trims,
-//!   `AssertValid`'s evaluations and bounding box), the port does too, except that
-//!   [`SolidError::Unported`] is always passed on. Ignored evaluations leave
-//!   default-constructed `SmVector3d`s ([`Vec3::UNDEF`]), as upstream.
-//!   With the opt-in `Kernel::fixes.query_statuses_pass_on` (WR-663) `TrimGap` returns
-//!   `false` (gap not fixed) at the first of those that fails, `HasInternalPole` returns
-//!   `false` when its knots cannot be read, and `AssertValid` fails tests 5/6 when a
-//!   derivative at an interior knot of multiplicity `p` cannot be evaluated (`value`
-//!   `SM_UNDEF_DOUBLE`), fails tests 11/12 or 13/14 (`value` `SM_UNDEF_DOUBLE`) when the
-//!   bounding box or `GlobalPropertyAnalysis` fails, and fails tests 11/12 (`value`
-//!   `SM_UNDEF_DOUBLE`) when a derivative at a first-derivative solution cannot be
-//!   evaluated, as the fork (tangency-labs/smlib 8843967).
+//! - **Ignored statuses (WR-663).** Where upstream ignores a status (the `TrimGap`
+//!   evaluations, extensions, trims and control point edits,
+//!   `SubdivideAtDiscontinuity`'s trims, `HasInternalPole`'s knots, `AssertValid`'s
+//!   evaluations, bounding box and `GlobalPropertyAnalysis`) and reads unset values, the
+//!   port answers as the fork (tangency-labs/smlib 8843967): `TrimGap` returns `false`
+//!   (gap not fixed) at the first of those that fails, `SubdivideAtDiscontinuity` passes
+//!   a failed trim on, `HasInternalPole` returns `false` when its knots cannot be read,
+//!   and `AssertValid` fails tests 5/6 when a derivative at an interior knot of
+//!   multiplicity `p` cannot be evaluated (`value` `SM_UNDEF_DOUBLE`), fails tests
+//!   11/12 or 13/14 (`value` `SM_UNDEF_DOUBLE`) when the bounding box or
+//!   `GlobalPropertyAnalysis` fails, and fails tests 11/12 (`value` `SM_UNDEF_DOUBLE`)
+//!   when a derivative at a first-derivative solution cannot be evaluated.
+//!   [`SolidError::Unported`] is always passed on.
 //! - **Crashes.** Where upstream dereferences a `NULL` (a curve without NURB in
 //!   `GetControlPoint` / `IsSegmentLine`, an extension `TrimGap` did not make, an
 //!   unclamped knot vector indexing before the control points in `HasInternalPole`)
@@ -106,7 +106,7 @@ use crate::curve::curve::p2::{Curve, CurvePropertyType};
 use crate::curve::curve::p7::{PropertyAnalysis, PropertyAnalysisOptions};
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::error::nurbs::BSplineFailure;
-use crate::error::{ignore_or_pass_on, ignored, Result, SolidError};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::assert_array::{labels, AssertArray, AssertReport, ObjectKey, ReportSpec};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -124,7 +124,7 @@ use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{max2, max3, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
-use crate::nurbs::b_spline_curve::analysis::{analysis_key, curve_bounds, BOUND_MARGIN};
+use crate::nurbs::b_spline_curve::analysis::analysis_key;
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::b_spline_curve::p2::{BoundingBoxRequest, ControlPointForm};
 use crate::nurbs::b_spline_curve::trim_image::{radius_clears_on_surface, sliver_within};
@@ -945,13 +945,9 @@ impl BSplineCurve {
         }
 
         let degree = cur.degree();
-        let (unique_knots, mults) = if k.fixes.query_statuses_pass_on {
-            let Some(km) = ignored(self.knots(None))? else {
-                return Ok(false);
-            };
-            km
-        } else {
-            self.knots(None)?
+        // knots that cannot be read show no pole (the fork, tangency-labs/smlib 8843967)
+        let Some((unique_knots, mults)) = ignored(self.knots(None))? else {
+            return Ok(false);
         };
         let mut knot_count = 0usize;
 
@@ -1350,12 +1346,9 @@ impl BSplineCurve {
                 // trim it to the interval between discontinuities (may be the whole
                 // curve; may snap the interval to existing knots)
                 let mut trim = Extent1d::from_min_max(start, current);
-                // (status ignored; passed on with the opt-in `query_statuses_pass_on`,
-                // tangency-labs/smlib 8843967)
-                ignore_or_pass_on(
-                    copy.trim(k, &mut trim, TrimMode::Notify),
-                    k.fixes.query_statuses_pass_on,
-                )?;
+                // (status ignored upstream; passed on as the fork, tangency-labs/smlib
+                // 8843967)
+                copy.trim(k, &mut trim, TrimMode::Notify)?;
 
                 resulting_curves.push(copy);
 
@@ -1387,15 +1380,13 @@ impl BSplineCurve {
         // only close gap if less than dMin
         let d_min_sq = d_min * d_min;
 
-        // with the opt-in fix each failed step leaves the gap unfixed (returns 0), as the
-        // fork has it (tangency-labs/smlib 8843967); upstream goes on with unset values
-        let soft = k.fixes.query_statuses_pass_on;
+        // each failed step leaves the gap unfixed (returns 0), as the fork has it
+        // (tangency-labs/smlib 8843967); upstream goes on with unset values
         macro_rules! or_unfixed {
-            ($r:expr, $default:expr) => {
+            ($r:expr) => {
                 match ignored($r)? {
                     Some(v) => v,
-                    None if soft => return Ok(false),
-                    None => $default,
+                    None => return Ok(false),
                 }
             };
         }
@@ -1403,14 +1394,14 @@ impl BSplineCurve {
         // curve 0 start and end points
         let mut extent0 = self.natural_interval();
         let t0size = extent0.max() - extent0.min();
-        let s0 = or_unfixed!(self.evaluate_point(extent0.min()), Vec3::UNDEF);
-        let e0 = or_unfixed!(self.evaluate_point(extent0.max()), Vec3::UNDEF);
+        let s0 = or_unfixed!(self.evaluate_point(extent0.min()));
+        let e0 = or_unfixed!(self.evaluate_point(extent0.max()));
 
         // curve 1 start and end points
         let mut extent1 = other.natural_interval();
         let t1size = extent1.max() - extent1.min();
-        let s1 = or_unfixed!(other.evaluate_point(extent1.min()), Vec3::UNDEF);
-        let e1 = or_unfixed!(other.evaluate_point(extent1.max()), Vec3::UNDEF);
+        let s1 = or_unfixed!(other.evaluate_point(extent1.min()));
+        let e1 = or_unfixed!(other.evaluate_point(extent1.max()));
 
         // Extend curves based on closest endpoints by domain * 0.3
         let d_s0s1 = (s0 - s1).length_squared();
@@ -1449,16 +1440,16 @@ impl BSplineCurve {
         let mut curve0e = None;
         let mut curve1e = None;
         if start0 {
-            curve0e = or_unfixed!(extend(self, extent0.min() - 0.03 * t0size), None);
+            curve0e = or_unfixed!(extend(self, extent0.min() - 0.03 * t0size));
         }
         if end0 {
-            curve0e = or_unfixed!(extend(self, extent0.max() + 0.03 * t0size), None);
+            curve0e = or_unfixed!(extend(self, extent0.max() + 0.03 * t0size));
         }
         if start1 {
-            curve1e = or_unfixed!(extend(other, extent1.min() - 0.03 * t1size), None);
+            curve1e = or_unfixed!(extend(other, extent1.min() - 0.03 * t1size));
         }
         if end1 {
-            curve1e = or_unfixed!(extend(other, extent1.max() + 0.03 * t1size), None);
+            curve1e = or_unfixed!(extend(other, extent1.max() + 0.03 * t1size));
         }
         let (Some(mut curve0e), Some(mut curve1e)) = (curve0e, curve1e) else {
             return Err(invalid(OP_GAP, "curve extension missing"));
@@ -1495,8 +1486,8 @@ impl BSplineCurve {
 
                 let mut ext0 = Extent1d::from_min_max(tmin0, tmax0);
                 let mut ext1 = Extent1d::from_min_max(tmin1, tmax1);
-                or_unfixed!(curve0e.trim(k, &mut ext0, TrimMode::Notify), ());
-                or_unfixed!(curve1e.trim(k, &mut ext1, TrimMode::Notify), ());
+                or_unfixed!(curve0e.trim(k, &mut ext0, TrimMode::Notify));
+                or_unfixed!(curve1e.trim(k, &mut ext1, TrimMode::Notify));
 
                 // only do this once
                 break;
@@ -1510,16 +1501,16 @@ impl BSplineCurve {
         let mut p0 = Vec3::UNDEF;
         let mut p1 = Vec3::UNDEF;
         if start0 {
-            p0 = or_unfixed!(curve0e.evaluate_point(extent0.min()), Vec3::UNDEF);
+            p0 = or_unfixed!(curve0e.evaluate_point(extent0.min()));
         }
         if end0 {
-            p0 = or_unfixed!(curve0e.evaluate_point(extent0.max()), Vec3::UNDEF);
+            p0 = or_unfixed!(curve0e.evaluate_point(extent0.max()));
         }
         if start1 {
-            p1 = or_unfixed!(curve1e.evaluate_point(extent1.min()), Vec3::UNDEF);
+            p1 = or_unfixed!(curve1e.evaluate_point(extent1.min()));
         }
         if end1 {
-            p1 = or_unfixed!(curve1e.evaluate_point(extent1.max()), Vec3::UNDEF);
+            p1 = or_unfixed!(curve1e.evaluate_point(extent1.max()));
         }
 
         // the new common end point
@@ -1544,18 +1535,18 @@ impl BSplineCurve {
         // replace the endpoint of the original curves
         let form = ControlPointForm::NonRational;
         if start0 {
-            or_unfixed!(self.set_control_point(form, 0, mid, 1.0), ());
+            or_unfixed!(self.set_control_point(form, 0, mid, 1.0));
         }
         if end0 {
             let last = self.number_control_points()?.wrapping_sub(1);
-            or_unfixed!(self.set_control_point(form, last, mid, 1.0), ());
+            or_unfixed!(self.set_control_point(form, last, mid, 1.0));
         }
         if start1 {
-            or_unfixed!(other.set_control_point(form, 0, mid, 1.0), ());
+            or_unfixed!(other.set_control_point(form, 0, mid, 1.0));
         }
         if end1 {
             let last = other.number_control_points()?.wrapping_sub(1);
-            or_unfixed!(other.set_control_point(form, last, mid, 1.0), ());
+            or_unfixed!(other.set_control_point(form, last, mid, 1.0));
         }
 
         Ok(true) // success...we have modified the curves
@@ -1796,8 +1787,8 @@ impl BSplineCurve {
                     continue;
                 }
 
-                // Lower interval evaluation (status ignored upstream; fails test 5/6
-                // with `query_statuses_pass_on`, tangency-labs/smlib 8843967)
+                // Lower interval evaluation (status ignored upstream; a failure fails
+                // test 5/6, as the fork, tangency-labs/smlib 8843967)
                 let param = knots.get(i).copied().unwrap_or(UNDEF_DOUBLE);
                 let eval1 = ignored(self.evaluate(param, 1, false, false))?;
                 let (v1_len, unit1) = match eval1 {
@@ -1805,8 +1796,7 @@ impl BSplineCurve {
                         let dir = v.get(1).copied().unwrap_or(Vec3::UNDEF);
                         (dir.length(), dir.unitize().ok())
                     }
-                    None if k.fixes.query_statuses_pass_on => (UNDEF_DOUBLE, None),
-                    None => (Vec3::UNDEF.length(), Vec3::UNDEF.unitize().ok()),
+                    None => (UNDEF_DOUBLE, None),
                 };
                 let Some(u1) = unit1 else {
                     let test = if dim == 2 {
@@ -1833,8 +1823,7 @@ impl BSplineCurve {
                         let dir = v.get(1).copied().unwrap_or(Vec3::UNDEF);
                         (dir.length(), dir.unitize().ok())
                     }
-                    None if k.fixes.query_statuses_pass_on => (UNDEF_DOUBLE, None),
-                    None => (Vec3::UNDEF.length(), Vec3::UNDEF.unitize().ok()),
+                    None => (UNDEF_DOUBLE, None),
                 };
                 let Some(u2) = unit2 else {
                     let test = if dim == 2 {
@@ -1883,9 +1872,9 @@ impl BSplineCurve {
             // Check for nonregular curve: vanishing first derivative. Allow zero 1st
             // derivatives at the NaturalParameter ends of the curve.
 
-            // Get a representive size (status ignored upstream; with
-            // `query_statuses_pass_on`, an unsized curve fails test 11/12 and skips
-            // the derivative and radius analyses, tangency-labs/smlib 8843967)
+            // Get a representive size (status ignored upstream; an unsized curve fails
+            // test 11/12 and skips the derivative and radius analyses, as the fork,
+            // tangency-labs/smlib 8843967)
             let domain = self.natural_interval();
             let bbox_opt = ignored(self.calculate_bounding_box(
                 &domain,
@@ -1896,21 +1885,17 @@ impl BSplineCurve {
                 },
             ))?
             .and_then(|b| b.normal);
-            let (sized, size_xyz) = if k.fixes.query_statuses_pass_on {
-                let ok = bbox_opt.is_some();
-                rtn &= report(
-                    &mut list,
-                    key,
-                    if dim == 2 { 11 } else { 12 },
-                    ok,
-                    UNDEF_DOUBLE,
-                    UNDEF_DOUBLE,
-                    |_| {},
-                )?;
-                (ok, bbox_opt.map_or(0.0, |b| b.size().length()))
-            } else {
-                (true, bbox_opt.unwrap_or_default().size().length())
-            };
+            let sized = bbox_opt.is_some();
+            rtn &= report(
+                &mut list,
+                key,
+                if dim == 2 { 11 } else { 12 },
+                sized,
+                UNDEF_DOUBLE,
+                UNDEF_DOUBLE,
+                |_| {},
+            )?;
+            let size_xyz = bbox_opt.map_or(0.0, |b| b.size().length());
             let size_t = domain.length();
 
             // finite curves: proportional to the average curve speed; else absolute
@@ -1926,16 +1911,9 @@ impl BSplineCurve {
                 5.0
             };
 
-            // Not upstream (#2568): where the curve's speed is bounded above the tolerance
-            // the search cannot report, and is not run (`analysis`; off without
-            // `Kernel::memoize_curve_caches`, and with `query_statuses_pass_on`, which
-            // reports the search's own status)
-            let shortcut = k.memoize_curve_caches && !k.fixes.query_statuses_pass_on;
-            let bounds = if shortcut { curve_bounds(cur) } else { None };
-            let speed_clear = bounds.is_some_and(|b| b.speed >= tol * BOUND_MARGIN);
-            let solutions = if sized && speed_clear {
-                Vec::new()
-            } else if sized {
+            // the search reports its own status (as the fork, tangency-labs/smlib
+            // 8843967), so it always runs on a sized curve
+            let solutions = if sized {
                 let (first_derivs_ok, sols) = global_property_analysis(
                     k,
                     self,
@@ -1943,17 +1921,15 @@ impl BSplineCurve {
                     CurveProperty::MinimizeFirstDerivative,
                     min_sep,
                 )?;
-                if k.fixes.query_statuses_pass_on {
-                    rtn &= report(
-                        &mut list,
-                        key,
-                        if dim == 2 { 11 } else { 12 },
-                        first_derivs_ok,
-                        tol,
-                        UNDEF_DOUBLE,
-                        |_| {},
-                    )?;
-                }
+                rtn &= report(
+                    &mut list,
+                    key,
+                    if dim == 2 { 11 } else { 12 },
+                    first_derivs_ok,
+                    tol,
+                    UNDEF_DOUBLE,
+                    |_| {},
+                )?;
                 sols
             } else {
                 Vec::new()
@@ -1977,12 +1953,11 @@ impl BSplineCurve {
                 let eval = ignored(self.evaluate(param, 1, false, false))?;
                 let (evaluated, deriv_length) = match eval {
                     Some(pt_der) => (true, pt_der.get(1).copied().unwrap_or(Vec3::UNDEF).length()),
-                    None if k.fixes.query_statuses_pass_on => (false, UNDEF_DOUBLE),
-                    None => (true, Vec3::UNDEF.length()),
+                    None => (false, UNDEF_DOUBLE),
                 };
 
-                // check 1stDeriv > tolerance; with `query_statuses_pass_on` a derivative
-                // that cannot be evaluated fails too
+                // check 1stDeriv > tolerance; a derivative that cannot be evaluated fails
+                // too (the fork, tangency-labs/smlib 8843967)
                 if !evaluated || deriv_length < tol {
                     let min_1st_deriv_param = param;
                     let test = if dim == 2 {
@@ -2039,19 +2014,8 @@ impl BSplineCurve {
 
             // Another type of kink check: vanishing radius of curvature.
             let mut radii = false;
-            // Not upstream (#2568): where the radius is bounded above the tolerance and the
-            // search's objective evaluates everywhere (a failed evaluation is returned as a
-            // radius of 0), the search cannot report and is not run
-            let radius_clear = shortcut
-                && match mapped.as_ref() {
-                    None => bounds,
-                    Some(m) => m.nurb.as_ref().and_then(curve_bounds),
-                }
-                .is_some_and(|b| b.radius_clears(radius_tol));
-            let solutions = if radius_sized && radius_clear {
-                radii = true;
-                Vec::new()
-            } else if radius_sized {
+            // (the search reports its own status, as the fork, tangency-labs/smlib 8843967)
+            let solutions = if radius_sized {
                 let (radii_ok, sols) = global_property_analysis(
                     k,
                     copy_curve,
@@ -2059,25 +2023,20 @@ impl BSplineCurve {
                     CurveProperty::MinimizeRadiusOfCurvature,
                     radius_sep,
                 )?;
-                if k.fixes.query_statuses_pass_on {
-                    radii = radii_ok;
-                    rtn &= report(
-                        &mut list,
-                        key,
-                        if dim == 2 { 13 } else { 14 },
-                        radii,
-                        radius_tol,
-                        UNDEF_DOUBLE,
-                        |_| {},
-                    )?;
-                    if radii {
-                        sols
-                    } else {
-                        Vec::new()
-                    }
-                } else {
-                    radii = true;
+                radii = radii_ok;
+                rtn &= report(
+                    &mut list,
+                    key,
+                    if dim == 2 { 13 } else { 14 },
+                    radii,
+                    radius_tol,
+                    UNDEF_DOUBLE,
+                    |_| {},
+                )?;
+                if radii {
                     sols
+                } else {
+                    Vec::new()
                 }
             } else {
                 Vec::new()
@@ -2385,9 +2344,7 @@ mod tests {
         // tangency-labs/smlib 8843967 (SmBSplineCurve::TrimGap): an end point that
         // cannot be evaluated leaves the gap unfixed (0); upstream measures the gap
         // between unset points, finds none and reports the curves joined.
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        let off = Kernel::default();
+        let on = Kernel::default();
         let mut a = BSplineCurve::new(3);
         assert!(a.evaluate_point(0.0).is_err());
         let mut b = curve(
@@ -2395,10 +2352,6 @@ mod tests {
             &[[0.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
             &[0.0, 0.0, 1.0, 1.0],
         );
-        assert!(a
-            .clone()
-            .trim_gap(&off, &mut b.clone(), GapFix::Both, 0.1)
-            .unwrap());
         assert!(!a.trim_gap(&on, &mut b, GapFix::Both, 0.1).unwrap());
     }
 
@@ -3539,13 +3492,10 @@ mod tests {
         // tangency-labs/smlib 8843967 (SmBSplineCurve::AssertValid, tests 5/6, WR-663):
         // two knots 1e-30 apart on a borrowed NURB (not spread by `sm_FixupKnotVector`)
         // count as one double knot in `GetKnots` (tolerance 1e-12), while `sm_BasisDerivs`
-        // rejects a span <= 1e-24. Without `query_statuses_pass_on` the failed evaluation
-        // leaves `Vec3::UNDEF` (`length = sqrt(3) * SM_UNDEF_DOUBLE`), reporting that
-        // length as the fault value; with the flag, test 5 (2D) / 6 (3D) fails with
-        // value `SM_UNDEF_DOUBLE`.
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        let off = Kernel::default();
+        // rejects a span <= 1e-24. Upstream the failed evaluation leaves `Vec3::UNDEF`
+        // (`length = sqrt(3) * SM_UNDEF_DOUBLE`), reporting that length as the fault
+        // value; as the fork, test 5 (2D) / 6 (3D) fails with value `SM_UNDEF_DOUBLE`.
+        let on = Kernel::default();
 
         let borrowed = |dim: u64, p: usize, pts: &[[f64; 3]], knots: &[f64]| {
             let n = pts.len() - 1;
@@ -3574,16 +3524,6 @@ mod tests {
 
             for (dim, expected_test) in [(2_u64, 5_u64), (3, 6)] {
                 let c = borrowed(dim, 2, &pts, knots);
-                let mut list_off = AssertArray::new();
-                assert!(!c
-                    .assert_valid(&off, Some(&mut list_off), true, ObjectKey(1))
-                    .unwrap());
-                assert_eq!(list_off.len(), 1, "{list_off:?}");
-                let r_off = list_off.get(0).unwrap();
-                assert_eq!(r_off.test_index, expected_test);
-                assert_eq!(r_off.value, Vec3::UNDEF.length());
-                assert_ne!(r_off.value, UNDEF_DOUBLE);
-
                 let mut list_on = AssertArray::new();
                 assert!(!c
                     .assert_valid(&on, Some(&mut list_on), true, ObjectKey(1))
@@ -3602,13 +3542,10 @@ mod tests {
         // tangency-labs/smlib 8843967 (SmBSplineCurve::AssertValid, tests 11-14, WR-663):
         // a single-span Bezier of degree `GW_MAX_DEGREE` (32) passes the knot, endpoint
         // and pole checks and sizes from its control polygon, then fails both
-        // `GlobalPropertyAnalysis` calls in `sm_CreateBezSegments` (`NL_DEG_ERR`). Without
-        // `query_statuses_pass_on` both failed analyses are ignored as empty solution sets
-        // and the curve passes; with the flag, tests 11 & 13 (2D) or 12 & 14 (3D) fail
-        // with value `SM_UNDEF_DOUBLE`.
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        let off = Kernel::default();
+        // `GlobalPropertyAnalysis` calls in `sm_CreateBezSegments` (`NL_DEG_ERR`). Upstream
+        // both failed analyses are ignored as empty solution sets and the curve passes; as
+        // the fork, tests 11 & 13 (2D) or 12 & 14 (3D) fail with value `SM_UNDEF_DOUBLE`.
+        let on = Kernel::default();
 
         let deg = crate::nurbs::nurbs_crv::MAX_DEGREE;
         let mut knots = vec![0.0; deg + 1];
@@ -3622,12 +3559,6 @@ mod tests {
             }
             cur.knots_mut().copy_from_slice(&knots);
             let c = BSplineCurve::from_nurb(cur, dim, true);
-
-            let mut list_off = AssertArray::new();
-            assert!(c
-                .assert_valid(&off, Some(&mut list_off), true, ObjectKey(9))
-                .unwrap());
-            assert!(list_off.is_empty(), "{list_off:?}");
 
             let mut list_on = AssertArray::new();
             assert!(!c
