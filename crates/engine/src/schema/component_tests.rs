@@ -893,6 +893,12 @@ fn the_schemas_take_what_the_occurrence_handlers_read() {
             (json!({"occurrence": 1, "angle": 0.5, "capture": false, "move_grounded": true, "path": [1]}), true),
             (json!({"occurrence": 1, "matrix": matrix, "tolerance": 1e-6}), true),
             (json!({"occurrence": 1, "matrix": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]}), true),
+            // Length expressions in the translation column, `translate` and `origin` (#8192).
+            (json!({"occurrence": 1, "matrix": [1, 0, 0, "dx", 0, 1, 0, "dy + 1 mm", 0, 0, 1, 0]}), true),
+            (json!({"occurrence": 1, "matrix": [1, 0, 0, "dx", 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]}), true),
+            (json!({"occurrence": 1, "matrix": [[1, 0, 0, "dx"], [0, 1, 0, 0], [0, 0, 1, "dz"]]}), true),
+            (json!({"occurrence": 1, "matrix": ["dx", 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]}), false),
+            (json!({"occurrence": 1, "translate": ["dx", 0, 0], "origin": [0, "dy", 0], "angle": 1}), true),
             (json!({"occurrence": 1, "base_transform": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]}), true),
             (json!({}), false),
             (json!({"occurrence": 1, "matrix": FLAT_MATRIX, "translate": [1, 0, 0]}), false),
@@ -1007,6 +1013,16 @@ fn the_check_reads_the_occurrence_keys_as_the_handlers_do() {
         ["translate entries must be numbers or length expressions"]
     );
     assert_eq!(issues("occurrence.copy", json!({"occurrence": 1, "translate": ["dy", 0, 0]})), ["translate must contain three finite numbers"]);
+    assert_eq!(issues("occurrence.move", json!({"occurrence": 1, "origin": ["0 mm", "dy", 0]})), none);
+    assert_eq!(
+        issues("occurrence.move", json!({"occurrence": 1, "origin": [true, "dy", 0]})),
+        ["origin entries must be numbers or length expressions"]
+    );
+    assert_eq!(issues("occurrence.move", json!({"occurrence": 1, "matrix": [1, 0, 0, "dy", 0, 1, 0, 0, 0, 0, 1, 0]})), none);
+    assert_eq!(
+        issues("occurrence.move", json!({"occurrence": 1, "matrix": ["dy", 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]})),
+        ["matrix: only its translation column (entries 4, 8 and 12, or the last of each of the first three rows) can be a length expression"]
+    );
     assert_eq!(issues("occurrence.move", json!({"occurrence": 1, "axis": null})), ["axis must contain three finite numbers"]);
     assert_eq!(issues("occurrence.move", json!({"occurrence": 1, "origin": "x"})), ["origin must contain three finite numbers"]);
     assert_eq!(issues("occurrence.move", json!({"occurrence": 1, "angle": null})), ["angle must be a number or angle expression"]);

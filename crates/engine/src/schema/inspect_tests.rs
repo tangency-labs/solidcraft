@@ -661,8 +661,8 @@ fn a_misspelt_key_is_reported_in_warn() {
     }
 }
 
-/// Shapes the real designs above don't reach: a body whose measurement failed (a sheet metal
-/// one carries its corrected counts) and the null coordinates of two planes that meet.
+/// Shapes the real designs above don't reach: a body whose measurement failed with a partial
+/// count, and the null coordinates of two planes that meet.
 #[test]
 fn rare_reply_shapes_serialize_as_before_and_match_the_schema() {
     use super::{BodyFailure, BodyMeasurement, BodyOutcome, Measured, MeasuredItems};

@@ -1315,6 +1315,14 @@ const OP_EDGE_GEOM: &str = "blend::fillet_corner::p1::calc_corner_edge_geom";
 const OP_DEGENERACY: &str = "blend::fillet_corner::p1::check_and_fix_degeneracy";
 const OP_END_PATCH: &str = "blend::fillet_corner::p1::create_end_patch";
 
+/// `CreateEndPatch`'s failure (`FILEXEC_CORNER_ERR(this, "Corner End Face Creation
+/// Error")`, then `SM_ERR`): the corner's end face could not be made. One site for every
+/// path that makes it (upstream's one face, the seam cap's two).
+#[track_caller]
+fn end_face_not_made() -> SolidError {
+    SolidError::blend_failed(OP_END_PATCH, "the corner's end face could not be made")
+}
+
 /// Not upstream (#2488, with `fillet_round_as_definition`): an End's patch keeps its
 /// definition ([`CornerDefinition::end`]): its support face's surface `support` (the face's
 /// or its extension) and the patch's boundary, the corner's edges' curves; re-certified at
@@ -1341,8 +1349,30 @@ fn keep_end_definition(
             .curve
             .as_ref()
             .ok_or_else(|| SolidError::invalid_input(OP_END_PATCH, NULL_DEREF))?;
-        boundary.push(nurbs_curve(curve)?.clone());
+        boundary.push(curve.clone());
     }
+    keep_end_definition_of(k, &boundary, support, net)
+}
+
+/// [`keep_end_definition`] of a patch bounded by `curves` (not upstream, #10876: a part of a
+/// cap across the cliff's tangent seam, whose sides are not all the corner's edges).
+///
+/// # Errors
+///
+/// As [`keep_end_definition`].
+fn keep_end_definition_of(
+    k: &Kernel,
+    curves: &[Curve],
+    support: &Surface,
+    net: &mut Surface,
+) -> Result<()> {
+    if !k.fixes.fillet_round_as_definition {
+        return Ok(());
+    }
+    let boundary = curves
+        .iter()
+        .map(|curve| nurbs_curve(curve).cloned())
+        .collect::<Result<Vec<_>>>()?;
     let definition = CornerDefinition::end(k, support, boundary)?;
     definition.recertify(k, net)?;
     net.set_corner_definition(definition);
@@ -2288,6 +2318,47 @@ impl FilletCorner {
     /// dereference; `SM_ERR` after noting a vertex-problem fillet error when `MakeFaceBrep`
     /// fails; those of the copy.
     pub fn create_end_patch(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
+        // Not upstream (#10876): a cap across the cliff's tangent seam is two faces
+        if let Some(cap) = self.seam_cap {
+            let mut surfaces = Vec::with_capacity(2);
+            for face in [cap.end_face, cap.wall] {
+                surfaces.push(match self.extended_surface(env.exec, face) {
+                    Some(s) => s.clone(),
+                    None => env
+                        .target
+                        .face(face)?
+                        .surface
+                        .clone()
+                        .ok_or_else(|| SolidError::invalid_input(OP_END_PATCH, NULL_DEREF))?,
+                });
+            }
+            let [end_surface, wall_surface] = surfaces.as_slice() else {
+                return Err(SolidError::invalid_input(OP_END_PATCH, NULL_DEREF));
+            };
+            let (end_surface, wall_surface) = (end_surface.clone(), wall_surface.clone());
+            let made = env
+                .with_patch_env(|env| self.make_seam_cap_faces(env, &end_surface, &wall_surface));
+            return match made {
+                Err(e) if e.is_unported_or_cancelled() => Err(e),
+                Err(e @ SolidError::InvalidInput { .. }) => Err(e),
+                Err(_) => {
+                    // as a failed MakeFaceBrep() below: noted as a vertex-problem corner error
+                    env.exec.error.note_corner_error(
+                        FilletErrorType::VertexProblem,
+                        self.corner_type(),
+                        FilStatus::Failure,
+                        Some(self.kind.name()),
+                        self.filleted_vertex()
+                            .map(ExecutiveErrorObject::TargetVertex),
+                        [None, None],
+                        [None, None],
+                        Some("Fillet Corner Error: Corner End Face Creation Error"),
+                    );
+                    Err(end_face_not_made())
+                }
+                Ok(()) => Ok(()),
+            };
+        }
         // for every filletCorner->FilletEdge
         for curr_edge in self.edges.clone() {
             // skip non SM_FE_FILLET_X_SIDE_FACE FilletEdges
@@ -2345,10 +2416,7 @@ impl FilletCorner {
                         Some("Fillet Corner Error: Corner End Face Creation Error"),
                     );
                     // FILEXEC_CORNER_ERR(this, "Corner End Face Creation Error"): a message, then SM_ERR
-                    return Err(SolidError::blend_failed(
-                        OP_END_PATCH,
-                        "the corner's end face could not be made",
-                    ));
+                    return Err(end_face_not_made());
                 }
             }
 
@@ -2371,6 +2439,33 @@ impl FilletCorner {
         env: &mut CornerPatchEnv<'_, '_>,
         extended_surface: impl Fn(FaceId) -> Option<Surface>,
     ) -> Result<()> {
+        // Not upstream (#10876): a cap across the cliff's tangent seam is two faces
+        if let Some(cap) = self.seam_cap {
+            let mut surfaces = Vec::with_capacity(2);
+            for face in [cap.end_face, cap.wall] {
+                surfaces.push(match extended_surface(face) {
+                    Some(s) => s,
+                    None => env
+                        .target
+                        .face(face)?
+                        .surface
+                        .clone()
+                        .ok_or_else(|| SolidError::invalid_input(OP_END_PATCH, NULL_DEREF))?,
+                });
+            }
+            let [end_surface, wall_surface] = surfaces.as_slice() else {
+                return Err(SolidError::invalid_input(OP_END_PATCH, NULL_DEREF));
+            };
+            return match self.make_seam_cap_faces(env, end_surface, wall_surface) {
+                Err(e) if e.is_unported_or_cancelled() => Err(e),
+                Err(e @ SolidError::InvalidInput { .. }) => Err(e),
+                Err(_) => {
+                    (env.note_face_error)(self);
+                    Err(end_face_not_made())
+                }
+                Ok(()) => Ok(()),
+            };
+        }
         // for every filletCorner->FilletEdge
         for curr_edge in self.edges.clone() {
             // skip non SM_FE_FILLET_X_SIDE_FACE FilletEdges
@@ -2416,10 +2511,7 @@ impl FilletCorner {
                 Err(_) => {
                     // when MakeFaceBrep() failed - Note FilletError
                     (env.note_face_error)(self);
-                    return Err(SolidError::blend_failed(
-                        OP_END_PATCH,
-                        "the corner's end face could not be made",
-                    ));
+                    return Err(end_face_not_made());
                 }
             }
 
@@ -2595,6 +2687,215 @@ impl FilletCorner {
             self.surface_faces.extend(face);
         } // end iter every surface buiding a face
 
+        Ok(())
+    }
+}
+
+impl FilletCorner {
+    /// Not upstream (#10876): the two faces of an End's cap across the cliff's tangent seam
+    /// ([`FilletCorner::seam_cap`]). The corner's edges run head to tail round the cap (the
+    /// rib's two pieces through S, then the side edges); the loop is cut along the seam's
+    /// line from S to W, where the seam meets the side edge running through it (that edge
+    /// split at W's drop): the part with the rib's piece on the end face lies on
+    /// `end_surface`, the other on `wall_surface`. The seam's line is the segment S W
+    /// (both on the line through W parallel to the axis, the seam's own line). Each face is
+    /// made and oriented as [`FilletCorner::make_face_brep`] makes a one-surface face, its
+    /// loop in the cap's sense; each keeps its definition (`keep_end_definition`) on its own
+    /// boundary.
+    ///
+    /// # Errors
+    ///
+    /// A stage failure ([`crate::error::blend::BlendFailure::StageFailed`], a defect) when
+    /// the edges do not close a loop through S, W does not drop onto a side edge within the
+    /// tolerance, a part's loop has no normal or a face is not made; those of the curve
+    /// copies, trims, evaluations and `MakeFaceWithCurves`.
+    pub(crate) fn make_seam_cap_faces(
+        &mut self,
+        env: &mut CornerPatchEnv<'_, '_>,
+        end_surface: &Surface,
+        wall_surface: &Surface,
+    ) -> Result<()> {
+        const OP: &str = OP_END_PATCH;
+        // a cap that cannot be split or made is a defect of the corner's construction
+        let fail = || SolidError::blend(OP, crate::error::blend::BlendFailure::StageFailed);
+        let cap = self
+            .seam_cap
+            .ok_or_else(|| SolidError::invalid_input(OP, "the corner has no seam cap"))?;
+        let tol = self.approx_tol_3d;
+        // the loop from S, each edge from its start vertex
+        let mut loop_edges: Vec<EdgeId> = Vec::new();
+        let mut at = cap.split_vertex;
+        for _ in 0..self.edges.len() {
+            let mut next = None;
+            for &e in &self.edges {
+                if loop_edges.contains(&e) {
+                    continue;
+                }
+                if edge::start_vertex(env.pseudo.brep(), e)? == Some(at) {
+                    next = Some(e);
+                    break;
+                }
+            }
+            let Some(e) = next else {
+                break;
+            };
+            loop_edges.push(e);
+            at = edge::end_vertex(env.pseudo.brep(), e)?.ok_or_else(fail)?; // a cap edge has no end vertex
+            if at == cap.split_vertex {
+                break;
+            }
+        }
+        if at != cap.split_vertex || loop_edges.len() != self.edges.len() {
+            return Err(fail()); // the cap's edges do not close a loop through the seam
+        }
+        // each edge's curve run from its start vertex to its end vertex (a fillet edge's curve
+        // may run either way along its edge)
+        let curve_of = |e: EdgeId| -> Result<Curve> {
+            let brep = env.pseudo.brep();
+            let mut c = brep
+                .edge(e)?
+                .curve
+                .as_ref()
+                .ok_or_else(|| SolidError::invalid_input(OP, NULL_DEREF))?
+                .copy(env.k)?;
+            let (Some(v0), Some(v1)) = (edge::start_vertex(brep, e)?, edge::end_vertex(brep, e)?)
+            else {
+                return Err(SolidError::invalid_input(OP, NULL_DEREF));
+            };
+            let (p0, p1) = (brep.vertex(v0)?.point, brep.vertex(v1)?.point);
+            let ivl = c.natural_interval();
+            let (c0, c1) = (
+                c.evaluate_point(env.k, ivl.min())?,
+                c.evaluate_point(env.k, ivl.max())?,
+            );
+            if c0.distance(p1) + c1.distance(p0) < c0.distance(p0) + c1.distance(p1) {
+                c.reverse_parameterization(env.k, &ivl)?;
+            }
+            Ok(c)
+        };
+        // the side edge through W, and W's parameter on it
+        let mut cut = None;
+        for (i, &e) in loop_edges.iter().enumerate() {
+            if env.pseudo.fillet_edge(e)?.edge_type == FilletEdgeType::FilletXSideFace {
+                continue;
+            }
+            let c = curve_of(e)?;
+            let ivl = c.natural_interval();
+            let d = c.drop_point(
+                env.k,
+                &ivl,
+                cap.seam_point,
+                None,
+                tol,
+                None,
+                SolverOperation::Minimize,
+            )?;
+            let inside = d.success
+                && d.distance <= tol
+                && d.parameter > ivl.min()
+                && d.parameter < ivl.max();
+            if inside {
+                cut = Some((i, c, d.parameter));
+                break;
+            }
+        }
+        let (cut_at, cut_curve, t_w) = cut.ok_or_else(fail)?; // the seam does not meet the cap's side edges
+        let ivl = cut_curve.natural_interval();
+        let mut head = cut_curve.copy(env.k)?;
+        head.trim(
+            env.k,
+            &mut Extent1d::from_min_max(ivl.min(), t_w),
+            TrimMode::Notify,
+        )?;
+        let mut tail = cut_curve;
+        tail.trim(
+            env.k,
+            &mut Extent1d::from_min_max(t_w, ivl.max()),
+            TrimMode::Notify,
+        )?;
+        let s_point = env.pseudo.vertex_point(cap.split_vertex)?;
+        let w_point = head.evaluate_point(env.k, head.natural_interval().max())?;
+        // first part: S, the edges up to the cut, the head, then W back to S; second: S to W,
+        // the tail, the rest
+        let mut first: Vec<Curve> = Vec::new();
+        let mut rest: Vec<Curve> = Vec::new();
+        let mut first_faces = Vec::new();
+        for (i, &e) in loop_edges.iter().enumerate() {
+            let fe = env.pseudo.fillet_edge(e)?;
+            let rib_face = (fe.edge_type == FilletEdgeType::FilletXSideFace)
+                .then_some(fe.orig_face)
+                .flatten();
+            match i.cmp(&cut_at) {
+                core::cmp::Ordering::Less => {
+                    first.push(curve_of(e)?);
+                    first_faces.extend(rib_face);
+                }
+                core::cmp::Ordering::Equal => {}
+                core::cmp::Ordering::Greater => rest.push(curve_of(e)?),
+            }
+        }
+        // the seam's two sides, with their NURBS forms: the End's definition keeps them
+        let seam_side = |from: Point3, to: Point3| -> Result<Curve> {
+            let mut line = Line::from_points(from, to, 3);
+            line.make_nurb()?;
+            Ok(Curve::from(line))
+        };
+        first.push(head.copy(env.k)?);
+        first.push(seam_side(w_point, s_point)?);
+        let mut second: Vec<Curve> = vec![seam_side(s_point, w_point)?, tail];
+        second.extend(rest);
+        let first_on_end = first_faces.contains(&cap.end_face);
+        let (end_part, wall_part) = if first_on_end {
+            (first, second)
+        } else {
+            (second, first)
+        };
+        // both parts are prepared before either face is made, so a part that cannot be
+        // oriented leaves no half cap in the fillet brep
+        let mut parts = Vec::new();
+        for (curves, surface) in [(end_part, end_surface), (wall_part, wall_surface)] {
+            let mut net = surface.copy_and_add_analytics(env.k)?;
+            keep_end_definition_of(env.k, &curves, surface, &mut net)?;
+            // the loop's sense: its Newell normal over points along each side (a side's end
+            // tangent can vanish, as a rib's at a rail end, so the corner of two sides does not
+            // decide it), against the surface's normal at the first side's start
+            let mut ring: Vec<Point3> = Vec::new();
+            for c in &curves {
+                let ivl = c.natural_interval();
+                for step in 0..4_u8 {
+                    ring.push(c.evaluate_point(env.k, ivl.evaluate(f64::from(step) / 4.0))?);
+                }
+            }
+            // (about the ring's first point, so the terms scale with the cap, not with its
+            // distance from the origin)
+            let Some(&p2) = ring.first() else {
+                return Err(fail()); // a cap part's loop has no points
+            };
+            let mut newell = Vec3::new(0.0, 0.0, 0.0);
+            for (a, b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
+                newell += (*a - p2).cross(*b - p2);
+            }
+            let Ok(patch_normal) = newell.unitize() else {
+                return Err(fail()); // a cap part's loop has no normal
+            };
+            let loop_orient = loop_orientation(env.k, &net, p2, patch_normal, OP)?;
+            let input = FaceCurvesInput {
+                loops: vec![curves.len()],
+                orientations: vec![OrientType::Same; curves.len()],
+                curves_3d: Some(curves.into_iter().map(Some).collect()),
+                uv_curves: None,
+                loop_points: Vec::new(),
+            };
+            parts.push((input, net, loop_orient));
+        }
+        for (input, net, loop_orient) in parts {
+            let face = make_face(env, input, net.clone(), loop_orient, OP)?;
+            if face.is_none() {
+                return Err(fail()); // a part of the seam cap is not made
+            }
+            self.surface_faces.extend(face);
+            self.surfaces.push(net);
+        }
         Ok(())
     }
 }

@@ -91,6 +91,7 @@ impl Document {
                     angle: 0.0,
                     suppressed: false,
                     exprs: Default::default(),
+                    offset_xy: [0.0; 2],
                     captured: None,
                     constraint: None,
                 });

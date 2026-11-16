@@ -32,7 +32,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
 
 use super::check::{located, whole};
-use super::component::{MatrixParam, MatrixTolerance};
+use super::component::{ExprMatrixParam, MatrixTolerance};
 use super::diagnostics::ProfileReport;
 use super::file::{HistoryParam, NamesParam, UpParam};
 use super::types::not_blank_pattern;
@@ -60,12 +60,12 @@ fn folder_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error>
 }
 
 /// `matrix`: as given, `null` as left out, which is how the handler has it.
-fn matrix_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<MatrixParam>, D::Error> {
+fn matrix_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<ExprMatrixParam>, D::Error> {
     let value = Value::deserialize(d)?;
     if value.is_null() {
         return Ok(None);
     }
-    Ok(Some(MatrixParam(value)))
+    Ok(Some(ExprMatrixParam(value)))
 }
 
 /// The keys `file.insert_step` reads. See [`InsertStepParams`], which leaves out the keys the
@@ -104,10 +104,12 @@ pub struct InsertStepKeys {
     pub history: Option<HistoryParam>,
     /// Where the import goes in the active component, as a rigid move applied after `up`: a
     /// row-major 3×4 (12 numbers) or 4×4 (16 numbers) matrix, flat or as rows, as
-    /// `occurrence.move` takes it. The reply gives the placement it made as `transform`.
+    /// `occurrence.move` takes it; its translation column may be length expressions that name
+    /// parameters, which the import then follows (#8192). The reply gives the placement it
+    /// made as `transform`.
     #[serde(default, deserialize_with = "matrix_key", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<MatrixParam>")]
-    pub matrix: Option<MatrixParam>,
+    #[schemars(with = "Option<ExprMatrixParam>")]
+    pub matrix: Option<ExprMatrixParam>,
     /// With `matrix` only: the largest accepted |RᵀR − I| per entry, above 0 and at most 0.001.
     /// Default: 1e-9. Read nowhere else, and `matrix::rigid` is the one that refuses both.
     #[serde(default)]
