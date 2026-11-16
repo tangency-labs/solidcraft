@@ -258,7 +258,8 @@ fn crease_meets(
 }
 
 /// The piece of `curve` that runs from `from` to `to` (each dropped onto it), reversed
-/// when they run against its parameter. `None` when either does not drop onto it.
+/// when they run against its parameter. `None` when either does not drop onto it, or
+/// both drop to one parameter (no piece between them).
 fn piece_between(k: &Kernel, curve: &Curve, from: Point3, to: Point3) -> Result<Option<Curve>> {
     let natural = curve.natural_interval();
     let (Some((t0, _)), Some((t1, _))) = (
@@ -267,6 +268,10 @@ fn piece_between(k: &Kernel, curve: &Curve, from: Point3, to: Point3) -> Result<
     ) else {
         return Ok(None);
     };
+    let distinct = t0 != t1;
+    if !distinct {
+        return Ok(None);
+    }
     let mut piece = curve.copy(k)?;
     let (lo, hi) = if t0 < t1 { (t0, t1) } else { (t1, t0) };
     let mut ivl = crate::geom::extent1d::Extent1d::from_min_max(lo, hi);
@@ -304,8 +309,12 @@ fn replace_edge_curve(
 /// positive, or `a` and `b` one point). A B-spline with positive weights lies in its
 /// control points' convex hull, and the distance to a line is convex, so its greatest
 /// value over the curve is at most the greatest over the control points; each distance is
-/// computed in the line's own frame and counted up by `16 eps` of the largest coordinate
-/// for its rounding.
+/// computed in the line's own frame and counted up by `64 eps` of the largest coordinate
+/// for its rounding: `d = p - a` (each coordinate within 2 scale, its norm within
+/// 2 sqrt 3 scale) takes one rounding per coordinate, the unit direction a few ulps,
+/// `along` and the perpendicular `d - dir along` about eight roundings on that size, and
+/// a rational point its division by the weight; 64 eps of the scale covers them with
+/// room to spare.
 fn distance_to_line_bound(crease: &Curve, a: Point3, b: Point3) -> Result<Option<f64>> {
     // the B-spline kinds' control polygons (a line's, a conic's, as an `SmBSplineCurve`)
     let spline = match crease.kind() {
@@ -343,29 +352,30 @@ fn distance_to_line_bound(crease: &Curve, a: Point3, b: Point3) -> Result<Option
         bound = smos_max(bound, off);
         scale = smos_max(scale, smos_max(p.x.abs(), smos_max(p.y.abs(), p.z.abs())));
     }
-    Ok(Some(bound + 16.0 * f64::EPSILON * scale))
+    Ok(Some(bound + 64.0 * f64::EPSILON * scale))
 }
 
 /// Whether `curve` is straight: a line, or a B-spline whose control points all lie on the
-/// line through its ends to rounding. Its ends are returned.
-fn straight_ends(k: &Kernel, curve: &Curve) -> Result<Option<(Point3, Point3)>> {
+/// line through its ends to rounding. Its ends are returned, with the enclosed bound on
+/// its distance from the line through them (0 for a line).
+fn straight_ends(k: &Kernel, curve: &Curve) -> Result<Option<(Point3, Point3, f64)>> {
     let ivl = curve.natural_interval();
     let (a, b) = (
         curve.evaluate_point(k, ivl.min())?,
         curve.evaluate_point(k, ivl.max())?,
     );
-    let straight = match curve.kind() {
-        CurveKind::Line(_) => true,
+    let deviation = match curve.kind() {
+        CurveKind::Line(_) => Some(0.0),
         CurveKind::BSpline(_) => {
             let scale = smos_max(
                 smos_max(a.x.abs(), smos_max(a.y.abs(), a.z.abs())),
                 smos_max(b.x.abs(), smos_max(b.y.abs(), b.z.abs())),
             );
-            matches!(distance_to_line_bound(curve, a, b)?, Some(d) if d <= 64.0 * f64::EPSILON * smos_max(scale, 1.0))
+            distance_to_line_bound(curve, a, b)?.filter(|&d| d <= 128.0 * f64::EPSILON * scale)
         }
-        _ => false,
+        _ => None,
     };
-    Ok(straight.then_some((a, b)))
+    Ok(deviation.map(|d| (a, b, d)))
 }
 
 /// What a move of an edge onto its crease leaves to the trim: geometry that no longer
@@ -376,9 +386,11 @@ struct MovedEdges {
     /// The edges moved onto their creases.
     moved: BTreeSet<EdgeId>,
     /// Each moved edge's faces other than the crease's: the crease is off them.
-    off_faces: Vec<(EdgeId, FaceId)>,
-    /// The edges at a moved vertex whose curves miss its new point.
-    left: Vec<EdgeId>,
+    off_faces: Vec<FaceId>,
+    /// The moved vertices: an edge through one whose curve misses its new point is off it.
+    vertices: Vec<crate::topology::VertexId>,
+    /// The crease pieces the edges took.
+    pieces: Vec<Curve>,
 }
 
 /// WR-717 (#17633): moves the body edge `e` of face `f`, which `crease` runs along, onto
@@ -410,7 +422,7 @@ fn move_edge_onto_crease(
     if sv == ev {
         return Ok(false);
     }
-    let Some((ea, eb)) = straight_ends(k, &edge_curve(k, b, e)?)? else {
+    let Some((ea, eb, straightness)) = straight_ends(k, &edge_curve(k, b, e)?)? else {
         return Ok(false);
     };
     let mut ends = Vec::with_capacity(2);
@@ -445,13 +457,13 @@ fn move_edge_onto_crease(
     let Some(piece) = piece_between(k, crease, qs, qe)? else {
         return Ok(false);
     };
-    // the crease's piece within `tol` of the edge over its whole length
-    if !matches!(distance_to_line_bound(&piece, ea, eb)?, Some(d) if d <= tol) {
+    // the crease's piece within `tol` of the edge over its whole length (its distance to the
+    // edge's line, and the edge's own from that line)
+    if !matches!(distance_to_line_bound(&piece, ea, eb)?, Some(d) if d + straightness <= tol) {
         return Ok(false);
     }
     // what each moved vertex does to the edges through it, decided before anything moves
     let mut trims: Vec<(EdgeId, Curve, Point3, Point3)> = Vec::new();
-    let mut left: Vec<EdgeId> = Vec::new();
     for &(v, _, q) in &ends {
         for e2 in vertex::edges(b, v, None)? {
             if e2 == e {
@@ -467,14 +479,15 @@ fn move_edge_onto_crease(
                     // an edge already on its crease would be left off its own vertex
                     return Ok(false);
                 }
-                left.push(e2);
+                // left for the trim to take off (checked once it has)
                 continue;
             }
             let (Some(a), Some(z)) = edge::start_end_vertices(b, e2)? else {
                 continue;
             };
-            if a == z {
-                // a closed edge through the vertex: its curve already runs through it
+            if a == z || trims.iter().any(|(t, _, _, _)| *t == e2) {
+                // a closed edge through the vertex: its curve already runs through it; an
+                // edge between both moved vertices is trimmed once
                 continue;
             }
             let at = |x: crate::topology::VertexId| -> Result<Point3> {
@@ -496,9 +509,10 @@ fn move_edge_onto_crease(
     // the move
     for g in edge::faces(b, e, None)? {
         if g != f {
-            record.off_faces.push((e, g));
+            record.off_faces.push(g);
         }
     }
+    record.pieces.push(piece.copy(k)?);
     replace_edge_curve(b, env, e, piece)?;
     for &(v, _, q) in &ends {
         let this = (env.key_of)(EntityRef::Vertex(v));
@@ -518,7 +532,7 @@ fn move_edge_onto_crease(
     for (e2, p) in pieces {
         replace_edge_curve(b, env, e2, p)?;
     }
-    record.left.extend(left);
+    record.vertices.extend(ends.iter().map(|&(v, _, _)| v));
     record.moved.insert(e);
     Ok(true)
 }
@@ -1726,15 +1740,46 @@ impl FilletSession<'_> {
         })?;
         // #17633: what an edge's move onto its crease left off its old geometry is taken off
         // with the faces past the creases; anything left of it is refused, not kept
-        // within a larger tolerance
+        // within a larger tolerance. Checked on the geometry, so that an edge or face the
+        // imprint split is still found: every edge still at a moved vertex runs through
+        // it, and no face the crease is off still has an edge along a crease piece.
         {
             let target = &*self.objects.target;
-            let mut kept_off = moves.left.iter().any(|&e| target.edge(e).is_ok());
-            for &(e, g) in &moves.off_faces {
-                if kept_off {
-                    break;
+            let on = tol * 1e-6;
+            let mut kept_off = false;
+            for &v in &moves.vertices {
+                if kept_off || target.vertex(v).is_err() {
+                    continue;
                 }
-                kept_off = target.edge(e).is_ok() && edge::faces(target, e, None)?.contains(&g);
+                let p = vertex::point(target, v)?;
+                for e in vertex::edges(target, v, None)? {
+                    let curve = edge_curve(k, target, e)?;
+                    let through = matches!(
+                        drop_on(k, &curve, &curve.natural_interval(), p)?,
+                        Some((_, dist)) if dist <= on
+                    );
+                    if !through {
+                        kept_off = true;
+                        break;
+                    }
+                }
+            }
+            for &g in &moves.off_faces {
+                if kept_off || target.face(g).is_err() {
+                    continue;
+                }
+                for e in face::p4::edges(target, g, None, false, None)? {
+                    let curve = edge_curve(k, target, e)?;
+                    let mid = curve.evaluate_point(k, curve.natural_interval().evaluate(0.5))?;
+                    for piece in &moves.pieces {
+                        if matches!(
+                            drop_on(k, piece, &piece.natural_interval(), mid)?,
+                            Some((_, dist)) if dist <= on
+                        ) {
+                            kept_off = true;
+                        }
+                    }
+                }
             }
             if kept_off {
                 return refuse(
@@ -1972,4 +2017,61 @@ pub(super) fn with_target_env_of<R>(
         };
         edit(k, target, &mut env, identity)
     })?
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+
+    use super::*;
+    use crate::nurbs::b_spline_curve::BSplineCurve;
+    use crate::nurbs::crv_basic::Curve as NlCurve;
+    use crate::nurbs::math::{CPoint, NOW};
+
+    /// A cubic S through (0, 0, 0) and (3, 0, 0) that crosses its chord at its middle:
+    /// its ends and midpoint lie on the line, its quarter points `0.2887 h` off it.
+    fn s_curve(h: f64) -> Curve {
+        Curve::from(BSplineCurve::from_nurb(
+            NlCurve::new(
+                vec![
+                    CPoint::new(0.0, 0.0, 0.0, NOW),
+                    CPoint::new(1.0, h, 0.0, NOW),
+                    CPoint::new(2.0, -h, 0.0, NOW),
+                    CPoint::new(3.0, 0.0, 0.0, NOW),
+                ],
+                3,
+                vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            3,
+            false,
+        ))
+    }
+
+    /// The move's gate is the control polygon's bound, not samples: a crease that meets
+    /// the edge's line at its ends and middle but bows off it between is not within `tol`.
+    #[test]
+    fn a_crease_on_the_line_at_three_points_but_bowed_between_is_not_moved_onto_it() {
+        let k = Kernel::default();
+        let (h, tol) = (2e-4, 4e-5);
+        let c = s_curve(h);
+        let (a, b) = (Point3::new(0.0, 0.0, 0.0), Point3::new(3.0, 0.0, 0.0));
+        for t in [0.0, 0.5, 1.0] {
+            let p = c.evaluate_point(&k, t).unwrap();
+            assert!(p.y.abs() <= 1e-15, "t {t}: {p:?} on the line");
+        }
+        // the true deviation, at t = 1/2 -+ sqrt(3)/6: h / (2 sqrt 3) = 0.2887 h
+        let worst = (0..=1000)
+            .map(|i| c.evaluate_point(&k, f64::from(i) / 1000.0).unwrap().y.abs())
+            .fold(0.0_f64, f64::max);
+        assert!(worst > tol, "the S bows {worst} off the line, past tol");
+        let bound = distance_to_line_bound(&c, a, b).unwrap().unwrap();
+        assert!(
+            bound >= worst,
+            "bound {bound} encloses the deviation {worst}"
+        );
+        assert!(bound > tol, "the gate refuses: bound {bound} > tol {tol}");
+        // and the S is not taken as a straight edge
+        assert!(straight_ends(&k, &c).unwrap().is_none());
+    }
 }
