@@ -555,14 +555,6 @@ pub struct UpstreamFixes {
     pub fillet_knife_edge_rounds: bool,
     /// `SmOffsetExecutive::MapEdgeuses` raises each offset edge it matches to an original edge to that edge's tolerance, and the offset edge's vertices to the original edge's vertices' largest. Upstream builds the offset faces' edges and vertices afresh at the B-rep's zone tolerance, so the offset of a sheet whose edges and vertices carry their own, larger tolerances (a trimmed B-spline patch: B-rep 2.08e-5, edges 4.15e-5, vertices 8.31e-5) is checked against half the B-rep's tolerance at its vertices, and its offset by 0.75 fails `check_brep` with edge/vertex Bad Gaps of 2.4e-5 to 3.9e-5, inside the original's own tolerances (WR-671, #2111).
     pub offset_edges_keep_source_tolerance: bool,
-    /// `SmOffsetSurface::SwapUV` negates the distance once for the extended surface and
-    /// again for the base, so an owning offset that has a stored extension comes back
-    /// with its distance unchanged and lies on the wrong side of its base; with this
-    /// fix the base's successful swap keeps the single negation the extended surface's
-    /// swap made, and `Offset(uv)` after the swap is the pre-swap `Offset(vu)` (WR-164).
-    /// An offset without an extension still negates once. Off by default for pinned C++
-    /// parity.
-    pub offset_swap_uv_extended_distance: bool,
     /// A face a Boolean takes over from its second operand keeps that operand's exact UV trims (WR-361, #488).
     pub keep_operand_uv_trims: bool,
     /// `smgu_EvaluateCurveContinuity`'s G2 test compares the two sides' Frenet curvatures and normals (WR-380, #933/#838).
@@ -585,14 +577,6 @@ pub struct UpstreamFixes {
     pub surface_continuity_checks_last_v_knot: bool,
     /// `sm_GoodDropResult` (`SmSurface::DropPoint` given a guess) refuses a local solve's result when the result is farther from the point than its guess, as its comment says; upstream measures its two distances the wrong way round (`dDsqGuess` to the result, `dDsqResult` to the guess), so it refused a result nearer than its guess, sending the drop to the global solve, and took one farther. The same fork change also takes a local result as the foot only when the gap's components along the unit tangents are within the local solve's tight tolerance, `SM_EFF_ZERO (1 + max|P|)` (their sum under it; an interior result each under it), where upstream takes any foot 1e-4 off (an interior one 1e-3 off in each direction); a stalled solve goes to the global solve (WR-56, #1852; the fork's tangency-labs/smlib@eaa998a (was 0b4de8c) / eaa998a, fork PR #70).
     pub good_drop_result_distances_in_order: bool,
-    /// `smvol_LiftThirdDerivative` (surface and volume forms) uses `Dxzz` instead of
-    /// `Dxxz` for the `x z^2` outer-derivative term in `Duuv`, `Duvv`, `Duuw`, `Duww`,
-    /// `Dvvw`, and `Dvww`, and builds the volume form's `Duww` and `Dvww` from
-    /// `Fuw`/`Fw` and `Fvw`/`Fw` instead of `Fuv`/`Fv` and `Fvv`/`Fv` (WR-45, #2165;
-    /// see `plan/upstream-issues/WR-45--addendum-2026-10-31-lift-third-derivative-terms.md`).
-    /// Propagated through `EvalOptions::fixes` across compound volume and
-    /// `SrfInVolume` / `CrvInVolume` evaluations. Off by default for pinned C++ parity.
-    pub volume_lift_third_derivative_terms: bool,
     /// `SmSurface::LocalSurfaceIntersect`'s out-of-bounds boundary retries guard both
     /// the minimum and maximum boundary tests of the second through fourth parameter
     /// branches (`v` of `this`, `u` of `other`, `v` of `other`) with `!bFoundSolution`,
@@ -759,20 +743,6 @@ pub struct UpstreamFixes {
     pub transform_model_size_from_body_box: bool,
     /// `SmTorus::IsNurbSurfaceTorus` and `SmSphere::IsNurbSurfaceSphere` keep the NURB they tested (rebuilding the analytic data from it, as `SetFromGwNurb` does), not the one made from the fitted circles (~1e-11 off), and the sphere test takes a half meridian within `180 + 360 * SM_EFF_ZERO` degrees, not `180 + SM_EFF_ZERO` (WR-493, #1433; tangency-labs/smlib@7ea6a96). The sphere's sweep interval is its polar curve's, so a small corner sphere passes `SmSurfOfRevolution` tests #6 and #7 (#2073; not in the fork).
     pub found_torus_sphere_keep_tested_nurb: bool,
-    /// `SmBSplineVolume::CalculateContinuitiesSimple` with `bCalcGeometric == FALSE`
-    /// sets both end knots (`0` and `knot_cnt - 1`) to `SM_CT_DISCONTINUOUS` (matching
-    /// its `SmBSplineVolume.h` contract, the `bCalcGeometric == TRUE` branch, and
-    /// `SmSurface::CalculateContinuities`) and evaluates representational knot
-    /// continuity (`degree - mult`) and `reMinContinuity` over interior knots
-    /// `1..knot_cnt - 1` only (leaving `reMinContinuity = SM_CT_CINFINITY` on a
-    /// single-span volume), instead of filling `0..knot_cnt - 1` into a zero-cleared
-    /// (`SM_CT_UNDEFINED`) array — which left the last knot `SM_CT_UNDEFINED`, set
-    /// knot `0` to `SM_CT_C0` on every clamped volume, lowered `reMinContinuity` to
-    /// `SM_CT_C0`, and made `HasDiscontinuitiesSimple(..., FALSE)` report
-    /// discontinuities on smooth single-span and `C1`/`C2` volumes (WR-49, #2151; see
-    /// `plan/upstream-issues/WR-49--addendum-2026-10-31-representational-end-continuities.md`).
-    /// Off by default for pinned C++ parity.
-    pub volume_representational_end_continuities: bool,
     /// `FindPolygonGuess` keeps a suspicious control-net triangle guess as a candidate against the nearest control point's, and returns the nearer one on the surface, so a rational surface whose control points are farther apart than its neighbouring parts does not lose a good guess (WR-444, #1164).
     pub point_solve_keeps_triangle_guess: bool,
     /// `SmEdgeDefinition::Imprint` continues an intersection edge's 3d and UV curves, each by the polynomial of its own end span, to a proto vertex that lies a few tolerances past the curve's end, so the edge reaches its vertex (internal thread cuts; WR-453, #410; tangency-labs/smlib bf5d3ae (was a8caccd)). The end goes to its proto vertex's position only when that proto vertex is one vertex in each B-rep, else to its own final vertex (WR-498, #1480; tangency-labs/smlib 0b1b945 (was ffaf4e8)).
