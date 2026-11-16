@@ -47,7 +47,6 @@ use solidcore::Kernel;
 const SOLIDCRAFT_C494A18: &[&str] = &[
     "analytic_copy_keeps_parameterization",
     "analytic_inversion_answers_apart",
-    "boolean_splits_definition_across_split",
     "boolean_union_refuses_solid_leak",
     "boolean_vertex_by_best_crossing",
     "box_face_failures_propagate",

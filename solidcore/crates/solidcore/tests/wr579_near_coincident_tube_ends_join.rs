@@ -5,7 +5,9 @@
 //! stretch and crosses it there too: the crossing and the stretch's ends fall in one proto
 //! vertex as three vertex definitions too far apart to combine, and upstream's
 //! `SmProtoEdge::Resolve` keeps the stretch's edge whole past the crossing's vertex. The
-//! union then fails.
+//! union then failed. Since WR-533's split of a coincident definition across a split point
+//! is always on, it joins without `proto_edge_splits_at_captured_vertices` as well, so this
+//! input no longer tells that flag's two settings apart.
 //!
 //! The fork builds each tube with its C API's extrude, the circle starting on the side the
 //! walls touch (the top tube's seam at -y, the seat's at +y). This builds them as
@@ -13,9 +15,9 @@
 //! about Y onto the axis, and moved to the base, as the `boolean.api_brep` fixture
 //! `issue_1517_tube_ends.json` does on both sides.
 //!
-//! Expected with `proto_edge_splits_at_captured_vertices`: one manifold solid, its volume
-//! between the larger tube's and both together, and its check is clean. The fork's still
-//! fails on a separate defect: an ellipse piece 8.6e-5 long (the top tube's wall cut by the
+//! Expected with either setting of `proto_edge_splits_at_captured_vertices`: one manifold
+//! solid, its volume between the larger tube's and both together, and its check is clean.
+//! The fork's still fails on a separate defect: an ellipse piece 8.6e-5 long (the top tube's wall cut by the
 //! seat's end plane) whose STEP inversion set points near the arc's start to the start, so
 //! its NURB read 2.1e-5 off its ellipse (`SmEllipse` test 2). That was
 //! `SmExtent1d::ContainsPeriodicValue`, fixed for #1518 (WR-509).
@@ -37,10 +39,12 @@ use solidcore::boolean::api_brep::{boolean, boolean_union};
 use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
-use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::mass::enclosure::enclose_volume;
+use solidcore::mass::integrator::properties::{brep_volume, face_area, PropertyAttributes};
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::create_cylinder;
 use solidcore::topology::api_files::read_brep_from_file;
+use solidcore::topology::brep::p1::faces;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
@@ -116,20 +120,204 @@ fn join(fixed: bool) -> Result<f64, String> {
     Ok(volume(&k, &mut r))
 }
 
+/// With `proto_edge_splits_at_captured_vertices` the stretch's edge is split at the
+/// crossing's vertex. Without it, `UpdateEdges` now splits the coincident definition that
+/// runs across that split point (WR-533, always on since its flag was removed), and the
+/// union joins as well. Either way `join` accepts only one manifold solid whose level-2
+/// check reports nothing, and its volume lies strictly between the larger tube's and both
+/// together.
 #[test]
 fn wr579_near_coincident_tube_ends_join() {
-    let unfixed = join(false);
-    println!("flag off: {unfixed:?}");
-    assert!(unfixed.is_err(), "upstream's union succeeded: {unfixed:?}");
-
-    let v = join(true).unwrap();
     let mut k = Kernel::default();
     let (mut t, mut s) = (top(&mut k), seat(&mut k));
     let (vt, vs) = (volume(&k, &mut t), volume(&k, &mut s));
+    for fixed in [false, true] {
+        let v = join(fixed).unwrap();
+        println!("fix {fixed}: {v:.17e}");
+        assert!(
+            v > vt.max(vs) && v < vt + vs,
+            "fix {fixed}: union volume {v}, tubes {vt} and {vs}"
+        );
+    }
+}
+
+/// Closed-form enclosures of the union's volume and of its six face areas, sorted, as
+/// `(low, high)`. The two axes lie in the plane y = 0 and meet at the top tube's start
+/// `P = (-150, 0, 820)`; the seat's axis runs through `P` and the seat ends `delta` (3.7e-4)
+/// short of it. With `t1`, `t2` the axial coordinates from `P` (the top tube is `t1` in
+/// `[0, L1]`, the seat `t2` in `[-|P - (0, 0, 300)|, -delta]`), the overlap of the solids is the
+/// bicylinder (both infinite cylinders of radius `r`) cut to `t1 >= 0`, `t2 <= -delta`; both
+/// tubes reach far past the bicylinder (`|t| <= 2 r / sin a` there, 33 against 541 and 751).
+///
+/// - Cut by a plane parallel to both axes at height `z`, the bicylinder is a rhombus of two
+///   strips of half-width `w = sqrt(r^2 - z^2)` crossing at the axes' angle `a`, so its
+///   volume is `16 r^3 / (3 sin a)`. The quarter `t1 >= 0`, `t2 <= 0` is cut from every rhombus by
+///   the same two lines through its centre, so it is the same fraction `f` of each
+///   (`rhombus_quarter`): `V_q = f 16 r^3 / (3 sin a)`.
+/// - On the top tube's wall at angle `th` the cut is the rhombus's edge at offset
+///   `s = r sin th` with `w = |s|`, of length `2 |s| / sin a`; the quarter keeps the same fraction
+///   `g` of the edge at each offset sign (`edge_quarter`), and the wall element is `r dth dt1`,
+///   so the wall inside the other tube is `4 r^2 (g+ + g-) / sin a`; likewise for the seat.
+/// - A cap meets the other cylinder in an ellipse that holds the whole disc (`|cos a| < 1`),
+///   so the other tube covers half of it, up to the strip `delta` moves the dividing line.
+/// - `delta` moves each figure by at most a slab: `delta pi r^2` of volume, a band
+///   `2 pi r delta` of the seat's wall and `2 pi r delta / |cos a|` of the top's, and a strip
+///   of `2 r delta / sin a` (top cap) or `2 r delta |cos a| / sin a` (seat cap) across a cap.
+fn union_enclosure() -> ((f64, f64), [(f64, f64); 6]) {
+    use std::f64::consts::PI;
+    let r: f64 = 16.0;
+    let (l1, l2) = (751.0659092250161_f64, 541.2019951093923_f64);
+    let delta = 150.0_f64.hypot(520.0) - l2;
+    let unit = |x: f64, z: f64| {
+        let n = x.hypot(z);
+        [x / n, z / n]
+    };
+    let (a1, a2) = (unit(750.0, 40.0), unit(-150.0, 520.0));
+    let dot = |u: [f64; 2], v: [f64; 2]| u[0] * v[0] + u[1] * v[1];
+    let normal = |a: [f64; 2]| [-a[1], a[0]];
+    let (n1, n2) = (normal(a1), normal(a2));
+    let cos_a = dot(a1, a2);
+    let sin_a = (a1[0] * a2[1] - a1[1] * a2[0]).abs();
+    // the quarter t1 >= 0, t2 <= 0 of the unit rhombus |n1.x| <= 1, |n2.x| <= 1
+    let keep = |poly: Vec<[f64; 2]>, n: [f64; 2], c: f64| -> Vec<[f64; 2]> {
+        let mut out = Vec::new();
+        for i in 0..poly.len() {
+            let (p, q) = (poly[i], poly[(i + 1) % poly.len()]);
+            let (fp, fq) = (dot(n, p) - c, dot(n, q) - c);
+            if fp <= 0.0 {
+                out.push(p);
+            }
+            if fp * fq < 0.0 {
+                let t = fp / (fp - fq);
+                out.push([p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]);
+            }
+        }
+        out
+    };
+    let shoelace = |poly: &[[f64; 2]]| {
+        let mut a = 0.0;
+        for i in 0..poly.len() {
+            let (p, q) = (poly[i], poly[(i + 1) % poly.len()]);
+            a += p[0] * q[1] - q[0] * p[1];
+        }
+        0.5 * a.abs()
+    };
+    let neg = |n: [f64; 2]| [-n[0], -n[1]];
+    let mut rhombus = vec![
+        [-100.0, -100.0],
+        [100.0, -100.0],
+        [100.0, 100.0],
+        [-100.0, 100.0],
+    ];
+    for n in [n1, n2] {
+        rhombus = keep(keep(rhombus, n, 1.0), neg(n), 1.0);
+    }
+    let quarter = keep(keep(rhombus.clone(), neg(a1), 0.0), a2, 0.0);
+    let rhombus_quarter = shoelace(&quarter) / shoelace(&rhombus);
+    // the fraction of the rhombus edge n.x = s (s = +-1) that the quarter keeps
+    let edge_quarter = |n: [f64; 2], a: [f64; 2], other: [f64; 2], s: f64| {
+        let (c0, c1) = (s * dot(other, n), dot(other, a));
+        let (mut lo, mut hi) = ((-1.0 - c0) / c1, (1.0 - c0) / c1);
+        if lo > hi {
+            std::mem::swap(&mut lo, &mut hi);
+        }
+        let full = hi - lo;
+        for (b, sign) in [(a1, 1.0), (a2, -1.0)] {
+            let (b0, b1) = (s * dot(b, n), dot(b, a));
+            let at = -b0 / b1;
+            if sign * b1 > 0.0 {
+                lo = lo.max(at);
+            } else {
+                hi = hi.min(at);
+            }
+        }
+        (hi - lo).max(0.0) / full
+    };
+    let g1 = edge_quarter(n1, a1, n2, 1.0) + edge_quarter(n1, a1, n2, -1.0);
+    let g2 = edge_quarter(n2, a2, n1, 1.0) + edge_quarter(n2, a2, n1, -1.0);
+
+    let disc = PI * r * r;
+    let v_q = rhombus_quarter * 16.0 * r.powi(3) / (3.0 * sin_a);
+    let v_lo = disc * (l1 + l2) - v_q;
+    let volume = (v_lo, v_lo + delta * disc);
+    let top_wall = 2.0 * PI * r * l1 - 4.0 * r * r * g1 / sin_a;
+    let seat_wall = 2.0 * PI * r * l2 - 4.0 * r * r * g2 / sin_a;
+    let half = disc / 2.0;
+    let top_cap = (half, half + 2.0 * r * delta / sin_a);
+    let seat_strip = 2.0 * r * delta * cos_a.abs() / sin_a;
+    let mut areas = [
+        (half - seat_strip, half + seat_strip),
+        top_cap,
+        (disc, disc),
+        (disc, disc),
+        (seat_wall, seat_wall + 2.0 * PI * r * delta),
+        (top_wall, top_wall + 2.0 * PI * r * delta / cos_a.abs()),
+    ];
+    // the two half caps overlap as ranges; sorted values pair with ranges sorted by midpoint
+    areas.sort_by(|p, q| (p.0 + p.1).total_cmp(&(q.0 + q.1)));
+    (volume, areas)
+}
+
+/// The union's volume lies in a certified enclosure (`enclose_volume`) at most `5e-6` of
+/// it wide that holds the golden row's volume, and its volume and face areas lie in their
+/// closed-form enclosures ([`union_enclosure`]), widened by the integrators' requested accuracies (the goldens'
+/// `1e-6` for volume, `1e-4` for areas, relative) and `1e-12` relative for rounding in the
+/// enclosures themselves. Six faces: both walls, both far caps and both cut caps.
+#[test]
+fn wr533_tube_ends_union_measures_lie_in_their_closed_forms() {
+    let mut k = Kernel::default();
+    let (t, s) = (top(&mut k), seat(&mut k));
+    let mut r = boolean_union(&mut k, t, s).unwrap();
+    let ((v_lo, v_hi), area_ranges) = union_enclosure();
+    let within = |x: f64, lo: f64, hi: f64, rel: f64| {
+        let slack = (rel + 1e-12) * hi.abs();
+        x >= lo - slack && x <= hi + slack
+    };
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    let v = brep_volume(&k, &mut r, 1e-6, &attrs).unwrap();
+    println!("volume {v} in [{v_lo}, {v_hi}]");
     assert!(
-        v > vt.max(vs) && v < vt + vs,
-        "union volume {v}, tubes {vt} and {vs}"
+        within(v, v_lo, v_hi, 1e-6),
+        "volume {v} outside [{v_lo}, {v_hi}]"
     );
+    // the certified volume (`enclose_volume`, rounding counted) at most 5e-6 of it wide
+    // holds the `boolean.api_brep` row `issue1517_tube_ends_union_measured`'s volume, and
+    // meets the closed-form window. 5e-6 rather than 1e-7: this body's enclosure has a floor
+    // of 2.84 (2.8e-6 of the volume; the strip cells along its trims that no cut narrows),
+    // so 1e-7 is out of its reach; the closed-form window, 2.9e-7 wide, is the tighter one.
+    let golden = 1_032_433.151_040_827_5;
+    let e = enclose_volume(&k, &mut r, 5e-6 * golden).unwrap();
+    println!(
+        "enclosure [{}, {}] width {} ({:?})",
+        e.lo,
+        e.hi,
+        e.width(),
+        e.stop
+    );
+    assert!(e.width() <= 5e-6 * golden, "enclosure {e:?}");
+    assert!(
+        e.lo <= golden && golden <= e.hi,
+        "golden {golden} outside {e:?}"
+    );
+    assert!(
+        e.lo <= v_hi && v_lo <= e.hi,
+        "enclosure {e:?} misses [{v_lo}, {v_hi}]"
+    );
+    let mut areas: Vec<f64> = faces(&r, None)
+        .unwrap()
+        .into_iter()
+        .map(|f| face_area(&k, &mut r, f, 1e-4).unwrap())
+        .collect();
+    areas.sort_by(f64::total_cmp);
+    assert_eq!(areas.len(), 6, "faces: {areas:?}");
+    for (a, (lo, hi)) in areas.iter().zip(area_ranges) {
+        println!("area {a} in [{lo}, {hi}]");
+        assert!(within(*a, lo, hi, 1e-4), "area {a} outside [{lo}, {hi}]");
+    }
 }
 
 /// The `SmClass::Test #n` labels of the check's lines, sorted, so reports compare as
