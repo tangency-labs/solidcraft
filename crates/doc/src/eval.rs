@@ -2026,29 +2026,38 @@ fn check_kept(before: &ModelState, after: &ModelState) -> kernel::Result<()> {
 /// [`check_kept`] of bodies whose checks were detached from them ([`kernel::detach_kept`]), by
 /// body name, in order: the first that fails is the feature's error, as there. `inputs` are the
 /// bodies the feature replaced ([`replaced`]), for that error.
-fn run_kept(checks: Vec<(String, kernel::KeptCheck)>, inputs: Vec<(String, Body)>) -> kernel::Result<()> {
+fn run_kept(checks: Vec<(String, kernel::KeptCheck)>, inputs: Vec<(String, Body, bool)>) -> kernel::Result<()> {
     for (name, check) in checks {
         check.run().map_err(|e| kept_refused(&name, &e, &inputs))?;
     }
     Ok(())
 }
 
-/// The bodies of `before` a feature that made `after` replaced or used up (by name): its inputs,
-/// whose own check says whether a refusal of its result is the feature's doing.
-fn replaced(before: &ModelState, after: &ModelState) -> Vec<(String, Body)> {
+/// The bodies of `before` a feature that made `after` replaced or used up: its inputs, whose own
+/// check says whether a refusal of its result is the feature's doing. Each with whether the
+/// feature used it up (no body of `after` has its name, as a join's tools), so that a refusal of
+/// one result is blamed on its own former self or on bodies it consumed, never on another body
+/// the same feature changed beside it.
+fn replaced(before: &ModelState, after: &ModelState) -> Vec<(String, Body, bool)> {
     before
         .bodies
         .iter()
         .filter(|old| !after.bodies.iter().any(|b| b.body.same_shape(&old.body)))
-        .map(|old| (old.name.clone(), old.body.clone()))
+        .map(|old| (old.name.clone(), old.body.clone(), !after.bodies.iter().any(|b| b.name == old.name)))
         .collect()
 }
 
 /// The feature's error when the check of body `name`, which it keeps, refused it (`e`): naming
-/// the bodies among `inputs` that already failed SMLib's check before the feature ran, since the
-/// result's check reports their defects too. Checked only here, once the result is refused.
-fn kept_refused(name: &str, e: &kernel::KernelError, inputs: &[(String, Body)]) -> kernel::KernelError {
-    let failing: Vec<&str> = inputs.iter().filter(|(_, b)| kernel::failing_check(b).is_ok_and(|c| c.is_some())).map(|(n, _)| n.as_str()).collect();
+/// the bodies among `inputs` that went into it (its own former self, by name, and the bodies the
+/// feature used up) and already failed SMLib's check before the feature ran, since the result's
+/// check reports their defects too. Checked only here, once the result is refused.
+fn kept_refused(name: &str, e: &kernel::KernelError, inputs: &[(String, Body, bool)]) -> kernel::KernelError {
+    let failing: Vec<&str> = inputs
+        .iter()
+        .filter(|(n, _, used_up)| *used_up || n == name)
+        .filter(|(_, b, _)| kernel::failing_check(b).is_ok_and(|c| c.is_some()))
+        .map(|(n, _, _)| n.as_str())
+        .collect();
     let before = match failing.as_slice() {
         [] => String::new(),
         [only] if *only == name => " (it already failed SMLib's check before this feature)".to_string(),
@@ -3609,7 +3618,7 @@ impl Model {
                 // A parameter with an error fails the features using it, with that error.
                 let bad_param = param_names(f).into_iter().find_map(|n| self.param_errors.get(&n).map(|e| format!("parameter `{n}`: {e}")));
                 // The bodies whose check runs beside the features after this one.
-                let mut apart: Option<(Vec<(String, kernel::KeptCheck)>, Vec<(String, Body)>)> = None;
+                let mut apart: Option<(Vec<(String, kernel::KeptCheck)>, Vec<(String, Body, bool)>)> = None;
                 let refused = checks.refused(i);
                 let mut r = match frame_error.or(bad_param) {
                     _ if cached.is_some() => Ok(()),
@@ -12469,5 +12478,35 @@ mod named_face_lookup_tests {
         let st = parts(3);
         let hit = body_at(&st, &None, &[Vec3::new(22.0, 5.0, 5.0)]).unwrap();
         assert_eq!(st.bodies[hit].name, "Part1");
+    }
+}
+
+#[cfg(test)]
+mod kept_refused_tests {
+    use super::*;
+
+    /// #17689: a refused result names the inputs that already failed SMLib's check: its own
+    /// former self and the bodies the feature used up, never another body the same feature
+    /// changed beside it.
+    #[test]
+    fn a_refusal_names_only_the_results_own_inputs_that_failed_the_check() {
+        let text = include_str!("../../../tests/step-regressions/block_edge_off_its_face.step");
+        let bad = kernel::step_import(text).unwrap().bodies.remove(0).body;
+        assert!(kernel::failing_check(&bad).unwrap().is_some(), "the block fails the check");
+        let good = kernel::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        assert!(kernel::failing_check(&good).unwrap().is_none(), "the box passes it");
+        let e = kernel::KernelError::Failed("refused".into());
+        let msg = |name: &str, inputs: &[(String, Body, bool)]| kept_refused(name, &e, inputs).to_string();
+        // Both moved by one feature: the box's result is not blamed on the block.
+        let both = [("Bloco".to_string(), bad.clone(), false), ("Box1".to_string(), good.clone(), false)];
+        assert!(!msg("Box1", &both).contains("already failed"), "{}", msg("Box1", &both));
+        assert!(msg("Bloco", &both).contains("body `Bloco` (it already failed SMLib's check before this feature)"), "{}", msg("Bloco", &both));
+        // The block used up by a join into the box: named.
+        let joined = [("Bloco".to_string(), bad, true), ("Box1".to_string(), good, false)];
+        assert!(
+            msg("Box1", &joined).contains("body `Box1` (body `Bloco` already failed SMLib's check before this feature)"),
+            "{}",
+            msg("Box1", &joined)
+        );
     }
 }

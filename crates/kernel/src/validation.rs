@@ -217,7 +217,8 @@ pub fn failing_check(body: &Body) -> std::result::Result<Option<String>, String>
 /// failure's own values stay in the check's text.
 pub fn check_summary(check: &solidcraft_smlib::CheckReport) -> String {
     let mut tests: Vec<(&str, usize)> = Vec::new();
-    for line in check.text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+    // "AssertValid skipped" says why the second half of the check did not run: not a test failed.
+    for line in check.text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("AssertValid skipped")) {
         // The test's name ends where its values or its owner start.
         let name = [line.find(" ("), line.find(" [owner")].into_iter().flatten().min().map_or(line, |end| line.get(..end).unwrap_or(line)).trim_end();
         match tests.iter_mut().find(|(t, _)| *t == name) {
@@ -226,7 +227,8 @@ pub fn check_summary(check: &solidcraft_smlib::CheckReport) -> String {
         }
     }
     let listed: Vec<String> = tests.iter().map(|(t, n)| if *n > 1 { format!("{t} (×{n})") } else { (*t).to_string() }).collect();
-    format!("{} failed tests: {}", check.failures, listed.join("; "))
+    let s = if check.failures == 1 { "" } else { "s" };
+    format!("{} failed test{s}: {}", check.failures, listed.join("; "))
 }
 
 /// [`check_result`] of a step's result nobody else reads, which it takes: the token over this

@@ -784,13 +784,14 @@ fn a_part_smlibs_check_fails_is_reported_at_import_by_name() {
     assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
     let body = &imp.bodies[0].body;
     assert!(body.smlib_refusal().is_none(), "SMLib takes the part");
+    assert_eq!((body.face_count(), body.edge_count(), body.vertex_count()), (6, 13, 9), "the block's topology as the file writes it");
     let check = body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
     assert!(!check.is_valid(), "the check fails it");
     let summary = crate::validation::check_summary(&check);
     let issue = imp.report.issues.iter().find(|i| i.kind == IssueKind::NeedsRepair).unwrap_or_else(|| panic!("{:?}", imp.warnings));
     assert_eq!(issue.detail, format!("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: {summary}"));
     assert!(imp.warnings.contains(&issue.detail), "{:?}", imp.warnings);
-    assert!(summary.starts_with(&format!("{} failed tests: ", check.failures)), "{summary}");
+    assert!(summary.starts_with(&format!("{} failed test", check.failures)), "{summary}");
     // Each test the check failed is named once, with how many times it failed.
     for line in check.text.lines().filter(|l| l.contains("Test #")) {
         let name = &line[..line.find(" (").unwrap()];
@@ -798,6 +799,9 @@ fn a_part_smlibs_check_fails_is_reported_at_import_by_name() {
     }
     // The block as written (its edge on the plane) passes the check, and no warning says otherwise.
     let clean = step_import(&lifted_bezier_block(0.0)).unwrap();
+    assert_eq!(clean.bodies.len(), 1, "{:?}", clean.warnings);
+    let b = &clean.bodies[0].body;
+    assert_eq!((b.face_count(), b.edge_count(), b.vertex_count()), (6, 13, 9), "the same topology with the edge on its face");
     assert!(clean.bodies[0].body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap().is_valid());
     assert!(clean.report.issues.iter().all(|i| i.kind != IssueKind::NeedsRepair), "{:?}", clean.warnings);
 }
