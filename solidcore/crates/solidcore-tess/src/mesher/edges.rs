@@ -7,9 +7,12 @@ use solidcore::eval::CurveEval;
 use solidcore_convert as kernel;
 use crate::vec::VecExt as _;
 
-use super::size::Rules;
+use super::size::{Rules, SizeAt};
 use crate::{Result, TessError};
 
+/// How near, as a fraction of its segment's parameter length, a node put in on an edge may lie to
+/// another before it is that node ([`insert_at`]).
+const NEAR: f64 = 1e-6;
 /// Most nodes on one edge.
 pub(crate) const MAX_EDGE_NODES: usize = 20_000;
 /// Deepest bisection of one edge segment.
@@ -44,6 +47,14 @@ pub(crate) struct Nodes {
 /// exactly. A curve that does not evaluate somewhere on its interval is an error naming the
 /// edge.
 pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> Result<Nodes> {
+    sample_edge_sized(b, ei, rules, h, None)
+}
+
+/// [`sample_edge`], where no segment is longer than the size function `size_at` asks at its
+/// middle either (the mesh path's, [`super::Purpose::Mesh`]; `None`: `h` alone). A line is
+/// divided evenly by `h` as there, then its segments are halved, on the line, wherever the
+/// function asks for less; a curve is bisected to both.
+pub(crate) fn sample_edge_sized(b: &brep::Brep, ei: usize, rules: &Rules, h: f64, size_at: Option<SizeAt<'_>>) -> Result<Nodes> {
     let fail = |why: String| TessError::Failed(format!("tessellation: edge {ei}: {why}"));
     let edge = b.edges.get(ei).ok_or_else(|| fail("no such edge".into()))?;
     let vertex = |k: usize| {
@@ -61,6 +72,15 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
         // runs the edge backwards starts its loop with that node, where the face running it
         // forwards takes the next edge's first node (the vertex) — a crack.
         let n = if h > 0.0 { (front.dist(back) / h).ceil().clamp(1.0, (MAX_EDGE_NODES - 1) as f64) as usize } else { 1 };
+        if let Some(f) = size_at {
+            // The line's even division by `h`, each segment then halved on the line while the
+            // size function asks for less at its middle. Its chords lie on it: no sag to split.
+            let initial = u32::try_from(n).map_err(|_| fail(format!("{n} segments")))?;
+            let along = back - front;
+            let on_line = |t: f64| -> Result<Vec3> { Ok(front + along * ((t - t0) / (t1 - t0))) };
+            let local = |pa: Vec3, pb: Vec3| super::size::local(h, Some(f), (pa + pb) * 0.5);
+            return bisect_at(&on_line, [t0, t1], [front, back], initial, rules, &local);
+        }
         let mut pts: Vec<Vec3> = (0..=n).map(|i| front + (back - front) * (i as f64 / n as f64)).collect();
         let mut params: Vec<f64> = (0..=n).map(|i| t0 + (t1 - t0) * (i as f64 / n as f64)).collect();
         if let (Some(p), Some(t)) = (pts.last_mut(), params.last_mut()) {
@@ -79,14 +99,30 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
     // A closed curve's chord between its ends is empty: start it from a few segments. An open
     // one starts whole, so an arc the tolerance leaves flat stays one segment.
     let initial: u32 = if edge.vertices[0] == edge.vertices[1] { 4 } else { 1 };
-    bisect(&at, [t0, t1], [front, back], initial, rules, h)
+    match size_at {
+        None => bisect(&at, [t0, t1], [front, back], initial, rules, h),
+        Some(f) => bisect_at(&at, [t0, t1], [front, back], initial, rules, &|pa: Vec3, pb: Vec3| super::size::local(h, Some(f), (pa + pb) * 0.5)),
+    }
 }
 
 /// The nodes of a curve over `[t0, t1]` by bisection: from `initial` even segments, each split
 /// until its chord is within the tolerance of the curve (checked at the quarter points), at most
 /// `h` long, within the rules' facet angle and spanning at most a quarter turn. The end nodes
 /// are `ends` themselves, not the curve's points there. `at` evaluates the curve.
-pub(crate) fn bisect(at: &impl Fn(f64) -> Result<Vec3>, [t0, t1]: [f64; 2], [front, back]: [Vec3; 2], initial: u32, rules: &Rules, h: f64) -> Result<Nodes> {
+pub(crate) fn bisect(at: &impl Fn(f64) -> Result<Vec3>, ts: [f64; 2], ends: [Vec3; 2], initial: u32, rules: &Rules, h: f64) -> Result<Nodes> {
+    bisect_at(at, ts, ends, initial, rules, &|_: Vec3, _: Vec3| h)
+}
+
+/// [`bisect`], with the longest side asked of each segment given by `h` from its two end
+/// points (the mesh path's size function, [`sample_edge_sized`]).
+pub(crate) fn bisect_at(
+    at: &impl Fn(f64) -> Result<Vec3>,
+    [t0, t1]: [f64; 2],
+    [front, back]: [Vec3; 2],
+    initial: u32,
+    rules: &Rules,
+    h: &dyn Fn(Vec3, Vec3) -> f64,
+) -> Result<Nodes> {
     let tol = rules.tol;
     let t_at = |i: u32| t0 + (t1 - t0) * f64::from(i) / f64::from(initial);
     let ends: Vec<Vec3> = (0..=initial).map(|i| at(t_at(i))).collect::<Result<_>>()?;
@@ -119,6 +155,7 @@ pub(crate) fn bisect(at: &impl Fn(f64) -> Result<Vec3>, [t0, t1]: [f64; 2], [fro
         let (q1, q3) = (at(a + 0.25 * (b - a))?, at(a + 0.75 * (b - a))?);
         let done = sg.depth >= MAX_DEPTH || out.len() + stack.len() >= MAX_EDGE_NODES;
         let sag = [q1, pm, q3].iter().map(|q| q.dist_to_segment(pa, pb)).fold(0.0, f64::max);
+        let h = h(pa, pb);
         let fine = || {
             let short = !(pa.dist(pb) > h * (1.0 + 1e-9));
             // The two half chords of an arc turning θ differ by θ/2.
@@ -195,6 +232,56 @@ pub(crate) fn split_segments(b: &brep::Brep, ei: usize, nodes: &mut Nodes, segs:
         };
         points.push(pm);
         params.push(m);
+    }
+    nodes.points = points;
+    nodes.params = params;
+    Ok(())
+}
+
+/// Edge `ei`'s nodes with a node put in at each of the curve parameters `ts` that lies strictly
+/// inside a segment, on the curve (on a line, along its segment, as [`split_segments`] puts a
+/// line's), in order: where the mesh path's shaping split a boundary side of a face of the edge,
+/// so every face of it takes the node. Two faces splitting one side in a round give its
+/// fraction each in its own metric, apart by their rounding: a parameter within [`NEAR`] of
+/// its segment's length from a node, or from one put in before it, is the same node and left
+/// out, so no two nodes lie a rounding apart. The nodes are unchanged on an error: more than
+/// [`MAX_EDGE_NODES`] nodes, or a curve that does not evaluate there, naming the edge.
+pub(crate) fn insert_at(b: &brep::Brep, ei: usize, nodes: &mut Nodes, ts: &[f64]) -> Result<()> {
+    let fail = |why: String| TessError::Failed(format!("tessellation: edge {ei}: {why}"));
+    let edge = b.edges.get(ei).ok_or_else(|| fail("no such edge".into()))?;
+    let mut ts: Vec<f64> = ts.iter().copied().filter(|t| t.is_finite()).collect();
+    ts.sort_by(f64::total_cmp);
+    ts.dedup();
+    if nodes.points.len() + ts.len() > MAX_EDGE_NODES {
+        return Err(fail(format!("more than {MAX_EDGE_NODES} nodes")));
+    }
+    let curve = match edge.curve {
+        Curve::Line { .. } => None,
+        _ => Some(CurveEval::new(&kernel::curve(edge.parameters()).map_err(|e| fail(e.to_string()))?).map_err(|e| fail(crate::eval_message(e)))?),
+    };
+    let n = nodes.points.len().min(nodes.params.len());
+    let (mut points, mut params) = (Vec::new(), Vec::new());
+    let mut next = ts.into_iter().peekable();
+    for k in 0..n {
+        let (Some(&p), Some(&t)) = (nodes.points.get(k), nodes.params.get(k)) else { continue };
+        points.push(p);
+        params.push(t);
+        let (Some(&q), Some(&u)) = (nodes.points.get(k + 1), nodes.params.get(k + 1)) else { continue };
+        // The last node of the segment so far: the one at `t`, then each put in.
+        let mut last = t;
+        while let Some(m) = next.next_if(|m| *m < u) {
+            let near = NEAR * (u - t);
+            if !(m - last > near && u - m > near) {
+                continue;
+            }
+            last = m;
+            let pm = match &curve {
+                None => p + (q - p) * ((m - t) / (u - t)),
+                Some(c) => c.point(m).filter(|p| p.is_finite()).ok_or_else(|| fail(format!("the curve does not evaluate at t = {m}")))?,
+            };
+            points.push(pm);
+            params.push(m);
+        }
     }
     nodes.points = points;
     nodes.params = params;

@@ -380,8 +380,7 @@ pub(crate) struct DerivedOverrides<'a> {
     /// `IsDegenerate(tol)` over the natural interval.
     pub is_degenerate: &'a dyn Fn(f64) -> Result<bool>,
     /// Not upstream: the surface of the face whose UV trim this curve is
-    /// (`GetEdgeuse()->GetFace()->GetSurface()`), read only with
-    /// `Kernel::fixes.uv_trim_checks_on_surface` (WR-560); `None` for any other curve.
+    /// (`GetEdgeuse()->GetFace()->GetSurface()`), WR-560; `None` for any other curve.
     pub trim_surface: Option<&'a Surface>,
     /// Not upstream: the edge this curve is the 3D curve or a UV trim of
     /// (`GetEdge()`, `GetEdgeuse()->GetEdge()`), read for WR-668's zero-speed tangent
@@ -1414,9 +1413,8 @@ impl BSplineCurve {
     }
 
     /// [`BSplineCurve::assert_valid`] of a UV trim on `trim_surface`, its face's
-    /// surface: with `Kernel::fixes.uv_trim_checks_on_surface` (WR-560) the radius of
-    /// curvature (13) and coincident control point (15) tests measure the trim on that
-    /// surface; otherwise the same as [`BSplineCurve::assert_valid`].
+    /// surface: the radius of curvature (13) and coincident control point (15) tests
+    /// measure the trim on that surface (WR-560).
     ///
     /// # Errors
     ///
@@ -1599,7 +1597,6 @@ impl BSplineCurve {
         let analytic = ovr.analytic;
 
         // for debug - data at failing tests
-        let mut min_radius = BIG_DOUBLE;
         let dim = self.dim;
         if !degenerate && !analytic {
             // for non degenerate curves
@@ -1828,7 +1825,7 @@ impl BSplineCurve {
             // mapped trim that cannot be sized fails test 13 and is not analysed.
             let mut mapped: Option<BSplineCurve> = None;
             let (mut radius_sized, mut radius_tol, mut radius_sep) = (sized, tol, min_sep);
-            if sized && k.fixes.uv_trim_checks_on_surface {
+            if sized {
                 if let Some(l) = trim_metric(k, self, bounded, ovr.trim_surface, &domain)? {
                     mapped = mapped_trim(self, l);
                     let mapped_box = match mapped.as_ref() {
@@ -1856,18 +1853,15 @@ impl BSplineCurve {
 
             // Another type of kink check: vanishing radius of curvature.
             let mut radii = false;
-            // Not upstream (#2568): the search's solutions only reach a report through
-            // `bspline_check_min_radius` (below); without it, or where the radius is
-            // bounded above the tolerance and the search's objective evaluates everywhere
-            // (a failed evaluation is returned as a radius of 0), it cannot report and is
-            // not run
+            // Not upstream (#2568): where the radius is bounded above the tolerance and the
+            // search's objective evaluates everywhere (a failed evaluation is returned as a
+            // radius of 0), the search cannot report and is not run
             let radius_clear = shortcut
-                && (!k.fixes.bspline_check_min_radius
-                    || match mapped.as_ref() {
-                        None => bounds,
-                        Some(m) => m.nurb.as_ref().and_then(curve_bounds),
-                    }
-                    .is_some_and(|b| b.radius_clears(radius_tol)));
+                && match mapped.as_ref() {
+                    None => bounds,
+                    Some(m) => m.nurb.as_ref().and_then(curve_bounds),
+                }
+                .is_some_and(|b| b.radius_clears(radius_tol));
             let solutions = if radius_sized && radius_clear {
                 radii = true;
                 Vec::new()
@@ -1904,8 +1898,7 @@ impl BSplineCurve {
             };
 
             // (upstream compares before setting the minimum radius, so the test never
-            // fires; the opt-in `Kernel::fixes.bspline_check_min_radius` reads it first:
-            // WR-382, tangency-labs/solidcore#475)
+            // fires; here it is read first: WR-382, tangency-labs/solidcore#475)
             //
             // Not upstream (fork tangency-labs/smlib ecf1963, WR-668): at a
             // zero-speed tangent end the radius vanishes as |t - t_end|. A solution below
@@ -1938,11 +1931,8 @@ impl BSplineCurve {
                 }
             }
             let first_radius = first.map_or(BIG_DOUBLE, |s| s.solution_value);
-            if k.fixes.bspline_check_min_radius {
-                min_radius = first_radius;
-            }
+            let min_radius = first_radius;
             if min_radius < radius_tol {
-                min_radius = first_radius;
                 let min_radius_param = match first {
                     Some(s) => s.param(0)?,
                     None => 0.0,
@@ -1967,15 +1957,13 @@ impl BSplineCurve {
         /* 15 */
         // Are Curve Internal ControlPoints Coincident
         let pole_tol = ZONE_TOL_3D / 10.0;
-        // Not upstream (fork tangency-labs/smlib 54ca3e0, WR-560, opt-in): the tolerance is
+        // Not upstream (fork tangency-labs/smlib 54ca3e0, WR-560): the tolerance is
         // a length, and a UV trim's control points are measured as lengths on its face's
         // surface, as the radius test above.
         let mut pole_curve: Option<BSplineCurve> = None;
-        if k.fixes.uv_trim_checks_on_surface {
-            let interval = self.natural_interval();
-            if let Some(l) = trim_metric(k, self, ovr.bounded, ovr.trim_surface, &interval)? {
-                pole_curve = mapped_trim(self, l);
-            }
+        let interval = self.natural_interval();
+        if let Some(l) = trim_metric(k, self, ovr.bounded, ovr.trim_surface, &interval)? {
+            pole_curve = mapped_trim(self, l);
         }
         let has_internal_pole = pole_curve
             .as_ref()
@@ -2265,22 +2253,11 @@ mod tests {
 
     #[test]
     fn assert_valid_reports_tiny_curvature_radius_in_2d_and_3d() {
-        let mut k = Kernel::default();
-        k.fixes.bspline_check_min_radius = true;
+        let k = Kernel::default();
         let width = 0.001;
         for (dim, test_index) in [(2, 13), (3, 14)] {
             let c = curvature_test_parabola(dim, width);
             for level_given in [true, false] {
-                let mut default_list = AssertArray::new();
-                assert!(c
-                    .assert_valid(
-                        &Kernel::default(),
-                        Some(&mut default_list),
-                        level_given,
-                        ObjectKey(42)
-                    )
-                    .unwrap());
-                assert!(default_list.is_empty(), "{default_list:?}");
                 let mut list = AssertArray::new();
                 assert!(!c
                     .assert_valid(&k, Some(&mut list), level_given, ObjectKey(42))
@@ -2306,8 +2283,7 @@ mod tests {
 
     #[test]
     fn assert_valid_accepts_regular_curvature_and_linear_empty_analysis() {
-        let mut k = Kernel::default();
-        k.fixes.bspline_check_min_radius = true;
+        let k = Kernel::default();
         for dim in [2, 3] {
             let c = curvature_test_parabola(dim, 0.02);
             let mut list = AssertArray::new();
@@ -2330,8 +2306,7 @@ mod tests {
 
     #[test]
     fn assert_valid_accepts_straight_span_joined_to_regular_bend() {
-        let mut k = Kernel::default();
-        k.fixes.bspline_check_min_radius = true;
+        let k = Kernel::default();
         // A straight quadratic span followed by a C1 quadratic bend. The radius
         // is infinite on the straight span and at least 1/2 on the bend.
         let c = curve(
@@ -2383,12 +2358,12 @@ mod tests {
     }
 
     /// tangency-labs/solidcore#475 (WR-382): tests 13/14 (an extremely small radius of
-    /// curvature) compare the minimum radius before it is read, so they never fire; the
-    /// opt-in reads it first. A quadratic with a sharp bend: radius 1/h = 1e-3 at its
+    /// curvature) compare the minimum radius before it is read upstream, so they never
+    /// fire; here it is read first. A quadratic with a sharp bend: radius 1/h = 1e-3 at its
     /// middle against a tolerance of about h / 20000 = 0.05.
     #[test]
     fn issue_475_min_radius_of_curvature_test() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let h = 1000.0;
         let c = curve(
             2,
@@ -2405,9 +2380,6 @@ mod tests {
                 .collect();
             (ok, idx)
         };
-        let (_, idx) = tests(&k);
-        assert!(!idx.contains(&14), "{idx:?}");
-        k.fixes.bspline_check_min_radius = true;
         let (ok, idx) = tests(&k);
         assert!(!ok && idx.contains(&14), "{idx:?}");
     }
@@ -2507,16 +2479,11 @@ mod tests {
     /// WR-560 (fork tangency-labs/smlib b4f8c57, #891 item 2): the exact trim of a r 1
     /// circle on a plane spanning 600 x 3 is an ellipse 200 times as long as it is wide
     /// in (u, v), of radius 8.3e-6 at its ends against a tolerance of about 6.7e-5; on
-    /// the plane it is the circle of radius 1. Test 13 needs `bspline_check_min_radius`
-    /// to fire at all (WR-382).
+    /// the plane it is the circle of radius 1.
     #[test]
     fn issue_891_uv_trim_radius_is_measured_on_its_surface() {
-        let mut k = Kernel::default();
-        k.fixes.bspline_check_min_radius = true;
+        let k = Kernel::default();
         let (trim, plane) = circle_trim_on_plane((300.0, 1.5, 1.0), (600.0, 3.0));
-        let idx = failed_tests(&k, &trim, Some(&plane));
-        assert!(idx.contains(&13), "{idx:?}");
-        k.fixes.uv_trim_checks_on_surface = true;
         let idx = failed_tests(&k, &trim, Some(&plane));
         assert!(!idx.contains(&13), "{idx:?}");
         // a curve that is no face's trim is tested as it is
@@ -2529,11 +2496,8 @@ mod tests {
     /// pole tolerance `SM_ZONE_TOL_3D / 10`; on the plane they are 0.003 apart.
     #[test]
     fn issue_1524_uv_trim_control_points_are_measured_on_its_surface() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let (trim, plane) = circle_trim_on_plane((2250.0, 2250.0, 0.003), (4500.0, 4500.0));
-        let idx = failed_tests(&k, &trim, Some(&plane));
-        assert!(idx.contains(&15), "{idx:?}");
-        k.fixes.uv_trim_checks_on_surface = true;
         let idx = failed_tests(&k, &trim, Some(&plane));
         assert!(!idx.contains(&15), "{idx:?}");
     }
@@ -2599,12 +2563,11 @@ mod tests {
     fn wr_668_zero_speed_tangent_end_is_no_kink() {
         let c = zero_speed_end_curve();
         let tangent = ends((0.0, 1.0), true);
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         // at a vertex where the edge's faces touch, the coincident first control points
         // (test 3) and, with the minimum radius read, the radius below the tolerance
         // (test 14) are the zero-speed end (upstream reports both)
         assert!(edge_failed_tests(&k, &c, Some(&tangent)).is_empty());
-        k.fixes.bspline_check_min_radius = true;
         assert!(edge_failed_tests(&k, &c, Some(&tangent)).is_empty());
         // on no edge, where the faces meet at an angle, or at no end of the edge, it
         // still fails both. Before tangency-labs/solidcore#2574 the 0 test 14 compared
@@ -2675,9 +2638,8 @@ mod tests {
             assert!(is_zero_speed_tangent_end(&c, 1, 1e-15, Some(&tangent)).unwrap());
             assert!(!is_zero_speed_tangent_end(&c, 0, 1e-15, Some(&tangent)).unwrap());
 
-            let mut k = Kernel::default();
+            let k = Kernel::default();
             assert!(edge_failed_tests(&k, &c, Some(&tangent)).is_empty());
-            k.fixes.bspline_check_min_radius = true;
             assert!(edge_failed_tests(&k, &c, Some(&tangent)).is_empty());
             // on no edge, or on an edge that ends past the curve's end, it still fails
             assert_eq!(edge_failed_tests(&k, &c, None), vec![radius_test]);
@@ -2706,13 +2668,10 @@ mod tests {
         );
         let tangent = ends((0.0, 1.0), true);
         assert!(!is_zero_speed_tangent_end(&c, 0, EFF_ZERO, Some(&tangent)).unwrap());
-        for min_radius in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.bspline_check_min_radius = min_radius;
-            let on_edge = edge_failed_tests(&k, &c, Some(&tangent));
-            assert!(on_edge.contains(&3), "{on_edge:?}");
-            assert_eq!(edge_failed_tests(&k, &c, None), on_edge);
-        }
+        let k = Kernel::default();
+        let on_edge = edge_failed_tests(&k, &c, Some(&tangent));
+        assert!(on_edge.contains(&3), "{on_edge:?}");
+        assert_eq!(edge_failed_tests(&k, &c, None), on_edge);
     }
 
     #[test]

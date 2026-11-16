@@ -117,7 +117,7 @@ pub(crate) fn copies_of<T: Copy>(
 }
 
 /// The name of each edge curve a merge makes.
-fn curve_ref(e: EdgeId, _type_code: i64) -> ObjectRef {
+pub(crate) fn curve_ref(e: EdgeId, _type_code: i64) -> ObjectRef {
     solidcore::topology::loopuse::notify_ref(EntityRef::Edge(e))
 }
 

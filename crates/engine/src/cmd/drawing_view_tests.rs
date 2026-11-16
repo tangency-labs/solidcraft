@@ -1,15 +1,18 @@
 use std::sync::Arc;
 
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
 use solidcraft_doc::drawing::DEFAULT_DPI;
+use solidcraft_doc::drawing::view::{Diagonal, QuarterTurn};
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_view::ProjectedSide;
 use solidcraft_geom::paper::NoPictures;
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 
 use super::*;
-use crate::drawing_scene::tests::{add_a_pin, hinge_pair, two_cubes};
+use crate::drawing_scene::tests::{add_a_pin, configured_block, hinge_pair, plate as sheet_plate, two_cubes};
+use crate::drawing_view::bend_dashes_mm;
 use crate::schema::tests::conforms;
 
 const EPS: f64 = 1e-9;
@@ -63,7 +66,7 @@ pub(crate) fn three_views_of(mut s: Session) -> (Session, [u64; 3]) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let mut add = |d: &mut Drawing, kind: ViewKind, place: ViewPlace, settings: ViewOverrides| {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0 })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, label: None })]);
         id
     };
     let front_settings =
@@ -184,8 +187,10 @@ fn an_edit_is_one_undo_step_and_names_its_followers() {
     let turned = edit_view(&mut s, front, json!({"view": "top", "scale": "1:5"}));
     assert_eq!(turned["changed"], json!(["scale", "view"]));
     assert_eq!(turned["followers"], json!([ids::encode(top), ids::encode(right)]), "by id");
-    assert_eq!(edit_view(&mut s, right, json!({"place": {"at": [320.0, 150.0]}}))["changed"], json!(["place"]));
-    assert_eq!(edit_view(&mut s, top, json!({"reference_shown_percent": 5.0}))["changed"], json!(["reference_shown_percent"]));
+    assert_eq!(edit_view(&mut s, right, json!({"place": {"at": [320.0, 150.0]}}))["changed"], json!(["place", "label"]), "and given its letter");
+    // The top view was placed apart without a letter (built above, not by a command): its first edit gives it one.
+    let edited = edit_view(&mut s, top, json!({"reference_shown_percent": 5.0}));
+    assert_eq!(edited["changed"], json!(["reference_shown_percent", "label"]));
     assert_eq!(inspect_view(&mut s, top)["reference_shown_percent"], 5.0);
     for percent in [-1.0, 100.001, 1e308] {
         assert!(edit_refused(&mut s, top, json!({"reference_shown_percent": percent})).contains("reference_shown_percent"), "{percent}");
@@ -910,7 +915,8 @@ fn drawn_length(v: &Value, visibility: &str) -> f64 {
 
 /// The block's front view at 1:2, centred on the A3 sheet at (210, 148.5): visible lines round its
 /// 50 x 10 mm outline and nothing else. The back edges lie under the front ones and are counted as
-/// covered; the edges seen end on draw nothing. The lines are the mesh's, so they say sampled.
+/// covered; the edges seen end on draw nothing. The lines are the block's exact edges, so they say
+/// analytic, and certify any accuracy.
 #[test]
 fn a_views_lines_are_the_blocks_outline() {
     let mut s = block();
@@ -927,10 +933,258 @@ fn a_views_lines_are_the_blocks_outline() {
     assert!(segments(&v, "visible").iter().all(|(a, b)| on_outline(*a) && on_outline(*b)), "{v}");
     for line in v["lines"].as_array().unwrap() {
         assert_eq!((&line["body"], &line["occurrence"], &line["reference"]), (&json!("Block"), &json!([]), &json!(false)), "{line}");
-        assert!(line["pieces"].as_array().unwrap().iter().all(|p| p["accuracy"]["kind"] == "sampled"), "{line}");
+        assert!(line["pieces"].as_array().unwrap().iter().all(|p| p["accuracy"]["kind"] == "analytic"), "{line}");
     }
-    assert_eq!((&v["status"]["lines"], &v["status"]["provenance"]), (&json!("approximate"), &json!("mesh_projection")));
+    assert_eq!((&v["status"]["lines"], &v["status"]["provenance"]), (&json!("exact"), &json!("hidden_lines")));
     assert!(v["status"]["covered_pieces"].as_u64().unwrap() >= 4, "{v}");
+    assert_eq!((v["stats"]["shared_meshes"].as_u64(), v["stats"]["triangles"].as_u64()), (Some(0), Some(0)), "nothing is meshed: {v}");
+    snap(&mut s, json!({"scale": "1:2", "max_error_mm": 0.0001}));
+}
+
+/// A view looking as the front view does, its plane through another point, draws the same lines on
+/// paper: a view is centred on what it shows, wherever its plane's origin is.
+#[test]
+fn a_views_origin_moves_nothing_on_paper() {
+    let mut s = block();
+    let front = snap(&mut s, json!({"scale": "1:2", "visual_style": "visible_hidden"}));
+    let looking = json!({"direction": [0, 1, 0], "up": [0, 0, 1], "origin": [30, 7, 5]});
+    let moved = snap(&mut s, json!({"view": looking, "scale": "1:2", "visual_style": "visible_hidden"}));
+    let ends = |v: &Value, visibility: &str| {
+        let mut ends: Vec<[f64; 4]> = segments(v, visibility).into_iter().map(|(a, b)| [a.x, a.y, b.x, b.y]).collect();
+        ends.sort_by(|p, q| p.partial_cmp(q).unwrap());
+        ends
+    };
+    for visibility in ["visible", "hidden"] {
+        let (a, b) = (ends(&front, visibility), ends(&moved, visibility));
+        assert!(!a.is_empty() || visibility == "hidden", "{front}");
+        assert_eq!(a.len(), b.len(), "{visibility}: {moved}");
+        assert!(a.iter().zip(&b).all(|(p, q)| p.iter().zip(q).all(|(x, y)| (x - y).abs() < 1e-9)), "{visibility}: {a:?} {b:?}");
+    }
+}
+
+/// The block in iso, hidden lines too: its three back edges are hidden over all their length, each
+/// one straight analytic piece, as long on paper as the block is along it at 1:2 (100, 50 and 20
+/// mm, foreshortened to sqrt(2/3) of it), and nothing else is hidden.
+#[test]
+fn an_iso_views_back_edges_are_hidden_end_to_end() {
+    let mut s = block();
+    let v = snap(&mut s, json!({"view": "iso", "scale": "1:2", "visual_style": "visible_hidden"}));
+    let hidden: Vec<&Value> =
+        v["lines"].as_array().unwrap().iter().filter(|l| l["pieces"].as_array().unwrap().iter().any(|p| p["visibility"] == "hidden")).collect();
+    assert_eq!(hidden.len(), 3, "{v}");
+    let mut lengths: Vec<f64> = Vec::new();
+    for line in hidden {
+        let [piece] = line["pieces"].as_array().unwrap().as_slice() else { panic!("one piece: {line}") };
+        assert_eq!((&piece["visibility"], &piece["accuracy"]["kind"]), (&json!("hidden"), &json!("analytic")), "{line}");
+        let [seg] = piece["path"].as_array().unwrap().as_slice() else { panic!("one segment: {line}") };
+        lengths.push(point(&seg["a"]).dist(point(&seg["b"])));
+    }
+    lengths.sort_by(f64::total_cmp);
+    let along = (2.0f64 / 3.0).sqrt() / 2.0;
+    for (got, want) in lengths.iter().zip([20.0, 50.0, 100.0]) {
+        assert!((got - want * along).abs() < 1e-9, "{lengths:?}: {v}");
+    }
+}
+
+/// A cylinder in iso: its rims, circles seen at an angle, are chords within `chord_mm` on paper,
+/// bounded by it; its sides are one exact silhouette line each, named by its first face.
+#[test]
+fn a_cylinder_in_iso_has_bounded_rims_and_exact_sides() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"diameter": 20, "height": 30, "body_name": "Cylinder"}));
+    let v = snap(&mut s, json!({"view": "iso", "scale": "1:1"}));
+    let lines = v["lines"].as_array().unwrap();
+    let (rims, sides): (Vec<&Value>, Vec<&Value>) = lines.iter().partition(|l| l["source"]["kind"] == "edge");
+    assert!(!rims.is_empty() && sides.len() == 2, "{v}");
+    for piece in rims.iter().flat_map(|l| l["pieces"].as_array().unwrap()) {
+        assert_eq!(piece["accuracy"], json!({"kind": "bounded", "max_deviation_mm": 0.01}), "{piece}");
+        assert!(piece["path"].as_array().unwrap().iter().all(|seg| seg["type"] == "line"), "{piece}");
+    }
+    for side in sides {
+        let [piece] = side["pieces"].as_array().unwrap().as_slice() else { panic!("{side}") };
+        assert_eq!(piece["accuracy"]["kind"], "analytic", "{side}");
+        let [seg] = piece["path"].as_array().unwrap().as_slice() else { panic!("{side}") };
+        assert!((point(&seg["a"]).dist(point(&seg["b"])) - 30.0 * (2.0f64 / 3.0).sqrt()).abs() < 1e-9, "{side}");
+    }
+    let faces: Vec<&Value> = lines.iter().filter(|l| l["source"]["kind"] == "silhouette").map(|l| &l["source"]["face"]).collect();
+    assert_eq!(faces[0], faces[1], "both sides are the silhouette of one surface: {v}");
+    assert_eq!((&v["status"]["lines"], &v["status"]["provenance"]), (&json!("exact"), &json!("hidden_lines")));
+}
+
+/// A cylinder's sides meet its rims, seen from each upper corner, so its rims' seams fall at either
+/// tangent point in one view or another: each side ends where a visible piece of its bottom rim ends
+/// (to 1e-6), and both its ends lie on a rim (within `chord_mm`). With hidden lines, the bottom rim's
+/// hidden half starts at a side's end too. Every view is checked before the test fails, so its
+/// message lists each side that misses. Listed in tests/KNOWN_FAILING_TESTS until `hlr` splits a rim
+/// where a side line touches it (#2455).
+#[test]
+fn a_cylinders_sides_meet_its_rims_from_every_corner() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 15, "height": 50, "base": [80, 20, 0], "axis": "Z", "body_name": "Cylinder"}));
+    // The ends of each piece of a rim, and its segments, at `visibility`.
+    let rims = |v: &Value, visibility: &str| {
+        let pieces = v["lines"].as_array().unwrap().iter().filter(|l| l["source"]["kind"] == "edge").flat_map(|l| l["pieces"].as_array().unwrap());
+        let paths: Vec<Vec<(Vec2, Vec2)>> = pieces
+            .filter(|p| p["visibility"] == visibility)
+            .map(|p| p["path"].as_array().unwrap().iter().map(|seg| (point(&seg["a"]), point(&seg["b"]))).collect())
+            .collect();
+        let ends: Vec<Vec2> = paths.iter().flat_map(|path| [path.first().unwrap().0, path.last().unwrap().1]).collect();
+        (ends, paths.concat())
+    };
+    let off = |p: Vec2, (a, b): (Vec2, Vec2)| {
+        let t = ((p - a).dot(b - a) / (b - a).len2()).clamp(0.0, 1.0);
+        p.dist(a + (b - a) * t)
+    };
+    // The distance from a side's nearer end to the nearest of `at`.
+    let gap = |(a, b): (Vec2, Vec2), at: &[Vec2]| [a, b].iter().flat_map(|e| at.iter().map(|q| q.dist(*e))).fold(f64::INFINITY, f64::min);
+    let mut wrong = Vec::new();
+    for (x, y) in [(-1, 1), (1, 1), (1, -1), (-1, -1)] {
+        let looking = json!({"direction": [x, y, -1], "up": [0, 0, 1]});
+        for style in ["visible", "visible_hidden"] {
+            let v = snap(&mut s, json!({"view": looking, "scale": "1:2", "visual_style": style}));
+            let sides: Vec<(Vec2, Vec2)> = v["lines"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|l| l["source"]["kind"] == "silhouette")
+                .flat_map(|l| l["pieces"].as_array().unwrap().iter().flat_map(|p| p["path"].as_array().unwrap()))
+                .map(|seg| (point(&seg["a"]), point(&seg["b"])))
+                .collect();
+            assert_eq!(sides.len(), 2, "({x}, {y}) {style}: {v}");
+            let (ends, segs) = rims(&v, "visible");
+            let (hidden_ends, _) = rims(&v, "hidden");
+            for side in sides {
+                let visible_gap = gap(side, &ends);
+                let hidden_gap = if style == "visible" { 0.0 } else { gap(side, &hidden_ends) };
+                let off_rims = [side.0, side.1].map(|e| segs.iter().map(|seg| off(e, *seg)).fold(f64::INFINITY, f64::min));
+                if visible_gap >= 1e-6 || hidden_gap >= 1e-6 || off_rims.iter().any(|d| *d > 0.01 + 1e-9) {
+                    wrong.push(format!("({x}, {y}) {style}, side at x {:.3}: rim end {visible_gap:.3e} mm away, hidden {hidden_gap:.3e}, off the rims {off_rims:.3?}", side.0.x));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// `s` with a 20 mm cube inserted as a mesh body (from an STL), its corner at `corner`.
+fn with_mesh_cube(s: &mut Session, corner: [f64; 3], tag: &str) {
+    let dir = std::env::temp_dir().join(format!("solidcraft-view-mesh-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("cube.stl");
+    let mut cube = Session::default();
+    run(&mut cube, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": corner, "body_name": "Cube"}));
+    run(&mut cube, "file.export", json!({"path": stl.to_string_lossy()}));
+    run(s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A mesh body is drawn from its mesh and a B-rep body beside it exactly. Once the mesh body stands
+/// in front of the block, the block may be hidden by it where `hlr` can't see, so it is drawn from
+/// the mesh too, its hidden part hidden; asked to certify, the view says why.
+#[test]
+fn a_body_a_mesh_body_could_hide_is_drawn_from_the_mesh() {
+    // The accuracies of the pieces of the block's lines (`true`) or the others'.
+    let kinds = |v: &Value, of_block: bool| -> std::collections::BTreeSet<String> {
+        let lines = v["lines"].as_array().unwrap().iter().filter(|l| (l["body"] == "Block") == of_block);
+        lines.flat_map(|l| l["pieces"].as_array().unwrap().iter()).map(|p| p["accuracy"]["kind"].as_str().unwrap().to_string()).collect()
+    };
+    let only = |kind: &str| std::collections::BTreeSet::from([kind.to_string()]);
+    let mut apart = block();
+    with_mesh_cube(&mut apart, [150.0, 0.0, 0.0], "apart");
+    let v = snap(&mut apart, json!({"scale": "1:2"}));
+    assert_eq!(v["status"]["provenance"], "hidden_lines_and_mesh_projection", "{v}");
+    assert_eq!((kinds(&v, true), kinds(&v, false)), (only("analytic"), only("sampled")), "{v}");
+    // The cube 20 mm across in front of the block's bottom edge, from x 40 to 60: 10 mm of it hidden
+    // at 1:2.
+    let mut in_front = block();
+    with_mesh_cube(&mut in_front, [40.0, -30.0, -10.0], "front");
+    let v = snap(&mut in_front, json!({"scale": "1:2", "visual_style": "visible_hidden"}));
+    assert_eq!((&v["status"]["lines"], &v["status"]["provenance"]), (&json!("approximate"), &json!("mesh_projection")), "{v}");
+    assert!((drawn_length(&v, "hidden") - 10.0).abs() < 1e-6, "the block's bottom edge behind the cube: {v}");
+    let e = refused(&mut in_front, json!({"scale": "1:2", "max_error_mm": 0.01}));
+    assert!(e.contains("bodies drawn from the mesh: 1 for mesh bodies, 1 for a mesh body in front"), "{e}");
+}
+
+/// A sheet's three views prepare the block for exact lines once between them (#13218). A mesh body
+/// beside it is drawn from its mesh in every view, not only in the view that met it first. Two
+/// copies of a part and a pin of their own: two bodies prepared, each drawn exact in every view by
+/// its own edges (the pin has 3, the cube 12).
+#[test]
+fn a_sheets_views_prepare_each_body_once() {
+    // Per view: the bodies it prepared, and the triangles it drew from meshes.
+    let views = |s: &Session| -> Vec<(usize, usize)> {
+        let d = s.drawing("test").unwrap().clone();
+        let scene = crate::drawing_scene::build(s, &d, d.sheets[0].id).unwrap();
+        scene.views.iter().map(|v| v.stats.map_or((0, 0), |stats| (stats.prepared, stats.triangles))).collect()
+    };
+    let prepared = |views: &[(usize, usize)]| views.iter().map(|(prepared, _)| prepared).sum::<usize>();
+    let (s, _) = three_views();
+    let drawn = views(&s);
+    assert_eq!((drawn.len(), prepared(&drawn)), (3, 1), "{drawn:?}");
+    assert!(drawn.iter().all(|(_, triangles)| *triangles == 0), "nothing from the mesh: {drawn:?}");
+    let mut mesh = block();
+    with_mesh_cube(&mut mesh, [150.0, 0.0, 0.0], "sheet");
+    let drawn = views(&three_views_of(mesh).0);
+    assert!(prepared(&drawn) == 1 && drawn.iter().all(|(_, triangles)| *triangles > 0), "{drawn:?}");
+    let (mut copies, _) = two_cubes();
+    run(&mut copies, "solid.cylinder", json!({"diameter": 6, "height": 10, "base": [5, 40, 0], "body_name": "Pin", "operation": "new"}));
+    let drawn = views(&three_views_of(copies).0);
+    assert_eq!((drawn.len(), prepared(&drawn)), (3, 2), "{drawn:?}");
+    assert!(drawn.iter().all(|(_, triangles)| *triangles == 0), "nothing from the mesh: {drawn:?}");
+}
+
+/// A mirrored copy of a plate with a hole is drawn from its own record, not the mesh: from the top,
+/// its outline and rim are the original's mirrored about the plane. The original's pieces and both
+/// rims are analytic. The copy's straight edges come from the kernel as splines (a mirror isn't a
+/// rigid move, so SMLib transforms the body), which `hlr` samples; they lie within 1e-12 of the line.
+#[test]
+fn a_mirrored_body_is_drawn_exact() {
+    let mut s = plate();
+    run(&mut s, "solid.mirror", json!({"bodies": ["Plate"], "plane": "YZ"}));
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1"}));
+    assert_eq!((&v["status"]["provenance"], &v["source"]["bodies"]), (&json!("hidden_lines"), &json!(2)), "{v}");
+    for line in v["lines"].as_array().unwrap() {
+        for piece in line["pieces"].as_array().unwrap() {
+            let (accuracy, arc) = (&piece["accuracy"], piece["path"][0]["type"] == "arc");
+            let sampled_by_the_copy = line["body"] != "Plate" && !arc && accuracy["max_sample_deviation_mm"].as_f64().is_some_and(|d| d < 1e-12);
+            assert!(accuracy["kind"] == "analytic" || sampled_by_the_copy, "{line}");
+        }
+    }
+    let rims = arcs(&v, "visible");
+    assert_eq!(rims.len(), 2, "one whole rim each: {v}");
+    let centres: Vec<f64> = rims.iter().map(|(c, _, _, _)| c.x).collect();
+    assert!(
+        (centres[0] + centres[1] - 2.0 * point(&v["boundary_mm"]["min"]).x.midpoint(point(&v["boundary_mm"]["max"]).x)).abs() < 1e-9,
+        "{centres:?}: {v}"
+    );
+}
+
+/// A cylinder split round its middle keeps its exact lines and draws only the split from the mesh,
+/// as the viewport does: `hlr` draws no edge between two faces of one surface yet (#2455). From the
+/// front at 1:1 its outline (two 30 mm sides and two 20 mm rims seen edge on) is analytic, and the
+/// split is one sampled line 20 mm across, within the mesh's chords. Asked to certify, the view says
+/// which edges came from the mesh.
+#[test]
+fn a_split_round_face_draws_only_its_split_from_the_mesh() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"diameter": 20, "height": 30, "body_name": "Cylinder"}));
+    run(&mut s, "solid.split_face", json!({"body": "Cylinder", "faces": [[-10, 0, 15]], "plane": {"origin": [0, 0, 15], "normal": [0, 0, 1]}}));
+    let v = snap(&mut s, json!({"view": "front", "scale": "1:1"}));
+    assert_eq!(v["status"]["provenance"], "hidden_lines_and_mesh_projection", "{v}");
+    // `hlr`'s pieces are analytic or bounded; only the mesh's are sampled.
+    let sampled = |l: &&Value| l["pieces"].as_array().unwrap().iter().any(|p| p["accuracy"]["kind"] == "sampled");
+    let (split, exact): (Vec<&Value>, Vec<&Value>) = v["lines"].as_array().unwrap().iter().partition(sampled);
+    let [split] = split.as_slice() else { panic!("one line from the mesh: {v}") };
+    assert_eq!(split["source"]["kind"], "edge", "{split}");
+    let across = drawn_length(&json!({"lines": [split]}), "visible");
+    assert!((across - 20.0).abs() < 0.05, "{across}: {split}");
+    // The rest stays `hlr`'s: both side silhouettes and both rims.
+    let kinds: Vec<&str> = exact.iter().filter_map(|l| l["source"]["kind"].as_str()).collect();
+    assert_eq!(kinds.iter().filter(|k| **k == "silhouette").count(), 2, "{v}");
+    assert_eq!(kinds.iter().filter(|k| **k == "edge").count(), 2, "{v}");
+    let e = refused(&mut s, json!({"view": "front", "scale": "1:1", "max_error_mm": 0.01}));
+    assert!(e.contains("edges drawn from the mesh: 1 for split faces"), "{e}");
 }
 
 /// A 20 x 20 x 40 tower behind the block, 40 to 60 mm across: in the front view at 1:1 its sides
@@ -961,25 +1215,30 @@ fn each_copys_lines_name_its_occurrence() {
     assert_eq!(paths, want, "{v}");
 }
 
-/// A view cancelled while its lines are made says so in a drawing's words, never as a DXF export.
+/// A view cancelled while its lines are made says so in a drawing's words, never as a DXF export:
+/// cancelled while the exact lines are worked out (the block), or while a mesh body's are (a mesh
+/// cube).
 #[test]
 fn a_view_cancelled_while_its_lines_are_made_says_so_on_a_drawing() {
     use std::sync::atomic::{AtomicBool, Ordering};
-    struct CancelOcclusion(AtomicBool);
-    impl solidcraft_kernel::watch::Watch for CancelOcclusion {
+    struct CancelAt(&'static str, AtomicBool);
+    impl solidcraft_kernel::watch::Watch for CancelAt {
         fn cancelled(&self) -> bool {
-            self.0.load(Ordering::Relaxed)
+            self.1.load(Ordering::Relaxed)
         }
         fn progress(&self, stage: &'static str, _done: usize, _total: usize) {
-            if stage == "dxf_occlusion" {
-                self.0.store(true, Ordering::Relaxed);
+            if stage == self.0 {
+                self.1.store(true, Ordering::Relaxed);
             }
         }
     }
-    let mut s = block();
-    let watch = Arc::new(CancelOcclusion(AtomicBool::new(false)));
-    let e = solidcraft_kernel::watch::watching(watch, || s.execute(CMD, &json!({}))).err().map(|e| e.to_string()).unwrap_or_default();
-    assert!(e.contains("drawing the view was cancelled") && !e.contains("DXF"), "{e}");
+    let mut mesh = Session::default();
+    with_mesh_cube(&mut mesh, [0.0, 0.0, 0.0], "cancel");
+    for (mut s, stage) in [(block(), "hidden_lines"), (mesh, "dxf_occlusion")] {
+        let watch = Arc::new(CancelAt(stage, AtomicBool::new(false)));
+        let e = solidcraft_kernel::watch::watching(watch, || s.execute(CMD, &json!({}))).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains("drawing the view was cancelled") && !e.contains("DXF"), "{stage}: {e}");
+    }
 }
 
 /// The mesh's chord is `chord_mm` on paper over the scale. Below 1:100 it passes 1 mm and is still
@@ -1117,8 +1376,9 @@ fn seeded_views_of_the_sample_stay_in_bounds_and_apart() {
     }
 }
 
-/// `chord_mm` and `max_error_mm` out of range are refused by name; a `max_error_mm` the mesh's
-/// lines can't certify is refused with the count of pieces short of it.
+/// `chord_mm` and `max_error_mm` out of range are refused by name; a `max_error_mm` the lines can't
+/// certify is refused with the count of pieces short of it: a cylinder's rims in iso are bounded by
+/// the chord, 0.01, so they don't certify 0.001.
 #[test]
 fn chords_and_accuracy_checks_out_of_range_are_refused() {
     let mut s = block();
@@ -1131,12 +1391,16 @@ fn chords_and_accuracy_checks_out_of_range_are_refused() {
         (json!({"max_error_mm": 0}), "max_error_mm is a number above 0"),
         (json!({"max_error_mm": -1}), "max_error_mm is a number above 0"),
         (json!({"max_error_mm": null}), "max_error_mm"),
-        (json!({"scale": "1:2", "max_error_mm": 0.5}), "accuracy not met: 0 bounded and"),
     ] {
         let e = refused(&mut s, p.clone());
         assert!(e.contains(says), "{p}: {e}");
         assert!(std::sync::Arc::ptr_eq(&doc, &s.doc), "{p}");
     }
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"diameter": 20, "height": 30}));
+    let e = refused(&mut s, json!({"view": "iso", "scale": "1:1", "max_error_mm": 0.001}));
+    assert!(e.contains("accuracy not met: ") && e.contains(" bounded and 0 sampled pieces") && !e.contains("from the mesh"), "{e}");
+    snap(&mut s, json!({"view": "iso", "scale": "1:1", "max_error_mm": 0.01}));
 }
 
 /// A stadium of cubic segments, two straight sides and four quarter circles, extruded 20: seen from
@@ -1197,25 +1461,25 @@ fn a_hole_seen_end_on_is_its_exact_circle() {
 
 /// A bar across the plate, above the hole, hides the rim where it passes over: the rim is cut where
 /// the bar's sides cross it (2 mm either side of its centre), 4 asin 0.4 of it hidden and the rest
-/// visible. The cut arcs end where the mesh found the change, so they stay sampled.
+/// visible. The rim is cut where its exact curve crosses the bar's sides, so the arcs are exact.
 #[test]
-fn a_rim_cut_where_its_visibility_changes_stays_sampled() {
+fn a_rim_cut_where_its_visibility_changes_is_exact() {
     let mut s = plate();
     run(&mut s, "solid.box", json!({"length": 30, "width": 4, "height": 2, "corner": [5, 18, 10], "body_name": "Bar", "operation": "new"}));
     let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "visual_style": "visible_hidden"}));
     let hidden = 4.0 * 0.4f64.asin();
     for (visibility, want) in [("hidden", hidden), ("visible", std::f64::consts::TAU - hidden)] {
         let rims = arcs(&v, visibility);
-        let on_rim = |(c, r, _, a): &(Vec2, f64, f64, Value)| c.dist(Vec2::new(210.0, 148.5)) < 1e-9 && (r - 5.0).abs() < 1e-9 && a == "sampled";
+        let on_rim = |(c, r, _, a): &(Vec2, f64, f64, Value)| c.dist(Vec2::new(210.0, 148.5)) < 1e-9 && (r - 5.0).abs() < 1e-9 && a == "analytic";
         assert!(!rims.is_empty() && rims.iter().all(on_rim), "{visibility}: {v}");
         let round: f64 = rims.iter().map(|(_, _, sweep, _)| sweep.abs()).sum();
-        assert!((round - want).abs() < 0.02, "{visibility}: {round}, not {want}: {v}");
+        assert!((round - want).abs() < 1e-9, "{visibility}: {round}, not {want}: {v}");
     }
 }
 
-/// A part with a hole placed three times, the third turned a quarter turn: one mesh serves all
-/// three, and each hole is an exact circle where its own placement puts it, 50 mm apart on the
-/// sheet round its centre.
+/// A part with a hole placed three times, the third turned a quarter turn: all three are drawn
+/// exact, nothing meshed, and each hole is an exact circle where its own placement puts it, 50 mm
+/// apart on the sheet round its centre.
 #[test]
 fn each_placements_hole_is_its_own_exact_circle() {
     let mut s = Session::default();
@@ -1226,7 +1490,7 @@ fn each_placements_hole_is_its_own_exact_circle() {
     let turned = run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [140, 0, 0]}))["occurrence"].as_u64().unwrap();
     run(&mut s, "occurrence.move", json!({"occurrence": turned, "space": "world", "axis": [0, 0, 1], "angle": "90 deg", "origin": [140, 0, 0]}));
     let v = snap(&mut s, json!({"view": "top", "scale": "1:1"}));
-    assert_eq!(v["stats"]["shared_meshes"], json!(1), "{v}");
+    assert_eq!((&v["status"]["provenance"], &v["stats"]["shared_meshes"]), (&json!("hidden_lines"), &json!(0)), "{v}");
     let mut round: std::collections::BTreeMap<i64, f64> = std::collections::BTreeMap::new();
     for (centre, radius, sweep, accuracy) in arcs(&v, "visible") {
         assert!((centre.y - 148.5).abs() < 1e-9 && (radius - 5.0).abs() < 1e-9 && accuracy == "analytic", "{v}");
@@ -1507,11 +1771,25 @@ fn reference_parts_hide_each_other_whatever_the_setting() {
 }
 
 /// A reference part's edge on a model part's: the block's right edge moved onto the plate's. Merged
-/// apart, each keeps its whole outline, so the model's line is drawn in the model's width.
+/// apart, each keeps its whole outline, so the model's line is drawn in the model's width. So does a
+/// block as tall as the plate and standing in it, over its right edge (parts may overlap): the
+/// block's right edge is the plate's, one line seen by both, and the block's stays whole although the
+/// plate is tested against it.
 #[test]
 fn a_reference_line_never_takes_a_stretch_from_a_model_line() {
     let (mut s, [_, block]) = plate_and_block(5.0);
     run(&mut s, "occurrence.move", json!({"occurrence": block, "translate": [-10, 0, 0]}));
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1"}));
+    assert_lengths(&v, false, 160.0, 0.0);
+    assert_lengths(&v, true, 80.0, 0.0);
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "PlatePart"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "body_name": "Plate", "operation": "new"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let inside = run(&mut s, "component.create", json!({"name": "BlockPart"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 5, "corner": [20, 10, 0], "body_name": "Block", "operation": "new"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": inside, "bom_type": "reference"}));
     let v = snap(&mut s, json!({"view": "top", "scale": "1:1"}));
     assert_lengths(&v, false, 160.0, 0.0);
     assert_lengths(&v, true, 80.0, 0.0);
@@ -1583,7 +1861,8 @@ fn no_reference_parts_means_the_setting_changes_nothing() {
     assert!(plain["lines"].as_array().unwrap().iter().all(|l| l["reference"] == false), "{plain}");
 }
 
-/// The snapshot's scene draws reference parts as saved views do: thin, and first.
+/// The snapshot's scene draws reference parts as saved views do: thin, and first. The reference
+/// block is drawn exact, as the plate is, so the view certifies any accuracy.
 #[test]
 fn a_scene_draws_reference_parts_thin_under_the_model() {
     let (mut s, _) = plate_and_block(5.0);
@@ -1591,6 +1870,45 @@ fn a_scene_draws_reference_parts_thin_under_the_model() {
     let widths: Vec<f64> = strokes(&v).iter().map(|(_, _, width)| *width).collect();
     let thin = widths.iter().take_while(|w| **w == LineKind::Thin.width_mm(LineGroup::DEFAULT)).count();
     assert!(thin > 0 && widths[thin..].iter().all(|w| *w == LineKind::Visible.width_mm(LineGroup::DEFAULT)), "{widths:?}");
+    assert_eq!(v["status"]["provenance"], "hidden_lines", "{v}");
+    snap(&mut s, json!({"view": "top", "scale": "1:1", "reference_shown_percent": 100, "max_error_mm": 0.0001}));
+}
+
+/// A reference part's arcs stay exact inside the view and are cut on their chords at its edge. On
+/// the plate stand a 10 mm pin round (20, 20) and a 10 mm peg round (40, 20), both reference parts,
+/// seen from above at 1:1 with no room given to reference parts. The pin's rim is one whole analytic
+/// circle round the sheet's centre (210, 148.5). The peg keeps the half of its rim inside the plate's
+/// x 40 (230 on the sheet): one arc on its circle, its ends where its chords (within 0.01 mm) cross
+/// x 40, so sampled, as the mesh projection draws it.
+#[test]
+fn a_reference_parts_arcs_stay_exact_inside_the_view_and_are_cut_at_its_edge() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "PlatePart"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "body_name": "Plate", "operation": "new"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    for (name, x) in [("Pin", 20), ("Peg", 40)] {
+        let occurrence = run(&mut s, "component.create", json!({"name": format!("{name}Part")}))["occurrence"].as_u64().unwrap();
+        run(&mut s, "solid.cylinder", json!({"diameter": 10, "height": 10, "base": [x, 20, 5], "body_name": name, "operation": "new"}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        run(&mut s, "occurrence.bom_type", json!({"occurrence": occurrence, "bom_type": "reference"}));
+    }
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1"}));
+    assert_eq!(v["status"]["provenance"], "hidden_lines", "{v}");
+    let of = |body: &str| json!({"lines": v["lines"].as_array().unwrap().iter().filter(|l| l["body"] == body).cloned().collect::<Vec<_>>()});
+    let pin = of("Pin");
+    let rims = arcs(&pin, "visible");
+    let [(centre, radius, sweep, kind)] = rims.as_slice() else { panic!("one rim: {pin}") };
+    assert!(centre.dist(Vec2::new(210.0, 148.5)) < 1e-9 && (radius - 5.0).abs() < 1e-9, "{pin}");
+    assert!((sweep.abs() - std::f64::consts::TAU).abs() < 1e-9 && kind == "analytic", "{pin}");
+    assert!(segments(&pin, "visible").is_empty(), "{pin}");
+    let peg = of("Peg");
+    let rims = arcs(&peg, "visible");
+    let [(centre, radius, sweep, kind)] = rims.as_slice() else { panic!("one arc: {peg}") };
+    assert!(centre.dist(Vec2::new(230.0, 148.5)) < 1e-9 && (radius - 5.0).abs() < 1e-9, "{peg}");
+    // A cut on a chord is at most its sag (0.01 mm) off the circle: that far round on either end.
+    let off = 2.0 * (0.01f64 / 5.0).asin();
+    assert!((sweep.abs() - std::f64::consts::PI).abs() <= off && kind == "sampled", "{sweep}: {peg}");
+    assert!(segments(&peg, "visible").is_empty(), "{peg}");
 }
 
 /// A scene's hidden reference lines are dashed as the model's are, by the reference parts' own
@@ -2097,70 +2415,70 @@ fn a_projected_view_draws_its_parents_exploded_view_until_it_sets_its_own() {
     assert!((width(&mut s, above) - 70.0).abs() < 1e-6, "null follows the parent again");
 }
 
-/// Dimensions, balloons and notes on a view's model read the design's placements, so on an exploded
-/// view they would measure the parts assembled: they are refused there until they read what the
-/// view draws. An edit that would explode a view holding one, itself or through a view that follows
-/// it, is refused and changes nothing; one whose follower draws assembled goes ahead. A note on the
-/// view itself is no hindrance, unless a branch points at its model; on an exploded view, a note's
-/// branches can't be edited.
+/// Whether a dimension's `reply` reads ok, near `want`.
+fn near_value(reply: &Value, want: f64) -> bool {
+    reply["status"] == "ok" && reply["value"].as_f64().is_some_and(|v| (v - want).abs() < 1e-6)
+}
+
+/// Whether `reply` reads ok with its arrow ending on `p`.
+fn ends_near(reply: &Value, p: [f64; 3]) -> bool {
+    let point = reply["point"].as_array().map(|p| p.iter().filter_map(Value::as_f64).collect::<Vec<_>>()).unwrap_or_default();
+    reply["status"] == "ok" && point.len() == 3 && point.iter().zip(p).all(|(a, b)| (a - b).abs() < 1e-6)
+}
+
+/// Dimensions, balloons and notes on a view's model read where the view draws its parts (#13048), so a
+/// view holding them can be exploded, itself or through a view that follows it, and they follow it. From
+/// the first cube's left corner to the second's right one reads 40 assembled and 40 + 30 = 70 with the
+/// second moved out; a balloon and a note on the second's bottom front edge end on its middle, (35, 0, 0)
+/// assembled and (65, 0, 0) exploded. New ones go on the exploded view, and a note's branches can be
+/// edited there.
 #[test]
-fn an_exploded_view_refuses_what_would_measure_its_parts_assembled() {
-    let (mut s, view, [first, _], apart) = exploded_pair();
+fn an_exploded_view_takes_what_measures_its_parts_where_it_draws_them() {
+    let (mut s, view, [first, second], apart) = exploded_pair();
     let on_view = |view: u64| ids::encode(view);
-    let unchanged = |s: &mut Session, view: u64, set: Value, says: &str| {
-        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
-        let e = edit_refused(s, view, set);
-        assert!(e.contains(says), "{e}");
-        assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
-    };
-    let blocked = "not supported yet: an exploded view with dimensions, balloons or notes on its model";
-
-    run(&mut s, "drawing.dimension.add", json!({"view": on_view(view), "kind": {"length": {"edge": first_cubes_edge(first)}}}));
-    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
-    run(&mut s, "edit.undo", json!({}));
-    run(&mut s, "drawing.balloon.add", json!({"view": on_view(view), "edge": first_cubes_edge(first), "at": [60, 40]}));
-    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
-    run(&mut s, "edit.undo", json!({}));
-    let note = json!({"anchor": {"edge": {"view": on_view(view), "edge": first_cubes_edge(first)}}, "at": [60, 40], "content": "Deburr"});
-    run(&mut s, "drawing.note.add", note);
-    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
-    run(&mut s, "edit.undo", json!({}));
-    let branched = json!({"anchor": {"view": on_view(view)}, "at": [60, 40], "content": "Deburr", "branches": [{"edge": first_cubes_edge(first)}]});
+    let across =
+        json!({"linear": {"a": {"point": [0, 0, 0], "path": [first]}, "b": {"point": [40, 0, 0], "path": [second]}, "direction": "horizontal"}});
+    let edge = json!({"point": [35, 0, 0], "path": [second]});
+    let dimension = run(&mut s, "drawing.dimension.add", json!({"view": on_view(view), "kind": across}))["dimension"].clone();
+    let balloon = run(&mut s, "drawing.balloon.add", json!({"view": on_view(view), "edge": edge, "at": [60, 40]}))["balloon"].clone();
+    let note = json!({"anchor": {"edge": {"view": on_view(view), "edge": edge}}, "at": [60, 40], "content": "Deburr"});
+    let note = run(&mut s, "drawing.note.add", note)["note"].clone();
+    let branched = json!({"anchor": {"view": on_view(view)}, "at": [60, -40], "content": "Both", "branches": [{"edge": edge}]});
     run(&mut s, "drawing.note.add", branched.clone());
-    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
-    run(&mut s, "edit.undo", json!({}));
-    let plain = run(&mut s, "drawing.note.add", json!({"anchor": {"view": on_view(view)}, "at": [60, 40], "content": "Exploded"}))["note"].clone();
+    assert!(near_value(&run(&mut s, "drawing.dimension.inspect", json!({"dimension": dimension})), 40.0));
+
     edit_view(&mut s, view, json!({"exploded": apart}));
-    assert!((width(&mut s, view) - 70.0).abs() < 1e-6, "a note on the view isn't on its model");
+    assert!((width(&mut s, view) - 70.0).abs() < 1e-6);
+    let read = run(&mut s, "drawing.dimension.inspect", json!({"dimension": dimension}));
+    assert!(near_value(&read, 70.0), "{read}");
+    let read = run(&mut s, "drawing.balloon.inspect", json!({"balloon": balloon}));
+    assert!(ends_near(&read, [65.0, 0.0, 0.0]), "{read}");
+    let read = run(&mut s, "drawing.note.inspect", json!({"note": note}));
+    assert!(ends_near(&read, [65.0, 0.0, 0.0]), "{read}");
 
-    // New ones on an exploded view.
-    let e = s
-        .execute("drawing.dimension.add", &json!({"view": on_view(view), "kind": {"length": {"edge": first_cubes_edge(first)}}}))
-        .unwrap_err()
-        .to_string();
-    assert!(e.contains("not supported yet: dimensions on an exploded view"), "{e}");
-    let e =
-        s.execute("drawing.balloon.add", &json!({"view": on_view(view), "edge": first_cubes_edge(first), "at": [60, 40]})).unwrap_err().to_string();
-    assert!(e.contains("not supported yet: balloons on an exploded view"), "{e}");
-    let note = json!({"anchor": {"edge": {"view": on_view(view), "edge": first_cubes_edge(first)}}, "at": [60, 40], "content": "Deburr"});
-    let e = s.execute("drawing.note.add", &note).unwrap_err().to_string();
-    assert!(e.contains("not supported yet: notes on its model on an exploded view"), "{e}");
-    let e = s.execute("drawing.note.add", &branched).unwrap_err().to_string();
-    assert!(e.contains("not supported yet: notes on its model on an exploded view"), "{e}");
-    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    // New ones on the exploded view.
+    let length = run(&mut s, "drawing.dimension.add", json!({"view": on_view(view), "kind": {"length": {"edge": edge}}}));
+    assert!(near_value(&length, 10.0), "{length}");
+    let added = run(&mut s, "drawing.balloon.add", json!({"view": on_view(view), "edge": edge, "at": [-60, 40]}));
+    assert!(ends_near(&added, [65.0, 0.0, 0.0]), "{added}");
+    run(
+        &mut s,
+        "drawing.note.add",
+        json!({"anchor": {"edge": {"view": on_view(view), "edge": first_cubes_edge(first)}}, "at": [60, 40], "content": "A"}),
+    );
+    run(&mut s, "drawing.note.add", branched);
+    let plain = run(&mut s, "drawing.note.add", json!({"anchor": {"view": on_view(view)}, "at": [0, -40], "content": "Exploded"}))["note"].clone();
     let add = json!({"note": plain, "set": {"branches": {"remove": [], "add": [{"edge": first_cubes_edge(first)}]}}});
-    let e = s.execute("drawing.note.edit", &add).unwrap_err().to_string();
-    assert!(e.contains("not supported yet: notes on its model on an exploded view"), "{e}");
-    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    assert_eq!(run(&mut s, "drawing.note.edit", add)["changed"], json!(["branches"]));
 
-    // Through a follower: its dimension blocks its parent's edit, until it draws assembled itself.
+    // Through a follower: the view above, holding a dimension of its own, follows its parent's explode.
     edit_view(&mut s, view, json!({"exploded": "assembled"}));
     let (_, above) = create(&mut s, PROJECTED, json!({"parent": on_view(view), "side": "above", "place": {"at": [150, 250]}}));
-    run(&mut s, "drawing.dimension.add", json!({"view": on_view(above), "kind": {"length": {"edge": first_cubes_edge(first)}}}));
-    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
-    edit_view(&mut s, above, json!({"exploded": "assembled"}));
+    let on_above = run(&mut s, "drawing.dimension.add", json!({"view": on_view(above), "kind": across}))["dimension"].clone();
+    assert!(near_value(&run(&mut s, "drawing.dimension.inspect", json!({"dimension": on_above})), 40.0));
     edit_view(&mut s, view, json!({"exploded": apart}));
-    assert!((width(&mut s, view) - 70.0).abs() < 1e-6 && (width(&mut s, above) - 40.0).abs() < 1e-6);
+    assert!((width(&mut s, view) - 70.0).abs() < 1e-6 && (width(&mut s, above) - 70.0).abs() < 1e-6);
+    assert!(near_value(&run(&mut s, "drawing.dimension.inspect", json!({"dimension": on_above})), 70.0));
 }
 
 /// A shaded view's pictures are rendered from the design as it places its parts, so an exploded view
@@ -2257,6 +2575,262 @@ fn hostile_exploded_choices_are_refused() {
         assert!(e.contains(says), "{choice}: {e}");
         assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps), "{choice}");
     }
+}
+
+/// [`configured_block`], whose length is parameter `L` (100 mm), with configuration rows Default (as
+/// it is) and Long (`L` = 120 mm), drawn as [`three_views`]: the session, the views and Long's row
+/// id. The front view, at 1:2, is `L` / 2 wide on paper.
+fn configured_views() -> (Session, [u64; 3], u64) {
+    let (s, long) = configured_block();
+    let (s, views) = three_views_of(s);
+    (s, views, long)
+}
+
+/// Runs `id` on the design with the drawing open closed, as the model can only be changed then, and
+/// opens the drawing again.
+fn in_the_design(s: &mut Session, id: &str, p: Value) {
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(s, "drawing.close", json!({}));
+    run(s, id, p);
+    run(s, "drawing.open", json!({"drawing": drawing}));
+}
+
+/// How view `view` of the drawing open stands in its sheet's scene: its status, and why (null when it
+/// says nothing).
+fn scene_entry(s: &mut Session, view: u64) -> (Value, Value) {
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let scene = run(s, "drawing.scene", json!({"sheet": sheet}));
+    let entry = scene["views"].as_array().and_then(|views| views.iter().find(|v| v["view"] == json!(ids::encode(view)))).cloned();
+    entry.map(|v| (v["status"].clone(), v.get("reason").cloned().unwrap_or(Value::Null))).unwrap_or_default()
+}
+
+/// The words a view of a row the design no longer has says.
+const NO_ROW: &str = "the configuration it draws is no longer in the design";
+
+/// A view of a row of the configuration table draws the row while the design stays as it is: the
+/// front view of Long is 60 mm wide at 1:2 beside a view of the active configuration at 50, and
+/// drawing it changes nothing in the design. Activating Long in the design leaves the Long view as it
+/// was, and the view of the active configuration follows (#13048).
+#[test]
+fn a_view_of_a_row_draws_it_and_leaves_the_design() {
+    let (mut s, [front, ..], _) = configured_views();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let p = json!({"sheet": sheet, "view": "front", "scale": "1:2", "position_mm": [200, 80], "configuration": "active"});
+    let (_, active) = create(&mut s, BASE, p);
+    let design = |s: &Session| (s.doc.params.clone(), s.doc.configs.clone(), s.doc.features.clone());
+    let before = design(&s);
+    let steps = s.undo.len();
+    assert_eq!(edit_view(&mut s, front, json!({"configuration": "Long"}))["changed"], json!(["configuration"]));
+    assert_eq!(s.undo.len(), steps + 1);
+    assert!((width(&mut s, front) - 60.0).abs() < 1e-6 && (width(&mut s, active) - 50.0).abs() < 1e-6);
+    run(&mut s, "drawing.scene", json!({"sheet": sheet}));
+    assert!(design(&s) == before && s.pending_moves.is_empty(), "the design is as it was");
+    in_the_design(&mut s, "config.activate", json!({"row": "Long"}));
+    assert!((width(&mut s, front) - 60.0).abs() < 1e-6 && (width(&mut s, active) - 60.0).abs() < 1e-6);
+}
+
+/// Deleting a row never refuses the drawing: a view that drew it is a placeholder that says why, and
+/// so are the views that follow it; its choice stays, for an undo, and undoing the delete draws the row
+/// again, as the row comes back with its id (#13048).
+#[test]
+fn a_deleted_configuration_row_leaves_the_views_that_named_it() {
+    let (mut s, [front, right, top], long) = configured_views();
+    edit_view(&mut s, front, json!({"configuration": "Long"}));
+    in_the_design(&mut s, "config.row", json!({"name": "Long", "delete": true}));
+    let gone = inspect_view(&mut s, front);
+    assert_eq!(
+        (gone["extents"]["status"].as_str(), gone["extents"]["provenance"].as_str()),
+        (Some("placeholder"), Some("no_configuration")),
+        "{gone}"
+    );
+    assert_eq!(gone["settings"]["configuration"]["value"], json!({"row": long}), "the choice stays, for an undo: {gone}");
+    assert_eq!(gone["settings"]["configuration"].get("drawn"), Some(&Value::Null), "it draws no row: {gone}");
+    for view in [front, right, top] {
+        assert_eq!(scene_entry(&mut s, view), (json!("placeholder"), json!(NO_ROW)), "{view}");
+    }
+    let d = s.drawing("test").unwrap();
+    assert_eq!(&Drawing::from_json(&d.to_json().unwrap()).unwrap(), &**d);
+    in_the_design(&mut s, "edit.undo", json!({}));
+    assert!((width(&mut s, front) - 60.0).abs() < 1e-6);
+}
+
+/// A row added again under a deleted row's name is another row, with an id of its own: the view of the
+/// deleted one stays its placeholder until it is set to the new one by name, which saves its id.
+#[test]
+fn a_row_added_again_by_name_is_another_row() {
+    let (mut s, [front, ..], long) = configured_views();
+    edit_view(&mut s, front, json!({"configuration": "Long"}));
+    in_the_design(&mut s, "config.row", json!({"name": "Long", "delete": true}));
+    in_the_design(&mut s, "config.row", json!({"name": "Long", "values": {"L": "120 mm"}}));
+    let again = s.doc.configs.rows.iter().find(|row| row.name == "Long").map(|row| row.id).unwrap();
+    assert_ne!(again, long);
+    assert_eq!(inspect_view(&mut s, front)["extents"]["provenance"], json!("no_configuration"));
+    edit_view(&mut s, front, json!({"configuration": "Long"}));
+    assert_eq!(saved(&s, front).settings.configuration, Some(ViewConfiguration::Row(again)));
+    assert!((width(&mut s, front) - 60.0).abs() < 1e-6);
+}
+
+/// A row that can't be put on the design (here a file whose Long cell is no expression) is never a
+/// reason to refuse the file: the design and the drawing read, and the view is a placeholder that says
+/// why, a different reason from a row that is gone (#13048).
+#[test]
+fn a_row_that_cant_be_put_on_the_design_is_a_placeholder() {
+    let (mut s, [front, ..], long) = configured_views();
+    edit_view(&mut s, front, json!({"configuration": "Long"}));
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    let row = s.doc_mut().configs.rows.iter_mut().find(|row| row.id == long).unwrap();
+    row.cells[0] = "1/".into();
+    assert!(solidcraft_doc::format::read(&s.doc.to_json()).is_ok());
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert_eq!(inspect_view(&mut s, front)["extents"]["provenance"], json!("not_configured"));
+    assert_eq!(scene_entry(&mut s, front), (json!("placeholder"), json!("its configuration can't be applied to the design")));
+    let d = s.drawing("test").unwrap();
+    assert_eq!(&Drawing::from_json(&d.to_json().unwrap()).unwrap(), &**d);
+}
+
+/// A view of a row whose features fail to build draws what the row builds, as activating it would, and
+/// says so: its scene reason names the row and counts the features that fail there and not in the
+/// design, and inspect lists them as `config.activate` does. A view of the active row says nothing
+/// (#13048).
+#[test]
+fn a_view_of_a_row_that_rebuilds_with_errors_draws_what_it_builds_and_says_so() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "L", "expression": "100 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "R", "expression": "5 mm"}));
+    run(&mut s, "solid.box", json!({"length": "L", "width": 50, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.sphere", json!({"radius": "R"}));
+    let sphere = s.doc.features.last().map(|f| f.name.clone()).unwrap();
+    run(&mut s, "config.configure", json!({"params": ["L", "R"]}));
+    run(&mut s, "config.row", json!({"name": "Broken", "values": {"L": "120 mm", "R": "-1 mm"}}));
+    let broken = s.doc.configs.rows.iter().find(|row| row.name == "Broken").map(|row| row.id).unwrap();
+    let (mut s, [front, _, top]) = three_views_of(s);
+    edit_view(&mut s, front, json!({"configuration": "Broken"}));
+    let configuration = &inspect_view(&mut s, front)["settings"]["configuration"];
+    assert_eq!(configuration["drawn"], json!({"id": broken, "name": "Broken"}), "{configuration}");
+    let errors = configuration["errors"].as_array().cloned().unwrap_or_default();
+    assert!(errors.len() == 1 && errors[0].as_str().is_some_and(|e| e.starts_with(&format!("{sphere}: "))), "{configuration}");
+    assert!((width(&mut s, front) - 60.0).abs() < 1e-6, "the block draws at the row's length");
+    let says = json!("its configuration `Broken` rebuilds with 1 failing feature");
+    assert_eq!(scene_entry(&mut s, front), (json!("drawn"), says.clone()));
+    assert_eq!(scene_entry(&mut s, top), (json!("drawn"), says), "a view that follows it says it too");
+    edit_view(&mut s, front, json!({"configuration": "active"}));
+    let configuration = &inspect_view(&mut s, front)["settings"]["configuration"];
+    assert_eq!((configuration["drawn"]["name"].as_str(), configuration.get("errors")), (Some("Default"), None), "{configuration}");
+    assert_eq!(scene_entry(&mut s, front), (json!("drawn"), Value::Null));
+    // Edited by hand, the design is in none of its rows.
+    in_the_design(&mut s, "parameters.change", json!({"name": "L", "expression": "110 mm"}));
+    assert_eq!(inspect_view(&mut s, front)["settings"]["configuration"].get("drawn"), Some(&Value::Null));
+}
+
+/// A shaded view's pictures are rendered from the design as it is, so a view of a configuration of its
+/// own can't be shaded yet: refused, as on an exploded view, and nothing changes. Its dimensions are
+/// read where it draws (#13048): the front bottom edge measures the Long row's 120 mm, not the
+/// design's 100.
+#[test]
+fn a_view_of_a_configuration_of_its_own_is_never_shaded_and_is_dimensioned_where_it_draws() {
+    let (mut s, [front, ..], _) = configured_views();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let shaded = "not supported yet: a shaded view of a configuration of its own";
+    let e = create_refused(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "visual_style": "shaded", "configuration": "Long"}));
+    assert!(e.contains(shaded), "{e}");
+    edit_view(&mut s, front, json!({"visual_style": "shaded"}));
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    assert!(edit_refused(&mut s, front, json!({"configuration": "Long"})).contains(shaded));
+    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    edit_view(&mut s, front, json!({"visual_style": "visible", "configuration": "Long"}));
+    let edge = json!({"view": ids::encode(front), "kind": {"length": {"edge": {"point": [50, 0, 0], "path": []}}}});
+    let added = run(&mut s, "drawing.dimension.add", edge);
+    assert!(added["value"].as_f64().is_some_and(|value| (value - 120.0).abs() < 1e-9), "{added}");
+}
+
+/// A view takes its configuration by a row's name or id, or "active", and saves the row's id, so a
+/// rename leaves it on its row. A projected view follows its parent's until it sets its own, and
+/// inspect says where each comes from; `null` follows the parent again. Choosing what it already
+/// draws changes nothing.
+#[test]
+fn a_view_takes_a_configuration_by_name_or_id_and_saves_the_rows_id() {
+    let (mut s, [front, right, top], long) = configured_views();
+    let steps = s.undo.len();
+    let edited = edit_view(&mut s, front, json!({"configuration": "Long"}));
+    assert_eq!(edited["changed"], json!(["configuration"]), "{edited}");
+    let mut followers: Vec<Value> = edited["followers"].as_array().cloned().unwrap_or_default();
+    followers.sort_by_key(|f| f.to_string());
+    let mut expected = vec![json!(ids::encode(right)), json!(ids::encode(top))];
+    expected.sort_by_key(|f| f.to_string());
+    assert_eq!(followers, expected, "{edited}");
+    assert_eq!(s.undo.len(), steps + 1);
+    assert_eq!(saved(&s, front).settings.configuration, Some(ViewConfiguration::Row(long)));
+    // What each draws: the row by its id and name, or the design's active row while it matches it.
+    let followed = |name: &str| {
+        let drawn = json!({"id": long, "name": name});
+        json!({"value": {"row": long}, "from": "parent", "parent": ids::encode(front), "set": null, "drawn": drawn})
+    };
+    let default = s.doc.configs.rows.iter().find(|row| row.name == "Default").map(|row| row.id).unwrap();
+    let active = json!({"id": default, "name": "Default"});
+    assert_eq!(inspect_view(&mut s, top)["settings"]["configuration"], followed("Long"));
+    // Renamed in the design, the view stays on its row.
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "config.row", json!({"name": "Long", "rename": "Longer"}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert_eq!(saved(&s, front).settings.configuration, Some(ViewConfiguration::Row(long)));
+    assert!((width(&mut s, front) - 60.0).abs() < 1e-6, "it draws the renamed row");
+    // By id it is the same row: nothing changes and no step is made.
+    let steps = s.undo.len();
+    assert_eq!(edit_view(&mut s, front, json!({"configuration": long}))["changed"], json!([]));
+    assert_eq!(s.undo.len(), steps);
+    // "active" is a choice of its own under a parent that draws another row.
+    edit_view(&mut s, right, json!({"configuration": "ACTIVE"}));
+    let own = json!({"value": "active", "from": "parent", "parent": ids::encode(right), "set": null, "drawn": active.clone()});
+    assert_eq!(inspect_view(&mut s, top)["settings"]["configuration"], own);
+    edit_view(&mut s, right, json!({"configuration": null}));
+    assert_eq!(inspect_view(&mut s, top)["settings"]["configuration"], followed("Longer"), "null follows the parent again");
+    edit_view(&mut s, front, json!({"configuration": null}));
+    let base = json!({"value": "active", "from": "default", "set": null, "drawn": active});
+    assert_eq!(inspect_view(&mut s, front)["settings"]["configuration"], base);
+    // A base view made with a row saves its id.
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (_, made) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:2", "position_mm": [200, 80], "configuration": "Longer"}));
+    assert_eq!(saved(&s, made).settings.configuration, Some(ViewConfiguration::Row(long)));
+}
+
+/// Making or editing a view refuses a configuration the design hasn't got, or that isn't one, with its
+/// reason, and leaves the drawing and the undo steps as they were. A row is named by its name (text)
+/// or its id (a whole number), never by the form a view saves it in.
+#[test]
+fn hostile_configuration_choices_are_refused() {
+    let (mut s, [front, ..], long) = configured_views();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let cases = [
+        (json!("Tall"), "no configuration `Tall`"),
+        (json!(long.to_string()), "no configuration"),
+        (json!(999_999), "no configuration `999999`"),
+        (json!(-1), "configuration"),
+        (json!(1.5), "configuration"),
+        (json!(1e300), "configuration"),
+        (json!([]), "configuration"),
+        (json!({"row": long}), "configuration"),
+        (json!(""), "no configuration"),
+        (json!("x".repeat(100_000)), "no configuration"),
+    ];
+    for (choice, says) in cases {
+        let e = create_refused(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "configuration": choice}));
+        assert!(e.contains(says), "{choice}: {}", e.chars().take(200).collect::<String>());
+        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+        let e = edit_refused(&mut s, front, json!({"configuration": choice}));
+        assert!(e.contains(says), "{choice}: {}", e.chars().take(200).collect::<String>());
+        assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps), "{choice}");
+    }
+    // A design with no configuration table has no row to name.
+    let (mut plain, [view, ..]) = three_views();
+    assert!(edit_refused(&mut plain, view, json!({"configuration": "Long"})).contains("no configuration `Long`"));
+    edit_view(&mut plain, view, json!({"configuration": "active"}));
+    // A deleted row is refused by its id, while the view that saved it still reads.
+    edit_view(&mut s, front, json!({"configuration": long}));
+    in_the_design(&mut s, "config.row", json!({"name": "Long", "delete": true}));
+    assert!(edit_refused(&mut s, front, json!({"configuration": long})).contains(&format!("no configuration `{long}`")));
+    assert_eq!(saved(&s, front).settings.configuration, Some(ViewConfiguration::Row(long)));
 }
 
 /// A view's height on its sheet: [`hinge_pair`]'s top view is 40 mm with the leaf flat, 20 mm with it
@@ -2569,25 +3143,37 @@ fn a_study_holds_only_the_values_it_keys_and_a_closed_loop_moves_the_rest() {
     assert!((angle - want[0].to_degrees()).abs() < 1e-6 && (slide - want[1]).abs() < 1e-6, "drawn {angle}°, {slide} mm; play {want:?}: {pose}");
 }
 
-/// Dimensions on a posed view would measure the design's placement: they are refused there, by the
-/// rule an exploded view follows, and an edit that would pose a view holding one is refused.
+/// Dimensions on a posed view read where it draws its parts (#13048), by the rule an exploded view
+/// follows: a view holding one can be posed, and the dimension follows it, and new ones go on a posed
+/// view. The plate's far top corner to the leaf's free top corner reads 40 with the leaf flat and 18
+/// with it turned up 90° about the hinge line (y 20, z 0): (0, 40, 2) goes to (0, 20 - 2, 20). The
+/// plate's top front edge, which doesn't move, reads 40 in both. A shaded posed view is still refused:
+/// its pictures are rendered from the design's placement.
 #[test]
-fn a_posed_view_refuses_what_would_measure_it_in_the_designs_place() {
+fn a_posed_view_takes_what_measures_it_where_it_draws_it() {
     let (mut s, view, _) = hinge_pair();
     let (_, other) = {
         let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
         create(&mut s, BASE, json!({"sheet": sheet, "view": "top", "scale": "1:1", "position_mm": [150, 250]}))
     };
+    let leaf = s.doc.occurrences.iter().find(|o| o.name.starts_with("Leaf")).map(|o| o.id).unwrap();
+    let across = |view: u64| {
+        let kind = json!({"linear": {"a": [0, 0, 2], "b": {"point": [0, 40, 2], "path": [leaf]}, "direction": "vertical"}});
+        json!({"view": ids::encode(view), "kind": kind})
+    };
     // The plate's top front edge.
     let edge = |view: u64| json!({"view": ids::encode(view), "kind": {"length": {"edge": {"point": [20, 0, 2], "path": []}}}});
-    run(&mut s, "drawing.dimension.add", edge(other));
-    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
-    let e = edit_refused(&mut s, other, json!({"pose": [{"joint": "Hinge", "values": [90]}]}));
-    assert!(e.contains("dimensions, balloons or notes on its model"), "{e}");
-    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    let free = run(&mut s, "drawing.dimension.add", across(other))["dimension"].clone();
+    let front = run(&mut s, "drawing.dimension.add", edge(other))["dimension"].clone();
+    let read = |s: &mut Session, d: &Value| run(s, "drawing.dimension.inspect", json!({"dimension": d}));
+    assert!(near_value(&read(&mut s, &free), 40.0));
+    edit_view(&mut s, other, json!({"pose": [{"joint": "Hinge", "values": [90]}]}));
+    assert!(near_value(&read(&mut s, &free), 18.0) && near_value(&read(&mut s, &front), 40.0));
     edit_view(&mut s, view, json!({"pose": [{"joint": "Hinge", "values": [90]}]}));
-    let e = s.execute("drawing.dimension.add", &edge(view)).err().map(|e| e.to_string()).unwrap_or_default();
-    assert!(e.contains("not supported yet") && e.contains("a position of its own"), "{e}");
+    assert!(near_value(&run(&mut s, "drawing.dimension.add", across(view)), 18.0));
+    assert!(near_value(&run(&mut s, "drawing.dimension.add", edge(view)), 40.0));
+    let e = edit_refused(&mut s, other, json!({"visual_style": "shaded"}));
+    assert!(e.contains("not supported yet: a shaded view in a position of its own"), "{e}");
 }
 
 /// A view exploded from a position: the leaf turned up, then moved out 30 mm along Y. Exploded alone,
@@ -2798,4 +3384,1280 @@ fn a_left_out_part_says_where_each_kind_of_setter_set_it() {
     assert_eq!(set_on(SetBy::Sheet), " (set on its sheet)");
     assert_eq!(set_on(SetBy::Drawing), " (set on the drawing)");
     assert_eq!((set_on(SetBy::This), set_on(SetBy::Default)), (String::new(), String::new()));
+}
+
+/// A view placed apart from its projection place is given the first free letter (#13044), as
+/// `projected`, `edit` and `move_to_sheet` place it; a base view and a view lined up with its parent
+/// get none, and a view lined up again keeps its own. A copy that doesn't need a letter never takes
+/// its original's. With letters not reused, a deleted view's letter never comes back.
+#[test]
+fn a_view_placed_apart_is_given_a_letter() {
+    let mut s = block_drawing();
+    let (base, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let (lined, right) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "right"}));
+    assert!(base.get("letter").is_none() && lined.get("letter").is_none(), "{base} {lined}");
+    let above = json!({"parent": ids::encode(front), "side": "above", "place": {"at": [200.0, 250.0]}});
+    let (apart, top) = create(&mut s, PROJECTED, above.clone());
+    assert_eq!(apart["letter"], "A");
+    let letter = |s: &Session, id: u64| saved(s, id).label.map(|label| label.letter);
+    let edited = edit_view(&mut s, right, json!({"place": {"at": [350.0, 150.0]}}));
+    assert_eq!(edited["changed"], json!(["place", "label"]));
+    assert_eq!(letter(&s, right).as_deref(), Some("B"));
+    edit_view(&mut s, right, json!({"place": {"aligned": 300.0}}));
+    assert_eq!(letter(&s, right).as_deref(), Some("B"), "lined up again, it keeps its letter");
+    let second = second_sheet(&mut s);
+    let (_, below) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "below"}));
+    to_sheet(&mut s, MOVE, json!({"view": ids::encode(below), "sheet": ids::encode(second), "break_alignment": true}));
+    assert_eq!(letter(&s, below).as_deref(), Some("C"), "moved apart");
+    // A projected view copied alone is a base view, and the linked views copied with a view are lined up.
+    let alone = listed(&to_sheet(&mut s, COPY, json!({"view": ids::encode(top), "sheet": ids::encode(second)})))[0];
+    let with = json!({"view": ids::encode(front), "sheet": ids::encode(second), "position_mm": [100.0, 100.0], "with_linked": true});
+    let linked = listed(&to_sheet(&mut s, COPY, with))[1];
+    assert_eq!((letter(&s, alone), letter(&s, linked)), (None, None), "no letter, never the original's");
+    run(&mut s, "drawing.set", json!({"view_letters_reuse": false}));
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    d.views.retain(|v| v.id != top);
+    s.doc_mut().put_drawing(Arc::new(d));
+    assert_eq!(create(&mut s, PROJECTED, above).0["letter"], "D", "A isn't given again");
+    assert_eq!(run(&mut s, "drawing.inspect", json!({}))["view_letters"], json!({"reuse": false, "given": 4}));
+}
+
+/// A label's parts are typed over, hidden and moved by `drawing.view.edit`, one undo step each, and
+/// inspect answers them with what the label reads and its box on the sheet: above the view until it
+/// is moved, then at its offset from the view's centre. A letter another view holds, a view with no
+/// label and hostile parts are refused, changing nothing.
+#[test]
+fn a_labels_parts_are_typed_over_hidden_and_moved() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2", "position_mm": [150.0, 150.0]}));
+    let (_, top) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "above", "place": {"at": [150.0, 230.0]}}));
+    let label = inspect_view(&mut s, top)["label"].clone();
+    assert_eq!((label["letter"].clone(), label["text"].clone(), label["needed"].clone()), (json!("A"), json!("VIEW A"), json!(true)));
+    let middle = |label: &Value| (point(&label["box_mm"]["min"]) + point(&label["box_mm"]["max"])) * 0.5;
+    // The top view is 50 x 25 at 1:2 round (150, 230): its boundary's top is at 242.5.
+    assert!(point(&label["box_mm"]["min"]).y > 242.5 && (middle(&label).x - 150.0).abs() < 1.0, "{label}");
+    assert!(inspect_view(&mut s, front).get("label").is_none(), "a base view has none");
+    let steps = s.undo.len();
+    let edited = edit_view(&mut s, top, json!({"label": {"words": "", "name": "BRACKET END", "offset": [0.0, -30.0]}}));
+    assert_eq!((edited["changed"].clone(), s.undo.len()), (json!(["label"]), steps + 1));
+    let label = inspect_view(&mut s, top)["label"].clone();
+    assert_eq!((label["text"].clone(), label["offset"].clone()), (json!("A\nBRACKET END"), json!([0.0, -30.0])));
+    assert!(middle(&label).dist(Vec2::new(150.0, 200.0)) < 1.0, "{label}");
+    edit_view(&mut s, top, json!({"label": {"offset": null, "shown": false}}));
+    let label = inspect_view(&mut s, top)["label"].clone();
+    assert_eq!((label["letter"].clone(), label["shown"].clone(), label["text"].clone()), (json!("A"), json!(false), Value::Null));
+    assert!(label.get("box_mm").is_none() && label.get("offset").is_none(), "{label}");
+    let (_, other) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "right", "place": {"at": [300.0, 150.0]}}));
+    let before = s.drawing("test").unwrap().clone();
+    let held = edit_refused(&mut s, other, json!({"label": {"letter": "A"}}));
+    assert!(held.contains(&format!("view {} has the letter A", ids::encode(top))), "{held}");
+    assert!(edit_refused(&mut s, front, json!({"label": {"name": "X"}})).contains("it has no label"));
+    for (bad, why) in [
+        (json!({"letter": "a"}), "its letter is one to three capital letters A to Z"),
+        (json!({"letter": "ABCD"}), "its letter is one to three capital letters A to Z"),
+        (json!({"letter": "A1"}), "its letter is one to three capital letters A to Z"),
+        (json!({"words": "two\nlines"}), "a label is one line"),
+        (json!({"name": "x".repeat(5000)}), "a label is one line"),
+        (json!({"offset": [1e9, 0.0]}), "its label's offset is at most 5000 mm"),
+        (json!({"colour": "red"}), "colour"),
+    ] {
+        let message = edit_refused(&mut s, other, json!({"label": bad}));
+        assert!(message.contains(why), "{bad}: {message}");
+    }
+    assert_eq!(*s.drawing("test").unwrap(), before);
+}
+
+/// [`three_views`] in `projection`, with a view projected above the front view and lined up at y 220:
+/// the session, and the front view's, the right view's and that view's ids.
+fn lined_up_views(projection: Projection) -> (Session, [u64; 3]) {
+    let (mut s, [front, right, _]) = three_views();
+    set_projection(&mut s, projection);
+    let made = run(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "above", "place": {"aligned": 220.0}}));
+    (s, [front, right, ids::decode(made["view"].as_str().unwrap()).unwrap()])
+}
+
+fn centre_of(s: &Session, view: u64) -> [f64; 2] {
+    let centre = s.drawing("test").unwrap().view_centre(view).unwrap();
+    [centre.x, centre.y]
+}
+
+fn dragged(s: &mut Session, view: u64, to: [f64; 2]) -> Value {
+    let reply = run(s, DRAG, json!({"view": ids::encode(view), "to_mm": to}));
+    let schema = output_schema_for::<ViewMoveResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    reply
+}
+
+/// Front moved (+20, +5) moves the top view (+20, 0) and the right view (0, +5), in both angles, and
+/// a lined-up view dragged off its line takes only its free axis, with its parent still. One step:
+/// undo puts all three back. Nothing is evaluated.
+#[test]
+fn a_dragged_view_keeps_its_line_up_and_its_followers_follow() {
+    for projection in [Projection::First, Projection::Third] {
+        let (mut s, [front, right, top]) = lined_up_views(projection);
+        let evaluations = s.evaluations;
+        let reply = dragged(&mut s, front, [170.0, 155.0]);
+        assert_eq!(centre_of(&s, front), [170.0, 155.0]);
+        assert_eq!(centre_of(&s, right), [300.0, 155.0]);
+        assert_eq!(centre_of(&s, top), [170.0, 220.0]);
+        assert_eq!(reply["place"], json!({"at": [170.0, 155.0]}), "{reply}");
+        let mut followers = [right, top];
+        followers.sort_unstable();
+        assert_eq!(reply["followers"], json!(followers.map(ids::encode)), "{reply}");
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!((centre_of(&s, front), centre_of(&s, right), centre_of(&s, top)), ([150.0, 150.0], [300.0, 150.0], [150.0, 220.0]));
+
+        // Off its line: the right view takes only x.
+        let reply = dragged(&mut s, right, [320.0, 999.0]);
+        assert_eq!(centre_of(&s, right), [320.0, 150.0]);
+        assert_eq!(reply["place"], json!({"aligned": 320.0}), "{reply}");
+        assert_eq!(reply["followers"], json!([]), "{reply}");
+        // Above: the top view takes only y.
+        dragged(&mut s, top, [999.0, 240.0]);
+        assert_eq!(centre_of(&s, top), [150.0, 240.0]);
+        assert_eq!(s.evaluations, evaluations);
+    }
+}
+
+/// `break_alignment` places a lined-up view apart, where it was dragged; the views lined up with it
+/// go with it, and a view placed at a point takes both axes.
+#[test]
+fn breaking_alignment_places_a_view_apart() {
+    let (mut s, [front, right, _]) = lined_up_views(Projection::Third);
+    let reply = run(&mut s, DRAG, json!({"view": ids::encode(right), "to_mm": [320.0, 90.0], "break_alignment": true}));
+    assert_eq!(reply["place"], json!({"at": [320.0, 90.0]}), "{reply}");
+    assert_eq!(centre_of(&s, right), [320.0, 90.0]);
+    assert_eq!(centre_of(&s, front), [150.0, 150.0], "its parent stays");
+    let letter = |s: &Session| saved(s, right).label.map(|label| label.letter);
+    assert_eq!(letter(&s).as_deref(), Some("A"), "placed apart, it is given a letter");
+    dragged(&mut s, right, [330.0, 95.0]);
+    assert_eq!(centre_of(&s, right), [330.0, 95.0], "both axes now");
+    assert_eq!(letter(&s).as_deref(), Some("A"), "and keeps it");
+    // Lined up with a view placed apart, a child follows that view.
+    let (mut s, [_, right, top]) = three_views();
+    let before = centre_of(&s, top);
+    dragged(&mut s, right, [310.0, 0.0]);
+    assert_eq!(centre_of(&s, top), before, "placed apart, it stays");
+}
+
+/// A move to where it is makes no step, and neither does one that off-axis leaves it on its line. A
+/// view off the sheet is listed. Hostile places are refused and change nothing.
+#[test]
+fn a_move_to_where_it_is_makes_no_step_and_hostile_places_are_refused() {
+    let (mut s, [front, right, _]) = lined_up_views(Projection::Third);
+    let doc = s.doc.clone();
+    dragged(&mut s, front, [150.0, 150.0]);
+    assert!(Arc::ptr_eq(&doc, &s.doc), "no step");
+    dragged(&mut s, right, [300.0, 777.0]);
+    assert!(Arc::ptr_eq(&doc, &s.doc), "still on the same place");
+
+    let out = dragged(&mut s, front, [1000.0, 150.0]);
+    assert_eq!(out["outside"][0]["view"], json!(ids::encode(front)), "{out}");
+    run(&mut s, "edit.undo", json!({}));
+
+    let doc = s.doc.clone();
+    for to in [json!([1e300, 0.0]), json!([0.0, -1e300]), json!([5001.0, 0.0]), json!(["a", 0.0]), json!([0.0]), json!(null)] {
+        assert!(s.execute(DRAG, &json!({"view": ids::encode(front), "to_mm": to})).is_err(), "{to}");
+    }
+    assert!(s.execute(DRAG, &json!({"view": ids::encode(right), "to_mm": [1e300, 0.0]})).is_err());
+    assert!(s.execute(DRAG, &json!({"view": "AAAAAAAAAAAA", "to_mm": [0.0, 0.0]})).is_err());
+    assert!(Arc::ptr_eq(&doc, &s.doc));
+    run(&mut s, "drawing.close", json!({}));
+    assert!(s.execute(DRAG, &json!({"view": ids::encode(front), "to_mm": [0.0, 0.0]})).is_err(), "no drawing open");
+}
+
+/// A move to the view's own sheet with a position goes by the same rule as a drag: it was ignored.
+#[test]
+fn a_position_on_the_views_own_sheet_is_a_move() {
+    let (mut s, [front, right, _]) = lined_up_views(Projection::Third);
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let reply = run(&mut s, MOVE, json!({"view": ids::encode(front), "sheet": sheet, "position_mm": [170.0, 155.0]}));
+    assert_eq!(centre_of(&s, front), [170.0, 155.0]);
+    // It, then the views that went with it, as a move to another sheet lists them.
+    let views = reply["views"].as_array().cloned().unwrap_or_default();
+    assert_eq!((views.first(), views.len()), (Some(&json!(ids::encode(front))), 3), "{reply}");
+    let reply = run(&mut s, MOVE, json!({"view": ids::encode(right), "sheet": sheet, "position_mm": [320.0, 999.0]}));
+    assert_eq!(centre_of(&s, right), [320.0, 155.0], "on its line");
+    assert_eq!(reply["views"], json!([ids::encode(right)]), "{reply}");
+    // No position: nothing moves and nothing is listed.
+    let reply = run(&mut s, MOVE, json!({"view": ids::encode(front), "sheet": sheet}));
+    assert_eq!(reply["views"], json!([]), "{reply}");
+}
+
+/// A section view of the front view of [`three_views`], cut along a horizontal line through the
+/// block's middle, its arrows down.
+fn with_section(s: &mut Session, front: u64) -> u64 {
+    use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
+    section_of(s, front, SectionKind::Full, &[[-40.0, 10.0], [40.0, 10.0]], ArrowSide::Right)
+}
+
+/// A section view of `parent`, cut along a line of `kind` through `points` on the parent's plane.
+fn section_of(
+    s: &mut Session,
+    parent: u64,
+    kind: solidcraft_doc::drawing::cutting_line::SectionKind,
+    points: &[[f64; 2]],
+    arrows: solidcraft_doc::drawing::cutting_line::ArrowSide,
+) -> u64 {
+    use solidcraft_doc::drawing::cutting_line::CuttingLine;
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let id = d.allocate_id(&mut solidcraft_doc::ids::IdSource::seeded(13046)).unwrap();
+    let line = CuttingLine::new(kind, points.iter().map(|p| Vec2::new(p[0], p[1])).collect(), arrows).unwrap();
+    let (sheet, place) = (d.sheets[0].id, ViewPlace::At([150.0, 60.0]));
+    let view = View {
+        id,
+        sheet,
+        kind: ViewKind::Section { parent, line },
+        place,
+        settings: ViewOverrides::default(),
+        reference_shown_percent: 0.0,
+        label: None,
+    };
+    d.add_views([Arc::new(view)]);
+    d.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(d));
+    id
+}
+
+/// A section view lists and inspects as a section of its parent, follows its parent's settings and
+/// keeps its own editable, copies alone as a section of the same parent, and its sheet draws it with
+/// its other views.
+#[test]
+fn a_section_view_inspects_copies_and_draws() {
+    let (mut s, [front, ..]) = three_views();
+    let cut = with_section(&mut s, front);
+    let reply = inspect_view(&mut s, cut);
+    assert_eq!((&reply["kind"], &reply["parent"], reply.get("side")), (&json!("section"), &json!(ids::encode(front)), None), "{reply}");
+    assert_eq!((&reply["settings"]["scale"]["from"], &reply["linked"]), (&json!("parent"), &json!(true)), "{reply}");
+    // The arrows point down the front view: it looks down, as the top view does.
+    assert_eq!(s.drawing("test").unwrap().resolve_view(cut).unwrap().basis.x, NamedView::Top.basis().x);
+    let listed_views = run(&mut s, "drawing.inspect", json!({}))["sheets"][0]["views"].clone();
+    let entry = listed_views.as_array().unwrap().iter().find(|v| v["id"] == json!(ids::encode(cut))).unwrap();
+    assert_eq!(
+        (&entry["kind"], &entry["parent"], &entry["label"]),
+        (&json!("section"), &json!(ids::encode(front)), &json!("Section of Front")),
+        "{entry}"
+    );
+    edit_view(&mut s, cut, json!({"scale": "1:1"}));
+    assert_eq!(saved(&s, cut).settings.scale, Some("1:1".parse().unwrap()));
+    // Copied alone, it stays a section of the same parent, its line as it was.
+    let copy = listed(&to_sheet(&mut s, COPY, json!({"view": ids::encode(cut), "sheet": "Sheet 1"})))[0];
+    assert_eq!(saved(&s, copy).kind, saved(&s, cut).kind);
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    let state = |id: u64| scene["views"].as_array().unwrap().iter().find(|v| v["view"] == json!(ids::encode(id))).unwrap().clone();
+    assert_eq!((&state(cut)["status"], &state(front)["status"]), (&json!("drawn"), &json!("drawn")), "{scene}");
+}
+
+/// Saved view `id` as its sheet draws it: what it shows, its extents and its lines at its scale,
+/// hidden lines too, on paper round its model's middle.
+fn drawn_lines(s: &Session, id: u64) -> (ShownSet, Extents, crate::drawing_view::Lines) {
+    use crate::drawing_view::{CHORD_MM, LineRequest, PreparedBodies};
+    let view = s.drawing("test").unwrap().resolve_view(id).unwrap();
+    let shown = crate::drawing_view::shown(s);
+    let (set, extents) = crate::drawing_view::measured(&shown, &view).unwrap();
+    let frame = crate::drawing_view::frame(view.basis, view.scale.value, &extents.model, Vec2::ZERO, "test").unwrap();
+    let request = LineRequest {
+        shows: extents.model,
+        hidden: true,
+        reference_hidden: false,
+        reference_hides_model: false,
+        tangent_edges: false,
+        chord_mm: CHORD_MM,
+    };
+    let lines = crate::drawing_view::lines(s, &set, &frame, &request, &mut PreparedBodies::default(), "test").unwrap();
+    (set.into_owned(), extents, lines)
+}
+
+/// Where `lines` has an upright straight piece at `visibility`: its x on paper, in hundredths of a mm.
+fn upright(lines: &crate::drawing_view::Lines, visibility: Visibility) -> BTreeSet<i64> {
+    let pieces = lines.lines.iter().flat_map(|l| &l.pieces).filter(|p| p.visibility == visibility);
+    let segments = pieces.flat_map(|p| &p.path).filter_map(|seg| match seg {
+        solidcore_record::Seg2::Line { a, b } if (a.x - b.x).abs() < 1e-6 && (a.y - b.y).abs() > 1.0 => Some((a.x * 100.0).round() as i64),
+        _ => None,
+    });
+    segments.collect()
+}
+
+/// The block drilled upright through its middle (10 mm across) and a tab standing on its left end,
+/// [`three_views_of`] them, and a section of the front view along an upright line through the hole,
+/// its arrows to the right.
+fn drilled_with_tab() -> (Session, [u64; 3], u64) {
+    use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
+    let mut s = block();
+    run(&mut s, "solid.cylinder", json!({"diameter": 10, "height": 22, "base": [50, 25, -1], "operation": "cut", "targets": ["Block"]}));
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 20], "length": 20, "width": 50, "height": 40, "body_name": "Tab"}));
+    let (mut s, views) = three_views_of(s);
+    let cut = section_of(&mut s, views[0], SectionKind::Full, &[[50.0, -10.0], [50.0, 70.0]], ArrowSide::Right);
+    (s, views, cut)
+}
+
+/// A full section view draws its parent's bodies cut along its line, the side its arrows point to
+/// kept: the tab on the other side is left out, so the view is the block's 50 x 20 mm end, and the
+/// hole's two sides, 5 mm from its middle, are cut edges, drawn visible. Seen whole from the right,
+/// they are hidden. Asked again, the view takes the cut it made.
+#[test]
+fn a_full_section_view_draws_the_bodies_cut_along_its_line() {
+    let (s, [_, right, _], cut) = drilled_with_tab();
+    let (set, extents, lines) = drawn_lines(&s, cut);
+    let names: Vec<&str> = set.bodies.iter().map(|b| b.body.as_str()).collect();
+    assert_eq!((names, &set.uncut), (vec!["Block"], &None));
+    let size = extents.model.max - extents.model.min;
+    assert!((size.x - 50.0).abs() < 1e-6 && (size.y - 20.0).abs() < 1e-6, "{size:?}");
+    // At 1:2, 5 mm from the middle is 2.5 mm on paper.
+    let sides = BTreeSet::from([-250, 250]);
+    assert!(sides.is_subset(&upright(&lines, Visibility::Visible)), "{:?}", upright(&lines, Visibility::Visible));
+    let (whole, _, seen) = drawn_lines(&s, right);
+    assert_eq!(whole.bodies.len(), 2);
+    assert!(sides.is_disjoint(&upright(&seen, Visibility::Visible)), "{:?}", upright(&seen, Visibility::Visible));
+    assert!(sides.is_subset(&upright(&seen, Visibility::Hidden)), "{:?}", upright(&seen, Visibility::Hidden));
+    let (again, ..) = drawn_lines(&s, cut);
+    let body = |set: &ShownSet| set.body(&set.bodies[0]).unwrap().body.clone();
+    assert!(body(&again).same(&body(&set)));
+}
+
+/// A section's cut bodies never lend their geometry to another copy of the part, as the plane cuts
+/// each copy where it stands: with the line through the first of two cubes, each copy is a group of
+/// its own, while the parent's view still shares one copy's geometry between them.
+#[test]
+fn copies_of_a_part_are_cut_apart() {
+    use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
+    let (s, _) = two_cubes();
+    let (mut s, [front, ..]) = three_views_of(s);
+    let cut = section_of(&mut s, front, SectionKind::Full, &[[5.0, -10.0], [5.0, 20.0]], ArrowSide::Right);
+    let groups = |id: u64| {
+        let view = s.drawing("test").unwrap().resolve_view(id).unwrap();
+        let shown = crate::drawing_view::shown(&s);
+        let (set, _) = crate::drawing_view::measured(&shown, &view).unwrap();
+        let placed = crate::mesh_lines::placed(&s, &set.state, |_| true, "test").unwrap();
+        placed.iter().map(|p| p.group).collect::<BTreeSet<_>>().len()
+    };
+    assert_eq!((groups(front), groups(cut)), (1, 2));
+}
+
+/// Reference parts show whole around a section, as context, while the model parts are cut: the
+/// plate is cut where the line crosses it, and the block over it, a reference part, isn't.
+#[test]
+fn reference_parts_are_not_cut() {
+    use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
+    let (s, _) = plate_and_block(5.0);
+    let (mut s, [front, ..]) = three_views_of(s);
+    let cut = section_of(&mut s, front, SectionKind::Full, &[[35.0, -10.0], [35.0, 30.0]], ArrowSide::Right);
+    let world = crate::drawing_view::shown(&s).unwrap();
+    let (set, ..) = drawn_lines(&s, cut);
+    let whole = |reference: bool| {
+        let shown = set.bodies.iter().find(|b| b.reference == reference).unwrap();
+        set.body(shown).unwrap().body.same(&world.body(shown).unwrap().body)
+    };
+    assert_eq!((set.bodies.len(), whole(true), whole(false)), (2, true, false));
+}
+
+/// A mesh body has no faces to cut: a section draws it whole beside the cut block, and says so.
+#[test]
+fn a_mesh_body_is_drawn_uncut_and_said_so() {
+    use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
+    let mut s = block();
+    with_mesh_cube(&mut s, [60.0, 10.0, 30.0], "section");
+    let (mut s, [front, ..]) = three_views_of(s);
+    let cut = section_of(&mut s, front, SectionKind::Full, &[[50.0, -10.0], [50.0, 70.0]], ArrowSide::Right);
+    let (set, ..) = drawn_lines(&s, cut);
+    assert_eq!((set.bodies.len(), set.uncut.as_deref()), (2, Some("1 mesh body is drawn uncut: a mesh has no faces to cut")));
+}
+
+/// A line that keeps none of the parts gives the placeholder, and says why.
+#[test]
+fn a_line_that_keeps_none_of_the_parts_shows_the_placeholder() {
+    use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
+    let (mut s, [front, ..]) = three_views();
+    let cut = section_of(&mut s, front, SectionKind::Full, &[[-40.0, 0.0], [40.0, 0.0]], ArrowSide::Right);
+    let view = s.drawing("test").unwrap().resolve_view(cut).unwrap();
+    assert_eq!(crate::drawing_view::measured(&crate::drawing_view::shown(&s), &view).err(), Some(Unmeasured::CutAway));
+    let reply = inspect_view(&mut s, cut);
+    assert_eq!(reply["extents"]["provenance"], json!("cut_away"), "{reply}");
+}
+
+/// Only a full section's lines are drawn yet: a half section, and a shaded full section, say so,
+/// and their sheet draws its other views.
+#[test]
+fn other_sections_and_shaded_ones_wait() {
+    use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
+    let (mut s, [front, ..]) = three_views();
+    let half = section_of(&mut s, front, SectionKind::Half, &[[-40.0, 10.0], [50.0, 10.0], [50.0, 30.0]], ArrowSide::Right);
+    let full = with_section(&mut s, front);
+    edit_view(&mut s, full, json!({"visual_style": "shaded"}));
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    let state = |id: u64| scene["views"].as_array().unwrap().iter().find(|v| v["view"] == json!(ids::encode(id))).unwrap().clone();
+    assert_eq!(state(half)["reason"], json!("not supported yet: a half section"), "{scene}");
+    assert_eq!(state(full)["reason"], json!("not supported yet: a shaded section view"), "{scene}");
+    assert_eq!(state(front)["status"], json!("drawn"), "{scene}");
+}
+
+/// A pictorial view's boundary is the gap past its parent's on both axes, corner to corner: above
+/// right of the 50 x 10 front view at 1:2 (185..235 x 143.5..153.5), the block's isometric view,
+/// 150 / sqrt 2 / 2 = 53.03 wide and 190 / sqrt 6 / 2 = 38.78 high, goes to 255..308.03 x
+/// 173.5..212.28, saved at that box's centre, at its parent's scale, looking from the corner
+/// between the top and right views (`iso_front_right`) and following its parent. Below left it
+/// looks from below in third angle, and is the same named view in first. A point given is kept; a
+/// place lined up is refused.
+#[test]
+fn a_pictorial_view_sits_a_gap_past_its_parents_corner() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let (wide, high) = (150.0 / 2f64.sqrt() / 2.0, 190.0 / 6f64.sqrt() / 2.0);
+    let (iso, iso_id) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "above_right"}));
+    assert_box(&iso, [255.0, 173.5], [255.0 + wide, 173.5 + high]);
+    assert_eq!(iso["scale"]["text"], "1:2");
+    let view = saved(&s, iso_id);
+    assert_eq!(view.kind, ViewKind::Pictorial { parent: front, diagonal: Diagonal::AboveRight });
+    let ViewPlace::At([x, y]) = view.place else { panic!("placed at a point: {:?}", view.place) };
+    assert!((Vec2::new(x, y) - Vec2::new(255.0 + wide / 2.0, 173.5 + high / 2.0)).len() < EPS, "{x} {y}");
+    let inspected = inspect_view(&mut s, iso_id);
+    assert_eq!(
+        (&inspected["kind"], &inspected["side"], &inspected["parent"]),
+        (&json!("pictorial"), &json!("above_right"), &json!(ids::encode(front)))
+    );
+    assert_eq!(inspected["direction"]["named"], "iso_front_right");
+    assert_eq!((&inspected["settings"]["scale"]["from"], &inspected["linked"]), (&json!("parent"), &json!(true)));
+
+    let (below, below_id) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "below_left"}));
+    assert_box(&below, [185.0 - 20.0 - wide, 143.5 - 20.0 - high], [165.0, 123.5]);
+    assert_eq!(inspect_view(&mut s, below_id)["direction"].get("named"), None, "third angle: from below");
+    set_projection(&mut s, Projection::First);
+    assert_eq!(inspect_view(&mut s, below_id)["direction"]["named"], "iso_front_right", "first angle");
+    set_projection(&mut s, Projection::Third);
+
+    let (_, apart) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "above_left", "place": {"at": [300.0, 60.0]}}));
+    assert_eq!(saved(&s, apart).place, ViewPlace::At([300.0, 60.0]));
+    let lined = create_refused(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "above_right", "place": {"aligned": 300.0}}));
+    assert!(lined.contains("a pictorial view is placed at a point"), "{lined}");
+}
+
+/// An isometric view of a 100 x 60 x 20 block at 1:1 is its outline at the isometric ratio:
+/// 160 / sqrt 2 = 113.14 wide and 200 / sqrt 6 = 81.65 high.
+#[test]
+fn an_isometric_view_of_a_100_60_20_block_is_its_isometric_outline() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 20, "body_name": "Block"}));
+    run(&mut s, "drawing.create", json!({}));
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:1", "position_mm": [100.0, 100.0]}));
+    let (iso, _) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "above_right"}));
+    let (size, _) = boundary(&iso);
+    assert!((size.x - 160.0 / 2f64.sqrt()).abs() < EPS && (size.y - 200.0 / 6f64.sqrt()).abs() < EPS, "{size:?}");
+}
+
+/// `drawing.view.projection_for` names the view a point gives, under the drawing's projection: in
+/// third angle 80 mm above the front view's centre the top view, 80 mm right the right view; in
+/// first angle 80 mm below gives the top view and 80 mm left the right view; on a diagonal an
+/// isometric view, not lined up, at the parent's scale. On the centre, or from a pictorial parent,
+/// none, with why. It reads no model, saves nothing, and agrees with what `drawing.view.projected`
+/// makes for each of the eight.
+#[test]
+fn the_view_beside_a_point_follows_the_drawings_projection() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let ask = |s: &mut Session, offset: [f64; 2]| {
+        let reply = run(s, PROJECTION_FOR, json!({"parent": ids::encode(front), "offset_mm": offset}));
+        let schema = output_schema_for::<ProjectionForResult>();
+        assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+        reply
+    };
+    let (steps, evaluations, record) = (s.undo.len(), s.evaluations, s.drawing("test").unwrap().clone());
+    let above = ask(&mut s, [0.0, 80.0]);
+    assert_eq!(
+        (&above["kind"], &above["side"], &above["lined_up"], &above["direction"]["named"], &above["scale"]["text"], &above["projection"]),
+        (&json!("orthographic"), &json!("above"), &json!(true), &json!("top"), &json!("1:2"), &json!("third"))
+    );
+    let right = ask(&mut s, [80.0, 0.0]);
+    assert_eq!((&right["side"], &right["direction"]["named"]), (&json!("right"), &json!("right")));
+    let iso = ask(&mut s, [80.0, 80.0]);
+    assert_eq!(
+        (&iso["kind"], &iso["side"], &iso["lined_up"], &iso["direction"]["named"], &iso["scale"]["text"]),
+        (&json!("pictorial"), &json!("above_right"), &json!(false), &json!("iso_front_right"), &json!("1:2"))
+    );
+    let centre = ask(&mut s, [0.0, 0.0]);
+    assert_eq!((&centre["kind"], centre.get("side"), &centre["why"]), (&json!("none"), None, &json!("on the parent's centre")));
+    assert!(ask(&mut s, [10000.0, -10000.0])["kind"] == "pictorial");
+    assert_eq!((s.undo.len(), s.evaluations, s.drawing("test").unwrap().clone()), (steps, evaluations, record), "reads no model, saves nothing");
+
+    set_projection(&mut s, Projection::First);
+    let below = ask(&mut s, [0.0, -80.0]);
+    assert_eq!((&below["side"], &below["direction"]["named"], &below["projection"]), (&json!("below"), &json!("top"), &json!("first")));
+    assert_eq!(ask(&mut s, [-80.0, 0.0])["direction"]["named"], "right");
+    assert_eq!(ask(&mut s, [-80.0, -80.0])["direction"]["named"], "iso_front_right");
+    set_projection(&mut s, Projection::Third);
+
+    for (offset, side) in [
+        ([80.0, 0.0], "right"),
+        ([-80.0, 0.0], "left"),
+        ([0.0, 80.0], "above"),
+        ([0.0, -80.0], "below"),
+        ([80.0, 80.0], "above_right"),
+        ([-80.0, 80.0], "above_left"),
+        ([80.0, -80.0], "below_right"),
+        ([-80.0, -80.0], "below_left"),
+    ] {
+        let answer = ask(&mut s, offset);
+        assert_eq!(answer["side"], side);
+        let (_, made) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": side, "place": {"at": [300.0, 60.0]}}));
+        assert_eq!(inspect_view(&mut s, made)["direction"], answer["direction"], "{side}");
+        if side == "above_right" {
+            let from_iso = run(&mut s, PROJECTION_FOR, json!({"parent": ids::encode(made), "offset_mm": [80.0, 0.0]}));
+            assert_eq!(from_iso["kind"], "none");
+            assert_eq!(from_iso["why"], "not supported yet: a view projected from a pictorial view");
+        }
+    }
+}
+
+const FLAT: &str = "drawing.view.flat";
+
+/// `change` made with the drawing closed, then the drawing opened again.
+fn with_drawing_closed(s: &mut Session, change: impl FnOnce(&mut Session)) {
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(s, "drawing.close", json!({}));
+    change(s);
+    run(s, "drawing.open", drawing);
+}
+
+/// `drawing.view.flat` with `p`: the new view's id and the reply, checked against its schema.
+fn flat_view(s: &mut Session, p: Value) -> (u64, Value) {
+    let reply = run(s, FLAT, p);
+    let schema = output_schema_for::<CreateResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    (ids::decode(reply["view"].as_str().unwrap()).unwrap(), reply)
+}
+
+/// `sheet.flat_pattern`'s reply. It's a model command, so while a drawing is open it runs with the
+/// drawing closed.
+fn flat_pattern(s: &mut Session) -> Value {
+    if s.open_drawing.is_none() {
+        return run(s, "sheet.flat_pattern", json!({}));
+    }
+    let mut reply = Value::Null;
+    with_drawing_closed(s, |s| reply = run(s, "sheet.flat_pattern", json!({})));
+    reply
+}
+
+/// The flat pattern's size, width and height.
+fn flat_size(s: &mut Session) -> Vec2 {
+    point(&flat_pattern(s)["flat_size_mm"])
+}
+
+/// View `id`'s strokes on its sheet, drawn at once: each path with its dash lengths, and the view's
+/// state.
+fn flat_strokes(s: &Session, id: u64) -> (Vec<(Vec<solidcore_record::Seg2>, Option<Vec<f64>>)>, crate::drawing_scene::Status) {
+    let d = s.drawing("test").unwrap();
+    let sheet = d.view(id).unwrap().sheet;
+    let built = crate::drawing_scene::build(s, d, sheet).unwrap();
+    let status = built.views.iter().find(|v| v.view == id).unwrap().status.clone();
+    let items = built.scene.groups.iter().filter(|g| g.object == id).flat_map(|g| &g.items);
+    let stroke = |item: &solidcraft_geom::paper::Item| match item {
+        solidcraft_geom::paper::Item::Stroke { path, pattern, .. } => Some((path.clone(), pattern.as_ref().map(|p| p.lengths_mm.clone()))),
+        _ => None,
+    };
+    (items.filter_map(stroke).collect(), status)
+}
+
+/// The box round the ends of `segs`' lines.
+fn line_box<'a>(segs: impl Iterator<Item = &'a solidcore_record::Seg2>) -> Aabb2 {
+    segs.filter_map(|seg| match seg {
+        solidcore_record::Seg2::Line { a, b } => Some([*a, *b]),
+        _ => None,
+    })
+    .flatten()
+    .collect()
+}
+
+/// How far `p` is from the nearest line of `segs`.
+fn off_lines<'a>(p: Vec2, segs: impl Iterator<Item = &'a solidcore_record::Seg2>) -> f64 {
+    let from = |a: Vec2, b: Vec2| {
+        let t = ((p - a).dot(b - a) / (b - a).dot(b - a)).clamp(0.0, 1.0);
+        (a + (b - a) * t - p).len()
+    };
+    segs.filter_map(|seg| if let solidcore_record::Seg2::Line { a, b } = seg { Some(from(*a, *b)) } else { None }).fold(f64::INFINITY, f64::min)
+}
+
+/// The issue's plate: a flat view's boundary, and its outline on the sheet, measure the flat size
+/// `sheet.flat_pattern` reports, to 1e-6 mm, at 1:1 and at 1:2, centred where it was placed.
+#[test]
+fn a_flat_view_measures_the_flat_size_at_its_scale() {
+    let mut s = sheet_plate();
+    let size = flat_size(&mut s);
+    for (scale, factor) in [("1:1", 1.0), ("1:2", 0.5)] {
+        let (id, reply) = flat_view(&mut s, json!({"sheet": "Sheet 1", "body": "Plate", "scale": scale, "position_mm": [200, 150]}));
+        let (on_sheet, centre) = boundary(&reply);
+        assert!((on_sheet - size * factor).len() < 1e-6 && (centre - Vec2::new(200.0, 150.0)).len() < 1e-6, "{scale}: {reply}");
+        let (strokes, status) = flat_strokes(&s, id);
+        assert_eq!(status.name(), "drawn", "{status:?}");
+        let outline = line_box(strokes.iter().filter(|(_, dashes)| dashes.is_none()).flat_map(|(path, _)| path));
+        assert!((outline.size() - size * factor).len() < 1e-6 && (outline.center() - Vec2::new(200.0, 150.0)).len() < 1e-6, "{scale}: {outline:?}");
+    }
+}
+
+/// A round hole is one circle of its exact diameter on the flat view, never a polyline, and each
+/// loop of the flat is drawn once.
+#[test]
+fn a_round_hole_is_one_circle_on_a_flat_view() {
+    let mut s = sheet_plate();
+    with_drawing_closed(&mut s, |s| {
+        run(s, "sketch.create", json!({"plane": "XY", "name": "Hole"}));
+        run(s, "sketch.circle.center", json!({"center": [50, 30], "radius": 5}));
+        run(s, "sketch.finish", json!({}));
+        run(s, "solid.extrude", json!({"sketch": "Hole", "through_all": true, "direction": "symmetric", "operation": "cut"}));
+    });
+    let flat = flat_pattern(&mut s);
+    let loops = flat["outline"].as_array().unwrap().len() + flat["cutouts"].as_array().unwrap().len();
+    let (id, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let (strokes, _) = flat_strokes(&s, id);
+    let solid: Vec<_> = strokes.iter().filter(|(_, dashes)| dashes.is_none()).map(|(path, _)| path).collect();
+    assert_eq!(solid.len(), loops, "one stroke per loop");
+    let circle = |path: &&Vec<solidcore_record::Seg2>| {
+        let arcs: Option<Vec<(Vec2, f64, f64)>> = path
+            .iter()
+            .map(|seg| if let solidcore_record::Seg2::Arc { center, radius, sweep, .. } = seg { Some((*center, *radius, *sweep)) } else { None })
+            .collect();
+        arcs.filter(|arcs| arcs.iter().all(|(c, r, _)| (*r - 2.5).abs() < 1e-9 && (*c - arcs[0].0).len() < 1e-9))
+            .is_some_and(|arcs| (arcs.iter().map(|(_, _, sweep)| sweep.abs()).sum::<f64>() - std::f64::consts::TAU).abs() < 1e-9)
+    };
+    assert_eq!(solid.iter().copied().filter(circle).count(), 1, "{solid:?}");
+}
+
+/// A flat pattern view draws one body's flat, so it is never exploded or posed, and it doesn't draw a
+/// configuration of its own yet. Edit refuses each and changes nothing. In a drawing saved so by hand,
+/// the edit rule refuses it too, and the sheet draws no lines for the view and says why.
+#[test]
+fn a_flat_pattern_view_is_never_exploded_posed_or_configured() {
+    let mut s = sheet_plate();
+    with_drawing_closed(&mut s, |s| {
+        run(s, "parameters.add", json!({"name": "W", "expression": "60 mm"}));
+        run(s, "config.configure", json!({"params": ["W"]}));
+        run(s, "config.row", json!({"name": "Wide", "values": {"W": "80 mm"}}));
+    });
+    let (id, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1"}));
+    let configured = "not supported yet: a flat pattern view of a configuration of its own";
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    let e = edit_refused(&mut s, id, json!({"configuration": "Wide"}));
+    assert!(e.contains(configured), "{e}");
+    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record.clone(), steps));
+    let cases: [(fn(&mut solidcraft_doc::drawing_view::ViewOverrides), &str); 3] = [
+        (|o| o.exploded = Some(Exploded::View(1)), "a flat pattern view is never exploded: it draws one body's flat"),
+        (|o| o.pose = Some(Pose::Study(StudyStep { id: 1, step: 0 })), "a flat pattern view has no position: it draws one body's flat"),
+        (|o| o.configuration = Some(ViewConfiguration::Row(1)), configured),
+    ];
+    for (set, why) in cases {
+        s.edit_drawing(EDIT, |d| {
+            let at = d.views.iter().position(|v| v.id == id).unwrap();
+            set(&mut Arc::make_mut(&mut d.views[at]).settings);
+            Ok(())
+        })
+        .unwrap();
+        let e = check_apart(s.drawing(EDIT).unwrap(), std::iter::once(id), EDIT).unwrap_err().to_string();
+        assert!(e.contains(why), "{e}");
+        let (strokes, status) = flat_strokes(&s, id);
+        assert_eq!((strokes.len(), status), (0, crate::drawing_scene::Status::Failed(why.into())));
+        s.edit_drawing(EDIT, |d| {
+            *d = Drawing::clone(&record);
+            Ok(())
+        })
+        .unwrap();
+    }
+}
+
+/// A flat pattern view draws its body's flat, not the model's edges, so nothing on it points at the
+/// model. A dimension, dimensions from the model, a balloon, a note on an edge, a note's leader and a
+/// leader added to a note are each refused, and nothing changes. A note on the view that points at
+/// nothing is drawn. Saved on it by hand, a dimension, a note on an edge and a balloon are left out of
+/// the sheet, which says they have no place to draw.
+#[test]
+fn nothing_on_a_flat_pattern_view_points_at_the_model() {
+    let mut s = sheet_plate();
+    let (flat, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1", "position_mm": [100, 150]}));
+    let (_, base) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "view": "top", "scale": "1:1", "position_mm": [300, 150]}));
+    let (on_flat, on_base) = (ids::encode(flat), ids::encode(base));
+    let why = "a flat pattern view draws its body's flat, not the model's edges: nothing on it points at the model";
+    let edge = json!({"point": [50, 60, 2], "path": []});
+    let plain = run(&mut s, "drawing.note.add", json!({"anchor": {"view": on_flat}, "at": [0, -50], "content": "FLAT"}));
+    let plain = ids::decode(plain["note"].as_str().unwrap()).unwrap();
+    let asks = [
+        ("drawing.dimension.add", json!({"view": on_flat, "kind": {"length": {"edge": edge}}})),
+        ("drawing.dimension.from_model", json!({"view": on_flat})),
+        ("drawing.balloon.add", json!({"view": on_flat, "edge": edge, "at": [40, 40]})),
+        ("drawing.note.add", json!({"anchor": {"edge": {"view": on_flat, "edge": edge}}, "at": [40, 40], "content": "Edge"})),
+        ("drawing.note.add", json!({"anchor": {"view": on_flat}, "at": [40, 40], "content": "Edge", "branches": [{"edge": edge}]})),
+        ("drawing.note.edit", json!({"note": ids::encode(plain), "set": {"branches": {"add": [{"edge": edge}]}}})),
+    ];
+    for (cmd, p) in asks {
+        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+        let e = s.execute(cmd, &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {cmd} {p}"));
+        assert!(e.contains(why), "{cmd}: {e}");
+        assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps), "{cmd}");
+    }
+    // Made on the base view, then moved onto the flat view by hand.
+    let dimension = run(&mut s, "drawing.dimension.add", json!({"view": on_base, "kind": {"length": {"edge": edge}}}));
+    let dimension = ids::decode(dimension["dimension"].as_str().unwrap()).unwrap();
+    let noted = run(&mut s, "drawing.note.add", json!({"anchor": {"edge": {"view": on_base, "edge": edge}}, "at": [40, 40], "content": "Edge"}));
+    let noted = ids::decode(noted["note"].as_str().unwrap()).unwrap();
+    s.edit_drawing(EDIT, |d| {
+        let at = d.dimensions.iter().position(|r| r.id == dimension).unwrap();
+        Arc::make_mut(&mut d.dimensions[at]).view = flat;
+        let at = d.notes.index_of(noted).unwrap();
+        if let Some(solidcraft_doc::drawing::note::Anchor::Edge { view, .. }) = d.notes.get_mut(at).map(|note| &mut Arc::make_mut(note).anchor) {
+            *view = flat;
+        }
+        // No command puts a balloon there, and this design has no placed part: one saved by hand.
+        let id = d.allocate_id(&mut solidcraft_doc::ids::IdSource::seeded(13030)).unwrap();
+        let edge = solidcraft_doc::drawing::dimension::ModelEdge { body: "Plate".into(), origin_feature: 1, name: "F1:side".into(), path: vec![7] };
+        d.balloons.add([Arc::new(solidcraft_doc::drawing::balloon::Balloon { id, view: flat, edge, at: [40.0, 40.0], parts_list: None })]);
+        Ok(())
+    })
+    .unwrap();
+    let d = s.drawing("test").unwrap();
+    let built = crate::drawing_scene::build(&s, d, d.sheets[0].id).unwrap();
+    let dimension = built.dimensions.iter().find(|one| one.dimension == dimension).unwrap();
+    assert_eq!((dimension.view, dimension.drawn, dimension.why.as_deref()), (flat, false, Some(crate::drawing_scene::NO_PLACE)));
+    let note = |id: u64| built.notes.iter().find(|one| one.note == id).unwrap();
+    assert_eq!((note(noted).view, note(noted).drawn, note(noted).why.as_deref()), (Some(flat), false, Some(crate::drawing_scene::NO_PLACE)));
+    assert_eq!((note(plain).drawn, note(plain).why.as_deref()), (true, None));
+    let [balloon] = built.balloons.as_slice() else { panic!("one balloon: {:?}", built.balloons) };
+    assert_eq!((balloon.view, balloon.drawn, balloon.why.as_deref()), (flat, false, Some(crate::drawing_scene::NO_PLACE)));
+}
+
+/// A bend up is ISO 128's long dash and dot (type 04), a bend down its long dash and two dots (type
+/// 05): dashes 20 widths of the narrow line, gaps 3, dots 1, in every line group. In the 0.35 mm group
+/// a bend up is 3.6, 0.54, 0.18, 0.54 mm. Each, narrow, is a stroke the scene takes across an A0 sheet.
+#[test]
+fn bend_lines_are_long_dashes_with_one_and_two_dots_in_every_group() {
+    use solidcraft_geom::paper::{Dashes, Group, Item, ObjectKind, Scene};
+    let groups = [LineGroup::Mm0_25, LineGroup::Mm0_35, LineGroup::Mm0_5, LineGroup::Mm0_7, LineGroup::Mm1, LineGroup::Mm1_4, LineGroup::Mm2];
+    let path = vec![solidcore_record::Seg2::Line { a: Vec2::new(10.0, 10.0), b: Vec2::new(1180.0, 830.0) }];
+    for group in groups {
+        let d = LineKind::Thin.width_mm(group);
+        assert_eq!(bend_dashes_mm(true, group), vec![20.0 * d, 3.0 * d, d, 3.0 * d], "{group:?}");
+        assert_eq!(bend_dashes_mm(false, group), vec![20.0 * d, 3.0 * d, d, 3.0 * d, d, 3.0 * d], "{group:?}");
+        let items = [true, false].map(|up| Item::Stroke {
+            path: path.clone(),
+            closed: false,
+            width_mm: d,
+            pattern: Some(Dashes { lengths_mm: bend_dashes_mm(up, group), phase_mm: 0.0 }),
+        });
+        let scene = Scene::new(Vec2::new(1189.0, 841.0), vec![Group { object: 1, kind: ObjectKind::View, items: items.to_vec() }]);
+        scene.validate().unwrap_or_else(|e| panic!("{group:?}: {e}"));
+    }
+    for (got, want) in bend_dashes_mm(true, LineGroup::Mm0_35).iter().zip([3.6, 0.54, 0.18, 0.54]) {
+        assert!((got - want).abs() < 1e-12, "{got} {want}");
+    }
+}
+
+/// A bend up and a bend down are drawn in two line types, ISO 128's long dash and dot and its long
+/// dash and two dots, narrow, one stroke per bend line, each where its own bend is; each bend line
+/// ends on the outline, unturned and turned a quarter.
+#[test]
+fn bends_up_and_down_draw_in_two_line_types_and_end_on_the_outline() {
+    let mut s = sheet_plate();
+    with_drawing_closed(&mut s, |s| {
+        run(s, "sheet.flange", json!({"edges": [[50, 60, 2]], "height": 20, "flip": true}));
+    });
+    let reply = flat_pattern(&mut s);
+    let bends = reply["bends"].as_array().unwrap();
+    let count = |direction: &str| bends.iter().filter(|b| b["direction"] == direction).count();
+    assert_eq!((count("up"), count("down")), (1, 1), "{bends:?}");
+    let (id, view) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1"}));
+    let (strokes, _) = flat_strokes(&s, id);
+    let group = LineGroup::DEFAULT;
+    let (up, down) = (Some(bend_dashes_mm(true, group)), Some(bend_dashes_mm(false, group)));
+    let drawn = |dashes: &Option<Vec<f64>>| strokes.iter().filter(|(_, d)| d == dashes).map(|(path, _)| path).collect::<Vec<_>>();
+    assert_eq!((drawn(&up).len(), drawn(&down).len()), (1, 1), "{strokes:?}");
+    // Unturned at 1:1, the flat only moves onto the sheet: its box's corner goes to the boundary's.
+    let flat = crate::drawing_view::flat_from(&reply, QuarterTurn::None, FLAT).unwrap().model;
+    let on_sheet = |p: &Value| point(p) - flat.min + point(&view["boundary_mm"]["min"]);
+    for bend in bends {
+        let dashes = if bend["direction"] == "up" { &up } else { &down };
+        let [solidcore_record::Seg2::Line { a, b }] = drawn(dashes)[0].as_slice() else { panic!("a bend line is one line") };
+        let (start, end) = (on_sheet(&bend["start"]), on_sheet(&bend["end"]));
+        let at = |p: Vec2, q: Vec2| (*a - p).len() < 1e-9 && (*b - q).len() < 1e-9;
+        assert!(at(start, end) || at(end, start), "{bend}: drawn from {a:?} to {b:?}");
+    }
+    // Turned a quarter too, the bend lines turn with the outline and end on it.
+    let (turned, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1", "turn": 90}));
+    for strokes in [strokes, flat_strokes(&s, turned).0] {
+        let outline: Vec<_> = strokes.iter().filter(|(_, d)| d.is_none()).flat_map(|(path, _)| path).collect();
+        let bend_lines: Vec<_> = strokes.iter().filter(|(_, d)| *d == up || *d == down).map(|(path, _)| path).collect();
+        assert_eq!(bend_lines.len(), 2, "{strokes:?}");
+        for path in bend_lines {
+            let [solidcore_record::Seg2::Line { a, b }] = path.as_slice() else { panic!("a bend line is one line: {path:?}") };
+            for end in [*a, *b] {
+                assert!(off_lines(end, outline.iter().copied()) < 1e-6, "{end:?} isn't on the outline");
+            }
+        }
+    }
+}
+
+/// What `drawing.view.projection_for` can't read is refused, and nothing changes: an offset
+/// missing, null, not two numbers, or past 10000 mm either way; a parent that isn't a view, or not
+/// a view's id; an unknown field; no drawing open.
+#[test]
+fn hostile_projection_for_is_refused() {
+    let mut s = block();
+    let message = s.execute(PROJECTION_FOR, &json!({"parent": ids::encode(1), "offset_mm": [1, 0]})).unwrap_err().to_string();
+    assert!(message.contains("drawing"), "{message}");
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let parent = json!(ids::encode(front));
+    for p in [
+        json!({"parent": parent}),
+        json!({"parent": parent, "offset_mm": null}),
+        json!({"parent": parent, "offset_mm": [1]}),
+        json!({"parent": parent, "offset_mm": [1, 2, 3]}),
+        json!({"parent": parent, "offset_mm": ["a", 0]}),
+        json!({"parent": parent, "offset_mm": [1e300, 0]}),
+        json!({"parent": parent, "offset_mm": [10000.001, 0]}),
+        json!({"parent": parent, "offset_mm": [0, -10000.001]}),
+        json!({"parent": ids::encode(99), "offset_mm": [1, 0]}),
+        json!({"parent": 1, "offset_mm": [1, 0]}),
+        json!({"parent": parent, "offset_mm": [1, 0], "side": "right"}),
+    ] {
+        create_refused(&mut s, PROJECTION_FOR, p);
+    }
+}
+
+/// A pictorial view made from what can't take one is refused whole: a side that isn't one of the
+/// eight, a pictorial parent, and a 33rd view in a chain.
+#[test]
+fn hostile_pictorial_view_creation_is_refused() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let parent = json!(ids::encode(front));
+    for side in ["above-right", "aboveright", "diagonal", "top"] {
+        create_refused(&mut s, PROJECTED, json!({"parent": parent, "side": side}));
+    }
+    let (_, iso) = create(&mut s, PROJECTED, json!({"parent": parent, "side": "above_right"}));
+    for side in ["right", "below_left"] {
+        let message = create_refused(&mut s, PROJECTED, json!({"parent": ids::encode(iso), "side": side}));
+        assert!(message.contains("not supported yet: a view projected from a pictorial view"), "{message}");
+    }
+    let mut last = front;
+    for _ in 1..32 {
+        last = create(&mut s, PROJECTED, json!({"parent": ids::encode(last), "side": "above", "place": {"at": [100.0, 100.0]}})).1;
+    }
+    let message = create_refused(&mut s, PROJECTED, json!({"parent": ids::encode(last), "side": "above_right"}));
+    assert!(message.contains("at most 32"), "{message}");
+}
+
+/// A pictorial view copied alone is a base view looking the way it did, saved by its name; the
+/// drawing lists it after its parent with its diagonal and its label; deleting its parent's sheet
+/// is refused while it is on another sheet.
+#[test]
+fn a_pictorial_view_copies_lists_and_keeps_its_parents_sheet() {
+    let (mut s, [front, right, top]) = three_views();
+    let (made, iso) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "above_right", "place": {"at": [60.0, 250.0]}}));
+    assert!(made.get("letter").is_none(), "nothing names a pictorial view by a letter: {made}");
+    let second = second_sheet(&mut s);
+    let copied = to_sheet(&mut s, COPY, json!({"view": ids::encode(iso), "sheet": ids::encode(second)}));
+    let copy = ids::decode(copied["view"].as_str().unwrap()).unwrap();
+    assert!(
+        matches!(saved(&s, copy).kind, ViewKind::Base { view: ViewDirection::Named(NamedView::IsoFrontRight), .. }),
+        "{:?}",
+        saved(&s, copy).kind
+    );
+
+    let listed = run(&mut s, "drawing.inspect", json!({}));
+    let views = listed["sheets"][0]["views"].as_array().unwrap();
+    let entry = views.iter().find(|v| v["id"] == json!(ids::encode(iso))).unwrap();
+    assert_eq!(
+        (&entry["kind"], &entry["parent"], &entry["side"], &entry["label"]),
+        (&json!("pictorial"), &json!(ids::encode(front)), &json!("above_right"), &json!("Pictorial above right of Front"))
+    );
+    let at = |id: u64| views.iter().position(|v| v["id"] == json!(ids::encode(id))).unwrap();
+    assert!(at(front) < at(iso), "after its parent");
+    assert!([right, top].iter().all(|v| views.iter().any(|e| e["id"] == json!(ids::encode(*v)))));
+
+    run(&mut s, MOVE, json!({"view": ids::encode(iso), "sheet": ids::encode(second)}));
+    let sheet = ids::encode(saved(&s, front).sheet);
+    let message = s.execute("drawing.sheet.delete", &json!({"sheet": sheet, "contents": "delete"})).unwrap_err().to_string();
+    assert!(message.contains("projected or cut from them on other sheets"), "{message}");
+}
+
+/// The block with its top front edge chamfered 10√3 along the top and 10 down the front, so the new
+/// face slopes 30° from the top and is 20 long up the slope; its front view at `scale` and the right
+/// view lined up with it, which shows the slope as a line. The session and the two views.
+fn sloped(scale: &str) -> (Session, [u64; 2]) {
+    let mut s = block();
+    run(&mut s, "solid.chamfer", json!({"edges": [[50, 0, 20]], "distance": 10.0 * 3f64.sqrt(), "distance2": 10, "body": "Block"}));
+    run(&mut s, "drawing.create", json!({}));
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": scale, "position_mm": [120.0, 120.0]}));
+    let (_, right) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "right"}));
+    (s, [front, right])
+}
+
+/// The slope's corners on the block's end at `x`: its foot on the front face and its top on the top.
+fn slope_foot(x: f64) -> Vec3 {
+    Vec3::new(x, 0.0, 10.0)
+}
+
+fn slope_top(x: f64) -> Vec3 {
+    Vec3::new(x, 10.0 * 3f64.sqrt(), 20.0)
+}
+
+/// A point inside the slope's edge on the block's right end, to pick it by.
+fn slope_edge() -> Value {
+    let middle = (slope_foot(100.0) + slope_top(100.0)) * 0.5;
+    json!([middle.x, middle.y, middle.z])
+}
+
+/// Where view `id` puts the model point `p` on its sheet: the one rule its lines are placed by.
+fn on_paper(s: &Session, id: u64, p: Vec3) -> Vec2 {
+    let d = s.drawing("test").unwrap();
+    let resolved = d.resolve_view(id).unwrap();
+    let placed = crate::drawing_view::on_sheet(s, d, id, "test").unwrap();
+    let centre = d.view_centre(id).unwrap();
+    crate::drawing_view::frame(resolved.basis, resolved.scale.value, &placed.extents.model, centre, "test").unwrap().to_paper(p)
+}
+
+/// An auxiliary view of the 30° slope, made from the right view by the slope's edge on the block's
+/// right end, shows the slope at its true length, 20 (the front view shows only its 10 rise), and
+/// the slope's other side at its 100, square to it: the face at its true shape, measured on paper at
+/// 1:1 and 1:2. It sits up and left of the right view, away from its middle, at its scale. Made by
+/// the sloped face itself, it is the same view.
+#[test]
+fn an_auxiliary_view_of_a_30_degree_slope_shows_its_true_length() {
+    for (scale, factor) in [("1:1", 1.0), ("1:2", 0.5)] {
+        let (mut s, [front, right]) = sloped(scale);
+        let (made, aux) = create(&mut s, AUXILIARY, json!({"parent": ids::encode(right), "edge": slope_edge()}));
+        assert_eq!(made["scale"]["text"], scale);
+        let apart = |s: &Session, view: u64, a: Vec3, b: Vec3| (on_paper(s, view, a) - on_paper(s, view, b)).len();
+        let up_the_slope = apart(&s, aux, slope_foot(100.0), slope_top(100.0));
+        assert!((up_the_slope - 20.0 * factor).abs() < EPS, "{scale}: the slope's true length, {up_the_slope}");
+        assert!((apart(&s, aux, slope_foot(0.0), slope_foot(100.0)) - 100.0 * factor).abs() < EPS, "{scale}: its other side");
+        let foot = on_paper(&s, aux, slope_foot(100.0));
+        let (up, across) = (on_paper(&s, aux, slope_top(100.0)) - foot, on_paper(&s, aux, slope_foot(0.0)) - foot);
+        assert!((up.x * across.x + up.y * across.y).abs() < EPS, "{scale}: square, the face's true shape");
+        assert!((apart(&s, front, slope_foot(100.0), slope_top(100.0)) - 10.0 * factor).abs() < EPS, "{scale}: the front view shows its rise");
+        let ViewKind::Auxiliary { parent, toward } = saved(&s, aux).kind else { panic!("{:?}", saved(&s, aux).kind) };
+        assert_eq!(parent, right);
+        assert!((toward[0] + 0.5).abs() < EPS && (toward[1] - 3f64.sqrt() / 2.0).abs() < EPS, "up and left: {toward:?}");
+        let face = (slope_foot(50.0) + slope_top(50.0)) * 0.5;
+        let (_, by_face) = create(&mut s, AUXILIARY, json!({"parent": ids::encode(right), "face": [face.x, face.y, face.z]}));
+        let ViewKind::Auxiliary { toward: same, .. } = saved(&s, by_face).kind else { panic!("{:?}", saved(&s, by_face).kind) };
+        assert!((same[0] - toward[0]).abs() < EPS && (same[1] - toward[1]).abs() < EPS, "{same:?} {toward:?}");
+    }
+}
+
+/// An auxiliary view goes where its parent unfolds to: every corner of the block keeps its place
+/// along the fold line (the line the slope's edge shows as in the right view), so each lies on a
+/// projector square to it; and it is moved along its side until its boundary is 20 mm past its
+/// parent's on the nearer axis. Toward the other side it goes there; a point given is kept. Folded
+/// right of the front view it is the right view, placed where the projected view goes.
+#[test]
+fn an_auxiliary_view_lines_up_a_gap_past_its_parent() {
+    let (mut s, [front, right]) = sloped("1:2");
+    let (made, aux) = create(&mut s, AUXILIARY, json!({"parent": ids::encode(right), "edge": slope_edge()}));
+    let fold = Vec2::new(3f64.sqrt() / 2.0, 0.5);
+    for i in 0..8 {
+        let p = Vec3::new(f64::from(i & 1) * 100.0, f64::from((i >> 1) & 1) * 50.0, f64::from((i >> 2) & 1) * 20.0);
+        let projector = on_paper(&s, aux, p) - on_paper(&s, right, p);
+        assert!((projector.x * fold.x + projector.y * fold.y).abs() < EPS, "{p:?}: {projector:?}");
+    }
+    let theirs = inspect_view(&mut s, right);
+    let (their_lo, their_hi) = (point(&theirs["boundary_mm"]["min"]), point(&theirs["boundary_mm"]["max"]));
+    let (lo, hi) = (point(&made["boundary_mm"]["min"]), point(&made["boundary_mm"]["max"]));
+    // Up and left: past the parent's top, or its left side, whichever it clears first.
+    let gap = (lo.y - their_hi.y).max(their_lo.x - hi.x);
+    assert!((gap - 20.0).abs() < EPS, "{gap}: {made}");
+
+    let p = json!({"parent": ids::encode(right), "edge": slope_edge(), "toward": [0.5, -1.0]});
+    let (_, other) = create(&mut s, AUXILIARY, p);
+    let ViewKind::Auxiliary { toward, .. } = saved(&s, other).kind else { panic!("{:?}", saved(&s, other).kind) };
+    assert!((toward[0] - 0.5).abs() < EPS && (toward[1] + 3f64.sqrt() / 2.0).abs() < EPS, "down and right: {toward:?}");
+    let p = json!({"parent": ids::encode(right), "edge": slope_edge(), "place": {"at": [300.0, 60.0]}});
+    let (_, apart) = create(&mut s, AUXILIARY, p);
+    assert_eq!(saved(&s, apart).place, ViewPlace::At([300.0, 60.0]));
+
+    // The block's back right upright edge is a vertical line in the front view: folded to its right.
+    let p = json!({"parent": ids::encode(front), "edge": [100.0, 50.0, 10.0], "toward": [1.0, 0.0]});
+    let (folded, folded_id) = create(&mut s, AUXILIARY, p);
+    let d = s.drawing("test").unwrap().clone();
+    assert_eq!(d.resolve_view(folded_id).unwrap().basis, d.resolve_view(right).unwrap().basis);
+    let (lo, hi) = (point(&folded["boundary_mm"]["min"]), point(&folded["boundary_mm"]["max"]));
+    assert!((lo - their_lo).len() < EPS && (hi - their_hi).len() < EPS, "{folded} {theirs}");
+}
+
+/// What `drawing.view.auxiliary` refuses, each with the drawing and the undo steps unchanged: no edge
+/// or face, or both; an edge the parent sees end-on; a face it doesn't see edge-on, with its angle; a
+/// side along the fold line or of no length; a place lined up; no edge at the point; badly given
+/// fields; an edge that isn't straight and a face that isn't flat; a pictorial parent.
+#[test]
+fn hostile_auxiliary_view_creation_is_refused() {
+    let (mut s, [front, right]) = sloped("1:2");
+    let parent = json!(ids::encode(right));
+    let face = (slope_foot(50.0) + slope_top(50.0)) * 0.5;
+    for (p, says) in [
+        (json!({"parent": parent}), "one of them"),
+        (json!({"parent": parent, "edge": slope_edge(), "face": [face.x, face.y, face.z]}), "one of them"),
+        (json!({"parent": parent, "edge": [50.0, 50.0, 20.0]}), "end-on"),
+        (json!({"parent": ids::encode(front), "face": [50.0, 0.0, 5.0]}), "90.00°"),
+        (json!({"parent": parent, "edge": slope_edge(), "toward": [3f64.sqrt() / 2.0, 0.5]}), "along the fold line"),
+        (json!({"parent": parent, "edge": slope_edge(), "toward": [0, 0]}), "no length"),
+        (json!({"parent": parent, "edge": slope_edge(), "place": {"aligned": 10.0}}), "an auxiliary view is placed at a point"),
+        (json!({"parent": parent, "edge": [500, 500, 500]}), "no edge"),
+        (json!({"parent": parent, "edge": slope_edge(), "toward": [1, 2, 3]}), ""),
+        (json!({"parent": parent, "edge": slope_edge(), "toward": null}), ""),
+        (json!({"parent": parent, "edge": slope_edge(), "side": "right"}), ""),
+        (json!({"parent": ids::encode(99), "edge": slope_edge()}), ""),
+        (json!({"parent": parent, "edge": slope_edge(), "place": {"at": [1e300, 0]}}), ""),
+    ] {
+        let message = create_refused(&mut s, AUXILIARY, p.clone());
+        assert!(message.contains(says), "{p}: {message}");
+    }
+    let (_, iso) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "above_right"}));
+    let message = create_refused(&mut s, AUXILIARY, json!({"parent": ids::encode(iso), "edge": slope_edge()}));
+    assert!(message.contains("not supported yet: a view projected from a pictorial view"), "{message}");
+
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20}));
+    run(&mut s, "drawing.create", json!({}));
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:1"}));
+    let rim = create_refused(&mut s, AUXILIARY, json!({"parent": ids::encode(front), "edge": [0.0, 10.0, 20.0]}));
+    assert!(rim.contains("isn't straight"), "{rim}");
+    let side = create_refused(&mut s, AUXILIARY, json!({"parent": ids::encode(front), "face": [0.0, 10.0, 10.0]}));
+    assert!(side.contains("isn't flat"), "{side}");
+}
+
+/// An auxiliary view is inspected with its kind, its parent and its side, looking along the slope's
+/// normal; the drawing lists it after its parent, with its parent and its label; copied alone it is
+/// a base view looking the way it did.
+#[test]
+fn an_auxiliary_view_inspects_lists_and_copies() {
+    let (mut s, [front, right]) = sloped("1:2");
+    let (made, aux) = create(&mut s, AUXILIARY, json!({"parent": ids::encode(right), "edge": slope_edge()}));
+    assert_eq!(made["letter"], "A", "placed apart, it is named by its letter: {made}");
+    let inspected = inspect_view(&mut s, aux);
+    assert_eq!((&inspected["kind"], &inspected["parent"], inspected.get("side")), (&json!("auxiliary"), &json!(ids::encode(right)), None));
+    let toward = point(&inspected["toward"]);
+    assert!((toward - Vec2::new(-0.5, 3f64.sqrt() / 2.0)).len() < EPS, "{inspected}");
+    let sight = Vec3::new(0.0, 0.5, -3f64.sqrt() / 2.0);
+    let looking = &inspected["direction"]["direction"];
+    let looking = Vec3::new(looking[0].as_f64().unwrap(), looking[1].as_f64().unwrap(), looking[2].as_f64().unwrap());
+    assert!((looking - sight).len() < EPS, "into the slope: {inspected}");
+    assert_eq!((&inspected["settings"]["scale"]["from"], &inspected["linked"]), (&json!("parent"), &json!(true)));
+
+    let listed = run(&mut s, "drawing.inspect", json!({}));
+    let views = listed["sheets"][0]["views"].as_array().unwrap();
+    let entry = views.iter().find(|v| v["id"] == json!(ids::encode(aux))).unwrap();
+    assert_eq!(
+        (&entry["kind"], &entry["parent"], entry.get("side"), &entry["label"]),
+        (&json!("auxiliary"), &json!(ids::encode(right)), None, &json!("Auxiliary of Right of Front"))
+    );
+    let at = |id: u64| views.iter().position(|v| v["id"] == json!(ids::encode(id))).unwrap();
+    assert!(at(front) < at(right) && at(right) < at(aux), "after its parent");
+
+    let copied = to_sheet(&mut s, COPY, json!({"view": ids::encode(aux), "sheet": "Sheet 1"}));
+    let copy = ids::decode(copied["view"].as_str().unwrap()).unwrap();
+    assert!(matches!(saved(&s, copy).kind, ViewKind::Base { view: ViewDirection::Looking(_), .. }), "{:?}", saved(&s, copy).kind);
+    let d = s.drawing("test").unwrap().clone();
+    let (was, is) = (d.resolve_view(aux).unwrap().basis, d.resolve_view(copy).unwrap().basis);
+    for (a, b) in [(was.x, is.x), (was.y, is.y), (was.origin, is.origin)] {
+        assert!((a - b).len() < 1e-12, "{a:?} {b:?}");
+    }
+}
+
+/// Each quarter turn turns the flat on the sheet: at 90 and 270 degrees its boundary is the flat's
+/// height wide and its width high. On its plane, each turn puts the flat's corners exactly where
+/// that turn anticlockwise takes them, so 90 and 270 degrees can't be told apart only by size.
+#[test]
+fn a_quarter_turn_turns_a_flat_view() {
+    let mut s = sheet_plate();
+    let reply = flat_pattern(&mut s);
+    let turned = |turn| crate::drawing_view::flat_from(&reply, turn, FLAT).unwrap().model;
+    let flat = turned(QuarterTurn::None);
+    // A box centred on the plane's origin would turn to the same box at 90 and 270 degrees.
+    assert!(flat.min.x != -flat.max.x || flat.min.y != -flat.max.y, "{flat:?}");
+    let corners = [flat.min, Vec2::new(flat.max.x, flat.min.y), flat.max, Vec2::new(flat.min.x, flat.max.y)];
+    let rules: [(QuarterTurn, fn(Vec2) -> Vec2); 3] = [
+        (QuarterTurn::Quarter, |p| Vec2::new(-p.y, p.x)),
+        (QuarterTurn::Half, |p| Vec2::new(-p.x, -p.y)),
+        (QuarterTurn::ThreeQuarters, |p| Vec2::new(p.y, -p.x)),
+    ];
+    for (turn, rule) in rules {
+        let at = corners.map(rule);
+        let min = at.iter().fold(Vec2::new(f64::INFINITY, f64::INFINITY), |m, p| Vec2::new(m.x.min(p.x), m.y.min(p.y)));
+        let max = at.iter().fold(Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY), |m, p| Vec2::new(m.x.max(p.x), m.y.max(p.y)));
+        let got = turned(turn);
+        assert!(got.min == min && got.max == max, "{turn:?}: {got:?}, want {min:?} to {max:?}");
+    }
+    let size = flat_size(&mut s);
+    for (turn, want) in [(0, size), (90, Vec2::new(size.y, size.x)), (180, size), (270, Vec2::new(size.y, size.x))] {
+        let (_, reply) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1", "turn": turn}));
+        assert!((boundary(&reply).0 - want).len() < 1e-9, "{turn}: {reply}");
+    }
+    let error = s.execute(FLAT, &json!({"sheet": "Sheet 1", "scale": "1:1", "turn": 45})).unwrap_err().to_string();
+    assert!(error.contains("0, 90, 180 or 270"), "{error}");
+}
+
+/// A body that isn't sheet metal is refused in `sheet.flat_pattern`'s words, and so is a design with
+/// none. A body renamed after its flat view was made fails that view with the reason, and the sheet
+/// still draws.
+#[test]
+fn a_flat_view_of_a_body_that_isnt_sheet_metal_is_refused() {
+    let mut s = block();
+    run(&mut s, "drawing.create", json!({}));
+    let error = s.execute(FLAT, &json!({"sheet": "Sheet 1", "body": "Block"})).unwrap_err().to_string();
+    assert!(error.contains("`Block` is not a sheet metal body"), "{error}");
+    let error = s.execute(FLAT, &json!({"sheet": "Sheet 1"})).unwrap_err().to_string();
+    assert!(error.contains("there is no sheet metal body"), "{error}");
+
+    let mut s = sheet_plate();
+    let (id, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "body": "Plate", "scale": "1:1"}));
+    with_drawing_closed(&mut s, |s| {
+        run(s, "body.rename", json!({"body": "Plate", "name": "Blank"}));
+    });
+    let (strokes, status) = flat_strokes(&s, id);
+    assert!(strokes.is_empty() && status.reason().is_some_and(|why| why.contains("`Plate` is not a sheet metal body")), "{status:?}");
+}
+
+/// A flat view follows the model: a taller flange and a smaller K-factor each change its size by what
+/// the flat pattern's size changes.
+#[test]
+fn a_flat_view_follows_the_flange_and_the_rule() {
+    let mut s = sheet_plate();
+    let (id, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1"}));
+    let size_on_sheet = |s: &mut Session| boundary(&inspect_view(s, id)).0;
+    assert!((size_on_sheet(&mut s) - flat_size(&mut s)).len() < 1e-6);
+    let (mut taller, mut smaller) = (Vec2::ZERO, Vec2::ZERO);
+    with_drawing_closed(&mut s, |s| {
+        let names = s.doc.features.last().map(|f| f.param_names.clone()).unwrap_or_default();
+        run(s, "parameters.change", json!({"name": names[0], "expression": "30"}));
+        taller = flat_size(s);
+        run(s, "sheet.manage_rules", json!({"name": "T2", "k_factor": 0.3}));
+        smaller = flat_size(s);
+    });
+    assert!(taller.y > 69.0 && smaller.y < taller.y, "{taller:?} {smaller:?}");
+    assert!((size_on_sheet(&mut s) - smaller).len() < 1e-6);
+}
+
+/// A flat view inspects as `flat`, and the drawing's status answers with it on the sheet. No view of
+/// any kind is made from it yet: each command refuses with nothing changed, and
+/// `drawing.view.projection_for` gives none with the same reason.
+#[test]
+fn a_flat_view_inspects_as_flat() {
+    let mut s = sheet_plate();
+    let (id, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1"}));
+    assert_eq!(inspect_view(&mut s, id)["kind"], json!("flat"));
+    run(&mut s, "drawing.status", json!({}));
+    let (parent, refusal) = (ids::encode(id), "not supported yet: a view made from a flat pattern view");
+    for (cmd, p) in [
+        (PROJECTED, json!({"parent": parent, "side": "right"})),
+        (PROJECTED, json!({"parent": parent, "side": "above_right"})),
+        (AUXILIARY, json!({"parent": parent, "edge": [50, 60, 2]})),
+    ] {
+        let message = create_refused(&mut s, cmd, p);
+        assert!(message.contains(refusal), "{cmd}: {message}");
+    }
+    let at = run(&mut s, PROJECTION_FOR, json!({"parent": parent, "offset_mm": [80.0, 0.0]}));
+    assert_eq!((at["kind"].as_str(), at["why"].as_str()), (Some("none"), Some(refusal)));
+}
+
+/// A flat view saved with its design and opened again in a new session keeps its body and turn, and
+/// draws the same lines.
+#[test]
+fn a_flat_view_is_the_same_after_saving_and_opening() {
+    let mut s = sheet_plate();
+    let (id, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1", "turn": 90}));
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    let dir = std::env::temp_dir().join(format!("solidcraft-flat-view-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("part.{}", solidcraft_io::DESIGN_EXT));
+    run(&mut s, "file.save_as", json!({"path": path}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": path}));
+    run(&mut opened, "drawing.open", drawing);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(opened.drawing("test").unwrap().view(id).unwrap().kind, s.drawing("test").unwrap().view(id).unwrap().kind);
+    let ((lines, status), (was, before)) = (flat_strokes(&opened, id), flat_strokes(&s, id));
+    assert_eq!(status.name(), "drawn", "{status:?}");
+    assert_eq!((lines, status.name()), (was, before.name()));
+}
+
+/// `drawing.view.section` makes a section view of a saved view along the cutting line it is given,
+/// in one undo step: it saves that line and the place given, follows its parent's settings, and
+/// draws as the same view written into the drawing by hand does.
+#[test]
+fn a_section_view_is_made_along_its_line() {
+    use solidcraft_doc::drawing::cutting_line::{ArrowSide, CuttingLine, SectionKind};
+    let (mut s, [front, ..], by_hand) = drilled_with_tab();
+    let line = json!({"kind": "full", "points": [[50.0, -10.0], [50.0, 70.0]], "arrows": "right"});
+    let (made, id) = create(&mut s, SECTION, json!({"parent": ids::encode(front), "line": line, "place": {"at": [150.0, 60.0]}}));
+    let expected = CuttingLine::new(SectionKind::Full, vec![Vec2::new(50.0, -10.0), Vec2::new(50.0, 70.0)], ArrowSide::Right).unwrap();
+    let view = saved(&s, id);
+    assert_eq!(
+        (view.kind, view.place, view.settings),
+        (ViewKind::Section { parent: front, line: expected }, ViewPlace::At([150.0, 60.0]), ViewOverrides::default())
+    );
+    assert_eq!(made["scale"]["text"], inspect_view(&mut s, front)["settings"]["scale"]["value"], "{made}");
+    let ((_, _, ours), (_, _, theirs)) = (drawn_lines(&s, id), drawn_lines(&s, by_hand));
+    for visibility in [Visibility::Visible, Visibility::Hidden] {
+        assert_eq!(upright(&ours, visibility), upright(&theirs, visibility), "{visibility:?}");
+    }
+}
+
+/// With no place, a section view sits where a projected view looking its way would: lined up with
+/// its parent, its boundary a gap past the parent's, on the side the drawing's projection gives. On
+/// the block's front view at 1:2 (185..235 x 143.5..153.5), a line across it with its arrows down
+/// looks down on the half below the line, 50 x 25 on paper: above the parent in third angle, where
+/// the top view goes, and below it in first. An upright line with its arrows right looks at the
+/// right half from the left, 25 x 10: left of the parent in third angle.
+#[test]
+fn a_section_view_sits_where_the_projection_puts_it() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let section = |s: &mut Session, points: Value| {
+        create(s, SECTION, json!({"parent": ids::encode(front), "line": {"kind": "full", "points": points, "arrows": "right"}}))
+    };
+    let across = json!([[-10.0, 10.0], [110.0, 10.0]]);
+    let (above, above_id) = section(&mut s, across.clone());
+    assert_box(&above, [185.0, 173.5], [235.0, 198.5]);
+    assert_eq!(saved(&s, above_id).place, ViewPlace::At([210.0, 186.0]));
+    assert_box(&section(&mut s, json!([[50.0, -10.0], [50.0, 30.0]])).0, [140.0, 143.5], [165.0, 153.5]);
+    set_projection(&mut s, Projection::First);
+    assert_box(&section(&mut s, across).0, [185.0, 98.5], [235.0, 123.5]);
+}
+
+/// What the drawing would refuse is refused before anything is saved, naming the command: a line
+/// with one point, two points on top of each other, a point past 1e12 mm, a half line that doesn't
+/// turn, a parent that isn't a view, and a place lined up with the parent.
+#[test]
+fn a_bad_cutting_line_is_refused() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let made =
+        |parent: u64, kind: &str, points: Value| json!({"parent": ids::encode(parent), "line": {"kind": kind, "points": points, "arrows": "left"}});
+    let mut aligned = made(front, "full", json!([[0.0, 10.0], [100.0, 10.0]]));
+    aligned["place"] = json!({"aligned": 40.0});
+    for bad in [
+        made(front, "full", json!([[0.0, 0.0]])),
+        made(front, "full", json!([[5.0, 5.0], [5.0, 5.0]])),
+        made(front, "full", json!([[0.0, 0.0], [1e13, 0.0]])),
+        made(front, "half", json!([[0.0, 0.0], [10.0, 0.0], [20.0, 0.0]])),
+        made(sheet, "full", json!([[0.0, 10.0], [100.0, 10.0]])),
+        aligned,
+    ] {
+        let why = create_refused(&mut s, SECTION, bad.clone());
+        assert!(why.contains(SECTION), "{bad}: {why}");
+    }
+}
+
+/// A section view takes its letter as it is made, the next one free: A for the first, then B.
+#[test]
+fn a_section_views_letter_is_given() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let line = json!({"kind": "full", "points": [[-10.0, 10.0], [110.0, 10.0]], "arrows": "right"});
+    let mut letters = Vec::new();
+    for at in [[100.0, 60.0], [300.0, 60.0]] {
+        let (made, id) = create(&mut s, SECTION, json!({"parent": ids::encode(front), "line": line, "place": {"at": at}}));
+        let saved_letter = saved(&s, id).label.map(|label| label.letter);
+        assert_eq!(made["letter"].as_str(), saved_letter.as_deref(), "{made}");
+        letters.extend(saved_letter);
+    }
+    assert_eq!(letters, ["A", "B"]);
 }

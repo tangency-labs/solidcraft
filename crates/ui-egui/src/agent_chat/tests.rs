@@ -4,7 +4,7 @@ use std::sync::mpsc::channel;
 fn transcript_clipboard_harness(layout: crate::ui_kit::LayoutMode) -> crate::scenario::Harness {
     let mut h = narrow_chat();
     h.app.ui.layout = layout;
-    h.app.preferences.agent_chat_width = 500.0;
+    resize_chat(&mut h, 500.0);
     h.app.agent_chat.items.push(Item::Agent { thought: false, text: "Transcript clipboard sentinel".into() });
     h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"})).unwrap();
     h.app.run("select.set", json!({"items": [{"type": "body", "name": "Cube"}]})).unwrap();
@@ -113,7 +113,9 @@ fn transcript_shortcut_ownership_ends_when_the_panel_is_hidden() {
         transcript_click(&mut h, at);
         match hidden {
             "closed" => h.app.agent_chat.open = false,
-            "minimized" => h.app.preferences.agent_chat_minimized = true,
+            "minimized" => {
+                h.app.run_panel_command("panel.collapse", &json!({"target":{"type":"instance","id":"assistant"},"collapsed":true})).unwrap();
+            }
             _ => h.app.preferences.ai_features = false,
         }
         h.frame_with(vec![egui::Event::Paste("SolidCraft bodies".into())]);
@@ -661,8 +663,7 @@ fn the_chat_pops_out_into_its_own_window_and_docks_back() {
     h.frames(3);
     assert!(rect_of("agent_chat:panel").is_some() && rect_of("agent_chat:window").is_none(), "docked by default");
     assert!(!h.app.preferences.agent_chat_popped);
-    let pop = handle_at("agent_chat:pop_out").expect("a pop-out button in the header");
-    h.call("ui.click", json!({"x": pop.x, "y": pop.y}));
+    h.call("ui.agent_chat", json!({"popped": true}));
     h.frames(3);
     assert!(h.app.preferences.agent_chat_popped);
     assert!(rect_of("agent_chat:panel").is_none(), "the side panel is gone");
@@ -3203,12 +3204,24 @@ fn new_chat_clears_the_files_waiting_and_asks_first() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+fn resize_chat(h: &mut crate::scenario::Harness, width: f32) {
+    h.frames(2);
+    h.app
+        .run_panel_command(
+            "panel.resize",
+            &json!({
+                "target":{"type":"instance","id":"assistant"},"size":{"width":width,"height":400},"thickness_only":true
+            }),
+        )
+        .unwrap();
+}
+
 /// A harness with the chat open at its narrowest and nothing to look for.
 fn narrow_chat() -> crate::scenario::Harness {
     let mut h = crate::scenario::Harness::new();
-    h.app.preferences.agent_chat_width = panel::MIN_WIDTH;
     h.app.agent_chat.open = true;
     h.app.agent_chat.detection = Some(Default::default());
+    resize_chat(&mut h, 280.0);
     h
 }
 
@@ -3622,19 +3635,13 @@ fn files_dropped_on_the_chat_attach_and_the_app_does_not_open_them() {
     assert!(!h.app.file_load.busy(), "the app doesn't open them as well");
     drop_files(&mut h, egui::pos2(300.0, 500.0), &[d.join("brief.md")]);
     assert_eq!(status(&h.app)["attachments"].as_array().map(Vec::len), Some(2), "over the 3D view: not the chat's");
-    // Folded to its strip, a drop on the strip is the chat's too.
-    h.call("ui.agent_chat", json!({"minimized": true}));
+    // Collapsing and closing release the body as an attachment drop target.
+    h.app.run_panel_command("panel.collapse", &json!({"target":{"type":"instance","id":"assistant"},"collapsed":true})).unwrap();
     h.frames(3);
-    let strip = h.app.agent_chat.drop_rect.expect("the strip takes drops");
-    assert!(strip.width() < 60.0, "{strip:?}");
-    drop_files(&mut h, strip.center(), &[d.join("brief.md")]);
-    assert_eq!(status(&h.app)["attachments"].as_array().map(Vec::len), Some(3));
-    // Closed: nothing is the chat's, wherever the pointer was.
+    assert!(h.app.agent_chat.drop_rect.is_none());
     h.app.agent_chat.open = false;
     h.frames(2);
     assert!(h.app.agent_chat.drop_rect.is_none());
-    drop_files(&mut h, strip.center(), &[d.join("brief.md")]);
-    assert_eq!(status(&h.app)["attachments"].as_array().map(Vec::len), Some(3));
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -3855,6 +3862,8 @@ fn assistant_marks_follow_chat_login_turns_and_approvals() {
 #[test]
 fn an_agent_without_the_design_tools_is_not_shown_as_ready() {
     let mut h = crate::scenario::Harness::new();
+    // The status badge belongs to the independent Assistant window.
+    h.app.preferences.agent_chat_popped = true;
     h.call("ui.agent_chat", json!({"open": true}));
     h.app.agent_chat.set_state(State::Ready);
     h.app.agent_chat.tools_available = Some(true);
@@ -4696,7 +4705,7 @@ fn a_split_wall_clicked_once_is_one_item() {
 /// boxes' feature ids and names, in order.
 fn picker_over_boxes(boxes: usize, timeline_left: bool) -> (crate::scenario::Harness, Vec<(u64, String)>) {
     let mut h = crate::scenario::Harness::new();
-    h.app.preferences.timeline_left = timeline_left;
+    h.app.run("view.history_layout", json!({"dock":if timeline_left { "left" } else { "bottom" }})).unwrap();
     h.call("ui.agent_chat", json!({"open": true}));
     for i in 0..boxes {
         h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": format!("Body{}", i + 1)})).expect("a box");
@@ -5541,7 +5550,6 @@ fn shared_assistant_harness() -> (crate::scenario::Harness, Script) {
     h.app.run("sketch.finish", json!({})).unwrap();
     let feature = h.app.session.doc.features[0].id;
     h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Feature { id: feature }]})).unwrap();
-    h.app.preferences.shared_panel_layout = true;
     h.frames(6);
     assert!(h.app.panel_runtime().is_some());
     assert!(h.app.agent_chat.detecting.is_none(), "the deterministic discovery fixture starts no worker");
@@ -5577,57 +5585,45 @@ fn shared_assistant_body(h: &crate::scenario::Harness) -> egui::Rect {
     egui::Rect::from_min_size(egui::pos2(body.origin.x, body.origin.y), egui::vec2(body.size.width, body.size.height))
 }
 
-/// #15087: an agent that asks to sign in two ways, in the docked Assistant of a small window, with
-/// the default panel layout and the shared one. The sign-in box scrolls inside the panel, and the
-/// message box stays in view below it with nothing drawn over it.
+/// #15087: in a short docked Assistant, the sign-in box scrolls above the message box.
 #[test]
 fn a_long_sign_in_box_scrolls_inside_a_short_docked_assistant() {
     use solidcraft_ui_registry::{handle_at, rect_of};
-    for shared in [false, true] {
-        let (mut h, _script) = shared_assistant_harness();
-        h.app.preferences.shared_panel_layout = shared;
-        h.app.ui.show_browser = true;
-        h.app.ui.show_timeline = true;
-        h.call("ui.resize", json!({"width":960,"height":600}));
-        let terminal = |id: &str, name: &str, flag: &str| acp::AuthMethod {
-            id: id.into(),
-            name: name.into(),
-            description: format!("Sign in with {name}"),
-            kind: acp::AuthKind::Terminal { args: vec!["--cli".into(), "auth".into(), "login".into(), flag.into()], command: None },
-        };
-        h.app.agent_chat.argv = vec!["standin-agent".into()];
-        h.app.agent_chat.auth = vec![terminal("console", "Console", "--console"), terminal("subscription", "Subscription", "--claudeai")];
-        // A new chat: its tip is drawn below the sign-in box, where the conversation goes.
-        h.app.agent_chat.items.clear();
-        h.app.agent_chat.input.clear();
-        h.app.agent_chat.state = Some(State::NeedsAuth);
-        h.frames(8);
-        assert_eq!(h.app.panel_runtime().is_some(), shared);
-        let window = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(960.0, 600.0));
-        let body = if shared { shared_assistant_body(&h) } else { rect_of("agent_chat:panel").expect("the docked Assistant") };
-        let composer = rect_of("agent_chat:composer_footer").expect("the message box");
-        let providers = rect_of("agent_chat:providers").expect("the sign-in box's scroll area");
-        let conversation = rect_of("agent_chat:conversation").expect("the conversation");
-        assert!(window.expand(1.0).contains_rect(body), "shared {shared}: the Assistant {body:?} fits the window");
-        assert!(body.expand(1.0).contains_rect(composer), "shared {shared}: the message box {composer:?} stays inside {body:?}");
-        assert!(providers.bottom() <= composer.top() + 1.0, "shared {shared}: the sign-in box {providers:?} ends above the message box {composer:?}");
-        assert!(
-            conversation.bottom() <= composer.top() + 1.0,
-            "shared {shared}: the conversation {conversation:?} ends above the message box {composer:?}"
-        );
-        for _ in 0..10 {
-            if handle_at("agent_chat:auth_retry").is_some_and(|at| providers.contains(at)) {
-                break;
-            }
-            h.call("ui.scroll", json!({"x":providers.center().x,"y":providers.center().y,"delta":-300}));
-            h.frames(4);
+    let (mut h, _script) = shared_assistant_harness();
+    h.app.ui.show_browser = true;
+    h.app.ui.show_timeline = true;
+    h.call("ui.resize", json!({"width":960,"height":600}));
+    let terminal = |id: &str, name: &str, flag: &str| acp::AuthMethod {
+        id: id.into(),
+        name: name.into(),
+        description: format!("Sign in with {name}"),
+        kind: acp::AuthKind::Terminal { args: vec!["--cli".into(), "auth".into(), "login".into(), flag.into()], command: None },
+    };
+    h.app.agent_chat.argv = vec!["standin-agent".into()];
+    h.app.agent_chat.auth = vec![terminal("console", "Console", "--console"), terminal("subscription", "Subscription", "--claudeai")];
+    // A new chat: its tip is drawn below the sign-in box, where the conversation goes.
+    h.app.agent_chat.items.clear();
+    h.app.agent_chat.input.clear();
+    h.app.agent_chat.state = Some(State::NeedsAuth);
+    h.frames(8);
+    let window = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(960.0, 600.0));
+    let body = shared_assistant_body(&h);
+    let composer = rect_of("agent_chat:composer_footer").expect("the message box");
+    let providers = rect_of("agent_chat:providers").expect("the sign-in box's scroll area");
+    let conversation = rect_of("agent_chat:conversation").expect("the conversation");
+    assert!(window.expand(1.0).contains_rect(body), "the Assistant {body:?} fits the window");
+    assert!(body.expand(1.0).contains_rect(composer), "the message box {composer:?} stays inside {body:?}");
+    assert!(providers.bottom() <= composer.top() + 1.0, "the sign-in box {providers:?} ends above the message box {composer:?}");
+    assert!(conversation.bottom() <= composer.top() + 1.0, "the conversation {conversation:?} ends above the message box {composer:?}");
+    for _ in 0..10 {
+        if handle_at("agent_chat:auth_retry").is_some_and(|at| providers.contains(at)) {
+            break;
         }
-        let at = handle_at("agent_chat:auth_retry").expect("the I've signed in button is drawn");
-        assert!(
-            providers.contains(at),
-            "shared {shared}: scrolling the sign-in box brings I've signed in: connect again {at:?} into view {providers:?}"
-        );
+        h.call("ui.scroll", json!({"x":providers.center().x,"y":providers.center().y,"delta":-300}));
+        h.frames(4);
     }
+    let at = handle_at("agent_chat:auth_retry").expect("the I've signed in button is drawn");
+    assert!(providers.contains(at), "scrolling the sign-in box brings I've signed in: connect again {at:?} into view {providers:?}");
 }
 
 #[test]
@@ -5973,7 +5969,7 @@ fn drawn(h: &crate::scenario::Harness, text: &str) -> usize {
 fn timed_chat() -> (crate::scenario::Harness, Script) {
     let mut h = crate::scenario::Harness::new();
     h.call("ui.agent_chat", json!({"open": true}));
-    h.app.preferences.agent_chat_width = 520.0;
+    resize_chat(&mut h, 520.0);
     let script = Script::default();
     h.app.agent_chat.backend = Some(Box::new(script.clone()));
     h.app.agent_chat.state = Some(State::Ready);
@@ -6120,4 +6116,20 @@ fn lengths_of_time_read_in_seconds_minutes_and_hours() {
     assert_eq!(times::exact(&noon).as_deref(), Some("2026-11-04 12:00:00 UTC"));
     assert_eq!(times::running(&noon, noon.at + 30_000.0).as_deref(), Some("running for 30 s"));
     assert_eq!(times::took(&times::Stamp { at: 1.0, took: Some((61_000.0, true)) }).as_deref(), Some("Answered in 1 min"));
+}
+
+#[test]
+fn plugin_runs_always_keep_per_run_consent() {
+    for mode in [agents::Mode::All, agents::Mode::Edits, agents::Mode::Ask] {
+        for command in ["plugin.run", "PLUGIN.RUN"] {
+            let (mut app, tx) = app_in_a_turn();
+            app.agent_chat.running_id = "claude".into();
+            app.preferences.ai_permissions = mode;
+            agents::remember(&mut app.preferences, "claude", command);
+            let reply = ask(&tx, "engine.execute", json!({"command":command,"params":{"path":"sample","entry":"make"}}));
+            pump_tools(&mut app);
+            assert_eq!(app.agent_chat.waiting(), 1, "{mode:?}: {command}");
+            assert!(reply.try_recv().is_err(), "consent must precede dispatch");
+        }
+    }
 }

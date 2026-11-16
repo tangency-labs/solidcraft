@@ -79,7 +79,7 @@ pub struct AngleReadoutParams {
     pub enabled: bool,
 }
 
-/// A boolean, with the `view.angle_readout` handler's message for anything else.
+/// A required display-setting boolean, preserving the handlers' messages for anything else.
 fn enabled_flag<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
     match Value::deserialize(d)? {
         Value::Bool(b) => Ok(b),
@@ -93,6 +93,24 @@ pub struct AngleReadoutResult {
     /// Whether the readout is shown now.
     pub enabled: bool,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Show long origin axes across the viewport, or keep the short axes. An application
+/// preference only: not saved with the design, not an undo step, and never opens a dialog.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct OriginAxesAcrossViewParams {
+    /// True extends the axes across the view, false keeps the short axes.
+    #[serde(deserialize_with = "enabled_flag")]
+    pub enabled: bool,
+}
+
+/// The accepted origin-axis display setting, applied by the app.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OriginAxesAcrossViewResult {
+    pub enabled: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }

@@ -47,6 +47,7 @@ pub mod topology;
 
 pub mod blend;
 pub mod boolean;
+pub mod cell_grid;
 pub mod curve;
 pub mod eval;
 pub mod geom;

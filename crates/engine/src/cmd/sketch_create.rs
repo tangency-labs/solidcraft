@@ -20,9 +20,10 @@ use crate::params::{bad, num, req_vec2, str_, string_list};
 use crate::schema::sketch_create::{
     ArcSlotCenterParams, ArcSlotResult, ArcSlotThreePointParams, ArcTangentParams, BlendCurveParams, CenterlineParams, ConicParams,
     ControlPointSplineParams, DrawResult, EditTextParams, EditTextResult, EllipseParams, FitPointSplineParams, InfiniteLineParams, LineTypeResult,
-    MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineHandlesParams, SplineHandlesResult, SplineRemovePointParams,
-    SplineRemovePointResult, SplineResetHandlesParams, SplineResetHandlesResult, SplineReverseParams, SplineReverseResult, TextChange,
-    TextEditsResult, TextExpressions, TextResult, ThreeTangentCircleParams, TwoTangentCircleParams,
+    MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineHandlesParams, SplineHandlesResult, SplineInsertPointParams,
+    SplineInsertPointResult, SplineRemovePointParams, SplineRemovePointResult, SplineResetHandlesParams, SplineResetHandlesResult,
+    SplineReverseParams, SplineReverseResult, TextChange, TextEditsResult, TextExpressions, TextResult, ThreeTangentCircleParams,
+    TwoTangentCircleParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -53,6 +54,7 @@ const TEXT_CONTRACT: TypedContract<SketchTextParams> = TypedContract::new();
 const EDIT_TEXT_CONTRACT: TypedContract<EditTextParams> = TypedContract::new();
 const SPLINE_REVERSE_CONTRACT: TypedContract<SplineReverseParams> = TypedContract::new();
 const SPLINE_REMOVE_POINT_CONTRACT: TypedContract<SplineRemovePointParams> = TypedContract::new();
+const SPLINE_INSERT_POINT_CONTRACT: TypedContract<SplineInsertPointParams> = TypedContract::new();
 const SPLINE_HANDLES_CONTRACT: TypedContract<SplineHandlesParams> = TypedContract::new();
 const SPLINE_RESET_HANDLES_CONTRACT: TypedContract<SplineResetHandlesParams> = TypedContract::new();
 
@@ -140,9 +142,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SPLINE_CONTROL_CONTRACT)
         .output(output_schema_for::<DrawResult>)
         .params(concat!("points: control points (2…500), degree 5", created_doc!())),
-    CommandSpec::new("sketch.spline.insert_point", "Add Spline Point", spline_insert_point)
+    CommandSpec::new("sketch.spline.insert_point", "Add Spline Point", crate::checked!("sketch.spline.insert_point", spline_insert_point))
         .icon("spline")
         .enabled(in_sketch)
+        .contract(&SPLINE_INSERT_POINT_CONTRACT)
+        .output(output_schema_for::<SplineInsertPointResult>)
         .params("curve: fit point spline id, at: [x,y]: a fit point is inserted where the curve passes nearest to it, between its neighbours (the curve still runs through it and all its old points; constraints on them stay); end?: start|end: `at` becomes the spline's new first or last point instead, and the curve runs on to it (refused when that end is joined to other geometry). Control point splines take no new points yet. Returns point: the new point's id"),
     CommandSpec::new("sketch.spline.remove_point", "Remove Spline Point", crate::checked!("sketch.spline.remove_point", spline_remove_point))
         .icon("spline")
@@ -839,7 +843,7 @@ fn spline_insert_point(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::String(e)) if e == "end" => Some(false),
         Some(_) => return Err(bad(cmd, "`end` must be start or end")),
     };
-    let (point, info) = edit(s, p, cmd, false, |sk, _| {
+    let ((point, curve), info) = edit(s, p, cmd, false, |sk, _| {
         let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a spline id"))?;
         let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
         let new = match end {
@@ -847,9 +851,11 @@ fn spline_insert_point(s: &mut Session, p: &Value) -> Result<Value> {
             Some(at_start) => sk.extend_spline(c, at, at_start),
         }
         .map_err(|e| bad(cmd, e.to_string()))?;
-        sk.points.get(new).map(|q| q.id.clone()).ok_or_else(|| bad(cmd, "the new point is missing"))
+        let point = sk.points.get(new).map(|q| q.id.clone()).ok_or_else(|| bad(cmd, "the new point is missing"))?;
+        Ok((point, id.to_string()))
     })?;
-    Ok(json!({"point": point, "curve": p.get("curve"), "sketch": info}))
+    let reply = SplineInsertPointResult { point, curve, sketch: info, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// One point taken out of a spline (#10783).

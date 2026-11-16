@@ -41,7 +41,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CHECK, "Check Drawing",
     .doc_only()
     .contract(&CONTRACT)
     .output(output_schema_for::<CheckResult>)
-    .params("sheet?: id or name (default: every sheet) → {sheet?, findings: [{kind, sheet, object: {kind: view|dimension|balloon|note|table|image|title_block, id}, cell?, field?, item?, why}], counts: [{kind, count}], coverage: [{feature, name, state, by?: [{kind: dimension|note, id}], why?}], coverage_counts: [{state, count}]}: what makes the drawing wrong or incomplete, in sheet order, then by the record each names. kind is one of a closed list: lost, ambiguous, unmeasurable, suppressed, failed (a dimension, balloon or note whose reference isn't found as one thing, can't be measured, or depends on a suppressed or failed feature; failed is also a view that can't be drawn), overridden (a dimension whose text is typed over its value, or a title block cell whose typed text hides a value), out_of_date (a view or dimension a deferred drawing shows as it last was), nothing_shown (a view with nothing to measure), empty_field (a title block field with no value, as source.key; a revision field only once the drawing has a revision row; a cell whose typed text fills it is none), not_ballooned (a row of a parts list on the sheet that no balloon points at, by item), outside_sheet (a view outside its sheet's drawing space or over its title block; a dimension, image or table off the paper). coverage lists each feature of the design in timeline order, apart from the findings: covered (a dimension or note points at a face it made: an edge covers the latest feature among the faces it separates, a corner the latest among its edges' faces, a pattern's copy the pattern; by lists them), not_covered (a view draws a face it made, named from exact history, and nothing points at it), unknown (the faces a view draws of it aren't named from exact history), not_applicable (it is suppressed or rolled back, only reference parts draw it, or no view draws a face it made: a sketch, a plane). Coverage says a dimension or a note points at a feature, not that it is fully dimensioned. With sheet, the findings and the coverage are of that sheet only, and sheet echoes its id. The sheet is read as an export reads it: a deferred drawing is checked as it shows the model, with what it shows as it last was listed. Read-only: nothing is drawn or saved, and the same drawing always gives the same answer.")];
+    .params("sheet?: id or name (default: every sheet) → {sheet?, findings: [{kind, sheet, object: {kind: view|dimension|balloon|note|table|image|title_block, id}, cell?, field?, item?, why}], counts: [{kind, count}], coverage: [{feature, name, state, by?: [{kind: dimension|note, id}], why?}], coverage_counts: [{state, count}]}: what makes the drawing wrong or incomplete, in sheet order, then by the record each names. kind is one of a closed list: lost, ambiguous, unmeasurable, suppressed, failed (a dimension, balloon or note whose reference isn't found as one thing, can't be measured, or depends on a suppressed or failed feature; failed is also a view that can't be drawn), overridden (a dimension whose text is typed over its value, or a title block cell whose typed text hides a value), out_of_date (a view, or a dimension, balloon or note on a view, that a deferred drawing shows as it last was), nothing_shown (a view with nothing to measure), empty_field (a title block field with no value, as source.key; a revision field only once the drawing has a revision row; a cell whose typed text fills it is none), not_ballooned (a row of a parts list on the sheet that no balloon points at, by item), outside_sheet (a view outside its sheet's drawing space or over its title block; a dimension, balloon, image or table off the paper). coverage lists each feature of the design in timeline order, apart from the findings: covered (a dimension or note points at a face it made: an edge covers the latest feature among the faces it separates, a corner the latest among its edges' faces, a pattern's copy the pattern; by lists them), not_covered (a view draws a face it made, named from exact history, and nothing points at it), unknown (the faces a view draws of it aren't named from exact history), not_applicable (it is suppressed or rolled back, only reference parts draw it, or no view draws a face it made: a sketch, a plane). Coverage says a dimension or a note points at a feature, not that it is fully dimensioned. With sheet, the findings and the coverage are of that sheet only, and sheet echoes its id. The sheet is read as an export reads it: a deferred drawing is checked as it shows the model, with what it shows as it last was listed. Read-only: nothing is drawn or saved, and the same drawing always gives the same answer.")];
 
 fn check(s: &mut Session, p: &Value) -> Result<Value> {
     let request: CheckParams = crate::schema::read(CHECK, p)?;
@@ -96,22 +96,24 @@ fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> 
     let dimensions =
         shown.dimensions.into_iter().filter_map(|state| status_finding(sheet, object(CheckedKind::Dimension, state.dimension), state.status));
     out.extend(dimensions);
-    // Out of date as a deferred drawing shows it as it last was, or held back by a view that draws its
-    // parts apart, which no update draws.
-    let held = crate::drawing_scene::held_apart(d, d.views.iter().filter(|v| v.sheet == sheet).map(|v| v.id));
+    // Out of date as a deferred drawing shows it as it last was.
     let last = "the sheet shows it as it last was: drawing.update draws it from the model as it is now";
-    let view_of = |id: u64| d.dimension(id).map(|r| r.view).or_else(|| d.notes.iter().find(|n| n.id == id)?.anchor.view());
-    let apart = |id: u64| view_of(id).and_then(|view| crate::drawing_view::draws_apart(d, view));
     for id in shown.out_of_date {
         let kind = if d.view(id).is_some() {
             CheckedKind::View
         } else if d.dimension(id).is_some() {
             CheckedKind::Dimension
-        } else {
+        } else if d.balloons.by_id(id).is_some() {
+            CheckedKind::Balloon
+        } else if d.notes.by_id(id).is_some() {
             CheckedKind::Note
+        } else {
+            // Every id listed is one of this drawing's records, so this is the scene and the record
+            // disagreeing: refused as `selection.delete` refuses an id it can't name, not listed as
+            // something it isn't.
+            return Err(bad(CHECK, format!("the drawing has no view, dimension, balloon or note {}", ids::encode(id))));
         };
-        let why = apart(id).filter(|_| held.contains(&id)).map_or(last, crate::drawing_view::Apart::held);
-        out.push(finding(FindingKind::OutOfDate, sheet, object(kind, id), why.into()));
+        out.push(finding(FindingKind::OutOfDate, sheet, object(kind, id), last.into()));
     }
     // A view belongs where its sheet's Room says, by its boundary as the sheet shows it. Anything
     // else is held to the paper, whose box is display data, as the scene's boxes are: it decides
@@ -133,6 +135,8 @@ fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> 
             }
             ObjectKind::Dimension => CheckedKind::Dimension,
             ObjectKind::Note => CheckedKind::Note,
+            ObjectKind::ViewLabel => CheckedKind::ViewLabel,
+            ObjectKind::Balloon => CheckedKind::Balloon,
             ObjectKind::PartsList | ObjectKind::RevisionTable => CheckedKind::Table,
             // Images are painted with the border and aren't among the objects: read below.
             ObjectKind::SheetImage | ObjectKind::SheetBorder | ObjectKind::DrawingBorder | ObjectKind::TitleBlock => continue,
@@ -175,20 +179,22 @@ fn status_finding(sheet: u64, object: CheckedObject, status: Status) -> Option<F
 }
 
 /// The balloons and notes in views on `sheets` whose references don't stand with the model: one
-/// read of each kind for the drawing, each body's names worked out once. A note on a sheet reads
-/// no model, so it is never read here.
+/// read of each kind for each state of the assembly the views draw, each body's names worked out
+/// once per state. A note on a sheet reads no model, so it is never read here.
 fn references(s: &Session, d: &Drawing, sheets: &[u64]) -> Result<Vec<Finding>> {
     let on = |view: u64| d.view(view).map(|v| v.sheet).filter(|sheet| sheets.contains(sheet));
-    let balloons: Vec<(u64, u64)> = d.balloons.iter().filter_map(|b| Some((b.id, on(b.view)?))).collect();
-    let notes: Vec<(u64, u64)> = d.notes.iter().filter_map(|n| Some((n.id, on(n.anchor.view()?)?))).collect();
-    let wanted = |records: &[(u64, u64)]| records.iter().map(|(id, _)| *id).collect::<Vec<_>>();
-    let read_balloons = s.doc.resolve_balloons(&s.model, d, &wanted(&balloons)).map_err(|e| bad(CHECK, e.to_string()))?;
-    let read_notes = s.doc.resolve_notes(&s.model, d, &wanted(&notes)).map_err(|e| bad(CHECK, e.to_string()))?;
-    let balloons = balloons.iter().zip(read_balloons).map(|((id, sheet), r)| (*sheet, object(CheckedKind::Balloon, *id), r.status));
+    let balloons: Vec<(u64, u64, u64)> = d.balloons.iter().filter_map(|b| Some((b.id, b.view, on(b.view)?))).collect();
+    let notes: Vec<(u64, u64, u64)> = d.notes.iter().filter_map(|n| Some((n.id, n.anchor.view()?, on(n.anchor.view()?)?))).collect();
+    let wanted = |records: &[(u64, u64, u64)]| records.iter().map(|(id, view, _)| (*id, *view)).collect::<Vec<_>>();
+    // Each on the session its view draws from (#13048), as the sheet reads its dimensions.
+    let mut sessions = crate::drawing_view::ViewSessions::new(s);
+    let read_balloons = sessions.read_on(d, &wanted(&balloons), solidcraft_doc::Document::resolve_balloons).map_err(|e| bad(CHECK, e.to_string()))?;
+    let read_notes = sessions.read_on(d, &wanted(&notes), solidcraft_doc::Document::resolve_notes).map_err(|e| bad(CHECK, e.to_string()))?;
+    let balloons = balloons.iter().zip(read_balloons).map(|((id, _, sheet), r)| (*sheet, object(CheckedKind::Balloon, *id), r.status));
     let mut out: Vec<Finding> = balloons.filter_map(|(sheet, object, status)| status_finding(sheet, object, status)).collect();
     // A note's anchor stands as a reference does; each branch that doesn't is a finding of its own, by
     // its number, as a lost branch loses only itself.
-    for ((id, sheet), r) in notes.iter().zip(read_notes) {
+    for ((id, _, sheet), r) in notes.iter().zip(read_notes) {
         out.extend(status_finding(*sheet, object(CheckedKind::Note, *id), r.anchor.status));
         for (n, end) in (1..).zip(r.branches) {
             let branch = status_finding(*sheet, object(CheckedKind::Note, *id), end.status);
@@ -206,7 +212,7 @@ fn fields_and_rows(s: &Session, d: &Drawing, sheets: &[u64]) -> Vec<Finding> {
     let mut tree = Tree::new(&s.doc, &state);
     let mut out = Vec::new();
     for (at, sheet) in d.sheets.iter().enumerate().filter(|(_, sheet)| sheets.contains(&sheet.id)) {
-        title_block_text::shown_with(&s.doc, &mut tree, d, at, |cell, content, values| {
+        title_block_text::shown_with(s, &mut tree, d, at, |cell, content, values| {
             let block = object(CheckedKind::TitleBlock, sheet.id);
             match cell.replaced {
                 // Typed text over an empty value fills the cell: nothing is hidden.
@@ -224,7 +230,7 @@ fn fields_and_rows(s: &Session, d: &Drawing, sheets: &[u64]) -> Vec<Finding> {
         });
     }
     // A parts list that can't be made has no rows to count.
-    for (table, rows) in super::drawing::ballooned(d, &mut tree) {
+    for (table, rows) in super::drawing::ballooned(s, d, &mut tree) {
         let Some(sheet) = d.tables.by_id(table).map(|t| t.sheet).filter(|sheet| sheets.contains(sheet)) else { continue };
         for (item, _) in rows.into_iter().flatten().filter(|(_, balloons)| *balloons == 0) {
             let why = format!("no balloon points at row {item}");
@@ -235,15 +241,12 @@ fn fields_and_rows(s: &Session, d: &Drawing, sheets: &[u64]) -> Vec<Finding> {
 }
 
 /// Each feature of the design, in timeline order, and whether the dimensions and notes on `sheets`
-/// point at a face it made ([`coverage::of`]), with what the views on them draw (`drawn`). One that a
-/// view drawing its parts apart holds back covers nothing: it isn't on paper, and the findings name it
-/// out of date.
+/// point at a face it made ([`coverage::of`]), with what the views on them draw (`drawn`).
 fn feature_coverage(s: &Session, d: &Drawing, sheets: &[u64], drawn: &coverage::Drawn) -> Vec<Coverage> {
     let on = |view: u64| d.view(view).is_some_and(|v| sheets.contains(&v.sheet));
-    let held = crate::drawing_scene::held_apart(d, d.views.iter().filter(|v| sheets.contains(&v.sheet)).map(|v| v.id));
-    let dimensions = d.dimensions.iter().filter(|dim| on(dim.view) && !held.contains(&dim.id));
+    let dimensions = d.dimensions.iter().filter(|dim| on(dim.view));
     let dimensions = dimensions.map(|dim| (object(CheckedKind::Dimension, dim.id), dim.kind.references()));
-    let notes = d.notes.iter().filter(|n| n.anchor.view().is_some_and(on) && !held.contains(&n.id));
+    let notes = d.notes.iter().filter(|n| n.anchor.view().is_some_and(on));
     let notes = notes.map(|n| (object(CheckedKind::Note, n.id), n.references().collect()));
     let state = |state: coverage::State| match state {
         coverage::State::Covered => CoverageState::Covered,

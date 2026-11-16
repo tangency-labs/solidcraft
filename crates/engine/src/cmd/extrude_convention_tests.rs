@@ -311,3 +311,13 @@ fn an_older_two_sided_extrude_with_a_negative_distance_keeps_its_sides() {
         check(&Session::new(Document::from_json(&opened.doc.to_json()).unwrap()), if distance == "-width" { -15.0 } else { lo }, hi);
     }
 }
+
+#[test]
+fn through_all_reach_uses_exact_body_bounds() {
+    let s = fixture(json!({"direction": "positive", "distance": "10 mm"}));
+    let st = s.model.state();
+    let reach = super::through_all_reach(&st, &json!({"through_all": true}), solidcore_record::Vec3::ZERO);
+    assert!(reach.is_some());
+    let reach = reach.unwrap();
+    assert!(reach > 10.0);
+}

@@ -608,6 +608,36 @@ impl Document {
         Ok(ModelFace { body: b.name.clone(), origin_feature: b.feature, name, path: path.to_vec() })
     }
 
+    /// The straight edge `pick` names, found as [`Document::edge_reference`] finds it: its two ends in
+    /// the design's frame, exactly, from the body's record (a line's two vertices), never from its
+    /// mesh, for a decision about the model (which way an auxiliary view looks). An edge that isn't a
+    /// line is refused.
+    pub fn edge_line(&self, model: &Model, pick: &EdgePick, path: &[u64]) -> Result<[Vec3; 2]> {
+        let mut picker = Picker::new(self, model, path);
+        let (body, edge) = picker.edge(pick)?;
+        let b = picker.state.bodies.get(body).ok_or_else(|| DocError::Invalid("the body picked no longer exists".into()))?;
+        let not_straight = || DocError::Invalid(format!("edge {edge} of `{}` isn't straight: give a straight edge", b.name));
+        // The model's edges are listed in the record's order, so the pick's index is the record's.
+        let record = b.body.record();
+        let line = record.edges.get(edge).filter(|e| matches!(e.curve, solidcore_record::brep::Curve::Line { .. })).ok_or_else(not_straight)?;
+        let vertex = |v: u32| usize::try_from(v).ok().and_then(|v| record.vertices.get(v)).map(|v| Vec3::from(v.point));
+        let [Some(start), Some(end)] = line.vertices.map(vertex) else { return Err(not_straight()) };
+        let frame = self.body_frame_at(b, path)?;
+        Ok([apply_point(&frame, start), apply_point(&frame, end)])
+    }
+
+    /// The flat face `pick` names, found as [`Document::face_reference`] finds it: a point of its
+    /// plane and its normal, in the design's frame, exactly (the body's planar face, never its mesh).
+    /// A face that isn't flat is refused.
+    pub fn face_plane(&self, model: &Model, pick: &EdgePick, path: &[u64]) -> Result<(Vec3, Vec3)> {
+        let mut picker = Picker::new(self, model, path);
+        let (body, face) = picker.face(pick)?;
+        let b = picker.state.bodies.get(body).ok_or_else(|| DocError::Invalid("the body picked no longer exists".into()))?;
+        let plane = b.body.planar_face(face).ok_or_else(|| DocError::Invalid(format!("face {face} of `{}` isn't flat: give a flat face", b.name)))?;
+        let frame = self.body_frame_at(b, path)?;
+        Ok((apply_point(&frame, plane.origin), apply_vector(&frame, plane.normal())))
+    }
+
     /// What a dimension between silhouettes `a` and `b` is on `model` (this design's): when both
     /// faces lie on one cylinder of one body placed once, that cylinder's diameter, which takes no
     /// direction; else the distance between them along `direction`, aligned if none.
