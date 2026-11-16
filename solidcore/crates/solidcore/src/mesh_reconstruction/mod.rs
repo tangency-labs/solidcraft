@@ -80,11 +80,12 @@ fn invalid(message: &'static str) -> SolidError {
 }
 
 /// Recover a closed indexed triangle mesh as certified straight extrusions and planar shoulders.
-/// Returns `None` when no supported analytic decomposition can be certified.
+/// Returns `None` when the mesh does not match a supported analytic decomposition.
 ///
 /// # Errors
-/// Returns an error for malformed input, a tolerance outside 0.000001–1 mm, exceeded work
-/// budgets, or a failed construction or validation of a certified candidate.
+/// Returns an error for malformed input, a tolerance outside 0.000001–1 mm, exceeded hard work
+/// limits, or a refused boundary, nesting, solid or volume certificate. Construction and validation
+/// errors also propagate. These refusals do not select another reconstruction.
 pub fn reconstruct(
     k: &mut Kernel,
     positions: &[Vec3],

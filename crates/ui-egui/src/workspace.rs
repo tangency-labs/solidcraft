@@ -74,6 +74,38 @@ pub fn tab_accent(t: &Tokens, tab: &str) -> TabAccent {
     TAB_ACCENTS.accent(t, tab)
 }
 
+/// The ribbon tab whose [`tab_accent`] a design view kind ("Model", "Sketch", "Sheet", "Render",
+/// "Animation") borrows for its sub-tab fill, ink and tint. A sheet reads as Sheet Metal; an
+/// animation has no ribbon tab of its own and keeps the main accent.
+pub fn view_accent_tab(kind: &str) -> &'static str {
+    match kind {
+        "Sketch" => "SKETCH",
+        "Sheet" => "SHEET METAL",
+        "Render" => "RENDER",
+        _ => "MODEL",
+    }
+}
+
+/// The stroke colour of a design view kind's icon in the Tabs board: its fill in the light theme
+/// and a brighter step of it in the dark one. Model, Sketch and Render follow their accents;
+/// Sheet is teal and Animation amber, as drawn. The board shows no dark Animation stroke, so it
+/// reuses the dark Surface ink. Unknown kinds take Model's.
+pub fn view_icon_colour(kind: &str, dark: bool) -> egui::Color32 {
+    let hex: u32 = match (kind, dark) {
+        ("Sketch", false) => 0x057f45,
+        ("Sketch", true) => 0x3cc07a,
+        ("Sheet", false) => 0x0f7b72,
+        ("Sheet", true) => 0x3dbfb1,
+        ("Render", false) => 0xa8326e,
+        ("Render", true) => 0xe57ba8,
+        ("Animation", false) => 0x9a5a00,
+        ("Animation", true) => 0xe0914a,
+        (_, false) => 0x236ead,
+        (_, true) => 0x5aa6f5,
+    };
+    egui::Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
+}
+
 /// The icon accent of a history step: the accent of the tab its feature kind belongs to.
 /// Surface aliases also cover Patch/Stitch/Thicken and other surface features without a
 /// Surface-prefixed kind.
@@ -101,6 +133,13 @@ pub const CONSTRAINT_GALLERY: &[&str] = &[
     "sketch.constraint.parallel",
     "sketch.constraint.perpendicular",
 ];
+
+/// Whether a Constrain-panel command is drawn as a small grid cell: the default gallery and any
+/// other constraint the user pins, since every constraint has a small `c_` icon in the same style.
+pub fn constraint_cell(id: &str) -> bool {
+    CONSTRAINT_GALLERY.contains(&id)
+        || (id.starts_with("sketch.constraint.") && solidcraft_engine::find_command(id).is_some_and(|c| c.icon.starts_with("c_")))
+}
 
 pub struct CommandGroup {
     pub label: &'static str,
@@ -254,6 +293,7 @@ pub const SECTIONS: &[Section] = &[
             "joint.as_built",
             "joint.origin",
             "joint.rigid_group",
+            "assembly.constraint.create",
             "joint.limits",
             "joint.gear",
             "joint.rack_pinion",
@@ -287,7 +327,7 @@ pub const SECTIONS: &[Section] = &[
         ids: &["file.insert_step", "file.insert_mesh", "pointcloud.insert", "component.insert_design", "file.save_mesh", "file.send_to_slicer"],
     },
     Section { tab: "INSERT", panel: "IMAGES", promoted: 3, ids: &["canvas.insert", "canvas.decal", "canvas.edit"] },
-    Section { tab: "INSERT", panel: "2D", promoted: 2, ids: &["sketch.insert_dxf", "sketch.insert_svg"] },
+    Section { tab: "INSERT", panel: "2D", promoted: 2, ids: &["sketch.insert_dxf", "sketch.insert_svg", "sketch.insert_airfoil"] },
     Section { tab: "INSERT", panel: "LIBRARY", promoted: 3, ids: &["parts.fastener", "parts.library", "parts.resize", "parts.insert"] },
     Section { tab: "INSERT", panel: "LINKS", promoted: 2, ids: &["component.update_links", "component.break_link"] },
     Section { tab: "INSPECT", panel: "MEASURE", promoted: 3, ids: &["inspect.measure", "inspect.center_of_mass", "component.properties"] },
@@ -407,6 +447,7 @@ pub const SECTIONS: &[Section] = &[
             "sketch.fit_curves_to_section",
             "sketch.insert_dxf",
             "sketch.insert_svg",
+            "sketch.insert_airfoil",
             "canvas.insert",
         ],
     },
@@ -1024,6 +1065,17 @@ mod tests {
         let plain = grouped_commands("SURFACE", "CREATE", &commands);
         assert!(plain.iter().all(|(h, _)| h.is_none()));
         assert_eq!(plain.iter().map(|(_, c)| c.id).collect::<Vec<_>>(), commands.iter().map(|c| c.id).collect::<Vec<_>>());
+    }
+
+    /// The Joints section's buttons stay as they were when Constrain joined it (#6061): Constrain
+    /// is in the section's menu, after the four promoted commands, so no one's default ribbon changes.
+    #[test]
+    fn constrain_joins_the_joints_menu_without_changing_its_buttons() {
+        let specs = solidcraft_engine::command_specs();
+        let (commands, count) = layout("ASSEMBLE", "JOINTS", &specs).unwrap();
+        let ids: Vec<&str> = commands.iter().map(|c| c.id).collect();
+        assert_eq!(ids.get(..count), Some(&["joint.create", "joint.as_built", "joint.origin", "joint.rigid_group"][..]), "{ids:?}");
+        assert!(ids.iter().skip(count).any(|id| *id == "assembly.constraint.create"), "{ids:?}");
     }
 
     #[test]
@@ -1673,6 +1725,21 @@ mod tests {
         assert!(AGENT_ONLY.contains(&"sketch.move3d"), "sketch.move3d must stay available to agents");
         for section in SECTIONS.iter().filter(|s| s.panel == "SKETCH") {
             assert!(!section.ids.contains(&"sketch.move3d"), "{}/{} must not offer sketch.move3d on the ribbon", section.tab, section.panel);
+        }
+    }
+
+    /// Every view icon colour reads as a 3:1 graphic on its theme's panel, and view kinds map to
+    /// a registered ribbon tab.
+    #[test]
+    fn view_icon_colours_hold_graphic_contrast_and_accent_tabs_exist() {
+        for (dark, panel) in [(false, Tokens::light().panel), (true, Tokens::dark().panel)] {
+            for kind in ["Model", "Sketch", "Sheet", "Render", "Animation", "other"] {
+                let ratio = solidcraft_theme::contrast_ratio(view_icon_colour(kind, dark), panel);
+                assert!(ratio >= 3.0, "{kind} dark={dark}: {ratio:.2}:1");
+            }
+        }
+        for kind in ["Model", "Sketch", "Sheet", "Render", "Animation"] {
+            assert!(TAB_ACCENTS.contains(view_accent_tab(kind)), "{kind}");
         }
     }
 }

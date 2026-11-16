@@ -305,6 +305,15 @@ pub(crate) fn legacy_legends(app: &SolveApp, ui: &mut egui::Ui, viewport: egui::
         descriptions.push(("continuity_legend", Details { key, ..Default::default() }));
     }
     let mut free = crate::shell::workspace_content(app, viewport);
+    if let Some(frame) = app.universal_panel_frame() {
+        let gap = solidcraft_theme::Tokens::get().space_8;
+        for section in &frame.layout.sections {
+            let bounds = crate::panel_runtime::egui_rect(section.outer);
+            if section.zone == solidcraft_engine::panels::Zone::Left && bounds.intersects(free) {
+                free.min.x = (bounds.right() + gap).clamp(free.left(), free.right());
+            }
+        }
+    }
     for (id, description) in descriptions {
         if let Some(rect) = legacy_legend(app, ui, free, id, &description) {
             free.max.y = (rect.top() - solidcraft_theme::Tokens::get().space_8).max(free.top());

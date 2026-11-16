@@ -3,4 +3,6 @@
 //! keeps the upstream converter, geometry-derived names and conversion feature owner after resaving.
 //! The unreleased `source_bound_names` Boolean is accepted as an alias: true selects `analytic_v1`,
 //! false selects `legacy_prism`. New commands save the canonical version name.
+//! The opt-in `analytic_v1_geometry_names` version uses the same new analytic reconstruction with
+//! geometry-derived names. Its per-feature value survives preference changes, undo and reopening.
 //! The previous release asks for an update instead of reading this format.

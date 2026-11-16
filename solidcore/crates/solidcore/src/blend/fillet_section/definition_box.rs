@@ -40,7 +40,7 @@
 //!   the direct enclosure, not the centred form. The net's piece only seeds the feet.
 
 use super::certificate::{
-    crosses_a_knot, gn_enclose_over, is_foot_past_domain_end, knot_cuts, partials_hull,
+    crosses_a_knot, gn_enclose_over_using, is_foot_past_domain_end, knot_cuts, partials_hull,
     EndContinuation, NurbsCurve, SpanAt,
 };
 use super::definition::{t2_pow, tv_dot, T2Of, TvOf};
@@ -360,8 +360,11 @@ fn leader_parts(d: &GnDefFace<'_>, s: Ivl) -> Result<Vec<(Ivl, usize)>> {
 /// ([`partials_on`]), and the hull taken. No station invariant is assumed: a net with knots
 /// removed, refitted or edited is enclosed on its definition all the same (#2570); `(ku,
 /// kv)` names the net's piece whose middle station seeds the feet. Refused where the feet's
-/// box crosses a face's knot line below [`super::certificate::FEET_BOX_CONTINUITY`], or a
-/// box lies past a face's or the leader's knots.
+/// box crosses a face's knot line below [`super::certificate::FEET_BOX_CONTINUITY`] for
+/// `lk >= 2` (for `lk <= 1` such a box is taken cell by cell,
+/// [`super::certificate::gn_enclose_over`], and refused by name, `Unsupported`, only where a
+/// cell is not decided, two feet are apart or the box runs past the knots), or a box lies
+/// past a face's or the leader's knots.
 ///
 /// # Errors
 ///
@@ -384,7 +387,7 @@ pub fn definition_partials_naive(
     let (s, t) = box_st(d, ua, ub, va, vb)?;
     let mut out: Option<Partials<Ivl>> = None;
     for (part, leader) in leader_parts(d, s)? {
-        let (p, _) = partials_on(k, d, net, kk, part, leader, t, lk)?;
+        let (p, _) = partials_on(k, d, net, kk, part, leader, t, lk, lk)?;
         out = Some(match out {
             None => p,
             Some(h) => partials_hull(h, &p, lk),
@@ -397,15 +400,18 @@ pub fn definition_partials_naive(
 /// order `lk` in its `(u, v)`, enclosed, and whether its feet's box crosses a knot line of
 /// a face (where the definition is only as smooth as the face). Its feet's series in s
 /// over `s` are enclosed by Krawczyk's operator on the faces it rolls on themselves
-/// ([`gn_enclose_over`] piecewise: the feet's box cut at the faces' knot lines, each part on
-/// its own piece, hulled) and the leader's piece, seeded from the station in the middle of
-/// the net's piece `kk` along s; then the arc in `(sigma, dt)` over t, as
-/// `EvaluateDefinition` makes it (the circle's centre the ball's: a constant radius), in
-/// rounded interval arithmetic.
+/// ([`super::certificate::gn_enclose_over`] piecewise: the feet's box cut at the faces' knot
+/// lines, each part on its own piece, hulled) and the leader's piece, seeded from the
+/// station in the middle of the net's piece `kk` along s; then the arc in `(sigma, dt)` over
+/// t, as `EvaluateDefinition` makes it (the circle's centre the ball's: a constant radius),
+/// in rounded interval arithmetic. `use_lk`: the order the caller's own use takes (the
+/// centred form asks for `lk = use_lk + 1`); at 1 or less a feet's box across a knot line
+/// below `C^2` is taken cell by cell ([`gn_enclose_over_using`]).
 ///
 /// # Errors
 ///
-/// `SM_ERR` where an enclosure is not proved, or `lk` is past `SM_GN_MAXS`.
+/// `SM_ERR` where an enclosure is not proved, or `lk` is past `SM_GN_MAXS`; the cell path's
+/// named refusals (`Unsupported`) and `FootPastDomainEnd` as they come.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn partials_on(
     k: &Kernel,
@@ -416,6 +422,7 @@ fn partials_on(
     leader: usize,
     t: Ivl,
     lk: usize,
+    use_lk: usize,
 ) -> Result<(Partials<Ivl>, bool)> {
     if lk > MAX_S {
         return Err(SolidError::blend_failed(
@@ -448,7 +455,7 @@ fn partials_on(
         *xb = c0 + db * (c1 + db * c2);
     }
     let [n0, n1] = &d.sup_n;
-    let e = match gn_enclose_over(
+    let e = match gn_enclose_over_using(
         k,
         [n0, n1],
         &d.leader,
@@ -460,10 +467,13 @@ fn partials_on(
         None,
         None,
         d.ends,
+        use_lk,
     ) {
         Ok(Some(e)) => e,
         // a foot past its support's domain end, refused by name (#14284)
         Err(e) if is_foot_past_domain_end(&e) => return Err(e),
+        // the feet across a knot line below C^2, refused by name (cell by cell, #14284)
+        Err(e @ SolidError::Unsupported { .. }) => return Err(e),
         _ => return Err(SolidError::blend_failed(OP, "the enclosure is not proved")),
     };
     let mut crossed = false;
@@ -618,12 +628,12 @@ fn centred_on(
     t: Ivl,
     lk: usize,
 ) -> Result<Partials<Ivl>> {
-    let (wide, crossed) = partials_on(k, d, net, kk, s, leader, t, lk + 1)?;
+    let (wide, crossed) = partials_on(k, d, net, kk, s, leader, t, lk + 1, lk)?;
     if crossed {
         return Ok(wide);
     }
     let (sm, tm) = (s.mid(), t.mid());
-    let (mid, _) = partials_on(k, d, net, kk, Ivl::from(sm), leader, Ivl::from(tm), lk)?;
+    let (mid, _) = partials_on(k, d, net, kk, Ivl::from(sm), leader, Ivl::from(tm), lk, lk)?;
     // the part's half widths in (u, v): s = A + B p
     let dp = (s - Ivl::from(sm)) / Ivl::from(d.b[0]);
     let dq = (t - Ivl::from(tm)) / Ivl::from(d.b[1]);

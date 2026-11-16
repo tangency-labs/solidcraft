@@ -1,6 +1,7 @@
-//! Opt-in fixes of the fork's fillet defects (`Kernel::fixes`): WR-300 (#1023, #421), WR-301
-//! (#485), WR-302 (#841, #1024), WR-303 (#841) and WR-320 (#879). Each case runs with the
-//! field off (SMLib's behaviour) and on.
+//! Fixes of the fork's fillet defects. WR-300 (#1023, #421), WR-302 (#841, #1024), WR-303
+//! (#841) and WR-320 (#879) are opt-in (`Kernel::fixes`): their cases run with the field off
+//! (SMLib's behaviour) and on. WR-301 (#485) is the default: its cases run on the default
+//! kernel.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -20,7 +21,7 @@ use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::edge;
 use solidcore::topology::EdgeId;
-use solidcore::{Brep, Kernel};
+use solidcore::{Brep, CancelToken, Kernel};
 
 fn kernel(set: impl FnOnce(&mut UpstreamFixes)) -> Kernel {
     let mut k = Kernel::default();
@@ -115,9 +116,9 @@ fn holed_cube_blend(k: &mut Kernel, size: f64, xsect: u32) -> Outcome {
 }
 
 /// A blend whose setback reaches exactly the openings' rims (5): SMLib's rollover fails
-/// on the rail touching the rim's corners and running along its top edge. With
-/// `fillet_rail_rim_on_face` it builds, to the closed forms 4000 - 12.5 * 20 (chamfer) and
-/// 4000 - (1 - pi/4) * 25 * 20 (round).
+/// on the rail touching the rim's corners and running along its top edge. Joining the
+/// rail's intervals on its face first, it builds, to the closed forms 4000 - 12.5 * 20
+/// (chamfer) and 4000 - (1 - pi/4) * 25 * 20 (round).
 #[test]
 fn rail_along_its_face_rim_rolls_over_only_where_it_leaves_the_face() {
     for (xsect, expected) in [
@@ -125,12 +126,6 @@ fn rail_along_its_face_rim_rolls_over_only_where_it_leaves_the_face() {
         (1, 4000.0 - (1.0 - std::f64::consts::FRAC_PI_4) * 500.0),
     ] {
         let mut k = Kernel::default();
-        assert_eq!(
-            holed_cube_blend(&mut k, 5.0, xsect),
-            Outcome::Refused { code: 4 },
-            "xsect {xsect}: SM_FILERR_EDGE_PROBLEM (Unable to Process Rollover)"
-        );
-        let mut k = kernel(|f| f.fillet_rail_rim_on_face = true);
         let Outcome::Built { volume, manifold } = holed_cube_blend(&mut k, 5.0, xsect) else {
             panic!("xsect {xsect}: refused");
         };
@@ -141,14 +136,22 @@ fn rail_along_its_face_rim_rolls_over_only_where_it_leaves_the_face() {
     }
 }
 
-/// Sizes that leave the rim alone build the same either way.
+/// A size that leaves the rims alone (4) takes the closed forms 4000 - 8 * 20 (chamfer)
+/// and 4000 - (1 - pi/4) * 16 * 20 (round).
 #[test]
-fn rail_rim_on_face_leaves_other_sizes_alone() {
-    for xsect in [0, 1] {
+fn rail_clear_of_the_rim_builds_to_the_closed_form() {
+    for (xsect, expected) in [
+        (0, 3840.0),
+        (1, 4000.0 - (1.0 - std::f64::consts::FRAC_PI_4) * 320.0),
+    ] {
         let mut k = Kernel::default();
-        let off = holed_cube_blend(&mut k, 4.0, xsect);
-        let mut k = kernel(|f| f.fillet_rail_rim_on_face = true);
-        assert_eq!(holed_cube_blend(&mut k, 4.0, xsect), off);
+        let Outcome::Built { volume, manifold } = holed_cube_blend(&mut k, 4.0, xsect) else {
+            panic!("xsect {xsect}: refused");
+        };
+        assert!(
+            manifold && near(volume, expected, 1e-4),
+            "xsect {xsect}: {volume}"
+        );
     }
 }
 
@@ -185,17 +188,21 @@ fn blends_larger_than_their_faces_are_refused() {
 /// A cylinder of radius 10 and height 20, its top rim blended by `size`.
 fn cylinder_rim(k: &mut Kernel, size: f64, xsect: u32) -> Outcome {
     let mut b = create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 10.0, 20.0).unwrap();
-    let rim = *b
-        .edge_list()
+    let rim = top_rim(k, &b);
+    fillet(k, &mut b, &[rim], size, xsect)
+}
+
+/// The top rim (z = 20, radius 10) of [`cylinder_rim`]'s cylinder.
+fn top_rim(k: &Kernel, b: &Brep) -> EdgeId {
+    *b.edge_list()
         .iter()
         .find(|&&e| {
-            let c = edge::curve(&b, e).unwrap().unwrap();
-            let ivl = edge::interval(&b, e).unwrap();
+            let c = edge::curve(b, e).unwrap().unwrap();
+            let ivl = edge::interval(b, e).unwrap();
             let p = c.evaluate_point(k, ivl.min()).unwrap();
             (p.z - 20.0).abs() < 1e-6 && (p.x.hypot(p.y) - 10.0).abs() < 1e-6
         })
-        .unwrap();
-    fillet(k, &mut b, &[rim], size, xsect)
+        .unwrap()
 }
 
 /// Blends as wide as the face they roll on: the chamfer's cone would end in a point at the
@@ -240,6 +247,62 @@ fn chamfer_as_wide_as_its_face_is_refused() {
     }
 }
 
+/// The cancel-token polls [`rim_chamfer_near_the_radius_is_certified_in_bounded_work`]'s
+/// build may take (#16652): about three times the 17 879 it takes. Before the
+/// certificate's enclosures kept the cancellation of the face's point against its offset
+/// normal, the build took 1 414 866 (passing 60 000 within its first 4 s).
+const RIM_CHAMFER_POLLS: u64 = 50_000;
+
+/// The volume's tolerance in [`rim_chamfer_near_the_radius_is_certified_in_bounded_work`]:
+/// the chamfer's surface is within its tolerance (4e-5, its certificate's target a tenth
+/// of that) of the cone, whose area is `pi (R + (R - c)) c sqrt(2)` = 444.3, so the volume
+/// is within 444.3 x 4e-5 = 0.0178 of the closed form, plus the integrator's own 1e-6.
+const VOLUME_TOL: f64 = 0.02;
+
+/// #16652: a cylinder's top rim chamfered by 9.99, just below its radius of 10, built as
+/// its definition. The chamfer's centre line is a circle of radius 0.01 about the axis,
+/// where the cylinder offset by 9.99 moves a thousandth as fast as the cylinder: its
+/// certificate's enclosures took the face's point and its offset normal apart and lost
+/// that cancellation at every order, and cut the chord into pieces for ten minutes. A
+/// deterministic work budget (the kernel's cancel-token polls, which the certificate
+/// takes per level, piece and bound) stands in for the time: past it the build is
+/// cancelled. The chamfer is the closed form's: the cylinder less the ring the chamfer's
+/// triangle (legs c) sweeps about the axis, `pi c^2 (R - c / 3)` (Pappus), to the
+/// certified surface's distance times its area.
+#[test]
+fn rim_chamfer_near_the_radius_is_certified_in_bounded_work() {
+    let (r, h, c) = (10.0_f64, 20.0_f64, 9.99_f64);
+    let mut k = kernel(|f| f.fillet_round_as_definition = true);
+    let mut b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), r, h).unwrap();
+    let rim = top_rim(&k, &b);
+    let token = CancelToken::after_polls(RIM_CHAMFER_POLLS);
+    k.set_cancel_token(token.clone());
+    let result = {
+        let mut session = FilletSession::new(&mut k, &mut b).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &[rim], c, 0, 1, 1.0)
+            .unwrap();
+        session
+            .do_fillet(&mut k)
+            .map_err(|_| session.error_info().code)
+    };
+    let polls = token.polls().unwrap();
+    k.clear_cancel_token();
+    assert!(
+        result.is_ok() && polls < RIM_CHAMFER_POLLS,
+        "{result:?} after {polls} polls"
+    );
+    let Outcome::Built { volume, manifold } = outcome(&mut k, &mut b, result) else {
+        panic!("refused after it was built");
+    };
+    let pi = std::f64::consts::PI;
+    let closed = pi * r * r * h - pi * c * c * (r - c / 3.0);
+    assert!(
+        manifold && near(volume, closed, VOLUME_TOL),
+        "{volume} against {closed}"
+    );
+}
+
 // ---- #960: the refusals named, not only commented ----
 
 /// What a refused blend's error info names (`ErrorInfo::no_room_reason`).
@@ -259,7 +322,8 @@ fn no_room_reason(
 
 /// The `NoRoom` refusals name themselves (#960): a rail leaving its face (the holed cube's
 /// blend of 6) and a blend taking a whole face (the cylinder's chamfer of 10), where the
-/// comment was the only difference; a refusal under another code names none.
+/// comment was the only difference; a refusal under another code names none. The holed
+/// cube's chamfer of 5, once refused under another code (WR-301's rollover), builds.
 #[test]
 fn no_room_refusals_are_named() {
     let mut k = kernel(|f| f.fillet_refuse_rails_leaving_faces = true);
@@ -287,9 +351,17 @@ fn no_room_refusals_are_named() {
         Some(NoRoomReason::FaceConsumed)
     );
 
-    // the rim-rollover failure of the holed cube's blend of 5 (SM_FILERR_EDGE_PROBLEM)
+    // the holed cube's chamfer of 5, whose rollover failed (SM_FILERR_EDGE_PROBLEM) before
+    // WR-301 became the default: 4000 - 12.5 * 20
+    let mut k = Kernel::default();
+    let Outcome::Built { volume, manifold } = holed_cube_blend(&mut k, 5.0, 0) else {
+        panic!("size 5: refused");
+    };
+    assert!(manifold && near(volume, 3750.0, 1e-4), "size 5: {volume}");
+
+    // a chamfer of 25 on the cube of 20 (SM_FILERR_BAD_INT)
     let mut k = Kernel::default();
     let mut b = holed_cube(&mut k);
     let e = edge_between(&k, &b, [0.0, 0.0, 20.0], [20.0, 0.0, 20.0]);
-    assert_eq!(no_room_reason(&mut k, &mut b, &[e], 5.0), None);
+    assert_eq!(no_room_reason(&mut k, &mut b, &[e], 25.0), None);
 }

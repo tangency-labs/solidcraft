@@ -1,25 +1,41 @@
 //! A sheet's control net: read, its control points moved, and the surface rebuilt to new degrees
 //! and spans with the kernel's certified bound of how far it moved. The sheet is a record of one
-//! untrimmed face on a non-rational B-spline surface (its face the whole of the surface's
-//! natural box, as `surface::boundary` and `surface::ruled` make it); the geometry is the
-//! kernel's. Ops checks the record and converts.
+//! untrimmed face on a B-spline surface (its face the whole of the surface's natural box, as
+//! `surface::boundary` and `surface::ruled` make it), or one the kernel makes such a sheet
+//! ([`editable`]: a plane, a cylinder, a cone, a sphere, a torus); the geometry is the kernel's,
+//! and so is which control points are one point and move together (a closed surface's seam, a
+//! pole). Ops checks the record and converts.
 
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
+use solidcore::nurbs::crv_basic::Boundary;
 use solidcore::nurbs::crv_fit::p1::approx_knots;
 use solidcore::nurbs::geom::Rectangle;
 use solidcore::nurbs::knots::{clamped_uniform, KnotVector, Side};
 use solidcore::nurbs::math::{CPoint, NOW};
-use solidcore::nurbs::srf_basic::{Direction, Surface as NurbSurface};
+use solidcore::nurbs::srf_basic::{
+    falloff_weight as kernel_falloff, Direction, FalloffShape, Surface as NurbSurface,
+};
 use solidcore::nurbs::srf_deviation::certified_distance;
+use solidcore::nurbs::srf_match::{match_boundary, match_plane as kernel_match_plane};
+pub use solidcore::nurbs::srf_match::{MatchOrder, MatchRows, SeamBounds};
+use solidcore::SolidError;
 use solidcore::Vec3;
 use solidcore_record::brep::{
     knot_domain, Brep, Curve2, Loop, Natural, Surface, MAX_SPLINE_DEGREE,
 };
 
-use crate::session::run;
-use crate::surface::{record, sheet as sheet_of};
+use std::borrow::Cow;
+
+use solidcore::topology::brep::sheet::editable_sheet;
+
+use crate::body::Body;
+use crate::error::status;
+use crate::session::with_body;
+use crate::session::{read_body, run};
+use crate::surface::{record, sheet_starting};
 use crate::sweep::coord_ok;
 use crate::{Error, Result};
+use solidcore::surface::side::BoxSide;
 
 /// The most sample points a rebuild fits (rows times columns).
 pub const REBUILD_MAX_SAMPLES: usize = 1 << 20;
@@ -32,51 +48,290 @@ pub struct Net {
     pub rows: usize,
     /// Control points along v.
     pub cols: usize,
-    /// The points, row by row (u index major).
+    /// The points, row by row (u index major), Euclidean.
     pub points: Vec<[f64; 3]>,
+    /// Each point's weight, in the order of `points`; empty for a non-rational surface. Edits
+    /// keep them.
+    pub weights: Vec<f64>,
+    /// The points that are one point and move together, `(u index, v index)` (the kernel's
+    /// `net_ties`): a closed surface's seam twins, a pole's row. An edit of any member moves
+    /// all of its group.
+    pub ties: Vec<Vec<(usize, usize)>>,
 }
 
-/// The control net of `sheet`'s surface.
+/// `sheet` ready for a control-net edit: a one-face sheet on a spline surface as it is,
+/// borrowed (so a spline sheet's edits are exactly what they were); any other one-face sheet as
+/// the kernel makes it a sheet with a net (`editable_sheet`, which decides by the surface's
+/// kind: a plane as the Coons spline of its edges, an analytic face as its exact NURBS form, its
+/// whole box the face). A record of other than one face is borrowed, for the edits to refuse.
 ///
 /// # Errors
-/// [`Error::Argument`] for a record that is not one face on a non-rational B-spline surface, or
-/// whose net is not rectangular; [`Error::Unsupported`] for a trimmed face (see [`untrimmed`]).
-pub fn control_net(sheet: &Brep) -> Result<Net> {
-    let (_, points) = untrimmed(sheet)?;
-    let rows = points.len();
-    let cols = points.first().map_or(0, Vec::len);
-    if cols == 0 || points.iter().any(|r| r.len() != cols) {
-        return Err(Error::Argument);
+/// [`Error::Record`] for a record the kernel refuses; the kernel's refusal of the rebuild
+/// ([`Error::Unsupported`]: holes, other than three or four edges, a folding outline, a face that
+/// is not its surface's whole box, a kind with no exact NURBS form) by its status.
+pub(crate) fn editable(sheet: &Brep) -> Result<Cow<'_, Brep>> {
+    let [face] = sheet.faces.as_slice() else {
+        return Ok(Cow::Borrowed(sheet));
+    };
+    let spline = matches!(
+        face.surface,
+        Surface::Spline { .. } | Surface::RationalSpline { .. }
+    );
+    if spline && face.nurbs.is_none() {
+        return Ok(Cow::Borrowed(sheet));
     }
-    Ok(Net {
-        rows,
-        cols,
-        points: points.iter().flatten().copied().collect(),
+    let (body, _) = Body::from_record(sheet, true)?;
+    let rebuilt = read_body("surface_cvs::editable", &body, |k, b| {
+        let Some(&f) = b.face_list().first() else {
+            return Ok(Err(Error::Argument));
+        };
+        Ok(editable_sheet(k, b, f).map_err(status))
+    })??;
+    match rebuilt {
+        Some(b) => Ok(Cow::Owned(Body::new(b).to_record()?.0)),
+        None => Ok(Cow::Borrowed(sheet)),
+    }
+}
+
+/// The side of `sheet`'s box its one face's loop starts on (the kernel's `first_side`), so an
+/// edit makes its sheet again listing the edges in its order: an edit changes no topology, and a
+/// client names an edge by its index in the record. `None` for a record of other than one face.
+///
+/// # Errors
+/// [`Error::Record`] for a record the kernel refuses; the kernel's error.
+fn first_side(sheet: &Brep) -> Result<Option<BoxSide>> {
+    if sheet.faces.len() != 1 {
+        return Ok(None);
+    }
+    let (body, _) = Body::from_record(sheet, true)?;
+    with_body("surface_cvs::first_side", &body, |k, b| {
+        let Some(&f) = b.face_list().first() else {
+            return Ok(None);
+        };
+        solidcore::topology::brep::sheet::first_side(k, b, f)
     })
 }
 
+/// The control net of `sheet`'s surface (a planar or analytic sheet's after [`editable`]): its
+/// Euclidean points, their weights and the points tied together.
+///
+/// # Errors
+/// [`Error::Argument`] for a record that is not one face on a B-spline surface, or whose net
+/// is not rectangular; [`Error::Unsupported`] for a trimmed face (see [`untrimmed`]); the
+/// kernel's status for a record tolerance it refuses.
+pub fn control_net(sheet: &Brep) -> Result<Net> {
+    let sheet = editable(sheet)?;
+    let ((u, v), net) = untrimmed(&sheet)?;
+    net_of(&kernel_surface(u, v, net)?, sheet.tolerance)
+}
+
+/// The [`Net`] of the kernel's surface `surface`, its ties within `tol` (the record's).
+fn net_of(surface: &NurbSurface, tol: f64) -> Result<Net> {
+    let s = BSplineSurface::from_gw_nurb(surface);
+    let net = s.control_point_net().map_err(status)?;
+    let ties = s.net_ties(tol).map_err(status)?;
+    if net.u_count == 0 || net.v_count == 0 {
+        return Err(Error::Argument);
+    }
+    Ok(Net {
+        rows: net.u_count,
+        cols: net.v_count,
+        points: net.points.iter().map(|p| [p.x, p.y, p.z]).collect(),
+        weights: net.weights,
+        ties,
+    })
+}
+
+/// The points tied to `p` in `ties` (its group), or `p` alone.
+fn tied(ties: &[Vec<(usize, usize)>], p: (usize, usize)) -> Vec<(usize, usize)> {
+    ties.iter()
+        .find(|g| g.contains(&p))
+        .cloned()
+        .unwrap_or_else(|| vec![p])
+}
+
 /// `sheet` with the control points `moves` names moved: `((i, j), to)` puts the point of the
-/// i-th u index and j-th v index at `to` (a later move of one point wins). The knots and
-/// degrees are kept; the result is a new one-face sheet on the moved surface, its whole box.
+/// i-th u index and j-th v index at `to`, its weight kept, and every point tied to it
+/// ([`Net::ties`]) there too, so a closed surface stays closed and a pole a point (a later move
+/// of one point wins). The knots, degrees and weights are kept; the result is a new one-face
+/// sheet on the moved surface, its whole box.
 ///
 /// # Errors
 /// As [`control_net`]; [`Error::Argument`] for an index past the net or a point not finite or
 /// past the coordinate bound; the kernel's status otherwise.
 pub fn move_cvs(sheet: &Brep, moves: &[((usize, usize), [f64; 3])]) -> Result<Brep> {
-    let ((u, v), points) = untrimmed(sheet)?;
-    let mut net = points.to_vec();
+    let sheet = editable(sheet)?;
+    let first = first_side(&sheet)?;
+    let ((u, v), net) = untrimmed(&sheet)?;
+    let mut surface = kernel_surface(u, v, net)?;
+    let ties = net_of(&surface, sheet.tolerance)?.ties;
     for &((i, j), to) in moves {
         if !coord_ok(&to) {
             return Err(Error::Argument);
         }
-        *net.get_mut(i)
-            .and_then(|row| row.get_mut(j))
-            .ok_or(Error::Argument)? = to;
+        for (a, b) in tied(&ties, (i, j)) {
+            let c = surface.cpt_mut(a, b).map_err(|_| Error::Argument)?;
+            *c = CPoint::weighted(Vec3::new(to[0], to[1], to[2]), c.w);
+        }
     }
-    let surface = kernel_surface(u, v, &net)?;
     record(run("surface_cvs::move_cvs", |k| {
-        sheet_of(k, BSplineSurface::from_gw_nurb(&surface))
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&surface), first)
     }))
+}
+
+/// What [`move_net`] moves: whole rows (u indices), whole columns (v indices) or single control
+/// points `(i, j)`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Picks {
+    /// Every point of these u indices.
+    Rows(Vec<usize>),
+    /// Every point of these v indices.
+    Columns(Vec<usize>),
+    /// These points, `(u index, v index)`.
+    Cvs(Vec<(usize, usize)>),
+}
+
+/// The shape of a soft selection's falloff over the index distance `d` from the picks, with
+/// `s = d / (radius + 1)`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shape {
+    /// `1 - s`.
+    Linear,
+    /// `1 - (3 s² - 2 s³)`: flat at the picks and at the radius's edge.
+    Smooth,
+}
+
+/// A soft selection: the points within `radius` index steps of the picks move too, by the
+/// weight [`Shape`] gives their distance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Falloff {
+    /// The most index steps from a pick a point moves at: 0 moves the picks alone.
+    pub radius: u32,
+    /// How the weight falls from 1 at the picks.
+    pub shape: Shape,
+}
+
+/// The weight of a point `d` index steps from the nearest pick: 1 at a pick, falling by
+/// `falloff`'s shape, 0 past its radius (and for every point off the picks without a falloff).
+#[must_use]
+pub fn falloff_weight(falloff: Option<Falloff>, d: usize) -> f64 {
+    let Some(f) = falloff else {
+        return if d == 0 { 1.0 } else { 0.0 };
+    };
+    let Ok(d) = u32::try_from(d) else {
+        return 0.0;
+    };
+    let shape = match f.shape {
+        Shape::Linear => FalloffShape::Linear,
+        Shape::Smooth => FalloffShape::Smooth,
+    };
+    kernel_falloff(shape, f.radius, d)
+}
+
+/// The weight table of a `rows` by `cols` net (row by row, as [`Net::points`]): each point's
+/// [`falloff_weight`] at its index distance from the nearest pick. A row pick's distance is
+/// along u (`|i - row|`), a column pick's along v (`|j - column|`), a point pick's the larger of
+/// the two (the square ring of the net around it).
+///
+/// # Errors
+/// [`Error::Argument`] for no picks, a pick past the net, or a net of no points or more than
+/// [`REBUILD_MAX_SAMPLES`].
+pub fn net_weights(
+    rows: usize,
+    cols: usize,
+    picks: &Picks,
+    falloff: Option<Falloff>,
+) -> Result<Vec<f64>> {
+    let total = rows
+        .checked_mul(cols)
+        .filter(|&n| n > 0 && n <= REBUILD_MAX_SAMPLES)
+        .ok_or(Error::Argument)?;
+    let (empty, inside) = match picks {
+        Picks::Rows(p) => (p.is_empty(), p.iter().all(|&i| i < rows)),
+        Picks::Columns(p) => (p.is_empty(), p.iter().all(|&j| j < cols)),
+        Picks::Cvs(p) => (p.is_empty(), p.iter().all(|&(i, j)| i < rows && j < cols)),
+    };
+    if empty || !inside {
+        return Err(Error::Argument);
+    }
+    let nearest = |i: usize, j: usize| -> usize {
+        let d = match picks {
+            Picks::Rows(p) => p.iter().map(|&r| i.abs_diff(r)).min(),
+            Picks::Columns(p) => p.iter().map(|&c| j.abs_diff(c)).min(),
+            Picks::Cvs(p) => p
+                .iter()
+                .map(|&(a, b)| i.abs_diff(a).max(j.abs_diff(b)))
+                .min(),
+        };
+        d.unwrap_or(usize::MAX)
+    };
+    let mut table = Vec::new();
+    table
+        .try_reserve_exact(total)
+        .map_err(|_| Error::Argument)?;
+    for i in 0..rows {
+        for j in 0..cols {
+            table.push(falloff_weight(falloff, nearest(i, j)));
+        }
+    }
+    Ok(table)
+}
+
+/// `sheet` with the picked control points moved by `delta`, and with a `falloff` the points
+/// around them by their weight of it ([`net_weights`]): the kernel moves each point of weight
+/// `t` by `t delta` (`Surface::displace_cpts`), the points tied together ([`Net::ties`]) each by
+/// the largest weight among them, so a closed surface stays closed and a pole a point. The
+/// knots, degrees and point weights are kept; the result is a new one-face sheet on the moved
+/// surface, its whole box.
+///
+/// # Errors
+/// As [`control_net`] and [`net_weights`]; [`Error::Argument`] for a `delta` not finite or
+/// past the coordinate bound, or a moved point past it; the kernel's status otherwise.
+pub fn move_net(
+    sheet: &Brep,
+    picks: &Picks,
+    delta: [f64; 3],
+    falloff: Option<Falloff>,
+) -> Result<Brep> {
+    if !coord_ok(&delta) {
+        return Err(Error::Argument);
+    }
+    let sheet = editable(sheet)?;
+    let first = first_side(&sheet)?;
+    let ((u, v), record_net) = untrimmed(&sheet)?;
+    let mut surface = kernel_surface(u, v, record_net)?;
+    let net = net_of(&surface, sheet.tolerance)?;
+    let mut weights = net_weights(net.rows, net.cols, picks, falloff)?;
+    let place = |(i, j): (usize, usize)| i.checked_mul(net.cols).and_then(|r| r.checked_add(j));
+    for group in &net.ties {
+        let most = group
+            .iter()
+            .filter_map(|&p| place(p).and_then(|n| weights.get(n)))
+            .copied()
+            .fold(0.0, f64::max);
+        for &p in group {
+            if let Some(t) = place(p).and_then(|n| weights.get_mut(n)) {
+                *t = most;
+            }
+        }
+    }
+    let moves: Vec<((usize, usize), f64)> = (0..net.rows)
+        .flat_map(|i| (0..net.cols).map(move |j| (i, j)))
+        .zip(weights)
+        .filter(|&(_, t)| t > 0.0)
+        .collect();
+    let moved = record(run("surface_cvs::move_net", |k| {
+        surface.displace_cpts(&moves, Vec3::new(delta[0], delta[1], delta[2]))?;
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&surface), first)
+    }))?;
+    if !control_net(&moved)?
+        .points
+        .iter()
+        .all(|p| coord_ok(p.as_slice()))
+    {
+        return Err(Error::Argument);
+    }
+    Ok(moved)
 }
 
 /// `sheet`'s surface refitted to degrees `(deg_u, deg_v)` with `(spans_u, spans_v)` uniform
@@ -87,9 +342,12 @@ pub fn move_cvs(sheet: &Brep, moves: &[((usize, usize), [f64; 3])]) -> Result<Br
 /// squares through its boundary rows: each column of samples along u at those parameters,
 /// then each row of the result along v ([`approx_knots`], The NURBS Book §9.4.3).
 ///
+/// A rational surface (an analytic face's exact form) is not rebuilt: the kernel's certified
+/// bound takes polynomial surfaces only, so a refit could not say how far it moved.
+///
 /// # Errors
-/// As [`control_net`]; [`Error::Argument`] for a surface on knots not clamped (a periodic
-/// one), a degree of 0 or past the record's most, no
+/// As [`control_net`]; [`Error::Unsupported`] for a rational surface; [`Error::Argument`] for
+/// a surface on knots not clamped (a periodic one), a degree of 0 or past the record's most, no
 /// spans, fewer than three or more than a record's control points either way, more samples
 /// than [`REBUILD_MAX_SAMPLES`], or a `tol` not finite or negative; [`Error::PastTolerance`]
 /// with the bound when it is past `tol`; the kernel's status otherwise.
@@ -101,7 +359,14 @@ pub fn rebuild(
     spans_v: usize,
     tol: f64,
 ) -> Result<(Brep, f64)> {
-    let ((u, v), points) = untrimmed(sheet)?;
+    let sheet = editable(sheet)?;
+    let first = first_side(&sheet)?;
+    let ((u, v), points) = untrimmed(&sheet)?;
+    if points.is_rational() {
+        return Err(Error::Unsupported(
+            "a rational surface: no certified bound for its refit",
+        ));
+    }
     let degrees_ok = |d: usize| (1..=MAX_SPLINE_DEGREE).contains(&d);
     if !(degrees_ok(deg_u) && degrees_ok(deg_v) && tol.is_finite() && tol >= 0.0) {
         return Err(Error::Argument);
@@ -181,9 +446,199 @@ pub fn rebuild(
         return Err(Error::PastTolerance { bound });
     }
     let made = record(run("surface_cvs::rebuild", |k| {
-        sheet_of(k, BSplineSurface::from_gw_nurb(&fit))
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&fit), first)
     }))?;
     Ok((made, bound))
+}
+
+/// `sheet` with the control rows next to its record edge `edge` moved so the edge meets record
+/// edge `target` of `other` at `order` (the kernel's
+/// [`solidcore::nurbs::srf_match::match_boundary`]: at most `rows.rows` rows from the edge move,
+/// the rows the order does not fix following by `rows.blend`, G2's row along the normal only, the
+/// sheet refined first where its knots cannot carry the target), and the seam after, measured at
+/// the edge's stations. Both sheets are one untrimmed face (as [`control_net`] reads them), each
+/// edge a side of its face's box. Refused when the seam would be worse than before in a measure
+/// the order holds: past both what it was and `held`, the caller's floor for that measure (the
+/// gap, the angle, the curvature jump), so rounding at a seam already held is not "worse".
+///
+/// # Errors
+/// As [`control_net`] for either sheet; [`Error::Argument`] for an edge past its record's list
+/// or not a side of its face's box, a floor in `held` negative or not finite, and the kernel's
+/// refusals of the input (rows outside 1..=3 or below the order plus one, a blend outside 0..=1,
+/// knots not clamped, a target degenerate at a station); [`Error::Unsupported`] for a match that
+/// would leave the seam worse; the kernel's status otherwise.
+pub fn match_edge(
+    sheet: &Brep,
+    edge: usize,
+    other: &Brep,
+    target: usize,
+    order: MatchOrder,
+    rows: MatchRows,
+    held: SeamBounds,
+) -> Result<(Brep, SeamBounds)> {
+    if ![held.gap, held.angle, held.curvature]
+        .iter()
+        .all(|t| t.is_finite() && *t >= 0.0)
+    {
+        return Err(Error::Argument);
+    }
+    let side = side_of(sheet, edge)?;
+    let target_side = side_of(other, target)?;
+    let first = first_side(sheet)?;
+    let ((u, v), points) = untrimmed(sheet)?;
+    let ((tu, tv), tpoints) = untrimmed(other)?;
+    // spline sheets on polynomial surfaces only, as before rational nets were read
+    if points.is_rational() || tpoints.is_rational() {
+        return Err(Error::Argument);
+    }
+    let surface = kernel_surface(u, v, points)?;
+    let target_surface = kernel_surface(tu, tv, tpoints)?;
+    let matched = run("surface_cvs::match_edge", |_| {
+        Ok(
+            match match_boundary(&surface, side, &target_surface, target_side, order, rows) {
+                Ok(m) => Ok(m),
+                Err(SolidError::InvalidInput { .. }) => Err(Error::Argument),
+                Err(e) => return Err(e),
+            },
+        )
+    })??;
+    let (before, after) = (matched.before, matched.after);
+    let worse = |now: f64, was: f64, floor: f64| now > was.max(floor);
+    let k = order.order();
+    if worse(after.gap, before.gap, held.gap)
+        || (k >= 1 && worse(after.angle, before.angle, held.angle))
+        || (k >= 2 && worse(after.curvature, before.curvature, held.curvature))
+    {
+        return Err(Error::Unsupported(
+            "the match would leave the seam worse than it was",
+        ));
+    }
+    let made = record(run("surface_cvs::match_edge", |k| {
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&matched.surface), first)
+    }))?;
+    Ok((made, after))
+}
+
+/// A plane a sheet's edge is matched to as its plane of symmetry ([`match_plane`]): a point on
+/// it and its normal (any length but none).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MirrorPlane {
+    /// A point on the plane.
+    pub origin: [f64; 3],
+    /// Its normal.
+    pub normal: [f64; 3],
+}
+
+/// `sheet` with the control rows next to its record edge `edge` moved so the sheet meets its own
+/// mirror image in `plane` at `order` (the kernel's
+/// [`solidcore::nurbs::srf_match::match_plane`]: the edge row put on the plane, at G1 and G2 the
+/// next row square to it, which makes the sheet curvature continuous with its mirror too; at
+/// most `rows.rows` rows from the edge move, the rows the order does not fix following by
+/// `rows.blend`), and the seam with the mirror after, measured at the edge's stations. The sheet
+/// is one untrimmed face (as [`control_net`] reads it), the edge a side of its face's box.
+/// Refused when the seam would be worse than before in a measure the order holds, past both what
+/// it was and `held`, as [`match_edge`] refuses.
+///
+/// # Errors
+/// As [`control_net`]; [`Error::Argument`] for an edge past the record's list or not a side of
+/// its face's box, a plane not finite or past the coordinate bound, a floor in `held` negative or
+/// not finite, and the kernel's refusals of the input (a normal of no length, an edge that does
+/// not leave the plane to one side, rows outside 1..=3 or below what the order fixes, a blend
+/// outside 0..=1, knots not clamped); [`Error::Unsupported`] for a match that would leave the seam
+/// worse; the kernel's status otherwise.
+pub fn match_plane(
+    sheet: &Brep,
+    edge: usize,
+    plane: MirrorPlane,
+    order: MatchOrder,
+    rows: MatchRows,
+    held: SeamBounds,
+) -> Result<(Brep, SeamBounds)> {
+    if ![held.gap, held.angle, held.curvature]
+        .iter()
+        .all(|t| t.is_finite() && *t >= 0.0)
+        || !coord_ok(&plane.origin)
+        || !coord_ok(&plane.normal)
+    {
+        return Err(Error::Argument);
+    }
+    let side = side_of(sheet, edge)?;
+    let first = first_side(sheet)?;
+    let ((u, v), points) = untrimmed(sheet)?;
+    if points.is_rational() {
+        return Err(Error::Argument);
+    }
+    let surface = kernel_surface(u, v, points)?;
+    let v3 = |[x, y, z]: [f64; 3]| Vec3::new(x, y, z);
+    let matched = run("surface_cvs::match_plane", |_| {
+        Ok(
+            match kernel_match_plane(
+                &surface,
+                side,
+                v3(plane.origin),
+                v3(plane.normal),
+                order,
+                rows,
+            ) {
+                Ok(m) => Ok(m),
+                Err(SolidError::InvalidInput { .. }) => Err(Error::Argument),
+                Err(e) => return Err(e),
+            },
+        )
+    })??;
+    let (before, after) = (matched.before, matched.after);
+    let worse = |now: f64, was: f64, floor: f64| now > was.max(floor);
+    let k = order.order();
+    if worse(after.gap, before.gap, held.gap)
+        || (k >= 1 && worse(after.angle, before.angle, held.angle))
+        || (k >= 2 && worse(after.curvature, before.curvature, held.curvature))
+    {
+        return Err(Error::Unsupported(
+            "the match would leave the seam worse than it was",
+        ));
+    }
+    let made = record(run("surface_cvs::match_plane", |k| {
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&matched.surface), first)
+    }))?;
+    Ok((made, after))
+}
+
+/// The side of its face's box record edge `edge` of the one-face untrimmed `sheet` runs along:
+/// its use's pcurve all on `u = umin` (left), `u = umax` (right), `v = vmin` (bottom) or
+/// `v = vmax` (top).
+///
+/// # Errors
+/// As [`untrimmed`]; [`Error::Argument`] for an edge the face does not use, or one not on a side.
+fn side_of(sheet: &Brep, edge: usize) -> Result<Boundary> {
+    untrimmed(sheet)?;
+    let [face] = sheet.faces.as_slice() else {
+        return Err(Error::Argument);
+    };
+    let [[u0, u1], [v0, v1]] = face.domain;
+    let [Loop::Edges { edges }] = face.loops.as_slice() else {
+        return Err(Error::Argument);
+    };
+    let Some(used) = edges
+        .iter()
+        .find(|e| usize::try_from(e.edge).is_ok_and(|i| i == edge))
+    else {
+        return Err(Error::Argument);
+    };
+    let Curve2::Spline { points: uv, .. } = &used.pcurve else {
+        return Err(Error::Argument);
+    };
+    let on = |k: usize, at: f64| uv.iter().all(|p| p.get(k) == Some(&at));
+    if on(0, u0) {
+        Ok(Boundary::Left)
+    } else if on(0, u1) {
+        Ok(Boundary::Right)
+    } else if on(1, v0) {
+        Ok(Boundary::Bottom)
+    } else if on(1, v1) {
+        Ok(Boundary::Top)
+    } else {
+        Err(Error::Argument)
+    }
 }
 
 /// Whether the first and last `degree + 1` of `knots` are each one value.
@@ -194,55 +649,105 @@ fn clamped(knots: &[f64], degree: usize) -> bool {
     flat(knots.get(..=degree)) && flat(last.and_then(|s| knots.get(s..)))
 }
 
+/// A record's control net as the record holds it: Euclidean points of a polynomial surface, or
+/// the homogeneous `[x w, y w, z w, w]` of a rational one (the kernel's own form).
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum RecordNet<'a> {
+    /// `Surface::Spline`'s points.
+    Plain(&'a [Vec<[f64; 3]>]),
+    /// `Surface::RationalSpline`'s homogeneous points.
+    Rational(&'a [Vec<[f64; 4]>]),
+}
+
+impl RecordNet<'_> {
+    fn rows(self) -> usize {
+        match self {
+            Self::Plain(n) => n.len(),
+            Self::Rational(n) => n.len(),
+        }
+    }
+
+    fn cols(self) -> usize {
+        match self {
+            Self::Plain(n) => n.first().map_or(0, Vec::len),
+            Self::Rational(n) => n.first().map_or(0, Vec::len),
+        }
+    }
+
+    fn is_rational(self) -> bool {
+        matches!(self, Self::Rational(_))
+    }
+}
+
 /// The kernel's surface of a record net and its knots (degrees from the knot counts).
 ///
 /// # Errors
 /// [`Error::Argument`] for knots that do not fit the net.
-fn kernel_surface(u: &[f64], v: &[f64], net: &[Vec<[f64; 3]>]) -> Result<NurbSurface> {
-    let rows = net.len();
-    let cols = net.first().map_or(0, Vec::len);
-    let p = u.len().checked_sub(rows + 1).ok_or(Error::Argument)?;
-    let q = v.len().checked_sub(cols + 1).ok_or(Error::Argument)?;
-    let pw = net
-        .iter()
-        .map(|row| {
-            row.iter()
-                .map(|&[x, y, z]| CPoint::new(x, y, z, NOW))
-                .collect()
-        })
-        .collect();
+fn kernel_surface(u: &[f64], v: &[f64], net: RecordNet<'_>) -> Result<NurbSurface> {
+    let p = u.len().checked_sub(net.rows() + 1).ok_or(Error::Argument)?;
+    let q = v.len().checked_sub(net.cols() + 1).ok_or(Error::Argument)?;
+    let pw = match net {
+        RecordNet::Plain(n) => n
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|&[x, y, z]| CPoint::new(x, y, z, NOW))
+                    .collect()
+            })
+            .collect(),
+        RecordNet::Rational(n) => n
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|&[x, y, z, w]| CPoint::new(x, y, z, w))
+                    .collect()
+            })
+            .collect(),
+    };
     NurbSurface::new(pw, p, q, u.to_vec(), v.to_vec()).map_err(|_| Error::Argument)
 }
 
 /// The knots `(u, v)` and net of the one face of `sheet`, when it is untrimmed: one face on a
-/// non-rational B-spline surface (no separate NURBS form), its domain the surface's natural
-/// box, one loop, and every use's pcurve on a side of that box (a spline pcurve whose control
-/// points all share the side's u or v: by their convex hull, the whole pcurve lies on it).
+/// B-spline surface, polynomial or rational (no separate NURBS form), its domain the surface's
+/// natural box, one loop, and every use's pcurve on a side of that box (a spline pcurve whose
+/// control points all share the side's u or v: by their convex hull, the whole pcurve lies on
+/// it).
 ///
 /// # Errors
-/// [`Error::Argument`] for a record of more or fewer faces, another surface or a rational one;
+/// [`Error::Argument`] for a record of more or fewer faces or another surface;
 /// [`Error::Unsupported`] for a face that is trimmed (or not proved untrimmed: a rational
 /// pcurve, a pcurve off the box's sides, holes).
+///
+/// A planar sheet is taken through [`editable`] first by the net edits (`control_net`,
+/// `move_cvs`, `move_net`, `rebuild`); `match_edge`, which names its edges by record index,
+/// takes spline sheets only (a planar one's rebuilt edges would need the edge map).
 #[allow(clippy::type_complexity)]
-pub(crate) fn untrimmed(sheet: &Brep) -> Result<((&[f64], &[f64]), &[Vec<[f64; 3]>])> {
+pub(crate) fn untrimmed(sheet: &Brep) -> Result<((&[f64], &[f64]), RecordNet<'_>)> {
     let [face] = sheet.faces.as_slice() else {
         return Err(Error::Argument);
     };
-    let (
-        Surface::Spline {
-            u_knots,
-            v_knots,
-            points,
-        },
-        None,
-    ) = (&face.surface, &face.nurbs)
-    else {
-        return Err(Error::Argument);
+    let (u_knots, v_knots, net) = match (&face.surface, &face.nurbs) {
+        (
+            Surface::Spline {
+                u_knots,
+                v_knots,
+                points,
+            },
+            None,
+        ) => (u_knots, v_knots, RecordNet::Plain(points)),
+        (
+            Surface::RationalSpline {
+                u_knots,
+                v_knots,
+                homogeneous,
+            },
+            None,
+        ) => (u_knots, v_knots, RecordNet::Rational(homogeneous)),
+        _ => return Err(Error::Argument),
     };
-    let cols = points.first().map_or(0, Vec::len);
     let (Natural::Range(u0, u1), Natural::Range(v0, v1)) = (
-        knot_domain(u_knots, points.len()),
-        knot_domain(v_knots, cols),
+        knot_domain(u_knots, net.rows()),
+        knot_domain(v_knots, net.cols()),
     ) else {
         return Err(Error::Argument);
     };
@@ -262,7 +767,7 @@ pub(crate) fn untrimmed(sheet: &Brep) -> Result<((&[f64], &[f64]), &[Vec<[f64; 3
             return trimmed;
         }
     }
-    Ok(((u_knots, v_knots), points))
+    Ok(((u_knots, v_knots), net))
 }
 
 #[cfg(test)]
@@ -292,6 +797,18 @@ mod tests {
             ],
         };
         ruled(&a, &b, false).unwrap()
+    }
+
+    /// A spline sheet is not rebuilt: `editable` hands the record back borrowed (not converted),
+    /// so every net edit of a spline sheet reads and makes exactly what it did before planar
+    /// sheets were taken.
+    #[test]
+    fn a_spline_sheet_is_edited_as_it_is() {
+        let s = sheet();
+        match editable(&s).unwrap() {
+            Cow::Borrowed(b) => assert_eq!(b, &s),
+            Cow::Owned(_) => panic!("a spline sheet was rebuilt"),
+        }
     }
 
     #[test]
@@ -370,6 +887,166 @@ mod tests {
         );
         assert_eq!(
             move_cvs(&s, &[((0, 0), [f64::NAN, 0.0, 0.0])]),
+            Err(Error::Argument)
+        );
+    }
+
+    #[test]
+    fn a_row_move_moves_exactly_that_row() {
+        let s = long_sheet();
+        let net = control_net(&s).unwrap();
+        let delta = [0.0, 0.0, 1.0];
+        let last = net.rows - 1;
+        for falloff in [
+            None,
+            Some(Falloff {
+                radius: 0,
+                shape: Shape::Smooth,
+            }),
+        ] {
+            let moved = move_net(&s, &Picks::Rows(vec![last]), delta, falloff).unwrap();
+            let after = control_net(&moved).unwrap();
+            assert_eq!((after.rows, after.cols), (net.rows, net.cols));
+            for (n, (p, q)) in net.points.iter().zip(&after.points).enumerate() {
+                if n / net.cols == last {
+                    assert_eq!(*q, [p[0], p[1], p[2] + 1.0], "point {n}");
+                } else {
+                    assert_eq!(p, q, "point {n}");
+                }
+            }
+        }
+        // a column the same way
+        let moved = move_net(&s, &Picks::Columns(vec![0]), delta, None).unwrap();
+        let after = control_net(&moved).unwrap();
+        for (n, (p, q)) in net.points.iter().zip(&after.points).enumerate() {
+            if n % net.cols == 0 {
+                assert_eq!(*q, [p[0], p[1], p[2] + 1.0], "point {n}");
+            } else {
+                assert_eq!(p, q, "point {n}");
+            }
+        }
+    }
+
+    #[test]
+    fn falloff_weights_are_one_at_the_pick_zero_past_the_radius_and_monotone() {
+        assert_eq!(falloff_weight(None, 0), 1.0);
+        assert_eq!(falloff_weight(None, 1), 0.0);
+        for shape in [Shape::Linear, Shape::Smooth] {
+            let f = Some(Falloff { radius: 3, shape });
+            let w: Vec<f64> = (0..8).map(|d| falloff_weight(f, d)).collect();
+            assert_eq!(w[0], 1.0, "{shape:?}");
+            assert!(
+                w[1..=3].iter().all(|&x| x > 0.0 && x < 1.0),
+                "{shape:?}: {w:?}"
+            );
+            assert!(w[4..].iter().all(|&x| x == 0.0), "{shape:?}: {w:?}");
+            assert!(
+                w.windows(2).all(|p| p[1] < p[0] || p[1] == 0.0),
+                "{shape:?}: {w:?}"
+            );
+            // the table: a point pick's distance is its square ring on the net
+            let table = net_weights(9, 7, &Picks::Cvs(vec![(4, 3)]), f).unwrap();
+            assert_eq!(table.len(), 63);
+            for i in 0..9_usize {
+                for j in 0..7_usize {
+                    let d = i.abs_diff(4).max(j.abs_diff(3));
+                    assert_eq!(table[i * 7 + j], w[d], "{shape:?} at ({i}, {j})");
+                }
+            }
+        }
+        // the smooth shape is flat at the pick: it falls less over the first step
+        let (linear, smooth) = (
+            falloff_weight(
+                Some(Falloff {
+                    radius: 3,
+                    shape: Shape::Linear,
+                }),
+                1,
+            ),
+            falloff_weight(
+                Some(Falloff {
+                    radius: 3,
+                    shape: Shape::Smooth,
+                }),
+                1,
+            ),
+        );
+        assert!(smooth > linear, "{smooth} {linear}");
+        // rows and columns by their one index
+        let rows = net_weights(
+            5,
+            3,
+            &Picks::Rows(vec![0]),
+            Some(Falloff {
+                radius: 1,
+                shape: Shape::Linear,
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            rows,
+            vec![1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        );
+        // bad picks
+        assert_eq!(
+            net_weights(5, 3, &Picks::Rows(vec![]), None),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            net_weights(5, 3, &Picks::Rows(vec![5]), None),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            net_weights(5, 3, &Picks::Columns(vec![3]), None),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            net_weights(5, 3, &Picks::Cvs(vec![(0, 3)]), None),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            net_weights(0, 3, &Picks::Rows(vec![0]), None),
+            Err(Error::Argument)
+        );
+    }
+
+    #[test]
+    fn a_soft_move_moves_each_point_by_its_weight() {
+        let s = bicubic();
+        let net = control_net(&s).unwrap();
+        let f = Some(Falloff {
+            radius: 1,
+            shape: Shape::Linear,
+        });
+        let picks = Picks::Cvs(vec![(1, 1)]);
+        let moved = move_net(&s, &picks, [0.0, 0.0, 2.0], f).unwrap();
+        let after = control_net(&moved).unwrap();
+        let weights = net_weights(net.rows, net.cols, &picks, f).unwrap();
+        for (n, ((p, q), w)) in net
+            .points
+            .iter()
+            .zip(&after.points)
+            .zip(&weights)
+            .enumerate()
+        {
+            assert_eq!((q[0], q[1]), (p[0], p[1]), "point {n}");
+            assert!(
+                (q[2] - (p[2] + 2.0 * w)).abs() <= 1e-15 * (1.0 + p[2].abs()),
+                "point {n}: {p:?} to {q:?}, weight {w}"
+            );
+        }
+        // the pick by the whole delta, its ring by half, the rest not at all
+        assert_eq!(weights[5], 1.0);
+        assert_eq!(weights[0], 0.5);
+        assert_eq!(weights[3 * 4 + 3], 0.0);
+        assert_eq!(after.points[15], net.points[15]);
+        // bad moves
+        assert_eq!(
+            move_net(&s, &picks, [f64::NAN, 0.0, 0.0], f),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            move_net(&s, &Picks::Cvs(vec![(4, 0)]), [0.0; 3], f),
             Err(Error::Argument)
         );
     }

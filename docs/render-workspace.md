@@ -10,6 +10,9 @@ the asynchronous protocol, image limits, captured revisions and PNG export. The 
 `ui.render` snapshot remains a separate route.
 
 Choose **Render** in the workspace switcher after finishing a modelling operation.
+A running Inspect tool that only picks what an analysis shows (Isocurve, Curvature Comb,
+Minimum Radius, Mass Center, Continuity) does not lock the switcher: choosing Render ends
+the tool as Esc does. Isocurve's curves stay on.
 The current integrated GPU renderer shows a separate product scene. Return to Design
 restores its camera, projection preference and existing viewport drawing policy.
 New native setups select CPU ray tracing with progressive sampling when the installed
@@ -439,7 +442,7 @@ distance, yaw, pitch, roll, FOV and up axis as view state. It neither edits the 
 nor settles a stale model. The UI honours its up axis in Render; the Design camera
 is restored when returning. The camera moves exactly as in Design: the navigation preset,
 Orbit around, zoom to the cursor, the SpaceMouse, the middle double-click, F6 and the axis
-view or navigation cube all work and
+view or axes navigator all work and
 **Fit Product** frames visible product bodies without including sketches or selection.
 
 In the normal workflow, **Fit Product**, entry fit, product drawing, navigation,

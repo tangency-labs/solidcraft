@@ -417,7 +417,9 @@ fn certified(points: &[Vec2], curves: &[Seg2], tolerance: f64) -> bool {
     })
 }
 
-/// Recover a bounded straight extrusion only when all projected side triangles match certified section curves.
+/// Recognize a bounded extrusion whose projected caps and walls match the hinted section curves.
+/// Returns `None` only when applicability is rejected before the native solid sweep.
+/// Boundary, nesting, construction and solid or volume certificate errors propagate.
 pub(super) fn extrusion(
     k: &mut Kernel,
     mesh: &TriMesh,

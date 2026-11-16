@@ -6,7 +6,7 @@
 | Started | 2026-10-14 (when #1221 opened) |
 | Apps | SolidCraft |
 | Discussion | [#1221](https://github.com/tangency-labs/solidcraft/issues/1221) |
-| Related | [#8987](https://github.com/tangency-labs/solidcraft/pull/8987) (native Wasm command plugin runtime, the base for phase 1), [#15100](https://github.com/tangency-labs/solidcraft/issues/15100) (design forms, the plugin UI mechanism), [#4933](https://github.com/tangency-labs/solidcraft/pull/4933) (plugin commands in Utilities), [#5586](https://github.com/tangency-labs/solidcraft/pull/5586) (install from a GitHub link) |
+| Related | [RFC 0015](0015-plugin-ui-workspaces.md) (plugin panels, workspaces and viewport content), [#8987](https://github.com/tangency-labs/solidcraft/pull/8987) (native Wasm command plugin runtime, the base for phase 1), [#15100](https://github.com/tangency-labs/solidcraft/issues/15100) (design forms, the plugin UI mechanism), [#4933](https://github.com/tangency-labs/solidcraft/pull/4933) (plugin commands in Utilities), [#5586](https://github.com/tangency-labs/solidcraft/pull/5586) (install from a GitHub link) |
 
 This RFC replaces `docs/plugins.md` and folds in what the 37 comments on #1221 settled. Only the Preferences page exists today. No plugin runs.
 
@@ -15,7 +15,7 @@ This RFC replaces `docs/plugins.md` and folds in what the 37 comments on #1221 s
 These are settled and override older text in this RFC, in #1221 and in the draft PRs.
 
 1. **One API.** The plugin API is the MCP engine command surface. There is no second surface.
-2. **WebAssembly is the plugin runtime.** No CPython, no pip, and no embedded script interpreter. Rhai and similar runtimes are not part of the plan.
+2. **WebAssembly is the plugin runtime.** No CPython, no pip, and no embedded script interpreter to start. Monty or Rhai may come later, on the same command surface.
 3. **No network to start.** The linker has no fetch, sockets or HTTP, and a manifest that asks for `net` is refused. `net` stays a reserved permission name. It can be granted later only to signed official plugins from the curated index (phase 6), with named `https` origins and requests made by the host, never by the plugin.
 4. **Plugin UI is host-drawn, and only where the app allows it.** Forms come from declared input schemas drawn with the design-forms mechanism in [#15100](https://github.com/tangency-labs/solidcraft/issues/15100). A plugin ships no UI code.
 5. **Phase 1 sets the shape, so it gets a design review.** The phase 1 PR is reviewed on its design (WIT, manifest, permissions, limits) before phase 2 starts. See section 8.
@@ -34,12 +34,12 @@ These are settled and override older text in this RFC, in #1221 and in the draft
 
 **Non-goals**
 - Not a way to override core commands. Overrides would make a model behave differently depending on what is installed.
-- Not where core features go. CAM, for example, stays in-tree (#1153); plugins add vendor posts, niche strategies and importers on top.
+- Not where core features go. CAM may ship as a plugin (see [RFC 0015](0015-plugin-ui-workspaces.md)); plugins add vendor posts, niche strategies and importers on top.
 - No plugin-to-plugin calls. If plugins ever cooperate, it goes through host events, and a failing listener never fails the caller.
 
 ## 2. The WIT contract
 
-World `solidcraft:plugin@1.0.0`. The interface stays thin: a few typed functions plus the JSON command set, so the WIT stays small while the commands keep growing.
+World `craft:plugin@0.1.0`. The interface stays thin: a few typed functions plus the JSON command set, so the WIT stays small while the commands keep growing.
 
 | Host import | Notes |
 |---|---|
@@ -140,7 +140,7 @@ Plugin inputs are schemas (section 2), so the app draws the values and variables
 1. **App-agnostic core crate `craft-plugin`.** No CAD and no SolidCraft knowledge. It owns the manifest, permissions, limits (fuel, memory, no network), install and signing, and the headless test harness. The app implements one trait: its command catalog as schemas, plus "run this command". SolidCraft implements it with the MCP engine command surface. PCBCraft and other Craft apps implement their own.
 2. **Declarative UI contributions.** A plugin declares entries, placed in named slots (menu or ribbon), and inputs as schemas. The app draws them through the [#15100](https://github.com/tangency-labs/solidcraft/issues/15100) forms. A plugin ships no UI code, and each app decides which slots exist.
 3. **Runtimes are sub-crates on the same trait.** `craft-plugin-wasm` is wasmtime on desktop and jco on the web, and it is the runtime. A `craft-plugin-script` crate (Monty or Rhai) is optional, is not part of phase 1, and is not added unless the owner decides to revisit decision 2.
-4. **The WIT world is generic:** run a command, log, progress, cancel, granted files. App commands are data (schemas), not WIT types, so one WIT serves every Craft app. The `solidcraft:plugin@1.0.0` world in section 2 becomes this generic world, with SolidCraft's commands as its catalog.
+4. **The WIT world is generic:** run a command, log, progress, cancel, granted files. App commands are data (schemas), not WIT types, so one WIT serves every Craft app. The `craft:plugin@0.1.0` world in section 2 becomes this generic world, with SolidCraft's commands as its catalog.
 5. **Location.** The crates start in this repository as `crates/craft-plugin*`, and `cargo xtask layers` forbids any dependency on SolidCraft crates. They move to their own repository, as solidcore did, when a second app needs them.
 
 Phase 1 therefore builds the host as `craft-plugin` plus `craft-plugin-wasm` against that trait, not hard-coded to SolidCraft.
@@ -159,7 +159,7 @@ Phase 1 therefore builds the host as `craft-plugin` plus `craft-plugin-wasm` aga
 
 | Phase | Delivers | Who and where |
 |---|---|---|
-| 1 | WIT `solidcraft:plugin@1.0.0`, a wasmtime host with fuel and memory limits, `execute`, permissions in the manifest, no network in the linker, a manifest asking for `net` refused, tests: no file access without a grant, a runaway loop is stopped, a crash leaves the model untouched, undo works | Builds on [#8987](https://github.com/tangency-labs/solidcraft/pull/8987) |
+| 1 | WIT `craft:plugin@0.1.0`, a wasmtime host with fuel and memory limits, `execute`, permissions in the manifest, no network in the linker, a manifest asking for `net` refused, tests: no file access without a grant, a runaway loop is stopped, a crash leaves the model untouched, undo works | Builds on [#8987](https://github.com/tangency-labs/solidcraft/pull/8987) |
 | 2 | Importers and exporters, author guide, `plugin check` and `plugin test`. Measurements (component size, compile memory, binary growth) go in a #1221 comment. | After the phase 1 design review |
 | 3 | `FeatureKind::Plugin`, `evaluate`, recorded fallbacks, generic timeline row | |
 | 4 | Install from file or GitHub, Add-on Manager, plugin dialogs drawn from input schemas through [#15100](https://github.com/tangency-labs/solidcraft/issues/15100) | [#5586](https://github.com/tangency-labs/solidcraft/pull/5586), [#4933](https://github.com/tangency-labs/solidcraft/pull/4933) |
@@ -171,7 +171,7 @@ Phase 1 therefore builds the host as `craft-plugin` plus `craft-plugin-wasm` aga
 ## 9. Open questions
 
 1. **Wasmtime size and component limit.** Accept the binary growth, and raise the 16 MiB limit after measuring compile memory?
-2. **Plugin UI.** Settled for forms: host-drawn through #15100. Still open: viewport overlays and workspaces (the slicer-as-a-tab case), or whether such tools live in-tree.
+2. **Plugin UI.** Settled for forms: host-drawn through #15100. Viewport overlays and workspaces are answered in [RFC 0015](0015-plugin-ui-workspaces.md).
 3. **Defaults.** Are newly installed plugins on or off until approved?
 4. **Local network.** Not before phase 6, and under the same rule as any network: signed official plugins only. Starting a print would also need a confirmation level above `edit`.
 5. **Extending core commands.** Data-driven extension points, such as thread standards in the Hole dialog, later. Never overrides.
@@ -179,4 +179,4 @@ Phase 1 therefore builds the host as `craft-plugin` plus `craft-plugin-wasm` aga
 7. **Web.** jco, or desktop only?
 8. **Result annotations.** Text a plugin adds to command results can steer a model, so it needs its own threat model.
 9. **Recorded macros.** A plugin kind or a core feature?
-10. **Version numbers.** #4980 uses `0.1.0` until the interface settles; this RFC says `1.0.0`.
+10. **Version numbers.** Decided: `craft:plugin@0.1.0`.

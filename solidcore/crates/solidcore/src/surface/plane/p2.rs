@@ -21,10 +21,14 @@
 //! | [`Plane::make_new_plane_ellipse`]          | `MakeNewPlaneEllipse`                             |
 //!
 //! Deviations:
-//! - **Plane first with a torus (opt-in, not upstream).** With
-//!   `fixes.plane_first_torus_section_exact` (WR-721, #2405) `GlobalSurfaceIntersect` takes a
-//!   torus's own plane section (`Torus::intersect_with_plane_owned_into`, its orders and UV
-//!   curves swapped as for a surface of revolution); upstream has no torus case and marches it.
+//! - **Analytic contacts.** A clipped line or ellipse whose whole extent is below
+//!   the geometric tolerance is returned as a point curve at the interval midpoint,
+//!   including a trailing interval at the source curve's end. The extent bound
+//!   includes arithmetic rounding.
+//! - **Plane first with a torus (not upstream).** `GlobalSurfaceIntersect` takes a torus's
+//!   own plane section (`Torus::intersect_with_plane_owned_into`, its orders and UV curves
+//!   swapped as for a surface of revolution; WR-721, #2405); upstream has no torus case and
+//!   marches it.
 //! - **Arguments.** Out-params become return values; `SmContext` arguments are
 //!   dropped. `GlobalSurfaceIntersect`'s and `IntersectWithPlane`'s optional output
 //!   arrays are always filled ([`SurfaceIntersection`]; a plane/plane intersection has
@@ -54,10 +58,9 @@
 //!   [`PlaneIntersectWarning::NearlySingular`], not as an error. `GlobalSurfaceIntersect`
 //!   stops on it as upstream's `SER` does ([`stop_on_warning`]: a surface failure whose
 //!   comparison status is `SM_ERR_WARNING`).
-//! - **Upstream fix WR-652 / #1056.** The opt-in
-//!   [`crate::kernel::UpstreamFixes::plane_recognition_origin_after_axes`] places a
-//!   recognised plane's origin using its final orthogonal axes. It is off by default
-//!   to preserve SMLib's original arithmetic.
+//! - **Upstream fix WR-652.** A recognised plane's origin is placed using its final
+//!   orthogonal axes; SMLib places it along the Y axis before that axis is made
+//!   perpendicular.
 //! - **Recognisers** after the plane in `GlobalSurfaceIntersect`: the surface of
 //!   revolution's and the cone's (`SmCone::IntersectWithPlane`, also for a cylinder)
 //!   special cases run; the sphere and extrusion need surface kinds not in
@@ -69,12 +72,13 @@
 //!   [`SolidError::Unported`].
 
 use crate::curve::curve::p8::CurveIntersectOptions;
-use crate::curve::curve::Curve;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::{BoundedLineOptions, Line};
 use crate::error::surface::SurfaceFailure;
 use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR_WARNING};
 use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::certified::{self, next_up};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -501,10 +505,9 @@ impl Plane {
     /// near the centre (angle tolerance `tolerance_scale * 1e-4` degrees), and ten test
     /// points lie within `SM_EFF_ZERO_SQRT * (1 + |origin|)` of the plane built from
     /// the `(0, 0)` derivatives. The plane is re-parameterised to the natural domain
-    /// of `test` (which makes its NURB). `None` when `test` is not a plane. By default,
-    /// the origin is computed before orthogonalizing the Y axis, matching SMLib. Set
-    /// [`crate::kernel::UpstreamFixes::plane_recognition_origin_after_axes`] to use the
-    /// final axes and avoid magnifying a small adjustment across a distant UV minimum.
+    /// of `test` (which makes its NURB). `None` when `test` is not a plane. The origin
+    /// is placed along the final, perpendicular axes (WR-652), so a small adjustment of
+    /// the Y axis is not magnified across a distant UV minimum.
     ///
     /// # Errors
     ///
@@ -592,12 +595,6 @@ impl Plane {
         let x_axis = x_axis.unitize_or_z();
         let mut y_axis = y_axis.unitize_or_z();
 
-        // Move the origin to correspond to the zero [u=0, v=0] parameter.
-        // Keep this calculation before axis orthogonalization for upstream-default parity.
-        let mut new_origin = origin
-            - uv_domain.min().x * x_axis * uv_scale.x
-            - uv_domain.min().y * y_axis * uv_scale.y;
-
         // Force XAxis and YAxis to be nicely perpendicular
         if x_axis.dot(y_axis).abs() > EFF_ZERO {
             y_axis = x_axis.cross(y_axis).cross(x_axis);
@@ -606,13 +603,12 @@ impl Plane {
             })?;
         }
 
-        // The opt-in upstream fix anchors the origin using the final axes, so a nonzero
-        // domain minimum does not amplify the small Y-axis adjustment.
-        if k.fixes.plane_recognition_origin_after_axes {
-            new_origin = origin
-                - uv_domain.min().x * x_axis * uv_scale.x
-                - uv_domain.min().y * y_axis * uv_scale.y;
-        }
+        // Move the origin to correspond to the zero [u=0, v=0] parameter, along the
+        // final axes (WR-652: upstream used the Y axis before it was made perpendicular,
+        // so a domain far from v = 0 magnified the turn).
+        let new_origin = origin
+            - uv_domain.min().x * x_axis * uv_scale.x
+            - uv_domain.min().y * y_axis * uv_scale.y;
 
         // construct temporary new plane (m_pNurb == NULL)
         let mut plane = Self::new(new_origin, x_axis, y_axis, uv_scale, &uv_domain);
@@ -1148,6 +1144,37 @@ impl Plane {
             let mut new_curve = curve.copy(k)?;
             // may snap sIvl by tol to existing knots (status ignored)
             ignore_status(new_curve.trim(k, &mut trim_ivl, TrimMode::Notify))?;
+            // A full circle has coincident endpoints. Bound the whole analytic
+            // interval using its diameter and arc length, with signed sizes by magnitude.
+            // Round each computed upper bound outward, including norm underflow.
+            let extent = match new_curve.kind() {
+                CurveKind::Line(line) => {
+                    let length = certified::distance(Vec3::ZERO, line.line_vector());
+                    let length_upper = next_up(length.value + length.bound);
+                    let interval = line.step_interval();
+                    let span_upper = next_up((interval.max() - interval.min()).abs());
+                    let scaled_length_upper = next_up(length_upper * line.line_scale().abs());
+                    Some(next_up(scaled_length_upper * span_upper))
+                }
+                CurveKind::Ellipse(ellipse) => {
+                    let radius = max2(ellipse.x_radius().abs(), ellipse.y_radius().abs());
+                    let interval = ellipse.step_interval();
+                    let angle_upper = next_up((interval.max() - interval.min()).abs());
+                    let radians_per_degree_upper = next_up(next_up(PI) / 180.0);
+                    let radius_angle_upper = next_up(radius * angle_upper);
+                    let arc_length_upper = next_up(radius_angle_upper * radians_per_degree_upper);
+                    // Multiplication by two is exact when the diameter is finite.
+                    Some(min2(2.0 * radius, arc_length_upper))
+                }
+                _ => None,
+            };
+            let point_contact = tol_3d.is_finite()
+                && extent.is_some_and(|extent| extent.is_finite() && extent < tol_3d);
+            if point_contact {
+                let interval = new_curve.natural_interval();
+                let point = new_curve.evaluate_point(k, interval.mid())?;
+                new_curve = Curve::from(BSplineCurve::create_degenerate_curve(3, point)?);
+            }
             curves_3d.push(new_curve);
         }
 
@@ -1644,9 +1671,9 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
             need_nurb_intersection = x.needs_more_intersections;
             *out = SurfaceIntersection::from(x);
         }
-        // Not upstream (WR-721, #2405, opt-in): the torus's own plane section, as for a
-        // surface of revolution (upstream has no SmTorus case: the default branch)
-        SurfaceKind::Torus(torus) if k.fixes.plane_first_torus_section_exact => {
+        // Not upstream (WR-721, #2405): the torus's own plane section, as for a surface of
+        // revolution (upstream has no SmTorus case: the default branch)
+        SurfaceKind::Torus(torus) => {
             // the plane's boxes take its face's tolerance
             let need = torus.intersect_with_plane_owned_into(
                 k,
@@ -1659,8 +1686,7 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
             core::mem::swap(&mut out.surface1_uv_curves, &mut out.surface2_uv_curves);
             need_nurb_intersection = need?;
         }
-        SurfaceKind::Torus(_)
-        | SurfaceKind::BSpline(_)
+        SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::BallPatch(_)
         | SurfaceKind::CurveBounded(_)
@@ -1779,21 +1805,16 @@ mod tests {
         assert!(Plane::is_nurb_surface_plane(k, &twisted, 1.0)
             .unwrap()
             .is_none());
-        let mut fixed_kernel = Kernel::default();
-        fixed_kernel.fixes.plane_recognition_origin_after_axes = true;
-        assert!(Plane::is_nurb_surface_plane(&fixed_kernel, &twisted, 1.0)
-            .unwrap()
-            .is_none());
     }
 
     #[test]
-    fn plane_origin_after_axes_fix_is_opt_in_and_domain_local() {
+    fn plane_origin_after_axes_is_domain_local() {
         const SHEAR: f64 = 3.2e-8;
+        let k = Kernel::default();
         let domain_cases = [
             Extent2d::from_bounds(2.0, 4.0, 3.0, 5.0),
             Extent2d::from_bounds(2.0, -5.0, 3.0, -4.0),
         ];
-        assert!(!Kernel::default().fixes.plane_recognition_origin_after_axes);
 
         for domain in domain_cases {
             let surface = skewed_bilinear(domain, SHEAR);
@@ -1802,80 +1823,49 @@ mod tests {
             let upper_uv = domain.max();
             let expected_lower = surface.evaluate_point(lower_uv).unwrap();
 
-            let default_kernel = Kernel::default();
-            let default_plane = Plane::is_nurb_surface_plane(&default_kernel, &surface, 1.0)
+            let plane = Plane::is_nurb_surface_plane(&k, &surface, 1.0)
                 .unwrap()
                 .unwrap();
-            let default_lower_error = default_plane.evaluate_point(lower_uv) - expected_lower;
-            let expected_shift = -domain.min().y * 40.0 * SHEAR;
-            assert!((default_lower_error.x - expected_shift).abs() < 1.0e-12);
-            assert!(default_lower_error.y.abs() < 1.0e-12);
-            assert_eq!(default_plane.natural_uv_domain(), domain);
-            assert_eq!(default_plane.step_uv_domain(), domain);
-            assert!((default_plane.uv_scale().x - 2.0).abs() < 1.0e-12);
-            assert!((default_plane.uv_scale().y - 40.0).abs() < 1.0e-12);
-
-            let mut fixed_kernel = Kernel::default();
-            fixed_kernel.fixes.plane_recognition_origin_after_axes = true;
-            let fixed_plane = Plane::is_nurb_surface_plane(&fixed_kernel, &surface, 1.0)
-                .unwrap()
-                .unwrap();
-            assert_eq!(fixed_plane.natural_uv_domain(), domain);
-            assert_eq!(fixed_plane.step_uv_domain(), domain);
-            assert_eq!(fixed_plane.uv_scale(), default_plane.uv_scale());
-            assert!(
-                fixed_plane
-                    .evaluate_point(lower_uv)
-                    .distance(expected_lower)
-                    < 1.0e-10
-            );
-            assert!(fixed_plane
+            assert_eq!(plane.natural_uv_domain(), domain);
+            assert_eq!(plane.step_uv_domain(), domain);
+            assert!((plane.uv_scale().x - 2.0).abs() < 1.0e-12);
+            assert!((plane.uv_scale().y - 40.0).abs() < 1.0e-12);
+            // Upstream's corner was `-v_min * 40 * SHEAR` off along X (5.12e-6 and
+            // -6.4e-6 here); along the final axes the lower corner is on the surface.
+            assert!(plane.evaluate_point(lower_uv).distance(expected_lower) < 1.0e-10);
+            assert!(plane
                 .position()
                 .x_axis()
-                .is_perpendicular_to(fixed_plane.position().y_axis(), 1.0e-10));
-            assert!((fixed_plane.position().x_axis().length() - 1.0).abs() < 1.0e-12);
-            assert!((fixed_plane.position().y_axis().length() - 1.0).abs() < 1.0e-12);
+                .is_perpendicular_to(plane.position().y_axis(), 1.0e-10));
+            assert!((plane.position().x_axis().length() - 1.0).abs() < 1.0e-12);
+            assert!((plane.position().y_axis().length() - 1.0).abs() < 1.0e-12);
 
+            // The upper corner is off by the patch's own span times the shear, the
+            // limit of an orthogonal plane on a sheared parameterisation.
             let expected_upper = surface.evaluate_point(upper_uv).unwrap();
-            let upper_residual = fixed_plane.evaluate_point(upper_uv) - expected_upper;
+            let upper_residual = plane.evaluate_point(upper_uv) - expected_upper;
             assert!((upper_residual.x + 40.0 * SHEAR).abs() < 1.0e-12);
             assert!(upper_residual.y.abs() < 1.0e-12);
         }
 
-        // With a zero minimum, recomputing the origin with the final axis is identical.
+        // With a zero minimum the origin is the surface's (0, 0) point.
         let zero_domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let surface = skewed_bilinear(zero_domain, SHEAR);
-        let baseline = Plane::is_nurb_surface_plane(&Kernel::default(), &surface, 1.0)
+        let plane = Plane::is_nurb_surface_plane(&k, &surface, 1.0)
             .unwrap()
             .unwrap();
-        let mut fixed_kernel = Kernel::default();
-        fixed_kernel.fixes.plane_recognition_origin_after_axes = true;
-        let fixed = Plane::is_nurb_surface_plane(&fixed_kernel, &surface, 1.0)
-            .unwrap()
-            .unwrap();
-        assert_eq!(baseline.position(), fixed.position());
-        assert_eq!(baseline.uv_scale(), fixed.uv_scale());
-        assert_eq!(baseline.step_uv_domain(), fixed.step_uv_domain());
-        assert_eq!(baseline.natural_uv_domain(), fixed.natural_uv_domain());
-        for uv in [zero_domain.min(), zero_domain.max()] {
-            assert_eq!(baseline.evaluate_point(uv), fixed.evaluate_point(uv));
-        }
+        let corner = surface.evaluate_point(zero_domain.min()).unwrap();
+        assert!(plane.position().origin().distance(corner) < 1.0e-12);
 
-        // An already orthogonal frame is also unaffected by enabling the correction.
+        // An already orthogonal frame reproduces the surface at both corners.
         let orthogonal_domain = Extent2d::from_bounds(2.0, 4.0, 3.0, 5.0);
         let orthogonal = skewed_bilinear(orthogonal_domain, 0.0);
-        let baseline = Plane::is_nurb_surface_plane(&Kernel::default(), &orthogonal, 1.0)
+        let plane = Plane::is_nurb_surface_plane(&k, &orthogonal, 1.0)
             .unwrap()
             .unwrap();
-        let fixed = Plane::is_nurb_surface_plane(&fixed_kernel, &orthogonal, 1.0)
-            .unwrap()
-            .unwrap();
-        assert_eq!(baseline.position(), fixed.position());
-        assert_eq!(baseline.uv_scale(), fixed.uv_scale());
-        assert_eq!(baseline.step_uv_domain(), fixed.step_uv_domain());
-        assert_eq!(baseline.natural_uv_domain(), fixed.natural_uv_domain());
         for uv in [orthogonal_domain.min(), orthogonal_domain.max()] {
-            assert_eq!(baseline.evaluate_point(uv), fixed.evaluate_point(uv));
+            let expected = orthogonal.evaluate_point(uv).unwrap();
+            assert!(plane.evaluate_point(uv).distance(expected) < 1.0e-12);
         }
     }
 
@@ -1947,6 +1937,181 @@ mod tests {
         let (more, x) = stop_on_warning(r).unwrap();
         assert!(!more);
         assert_eq!(x.curves_3d.len(), 1);
+    }
+
+    #[test]
+    fn clipping_preserves_a_large_arc_on_a_short_parameter_interval() {
+        let k = Kernel::default();
+        let interval = Extent1d::from_min_max(0.999_999_999_998_075_2, 1.0);
+        let mut arc = Ellipse::new_circle(
+            &k,
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Extent1d::from_min_max(0.0, 90.0),
+            2.0,
+            &EllipseOptions::default(),
+        )
+        .unwrap();
+        arc.edit_parameterization(&k, &interval, true, None)
+            .unwrap();
+        let curve = Curve::from(arc);
+        let output = rect()
+            .trim_curve_to_plane_domain(&k, &dom(), &curve, 1e-6)
+            .unwrap();
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0].natural_interval(), interval);
+        for t in [interval.min(), interval.mid(), interval.max()] {
+            assert_eq!(
+                output[0].evaluate_point(&k, t).unwrap(),
+                curve.evaluate_point(&k, t).unwrap()
+            );
+        }
+        assert!(!output[0].is_degenerate(&k, 1e-6, None).unwrap());
+    }
+
+    #[test]
+    fn clipping_keeps_the_size_of_signed_analytic_geometry() {
+        let k = Kernel::default();
+        let plane = rect();
+        for sign in [-1.0, 1.0] {
+            let circle = Curve::from(
+                Ellipse::new_circle(
+                    &k,
+                    Vec3::ZERO,
+                    Vec3::X,
+                    Vec3::Y,
+                    Extent1d::from_min_max(0.0, 360.0),
+                    sign * 2.0,
+                    &EllipseOptions::default(),
+                )
+                .unwrap(),
+            );
+            let line = Curve::from(Line::bounded(
+                Vec3::ZERO,
+                Vec3::X,
+                &Extent1d::from_min_max(-1.0, 1.0),
+                &BoundedLineOptions {
+                    scale: sign * 2.0,
+                    ..BoundedLineOptions::default()
+                },
+            ));
+            for curve in [line, circle] {
+                let result = plane
+                    .trim_curve_to_plane_domain(&k, &dom(), &curve, 1e-6)
+                    .unwrap();
+                assert_eq!(result.len(), 1);
+                let interval = result[0].natural_interval();
+                let a = result[0].evaluate_point(&k, interval.min()).unwrap();
+                let b = result[0].evaluate_point(&k, interval.mid()).unwrap();
+                assert!(a.distance(b) > 1.0, "the signed curve retains its extent");
+            }
+        }
+    }
+
+    #[test]
+    fn clipping_retains_a_curve_at_the_extent_rounding_boundary() {
+        let k = Kernel::default();
+        let tolerance = 0.91;
+        // The computed line extent is below 0.91. Its exact extent from the f64
+        // inputs exceeds 0.91, so the curve must stay when the bound is uncertain.
+        let line = Curve::from(Line::bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            &Extent1d::from_min_max(-0.3, 0.4),
+            &BoundedLineOptions {
+                scale: 1.3,
+                ..BoundedLineOptions::default()
+            },
+        ));
+        let circle = Curve::from(
+            Ellipse::new_circle(
+                &k,
+                Vec3::ZERO,
+                Vec3::X,
+                Vec3::Y,
+                Extent1d::from_min_max(0.0, 360.0),
+                tolerance / 2.0,
+                &EllipseOptions::default(),
+            )
+            .unwrap(),
+        );
+        for curve in [line, circle] {
+            let output = rect()
+                .trim_curve_to_plane_domain(&k, &dom(), &curve, tolerance)
+                .unwrap();
+            assert_eq!(output.len(), 1);
+            assert!(matches!(
+                output[0].kind(),
+                CurveKind::Line(_) | CurveKind::Ellipse(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn clipped_sub_tolerance_tails_are_point_contacts() {
+        let k = Kernel::default();
+        let plane = rect();
+        let tolerance = 1e-6;
+        let line = Curve::from(
+            Line::create_line_segment(
+                3,
+                Vec3::new(-10.0, 0.0, 0.0),
+                Vec3::new(-5.0 + 1e-10, 0.0, 0.0),
+                None,
+            )
+            .unwrap(),
+        );
+        let arc = Curve::from(
+            Ellipse::new_circle(
+                &k,
+                Vec3::new(-5.0, 0.0, 0.0),
+                -Vec3::X,
+                Vec3::Y,
+                Extent1d::from_min_max(0.0, 90.0 + 1e-8),
+                2.0,
+                &EllipseOptions::default(),
+            )
+            .unwrap(),
+        );
+        for curve in [line, arc] {
+            let contacts = plane
+                .trim_curve_to_plane_domain(&k, &dom(), &curve, tolerance)
+                .unwrap();
+            assert_eq!(contacts.len(), 1, "keep the boundary contact");
+            let contact = &contacts[0];
+            let interval = contact.natural_interval();
+            let start = contact.evaluate_point(&k, interval.min()).unwrap();
+            let end = contact.evaluate_point(&k, interval.max()).unwrap();
+            assert_eq!(start, end, "a contact has no edge extent");
+            assert!((start.x + 5.0).abs() < tolerance);
+            assert_eq!(
+                contact
+                    .evaluate(&k, interval.evaluate(0.5), 1, false, false)
+                    .unwrap()[1],
+                Vec3::ZERO
+            );
+        }
+
+        // Endpoint coincidence alone does not make a contact: retain the full
+        // circle inside the rectangle, including its nonzero tangent.
+        let circle = Curve::from(
+            Ellipse::new_circle(
+                &k,
+                Vec3::ZERO,
+                Vec3::X,
+                Vec3::Y,
+                Extent1d::from_min_max(0.0, 360.0),
+                2.0,
+                &EllipseOptions::default(),
+            )
+            .unwrap(),
+        );
+        let curves = plane
+            .trim_curve_to_plane_domain(&k, &dom(), &circle, tolerance)
+            .unwrap();
+        assert_eq!(curves.len(), 1);
+        assert!(!curves[0].is_degenerate(&k, tolerance, None).unwrap());
     }
 
     #[test]

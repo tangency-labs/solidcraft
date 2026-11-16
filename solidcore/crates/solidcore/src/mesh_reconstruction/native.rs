@@ -38,9 +38,7 @@ pub(super) fn extrude(
     let fixes = k.fixes;
     // The arc-zero test is already unconditional. The remaining fix can be retired once
     // its cylinder construction is the default too.
-    if let Some(arc_is_cylinder) = k.fixes.flag_mut("linear_sweep_arc_is_cylinder") {
-        *arc_is_cylinder = true;
-    }
+    k.fixes.linear_sweep_arc_is_cylinder = true;
     let result = (|| {
         let mut regions = regions.iter();
         let first = regions

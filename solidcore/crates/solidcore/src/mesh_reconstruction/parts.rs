@@ -78,6 +78,9 @@ fn recover(
             let circles = models.entry(key).or_insert_with(|| {
                 super::curves::hints(root, axis, tolerance, tolerance.min(1e-3) * 0.01)
             });
+            // A cut adds cap vertices, so a piece can match its polygonal caps without matching
+            // a section from the original circle hints. None rejects that applicability before any
+            // solid sweep. The ? propagates every certification or construction error.
             let result = match super::curves::extrusion(k, mesh, axis, tolerance, circles)? {
                 Some(body) => Some(body),
                 None if depth > 0 => extrusion(k, mesh, axis, tolerance)?,

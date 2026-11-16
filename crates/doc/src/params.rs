@@ -653,6 +653,8 @@ pub enum ParamUser {
     Rule { kind: String, name: String, field: String },
     /// The plane a canvas lies on (`input` is its label, e.g. `Offset`).
     Canvas { canvas: u64, name: String, input: String },
+    /// An occurrence moved by an expression (`input` names the axis, e.g. `translate y`).
+    Occurrence { occurrence: u64, name: String, input: String },
 }
 
 impl ParamUser {
@@ -668,6 +670,7 @@ impl ParamUser {
             ParamUser::Joint { name, input, .. } => format!("joint {name} ({input})"),
             ParamUser::Rule { kind, name, field } => format!("{kind} rule {name} ({field})"),
             ParamUser::Canvas { name, input, .. } => format!("canvas {name} ({input})"),
+            ParamUser::Occurrence { name, input, .. } => format!("occurrence {name} ({input})"),
         }
     }
 }
@@ -808,6 +811,12 @@ impl Document {
         }
         let uses = |e: &str| expr::references(e).iter().any(|r| r == name);
         let rule_uses = |field: &str, e: &str| rule_references(field, e).iter().any(|r| r == name);
+        for o in &self.occurrences {
+            let axes: BTreeSet<&str> = o.expressed_moves.iter().flat_map(|m| m.exprs()).filter(|(_, e)| uses(e)).map(|(axis, _)| axis).collect();
+            for axis in axes {
+                out.push(ParamUser::Occurrence { occurrence: o.id, name: o.name.clone(), input: format!("translate {axis}") });
+            }
+        }
         for r in &self.sheet.rules {
             for (field, _, _) in r.fields().into_iter().filter(|(f, e, _)| rule_uses(f, e)) {
                 out.push(ParamUser::Rule { kind: "sheet metal".into(), name: r.name.clone(), field: field.into() });
@@ -979,6 +988,13 @@ impl Document {
                 if !text && matches!(column, crate::config::Column::Param(c) if !texts.contains(c)) {
                     *cell = expr::rename_reference(cell, old, new);
                 }
+            }
+        }
+        for e in self.occurrences.iter_mut().flat_map(|o| &mut o.expressed_moves).flat_map(|m| m.translate.iter_mut().flatten()) {
+            let r = expr::rename_reference(e, old, new);
+            if r != *e {
+                *e = r;
+                n += 1;
             }
         }
         for e in self.assembly.exprs_mut() {
@@ -1293,6 +1309,25 @@ mod design_length_tests {
         assert_eq!(doc.with_design_unit("=5 mm", length), "=5 mm");
         let inches = doc.eval(&doc.with_design_unit("=5", length), length).unwrap();
         assert!((inches - 127.0).abs() < 1e-9, "{inches}");
+    }
+
+    /// A bare number written with a decimal comma (`2,5`) or as a mixed number (`2 1/8`) means the
+    /// design's units like `2.5` does, not millimetres.
+    #[test]
+    fn a_decimal_comma_or_mixed_number_gets_the_design_unit() {
+        let mut doc = Document::new("Units");
+        doc.units = "in".into();
+        let length = crate::expr::Kind::Length;
+        assert_eq!(doc.with_design_unit("2,5", length), "2,5 in");
+        assert_eq!(doc.with_design_unit("-,5", length), "-,5 in");
+        assert_eq!(doc.with_design_unit("=2 1/8", length), "=2 1/8 in");
+        assert_eq!(doc.with_design_unit("w = 2,5", length), "w = 2,5 in");
+        let inches = doc.eval(&doc.with_design_unit("2 1/8", length), length).unwrap();
+        assert!((inches - 2.125 * 25.4).abs() < 1e-9, "{inches}");
+        // Anything that is not one bare number is left as typed.
+        for e in ["2,5 mm", "2 1/8\"", "(2,5)", "2,5 + 1", "1/2", "d3"] {
+            assert_eq!(doc.with_design_unit(e, length), e, "{e}");
+        }
     }
 
     #[test]
