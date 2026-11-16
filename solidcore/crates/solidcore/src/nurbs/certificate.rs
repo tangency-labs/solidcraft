@@ -126,12 +126,14 @@ impl RailSpans {
         let r = nurb.degree();
         let w = |c: &CPoint| if c.w == NOW { 1.0 } else { c.w };
         let mut net_size = 0.0_f64;
+        let mut max_w = 0.0_f64;
         for c in nurb.cpts() {
             net_size = net_size
                 .max(c.x.abs())
                 .max(c.y.abs())
                 .max(c.z.abs())
                 .max(w(c).abs());
+            max_w = max_w.max(w(c).abs());
         }
         // an interior knot below full multiplicity is where the extraction inserts
         let knots = nurb.knots();
@@ -186,8 +188,11 @@ impl RailSpans {
                 ],
             ));
         }
-        // the translation: c - p w, a product and a difference
-        err += gamma(2) * (net_size + far * net_size) + err * (1.0 + far);
+        // the translation: c - p w, a product and a difference, of magnitude at most
+        // |c| + far w (a length: `far` times a weight, not times a coordinate). The spans'
+        // coefficients are convex combinations of the net's (positive weights), so the net's
+        // largest coordinate and weight bound theirs.
+        err += gamma(2) * (net_size + far * max_w) + err * (1.0 + far);
         if !err.is_finite() {
             return Err(failed("a rail's coefficients are not finite"));
         }
@@ -804,7 +809,9 @@ fn circle_piece_within(
                 + normal.z.abs() * hz.max_abs_coefficient());
     let up = 1.0 + gamma(8);
     let f_max = (f.max_abs_coefficient() + ef) / (w_lo * w_lo) * up;
-    let radial = f_max / (radius + (r2 - f_max).max(0.0).sqrt()) * up;
+    // (the square root's argument rounded down: `r2` carries one rounding, the difference
+    // another, so a cancellation cannot raise the denominator)
+    let radial = f_max / (radius + (r2 * (1.0 - gamma(2)) - f_max).max(0.0).sqrt()) * up;
     let plane = (g.max_abs_coefficient() + eg) / w_lo / normal_len * up;
     Ok(radial <= tol && plane <= tol)
 }
@@ -970,6 +977,26 @@ mod circle_tests {
                 "{center:?} {normal:?} {radius}"
             );
         }
+    }
+
+    /// An exact arc far from the origin is still proved at a tolerance of 1e-9: the
+    /// translation about the centre rounds as a length (`far` times a weight), not as an
+    /// area (`far` times a coordinate: a radial bound of about 2e-8 here, which left the
+    /// arc unproved).
+    #[test]
+    fn an_exact_arc_far_from_the_origin_is_proved() {
+        let far = Vec3::new(1e4, 1e4, 0.0);
+        let c = quarter(0.0);
+        let moved = c
+            .cpts()
+            .iter()
+            .map(|p| CPoint::new(p.x + far.x * p.w, p.y + far.y * p.w, p.z + far.z * p.w, p.w))
+            .collect();
+        let moved = NurbCurve::new(moved, 2, c.knots().to_vec()).unwrap();
+        assert_eq!(
+            on_circle(&moved, C + far, Z, 2.0, 1e-9).unwrap(),
+            OnCircle::Within
+        );
     }
 
     /// Non-finite or degenerate circles and tolerances are refused, not answered.
