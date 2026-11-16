@@ -800,7 +800,7 @@ mod tests {
         let mut picture = |model: u64, moving: Option<(u64, Option<GpuScene>)>| {
             let mut f = frame(&Scene::default(), &cam, size, model, None);
             f.moving = moving.map(|(key, scene)| crate::view::MovingLayer { key, slot: Arc::new(Mutex::new(scene)), transform });
-            let drawn = capturer.picture(&mut state, &f, BACKGROUND, size).unwrap().0;
+            let drawn = capturer.picture(&mut state, &f, BACKGROUND, None, size).unwrap().0;
             let red = drawn.chunks(4).filter(|p| p[0] > p[1].saturating_add(60)).count();
             (drawn, red)
         };
@@ -867,7 +867,7 @@ mod tests {
     /// (on this machine's GPU, skipped without one).
     #[test]
     fn a_background_with_a_middle_colour_is_two_bands_through_it() {
-        let Ok(capturer) = Capturer::headless_single_sample() else {
+        let Ok(capturer) = Capturer::headless_single_sample(crate::test_env::policy()) else {
             eprintln!("skipping: no GPU adapter");
             return;
         };
