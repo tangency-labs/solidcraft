@@ -339,6 +339,7 @@ mod theme_files_tests;
 use solidcraft_ui_kit::theme_options;
 #[cfg(test)]
 mod thin_extrude_tests;
+pub mod tickets;
 pub mod timeline;
 mod timeline_fold;
 mod timeline_folders;
@@ -550,6 +551,12 @@ pub struct Services {
     /// Upload a model to EasyPrint (Printables' slicer in the browser) and answer with the address
     /// to open (`easyprint_ui`); None: this host can't, and the menu doesn't offer it.
     pub easyprint_upload: Option<easyprint_ui::Upload>,
+    /// HTTP to the ticket server, for problem reports and My tickets (`tickets`); None: reports
+    /// open a GitHub draft instead.
+    pub tickets_http: Option<tickets::Http>,
+    /// Where the ticket server's sign-in is kept: the system keyring (the browser's storage on
+    /// the web). Never a plain file.
+    pub ticket_secrets: Option<std::sync::Arc<dyn agent_chat::backend::Secrets>>,
 }
 
 /// The view before a sketch opened and the view that faced the sketch then (#7038).
@@ -690,6 +697,8 @@ pub struct SolveApp {
     pub messages: messages::Messages,
     /// An editable local issue draft and optional captured app frame.
     pub issue_report: issue_report::ReportState,
+    /// Problem reports on the ticket server: sign-in, sending, the offline queue.
+    pub tickets: tickets::Tickets,
     /// The Crash Reports window.
     pub crashes: crash_ui::CrashUi,
     /// The update check and its window (`update`).
@@ -1018,6 +1027,7 @@ impl SolveApp {
             help: help::HelpState::default(),
             messages: messages::Messages::default(),
             issue_report: issue_report::ReportState::default(),
+            tickets: tickets::Tickets::new(),
             crashes: crash_ui::CrashUi::default(),
             updater: update::Updater::default(),
             install_steps: None,
@@ -3669,6 +3679,7 @@ impl SolveApp {
             ctx.request_repaint();
         }
         issue_report::tick(self, ctx);
+        tickets::tick(self, ctx);
         self.collect_screenshots(ctx);
         self.issue_screenshots(ctx);
         if self.issue_report.draft.is_none() && self.file_picker.is_none() {

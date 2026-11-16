@@ -413,21 +413,30 @@ impl JsonSchema for CanvasPlane {
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         let point = generator.subschema_for::<Point3>();
-        json_schema!({
-            "description": "A plane: XY, XZ or YZ (or Top, Front or Right; any case), a construction plane's name or feature id, a picked planar face {\"face\": [x, y, z], \"body\"?, \"index\"?, \"path\"?, \"fixed\"?}, or an explicit plane {\"origin\"?, \"x_dir\", \"y_dir\"}: two directions [x, y, z] that aren't parallel and an origin in mm, numbers only (default: the origin).",
-            "anyOf": [
-                {"type": "string"},
-                {"type": "integer", "minimum": 0, "maximum": u64::MAX},
-                face_pick(&point),
-                {
-                    "type": "object",
-                    "properties": {"origin": {"anyOf": [point, {"type": "null"}]}, "x_dir": point, "y_dir": point},
-                    "required": ["x_dir", "y_dir"],
-                    "not": {"required": ["face"]}
-                }
-            ]
-        })
+        plane_schema(
+            &point,
+            json!({"anyOf": [point, {"type": "null"}]}),
+            "A plane: XY, XZ or YZ (or Top, Front or Right; any case), a construction plane's name or feature id, a picked planar face {\"face\": [x, y, z], \"body\"?, \"index\"?, \"path\"?, \"fixed\"?}, or an explicit plane {\"origin\"?, \"x_dir\", \"y_dir\"}: two directions [x, y, z] that aren't parallel and an origin in mm, numbers only (default: the origin).",
+        )
     }
+}
+
+/// The schema of a plane with the given `origin` schema and description.
+pub(super) fn plane_schema(point: &Schema, origin: Value, description: &str) -> Schema {
+    json_schema!({
+        "description": description,
+        "anyOf": [
+            {"type": "string"},
+            {"type": "integer", "minimum": 0, "maximum": u64::MAX},
+            face_pick(point),
+            {
+                "type": "object",
+                "properties": {"origin": origin, "x_dir": point, "y_dir": point},
+                "required": ["x_dir", "y_dir"],
+                "not": {"required": ["face"]}
+            }
+        ]
+    })
 }
 
 /// The face of `canvas.decal`, as the handler reads it: a point on the face, or a picked face
