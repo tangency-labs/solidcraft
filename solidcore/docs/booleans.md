@@ -259,6 +259,8 @@ that may not be settled yet (`ResolveOverlappingProtoEdges` re-parametrises over
 first points can lie 18 mm apart in an outset of `Boolean/extrudeHoles1.smb`), so their distance
 proves no separation.
 
+**A curve that runs along an edge without crossing it.** With `classify_edge_interval` (WR-305) an interval between two points on a face's boundary edge whose middle lies within the band of that edge is on the edge, not inside the face. An end the edge intersections find no crossing for (an arc 1.4e-11 from another arc, ending 2.8e-5 short of that arc's corner) used to stay unclassified, so the interval was imprinted as a second edge beside the first; now such an end counts as on the edge when it lies within the band of it and clear of its vertices, the curve is tangent to the edge (within the angle tolerance) at both ends of the interval, and the whole curve over the interval is proved within the band of the edge on control points: the curve piece's control points against the chord of its ends, those ends against the edge piece's ends, and the edge piece's control points against its own chord, rounding counted (`piece_within_band`); the end is then classified to the edge with its parameter on it (`CurveClassification::classify_edge_interval`, `intersect/curve_class/p3.rs`). Without the tangency (a curve that crosses the edge at the interval's classified end and stops a hair past it, whose short piece lies within the band whatever its angle) or the proof (another curve kind, or a curve that bows out of the band between its ends) the end stays unclassified. An interval whose ends both classify onto the edge is still decided by WR-305 alone (a straight piece along a straight edge by its ends, a curved one by its midpoint).
+
 This is the problem Segal's tolerant modeller and Jackson's local tolerances address [9, 10]: two
 entities within tolerance are one, and a decision across that band has to be made once and kept by
 every later step. The port's strip rule is one such decision; a general one for curved faces within
@@ -422,9 +424,9 @@ A reviewer can check each of these on a change to the boolean.
   `known_failing.json` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
   returns 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16; #15669).
 - Opt-in fixes for the cases in §5, §6 and §8: `boolean_union_refuses_solid_leak`,
-  `boolean_outer_shell_first`, `boolean_cleanup_removes_slits`, `keep_operand_uv_trims`,
-  `boolean_vertex_by_best_crossing`, `boolean_splits_definition_across_split`
-  (`solidcore/src/kernel.rs`). Every boolean, 3D included, skips the face pairs whose boxes lie
+  `keep_operand_uv_trims`, `boolean_vertex_by_best_crossing`,
+  `boolean_splits_definition_across_split` (`solidcore/src/kernel.rs`). Always on: the outer
+  shell first and the clean-up of slits. Every boolean, 3D included, skips the face pairs whose boxes lie
   apart, and a new planar face leaves in place the inner loops whose boxes lie outside its outer
   loop's box (WR-527), always.
 

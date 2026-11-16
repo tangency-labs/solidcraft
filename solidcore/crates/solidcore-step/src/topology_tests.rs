@@ -128,6 +128,9 @@ struct BoxStyle {
     /// on the same two vertices: on the first one's LINE (`Some(0.0)`), or on a LINE of its own
     /// whose origin lies the given distance off.
     twin_edges: Option<f64>,
+    /// The first edge starts at a second VERTEX_POINT at its first corner's point, not at the
+    /// corner's own vertex, moved by the given distance along x (0 for the same point).
+    dup_vertex: Option<f64>,
 }
 
 /// The box from `lo` to `hi`: its faces (outward normals) and its top and bottom faces'
@@ -176,6 +179,10 @@ fn box_faces(w: &mut W, lo: V, hi: V, style: BoxStyle, inner: &mut dyn FnMut(&mu
                             let v = w.add(format!("VECTOR('',#{d},1.)"));
                             let l = w.add(format!("LINE('',#{o},#{v})"));
                             w.add(format!("EDGE_CURVE('',#{va},#{vb},#{l},.F.)"))
+                        } else if let Some(off) = style.dup_vertex.filter(|_| n == 0) {
+                            let at = [vs[key.0].1[0] + off, vs[key.0].1[1], vs[key.0].1[2]];
+                            let twin = (w.vertex(at), at);
+                            w.line_edge(twin, vs[key.1], !flip, 1.0)
                         } else {
                             w.line_edge(vs[key.0], vs[key.1], !flip, if n.is_multiple_of(3) { 1.0 } else { 2.5 })
                         };
@@ -328,6 +335,90 @@ fn a_cube_is_two_regions_six_faces_twelve_edges_eight_vertices() {
             assert_ne!(side(&e.uses[0]), side(&e.uses[1]));
         }
     }
+}
+
+/// A cube whose first edge starts at a second vertex at its corner's point (tangency-labs/solidcraft#17141):
+/// the faces meeting there close by position, and the corner is one vertex.
+#[test]
+fn a_corner_written_as_two_vertices_at_one_point_is_one_vertex() {
+    let s = one_solid(&cube(BoxStyle { dup_vertex: Some(0.0), ..Default::default() }));
+    assert!(!s.sheet);
+    assert_eq!(counts(&s.brep), [2, 1, 6, 12, 8]);
+    faces_away(&s.brep, 0, |_| [5.0, 10.0, 15.0]);
+}
+
+/// Two vertices that really are apart (1 mm, against tolerances of 1e-7 mm) are never one: the
+/// loop stays open and the solid is refused naming it, as before vertices could join.
+#[test]
+fn a_loop_whose_ends_are_apart_is_still_refused() {
+    let r = read_solids(&cube(BoxStyle { dup_vertex: Some(1.0), ..Default::default() }));
+    assert!(r.solids.is_empty(), "{}", r.solids.len());
+    assert_eq!(r.failures.len(), 1);
+    assert!(r.failures[0].message.contains("is not closed") || r.failures[0].message.contains("is not connected"), "{}", r.failures[0].message);
+}
+
+/// A builder over `ex` at its 1e-7 mm uncertainty, for reading single bounds and edges.
+fn with_builder<T>(ex: &p21::Exchange, f: impl FnOnce(&mut Builder<'_, '_>) -> T) -> T {
+    let mut reader = crate::read::Reader::new(ex, crate::read::Units::default());
+    let mut budget = MAX_FILE_FACES;
+    let mut b = Builder::new(ex, &mut reader, 1e-7, &mut budget, None);
+    f(&mut b)
+}
+
+/// Two vertices 1.5e-7 mm apart (within their two 1e-7 mm tolerances) that are the two ends of
+/// one LINE edge are never joined, even when a loop read before that edge meets them: the
+/// loop is refused and the edge, read later, stays a line between two vertices.
+#[test]
+fn the_two_ends_of_an_edge_read_later_are_never_joined() {
+    let mut w = W::default();
+    let (x, p, q) = ([0.0, 5.0, 0.0], [0.0; 3], [1.5e-7, 0.0, 0.0]);
+    let (vx, vp, vq) = ((w.vertex(x), x), (w.vertex(p), p), (w.vertex(q), q));
+    let short = w.line_edge(vp, vq, true, 1.0);
+    let (xp, qx) = (w.line_edge(vx, vp, true, 1.0), w.line_edge(vq, vx, true, 1.0));
+    let (a, z) = (w.oe(xp, true), w.oe(qx, true));
+    let bound = w.bound(&[a, z], true, true);
+    let ex = w.file(&[bound]);
+    with_builder(&ex, |b| {
+        let mut edges = 0;
+        let err = b.bound(bound, &mut edges).err().unwrap_or_default();
+        assert!(err.contains("is not connected"), "{err}");
+        let (e, _) = b.edge(short).unwrap();
+        let [s, t] = b.edges[e as usize].vertices;
+        assert_ne!(s, t);
+    });
+}
+
+/// A loop X→B, C→C (a circle), D→X with B, C and D at one point: every join resolves the
+/// vertex the last one left, so B, C and D are one vertex and the loop's edges meet there.
+#[test]
+fn a_loop_through_three_vertices_at_one_point_joins_all_three() {
+    let mut w = W::default();
+    let (x, c) = ([0.0, 5.0, 0.0], [0.0; 3]);
+    let vx = (w.vertex(x), x);
+    let (vb, vc, vd) = ((w.vertex(c), c), w.vertex(c), (w.vertex(c), c));
+    let xb = w.line_edge(vx, vb, true, 1.0);
+    let circle = w.circle([-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 1.0);
+    let cc = w.add(format!("EDGE_CURVE('',#{vc},#{vc},#{circle},.T.)"));
+    let dx = w.line_edge(vd, vx, true, 1.0);
+    let oes = [w.oe(xb, true), w.oe(cc, true), w.oe(dx, true)];
+    let bound = w.bound(&oes, true, true);
+    let ex = w.file(&[bound]);
+    with_builder(&ex, |b| {
+        let mut edges = 0;
+        let (LoopB::Edges(uses), _) = b.bound(bound, &mut edges).unwrap() else { panic!("an edge loop") };
+        b.join_vertices().unwrap();
+        let ends: Vec<[u32; 2]> = uses
+            .iter()
+            .map(|&(e, fwd)| {
+                let [s, t] = b.edges[e as usize].vertices;
+                if fwd { [s, t] } else { [t, s] }
+            })
+            .collect();
+        for (k, e) in ends.iter().enumerate() {
+            assert_eq!(e[1], ends[(k + 1) % ends.len()][0], "{ends:?}");
+        }
+        assert_eq!(b.edges.iter().flat_map(|e| e.vertices).collect::<HashSet<_>>().len(), 2);
+    });
 }
 
 #[test]
@@ -939,6 +1030,65 @@ fn a_half_torus_between_its_rims_gets_a_seam_round_the_tube() {
         let r = p[0].hypot(p[1]).max(1e-9);
         [20.0 * p[0] / r, 20.0 * p[1] / r, 1.0]
     });
+}
+
+/// A band round a spindle torus (`major` under `minor`: its tube crossing its axis, as the round
+/// end of a pin), read as its tube circle revolved: between its widest circle (its vertex at
+/// angle `at`) and a circle below it (its vertex at 0.3 rad), closed by a disk on each. Read,
+/// validated, its faces pointing out, and its one seam (the one edge that is not a circle) on
+/// the quarter line at the revolution's profile (angle 0: y = 0, x > 0), its loops split there.
+fn spindle_torus_band(major: f64, minor: f64, at: f64) {
+    let low = -std::f64::consts::FRAC_PI_3;
+    let (r_low, z_low) = (major + minor * low.cos(), minor * low.sin());
+    let mut w = W::default();
+    let ring = |w: &mut W, r: f64, z: f64, at: f64| {
+        let x = [at.cos(), at.sin(), 0.0];
+        let v = w.vertex([r * x[0], r * x[1], z]);
+        let k = w.circle([0.0, 0.0, z], [0.0, 0.0, 1.0], x, r);
+        w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"))
+    };
+    let (equator, lower) = (ring(&mut w, major + minor, 0.0, at), ring(&mut w, r_low, z_low, 0.3));
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let torus = w.add(format!("TOROIDAL_SURFACE('',#{a},{},{})", real(major), real(minor)));
+    // The band lies below the equator (running −u) and above the lower circle (running +u).
+    let (x, y) = (w.oe(equator, false), w.oe(lower, true));
+    let (bx, by) = (w.bound(&[x], true, true), w.bound(&[y], false, true));
+    let band = w.face(&[bx, by], torus, true);
+    let top = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let x = w.oe(equator, true);
+    let bx = w.bound(&[x], true, true);
+    let top = w.face(&[bx], top, true);
+    let bottom = w.plane([0.0, 0.0, z_low], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+    let x = w.oe(lower, false);
+    let bx = w.bound(&[x], true, true);
+    let bottom = w.face(&[bx], bottom, true);
+    let shell = closed_shell(&mut w, &[band, top, bottom]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('pin end',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    assert_eq!(s.brep.faces.len(), 3);
+    assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
+    let seams: Vec<_> = s.brep.edges.iter().filter(|e| !matches!(e.curve, solidcore_record::brep::Curve::Circle { .. })).collect();
+    assert_eq!(seams.len(), 1, "{:?}", s.brep.edges.iter().map(|e| &e.curve).collect::<Vec<_>>());
+    for p in seams[0].vertices.map(|v| s.brep.vertices[v as usize].point) {
+        assert!(p[1].abs() < 1e-9 * (major + minor) && p[0] > 0.0, "{p:?}");
+    }
+    faces_away(&s.brep, 0, |_| [0.0, 0.0, 0.5 * z_low]);
+}
+
+/// The pin end's radii, both circles' vertices off the quarter lines (at 0.5 and 0.3 rad): the
+/// seam lies on the quarter line at angle 0, both circles split there. A seam at a vertex left
+/// its second use past the end of the form, which starts on a quarter line.
+#[test]
+fn a_band_round_a_spindle_torus_gets_its_seam_on_a_quarter_line() {
+    spindle_torus_band(0.84455, 1.905, 0.5);
+}
+
+/// A widest circle of radius 100 with its vertex 5e-9 rad (5e-7 mm, past the file's 1e-7 mm)
+/// round from the quarter line: the vertex is off the line, and the circle is split on it that
+/// close to its end, the piece left longer than the tolerance.
+#[test]
+fn a_spindle_torus_band_splits_its_circle_just_short_of_a_vertex_near_the_quarter_line() {
+    spindle_torus_band(40.0, 60.0, 5e-9);
 }
 
 /// A quarter elbow: a torus face winding round its tube between two tube circles (at u = 0 and

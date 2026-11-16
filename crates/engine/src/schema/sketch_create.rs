@@ -24,7 +24,7 @@ use solidcore_record::Vec2;
 use super::check::{located, parse_issue, whole};
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
-use super::sketch_shapes::{CornerPoint, Created};
+use super::sketch_shapes::{CornerPoint, Created, SlotWidth};
 use super::types::{AngleExpr, LengthExpr, Point2, Point3, SketchRef, not_blank_pattern, present};
 use crate::params;
 
@@ -430,31 +430,6 @@ impl JsonSchema for SnapPoint {
     }
 }
 
-/// A width, as the slot commands read it: a number above 0.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SlotWidth(pub f64);
-
-impl<'de> Deserialize<'de> for SlotWidth {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        match Value::deserialize(d)?.as_f64().and_then(params::finite) {
-            Some(w) if w > 1e-9 => Ok(SlotWidth(w)),
-            _ => Err(D::Error::custom("must be positive")),
-        }
-    }
-}
-
-impl JsonSchema for SlotWidth {
-    fn schema_name() -> Cow<'static, str> {
-        "SlotWidth".into()
-    }
-    fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({
-            "description": "The slot's width in mm: more than 0.000000001 and below 1 000 000 000.",
-            "type": "number", "exclusiveMinimum": 1e-9, "exclusiveMaximum": 1e9
-        })
-    }
-}
-
 /// The schema of curve ids as `params::string_list` reads them: a list of ids, or one id when
 /// one is enough, with the bounds on the list.
 fn curve_ids_schema(description: &str, min: usize, max: usize) -> Schema {
@@ -797,7 +772,8 @@ pub struct SlotCenterPointParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointXY")]
     pub end: Option<PointXY>,
-    /// The slot's width, in mm.
+    /// The slot's width, in mm: a number, or an expression over the design's parameters, which
+    /// makes the width a dimension driven by them. Positive.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SlotWidth")]
     pub width: Option<SlotWidth>,
@@ -832,7 +808,8 @@ pub struct ArcSlotThreePointParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointXY")]
     pub end: Option<PointXY>,
-    /// The slot's width, in mm.
+    /// The slot's width, in mm: a number, or an expression over the design's parameters, which
+    /// makes the width a dimension driven by them. Positive.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SlotWidth")]
     pub width: Option<SlotWidth>,
@@ -880,7 +857,8 @@ pub struct ArcSlotCenterKeys {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointXY")]
     pub start: Option<PointXY>,
-    /// The slot's width, in mm.
+    /// The slot's width, in mm: a number, or an expression over the design's parameters, which
+    /// makes the width a dimension driven by them. Positive.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SlotWidth")]
     pub width: Option<SlotWidth>,
