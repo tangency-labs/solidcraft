@@ -4433,101 +4433,97 @@ mod tests {
     }
 
     /// WR-101: the upper split child's interval. A split goes ahead only where an edge
-    /// definition splits too, and that definition gives the upper child `[dT, old_max]`,
-    /// with `Kernel::fixes.proto_edge_split_upper_keeps_the_old_max` or without it: the
-    /// pinned `[dT, dT]` was only left on a child no definition split onto, a split now
-    /// refused, so the flag changes no result. With two definitions, one splitting and
-    /// one refusing (too near its end for its larger tolerance), the upper child gets
+    /// definition splits too, and that definition gives the upper child `[dT, old_max]`;
+    /// the proto edge's own upper interval is `[dT, old_max]` too (upstream's pinned
+    /// `[dT, dT]` was only left on a child no definition split onto, a split now
+    /// refused). With two definitions, one splitting and one refusing (too near its
+    /// end for its larger tolerance), the upper child gets
     /// the one that splits and still `[dT, old_max]`; the lower child is `[old_min, dT]`
     /// and keeps both. A split at or within the tolerance of an end is refused.
     #[test]
     fn proto_edge_split_upper_interval_keeps_the_old_max() {
-        for fixed in [false, true] {
-            let mut k = Kernel::default();
-            assert!(!k.fixes.proto_edge_split_upper_keeps_the_old_max);
-            k.fixes.proto_edge_split_upper_keeps_the_old_max = fixed;
-            let mut geo = Geo::default();
-            geo.curves.push(line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0]));
-            let c0 = H(0, ClassObjectKind::Curve);
-            let mut m = manager();
-            let v0 = m
-                .new_proto_vertex(Point3::new(0.0, 0.0, 0.0), 1e-5)
-                .unwrap();
-            let v1 = m
-                .new_proto_vertex(Point3::new(2.0, 0.0, 0.0), 1e-5)
-                .unwrap();
-            m.add_proto_vertex(v0);
-            m.add_proto_vertex(v1);
+        let k = Kernel::default();
+        let mut geo = Geo::default();
+        geo.curves.push(line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0]));
+        let c0 = H(0, ClassObjectKind::Curve);
+        let mut m = manager();
+        let v0 = m
+            .new_proto_vertex(Point3::new(0.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        let v1 = m
+            .new_proto_vertex(Point3::new(2.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        m.add_proto_vertex(v0);
+        m.add_proto_vertex(v1);
 
-            let mut cc = CurveClassification::new(&k);
-            cc.set_curve(Some(c0), false);
-            let ivl = geo.curves[0].natural_interval();
-            let (old_min, old_max) = (ivl.min(), ivl.max());
-            let mut ci1 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
-            ci1.mid = region_pc(R0);
-            let mut ci2 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
-            ci2.mid = region_pc(R1);
+        let mut cc = CurveClassification::new(&k);
+        cc.set_curve(Some(c0), false);
+        let ivl = geo.curves[0].natural_interval();
+        let (old_min, old_max) = (ivl.min(), ivl.max());
+        let mut ci1 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
+        ci1.mid = region_pc(R0);
+        let mut ci2 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
+        ci2.mid = region_pc(R1);
 
-            let pe = m
-                .create_proto_edge(&k, &mut geo, Some(v0), Some(v1), &cc, &ci1, &cc, &ci2)
-                .unwrap();
-            let tol = m.proto_edge(pe).unwrap().raw_tolerance();
+        let pe = m
+            .create_proto_edge(&k, &mut geo, Some(v0), Some(v1), &cc, &ci1, &cc, &ci2)
+            .unwrap();
+        let tol = m.proto_edge(pe).unwrap().raw_tolerance();
 
-            // the two refusal guards: at the ends and within the tolerance of them
-            for at in [old_min, old_min + tol / 4.0, old_max - tol / 4.0, old_max] {
-                assert!(matches!(
-                    m.proto_edge_split(&k, &mut geo, pe, at),
-                    Ok((None, None))
-                ));
-            }
-
-            // Near the end, within 10*tol, the edge definition refuses to split (upstream's
-            // `cbiFudge`), so the proto edge does not split either: it would leave an upper
-            // child with no definitions.
-            let near_end = old_max - 2.0 * tol;
+        // the two refusal guards: at the ends and within the tolerance of them
+        for at in [old_min, old_min + tol / 4.0, old_max - tol / 4.0, old_max] {
             assert!(matches!(
-                m.proto_edge_split(&k, &mut geo, pe, near_end),
+                m.proto_edge_split(&k, &mut geo, pe, at),
                 Ok((None, None))
             ));
-            assert_eq!(m.proto_edges(), [pe]);
-            let whole = m.proto_edge(pe).unwrap().xsect_interval();
-            assert_eq!((whole.min(), whole.max()), (old_min, old_max));
-
-            // A second definition, of ten times the tolerance, refuses within 1e-3 of the end.
-            geo.curves.push(line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0]));
-            let c1 = H(geo.curves.len() - 1, ClassObjectKind::Curve);
-            let wide = m
-                .insert_edge_definition(EdgeDefinition::new(
-                    Some(c1),
-                    ivl,
-                    R0,
-                    R1,
-                    10.0 * tol,
-                    None,
-                    None,
-                    None,
-                ))
-                .unwrap();
-            m.add_edge_definition(&k, &mut geo, pe, wide).unwrap();
-
-            // 2e-4 from the end the first definition splits and the wide one refuses.
-            let dt = old_max - 20.0 * tol;
-            let (new_pv, new_pe) = m.proto_edge_split(&k, &mut geo, pe, dt).unwrap();
-            let new_pe = new_pe.expect("proto edge was split");
-            assert!(new_pv.is_some());
-            assert_eq!(m.proto_edge(new_pe).unwrap().num_edge_definitions(), 1);
-            assert!(!m
-                .proto_edge(new_pe)
-                .unwrap()
-                .edge_definitions()
-                .contains(&wide));
-            assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 2);
-
-            let lower = m.proto_edge(pe).unwrap().xsect_interval();
-            assert_eq!((lower.min(), lower.max()), (old_min, dt));
-            let upper = m.proto_edge(new_pe).unwrap().xsect_interval();
-            assert_eq!((upper.min(), upper.max()), (dt, old_max), "fixed: {fixed}");
         }
+
+        // Near the end, within 10*tol, the edge definition refuses to split (upstream's
+        // `cbiFudge`), so the proto edge does not split either: it would leave an upper
+        // child with no definitions.
+        let near_end = old_max - 2.0 * tol;
+        assert!(matches!(
+            m.proto_edge_split(&k, &mut geo, pe, near_end),
+            Ok((None, None))
+        ));
+        assert_eq!(m.proto_edges(), [pe]);
+        let whole = m.proto_edge(pe).unwrap().xsect_interval();
+        assert_eq!((whole.min(), whole.max()), (old_min, old_max));
+
+        // A second definition, of ten times the tolerance, refuses within 1e-3 of the end.
+        geo.curves.push(line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0]));
+        let c1 = H(geo.curves.len() - 1, ClassObjectKind::Curve);
+        let wide = m
+            .insert_edge_definition(EdgeDefinition::new(
+                Some(c1),
+                ivl,
+                R0,
+                R1,
+                10.0 * tol,
+                None,
+                None,
+                None,
+            ))
+            .unwrap();
+        m.add_edge_definition(&k, &mut geo, pe, wide).unwrap();
+
+        // 2e-4 from the end the first definition splits and the wide one refuses.
+        let dt = old_max - 20.0 * tol;
+        let (new_pv, new_pe) = m.proto_edge_split(&k, &mut geo, pe, dt).unwrap();
+        let new_pe = new_pe.expect("proto edge was split");
+        assert!(new_pv.is_some());
+        assert_eq!(m.proto_edge(new_pe).unwrap().num_edge_definitions(), 1);
+        assert!(!m
+            .proto_edge(new_pe)
+            .unwrap()
+            .edge_definitions()
+            .contains(&wide));
+        assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 2);
+
+        let lower = m.proto_edge(pe).unwrap().xsect_interval();
+        assert_eq!((lower.min(), lower.max()), (old_min, dt));
+        let upper = m.proto_edge(new_pe).unwrap().xsect_interval();
+        assert_eq!((upper.min(), upper.max()), (dt, old_max));
     }
 
     /// WR-533 (the fork's tangency-labs/smlib@f11d0ac): an edge definition along the

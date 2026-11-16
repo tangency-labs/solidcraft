@@ -80,12 +80,10 @@
 //!   tolerance of the two (a distance upstream's `sm_FindPositionFromPCs` only reports and
 //!   then covers by the new proto vertex's tolerance).
 //! - **Recursion.** None.
-//! - **Upper split child's interval** (WR-101, opt-in
-//!   `Kernel::fixes.proto_edge_split_upper_keeps_the_old_max`): `SmProtoEdge::Split` sets
+//! - **Upper split child's interval** (WR-101): upstream's `SmProtoEdge::Split` sets
 //!   the upper child's interval from this edge's interval after clamping it, so the upper
-//!   child gets `[dT, dT]` instead of `[dT, old_max]`. With the flag the upper child keeps
-//!   `[dT, old_max]`; the lower child is `[old_min, dT]` either way. Off by default for
-//!   pinned C++ parity.
+//!   child gets `[dT, dT]` instead of `[dT, old_max]`. The port's upper child keeps
+//!   `[dT, old_max]`; the lower child is `[old_min, dT]`.
 //! - **HANG-51.** `ResolveOverlappingProtoEdges` does not advance its index after it
 //!   replaces an overlapping proto edge group, and a replacement can form a new group
 //!   at the same index forever (`Solids/extrusion_old.smb`, rounded solid outset 2.5:
@@ -909,10 +907,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// edge definition splits there, so a split never leaves a proto edge without
     /// definitions.
     ///
-    /// With `Kernel::fixes.proto_edge_split_upper_keeps_the_old_max` the upper child keeps
-    /// this edge's old interval maximum (`[dt, old_max]`); without it (default, pinned
-    /// C++) the upper child is `[dt, dt]`, because upstream reads this edge's maximum
-    /// after clamping it to `dt` (WR-101). The lower child is `[old_min, dt]` either way.
+    /// The upper child keeps this edge's old interval maximum (`[dt, old_max]`) and the
+    /// lower child is `[old_min, dt]` (WR-101; upstream's upper child is `[dt, dt]`,
+    /// because it reads this edge's maximum after clamping it to `dt`).
     ///
     /// # Errors
     ///
@@ -945,15 +942,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             }
         };
 
-        // set Split child ProtoEdge intervals (the upper one is set from this
-        // edge's interval after it was changed, as upstream; the upper child gets [dT, dT]
-        // without the opt-in, plan/upstream-issues/WR-101)
+        // set Split child ProtoEdge intervals
         let mut lower = self
             .proto_edge(pe)
             .ok_or(dangling("proto edge is deleted"))?
             .xsect_interval();
-        // WR-101: upstream reads this maximum after clamping it, giving the upper child
-        // `[dT, dT]`; the opt-in keeps the old maximum (`[dT, old_max]`).
+        // WR-101: the upper child keeps the old maximum (`[dT, old_max]`); upstream reads
+        // this maximum after clamping it, giving the upper child `[dT, dT]`.
         let old_max = lower.max();
         ignore_soft(passed_on(
             lower.set_min_max(lower.min(), dt),
@@ -966,13 +961,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             .proto_edge(new_pe)
             .ok_or(dangling("proto edge is deleted"))?
             .xsect_interval();
-        let upper_max = if k.fixes.proto_edge_split_upper_keeps_the_old_max {
-            old_max
-        } else {
-            lower.max()
-        };
         ignore_soft(passed_on(
-            upper.set_min_max(dt, upper_max),
+            upper.set_min_max(dt, old_max),
             k.fixes.ssi_proto_topology_statuses_pass_on,
         )?)?;
         self.proto_edge_mut(new_pe)

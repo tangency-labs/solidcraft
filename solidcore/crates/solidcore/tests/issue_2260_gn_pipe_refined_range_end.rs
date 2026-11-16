@@ -95,7 +95,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "point_class_gap_3d_propagates_no_drop_error",
     "point_solve_keeps_triangle_guess",
     "proto_edge_splits_at_captured_vertices",
-    "proto_edge_split_upper_keeps_the_old_max",
     "proto_vertex_miss_is_false",
     "revolution_round_offset_collapses",
     "revolve_analytic_profile_faces",
@@ -110,10 +109,7 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "surface_continuity_checks_last_v_knot",
     "surface_parallel_to_vector_checks",
     "sweep_statuses_pass_on",
-    "transform_model_size_from_body_box",
-    "transform_scales_each_tolerance",
     "uv_trim_corner_end_points_only",
-    "validation_does_not_make_uv_trims",
 ];
 
 /// The volume 729f893 gives the rounded body at accuracy 1e-7.
