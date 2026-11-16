@@ -240,18 +240,27 @@ impl<H: PluginHost> clock::Host for State<H> {
 impl<H: PluginHost> files::Host for State<H> {
     fn read_file(&mut self, grant: String, path: String) -> std::result::Result<Vec<u8>, PluginError> {
         self.file_path(&grant, &path, false)?;
-        let read = (|| -> std::io::Result<Vec<u8>> {
+        // `None`: the path is allowed and nothing is there (and no write of this call is staged for it).
+        let read = (|| -> std::io::Result<Option<Vec<u8>>> {
             let folder = self.folders.get(&grant).ok_or_else(|| std::io::Error::other("grant disappeared"))?;
             let staged = self.staged.get(&(grant.clone(), Path::new(&path).components().collect()));
-            let file = folder.dir.open(staged.map(|pending| pending.temporary.as_path()).unwrap_or(Path::new(&path)))?;
+            let file = match folder.dir.open(staged.map(|pending| pending.temporary.as_path()).unwrap_or(Path::new(&path))) {
+                Err(error) if staged.is_none() && error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                opened => opened?,
+            };
             if !file.metadata()?.is_file() {
                 return Err(std::io::Error::other("only regular files are supported"));
             }
             let mut bytes = Vec::new();
             file.take(MAX_JSON_BYTES as u64 + 1).read_to_end(&mut bytes)?;
-            Ok(bytes)
+            Ok(Some(bytes))
         })();
         let bytes = read.map_err(|e| self.fail(HostError::PermissionDenied { permission: format!("files.read:{grant}: {e}") }))?;
+        // A file that is not there yet is an answer, not a failed run (#17899): the entry gets the
+        // error and goes on, so a plugin can make its own file on its first run.
+        let Some(bytes) = bytes else {
+            return Err(wit_error(HostError::InvalidInput { field: "path".into(), reason: "no such file".into() }));
+        };
         if bytes.len() > MAX_JSON_BYTES {
             return Err(self.fail(limit("file read size")));
         }

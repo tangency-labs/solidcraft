@@ -20,7 +20,7 @@
 //! are returned instead (`SER`). The path's unused normal is not computed.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
-use crate::curve::curve::p3::compute_crvs_normal;
+use crate::curve::curve::p3::{compute_crvs_normal, compute_crvs_normal_written};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignore_status, ignored, passed_on, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -357,10 +357,12 @@ pub fn prepare_curve_sweep(
     let mut orientation = None;
     if options.orient_profile_perpendicular_to_path {
         let as_curves: Vec<_> = profiles.iter().cloned().map(Curve::from).collect();
-        let mut normal = match compute_crvs_normal(k, &as_curves) {
-            Ok(normal) => normal,
-            Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(e) if e.upstream_status() == Some(1001) => {
+        // Only `SM_ERR` takes the fallback; any other status keeps the normal
+        // `ComputeCrvsNormal` wrote ((0, 0, 1) for a zero normal), as upstream and the
+        // fork test `== SM_ERR` here
+        let (written, status) = compute_crvs_normal_written(k, &as_curves)?;
+        let mut normal = match status {
+            Some(e) if e.upstream_status() == Some(1001) => {
                 let first = profiles
                     .first()
                     .ok_or_else(|| SolidError::primitive_failed(OP, "no profiles to sweep"))?;
@@ -376,7 +378,7 @@ pub fn prepare_curve_sweep(
                         .unwrap_or(Vec3::UNDEF),
                 )
             }
-            Err(error) => return Err(error),
+            _ => written,
         };
         // The fork no longer computes the path's normal (unused, and a straight path has
         // none; c8f6a31).

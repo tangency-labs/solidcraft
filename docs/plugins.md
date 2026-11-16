@@ -104,8 +104,8 @@ Direct requests use a worker to keep the window responsive.
 
 ## Menu and ribbon entries
 
-The **Plugins** menu in the app bar lists every installed plugin entry, including entries without
-slots. Disabled entries remain listed but cannot be selected. Discovery examines at most 1,024
+The **Plugins** group on the Model tab lists every installed plugin entry, including entries without
+slots; its label opens the **Plugins** menu. Manage plugins in **Preferences › Plugins** (File › Plugins… opens it): install, turn on or off, and remove. Disabled entries remain listed but cannot be selected. Discovery examines at most 1,024
 package folders and 8,192 host slot items. Only enabled plugins contribute host menu and ribbon
 items. The host draws each slot item with the plugin's name,
 a plugin badge and the entry name. Plugins declare placement in their manifests and supply no

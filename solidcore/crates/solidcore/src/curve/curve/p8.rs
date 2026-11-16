@@ -56,19 +56,19 @@
 //!   solution combination evaluates the other curve inside its trimmed interval
 //!   (`sIvl2.Evaluate(0.38)`), as upstream. `bIsDegenerate` keeps its value from one
 //!   range solution to the next when the classification is skipped.
-//! - **Statuses passed on (WR-663).** With the opt-in
-//!   `Kernel::fixes.query_statuses_pass_on` the statuses SMLib drops are passed on, as the
-//!   fork (tangency-labs/smlib 8311f8e): `GlobalCurveIntersect`'s refinement, interval
+//! - **Statuses passed on (WR-663).** The statuses SMLib drops are passed on, as the
+//!   fork (tangency-labs/smlib 8311f8e):`GlobalCurveIntersect`'s refinement, interval
 //!   trims, combine and cull evaluations and range classification, and the evaluations of
 //!   its consistency check (which the port otherwise leaves out: it only warns).
 
 use crate::curve::curve::p1::refine_cc_solutions;
 use crate::curve::curve::p2::{at, CciGlobalSolver, Curve};
-use crate::curve::curve::p4::{analytic_curve_intersect, point_or_pass_on, AnalyticOperand};
-use crate::curve::curve::p5::make_curve_cache_with_zone_tol;
+use crate::curve::curve::p4::{analytic_curve_intersect, AnalyticOperand};
+use crate::curve::curve::p5::{make_curve_cache_with_zone_tol, memoized_cache_top_box};
 use crate::curve::curve_cache::CurveCache;
-use crate::error::{ignore_or_pass_on, ignored_or_pass_on, Result, SolidError};
+use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{
     Branch, GlobalSolve, SolutionRequested, SolveRequest, SolverOperation, MAX_SOLVER_TREES,
 };
@@ -270,18 +270,14 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
     Ok(())
 }
 
-/// Runs `sm_RefineCCSolutions` on `sols` (status ignored; passed on with the opt-in
-/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`], as the fork,
-/// tangency-labs/smlib 8311f8e).
+/// Runs `sm_RefineCCSolutions` on `sols` (status ignored upstream; passed on as the
+/// fork, tangency-labs/smlib 8311f8e).
 fn refine<O: SolutionObject>(
     k: &Kernel,
     sols: &mut SolutionArray<O>,
     named: &Named<'_, O>,
 ) -> Result<()> {
-    ignore_or_pass_on(
-        refine_cc_solutions(k, sols, |o| named.curve_of(o)),
-        k.fixes.query_statuses_pass_on,
-    )
+    refine_cc_solutions(k, sols, |o| named.curve_of(o))
 }
 
 /// The analytic curve of a cache (`GetAnalyticCurve`), copied out of the cache.
@@ -290,6 +286,15 @@ fn cache_analytic<O: SolutionObject>(
     cache: &mut CurveCache<O>,
 ) -> Result<Option<Curve>> {
     Ok(cache.analytic_curve(k)?.cloned())
+}
+
+/// The top box of the tree of the cache [`build_cache`] would return for `curve` at
+/// `zone_tol_3d`, read from the curve's memo when it holds that build (not upstream,
+/// #14453); `None` when it does not, or the tree has no top node. A memo hit copies the
+/// tree with every box as it is ([`crate::geom::tree::Tree::retag_curve_tree`]), so this
+/// is the box the tree of that cache has.
+fn memoized_top_box(k: &Kernel, curve: &Curve, zone_tol_3d: Option<f64>) -> Option<Extent3d> {
+    memoized_cache_top_box(k, curve, zone_tol_3d.or_else(|| curve.owner_zone_tol_3d()))
 }
 
 /// The cache tree (`GetTree`, `NER`).
@@ -402,6 +407,7 @@ impl Curve {
             &mut None,
             [None, None],
             0.0,
+            true,
         )
     }
 
@@ -507,6 +513,7 @@ impl Curve {
             cache2,
             zone_tols,
             contact_tol,
+            false,
         )
     }
 
@@ -550,6 +557,7 @@ impl Curve {
                 cache2,
                 [None, None],
                 0.0,
+                false,
             )?
             .without_objects())
     }
@@ -558,7 +566,10 @@ impl Curve {
     /// the cache slots of [`Curve::global_curve_intersect_cached`]. `zone_tols` are the
     /// zone tolerances the caller resolved for the curves' owners, used only where a
     /// slot's cache is built ([`build_cache`]); `None` preserves the corresponding
-    /// curve's recorded owner tolerance.
+    /// curve's recorded owner tolerance. `own_slots`: true only when the slots are the
+    /// callee's locals, dropped on return; the top-box return (#14453) skips filling
+    /// them. A caller's kept slots (`false`) are filled as before, wherever the
+    /// intersection needs the caches.
     fn global_curve_intersect_body<O: SolutionObject>(
         &self,
         k: &Kernel,
@@ -571,6 +582,7 @@ impl Curve {
         cache2_slot: &mut Option<CurveCache<O>>,
         zone_tols: [Option<f64>; 2],
         contact_tol: f64,
+        own_slots: bool,
     ) -> Result<SolutionArray<O>> {
         let [h_this, h_other] = opts.handles;
         let same_curve = core::ptr::eq(self, other);
@@ -614,6 +626,24 @@ impl Curve {
             // exit when Line/Line solutions are complete
             if !needs_more_intersections {
                 return Ok(sols);
+            }
+        }
+
+        // Not upstream (#14453): two curves whose memoised caches' top boxes are apart
+        // have no intersection, the same test as below on the same boxes, read from the
+        // memo without copying the caches into this call's own slots (a boolean asks
+        // this for every pair of proto edges, nearly all apart); a caller's kept slots
+        // are filled as before
+        if own_slots && !same_curve && cache1_slot.is_none() && cache2_slot.is_none() {
+            if let (Some(root1), Some(root2)) = (
+                memoized_top_box(k, self, zone_tols[0]),
+                memoized_top_box(k, other, zone_tols[1]),
+            ) {
+                let mut bbox = root1;
+                bbox.expand_absolute(dist_tol);
+                if bbox.are_disjoint(&root2, 0.0) {
+                    return Ok(sols);
+                }
             }
         }
 
@@ -890,11 +920,8 @@ impl Curve {
 
             // when solution starts at ivl1.min and stops short of ivl1.max
             if are_same(ivl1.min(), s0) && e0 < ivl1.max() {
-                // trim ivl1 to remove solution range (status ignored)
-                ignore_or_pass_on(
-                    ivl1.set_min_max(e0, ivl1.max()),
-                    k.fixes.query_statuses_pass_on,
-                )?;
+                // trim ivl1 to remove solution range (status ignored upstream)
+                ivl1.set_min_max(e0, ivl1.max())?;
 
                 // for zero length regions - curve is entirely coincident - no more work
                 if ivl1.length().abs() < EFF_ZERO {
@@ -905,11 +932,8 @@ impl Curve {
 
             // when solution ends at ivl1.max and starts after ivl1.min
             if are_same(ivl1.max(), e0) && ivl1.min() < s0 {
-                // trim ivl1 to remove solution range (status ignored)
-                ignore_or_pass_on(
-                    ivl1.set_min_max(ivl1.min(), s0),
-                    k.fixes.query_statuses_pass_on,
-                )?;
+                // trim ivl1 to remove solution range (status ignored upstream)
+                ivl1.set_min_max(ivl1.min(), s0)?;
 
                 // for zero length regions - curve is entirely coincident - no more work
                 if ivl1.length().abs() < EFF_ZERO {
@@ -924,11 +948,8 @@ impl Curve {
 
             // when solution starts at ivl2.min and stops short of ivl2.max
             if are_same(ivl2.min(), ivl_tmp.min()) && ivl_tmp.max() < ivl2.max() {
-                // trim ivl2 to remove solution range (status ignored)
-                ignore_or_pass_on(
-                    ivl2.set_min_max(ivl_tmp.max(), ivl2.max()),
-                    k.fixes.query_statuses_pass_on,
-                )?;
+                // trim ivl2 to remove solution range (status ignored upstream)
+                ivl2.set_min_max(ivl_tmp.max(), ivl2.max())?;
 
                 // for zero length regions - curve is entirely coincident - no more work
                 if ivl2.length().abs() < EFF_ZERO {
@@ -939,11 +960,9 @@ impl Curve {
 
             // when solution ends at ivl2.max and starts after ivl2.min
             if are_same(ivl2.max(), ivl_tmp.max()) && ivl2.min() < ivl_tmp.min() {
-                // trim (upstream: sIvl1) to remove solution range (status ignored)
-                ignore_or_pass_on(
-                    ivl1.set_min_max(ivl2.min(), ivl_tmp.min()),
-                    k.fixes.query_statuses_pass_on,
-                )?;
+                // trim (upstream: sIvl1) to remove solution range (status ignored
+                // upstream)
+                ivl1.set_min_max(ivl2.min(), ivl_tmp.min())?;
 
                 // for zero length regions - curve is entirely coincident - no more work
                 if ivl2.length().abs() < EFF_ZERO {
@@ -1147,11 +1166,9 @@ impl Curve {
         // For SMLib intersection consistency upstream evaluates each pair of
         // consecutive point solutions (not across a seam) and only warns when they lie
         // within tolerance; the port leaves that out. The fork passes on the statuses
-        // of those evaluations (tangency-labs/smlib 8311f8e), so with the opt-in fix
-        // they are made and a failure is returned.
-        if k.fixes.query_statuses_pass_on {
-            self.consistency_evaluations(k, &sols, other)?;
-        }
+        // of those evaluations (tangency-labs/smlib 8311f8e), so they are made and a
+        // failure is returned.
+        self.consistency_evaluations(k, &sols, other)?;
 
         // Check adjacent point solutions: a 'precise' solution with a not-so-good
         // solution very close may be an artifact of the local intersector; when the
@@ -1256,11 +1273,10 @@ impl Curve {
 
         // for point solutions only
         if curr.solution_type == SolutionType::SingleValue {
-            // evaluate solution points (statuses ignored)
-            // (statuses ignored; passed on with the opt-in fix, tangency-labs/smlib
-            // 8311f8e)
-            let pt1 = point_or_pass_on(k, self, cs0)?;
-            let pt2 = point_or_pass_on(k, self, le0)?;
+            // evaluate solution points (statuses ignored upstream; passed on as the
+            // fork, tangency-labs/smlib 8311f8e)
+            let pt1 = self.evaluate_point(k, cs0)?;
+            let pt2 = self.evaluate_point(k, le0)?;
             let dist2 = pt1.distance_squared(pt2);
 
             // combine solutions when points are close enough together
@@ -1685,18 +1701,20 @@ impl Curve {
                 let curve_b = named.curve_of(sol_a.objects[1]).ok_or_else(|| {
                     SolidError::curve_missing(OP_GCI, "a solution's second curve")
                 })?;
-                let pt_a = point_or_pass_on(k, curve_a, param_a1)?;
-                let pt_b = point_or_pass_on(k, curve_b, param_b1)?;
+                // (statuses ignored upstream; passed on as the fork, tangency-labs/smlib
+                // 8311f8e)
+                let pt_a = curve_a.evaluate_point(k, param_a1)?;
+                let pt_b = curve_b.evaluate_point(k, param_b1)?;
                 let dist1 = pt_a.distance(pt_b);
 
-                let pt_a = point_or_pass_on(k, curve_a, param_a2)?;
-                let pt_b = point_or_pass_on(k, curve_b, param_b2)?;
+                let pt_a = curve_a.evaluate_point(k, param_a2)?;
+                let pt_b = curve_b.evaluate_point(k, param_b2)?;
                 let dist2 = pt_a.distance(pt_b);
 
                 let t = (param_a1 + param_a2) / 2.0;
-                let pt_a = point_or_pass_on(k, curve_a, t)?;
+                let pt_a = curve_a.evaluate_point(k, t)?;
                 let t = (param_b1 + param_b2) / 2.0;
-                let pt_b = point_or_pass_on(k, curve_b, t)?;
+                let pt_b = curve_b.evaluate_point(k, t)?;
                 let dist_mid = pt_a.distance(pt_b);
 
                 if dist1 < dist2 && dist_mid < dist2 {
@@ -1800,13 +1818,9 @@ impl Curve {
             // for nonDegenerate intervals
             if !small_interval {
                 // if GapVector is diverging over length of solution range change
-                // solution to a tangent point intersection (status ignored)
-                // (passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
-                let (deg, point) = ignored_or_pass_on(
-                    self.classify_intersecting_range_solution(k, other, &curr),
-                    k.fixes.query_statuses_pass_on,
-                )?
-                .unwrap_or((false, None));
+                // solution to a tangent point intersection (status ignored upstream;
+                // passed on as the fork, tangency-labs/smlib 8311f8e)
+                let (deg, point) = self.classify_intersecting_range_solution(k, other, &curr)?;
                 is_degenerate = deg;
                 if let Some(p) = point {
                     curr.start.solution_value = p.solution_value;
@@ -1932,6 +1946,82 @@ mod tests {
             Ok(s) => assert!(s.is_empty()),
             Err(e) => assert!(e.is_unported()),
         }
+    }
+
+    /// With the memo on, a pair whose caches the memo holds is answered from their trees'
+    /// top boxes (#14453), and those are the boxes of fresh builds' trees, bit for bit: a
+    /// pair apart gives no solutions, and a crossing pair the solutions of the memo off,
+    /// call after call.
+    #[test]
+    fn memoised_top_boxes_answer_as_fresh_caches() {
+        let on = Kernel {
+            memoize_curve_caches: true,
+            ..Kernel::default()
+        };
+        let off = Kernel {
+            memoize_curve_caches: false,
+            ..Kernel::default()
+        };
+        let a = polyline(&[[0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [2.0, 0.0, 0.0]]);
+        let far = polyline(&[[0.0, 50.0, 0.0], [1.0, 51.0, 0.0], [2.0, 50.0, 0.0]]);
+        let across = polyline(&[[0.0, 0.2, 0.0], [1.0, 0.1, 0.0], [2.0, 0.3, 0.0]]);
+        assert!(
+            memoized_top_box(&on, &a, None).is_none(),
+            "nothing memoised yet"
+        );
+        for b in [&far, &across] {
+            let fresh = a.global_curve_intersect(&off, &unit(), b, &unit(), 1e-6, &opts());
+            for _ in 0..3 {
+                let memo = a.global_curve_intersect(&on, &unit(), b, &unit(), 1e-6, &opts());
+                assert_eq!(format!("{memo:?}"), format!("{fresh:?}"));
+            }
+            for c in [&a, b] {
+                let built = build_cache::<H>(&off, c, Some(H(0)), None).unwrap();
+                let tree = built.tree().unwrap();
+                let top = tree.node(tree.top_node().unwrap()).unwrap().bbox;
+                assert_eq!(memoized_top_box(&on, c, None), Some(top));
+            }
+        }
+        let apart = a.global_curve_intersect(&on, &unit(), &far, &unit(), 1e-6, &opts());
+        assert!(apart.unwrap().is_empty());
+        assert!(
+            memoized_top_box(&off, &a, None).is_none(),
+            "the memo off reads nothing"
+        );
+    }
+
+    /// The cached forms fill a kept slot when the curves' memoised top boxes are apart (the
+    /// top-box return is only for the uncached form, whose slots are its own), and give the
+    /// uncached solutions.
+    #[test]
+    fn kept_slots_are_filled_when_the_top_boxes_are_apart() {
+        let k = Kernel {
+            memoize_curve_caches: true,
+            ..Kernel::default()
+        };
+        let a = polyline(&[[0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [2.0, 0.0, 0.0]]);
+        let far = polyline(&[[0.0, 50.0, 0.0], [1.0, 51.0, 0.0], [2.0, 50.0, 0.0]]);
+        // the uncached form builds and memoises both curves' caches
+        let fresh = a.global_curve_intersect(&k, &unit(), &far, &unit(), 1e-6, &opts());
+        assert!(memoized_top_box(&k, &a, None).is_some());
+        assert!(memoized_top_box(&k, &far, None).is_some());
+        let (mut slot_a, mut slot_b) = (None, None);
+        let kept = a.global_curve_intersect_cached(
+            &k,
+            &unit(),
+            &far,
+            &unit(),
+            1e-6,
+            &opts(),
+            &mut slot_a,
+            &mut slot_b,
+        );
+        assert_eq!(format!("{kept:?}"), format!("{fresh:?}"));
+        assert!(kept.unwrap().is_empty());
+        assert!(
+            slot_a.is_some() && slot_b.is_some(),
+            "the kept slots are filled"
+        );
     }
 
     #[test]

@@ -424,6 +424,7 @@ fn edge_on_face_saved_as_a_line_pair_keeps_the_line_an_offset_follows() {
         sk.points[point].link = Some(link.clone());
     }
     sk.links.push(Link {
+        sketch_placements: Vec::new(),
         id: link.clone(),
         kind: LinkKind::Project,
         source: face(),
@@ -583,6 +584,73 @@ fn leaving_directions_match_one_to_one() {
     assert!(!super::loops::same_leaving(&[right, near_right], &[right, left]), "one line turned round");
     assert!(!super::loops::same_leaving(&[right, up], &[right, up, left]));
     assert!(super::loops::same_leaving(&[], &[]));
+}
+
+/// #17732: a projected outline set to construction stays construction when the link is rebuilt
+/// because its hole rim, saved as two halves, is one circle now. Were it to turn into profile
+/// geometry, a circle drawn around the plate would extrude the disc minus the plate.
+#[test]
+fn a_rebuilt_link_keeps_its_curves_set_to_construction() {
+    let mut sk = Sketch::new();
+    let (east, west) = (Vec2::new(5.0, 0.0), Vec2::new(-5.0, 0.0));
+    let corners = [Vec2::new(-20.0, -10.0), Vec2::new(20.0, -10.0), Vec2::new(20.0, 10.0), Vec2::new(-20.0, 10.0)];
+    let mut saved: Vec<LinkGeom> = (0..4).map(|k| LinkGeom::Line(corners[k], corners[(k + 1) % 4])).collect();
+    saved.push(LinkGeom::Arc { c: Vec2::ZERO, a: east, b: west });
+    saved.push(LinkGeom::Arc { c: Vec2::ZERO, a: west, b: east });
+    let face = LinkSource::Edge { body: "Body1".into(), at: Vec3::new(5.0, 0.0, 0.0) };
+    let link = sk.add_link(LinkKind::Project, face, &saved).unwrap();
+    let outline: Vec<String> =
+        sk.link_curves(&link).iter().filter(|c| matches!(sk.curves[**c].kind, CurveKind::Line { .. })).map(|c| sk.curves[*c].id.clone()).collect();
+    assert_eq!(outline.len(), 4);
+    for c in sk.link_curves(&link) {
+        if matches!(sk.curves[c].kind, CurveKind::Line { .. }) {
+            sk.curves[c].construction = true;
+        }
+    }
+    let mut now: Vec<LinkGeom> = (0..4).map(|k| LinkGeom::Line(corners[k], corners[(k + 1) % 4])).collect();
+    now.push(LinkGeom::Circle(Vec2::ZERO, 5.0));
+    assert!(sk.update_link(&link, &now).unwrap());
+    for id in &outline {
+        let c = sk.curves.iter().find(|c| &c.id == id).unwrap_or_else(|| panic!("{id} is still in the sketch"));
+        assert!(c.construction, "{id} is still construction after the rebuild");
+    }
+    let [circle] = sk.link_curves(&link).iter().copied().filter(|c| matches!(sk.curves[*c].kind, CurveKind::Circle { .. })).collect::<Vec<_>>()[..]
+    else {
+        panic!("one circle")
+    };
+    assert!(!sk.curves[circle].construction);
+}
+
+/// #17172: a closed circular edge was once projected as its two halves, and is one circle now.
+/// A saved sketch's projection of it becomes that circle: the first half's id names it, a
+/// dimension on the second half moves to it, and a line drawn to a point where the halves met
+/// keeps its end there, held on the circle.
+#[test]
+fn a_circle_saved_as_two_halves_comes_back_as_one_circle_keeping_what_was_on_it() {
+    let mut sk = Sketch::new();
+    let (east, west) = (Vec2::new(5.0, 0.0), Vec2::new(-5.0, 0.0));
+    let halves = [LinkGeom::Arc { c: Vec2::ZERO, a: east, b: west }, LinkGeom::Arc { c: Vec2::ZERO, a: west, b: east }];
+    let rim = LinkSource::Edge { body: "Body1".into(), at: Vec3::new(5.0, 0.0, 0.0) };
+    let link = sk.add_link(LinkKind::Project, rim, &halves).unwrap();
+    let [first, second] = sk.link_curves(&link)[..] else { panic!("two halves") };
+    let first_id = sk.curves[first].id.clone();
+    let CurveKind::Arc { b: split, .. } = sk.curves[first].kind else { panic!("an arc") };
+    sk.add_constraint(ConstraintKind::Diameter { c: second, value: 10.0 }, None).unwrap();
+    let start = sk.add_point(Vec2::new(-20.0, 0.0), None).unwrap();
+    let line = sk.add_line_pts(start, split, None).unwrap();
+    let line = sk.curves[line].id.clone();
+    assert!(sk.update_link(&link, &[LinkGeom::Circle(Vec2::ZERO, 5.0)]).unwrap());
+    let [circle] = sk.link_curves(&link)[..] else { panic!("one circle") };
+    assert!(matches!(sk.curves[circle].kind, CurveKind::Circle { r, .. } if (r - 5.0).abs() < 1e-12));
+    assert_eq!(sk.curves[circle].id, first_id);
+    assert!(sk.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::Diameter { c, .. } if c == circle)), "{:?}", sk.constraints);
+    let line = sk.curves.iter().position(|c| c.id == line).unwrap();
+    let CurveKind::Line { b: end, .. } = sk.curves[line].kind else { panic!("a line") };
+    assert_eq!(sk.points[end].pos, west);
+    let held = sk.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::PointOnCurve { p, c } if p == end && c == circle));
+    assert!(held, "{:?}", sk.constraints);
+    assert!(solve(&mut sk).ok());
+    assert!(sk.points[end].pos.dist(west) < 1e-9);
 }
 
 #[test]

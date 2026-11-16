@@ -42,7 +42,7 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
         // as the viewport draws it. The cut and the reply are in the world.
         Some(v @ (Value::String(_) | Value::Number(_))) => {
             let r = super::features::plane_param(s, Some(v), cmd)?;
-            let solidcraft_doc::PlaneRef::Construction { feature } = &r else { return Err(bad(cmd, "`plane` must be a plane")) };
+            let solidcraft_doc::PlaneRef::Construction { feature, .. } = &r else { return Err(bad(cmd, "`plane` must be a plane")) };
             let st = s.world_state()?;
             let c = st
                 .construct
