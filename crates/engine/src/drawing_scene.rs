@@ -157,6 +157,23 @@ pub struct ViewState {
     pub why: Option<String>,
     /// Its label, when it draws one ([`Drawing::label_text`]).
     pub label: Option<LabelState>,
+    /// A section view's hatching, per body it hatches ([`crate::drawing_view::hatches`]).
+    pub hatches: Vec<HatchState>,
+}
+
+/// One body's hatching in a section view (#13046).
+#[derive(Clone, Debug, PartialEq)]
+pub struct HatchState {
+    /// The body's name.
+    pub body: String,
+    /// Its lines' angle on paper, in radians.
+    pub angle: f64,
+    /// Its lines' spacing on paper, in millimetres.
+    pub spacing_mm: f64,
+    /// Painted solid: too thin to hatch.
+    pub filled: bool,
+    /// How many hatch lines it drew.
+    pub strokes: usize,
 }
 
 /// A view's label in a sheet scene (#13044).
@@ -681,6 +698,8 @@ struct Drawn {
     owners: Option<Arc<Owners>>,
     /// What it says beside its lines ([`ViewState::why`]).
     why: Option<String>,
+    /// A section view's hatching ([`ViewState::hatches`]).
+    hatches: Vec<HatchState>,
 }
 
 /// What drew each item of a view's group: for a stroke, the body (its index among `bodies`) and what
@@ -812,7 +831,7 @@ fn draw(
         (Some(state), Some(uncut)) => Some(format!("{state}; {uncut}")),
         (state, uncut) => state.or(uncut),
     };
-    let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: why.clone() };
+    let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: why.clone(), hatches: Vec::new() };
     let styles = Styles::from(view);
     let not_drawable = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value);
     let not_drawable = not_drawable.or_else(|| crate::drawing_view::not_cut_yet(view));
@@ -840,24 +859,65 @@ fn draw(
     let lines = frame.boundary(&around).map_err(|e| bad(CMD, e.to_string())).and_then(|rect| {
         let mut lines = crate::drawing_view::lines(s, &set, &frame, &request, prepared, CMD)?;
         styles.leave_shaded_to_pictures(&mut lines);
-        Ok((lines, rect))
+        let hatched = match &view.cut {
+            Some(cut) => crate::drawing_view::hatches(&set, cut, &frame, view.line_group.value),
+            None => crate::drawing_view::Hatching::default(),
+        };
+        Ok((lines, rect, hatched))
     });
     match lines {
-        Ok((lines, rect)) => {
+        Ok((lines, rect, hatched)) => {
             let (mut group, drew) = paper_lines(&lines, id, view.line_group.value);
-            let pictures = picture_items(id, &view_parts(&set, styles), rect);
-            // The pictures go under the strokes, so the owners start with one empty entry for each.
+            // The pictures, then the hatching, go under the strokes, so the owners start with one empty
+            // entry for each.
+            let mut under = picture_items(id, &view_parts(&set, styles), rect);
+            under.extend(hatch_items(&hatched.bodies, view.line_group.value));
             let owner = |at: usize| lines.lines.get(at).map(|line| (line.shown, line.source));
-            let items = std::iter::repeat_n(None, pictures.len()).chain(drew.into_iter().map(|at| at.and_then(owner))).collect();
-            group.items.splice(0..0, pictures);
+            let items = std::iter::repeat_n(None, under.len()).chain(drew.into_iter().map(|at| at.and_then(owner))).collect();
+            group.items.splice(0..0, under);
+            // A body the hatcher refused is drawn unhatched, and the view says so.
+            let refused = hatched.refused.iter().map(|(at, why)| {
+                let name = set.bodies.get(*at).map_or("a body", |b| b.body.as_str());
+                format!("{name} isn't hatched: {why}")
+            });
+            let says = why.clone().into_iter().chain(refused).reduce(|a, b| format!("{a}; {b}"));
+            let hatches = hatched
+                .bodies
+                .iter()
+                .map(|h| HatchState {
+                    body: set.bodies.get(h.shown).map(|b| b.body.clone()).unwrap_or_default(),
+                    angle: h.angle,
+                    spacing_mm: h.spacing_mm,
+                    filled: h.filled,
+                    strokes: h.strokes.len(),
+                })
+                .collect();
             if group.records() > MAX_RECORDS {
                 return none(Status::Failed(format!("its lines are more than a paper scene's {MAX_RECORDS} records: choose a smaller scale")));
             }
             let owners = Some(Arc::new(Owners { bodies: set.into_owned().bodies, items }));
-            Drawn { group: Some(Arc::new(group)), status: Status::Drawn, stats: Some(lines.stats), boundary, frame: Some(frame), owners, why }
+            Drawn {
+                group: Some(Arc::new(group)),
+                status: Status::Drawn,
+                stats: Some(lines.stats),
+                boundary,
+                frame: Some(frame),
+                owners,
+                why: says,
+                hatches,
+            }
         }
         Err(e) => none(Status::Failed(reason(e))),
     }
+}
+
+/// A section view's hatching as paper items: each filled body's cut faces painted solid, then each
+/// other body's hatch lines, thin, each its own stroke.
+fn hatch_items(hatched: &[crate::drawing_view::BodyHatch], group: LineGroup) -> Vec<Item> {
+    let width_mm = LineKind::Thin.width_mm(group);
+    let fills = hatched.iter().filter(|h| h.filled).flat_map(|h| h.regions.iter().cloned().map(|region| Item::Fill { region }));
+    let strokes = hatched.iter().flat_map(|h| &h.strokes).map(|seg| Item::Stroke { path: vec![*seg], closed: false, width_mm, pattern: None });
+    fills.chain(strokes).collect()
 }
 
 /// Flat pattern view `id`, drawing as `view` does, of its body's flat `of` ([`crate::drawing_view::flat`]):
@@ -866,7 +926,7 @@ fn draw_flat(s: &Session, id: u64, view: &ResolvedView, of: &FlatOf) -> Drawn {
     let flat = crate::drawing_view::flat(s, of, CMD);
     let placing = crate::drawing_view::flat_measured(&flat);
     let boundary = crate::drawing_view::placed(view, placing, Vec2::ZERO, CMD).ok().map(|placed| placed.boundary);
-    let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: None };
+    let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: None, hatches: Vec::new() };
     if let Some(why) = crate::drawing_view::not_drawable_flat(view) {
         return none(Status::Failed(why.into()));
     }
@@ -882,7 +942,16 @@ fn draw_flat(s: &Session, id: u64, view: &ResolvedView, of: &FlatOf) -> Drawn {
     if group.records() > MAX_RECORDS {
         return none(Status::Failed(format!("its lines are more than a paper scene's {MAX_RECORDS} records: choose a smaller scale")));
     }
-    Drawn { group: Some(Arc::new(group)), status: Status::Drawn, stats: None, boundary, frame: Some(frame), owners: None, why: None }
+    Drawn {
+        group: Some(Arc::new(group)),
+        status: Status::Drawn,
+        stats: None,
+        boundary,
+        frame: Some(frame),
+        owners: None,
+        why: None,
+        hatches: Vec::new(),
+    }
 }
 
 /// Why a sheet leaves out a dimension or a note whose view it doesn't draw.
@@ -1486,7 +1555,7 @@ fn assemble<D: Borrow<Drawn>>(
             .objects
             .extend(SheetObject::on_paper(view, ObjectKind::View, lines.unwrap_or(Aabb2::EMPTY), boundary_mm).map(banded(DrawnFor::View)));
         let label = labels.iter().find(|label| label.view == view).map(|label| assembly.add_label(label, centre, drawn.boundary));
-        assembly.states.push(ViewState { view, status, stats: drawn.stats, why: drawn.why.clone(), label });
+        assembly.states.push(ViewState { view, status, stats: drawn.stats, why: drawn.why.clone(), label, hatches: drawn.hatches.clone() });
     }
     Ok(assembly)
 }

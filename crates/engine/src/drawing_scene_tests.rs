@@ -1923,6 +1923,7 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
         let path = (0..n).map(|i| Seg2::Line { a: Vec2::new(i as f64 * 1e-3, 0.0), b: Vec2::new((i + 1) as f64 * 1e-3, 0.0) }).collect();
         let items = vec![Item::Stroke { path, closed: false, width_mm: 0.5, pattern: None }];
         Drawn {
+            hatches: Vec::new(),
             group: Some(Arc::new(Group { object: n as u64, kind: ObjectKind::View, items })),
             status: Status::Drawn,
             stats: None,
@@ -2308,6 +2309,7 @@ fn a_views_box_is_what_it_draws() {
     let moved_to = [105.0, 107.0];
     for (items, min, max) in [(vec![], [70.0, 80.0], [130.0, 120.0]), (vec![fill], moved, moved_to), (vec![picture], moved, moved_to)] {
         let drawn = Drawn {
+            hatches: Vec::new(),
             group: Some(Arc::new(Group { object: 7, kind: ObjectKind::View, items })),
             status: Status::Drawn,
             stats: None,
@@ -2505,7 +2507,16 @@ fn overfill(s: &mut Session, view: u64) -> Drawn {
     entry.serial = serial;
     std::mem::replace(
         &mut entry.drawn,
-        Drawn { group: Some(Arc::new(group)), status: Status::Drawn, stats: None, boundary: None, frame: None, owners: None, why: None },
+        Drawn {
+            group: Some(Arc::new(group)),
+            status: Status::Drawn,
+            stats: None,
+            boundary: None,
+            frame: None,
+            owners: None,
+            why: None,
+            hatches: Vec::new(),
+        },
     )
 }
 
@@ -2839,6 +2850,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
     let record = sheet_of(&d, sheet).unwrap();
     let group = |items| Group { object: front, kind: ObjectKind::View, items };
     let view = Drawn {
+        hatches: Vec::new(),
         group: Some(Arc::new(group(Vec::new()))),
         status: Status::Drawn,
         stats: None,
@@ -2883,6 +2895,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
     let record = sheet_of(&d, sheet).unwrap();
     let frame = ViewFrame::new(solidcore_record::Plane::XY, "1:1".parse().unwrap(), Vec2::ZERO, Vec2::ZERO).unwrap();
     let view = Drawn {
+        hatches: Vec::new(),
         group: Some(Arc::new(Group { object: front, kind: ObjectKind::View, items: Vec::new() })),
         status: Status::Drawn,
         stats: None,
@@ -4195,6 +4208,7 @@ fn sheet_sketch_assembly_budget_names_only_the_excluded_sketch_and_can_recover()
     };
     let left = MAX_RECORDS - border(&s, sheet).iter().map(Group::records).sum::<usize>();
     let view = Drawn {
+        hatches: Vec::new(),
         group: Some(Arc::new(group(10, ObjectKind::View, left - 12))),
         status: Status::Drawn,
         stats: None,

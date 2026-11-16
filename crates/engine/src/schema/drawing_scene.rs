@@ -98,6 +98,21 @@ pub struct SheetSceneView {
     /// Its label, when it draws one (a view placed apart from its projection place).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<SheetSceneLabel>,
+    /// A section view's hatching, one entry per body it cut, in the order the view shows them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hatches: Vec<SheetSceneHatch>,
+}
+
+/// One body's hatching in a section view: its lines' angle on paper (45 or 135 degrees) and
+/// spacing, or painted solid when its cut faces are too thin to hatch.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetSceneHatch {
+    pub body: String,
+    pub angle_deg: f64,
+    pub spacing_mm: f64,
+    pub filled: bool,
+    /// How many hatch lines it drew: none when it is filled.
+    pub strokes: usize,
 }
 
 impl From<ViewState> for SheetSceneView {
@@ -109,6 +124,17 @@ impl From<ViewState> for SheetSceneView {
             reason: v.status.reason().or(v.why),
             stats: v.stats.map(Into::into),
             label,
+            hatches: v
+                .hatches
+                .into_iter()
+                .map(|h| SheetSceneHatch {
+                    body: h.body,
+                    angle_deg: h.angle.to_degrees(),
+                    spacing_mm: h.spacing_mm,
+                    filled: h.filled,
+                    strokes: h.strokes,
+                })
+                .collect(),
         }
     }
 }
