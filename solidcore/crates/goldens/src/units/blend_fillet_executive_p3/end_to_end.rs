@@ -2062,6 +2062,84 @@ mod wr457_certificates {
     }
 }
 
+/// WR-455 (#17404): moving a contact to the curve end it runs on to moved one row,
+/// `stubs4-degenerate-brepForFillet2-e9-r0.5`. The round of edge 9 of `brepForFillet2.smb`
+/// builds with main's status, counts and topology record, and its volume moves by about
+/// `2.2e-7` in 3616. The body is certified, not compared with main's bits.
+#[cfg(test)]
+mod wr455_certificates {
+    use super::{apply, build, RealSolid};
+    use solidcore::kernel::Kernel;
+    use solidcore::mass::enclosure::enclose_volume;
+    use solidcore::topology::brep::p1;
+    use solidcore::topology::brep::p2::is_manifold_solid;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+
+    const NAME: &str = "stubs4-degenerate-brepForFillet2-e9-r0.5";
+
+    /// The row's input, read as the goldens gate reads it (upstream file paths resolved).
+    fn load() -> RealSolid {
+        let case = crate::case::regression_case(&super::super::Runner, NAME);
+        let inputs: super::super::Inputs = case.parse().expect("inputs");
+        inputs.real_solid.expect("a real_solid case")
+    }
+
+    /// The built body is valid at Level 2 (PROVEN as far as `check_brep` Level 2 checks)
+    /// and one closed manifold solid. Its volume is enclosed in an interval no wider than
+    /// `0.02` (PROVEN, [`enclose_volume`]; the cell budget stops it near `0.0127`). The harness row records that body: status
+    /// 0, its vertex, edge and face counts, and a mass-properties volume within `1e-4` of
+    /// the enclosure (MEASURED: the integrator's accuracy is an estimate, not a bound).
+    #[test]
+    fn the_moved_round_builds_a_valid_closed_solid() {
+        let input = load();
+        let mut k = Kernel::default();
+        let mut body = build(&mut k, &input)
+            .expect("fixture")
+            .expect("brepForFillet2");
+        let edges = p1::edges(&body, None).expect("edges");
+        let selected: Vec<_> = input
+            .edge_indices()
+            .expect("edge indices")
+            .iter()
+            .map(|&i| *edges.get(i).expect("selected edge"))
+            .collect();
+        apply(&mut k, &mut body, &selected, &input)
+            .unwrap_or_else(|e| panic!("{NAME}: the round failed: {e:?}"));
+        let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
+            .expect("check")
+            .lines();
+        assert!(lines.is_empty(), "{NAME}: Level 2: {lines:?}");
+        assert!(
+            is_manifold_solid(&body).expect("manifold check"),
+            "{NAME}: not one closed manifold solid"
+        );
+        let width = 0.02;
+        let e = enclose_volume(&k, &mut body, width).expect("enclosure");
+        assert!(e.width() <= width, "{NAME}: enclosure {e:?} wider than {width}");
+        eprintln!("{NAME}: volume in [{}, {}] ({:?})", e.lo, e.hi, e.stop);
+        let row = super::rust(&input).unwrap_or_else(|e| panic!("{NAME}: harness: {e:?}"));
+        let counts = [
+            0,
+            p1::vertices(&body, None).expect("vertices").len() as i64,
+            p1::edges(&body, None).expect("edges").len() as i64,
+            p1::faces(&body, None).expect("faces").len() as i64,
+        ];
+        assert_eq!(counts, [0, 11, 17, 8], "{NAME}: main's counts");
+        assert_eq!(
+            row.ints["api_status_vertex_edge_face_counts"], counts,
+            "{NAME}: row status and counts"
+        );
+        assert_eq!(row.ints["mass_status"], [0], "{NAME}: mass status");
+        let volume = *row.values["mass_properties"].get(1).expect("volume");
+        assert!(
+            e.lo - 1e-4 <= volume && volume <= e.hi + 1e-4,
+            "{NAME}: row volume {volume} not within 1e-4 of [{}, {}]",
+            e.lo,
+            e.hi
+        );
+    }
+}
+
 /// WR-56 (#17467): the two rows it moved, `source-file-6_sided_corner-all-edges` and
 /// `source-file-nurb_box-all-edges`, round every edge of a B-spline body. Their mass
 /// properties did not move (bit for bit), and their topology and geometry records hold the
