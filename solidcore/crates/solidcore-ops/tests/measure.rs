@@ -218,7 +218,7 @@ fn a_ray_beside_a_box_is_nearest_the_edge_it_passes() {
     assert!(close(nearest.on_ray, [5.0, -3.0, 0.0]), "{nearest:?}");
     assert_eq!(
         b.edge_closest_to_ray(&order, order.edges.len(), [0.0; 3], [0.0, 0.0, 1.0]),
-        Err(solidcore_ops::Error::Argument)
+        Err(Error::Argument)
     );
 }
 
@@ -301,7 +301,7 @@ fn a_ray_through_a_tube_hits_its_nearer_side_with_the_face_and_uv() {
     ] {
         assert_eq!(
             b.face_hit_by_ray(&order, origin, direction),
-            Err(solidcore_ops::Error::Argument),
+            Err(Error::Argument),
             "{origin:?} {direction:?}"
         );
     }
@@ -630,27 +630,67 @@ fn points_round_a_closed_surface_read_their_distance_across_its_seam() {
     }
 }
 
-/// Points beside a surface read `None`: off the ends of the cylinder of radius 5 and height 10
-/// (above its top, below its foot), the nearest point of its side is on its end circle, held
-/// there by the side's boundary. A point square over the end circle reads its distance to it.
+/// Points beside a surface read `None`. The ruled sheet between the lines (0, 0, 0)-(10, 0, 0)
+/// and (0, 10, 0)-(10, 10, 5) is the bilinear patch S(s, t) = (10 s, 10 t, 5 s t), no analytic
+/// surface, bounded by its domain [0, 1]^2. Off its sides the nearest point of it is on a side,
+/// held there and not square to the patch: (20, 5, 0) past s = 1, (5, -8, 3) past t = 0 (its
+/// nearest point (5, 0, 0), where (0, -8, 3) . S_t = -72.5), (-6, 5, -2) past s = 0. Over its
+/// middle (5, 5, 1.25), 3 along the unit normal (-1, -1, 4) / sqrt(18), the point reads 3.
+///
+/// The tube of radius 5 from z = 0 to z = 10 ([`tube`]) reads 3 at points 3 off it across its
+/// seam at (5, 0) and square over its end circle; the analytic cylinder of the same size is its
+/// definition, unbounded along its axis, so points off its ends read their distance from its
+/// axis less 5.
 #[test]
 fn points_beside_a_surface_read_none() {
     all_fixes();
+    let rule = |a: [f64; 3], b: [f64; 3]| Curve::Line { start: a, end: b };
+    let sheet = ruled(
+        &rule([0.0, 0.0, 0.0], [10.0, 0.0, 0.0]),
+        &rule([0.0, 10.0, 0.0], [10.0, 10.0, 5.0]),
+        false,
+    )
+    .unwrap();
+    let (patch, _) = Body::from_record(&sheet, false).unwrap();
+    let (_, order) = patch.to_record().unwrap();
+    let beside = [[20.0, 5.0, 0.0], [5.0, -8.0, 3.0], [-6.0, 5.0, -2.0]];
+    let gaps = patch.face_surface_gaps(&order, 0, &beside).unwrap();
+    assert_eq!(gaps, vec![None; beside.len()]);
+    let unit = 3.0 / 18.0_f64.sqrt();
+    let over = [5.0 - unit, 5.0 - unit, 1.25 + 4.0 * unit];
+    let gap = patch.face_surface_gaps(&order, 0, &[over]).unwrap();
+    assert!(gap[0].is_some_and(|g| near(g, 3.0, 1e-9)), "{gap:?}");
+
+    let (t, _, order) = tube();
+    let seam = [
+        [8.0, 0.0, 10.0],
+        [8.0, 1e-9, 5.0],
+        [8.0, -1e-9, 5.0],
+        [8.0 * 0.1_f64.cos(), 8.0 * 0.1_f64.sin(), 2.0],
+        [8.0 * 0.1_f64.cos(), -8.0 * 0.1_f64.sin(), 2.0],
+    ];
+    let over = t.face_surface_gaps(&order, 0, &seam).unwrap();
+    for (p, gap) in seam.iter().zip(&over) {
+        assert!(gap.is_some_and(|g| near(g, 3.0, 1e-9)), "{p:?}: {gap:?}");
+    }
+
     let c = make_cylinder([0.0; 3], 5.0, 10.0).unwrap();
     let (_, order) = c.to_record().unwrap();
     let side = face_holding(&c, &order, [5.0, 0.0, 5.0]);
-    let beside = [
+    let off_the_ends = [
         [8.0, 0.0, 13.0],
         [0.0, 8.0, 10.5],
         [-2.0, 0.0, 12.0],
         [0.0, -8.0, -4.0],
     ];
-    let gaps = c.face_surface_gaps(&order, side, &beside).unwrap();
-    assert_eq!(gaps, vec![None; beside.len()]);
-    let over = c
-        .face_surface_gaps(&order, side, &[[8.0, 0.0, 10.0]])
-        .unwrap();
-    assert!(over[0].is_some_and(|g| near(g, 3.0, 1e-9)), "{over:?}");
+    let gaps = c.face_surface_gaps(&order, side, &off_the_ends).unwrap();
+    for (p, gap) in off_the_ends.iter().zip(&gaps) {
+        let off = (p[0] * p[0] + p[1] * p[1]).sqrt() - 5.0;
+        assert!(
+            gap.is_some_and(|g| near(g, off.abs(), 1e-9)),
+            "{p:?}: {gap:?}"
+        );
+    }
 }
 
 /// A point that is not finite, or a face past the faces, is refused.

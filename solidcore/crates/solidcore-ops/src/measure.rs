@@ -773,9 +773,11 @@ impl Body {
     }
 
     /// The distance from each of `points` to record face `face`'s surface untrimmed, where the
-    /// point lies over it: the kernel's global solve for the surface's nearest point over its
-    /// whole domain, a periodic seam wrapped (`query::face_surface_feet`). `None` for a point
-    /// beside the surface, whose nearest point is held on a side of the domain. Where
+    /// point lies over it: the kernel's global solve for the surface's nearest point, a periodic
+    /// seam wrapped, the surface by its definition (a B-spline over its domain, a plane,
+    /// cylinder, cone, sphere or torus continued as that analytic surface;
+    /// `query::face_surface_feet`). `None` for a point beside the surface, whose nearest point
+    /// is held on a side of its domain. Where
     /// [`Body::face_distances`] reads a point past the face's edge as its distance to that edge,
     /// this reads its distance to the surface the face lies on.
     ///

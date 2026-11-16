@@ -15,6 +15,9 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::nurbs::knots::Side;
 use crate::query::brep::BrepFaceServices;
+use crate::surface::extend::Continuity;
+use crate::surface::implicit::AnalyticSupport;
+use crate::surface::side::BoxSide;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceIntersection};
 use crate::topology::brep_cache::CacheObject;
@@ -75,35 +78,40 @@ pub struct SurfaceFoot {
 }
 
 /// For each of `points`, its foot on face `id`'s surface untrimmed: the surface's point nearest
-/// it over the surface's whole natural domain (the face's trims play no part), where the
-/// segment from the point to it is square to the surface there; `None` for a point beside the
-/// surface, whose nearest point is held on a side of the domain without being square to it.
+/// it (the face's trims play no part), where the segment from the point to it is square to the
+/// surface there; `None` for a point beside the surface, whose nearest point is held on a side
+/// of its domain without being square to it.
+///
+/// **The surface is its definition** ([`untrimmed`]): a B-spline over its natural domain; a
+/// plane, cylinder, cone, sphere or torus as that analytic surface continued, since the box
+/// its stored form spans is bookkeeping (a sheet's plane is made a little larger than its
+/// curves' bounding sphere), not where the surface ends.
 ///
 /// The nearest point is the global solve's (`Surface::global_point_solve`, minimize, every
 /// solution, the trim test off), the nearest of its solutions, never a local solve from a
 /// guess. A closed direction (a periodic seam) and a collapsed side (a pole, an apex) bound no
 /// part of the surface: a foot there is square to the surface like any other, so it is kept.
-/// A foot held on an open side is not square there: the point's offset along the surface,
-/// `|(p - foot) x n|` with `n` the unit normal at the foot, is the distance the side cut off.
-/// It is within the face's tolerance exactly where the point lies over the surface (a point
-/// over the side itself included), and the foot is kept there.
+/// A foot held on an open side is not square there (the zero-cosine test of point inversion,
+/// in distance rather than angle): the point's offset along the surface, `|(p - foot) x n|`
+/// with `n` the unit normal at the foot, is the distance the side cut off. It is within the
+/// face's tolerance exactly where the point lies over the surface (a point square over the
+/// side itself included), and the foot is kept there.
 ///
 /// The surface and its domain are made once for all the points.
 ///
 /// # Errors
-/// A dangling face, a face without a surface; those of the evaluation copy, the natural domain,
-/// the global solve and the evaluations at the foot.
+/// A dangling face, a face without a surface; those of the evaluation copy, the continuation
+/// ([`untrimmed`]), the natural domain, the global solve and the evaluations at the foot.
 pub fn face_surface_feet(
     k: &Kernel,
     brep: &Brep,
     id: FaceId,
     points: &[Point3],
 ) -> Result<Vec<Option<SurfaceFoot>>> {
-    let surface = face::surface(brep, id)?
-        .ok_or_else(|| {
-            SolidError::query_missing("query::face_surface_feet", "the face's surface")
-        })?
+    let stored = face::surface(brep, id)?
+        .ok_or_else(|| SolidError::query_missing("query::face_surface_feet", "the face's surface"))?
         .clone_for_evaluation()?;
+    let surface = untrimmed(k, stored, points)?;
     let domain = surface.natural_uv_domain_with_nurb(k)?;
     let tolerance = face::tolerance(brep, id)?;
     points
@@ -111,6 +119,38 @@ pub fn face_surface_feet(
         .map(|&p| surface_foot(k, &surface, &domain, tolerance, p))
         .collect()
 }
+
+/// `surface` as far as its definition reaches for `points` ([`face_surface_feet`]): a surface
+/// that is not an analytic kind as it is; an analytic one continued Natural past every side of
+/// its box by `reach` (`Surface::extended_sides`: exact, the same analytic, its stored part
+/// bit for bit), a side that closes, collapses or is unbounded left as it is and one toward an
+/// apex, pole or full turn taken up to it.
+///
+/// `reach` is the largest distance from a point to `c`, the surface's point at the middle of
+/// its box, and it is enough: a point's foot on a plane, or its axial or generator coordinate
+/// on a cylinder or cone, is its projection there, which moves no further from `c` (or from
+/// `c` turned about the axis to the point's side, no further from the point than `c`) than
+/// the point is. So no foot is cut off by a side the continuation added.
+fn untrimmed(k: &Kernel, surface: Surface, points: &[Point3]) -> Result<Surface> {
+    if AnalyticSupport::of(&surface).is_none() {
+        return Ok(surface);
+    }
+    let middle = surface
+        .natural_uv_domain_with_nurb(k)?
+        .evaluate(MIDDLE, MIDDLE);
+    let c = surface.evaluate_point(k, middle)?;
+    let reach = points.iter().map(|p| p.distance(c)).fold(0.0, f64::max);
+    // every point at the middle: the box already holds each foot
+    if reach <= 0.0 {
+        return Ok(surface);
+    }
+    Ok(surface
+        .extended_sides(k, &BoxSide::ALL, Continuity::Natural, reach)?
+        .surface)
+}
+
+/// The middle of a box side's normalised parameter.
+const MIDDLE: f64 = 0.5;
 
 /// One point's foot on `surface` over `domain` ([`face_surface_feet`]).
 fn surface_foot(
