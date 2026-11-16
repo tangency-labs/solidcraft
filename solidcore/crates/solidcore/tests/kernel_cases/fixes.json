@@ -33,7 +33,6 @@
   "degenerate_proto_edge_in_one_vertex",
   "new_edge_vertex_tolerance_covers_gap",
   "found_torus_sphere_keep_tested_nurb",
-  "imprint_extends_edge_to_proto_vertex",
   "fillet_point_step_per_point",
   "analytic_copy_keeps_parameterization",
   "offset_extension_from_base",
