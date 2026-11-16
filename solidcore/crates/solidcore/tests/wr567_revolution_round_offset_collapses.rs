@@ -93,8 +93,9 @@ fn shelled(k: &mut Kernel, edge_z: f64, open_z: f64, t: f64) -> bool {
 /// Without the revolution's collapse test the round's offset is the arc turned inside out
 /// (upstream), and the shell failed with 1001 open at the other end while the inset kept
 /// every finite region. Keeping only the cavity regions (WR-667) gives the closed form, a
-/// shell valid at every `check_brep` level. (The selection changes the result only when
-/// the merge leaves two or more finite regions, so this merge leaves at least two.)
+/// shell valid at every `check_brep` level. (Deduced, not checked: with fewer than two
+/// finite regions the selection is skipped, so the result would not have changed; this
+/// merge leaves at least two.)
 #[test]
 fn wr567_without_collapse_open_at_the_other_end_keeps_the_cavity() {
     let mut k = kernel(false);

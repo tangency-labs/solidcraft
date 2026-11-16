@@ -1168,7 +1168,8 @@ impl OffsetExecutive {
             // Only a choice between two or more finite regions can select anything: with
             // one, `make_manifold` keeps it whether it is cavity or not (a lone cavity
             // region is every region; a lone other region leaves no cavity to keep), so
-            // the body's point solves are not run for it.
+            // the body's point solves are not run for it, nor the live classification
+            // whose trims, caches and tolerance growth they would leave on `result`.
             let mut cavities = Vec::new();
             let mut select = false;
             let finite: Vec<RegionId> =

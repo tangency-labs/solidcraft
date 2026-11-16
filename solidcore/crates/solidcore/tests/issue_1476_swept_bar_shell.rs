@@ -151,8 +151,9 @@ fn check_validated(fixes: &UpstreamFixes, want: Option<f64>, validate: bool) -> 
 }
 
 /// The default kernel, which keeps an inset's cavity regions (WR-667). The merge leaves one
-/// finite region, which `make_manifold` keeps whatever its cavity verdict, so the verdict's
-/// point solves over the operand are not run (#17393).
+/// finite region (deduced: before #17064 the one-name fixture shelled with this selection, which
+/// the verdicts' point-solve cache would have refused), which `make_manifold` keeps whatever its cavity
+/// verdict, so the verdict's point solves over the operand are not run (#17393).
 #[test]
 fn issue_1476_swept_bar_shells() {
     assert_eq!(check(&UpstreamFixes::default(), None), 16);
