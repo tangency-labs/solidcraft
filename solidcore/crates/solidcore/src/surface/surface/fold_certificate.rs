@@ -42,7 +42,10 @@
 //! `H_u x H_v` (polynomial form) or `(w H_u - w_u H) x (w H_v - w_v H)` (rational form,
 //! `w^4 N`; the weight must be shown positive on the piece), written in Bernstein form
 //! ([`crate::offset::construction::bernstein`]); `N . d` lies within its coefficients'
-//! hull (Farouki and Rajan 1987).
+//! hull (Farouki and Rajan 1987). The derivatives are taken on the whole patch and then
+//! restricted (a restricted derivative is the piece's derivative over its positive
+//! widths), so a piece only an ulp wide, where a knot or a side falls an ulp from a
+//! grid line, keeps the precision its coefficients' differences would lose.
 //!
 //! **The arithmetic's bound.** Every coefficient is computed twice more, on absolute
 //! values: with the net's magnitudes `|c|` (twin `T`) and with `|c| + e0` (twin `Te`),
@@ -61,8 +64,11 @@
 //! proved. Spheres, cones and tori: the normal is a scalar closed form times a unit
 //! normal field that never vanishes, so the continuation folds exactly where the scalar
 //! changes sign (see [`analytic`]). Extrusions and revolutions: proved along the sweep,
-//! and along a line generator's continuation by a closed form ([`swept`]). Every other
-//! kind, and a continuation of any other generator, is not proved.
+//! along a line generator's continuation by a closed form ([`swept`]), and along an
+//! extrusion's B-spline generator's continuation as the B-spline net of the extrusion
+//! ([`extruded_net`]). Every other kind, and a continuation of any other generator
+//! (a revolution's B-spline generator; an ellipse, parabola or hyperbola, whose
+//! evaluation clamps to its own interval rather than continuing), is not proved.
 //!
 //! Deviations: none (no upstream counterpart). No recursion: pieces wait on a stack, at
 //! most [`MAX_PIECES`] of them per call.
@@ -75,7 +81,8 @@ use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
 use crate::math::Vec3;
 use crate::nurbs::b_spline_surface::p1::{BSplineSurface, BSplineSurfaceForm};
-use crate::nurbs::math::{gamma, NOW, NOZ};
+use crate::nurbs::math::{gamma, CPoint, NOW, NOZ};
+use crate::nurbs::srf_basic::Surface as NlSurface;
 use crate::nurbs::srf_tool::p1::decompose_to_bez;
 use crate::offset::construction::bernstein::{Bernstein2, Binomials, MAX_DEGREE};
 use crate::surface::surface::{Surface, SurfaceKind};
@@ -146,7 +153,7 @@ pub fn certify_no_fold(
         }
         // the normal depends on the generator parameter alone
         SurfaceKind::SurfOfExtrusion(_) | SurfaceKind::SurfOfRevolution(_) => {
-            Ok(swept(s, natural, domain))
+            swept(k, s, natural, domain)
         }
         SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::OffsetSurface(_)
@@ -168,20 +175,31 @@ pub fn certify_no_fold(
 /// domain's middle generator parameter) is positive over the merge domain's generator
 /// interval when it is at that interval's ends and at the natural interval's ends inside
 /// it (an undecided value is allowed only on the natural interval's closed ends: a pole
-/// the face itself has). Other generators' continuations are not proved.
-fn swept(s: &Surface, natural: &Extent2d, domain: &Extent2d) -> FoldCertificate {
+/// the face itself has). An extrusion's B-spline generator goes to [`extruded_net`].
+/// Other generators' continuations are not proved.
+///
+/// # Errors
+///
+/// Those of [`extruded_net`].
+fn swept(
+    k: &Kernel,
+    s: &Surface,
+    natural: &Extent2d,
+    domain: &Extent2d,
+) -> Result<FoldCertificate> {
     let not = |reason| FoldCertificate::NotProved {
         uv: domain.evaluate(0.5, 0.5),
         reason,
     };
-    let (generator, generator_is_u, revolution) = match s.kind() {
-        SurfaceKind::SurfOfExtrusion(e) => (e.gen_curve(), true, None),
+    let (generator, generator_is_u, revolution, extrusion) = match s.kind() {
+        SurfaceKind::SurfOfExtrusion(e) => (e.gen_curve(), true, None, e.extrusion_vector()),
         SurfaceKind::SurfOfRevolution(r) => (
             r.gen_curve(),
             false,
             Some((r.position().origin(), r.position().z_axis())),
+            Vec3::ZERO,
         ),
-        _ => return not("not a swept surface"),
+        _ => return Ok(not("not a swept surface")),
     };
     let (d, n) = if generator_is_u {
         (domain.u_interval(), natural.u_interval())
@@ -189,14 +207,18 @@ fn swept(s: &Surface, natural: &Extent2d, domain: &Extent2d) -> FoldCertificate 
         (domain.v_interval(), natural.v_interval())
     };
     if d.min() >= n.min() && d.max() <= n.max() {
-        return FoldCertificate::Proved;
+        return Ok(FoldCertificate::Proved);
     }
-    let Some(CurveKind::Line(line)) = generator.map(Curve::kind) else {
-        return not("the generator's continuation is not proved");
+    let line = match (generator.map(Curve::kind), revolution) {
+        (Some(CurveKind::Line(line)), _) => line,
+        (Some(CurveKind::BSpline(c)), None) => {
+            return extruded_net(k, c, extrusion, n, d);
+        }
+        _ => return Ok(not("the generator's continuation is not proved")),
     };
     let Some((origin, axis)) = revolution else {
         // `C' x E`, the same everywhere
-        return FoldCertificate::Proved;
+        return Ok(FoldCertificate::Proved);
     };
     // `M(t)` and the rounding bound of `M(t) . d`: the line's point and the difference
     // with `A` (each within `gamma_4` of its terms' sizes), then two cross products and
@@ -222,15 +244,66 @@ fn swept(s: &Surface, natural: &Extent2d, domain: &Extent2d) -> FoldCertificate 
         let x = mt.dot(middle);
         let e = gamma(32) * size * dlen;
         if !(x.is_finite() && e.is_finite()) {
-            return not("the generator's closed form is not finite");
+            return Ok(not("the generator's closed form is not finite"));
         }
         // positive, or undecided on the natural interval's closed ends
         let on_natural = t >= n.min() && t <= n.max();
         if !(above(x, e) || (on_natural && !above(-x, e))) {
-            return not("the normal turns back or vanishes along the generator's continuation");
+            return Ok(not(
+                "the normal turns back or vanishes along the generator's continuation",
+            ));
         }
     }
-    FoldCertificate::Proved
+    Ok(FoldCertificate::Proved)
+}
+
+/// The certificate of an extrusion `C(u) + v E` of a B-spline generator past the
+/// generator's natural interval `n`, over the merge domain's generator interval `d`.
+/// The extrusion's evaluation continues `C` by its NURBS form's end spans (with
+/// out-of-bounds evaluation on), as a B-spline surface's does, and its normal
+/// `C'(u) x E` does not depend on `v`; so it is the certificate of the B-spline surface
+/// whose net has, for each control point `c` of `C` (homogeneous, weight `w`), the
+/// two columns `c` and `c + w E` (degree 1 in `v` over `[0, 1]`: exactly `C(u) + v E`),
+/// over `n x [0, 1]` and `d x [0, 1]`. The second column's coordinates are rounded
+/// sums, within `gamma_2 (|c| + |w| |E|)` of the exact ones: that is the net's
+/// `extra` error ([`net_certificate`]).
+fn extruded_net(
+    k: &Kernel,
+    c: &crate::nurbs::b_spline_curve::p1::BSplineCurve,
+    e: Vec3,
+    n: crate::geom::extent1d::Extent1d,
+    d: crate::geom::extent1d::Extent1d,
+) -> Result<FoldCertificate> {
+    let not = |reason| FoldCertificate::NotProved {
+        uv: Point2::new(0.5 * (d.min() + d.max()), 0.5),
+        reason,
+    };
+    let Some(nurb) = c.gw_nurb() else {
+        return Ok(not("no NURBS form"));
+    };
+    let emax = e.x.abs().max(e.y.abs()).max(e.z.abs());
+    let mut extra = 0.0_f64;
+    let mut net = Vec::new();
+    for &cp in nurb.cpts() {
+        if cp.z == NOZ {
+            return Ok(not("a two-dimensional form"));
+        }
+        let w = if cp.w == NOW { 1.0 } else { cp.w };
+        let moved = CPoint::new(cp.x + w * e.x, cp.y + w * e.y, cp.z + w * e.z, cp.w);
+        let size = cp.x.abs().max(cp.y.abs()).max(cp.z.abs()) + w.abs() * emax;
+        extra = extra.max(gamma(2) * size);
+        net.push(vec![cp, moved]);
+    }
+    let surface = NlSurface::new(
+        net,
+        nurb.degree(),
+        1,
+        nurb.knots().to_vec(),
+        vec![0.0, 0.0, 1.0, 1.0],
+    )?;
+    let natural = Extent2d::from_bounds(n.min(), 0.0, n.max(), 1.0);
+    let domain = Extent2d::from_bounds(d.min(), 0.0, d.max(), 1.0);
+    net_certificate(k, &surface, &natural, &domain, extra)
 }
 
 /// A polynomial with its two magnitude twins (see the module header).
@@ -373,10 +446,15 @@ fn restrict_1d(c: &[f64], a: f64, b: f64, twin: bool) -> Vec<f64> {
 fn restrict_2d(p: &Bernstein2, r: [f64; 4], twin: bool) -> Result<Bernstein2> {
     let [u0, u1, v0, v1] = r;
     let (du, dv) = p.degrees();
-    let rows: Vec<Vec<f64>> = p
-        .coefficients()
-        .chunks(dv + 1)
-        .map(|row| restrict_1d(row, v0, v1, twin))
+    let c = p.coefficients();
+    // row `i` holds the coefficients `i (dv + 1) ..= i (dv + 1) + dv`
+    let rows: Vec<Vec<f64>> = (0..=du)
+        .map(|i| {
+            let row: Vec<f64> = (0..=dv)
+                .map(|j| c.get(i * (dv + 1) + j).copied().unwrap_or(0.0))
+                .collect();
+            restrict_1d(&row, v0, v1, twin)
+        })
         .collect();
     let mut out = vec![0.0; (du + 1) * (dv + 1)];
     for j in 0..=dv {
@@ -431,6 +509,22 @@ fn polynomial(
     let Some(nurb) = b.gw_nurb() else {
         return Ok(not("no NURBS form"));
     };
+    net_certificate(k, nurb, natural, domain, 0.0)
+}
+
+/// The certificate of the NURBS net `nurb`'s continuation; `extra` bounds, per
+/// coefficient, how far the net may be from the exact net of the surface certified
+/// (added to the extraction's error `e0`: knot insertion takes convex combinations, so
+/// it moves no coefficient by more than the largest input error).
+fn net_certificate(
+    k: &Kernel,
+    nurb: &NlSurface,
+    natural: &Extent2d,
+    domain: &Extent2d,
+    extra: f64,
+) -> Result<FoldCertificate> {
+    let centre = domain.evaluate(0.5, 0.5);
+    let not = |reason| FoldCertificate::NotProved { uv: centre, reason };
     let (p, q) = (nurb.p(), nurb.q());
     let mut rational = false;
     let mut net_size = 0.0_f64;
@@ -482,11 +576,20 @@ fn polynomial(
         }
         false
     };
-    let e0 = if inserts(nurb.u_knots(), p) || inserts(nurb.v_knots(), q) {
+    let extraction = if inserts(nurb.u_knots(), p) || inserts(nurb.v_knots(), q) {
         gamma(16 * (p + q)) * net_size
     } else {
         0.0
     };
+    // (rounded up: the sum's own rounding)
+    let e0 = if extra > 0.0 {
+        (extraction + extra) * (1.0 + gamma(1))
+    } else {
+        extraction
+    };
+    if !e0.is_finite() {
+        return Ok(not("a coefficient not finite or a weight not positive"));
+    }
     let mut patches = Vec::new();
     for column in decompose_to_bez(nurb)? {
         let mut out = Vec::new();
@@ -555,14 +658,17 @@ fn polynomial(
     }
     levels += 3 + 4;
     let (ep, eq) = if rational { (2 * p, 2 * q) } else { (p, q) };
-    let cost = ((ep + 1) * (eq + 1)).saturating_pow(2).max(1);
+    let cost = ((ep + 1) * (eq + 1)).saturating_pow(2);
     let form = Form {
         patches,
         rational,
         degrees: (p, q),
         e0,
         levels,
-        max_pieces: MAX_PIECES.saturating_mul(UNIT_WORK) / cost,
+        max_pieces: MAX_PIECES
+            .saturating_mul(UNIT_WORK)
+            .checked_div(cost)
+            .unwrap_or(0),
     };
     certify_pieces(k, &form, natural, domain)
 }
@@ -648,27 +754,44 @@ fn normal_on(form: &Form, patch: &Patch, r: &Rect, b: &Binomials) -> Result<Opti
         (r.y[0] - patch.v[0]) / sv,
         (r.y[1] - patch.v[0]) / sv,
     ];
-    let mut h: Vec<Net> = Vec::with_capacity(4);
+    // Each coordinate on the whole patch, and its derivatives taken there and only then
+    // restricted to the piece: the restriction of a derivative is the piece's derivative
+    // divided by the piece's (positive) widths, so the directions are kept, and a thin
+    // piece keeps its precision (a derivative of a thin piece's coefficients would be a
+    // difference of nearly equal numbers, all of its size lost to their rounding).
+    let restrict = |n: &Net| -> Result<Net> {
+        Ok(Net {
+            v: restrict_2d(&n.v, local, false)?,
+            t: restrict_2d(&n.t, local, true)?,
+            te: restrict_2d(&n.te, local, true)?,
+        })
+    };
+    let mut h: Vec<[Net; 3]> = Vec::with_capacity(4);
     for (value, abs) in patch.h.iter().zip(&patch.abs) {
-        let t = restrict_2d(abs, local, true)?;
         let te = if form.e0 > 0.0 {
             let (pu, pv) = abs.degrees();
             let raised: Vec<f64> = abs.coefficients().iter().map(|x| x + form.e0).collect();
-            restrict_2d(&Bernstein2::new(pu, pv, raised)?, local, true)?
+            Bernstein2::new(pu, pv, raised)?
         } else {
-            t.clone()
+            abs.clone()
         };
-        h.push(Net {
-            v: restrict_2d(value, local, false)?,
-            t,
+        let whole = Net {
+            v: value.clone(),
+            t: abs.clone(),
             te,
-        });
+        };
+        h.push([
+            restrict(&whole)?,
+            restrict(&whole.deriv_u()?)?,
+            restrict(&whole.deriv_v()?)?,
+        ]);
     }
-    let Ok([x, y, z, w]) = <[Net; 4]>::try_from(h) else {
+    let Ok([x, y, z, w]) = <[[Net; 3]; 4]>::try_from(h) else {
         return Ok(None);
     };
     let (hu, hv);
     if form.rational {
+        let [w, wu, wv] = &w;
         // the weight positive on the piece
         let restriction_levels = 3 * (form.degrees.0 + form.degrees.1) + 4;
         let bound = w.bounds(restriction_levels);
@@ -680,22 +803,14 @@ fn normal_on(form: &Form, patch: &Patch, r: &Rect, b: &Binomials) -> Result<Opti
         {
             return Ok(None);
         }
-        let (wu, wv) = (w.deriv_u()?, w.deriv_v()?);
-        let a = |c: &Net, cu: &Net| -> Result<Net> { w.mul(cu, b)?.sub(&wu.mul(c, b)?, b) };
-        let bb = |c: &Net, cv: &Net| -> Result<Net> { w.mul(cv, b)?.sub(&wv.mul(c, b)?, b) };
-        hu = [
-            a(&x, &x.deriv_u()?)?,
-            a(&y, &y.deriv_u()?)?,
-            a(&z, &z.deriv_u()?)?,
-        ];
-        hv = [
-            bb(&x, &x.deriv_v()?)?,
-            bb(&y, &y.deriv_v()?)?,
-            bb(&z, &z.deriv_v()?)?,
-        ];
+        let a = |[c, cu, _]: &[Net; 3]| -> Result<Net> { w.mul(cu, b)?.sub(&wu.mul(c, b)?, b) };
+        let bb = |[c, _, cv]: &[Net; 3]| -> Result<Net> { w.mul(cv, b)?.sub(&wv.mul(c, b)?, b) };
+        hu = [a(&x)?, a(&y)?, a(&z)?];
+        hv = [bb(&x)?, bb(&y)?, bb(&z)?];
     } else {
-        hu = [x.deriv_u()?, y.deriv_u()?, z.deriv_u()?];
-        hv = [x.deriv_v()?, y.deriv_v()?, z.deriv_v()?];
+        let [[_, xu, xv], [_, yu, yv], [_, zu, zv]] = [x, y, z];
+        hu = [xu, yu, zu];
+        hv = [xv, yv, zv];
     }
     let [ax, ay, az] = &hu;
     let [bx, by, bz] = &hv;
@@ -987,7 +1102,8 @@ pub mod analytic {
         let mut m = first;
         while m * 180.0 < v1 && out.len() < 66 {
             // the exact extreme: +-1 at a multiple of 180 degrees
-            let c = if (m as i64).rem_euclid(2) == 0 {
+            // (`m` is an integer: halving and doubling it is exact)
+            let c = if (0.5 * m).floor() * 2.0 == m {
                 1.0
             } else {
                 -1.0

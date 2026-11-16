@@ -2652,6 +2652,121 @@ mod tests {
         Ok(())
     }
 
+    /// A piece an ulp wide keeps its precision (thickening an L of two flat faces,
+    /// `issue_1973_a_thickened_l_of_two_flat_faces_keeps_its_edges_marks`): the bilinear
+    /// trapezoid `x = v (20 - 2 u)`, `y = 2 u` has the normal `2 (20 - 2 u) z`, at least
+    /// `20` on `u <= 5`. Over `[0, 5 + 2 ulp] x [0, 2]` the grid line `5 (1 + ulp) / 5`
+    /// falls an ulp past the natural side u = 1, so the cut there leaves a piece
+    /// `[1, 1 + 4e-16]`, where the differences of the restricted coefficients lose all
+    /// of their size: the derivatives are taken before the restriction.
+    #[test]
+    fn wr_407_fold_certificate_keeps_precision_on_a_thin_piece() -> Result<()> {
+        use super::super::fold_certificate::{certify_no_fold, FoldCertificate};
+        let k = Kernel::default();
+        let s = wr_407_bezier_sheet(&[
+            &[[0.0, 0.0], [20.0, 0.0]],
+            &[[8.881784197001252e-16, 2.0], [18.0, 2.0]],
+        ])?;
+        let natural = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        for domain in [
+            Extent2d::from_bounds(0.0, 0.0, 5.000000000000002, 2.0),
+            Extent2d::from_bounds(0.0, 0.0, 5.0, 2.000000000000003),
+        ] {
+            assert_eq!(
+                certify_no_fold(&k, &s, &natural, &domain)?,
+                FoldCertificate::Proved,
+                "{domain:?}"
+            );
+        }
+        // a genuine zero, u = 10, past the merge domain's side is still refused
+        let past = Extent2d::from_bounds(0.0, 0.0, 12.0, 2.0);
+        assert!(
+            matches!(
+                certify_no_fold(&k, &s, &natural, &past)?,
+                FoldCertificate::NotProved { uv, .. } if uv.x > 9.0 && uv.x < 11.0
+            ),
+            "{past:?}"
+        );
+        Ok(())
+    }
+
+    /// An extrusion of a B-spline generator continues along the generator's end spans
+    /// (`wr_593_nx1_tangent_corner_edge`: the two half-cylinder walls of a peg join as
+    /// one face): the rational quadratic half circle about `(20, 0)` of radius 5,
+    /// extruded along z, continues past both ends (its normal is radial, its weight
+    /// positive there). The parabola `C(t) = (t + t^2, t^2, 0)`, extruded along y, has
+    /// the normal `C' x E = (1 + 2 t) (0, 0, 1)` (its tangent is along y at `t = -0.5`):
+    /// it continues to `t = -0.4` but not past its turn back at `t = -0.5`.
+    #[test]
+    fn wr_407_extruded_b_spline_generator_continues_to_its_turn() -> Result<()> {
+        use super::super::fold_certificate::{certify_no_fold, FoldCertificate};
+        use crate::curve::curve::{Curve, CurveKind};
+        use crate::nurbs::b_spline_curve::p1::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::CPoint;
+        use crate::surface::surf_of_extrusion::p1::SurfOfExtrusion;
+        let k = Kernel::default();
+        let extrude = |pw: Vec<CPoint>, p: usize, knots: Vec<f64>, e: Vec3| -> Result<Surface> {
+            let c = BSplineCurve::from_nurb(NlCurve::new(pw, p, knots)?, 3, false);
+            let mut x = SurfOfExtrusion::create_canonical(&k, Curve::from(c), e)?;
+            x.set_out_of_bounds_enabled(true);
+            let s = Surface::from(x);
+            assert!(matches!(
+                s.kind(),
+                SurfaceKind::SurfOfExtrusion(x)
+                    if matches!(x.gen_curve().map(Curve::kind), Some(CurveKind::BSpline(_)))
+            ));
+            Ok(s)
+        };
+        let w = core::f64::consts::FRAC_1_SQRT_2;
+        let hw = |x: f64, y: f64, wt: f64| CPoint::new(x * wt, y * wt, 0.0, wt);
+        let wall = extrude(
+            vec![
+                hw(20.0, -5.0, 1.0),
+                hw(25.0, -5.0, w),
+                hw(25.0, 0.0, 1.0),
+                hw(25.0, 5.0, w),
+                hw(20.0, 5.0, 1.0),
+            ],
+            2,
+            vec![0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0],
+            Vec3::new(0.0, 0.0, 10.0),
+        )?;
+        let natural = wall.step_uv_domain();
+        let wider = Extent2d::from_bounds(
+            natural.u_min() - 0.02,
+            natural.v_min() - 1.0,
+            natural.u_max() + 0.02,
+            natural.v_max() + 1.0,
+        );
+        assert_eq!(
+            certify_no_fold(&k, &wall, &natural, &wider)?,
+            FoldCertificate::Proved
+        );
+        let p = |x: f64, y: f64| CPoint::from_point(Vec3::new(x, y, 0.0));
+        let turn = extrude(
+            vec![p(0.0, 0.0), p(0.5, 0.0), p(2.0, 1.0)],
+            2,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            Vec3::new(0.0, 1.0, 0.0),
+        )?;
+        let natural = turn.step_uv_domain();
+        assert_eq!((natural.u_min(), natural.u_max()), (0.0, 1.0));
+        let (v0, v1) = (natural.v_min(), natural.v_max());
+        let short = Extent2d::from_bounds(-0.4, v0, 1.0, v1);
+        assert_eq!(
+            certify_no_fold(&k, &turn, &natural, &short)?,
+            FoldCertificate::Proved
+        );
+        let past = Extent2d::from_bounds(-1.0, v0, 1.0, v1);
+        let refused = certify_no_fold(&k, &turn, &natural, &past)?;
+        assert!(
+            matches!(refused, FoldCertificate::NotProved { uv, .. } if uv.x < -0.4),
+            "{refused:?}"
+        );
+        Ok(())
+    }
+
     /// A revolution of a line continues past its rim but not through its pole: the cone
     /// swept by `C(v) = v (1, 0, 1)` about the z axis has `M(v) = v (1, 0, -1)` (module
     /// `fold_certificate`, `swept`), zero at the apex v = 0 (the face's own pole, on its
