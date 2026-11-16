@@ -62,6 +62,8 @@ pub struct Tracker {
     pen_contact: Option<i32>,
     /// Position of a completed pen press, for matching eframe's primary release.
     pen_release: Option<Pos2>,
+    /// Position of a pen press awaiting the next frame.
+    pen_press: Option<Pos2>,
     /// Where a finger last went down on the canvas, for the next frame. eframe runs a frame on
     /// `pointerdown` before the touch events arrive, so the app learns of a finger from here.
     finger_down: Option<Pos2>,
@@ -78,6 +80,7 @@ impl Tracker {
     fn note_pen(&mut self, id: i32, pressed: bool, on_canvas: bool, pos: Pos2) {
         if pressed && on_canvas {
             self.pen_contact = Some(id);
+            self.pen_press = Some(pos);
         } else if !pressed && self.pen_contact == Some(id) {
             self.pen_contact = None;
             self.pen_release = Some(pos);
@@ -108,6 +111,7 @@ impl Tracker {
         if id.is_none() || self.pen_contact == id {
             self.pen_contact = None;
             self.pen_release = None;
+            self.pen_press = None;
         }
     }
 
@@ -192,6 +196,7 @@ pub fn egui_down(ctx: &egui::Context) -> [bool; NUM_POINTER_BUTTONS] {
 pub fn reconcile(tracker: &std::cell::RefCell<Tracker>, ctx: &egui::Context, raw: &mut egui::RawInput) -> solidcraft_ui_egui::pencil::PlatformTaps {
     let mut tracker = tracker.borrow_mut();
     let taps = solidcraft_ui_egui::pencil::PlatformTaps {
+        pen_press: tracker.pen_press.take(),
         pen_release: tracker.take_pen_release(&raw.events),
         finger_down: tracker.take_finger_down(),
         pen_down: tracker.pen_contact.is_some(),

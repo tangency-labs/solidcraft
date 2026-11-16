@@ -1072,7 +1072,7 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
         }
         if touch.zoom.is_finite() && touch.zoom > 0.0 && touch.zoom != 1.0 {
             let anchor = zoom_anchor(app, rect, touch.centre, caps.orbit);
-            app.cam.zoom_at(f64::from(touch.zoom).powf(-crate::prefs::zoom_sign(app)), anchor);
+            zoom_in_view(app, f64::from(touch.zoom).powf(-crate::prefs::zoom_sign(app)), anchor);
         }
     } else if let Some((mode, delta)) = motion {
         if delta != egui::Vec2::ZERO {
@@ -1769,6 +1769,7 @@ impl TouchNavigation {
         };
         // Hit-testing also reads the context, so release its input lock first.
         let events = ui.input(|i| i.events.clone());
+        let mut ended_last = false;
         for event in &events {
             let egui::Event::Touch { device_id, id, phase, pos, .. } = event else { continue };
             match phase {
@@ -1799,9 +1800,24 @@ impl TouchNavigation {
                     }
                 }
                 egui::TouchPhase::End | egui::TouchPhase::Cancel => {
-                    self.contacts.retain(|(d, t, _)| d != device_id || t != id);
-                    if *phase == egui::TouchPhase::Cancel {
-                        self.owned = false;
+                    if *phase == egui::TouchPhase::End
+                        && self.contacts.len() == 1
+                        && self.contacts.first().is_some_and(|(d, t, _)| d == device_id && t == id)
+                    {
+                        if pos.is_finite() {
+                            if let Some((_, _, at)) = self.contacts.first_mut() {
+                                *at = *pos;
+                            }
+                            ended_last = true;
+                        } else {
+                            *self = Self::default();
+                            return TouchMotion::default();
+                        }
+                    } else {
+                        self.contacts.retain(|(d, t, _)| d != device_id || t != id);
+                        if *phase == egui::TouchPhase::Cancel {
+                            self.owned = false;
+                        }
                     }
                 }
             }
@@ -1811,97 +1827,106 @@ impl TouchNavigation {
             // Suppress a drag's release, but a stationary finger still clicks/selects.
             return TouchMotion { active: was_owned, mode: old_mode, ..Default::default() };
         }
-        let same_device = self.contacts.first().is_some_and(|(device, _, _)| self.contacts.iter().all(|(d, _, _)| d == device));
-        if !same_device {
-            self.owned = false;
-        }
-        if !self.owned {
-            return TouchMotion::default();
-        }
-        let current_points: Vec<_> = self.contacts.iter().map(|(_, _, point)| screen_point(*point)).collect();
-        let current_summary = match point_set_summary(&current_points) {
-            Ok(summary) => summary,
-            Err(_) => {
-                *self = Self::default();
+        let result = (|| {
+            let same_device = self.contacts.first().is_some_and(|(device, _, _)| self.contacts.iter().all(|(d, _, _)| d == device));
+            if !same_device {
+                self.owned = false;
+            }
+            if !self.owned {
                 return TouchMotion::default();
             }
-        };
-        let Some(current) = finite_screen_point(current_summary.centroid) else {
+            let current_points: Vec<_> = self.contacts.iter().map(|(_, _, point)| screen_point(*point)).collect();
+            let current_summary = match point_set_summary(&current_points) {
+                Ok(summary) => summary,
+                Err(_) => {
+                    *self = Self::default();
+                    return TouchMotion::default();
+                }
+            };
+            let Some(current) = finite_screen_point(current_summary.centroid) else {
+                *self = Self::default();
+                return TouchMotion::default();
+            };
+            if self.contacts.len() >= 2 {
+                self.multiple = true;
+                self.mode = Some(NavMode::Pan);
+            } else if !self.multiple
+                && let Some(origin) = self.origin
+            {
+                let distance =
+                    point_distance([f64::from(origin.x), f64::from(origin.y), 0.0], [current_summary.centroid[0], current_summary.centroid[1], 0.0]);
+                match distance {
+                    Ok(distance) if distance.value > 6.0 => {
+                        self.mode = Some(if orbit { NavMode::Orbit } else { NavMode::Pan });
+                    }
+                    Ok(_) => {}
+                    Err(_) => {
+                        *self = Self::default();
+                        return TouchMotion::default();
+                    }
+                }
+            }
+            let mut out = TouchMotion { active: true, mode: self.mode, zoom: 1.0, centre: Some(current), ..Default::default() };
+            // Fingers that start on a panel cannot take the view. An owned gesture pauses over a
+            // panel or outside the view; returning never applies the distance travelled outside it.
+            let stable = before.len() == self.contacts.len() && before.iter().zip(&self.contacts).all(|((d, t, _), (nd, nt, _))| (d, t) == (nd, nt));
+            if !ui.is_enabled() || !stable || !self.contacts.iter().all(|(_, _, p)| visible(*p)) || !before.iter().all(|(_, _, p)| visible(*p)) {
+                return out;
+            }
+            if self.multiple && self.contacts.len() == 1 {
+                return out;
+            }
+            let needs_prior = out.mode.is_some() || self.contacts.len() >= 2;
+            let prior_summary = if needs_prior {
+                let prior_points: Vec<_> = before.iter().map(|(_, _, point)| screen_point(*point)).collect();
+                match point_set_summary(&prior_points) {
+                    Ok(summary) => Some(summary),
+                    Err(_) => {
+                        *self = Self::default();
+                        return TouchMotion::default();
+                    }
+                }
+            } else {
+                None
+            };
+            if out.mode.is_some() {
+                let Some(prior) = prior_summary else {
+                    *self = Self::default();
+                    return TouchMotion::default();
+                };
+                match point_displacement(prior.centroid, current_summary.centroid).ok().and_then(finite_screen_vector) {
+                    Some(delta) => out.delta = delta,
+                    None => {
+                        *self = Self::default();
+                        return TouchMotion::default();
+                    }
+                }
+            }
+            if self.contacts.len() >= 2 {
+                let Some(old) = prior_summary else {
+                    *self = Self::default();
+                    return TouchMotion::default();
+                };
+                let old = old.mean_distance;
+                let new = current_summary.mean_distance;
+                if old > 1.0 && new > 1.0 {
+                    let zoom = (new / old).clamp(0.05, 20.0) as f32;
+                    if !zoom.is_finite() {
+                        *self = Self::default();
+                        return TouchMotion::default();
+                    }
+                    out.zoom = zoom;
+                }
+            }
+            out
+        })();
+        if ended_last {
             *self = Self::default();
-            return TouchMotion::default();
-        };
-        if self.contacts.len() >= 2 {
-            self.multiple = true;
-            self.mode = Some(NavMode::Pan);
-        } else if !self.multiple
-            && let Some(origin) = self.origin
-        {
-            let distance =
-                point_distance([f64::from(origin.x), f64::from(origin.y), 0.0], [current_summary.centroid[0], current_summary.centroid[1], 0.0]);
-            match distance {
-                Ok(distance) if distance.value > 6.0 => {
-                    self.mode = Some(if orbit { NavMode::Orbit } else { NavMode::Pan });
-                }
-                Ok(_) => {}
-                Err(_) => {
-                    *self = Self::default();
-                    return TouchMotion::default();
-                }
+            if !was_owned {
+                return TouchMotion { active: false, mode: old_mode, ..Default::default() };
             }
         }
-        let mut out = TouchMotion { active: true, mode: self.mode, zoom: 1.0, centre: Some(current), ..Default::default() };
-        // Fingers that start on a panel cannot take the view. An owned gesture pauses over a
-        // panel or outside the view; returning never applies the distance travelled outside it.
-        let stable = before.len() == self.contacts.len() && before.iter().zip(&self.contacts).all(|((d, t, _), (nd, nt, _))| (d, t) == (nd, nt));
-        if !ui.is_enabled() || !stable || !self.contacts.iter().all(|(_, _, p)| visible(*p)) || !before.iter().all(|(_, _, p)| visible(*p)) {
-            return out;
-        }
-        if self.multiple && self.contacts.len() == 1 {
-            return out;
-        }
-        let needs_prior = out.mode.is_some() || self.contacts.len() >= 2;
-        let prior_summary = if needs_prior {
-            let prior_points: Vec<_> = before.iter().map(|(_, _, point)| screen_point(*point)).collect();
-            match point_set_summary(&prior_points) {
-                Ok(summary) => Some(summary),
-                Err(_) => {
-                    *self = Self::default();
-                    return TouchMotion::default();
-                }
-            }
-        } else {
-            None
-        };
-        if out.mode.is_some() {
-            let Some(prior) = prior_summary else {
-                *self = Self::default();
-                return TouchMotion::default();
-            };
-            match point_displacement(prior.centroid, current_summary.centroid).ok().and_then(finite_screen_vector) {
-                Some(delta) => out.delta = delta,
-                None => {
-                    *self = Self::default();
-                    return TouchMotion::default();
-                }
-            }
-        }
-        if self.contacts.len() >= 2 {
-            let Some(old) = prior_summary else {
-                *self = Self::default();
-                return TouchMotion::default();
-            };
-            let old = old.mean_distance;
-            let new = current_summary.mean_distance;
-            if old > 1.0 && new > 1.0 {
-                let zoom = (new / old).clamp(0.05, 20.0) as f32;
-                if !zoom.is_finite() {
-                    *self = Self::default();
-                    return TouchMotion::default();
-                }
-                out.zoom = zoom;
-            }
-        }
-        out
+        result
     }
 }
 
@@ -3862,6 +3887,51 @@ mod tests {
         assert_eq!(motion.centre, Some(centre));
         assert_eq!(motion.delta, egui::Vec2::ZERO);
         assert_eq!(motion.zoom, 1.0);
+    }
+
+    #[test]
+    fn touchscreen_move_and_end_in_one_frame_delivers_final_motion() {
+        use egui::TouchPhase::{End, Move, Start};
+        let ctx = crate::fonts::test_context();
+        let rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
+        let mut time = 0.0;
+        let mut touch = super::TouchNavigation::default();
+        touch_motion_frame(&mut touch, &ctx, vec![finger(1, Start, 300.0, 300.0)], &mut time, rect);
+        let motion = touch_motion_frame(&mut touch, &ctx, vec![finger(1, Move, 320.0, 310.0), finger(1, End, 320.0, 310.0)], &mut time, rect);
+        assert!(motion.active);
+        assert_eq!(motion.mode, Some(super::NavMode::Pan));
+        assert_eq!(motion.delta, egui::vec2(20.0, 10.0));
+        assert!(touch.contacts.is_empty());
+        assert!(!touch.owned);
+        touch_motion_frame(&mut touch, &ctx, vec![finger(2, Start, 300.0, 300.0)], &mut time, rect);
+        let tap = touch_motion_frame(&mut touch, &ctx, vec![finger(2, End, 300.0, 300.0)], &mut time, rect);
+        assert_eq!(tap.mode, None);
+        assert_eq!(tap.delta, egui::Vec2::ZERO);
+    }
+
+    #[test]
+    fn touchscreen_pinch_uses_displayed_projection_for_anchor() {
+        use egui::TouchPhase::{Move, Start};
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        app.preferences.touchscreen_navigation = true;
+        app.preferences.zoom_to_cursor = true;
+        app.ui.perspective = true;
+        app.cam.fov = 0.0;
+        assert!(app.view_fov() > 0.0);
+        let ctx = crate::fonts::test_context();
+        let mut time = 0.0;
+        let rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
+        let centre = egui::pos2(450.0, 300.0);
+        let mut events = pointer(400.0, 300.0, Some(true));
+        events.extend([finger(1, Start, 400.0, 300.0), finger(2, Start, 500.0, 300.0)]);
+        touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+        let anchor = super::zoom_anchor(&mut app, rect, Some(centre), true).unwrap();
+        let before = super::projection(&app, rect).to_screen(anchor).unwrap();
+        let events = vec![finger(1, Move, 375.0, 300.0), finger(2, Move, 525.0, 300.0)];
+        touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+        let after = super::projection(&app, rect).to_screen(anchor).unwrap();
+        assert!((after - before).length() < 0.05, "anchor moved from {before:?} to {after:?}");
+        assert_eq!(app.cam.fov, 0.0, "stored projection is preserved");
     }
 
     #[test]

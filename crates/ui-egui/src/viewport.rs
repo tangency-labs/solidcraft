@@ -9118,6 +9118,77 @@ mod tests {
         }
     }
 
+    #[test]
+    fn pencil_mode_finger_hold_preserves_pen_buttons_and_finger_identity() {
+        let mut h = pencil_box();
+        let ctx = h.ctx.clone();
+        let finger_pos = screen(&mut h, [5.0, 5.0, 10.0]);
+        let pen_pos = finger_pos + egui::vec2(40.0, 0.0);
+        let button =
+            |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        let touch = |phase| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(1), phase, pos: finger_pos, force: None };
+        let mut start =
+            egui::RawInput { time: Some(1.0), events: vec![button(finger_pos, true), touch(egui::TouchPhase::Start)], ..Default::default() };
+        crate::pencil::filter(
+            &mut h.app,
+            &ctx,
+            &mut start,
+            &crate::pencil::PlatformTaps { finger_down: Some(finger_pos), pen_down: true, ..Default::default() },
+        );
+        assert!(
+            start.events.iter().any(|e| matches!(e, egui::Event::Touch { phase: egui::TouchPhase::Start, .. })),
+            "a finger starting while the pen is down remains a finger"
+        );
+        assert!(!start.events.iter().any(|e| matches!(e, egui::Event::PointerButton { .. })));
+        for pressed in [true, false] {
+            let taps = if pressed {
+                crate::pencil::PlatformTaps { pen_press: Some(pen_pos), pen_down: true, ..Default::default() }
+            } else {
+                crate::pencil::PlatformTaps { pen_release: Some(pen_pos), ..Default::default() }
+            };
+            let mut raw = egui::RawInput { time: Some(1.1), events: vec![button(pen_pos, pressed)], ..Default::default() };
+            crate::pencil::filter(&mut h.app, &ctx, &mut raw, &taps);
+            assert!(matches!(raw.events.as_slice(), [egui::Event::PointerButton { pressed: p, .. }] if *p == pressed));
+        }
+    }
+
+    #[test]
+    fn pencil_mode_finger_drag_returning_to_start_is_not_a_tap() {
+        let mut h = pencil_box();
+        let ctx = h.ctx.clone();
+        let at = screen(&mut h, [5.0, 5.0, 10.0]);
+        let touch = |id, phase, pos| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(id), phase, pos, force: None };
+        let mut filter = |time, events, taps| {
+            let mut raw = egui::RawInput { time: Some(time), events, ..Default::default() };
+            crate::pencil::filter(&mut h.app, &ctx, &mut raw, &taps);
+        };
+        filter(1.0, vec![touch(1, egui::TouchPhase::Start, at)], crate::pencil::PlatformTaps { finger_down: Some(at), ..Default::default() });
+        filter(1.1, vec![touch(1, egui::TouchPhase::Move, at + egui::vec2(30.0, 0.0))], Default::default());
+        filter(1.2, vec![touch(1, egui::TouchPhase::End, at)], Default::default());
+        filter(1.25, vec![touch(2, egui::TouchPhase::Start, at)], crate::pencil::PlatformTaps { finger_down: Some(at), ..Default::default() });
+        filter(1.3, vec![touch(2, egui::TouchPhase::End, at)], Default::default());
+        assert!(h.app.viewport.fingers.double_tap.is_none(), "a drag followed by one tap is not a double-tap");
+    }
+
+    #[test]
+    fn pencil_mode_whole_sketch_includes_spatial_wires() {
+        for mixed in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            if mixed {
+                h.app.run("sketch.line", json!({"points": [[0,0], [10,0]], "infer":false})).unwrap();
+            }
+            h.app.run("sketch.options", json!({"sketch_3d":true})).unwrap();
+            let wire =
+                h.app.run("sketch.spline3d", json!({"points": [[0,0,0], [10,5,10], [20,0,20]]})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+            let sketch = h.app.session.active_sketch.unwrap();
+            let point = Hit::SketchPoint3d { sketch, id: format!("{wire}:0"), at: solidcore_record::Vec3::ZERO };
+            let selected = crate::pencil::whole(&h.app, &point).unwrap();
+            assert!(selected.iter().any(|s| matches!(s, Sel::SketchCurve { id, .. } if id == &wire)));
+            assert_eq!(selected.len(), if mixed { 2 } else { 1 });
+        }
+    }
+
     /// A component dragged with its Move triad is drawn as a layer: its bodies' scene is built
     /// once, where the drag found them, and drawn moved by the drag's motion, the rest of the
     /// model scene stays as it was (with the ground its ambient occlusion darkens put together

@@ -52,6 +52,8 @@ pub(crate) fn is_pen_release(pen: Option<Pos2>, at: Pos2) -> bool {
 /// What the platform knows about this frame's contacts and egui doesn't.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PlatformTaps {
+    /// Where a pen tip was pressed in this frame.
+    pub pen_press: Option<Pos2>,
     /// Where a pen tip was lifted: the primary release at this point is a pen tap.
     pub pen_release: Option<Pos2>,
     /// Where a finger went down on the app's canvas since the last frame.
@@ -71,6 +73,7 @@ struct Contact {
     start: Pos2,
     at: Pos2,
     since: f64,
+    moved: bool,
 }
 
 /// The fingers on the view while Pencil mode is on.
@@ -135,7 +138,7 @@ pub(crate) fn filter(app: &mut SolveApp, ctx: &egui::Context, raw: &mut RawInput
     let mut pen_touches = Vec::new();
     for (device, id, phase, pos) in touches {
         let fingers = &mut app.viewport.fingers;
-        let pen = if phase == TouchPhase::Start { taps.pen_down || taps.stylus.contains(&id) } else { fingers.pens.contains(&id) };
+        let pen = if phase == TouchPhase::Start { taps.stylus.contains(&id) } else { fingers.pens.contains(&id) };
         if pen {
             match phase {
                 TouchPhase::Start if fingers.pens.len() < MAX_PENS && !fingers.pens.contains(&id) => fingers.pens.push(id),
@@ -161,13 +164,14 @@ pub(crate) fn filter(app: &mut SolveApp, ctx: &egui::Context, raw: &mut RawInput
                     fingers.several = true;
                 }
                 if pos.is_finite() && fingers.contacts.len() < MAX_CONTACTS && !fingers.contacts.iter().any(|c| c.device == device && c.id == id) {
-                    fingers.contacts.push(Contact { device, id, start: pos, at: pos, since: now });
+                    fingers.contacts.push(Contact { device, id, start: pos, at: pos, since: now, moved: false });
                 }
             }
             TouchPhase::Move => {
                 if let Some(c) = fingers.contacts.iter_mut().find(|c| c.device == device && c.id == id)
                     && pos.is_finite()
                 {
+                    c.moved |= pos.distance(c.start) > TAP_SLOP;
                     c.at = pos;
                 }
             }
@@ -178,6 +182,7 @@ pub(crate) fn filter(app: &mut SolveApp, ctx: &egui::Context, raw: &mut RawInput
                 let tap = phase == TouchPhase::End
                     && fingers.holding
                     && !fingers.several
+                    && !c.moved
                     && fingers.contacts.is_empty()
                     && now - c.since <= TAP_TIME
                     && end.distance(c.start) <= TAP_SLOP;
@@ -204,8 +209,11 @@ pub(crate) fn filter(app: &mut SolveApp, ctx: &egui::Context, raw: &mut RawInput
     // the press becomes a move there, so the view still knows the finger is over it and
     // touchscreen navigation can take the gesture, but nothing is clicked.
     for e in &mut raw.events {
-        if let Event::PointerButton { pos, button: PointerButton::Primary, .. } = *e {
-            *e = Event::PointerMoved(pos);
+        if let Event::PointerButton { pos, button: PointerButton::Primary, pressed, .. } = *e {
+            let pen = if pressed { taps.pen_press } else { taps.pen_release };
+            if !is_pen_release(pen, pos) {
+                *e = Event::PointerMoved(pos);
+            }
         }
     }
     // The last finger has lifted (its release was just taken out), or a finger reported down
@@ -285,11 +293,22 @@ pub(crate) fn finger_double_tap(app: &mut SolveApp, proj: &Proj, p: Pos2) -> boo
 pub(crate) fn whole(app: &SolveApp, hit: &Hit) -> Option<Vec<Sel>> {
     match hit {
         Hit::Face { body, .. } | Hit::Edge { body, .. } | Hit::Vertex { body, .. } => Some(vec![Sel::Body { name: body.clone() }]),
-        Hit::SketchCurve { sketch, .. } | Hit::SketchPoint { sketch, .. } | Hit::SketchMidpoint { sketch, .. } | Hit::Profile { sketch, .. } => {
+        Hit::SketchCurve { sketch, .. }
+        | Hit::SketchPoint { sketch, .. }
+        | Hit::SketchPoint3d { sketch, .. }
+        | Hit::SketchMidpoint { sketch, .. }
+        | Hit::Profile { sketch, .. } => {
             if app.session.active_sketch == Some(*sketch) {
                 let state = crate::open_meshing::session_world(&app.session);
                 let ss = state.sketch(*sketch)?;
-                let curves: Vec<Sel> = ss.sketch.curves.iter().map(|c| Sel::SketchCurve { id: c.id.clone(), sketch: None }).collect();
+                let curves: Vec<Sel> = ss
+                    .sketch
+                    .curves
+                    .iter()
+                    .map(|c| &c.id)
+                    .chain(ss.sketch.wires.iter().map(|w| &w.id))
+                    .map(|id| Sel::SketchCurve { id: id.clone(), sketch: None })
+                    .collect();
                 (!curves.is_empty()).then_some(curves)
             } else {
                 Some(vec![Sel::Feature { id: *sketch }])
