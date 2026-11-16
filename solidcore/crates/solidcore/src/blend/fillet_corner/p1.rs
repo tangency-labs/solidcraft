@@ -2834,10 +2834,15 @@ impl FilletCorner {
                 core::cmp::Ordering::Greater => rest.push(curve_of(e)?),
             }
         }
+        // the seam's two sides, with their NURBS forms: the End's definition keeps them
+        let seam_side = |from: Point3, to: Point3| -> Result<Curve> {
+            let mut line = Line::from_points(from, to, 3);
+            line.make_nurb()?;
+            Ok(Curve::from(line))
+        };
         first.push(head.copy(env.k)?);
-        first.push(Curve::from(Line::from_points(w_point, s_point, 3)));
-        let mut second: Vec<Curve> =
-            vec![Curve::from(Line::from_points(s_point, w_point, 3)), tail];
+        first.push(seam_side(w_point, s_point)?);
+        let mut second: Vec<Curve> = vec![seam_side(s_point, w_point)?, tail];
         second.extend(rest);
         let first_on_end = first_faces.contains(&cap.end_face);
         let (end_part, wall_part) = if first_on_end {
@@ -2861,11 +2866,16 @@ impl FilletCorner {
                     ring.push(c.evaluate_point(env.k, ivl.evaluate(f64::from(step) / 4.0))?);
                 }
             }
+            // (about the ring's first point, so the terms scale with the cap, not with its
+            // distance from the origin)
+            let Some(&p2) = ring.first() else {
+                return Err(fail()); // a cap part's loop has no points
+            };
             let mut newell = Vec3::new(0.0, 0.0, 0.0);
             for (a, b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
-                newell += a.cross(*b);
+                newell += (*a - p2).cross(*b - p2);
             }
-            let (Some(&p2), Ok(patch_normal)) = (ring.first(), newell.unitize()) else {
+            let Ok(patch_normal) = newell.unitize() else {
                 return Err(fail()); // a cap part's loop has no normal
             };
             let loop_orient = loop_orientation(env.k, &net, p2, patch_normal, OP)?;
