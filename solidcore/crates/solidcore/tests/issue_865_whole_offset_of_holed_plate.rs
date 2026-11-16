@@ -376,24 +376,21 @@ fn l_sheet(k: &mut Kernel, hole_x: f64) -> Brep {
     boolean_difference(k, sheet, hole).unwrap()
 }
 
-/// The L sheet's hole 0.5 from the bend (about (18.5, 5)), offset 2 into the L, results
-/// not merged. The floor's offset (z = 2) ends where it meets the wall's (x = 18), so the
-/// hole's loop crosses the floor offset's outer loop. An open sheet's plain offset builds
-/// no walls: the floor's offset is rebuilt from its loops' stretches, notched where the
-/// hole reaches past x = 18, and stitched to the wall's along the edge they share. It is
-/// `check_brep` Level 2 clean, of the closed-form area: the floor 18 x 10 less the hole's
-/// segment beyond x = 18 (chord 0.5 from the centre), plus the wall 8 x 10. Merged, it is
-/// the same.
+/// The L sheet's hole 0.5 from the bend (about (18.5, 5)), offset 2 into the L. The
+/// floor's offset (z = 2) ends where it meets the wall's (x = 18), so the hole's loop
+/// crosses the floor offset's outer loop. With results not merged it is refused as
+/// [`LoopCrossing::Unmerged`], as every unmerged offset whose face's loops cross is: body
+/// type does not tell whether two walls pass through each other there (an open sheet with
+/// a hole through a face of its own has the same two walls as a solid). Merged, it is
+/// built: `check_brep` Level 2 clean, of the closed-form area, the floor 18 x 10 less the
+/// hole's segment beyond x = 18 (chord 0.5 from the centre), plus the wall 8 x 10.
 #[test]
-fn an_open_sheet_with_crossing_loops_offsets_unmerged() {
-    let segment = (0.5_f64).acos() - 0.5 * (1.0_f64 - 0.25).sqrt();
-    let want = 18.0 * 10.0 - segment + 8.0 * 10.0;
-    for merge_results in [false, true] {
-        let mut k = Kernel::default();
-        let mut sheet = l_sheet(&mut k, 18.5);
+fn an_open_sheet_with_crossing_loops_offsets_only_merged() {
+    let offset = |k: &mut Kernel, merge_results: bool| {
+        let mut sheet = l_sheet(k, 18.5);
         let mut notifications = offset_fixture::Notifications::new(&mut sheet);
-        let mut result = api_offset_brep_full(
-            &mut k,
+        api_offset_brep_full(
+            k,
             Some(&mut sheet),
             OffsetOptions {
                 distance: 2.0,
@@ -402,25 +399,38 @@ fn an_open_sheet_with_crossing_loops_offsets_unmerged() {
             },
             &mut notifications.context(),
         )
-        .unwrap_or_else(|e| panic!("merge {merge_results}: {e:?}"));
-        result.refresh_cached_topology();
-        result.use_arena_naming().unwrap();
-        let lines = check_brep(&mut k, &mut result, CheckLevel::Level2)
-            .unwrap()
-            .lines();
-        assert!(lines.is_empty(), "merge {merge_results}: {lines:?}");
-        let got = brep_area(&k, &mut result, 1e-9).unwrap();
-        assert!(
-            (got - want).abs() <= 1e-6 * want,
-            "merge {merge_results}: area {got}, closed form {want}"
-        );
-    }
+    };
+    let mut k = Kernel::default();
+    let e = offset(&mut k, false).unwrap_err();
+    let cause = e.root_cause();
+    let Some(Reason::Offset(OffsetFailure::LoopsCross {
+        face: Some(_),
+        crossing: LoopCrossing::Unmerged,
+    })) = cause.failure().map(|f| &f.reason)
+    else {
+        panic!("{e:?}");
+    };
+    assert_eq!(cause.sm_status(), Some(1027));
+
+    let segment = (0.5_f64).acos() - 0.5 * (1.0_f64 - 0.25).sqrt();
+    let want = 18.0 * 10.0 - segment + 8.0 * 10.0;
+    let mut k = Kernel::default();
+    let mut result = offset(&mut k, true).unwrap();
+    result.refresh_cached_topology();
+    result.use_arena_naming().unwrap();
+    let lines = check_brep(&mut k, &mut result, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    let got = brep_area(&k, &mut result, 1e-9).unwrap();
+    assert!(
+        (got - want).abs() <= 1e-6 * want,
+        "area {got}, closed form {want}"
+    );
 }
 
 /// The same sheet thickened by 2 into the L (`create_offset_solid`), results not merged:
-/// thickening builds side walls along the sheet's open edges, and the hole's wall and the
-/// floor's offset end pass through each other uncut, so it is refused as
-/// [`LoopCrossing::Unmerged`]. The hole moved to (10, 5), well clear of the bend, it
+/// refused as [`LoopCrossing::Unmerged`] like its plain offset. The hole moved to (10, 5), well clear of the bend, it
 /// thickens unmerged into a valid manifold solid of the closed-form volume: the L's two
 /// slabs (20 x 10 x 2 and 2 x 10 x 8) less the hole's r 1 x 2 cylinder.
 #[test]

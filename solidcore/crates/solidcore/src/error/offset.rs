@@ -315,9 +315,8 @@ pub enum LoopCrossing {
     /// The face comes apart around a hole.
     ComesApartAroundHole,
     /// The offset's results are not merged, so the walls the crossing loops come from
-    /// are not cut where they pass through each other; only the merge cuts them. Only for
-    /// an offset that builds walls (any body but an open sheet, the local operation's, a
-    /// sheet thickened).
+    /// are not cut where they pass through each other; only the merge cuts them (the local
+    /// operation, always unmerged, included).
     Unmerged,
 }
 

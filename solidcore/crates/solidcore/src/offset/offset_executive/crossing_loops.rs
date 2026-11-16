@@ -36,8 +36,7 @@
 //! Not in the fork: a loop of one edge use that no crossing cuts is not taken for a stretch
 //! too short to build, though its closed curve's two ends meet (the fork refuses an uncut
 //! hole circle beside a crossing as three loops at one point). Where the offset's results
-//! are not merged and it builds walls (any body but an open sheet, the local operation's
-//! included, or a sheet thickened), a face whose loops cross is refused
+//! are not merged (the local operation's included), a face whose loops cross is refused
 //! ([`crate::error::offset::LoopCrossing::Unmerged`]): only the merge cuts the walls the
 //! crossing loops come from where they pass through each other.
 //!
@@ -544,37 +543,6 @@ fn stretch_too_short(from: i64, to: i64, distance: f64, tol_3d: f64) -> bool {
     !whole_loop && distance.partial_cmp(&tol_3d) != Some(core::cmp::Ordering::Greater)
 }
 
-/// (not in the fork) Whether an offset whose face's loops cross is refused as
-/// `LoopCrossing::Unmerged`: its results are not merged, and it builds walls: a sheet
-/// thickened (`create_offset_solid`) or any body that is not an open sheet (`open_sheet`,
-/// asked only then).
-fn refuses_unmerged(
-    merge_results: bool,
-    create_offset_solid: bool,
-    open_sheet: impl FnOnce() -> Result<bool>,
-) -> Result<bool> {
-    if merge_results {
-        return Ok(false);
-    }
-    Ok(create_offset_solid || !open_sheet()?)
-}
-
-/// (not in the fork) Whether `b` is an open sheet, the only body whose plain offset builds
-/// no walls: one shell (`SmBrep::IsSheet`: every edge lamina or manifold) with at least one
-/// lamina edge, so that shell is not closed. A closed body (its regions labelled or not), a
-/// non-manifold one, one with a face hanging off it and one of several lumps are not.
-fn is_open_sheet(k: &mut Kernel, b: &Brep) -> Result<bool> {
-    if !crate::topology::brep::p2::is_sheet(k, b)? {
-        return Ok(false);
-    }
-    for e in bp1::edges(b, None)? {
-        if eu::edge_is_lamina(b, e)? {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
 impl OffsetExecutive {
     /// `ResolveCrossingLoops` (fork, not upstream): rebuilds every offset face whose
     /// loops cross one another. Each loop of an offset face is made of the offsets of
@@ -751,24 +719,18 @@ impl OffsetExecutive {
             }
         }
 
-        // (not in the fork) Rebuilding this face trims it alone. Where its loops cross, the
-        // offset walls the crossing loops' edges bound pass through each other along a
-        // curve through the crossing; only the merge (`PiecewiseMerge` with merged results)
-        // cuts them there. The unmerged path only stitches the offset faces, so the walls
-        // stay whole: the stitch encloses no region (the face rebuilt) or the face keeps
-        // loops that cross (`SmFace` test #38, the face left as it is). No unmerged offset
-        // with walls is valid here, and it is refused as such. Walls there are where the
-        // body offset is a solid (its faces' offsets meet along its edges) or a sheet is
-        // thickened (side walls along its open edges). An open sheet's plain offset has
-        // none: the rebuilt face is stitched to its neighbours' offsets along the edges
-        // they share, and its other edges stay open. Any other body is refused: a closed
-        // one (whatever its regions say), a non-manifold one or one with a face hanging
-        // off it has faces whose offsets meet as walls. The local operation (always
-        // unmerged) is no exception: its offset faces are stitched alike before they are
-        // moved into the body.
-        if refuses_unmerged(self.merge_results(), self.create_offset_solid(), || {
-            is_open_sheet(kernel, original)
-        })? {
+        // (not in the fork) Rebuilding this face trims it alone. Where its loops cross, an
+        // offset wall a crossing loop's edges bound (the offset of the face across that
+        // edge) is cut there only by the merge (`PiecewiseMerge` with merged results). The
+        // unmerged path only stitches the offset faces, so where two such walls pass
+        // through each other they stay whole: the stitch encloses no region (the face
+        // rebuilt) or the face keeps loops that cross (`SmFace` test #38, the face left as
+        // it is). Body type does not tell where that happens: an open sheet with a hole
+        // through a face of its own has the same two walls as a solid. Every unmerged
+        // offset whose face's loops cross is therefore refused; with the results merged
+        // the same offset is built. The local operation (always unmerged) is no exception:
+        // its offset faces are stitched alike before they are moved into the body.
+        if !self.merge_results() {
             return Err(unresolved(LoopCrossing::Unmerged));
         }
 
@@ -1516,17 +1478,5 @@ mod tests {
         // long enough
         assert!(!stretch_too_short(0, 1, 0.02, tol));
         assert!(!stretch_too_short(-2, -3, 0.02, tol));
-    }
-
-    /// The refusal applies to unmerged offsets that build walls and to nothing else.
-    #[test]
-    fn unmerged_refusal_needs_walls_and_no_merge() {
-        let solid = || Ok(false);
-        let sheet = || Ok(true);
-        assert!(refuses_unmerged(false, false, solid).unwrap());
-        assert!(refuses_unmerged(false, true, sheet).unwrap());
-        assert!(!refuses_unmerged(false, false, sheet).unwrap());
-        assert!(!refuses_unmerged(true, true, solid).unwrap());
-        assert!(!refuses_unmerged(true, false, solid).unwrap());
     }
 }
