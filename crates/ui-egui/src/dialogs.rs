@@ -2315,6 +2315,13 @@ impl Dialog {
                 }
             } else if !inp.items.iter().any(|y| selection::same_item(y, &x)) {
                 inp.items.push(x);
+            } else if inp.chain == Some(true)
+                && inp.chain_written.iter().any(|y| selection::same_item(y, &x))
+                && !inp.chain_seeds.iter().any(|(y, _)| selection::same_item(y, &x))
+            {
+                // Already listed through an earlier pick's chain, it is a pick of its own all the
+                // same: unticking Tangent Chain keeps it.
+                inp.chain_seeds.push((x, None));
             }
         }
         // A marquee that took something is the pick a waiting pick field waited for (#10428).
@@ -2355,27 +2362,49 @@ impl Dialog {
     /// and stays a pick (to go back to when the switch is unticked) even when an earlier pick's
     /// chain already holds it; an item gone takes out the picks whose chain held it, with their
     /// chains, as picking a chain's edge again does.
+    ///
+    /// A chain is closed under walking on (the edge an edge runs on into depends on that edge
+    /// alone), so the chain of a pick inside an earlier pick's chain lies inside that chain: it
+    /// adds nothing, and holds nothing gone while the earlier pick stays. Such a pick is walked
+    /// only once the earlier pick goes, so a marquee over a smooth loop of N edges walks once.
     pub fn sync_input_chains(&mut self, s: &Session) {
         for inp in &mut self.inputs {
             if inp.chain != Some(true) || inp.items == inp.chain_written {
                 continue;
             }
-            let gone: Vec<Sel> = inp.chain_written.iter().filter(|x| !inp.items.iter().any(|y| selection::same_item(x, y))).cloned().collect();
-            inp.chain_seeds.retain(|(_, chain)| !gone.iter().any(|g| chain.iter().any(|y| selection::same_item(g, y))));
-            let new: Vec<Sel> = inp.items.iter().filter(|x| !inp.chain_written.iter().any(|y| selection::same_item(x, y))).cloned().collect();
-            for x in new {
-                if !inp.chain_seeds.iter().any(|(y, _)| selection::same_item(&x, y)) {
-                    let chain = curve_edges(s, &x);
-                    inp.chain_seeds.push((x, chain));
+            let listed = selection::ItemSet::of(&inp.items);
+            let written = selection::ItemSet::of(&inp.chain_written);
+            let gone = selection::ItemSet::of(inp.chain_written.iter().filter(|x| !listed.contains(x)));
+            // The picks so far, each checked against what is gone, then each new item as a pick.
+            let mut seeds: Vec<(Sel, Option<Vec<Sel>>, bool)> = inp.chain_seeds.drain(..).map(|(x, chain)| (x, chain, true)).collect();
+            let mut seeded = selection::ItemSet::of(seeds.iter().map(|(x, ..)| x));
+            for x in &inp.items {
+                if !written.contains(x) && seeded.insert(x) {
+                    seeds.push((x.clone(), None, false));
                 }
             }
             let mut items: Vec<Sel> = Vec::new();
-            for (_, chain) in &inp.chain_seeds {
-                for y in chain {
-                    if !items.iter().any(|z| selection::same_item(z, y)) {
+            let mut have = selection::ItemSet::default();
+            for (x, chain, old) in seeds {
+                let chain = match chain {
+                    Some(chain) => chain,
+                    // Inside a chain kept before it (the picks so far come first, each checked
+                    // against what is gone): its own chain adds nothing and holds nothing gone.
+                    None if have.contains(&x) => {
+                        inp.chain_seeds.push((x, None));
+                        continue;
+                    }
+                    None => curve_edges(s, &x),
+                };
+                if old && chain.iter().any(|y| gone.contains(y)) {
+                    continue;
+                }
+                for y in &chain {
+                    if have.insert(y) {
                         items.push(y.clone());
                     }
                 }
+                inp.chain_seeds.push((x, Some(chain)));
             }
             inp.items = items.clone();
             inp.chain_written = items;

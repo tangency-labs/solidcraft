@@ -12,6 +12,51 @@ use crate::viewport::Hit;
 pub(crate) use solidcraft_engine::pick_pieces::polyline_mid;
 pub(crate) use solidcraft_engine::selection_context::same_item;
 
+/// A set of picks by [`same_item`] identity: model edges and faces by body and index in a hash
+/// set, anything else in a list.
+#[derive(Default)]
+pub(crate) struct ItemSet {
+    keyed: std::collections::HashSet<(bool, String, usize)>,
+    other: Vec<Sel>,
+}
+
+impl ItemSet {
+    pub(crate) fn of<'a>(items: impl IntoIterator<Item = &'a Sel>) -> ItemSet {
+        let mut set = ItemSet::default();
+        for x in items {
+            set.insert(x);
+        }
+        set
+    }
+
+    fn key(x: &Sel) -> Option<(bool, &str, usize)> {
+        match x {
+            Sel::Edge { body, index, .. } => Some((true, body.as_str(), *index)),
+            Sel::Face { body, index, .. } => Some((false, body.as_str(), *index)),
+            _ => None,
+        }
+    }
+
+    /// Add `x`; whether it was not in the set yet.
+    pub(crate) fn insert(&mut self, x: &Sel) -> bool {
+        match ItemSet::key(x) {
+            Some((edge, body, index)) => self.keyed.insert((edge, body.to_owned(), index)),
+            None if self.other.iter().any(|y| same_item(x, y)) => false,
+            None => {
+                self.other.push(x.clone());
+                true
+            }
+        }
+    }
+
+    pub(crate) fn contains(&self, x: &Sel) -> bool {
+        match ItemSet::key(x) {
+            Some((edge, body, index)) => self.keyed.contains(&(edge, body.to_owned(), index)),
+            None => self.other.iter().any(|y| same_item(x, y)),
+        }
+    }
+}
+
 /// Whether the selection holds the body `body`: selected on its own, or through a selected
 /// occurrence (the bodies its placement shows, as its Browser row lists them).
 pub(crate) fn holds_body(session: &solidcraft_engine::Session, body: &str) -> bool {
@@ -115,8 +160,10 @@ pub struct SelInput {
     /// an edge picked into it brings every edge that continues it smoothly as a curve (a path,
     /// rail or boundary to run along: [`crate::dialogs::Dialog::sync_input_chains`]).
     pub chain: Option<bool>,
-    /// While Tangent Chain is on: each pick, with the edges its chain brought in.
-    pub(crate) chain_seeds: Vec<(Sel, Vec<Sel>)>,
+    /// While Tangent Chain is on: each pick, with the edges its chain brought in. `None` for a
+    /// pick that lies in an earlier pick's chain: its own chain lies in that one too, so it is
+    /// walked only when that earlier pick goes ([`crate::dialogs::Dialog::sync_input_chains`]).
+    pub(crate) chain_seeds: Vec<(Sel, Option<Vec<Sel>>)>,
     /// The items as the chains last wrote them: a difference is a pick or a removal to follow.
     pub(crate) chain_written: Vec<Sel>,
 }
