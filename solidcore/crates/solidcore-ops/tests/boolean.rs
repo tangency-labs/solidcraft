@@ -1698,6 +1698,22 @@ fn a_traced_intersect_keeps_every_5_mm_round_beside_the_grooves_1_mm_rounds() {
     );
 }
 
+/// #14477's join as SolidCraft passed it: a 14 x 20 x 35 block with a 3.2 mm hole whose rim on
+/// the y = -20 face is chamfered 0.5 mm, joined with that face extruded 10 mm (a slab with a
+/// 4.2 mm hole, the chamfer's outer rim). The two touch on the face; the join is their sum.
+#[test]
+fn a_traced_join_onto_a_chamfered_holes_face_is_their_sum() {
+    all_fixes();
+    let body = traced_operands("issue_14477_join_over_chamfered_hole");
+    // the block less the 1.6 hole and the chamfer's ring (Pappus), the slab less its 2.1 hole
+    let block = 14.0 * 20.0 * 35.0 - PI * 1.6 * 1.6 * 20.0 - TAU * (1.6 + 0.5 / 3.0) * 0.125;
+    let slab = 14.0 * 10.0 * 35.0 - PI * 2.1 * 2.1 * 10.0;
+    let r = boolean(body("target"), body("tool"), BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(&r, [9, 19, 12], block + slab, 1e-9);
+}
+
 /// A 10 mm cube with the vertical edge at x = 0, y = 0 rounded to radius 2.
 fn filleted_cube() -> Body {
     let block = make_box([0.0; 3], [10.0, 10.0, 10.0]).unwrap();

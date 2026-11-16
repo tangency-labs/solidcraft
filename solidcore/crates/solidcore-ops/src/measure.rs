@@ -320,6 +320,15 @@ pub fn point_distance(a: [f64; 3], b: [f64; 3]) -> Result<Distance> {
     q::point_distance(a, b).map(Distance::from).map_err(status)
 }
 
+/// The largest distance from `p` to a point of the box `[lo, hi]`: to its farthest corner
+/// (`query::api_queries::box_max_distance_to_point`).
+///
+/// # Errors
+/// [`Error::Argument`] for a coordinate that is not finite.
+pub fn box_max_distance_to_point(lo: [f64; 3], hi: [f64; 3], p: [f64; 3]) -> Result<f64> {
+    q::box_max_distance_to_point(point(lo)?, point(hi)?, point(p)?).map_err(status)
+}
+
 /// Whether two points meet: their distance is within `tol` (the rounded distance of
 /// [`point_distance`], not more than `tol`).
 ///

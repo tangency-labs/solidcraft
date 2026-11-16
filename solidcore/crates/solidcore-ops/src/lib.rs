@@ -50,6 +50,7 @@ pub mod curve_knots;
 pub mod curve_plane;
 pub mod cylinder_wall;
 pub mod error;
+pub mod export_geometry;
 pub mod extend;
 pub mod face_surface;
 pub mod file;
@@ -74,6 +75,7 @@ pub mod sweep;
 pub mod tangent;
 pub mod trim;
 pub mod untrim;
+pub mod vertex_meet;
 
 pub use blend::{
     band_room, blend, blend_ordered, carried_faces, carried_faces_ordered, chamfer_sides,

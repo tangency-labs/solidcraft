@@ -16,8 +16,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)] // test helpers
 
 use solidcore::geom::assert_array::AssertArray;
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::object::ObjectRef;
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::mass::integrator::properties::brep_area;
 use solidcore::offset::offset_executive::p2::{offset_brep_simple, OffsetOptions};
 use solidcore::topology::brep::p10::TopologyEnv;
@@ -28,7 +27,7 @@ use solidcore::topology::brep::validation::{
 };
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::{Brep, EntityRef, Kernel};
+use solidcore::{Brep, Kernel};
 
 const SHEET: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -64,10 +63,7 @@ fn offset(d: f64, keep: bool) -> (Kernel, Brep) {
     let mut read = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,
@@ -159,10 +155,7 @@ fn offset_with(d: f64, flags: &[&str]) -> (Kernel, Brep) {
     let mut read = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,

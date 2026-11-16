@@ -876,6 +876,63 @@ fn a_snapped_edge_that_cuts_an_arc_between_its_chord_samples_is_found_to_cross_i
     ]));
 }
 
+/// A field with a round keep-out well inside it: the outer edges and the keep-out can be clipped
+/// by different modes.
+fn keep_out_field() -> Vec<Loop2> {
+    vec![rect(0.3, 0.2, 43.1, 40.7), circle(21.0, 20.0, 4.3)]
+}
+
+fn kind_count(p: &CellGridPlan, kind: CellKind) -> usize {
+    p.cells.iter().filter(|c| c.kind == kind).count()
+}
+
+#[test]
+fn a_keep_out_can_be_clipped_by_another_mode_than_the_field() {
+    let field = keep_out_field();
+    let snap = run(&field, &with_clip(CellShape::Hexagon, Clip::Snap));
+    // The default: the keep-out follows `clip`.
+    let same = CellGridSpec {
+        keepout_clip: Some(Clip::Snap),
+        ..with_clip(CellShape::Hexagon, Clip::Snap)
+    };
+    let same = run(&field, &same);
+    assert_eq!(counts(&snap), counts(&same));
+    assert!((snap.open_area - same.open_area).abs() < 1e-9);
+    assert_eq!(kind_count(&snap, CellKind::Free), 0);
+    // Free round the keep-out only: its cells are trimmed to the circle, the outer edge's are not.
+    let mixed = CellGridSpec {
+        keepout_clip: Some(Clip::Free),
+        ..with_clip(CellShape::Hexagon, Clip::Snap)
+    };
+    let mixed = run(&field, &mixed);
+    let free = kind_count(&mixed, CellKind::Free);
+    assert!(
+        free > 0 && free < mixed.cells.len() / 2,
+        "{free} of {}",
+        mixed.cells.len()
+    );
+    // Cells far from the keep-out are the same as with snap everywhere.
+    let far = |p: &CellGridPlan| {
+        let mut v: Vec<(i64, i64)> = p
+            .cells
+            .iter()
+            .filter(|c| c.center.distance(v(21.0, 20.0)) > 4.3 + 2.0 * P)
+            .map(|c| (c.i, c.j))
+            .collect();
+        v.sort_unstable();
+        v
+    };
+    assert_eq!(far(&mixed), far(&snap));
+    // Whole round the keep-out only: no cell touches the circle, and nothing is trimmed.
+    let whole = CellGridSpec {
+        keepout_clip: Some(Clip::Whole),
+        ..with_clip(CellShape::Hexagon, Clip::Snap)
+    };
+    let whole = run(&field, &whole);
+    assert_eq!(kind_count(&whole, CellKind::Free), 0);
+    assert!(whole.open_area <= snap.open_area + 1e-9);
+}
+
 #[test]
 fn an_edge_that_passes_through_a_vertex_of_the_loop_is_not_simple() {
     // (0,0) -> (4,4) passes through the vertex (2,2), where the two edges on either side of it

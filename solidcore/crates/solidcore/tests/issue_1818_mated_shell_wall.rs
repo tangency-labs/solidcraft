@@ -199,8 +199,7 @@ fn mated_offsets_alone_shell_the_square_to_circle_loft() {
     );
 }
 
-/// SolidCraft's fixes (`issue_1476_swept_bar_shell.rs`, which include the flag and WR-454's
-/// `shell_empty_cavity_fails`): the same sound body, with loop-gap closure unconditional.
+/// SolidCraft's fixes (`issue_1476_swept_bar_shell.rs`, which include the flag): the same sound body, with loop-gap closure unconditional.
 #[test]
 fn solidcraft_fixes_shell_the_square_to_circle_loft() {
     let (mut k, result) = shell(&solidcraft_fixes(), true);
@@ -304,17 +303,12 @@ fn solidcraft_fixes() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_chamfer_cone_on_arc = true;
-    f.offset_excess_faces_after_merge = true;
-    f.offset_clip_right_side_out = true;
     f.offset_extended_edges_mated = true;
     f.keep_operand_uv_trims = true;
     f.geometric_g2_continuity = true;
     f.proto_vertex_miss_is_false = true;
-    f.check_loop_vertex_tolerance = true;
-    f.check_loop_projected_seam_ends = true;
     f.cylinder_rebuild_mean_radius = true;
     f.revolve_analytic_profile_faces = true;
-    f.revolve_nested_shells_as_cavities = true;
     f.join_touching_loops = true;
     f.offset_resolve_crossing_loops = true;
     f.offset_analytic_mate_edges = true;
@@ -329,7 +323,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.ellipse_trim_seam_lines_span_cone_height = true;
     f.degenerate_proto_edge_in_one_vertex = true;
     f.new_edge_vertex_tolerance_covers_gap = true;
-    f.torus_signed_gen_curve_interval = true;
     f.point_solve_keeps_triangle_guess = true;
     f.imprint_extends_edge_to_proto_vertex = true;
     f.fillet_point_step_per_point = true;
@@ -339,7 +332,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.fillet_nx1_tangent_side_edge = true;
     f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
-    f.shell_empty_cavity_fails = true;
     f.ssi_tangent_contact_points = true;
     f.ssi_trace_tangent_curves_once = true;
     f.found_torus_sphere_keep_tested_nurb = true;

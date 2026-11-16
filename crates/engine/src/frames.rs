@@ -433,6 +433,36 @@ pub fn mapped() -> bool {
     MAPPED.with(std::cell::Cell::get)
 }
 
+thread_local! {
+    static COPY_FRAMES: std::cell::RefCell<Option<Value>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Keep captured placements outside the public command parameters while the command runs.
+/// Split moves pass their own captures directly to the body handler instead.
+pub(crate) fn copy_context(id: &str, mapped: Option<&mut Value>) -> CopyContext {
+    let frames = mapped.and_then(|p| {
+        let p = match id {
+            "solid.move" => p,
+            "timeline.redefine" if p.get("command").and_then(Value::as_str) == Some("solid.move") => p.get_mut("params")?,
+            _ => return None,
+        };
+        p.as_object_mut()?.remove("_copy_frames")
+    });
+    CopyContext(COPY_FRAMES.with(|slot| slot.replace(frames)))
+}
+
+pub(crate) struct CopyContext(Option<Value>);
+
+impl Drop for CopyContext {
+    fn drop(&mut self) {
+        COPY_FRAMES.with(|slot| slot.replace(self.0.take()));
+    }
+}
+
+pub(crate) fn take_copy_frames() -> Option<Value> {
+    COPY_FRAMES.with(|slot| slot.borrow_mut().take())
+}
+
 /// Author generated geometry directly in the active component's local frame.
 /// Restores the enclosing command's mapping state, including on an error.
 pub(crate) fn local_geometry() -> GeometryMapping {
@@ -551,6 +581,11 @@ fn thread_body_picks(s: &Session, input: &solidcraft_doc::ModelState, faces: &[V
 /// `params` with world picks mapped into component frames (`None`: nothing to change). A model
 /// that cannot be placed is the error.
 pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<Value>> {
+    if (id == "solid.move" && params.get("_copy_frames").is_some())
+        || (id == "timeline.redefine" && params.get("params").and_then(|p| p.get("_copy_frames")).is_some())
+    {
+        return Err(crate::params::bad(id, "_copy_frames is internal placement data, not a command parameter"));
+    }
     // A command with no world picks has nothing to map, and may not need the bodies placed.
     let picks = !table(id).is_empty() || matches!(id, "library.apply" | "timeline.redefine" | "sketch.redefine");
     // Edit Feature of a revolve restores its saved axis (and the origin's expressions) even
@@ -558,7 +593,9 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<V
     let revolve_edit =
         id == "timeline.redefine" && matches!(params.get("command").and_then(Value::as_str), Some("solid.revolve" | "surface.revolve"));
     let grouped_thread = grouped_thread_faces(id, params);
-    if !picks || (!placed(s) && !revolve_edit && grouped_thread.is_none()) {
+    let copying = id == "solid.move" && params.get("copy").and_then(Value::as_bool) == Some(true);
+    let copy_edit = id == "timeline.redefine" && edited_copy_frames(s, params).is_some();
+    if !picks || (!placed(s) && !revolve_edit && grouped_thread.is_none() && !copying && !copy_edit) {
         return Ok(None);
     }
     // A move of bodies in differently turned frames keeps its world vectors: `solid.move` splits
@@ -595,10 +632,10 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<V
             normalized["faces"] = faces;
         }
     }
-    if !placed && !revolve_edit {
+    if !placed && !revolve_edit && !copying && !copy_edit {
         return Ok(grouped_thread.map(|_| normalized));
     }
-    Ok(map_local_with_input(s, &world, id, &normalized, thread_input.as_deref()).or_else(|| grouped_thread.map(|_| normalized)))
+    Ok(map_local_with_input(s, &world, id, &normalized, thread_input.as_deref(), None).or_else(|| grouped_thread.map(|_| normalized)))
 }
 
 /// A `solid.move` of bodies placed in different frames, as one move per frame (#9660). A Move
@@ -657,18 +694,37 @@ pub(crate) fn split_move(s: &Session, params: &Value) -> crate::Result<Option<Ve
     Ok(Some(moves))
 }
 
+/// An unchanged copy selection keeps the captured placement even after its source moves.
+/// A qualified instance name supplied anew is a new selection and captures that instance.
+fn edited_copy_frames<'a>(s: &'a Session, params: &Value) -> Option<&'a [Mat]> {
+    if params.get("command")?.as_str()? != "solid.move" {
+        return None;
+    }
+    let key = params.get("feature").and_then(|v| v.as_str().map(str::to_string).or_else(|| v.as_u64().map(|id| id.to_string())))?;
+    let feature = s.doc.find_feature(&key)?;
+    let solidcraft_doc::FeatureKind::Move { bodies, copy_frames, copy: true, .. } = &feature.kind else { return None };
+    let inner = params.get("params")?;
+    let names = inner.get("bodies")?.as_array()?;
+    (inner.get("copy").and_then(Value::as_bool) == Some(true)
+        && names.len() == bodies.len()
+        && names.iter().zip(bodies).all(|(name, body)| name.as_str() == Some(&**body)))
+    .then_some(copy_frames.as_slice())
+}
+
 /// [`to_local`] on the placed model `world`.
 fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: &Value) -> Option<Value> {
-    map_local_with_input(s, world, id, params, None)
+    map_local_with_input(s, world, id, params, None, None)
 }
 
 /// A grouped Thread edit also maps its picks using the bodies present at its input.
+/// A copied Move keeps the source placements captured by the existing feature.
 fn map_local_with_input(
     s: &Session,
     world: &solidcraft_doc::ModelState,
     id: &str,
     params: &Value,
     input: Option<&solidcraft_doc::ModelState>,
+    saved_copies: Option<&[Mat]>,
 ) -> Option<Value> {
     if id == "solid.move" && ["translate", "origin", "axis"].iter().any(|k| params.get(k).is_some_and(Value::is_object)) {
         let mut normalized = params.clone();
@@ -682,13 +738,13 @@ fn map_local_with_input(
             }
         }
         if changed {
-            return Some(map_local(s, world, id, &normalized).unwrap_or(normalized));
+            return Some(map_local_with_input(s, world, id, &normalized, input, saved_copies).unwrap_or(normalized));
         }
     }
     if id == "solid.move"
         && let Ok(Some(normalized)) = crate::cmd::move_matrix_params(params)
     {
-        return Some(map_local(s, world, id, &normalized).unwrap_or(normalized));
+        return Some(map_local_with_input(s, world, id, &normalized, input, saved_copies).unwrap_or(normalized));
     }
     if id == "library.apply" {
         // Library targets are the same world selections as appearance.assign,
@@ -719,7 +775,9 @@ fn map_local_with_input(
         // Nothing to map (a surface revolve has no picks; a design with no placed component needs
         // none): an untouched explicit axis is still restored below.
         let edited = if cmd == "surface.revolve" { SURFACE_REVOLVE_EDIT } else { cmd };
-        let mapped = if placed(s) { map_local_with_input(&context, world, edited, params.get("params")?, input) } else { None };
+        let copies = edited_copy_frames(s, params);
+        let mapped =
+            if placed(s) || copies.is_some() { map_local_with_input(&context, world, edited, params.get("params")?, input, copies) } else { None };
         let mut inner = match mapped {
             Some(inner) => inner,
             None if matches!(cmd, "solid.revolve" | "surface.revolve") => params.get("params")?.clone(),
@@ -825,10 +883,12 @@ fn map_local_with_input(
     // frame's origin and, without `axis`, its Z, so moves written before `origin` existed land
     // where they did. A given `origin` (a matrix gives [0, 0, 0]) puts the whole turn in the
     // world: a missing axis is then world Z.
-    let first = (id == "solid.move")
-        .then(|| obj.get("bodies").and_then(Value::as_array)?.first()?.as_str())
-        .flatten()
-        .and_then(|b| command_frames.bodies(s).iter().find(|(world, own, _)| world == b || own == b).map(|(.., m)| *m));
+    let first = saved_copies.and_then(|copies| copies.first()).map(|m| solidcraft_doc::mat_mul(&command_frames.active, m)).or_else(|| {
+        (id == "solid.move")
+            .then(|| obj.get("bodies").and_then(Value::as_array)?.first()?.as_str())
+            .flatten()
+            .and_then(|b| command_frames.bodies(s).iter().find(|(world, own, _)| world == b || own == b).map(|(.., m)| *m))
+    });
     let world_axis;
     let obj = if id == "solid.move" && obj.contains_key("origin") && obj.contains_key("angle") && !obj.contains_key("axis") {
         let mut with_axis = obj.clone();
@@ -841,6 +901,25 @@ fn map_local_with_input(
     let mut m = Mapper { s, world, f: command_frames, first, changed: false, here: false };
     let body = obj.get("body").or_else(|| obj.get("face_body")).and_then(Value::as_str).map(str::to_string);
     let mut out: Map<String, Value> = obj.clone();
+    if id == "solid.move" && obj.get("copy").and_then(Value::as_bool) == Some(true) {
+        let copies = match saved_copies {
+            Some(copies) => copies.to_vec(),
+            None => {
+                let inverse = mat_inverse(&m.f.active)?;
+                obj.get("bodies")?
+                    .as_array()?
+                    .iter()
+                    .map(|name| {
+                        let name = name.as_str()?;
+                        let frame = m.f.bodies(s).iter().find(|(world, own, _)| world == name || own == name).map(|(.., frame)| frame)?;
+                        Some(solidcraft_doc::mat_mul(&inverse, frame))
+                    })
+                    .collect::<Option<Vec<_>>>()?
+            }
+        };
+        out.insert("_copy_frames".into(), serde_json::json!(copies));
+        m.changed = true;
+    }
     // Picks first: their frame turns the directions.
     for pass in [true, false] {
         for (k, kind) in keys {

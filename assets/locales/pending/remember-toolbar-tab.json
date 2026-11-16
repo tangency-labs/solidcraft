@@ -4,8 +4,8 @@
     "prefs.remember_toolbar_tab_note": "Each design comes back on the toolbar tab it was last using, such as Surface or Inspect, when you switch back to it. Off: switching designs shows the Model tab."
   },
   "ar": {
-    "prefs.remember_toolbar_tab": "تذكّر تبويب شريط الأدوات لكل تصميم",
-    "prefs.remember_toolbar_tab_note": "يعود كل تصميم إلى آخر تبويب في شريط الأدوات كان يستخدمه، مثل السطح أو الفحص، عند الرجوع إليه. عند الإيقاف: يؤدي التبديل بين التصاميم إلى عرض تبويب النموذج."
+    "prefs.remember_toolbar_tab": "تذكّر علامة تبويب شريط الأدوات لكل تصميم",
+    "prefs.remember_toolbar_tab_note": "يعود كل تصميم إلى آخر علامة تبويب كان يستخدمها في شريط الأدوات، مثل السطح أو الفحص، عند الرجوع إليه. عند الإيقاف: يؤدي التبديل بين التصاميم إلى عرض علامة التبويب «النموذج»."
   },
   "de": {
     "prefs.remember_toolbar_tab": "Registerkarte der Symbolleiste je Entwurf merken",
