@@ -86,6 +86,10 @@ use solidcraft_doc::{Document, Metadata, ModelState};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{MassProperties, Mesh};
 
+/// Source commit of the checkout at build time, or `"unknown"` without Git.
+/// Identifies committed source; uncommitted changes are not marked.
+pub const SOURCE_COMMIT: &str = env!("SOLIDCRAFT_SOURCE_COMMIT");
+
 /// Design file extension: new designs, autosaves and recovery files are written as `.sc`.
 pub const DESIGN_EXT: &str = "sc";
 /// The design extensions of earlier releases, newest first. Compatibility shim
