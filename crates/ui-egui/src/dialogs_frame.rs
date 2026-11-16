@@ -84,6 +84,8 @@ fn corner_index(corner: &CornerType) -> usize {
 pub struct Member {
     /// Every line of the frame sketch, now and as lines are added, not only the lines picked.
     pub all: bool,
+    /// The picked curves, in pick order, make one continuous member along a tangent path.
+    pub continuous: bool,
     /// The built-in profile (an index into `frame::profile_kinds`), used when no section is picked.
     pub kind: usize,
     /// Each built-in profile's dimensions, its required ones then its optional ones; kept per
@@ -420,6 +422,7 @@ impl Member {
         let kind = frame::profile_kinds().iter().position(|k| k.kind == "rect_tube").unwrap_or(0);
         Member {
             all: false,
+            continuous: false,
             kind,
             dims,
             whole: None,
@@ -1107,6 +1110,8 @@ fn member_rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &[SelI
     let mut enter = false;
     m.sync(crate::selection::items(inputs, 0));
     form_row(ui, "All Lines", |ui| check(ui, &mut m.all));
+    let continuous_label = app.tr("ui.frame.continuous").to_string();
+    form_row(ui, &continuous_label, |ui| check(ui, &mut m.continuous));
     let picked = !crate::selection::items(inputs, 1).is_empty();
     if let Some(sketch) = m.whole.filter(|_| !picked) {
         let name = app.session.doc.feature(sketch).map(|f| f.name.clone()).unwrap_or_default();
@@ -1214,6 +1219,12 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
     }
     if !pairs.is_empty() {
         p["pairs"] = json!(pairs);
+    }
+    if m.continuous {
+        if m.all {
+            return Err(app.tr("ui.frame.continuous_requires_selection").into());
+        }
+        p["continuous"] = json!(true);
     }
     if let Some(ps) = section_sketch {
         p["profile_sketch"] = json!(ps);
@@ -1355,6 +1366,7 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
     let FeatureKind::FrameMember {
         path_sketch,
         lines,
+        continuous,
         pairs,
         profile,
         anchor,
@@ -1378,6 +1390,7 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
     let st = app.session.model.state();
     let mut m = Member::new();
     m.all = lines.is_empty() && path_sketch.is_some();
+    m.continuous = *continuous;
     // The sketch's lines (without the pairs' ids, which come after them, or an Auto frame's later pieces).
     let ids = if m.all {
         let (ids, later) = frame::member_parts(&st, kind).unwrap_or_default();

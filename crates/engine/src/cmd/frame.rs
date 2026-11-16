@@ -377,6 +377,13 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Some(_) => Err(bad(cmd, format!("`lines` must list 1…{} curve ids", frame::MAX_MEMBERS)))?,
     };
+    let continuous = match p.get("continuous") {
+        None | Some(Value::Null) => false,
+        Some(_) => bool_(p, "continuous").ok_or_else(|| bad(cmd, "`continuous` must be true or false"))?,
+    };
+    if continuous && lines.is_empty() {
+        return Err(bad(cmd, "a continuous member needs explicit `lines` in path order"));
+    }
     let body_name = match p.get("body_name") {
         None | Some(Value::Null) => None,
         Some(_) => Some(
@@ -491,6 +498,7 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
     let mut kind = FeatureKind::FrameMember {
         path_sketch: path_sketch.map(SketchId),
         lines,
+        continuous,
         profile,
         anchor,
         locate,
