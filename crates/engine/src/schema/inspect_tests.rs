@@ -579,6 +579,51 @@ fn sketch_inspect_replies_match_its_schema() {
     }
 }
 
+#[test]
+fn sketch_inspect_world_plane_follows_occurrence_context() {
+    use solidcraft_geom::prelude::*;
+
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let parent = run(&mut s, "component.create", json!({"name": "Assembly", "grounded": false}));
+    let leaf = run(&mut s, "component.create", json!({"name": "Carrier", "grounded": false}));
+    let sketch = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Mount"}))["sketch"].clone();
+    run(&mut s, "sketch.circle.center", json!({"center": [10, 20], "radius": 1, "id": "mount"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "occurrence.move", json!({"occurrence": leaf["occurrence"], "translate": [5, 0, 0]}));
+    let copy = run(&mut s, "occurrence.copy", json!({"component": parent["component"], "parent": 0}));
+    run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence": copy["occurrence"], "to_matrix": [[0, 0, 1, 100], [0, 1, 0, 50], [-1, 0, 0, 30]], "capture": false}),
+    );
+    let saved = json!({"origin": [0.0, 0.0, 0.0], "x_dir": [1.0, 0.0, 0.0], "y_dir": [0.0, 1.0, 0.0]});
+    for (activation, origin, x_dir, normal, center) in [
+        (
+            json!({"component": leaf["component"], "occurrence": leaf["occurrence"], "path": [copy["occurrence"], leaf["occurrence"]]}),
+            [100.0, 50.0, 25.0],
+            [0.0, 0.0, -1.0],
+            [1.0, 0.0, 0.0],
+            [100.0, 70.0, 15.0],
+        ),
+        (json!({"component": leaf["component"]}), [5.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [15.0, 20.0, 0.0]),
+    ] {
+        run(&mut s, "component.activate", activation);
+        let inspected = run(&mut s, "sketch.inspect", json!({"sketch": sketch}));
+        matches::<SketchInspected>("sketch.inspect", &inspected, false);
+        assert_eq!(inspected["plane"], saved, "the saved plane keeps its component-local frame");
+        assert_eq!(inspected["world_plane"], json!({"origin": origin, "x_dir": x_dir, "y_dir": [0.0, 1.0, 0.0]}));
+        let plane: solidcore_record::Plane = serde_json::from_value(inspected["world_plane"].clone()).unwrap();
+        assert_eq!(<[f64; 3]>::from(plane.normal()), normal);
+        let point = inspected["points"].as_array().unwrap().iter().find(|p| p["id"] == "mount.center").unwrap();
+        assert_eq!(point["world"], json!(center));
+        assert_eq!(<[f64; 3]>::from(plane.to_world(solidcore_record::Vec2::new(10.0, 20.0))), center);
+        let schema = output_schema_for::<SketchInspected>();
+        let mut missing = inspected.clone();
+        missing.as_object_mut().unwrap().remove("world_plane");
+        assert!(!conforms(schema.as_value(), schema.as_value(), &missing), "world_plane must always be present");
+    }
+}
+
 /// `material.assign` (a name, a list, the default material) and `material.list` (built-in
 /// materials and the design's, with and without a look) in Warn without warnings.
 #[test]

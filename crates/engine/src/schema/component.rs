@@ -881,6 +881,9 @@ pub struct ComponentNode {
 pub struct ListResult {
     /// The active component, by id.
     pub active: u64,
+    /// The exact occurrence path selected for authoring, from the root to the active component.
+    /// Empty for component-only activation, including the design root; no placement is inferred.
+    pub active_path: Vec<u64>,
     /// The design and its components.
     pub components: Vec<ComponentNode>,
     /// The occurrences with a move not captured yet, by id.

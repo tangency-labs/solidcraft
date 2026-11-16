@@ -1135,15 +1135,34 @@ pub struct SketchInspectParams {
     pub sketch: Option<SketchTarget>,
 }
 
+/// A sketch plane: its origin and orthonormal axes. Its normal is `x_dir` crossed with `y_dir`.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SketchPlaneReply {
+    /// The sketch origin, in mm.
+    pub origin: [f64; 3],
+    /// Sketch X, a unit direction.
+    pub x_dir: [f64; 3],
+    /// Sketch Y, a unit direction perpendicular to X.
+    pub y_dir: [f64; 3],
+}
+
+impl From<solidcore_record::Plane> for SketchPlaneReply {
+    fn from(plane: solidcore_record::Plane) -> Self {
+        Self { origin: plane.origin.into(), x_dir: plane.x.into(), y_dir: plane.y.into() }
+    }
+}
+
 /// What `sketch.inspect` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct SketchInspected {
     /// The sketch's feature id.
     pub id: u64,
     pub name: String,
-    /// Where it lies, as saved.
-    #[schemars(with = "Map<String, Value>")]
-    pub plane: Value,
+    /// Where it lies in its component's coordinates, as saved.
+    pub plane: SketchPlaneReply,
+    /// Where it lies in the design, matching `points[].world`. Includes pending moves and
+    /// the active authoring path; sketches of other components use their first placement.
+    pub world_plane: SketchPlaneReply,
     pub status: SketchStatus,
     /// Its remaining degrees of freedom (0: fully constrained).
     pub dof: usize,
