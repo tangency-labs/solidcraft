@@ -2195,6 +2195,12 @@ pub enum FeatureKind {
         translate: [Expr; 3],
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rotate_axis: Option<Dir>,
+        /// The edge or round face of the model the turn was picked on (#17974), found again on
+        /// each evaluation ([`crate::construct::model_axis`]), so the turn follows it when an
+        /// earlier step moves the body; `rotate_axis` and `origin` are where it was when picked,
+        /// and are used when it is not found. Older moves have none and turn about those.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rotate_about: Option<GeoRef>,
         /// Rotation pivot in the body's authoring frame. Older moves turn about the origin.
         #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_point_expr")]
         #[walk(placement)]

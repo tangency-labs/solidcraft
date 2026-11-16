@@ -126,6 +126,44 @@ fn rotate_handle_updates_the_angle_without_moving_the_camera() {
     assert_eq!(serde_json::to_value(&*h.app.session.doc).unwrap(), before);
 }
 
+/// Rotate about a picked body edge keeps the edge (#17974): the command gets it as `about`, the
+/// Move saves it, and a move dragged before the turn takes the turn with the edge.
+#[test]
+fn rotate_about_a_picked_edge_keeps_the_edge() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+    let Some(edge @ Sel::Edge { .. }) = crate::dialogs::edge_sel(&h.app.session, Vec3::new(40.0, 15.0, 10.0)) else { panic!("the top right edge") };
+    h.app.start("solid.move");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.kind = kind(ROTATE, &h.app.session.doc);
+        d.inputs = inputs(ROTATE);
+        d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+        d.inputs[1].items = vec![edge];
+        if let Kind::Move { angle, .. } = &mut d.kind {
+            *angle = "10 deg".into();
+        }
+    }
+    let p = params(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(p["about"]["body"], "Body1", "{p}");
+    h.frames(5);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    let saved = serde_json::to_value(&h.app.session.doc.features.last().unwrap().kind).unwrap();
+    assert_eq!(saved["rotate_about"]["type"], "edge", "{saved}");
+    let turned = h.app.session.model.state().body("Body1").unwrap().mesh().bounds();
+    // A move along X dragged before the turn: the turn follows the edge, so the box is the
+    // turned box moved along X, not one swung about where the edge was.
+    h.app.run("solid.move", json!({"bodies": ["Body1"], "translate": [20, 0, 0]})).unwrap();
+    let last = h.app.session.doc.features.last().unwrap().name.clone();
+    h.app.run("timeline.reorder", json!({"feature": last, "position": 1})).unwrap();
+    h.settle();
+    let b = h.app.session.model.state().body("Body1").unwrap().mesh().bounds();
+    assert!((b.min - (turned.min + Vec3::new(20.0, 0.0, 0.0))).len() < 1e-6, "{b:?} vs {turned:?}");
+    assert!((b.max - (turned.max + Vec3::new(20.0, 0.0, 0.0))).len() < 1e-6, "{b:?} vs {turned:?}");
+}
+
 #[test]
 fn rotate_handle_follows_an_offset_axis_and_preserves_full_turns() {
     for (direction, initial, expected, free) in [(Vec3::new(1.0, 1.0, 1.0), "720 deg", 755.0, false), (-Vec3::Z, "", 37.3, true)] {
