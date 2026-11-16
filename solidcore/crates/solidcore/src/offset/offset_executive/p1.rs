@@ -2787,6 +2787,7 @@ impl OffsetExecutive {
                             required(self.offset_brep.as_mut())?,
                             offset,
                             offset_edge,
+                            uv_tol * scale,
                         )?;
                         if let Some(slot) = original_uses.get_mut(slot) {
                             *slot = None;
@@ -2837,30 +2838,31 @@ impl OffsetExecutive {
 /// (Not upstream, WR-671.) Raises `offset_edge` of `result` to the tolerance of the
 /// original edge it was matched to, and each of its vertices to the tolerance of the
 /// original vertex it stands for. `original_use` and `offset_use` are the edge uses
-/// `MapEdgeuses` matched by their UV midpoints, so they may run either way. An edge use
-/// starts at its vertex use's vertex and its mate at the other end. An offset edge with
-/// one vertex stands for both original ends and takes the larger. An end takes only its
-/// own vertex's tolerance otherwise: taking the larger of the two ends' grew a thin vertex
-/// to its edge's other end's tolerance, one edge further at each operation, until it
-/// reached past a short neighbouring edge and the merge joined that edge's two ends.
-/// Tolerances only grow (`SetTolerance(.., bUpdateOnlyIfLarger = TRUE)`).
+/// `MapEdgeuses` matched within `uv_tol` in UV (their midpoints, or the offset use's
+/// midpoint dropped onto the original's UV curve where curves were split), so they may
+/// run either way, and the offset use may be a piece of the original.
 ///
-/// Which way the uses run is read where they were matched, in UV: an offset face is
-/// trimmed by its original's UV curves on a surface that shares the original's
-/// parameters (an offset surface; a local operation's new surface, whatever its own
-/// frame, takes the face's UV curves too), so a matched pair's UV tangents at the
-/// midpoint are one curve's, the same way or reversed. Uses that run the same way pair
-/// start with start; uses that run opposite ways pair each start with the start of the
-/// other's mate. Their 3D tangents do not tell this: a local operation's surface turned
-/// in its own parameters carries the UV curve another way in space (square to the
-/// original's at a quarter turn, opposite past it). A pair whose UV tangents are not
-/// parallel within the angular tolerance is no curve and its image (the drop fallback
-/// matched a piece elsewhere): nothing is raised, as upstream raises nothing.
+/// The edge is raised whatever its ends do: it lies along the original's image. An end
+/// of an edge use is its UV point at normalized 0 (its vertex use's vertex) or 1 (its
+/// mate's). An offset face is trimmed by its original's UV curves on a surface that
+/// shares the original's parameters (an offset surface; a local operation's new surface,
+/// whatever its own frame, takes the face's UV curves too), so an offset end that stands
+/// for an original end lies on it in UV, whichever way the uses run and however the new
+/// surface carries them in space. Each offset end takes the tolerance of each original
+/// end within `uv_tol` of it, the tolerance the uses were matched with. An end near none
+/// is a vertex the original does not have (a piece's split end) and takes nothing. An end
+/// near both (one vertex closing the edge, or an edge shorter than `uv_tol`) takes the
+/// larger. An end takes only its own vertex's tolerance otherwise: taking the larger of
+/// the two ends' grew a thin vertex to its edge's other end's tolerance, one edge further
+/// at each operation, until it reached past a short neighbouring edge and the merge
+/// joined that edge's two ends. A NaN distance is near nothing. Tolerances only grow
+/// (`SetTolerance(.., bUpdateOnlyIfLarger = TRUE)`).
 ///
 /// # Errors
 ///
-/// [`SolidError::PortInvariant`] for a matched edge use without a mate or vertex, a UV
-/// tangent that is not finite (NaN) or zero; those of the evaluations.
+/// [`SolidError::PortInvariant`] for a matched edge use without a mate or vertex; those
+/// of the evaluations.
+#[allow(clippy::too_many_arguments)]
 fn keep_source_tolerances(
     k: &Kernel,
     original: &Brep,
@@ -2869,9 +2871,11 @@ fn keep_source_tolerances(
     result: &mut Brep,
     offset_use: EdgeuseId,
     offset_edge: EdgeId,
+    uv_tol: f64,
 ) -> Result<()> {
     const OP: &str = "offset::offset_executive::keep_source_tolerances";
     let edge_tolerance = edge::tolerance(original, original_edge)?;
+    edge::set_tolerance(result, offset_edge, edge_tolerance, true, true)?;
     let mates = |b: &Brep, u: EdgeuseId| -> Result<[VertexId; 2]> {
         let mate = eu::mate(b, u)?
             .ok_or_else(|| SolidError::port_invariant(OP, "a matched edge use without a mate"))?;
@@ -2879,56 +2883,26 @@ fn keep_source_tolerances(
     };
     let source = mates(original, original_use)?;
     let made = mates(result, offset_use)?;
+    let uv_ends = |b: &Brep, u: EdgeuseId| -> Result<[Vec3; 2]> {
+        let at = |t: f64| -> Result<Vec3> {
+            Ok(eu3::normalized_evaluate_read_only(k, b, u, t, true, false)?.point)
+        };
+        Ok([at(0.0)?, at(1.0)?])
+    };
     let [source_start, source_end] = source;
-    let starts = vertex::tolerance(original, source_start)?;
-    let ends = vertex::tolerance(original, source_end)?;
-    if made[0] == made[1] {
-        edge::set_tolerance(result, offset_edge, edge_tolerance, true, true)?;
-        vertex::set_tolerance(result, made[0], starts.max(ends), true, true)?;
-        return Ok(());
+    let [source_start_uv, source_end_uv] = uv_ends(original, original_use)?;
+    let source_ends = [
+        (source_start_uv, vertex::tolerance(original, source_start)?),
+        (source_end_uv, vertex::tolerance(original, source_end)?),
+    ];
+    for (v, at) in made.into_iter().zip(uv_ends(result, offset_use)?) {
+        for (end, tolerance) in source_ends {
+            if end.distance(at) < uv_tol {
+                vertex::set_tolerance(result, v, tolerance, true, true)?;
+            }
+        }
     }
-    let uv_tangent = |b: &Brep, u: EdgeuseId| -> Result<Vec3> {
-        eu3::normalized_evaluate_read_only(k, b, u, 0.5, true, true)?
-            .first_deriv
-            .ok_or_else(|| SolidError::port_invariant(OP, "an edge use without a tangent"))
-    };
-    let Some(same_way) = run_same_way(
-        k,
-        uv_tangent(original, original_use)?,
-        uv_tangent(result, offset_use)?,
-    )?
-    else {
-        return Ok(());
-    };
-    let [made_start, made_end] = if same_way { made } else { [made[1], made[0]] };
-    edge::set_tolerance(result, offset_edge, edge_tolerance, true, true)?;
-    vertex::set_tolerance(result, made_start, starts, true, true)?;
-    vertex::set_tolerance(result, made_end, ends, true, true)?;
     Ok(())
-}
-
-/// Whether two matched edge uses with UV tangents `source` and `made` run the same way
-/// (`Some(true)`), opposite ways (`Some(false)`), or are not one curve's at all
-/// (`None`: the tangents are not parallel within the angular tolerance,
-/// `|source · made| < cos(ang_tol) |source| |made|`).
-///
-/// # Errors
-///
-/// [`SolidError::PortInvariant`] for a tangent that tells no direction: zero, infinite
-/// or NaN (the comparisons are written so NaN fails).
-fn run_same_way(k: &Kernel, source: Vec3, made: Vec3) -> Result<Option<bool>> {
-    let along = source.dot(made);
-    let scale = source.length() * made.length();
-    if !(along.is_finite() && scale.is_finite() && scale > 0.0) {
-        return Err(SolidError::port_invariant(
-            "offset::offset_executive::keep_source_tolerances",
-            "matched edge uses whose UV tangents do not tell their directions apart",
-        ));
-    }
-    if along.abs() < k.tolerances.ang_tol_rad().cos() * scale {
-        return Ok(None);
-    }
-    Ok(Some(along > 0.0))
 }
 
 /// The vertex an edge use starts at (`GetVertexuse()->GetVertex()`).
@@ -5636,7 +5610,7 @@ mod tests {
             } else {
                 u
             };
-            keep_source_tolerances(&k, &original, u, e, &mut result, matched, e).unwrap();
+            keep_source_tolerances(&k, &original, u, e, &mut result, matched, e, 1e-6).unwrap();
             assert_eq!(
                 vertex::tolerance(&result, start).unwrap(),
                 1e-3,
@@ -5646,37 +5620,219 @@ mod tests {
         }
     }
 
-    /// `run_same_way` reads one curve's UV tangents, either way, within the angular
-    /// tolerance; tangents that are not parallel (a square or 30-degree pair) are no
-    /// curve and its image; a NaN, infinite or zero tangent stays a `PortInvariant`.
+    /// `original` copied with every edge and vertex at `thin`, its edge `e` split at the
+    /// middle of its interval: the copy, each piece with its use on `u`'s faceuse, and
+    /// the split vertex.
+    fn split_copy(
+        k: &mut Kernel,
+        original: &Brep,
+        e: EdgeId,
+        u: EdgeuseId,
+        thin: f64,
+    ) -> (Brep, Vec<(EdgeId, EdgeuseId)>, VertexId) {
+        let mut result = original.clone_standing_for_self().unwrap();
+        for v in result.vertices().ids().collect::<Vec<_>>() {
+            result.vertex_mut(v).unwrap().tolerance = thin;
+        }
+        for x in result.edges().ids().collect::<Vec<_>>() {
+            result.edge_mut(x).unwrap().tolerance = thin;
+        }
+        result.set_editing_enabled(true);
+        let at = edge::interval(&result, e).unwrap().evaluate(0.5);
+        let (a, z, split) =
+            crate::heal::stitch::p1::make_vertex_split_edge(k, &mut result, e, at).unwrap();
+        let on = eu::faceuse(original, u).unwrap();
+        let pieces = [a.unwrap(), z.unwrap()]
+            .into_iter()
+            .map(|piece| {
+                let uses = edge::edgeuses(&result, piece, None, None).unwrap();
+                let use_on = uses
+                    .into_iter()
+                    .find(|&w| eu::faceuse(&result, w).unwrap() == on)
+                    .unwrap();
+                (piece, use_on)
+            })
+            .collect();
+        (result, pieces, split.unwrap())
+    }
+
+    /// `MapEdgeuses`'s UV tolerance at the middle of `u` (`EFF_ZERO_SQRT * (1 + |uv|)`).
+    fn uv_tol_at(k: &Kernel, b: &Brep, u: EdgeuseId) -> f64 {
+        let mid = eu3::normalized_evaluate_read_only(k, b, u, 0.5, true, false)
+            .unwrap()
+            .point;
+        EFF_ZERO_SQRT * (1.0 + mid.max_dimension())
+    }
+
+    /// A matched piece of a split original edge (`MapEdgeuses`'s drop fallback) takes
+    /// the edge's tolerance, and its end on an original end that end's tolerance, run
+    /// either way; the split vertex the original does not have takes no end's (only the
+    /// edge's, which raising an edge gives its ends). A box's straight edge, ends loosened
+    /// to 1e-3 and 2e-3 and the edge to 5e-4: pairing ends by UV tangents (one line's,
+    /// parallel) gave the split vertex the far end's tolerance.
     #[test]
-    fn run_same_way_takes_parallel_tangents_only() {
-        let k = Kernel::default();
-        let t = Vec3::new(3.0, 4.0, 0.0);
-        let turned = |deg: f64| {
-            let (s, c) = (deg * PI / 180.0).sin_cos();
-            Vec3::new(c * t.x - s * t.y, s * t.x + c * t.y, 0.0) * 0.5
-        };
-        assert_eq!(run_same_way(&k, t, t * 2.0).unwrap(), Some(true));
-        assert_eq!(run_same_way(&k, t, t * -0.25).unwrap(), Some(false));
-        assert_eq!(run_same_way(&k, t, turned(0.4)).unwrap(), Some(true));
-        assert_eq!(run_same_way(&k, t, turned(179.6)).unwrap(), Some(false));
-        for deg in [0.6, 30.0, 90.0, 120.0, 150.0, 179.4] {
-            assert_eq!(run_same_way(&k, t, turned(deg)).unwrap(), None, "{deg}");
-        }
-        for bad in [
-            Vec3::new(f64::NAN, 0.0, 0.0),
-            Vec3::new(f64::INFINITY, 0.0, 0.0),
-            Vec3::ZERO,
-        ] {
-            for (a, b) in [(t, bad), (bad, t)] {
-                let e = run_same_way(&k, a, b).unwrap_err();
-                assert!(
-                    matches!(e, SolidError::PortInvariant { .. }),
-                    "{bad:?}: {e}"
-                );
+    fn a_split_piece_keeps_its_original_ends_tolerances_only() {
+        let mut k = Kernel::default();
+        let mut original = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            10.0,
+            10.0,
+            10.0,
+        )
+        .unwrap();
+        let e = original.edges().ids().next().unwrap();
+        let u = edge::edgeuses(&original, e, None, None).unwrap()[0];
+        let start = use_vertex(&original, u).unwrap();
+        let end = use_vertex(&original, eu::mate(&original, u).unwrap().unwrap()).unwrap();
+        vertex::set_tolerance(&mut original, start, 1e-3, true, true).unwrap();
+        vertex::set_tolerance(&mut original, end, 2e-3, true, true).unwrap();
+        original.edge_mut(e).unwrap().tolerance = 5e-4;
+        let thin = 1e-5;
+        for reversed in [false, true] {
+            let (mut result, pieces, split) = split_copy(&mut k, &original, e, u, thin);
+            assert_eq!(pieces.len(), 2);
+            for (piece, use_on) in pieces {
+                let matched = if reversed {
+                    eu::mate(&result, use_on).unwrap().unwrap()
+                } else {
+                    use_on
+                };
+                let tol = uv_tol_at(&k, &result, matched);
+                keep_source_tolerances(&k, &original, u, e, &mut result, matched, piece, tol)
+                    .unwrap();
+                assert_eq!(edge::tolerance(&result, piece).unwrap(), 5e-4, "{reversed}");
             }
+            assert_eq!(
+                vertex::tolerance(&result, start).unwrap(),
+                1e-3,
+                "{reversed}"
+            );
+            assert_eq!(vertex::tolerance(&result, end).unwrap(), 2e-3, "{reversed}");
+            // only the edge's, which an edge's tolerance gives its ends
+            assert_eq!(
+                vertex::tolerance(&result, split).unwrap(),
+                5e-4,
+                "{reversed}"
+            );
         }
+    }
+
+    /// A piece of a split circle: a cylinder's rim, one closed edge on one vertex
+    /// (loosened to 1e-3, the edge to 5e-4), split in half. Each half takes the edge's
+    /// tolerance and its end on the rim's vertex that vertex's; the split vertex takes only
+    /// the edge's. Pairing ends by UV tangents failed both ways: on the cap, where the
+    /// rim's UV curve is a circle, each half's tangent at its middle is square to the whole
+    /// rim's, so nothing was raised, not even the edge; on the side, where it is a line,
+    /// the split vertex took the rim vertex's tolerance.
+    #[test]
+    fn a_split_circle_piece_keeps_the_rims_tolerances() {
+        let mut k = Kernel::default();
+        let mut original = crate::primitive::api_primitives::create_cylinder(
+            &mut k,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            5.0,
+            10.0,
+        )
+        .unwrap();
+        let rim = original
+            .edges()
+            .ids()
+            .find(|&x| {
+                let ends = edge::vertices(&original, x, None).unwrap();
+                ends.len() == 1
+            })
+            .unwrap();
+        let ring = edge::vertices(&original, rim, None).unwrap()[0].unwrap();
+        vertex::set_tolerance(&mut original, ring, 1e-3, true, true).unwrap();
+        original.edge_mut(rim).unwrap().tolerance = 5e-4;
+        let thin = 1e-5;
+        // the rim's use on the cylinder's side (its UV ends are the seam's two sides)
+        // and on the cap (one UV point)
+        for u in edge::edgeuses(&original, rim, None, None).unwrap() {
+            let (mut result, pieces, split) = split_copy(&mut k, &original, rim, u, thin);
+            assert_eq!(pieces.len(), 2);
+            for (piece, use_on) in pieces {
+                let tol = uv_tol_at(&k, &result, use_on);
+                keep_source_tolerances(&k, &original, u, rim, &mut result, use_on, piece, tol)
+                    .unwrap();
+                assert_eq!(edge::tolerance(&result, piece).unwrap(), 5e-4, "{u:?}");
+            }
+            assert_eq!(vertex::tolerance(&result, ring).unwrap(), 1e-3, "{u:?}");
+            assert_eq!(vertex::tolerance(&result, split).unwrap(), 5e-4, "{u:?}");
+        }
+    }
+
+    /// A matched use whose UV curve stops at its middle (a cubic with control points
+    /// at 0, 1, 0, 1 of its chord: monotone, its derivative `3(1 - 2t)^2` zero at 0.5) is
+    /// paired by its ends like any other; reading its UV tangent there raised a
+    /// `PortInvariant` that aborted the whole offset. A NaN tolerance is near no end: the
+    /// edge is raised and the vertices are not.
+    #[test]
+    fn a_use_stopping_at_its_middle_keeps_source_tolerances() {
+        use crate::nurbs::math::CPoint;
+        let mut k = Kernel::default();
+        let mut original = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            10.0,
+            10.0,
+            10.0,
+        )
+        .unwrap();
+        let e = original.edges().ids().next().unwrap();
+        let u = edge::edgeuses(&original, e, None, None).unwrap()[0];
+        let start = use_vertex(&original, u).unwrap();
+        let end = use_vertex(&original, eu::mate(&original, u).unwrap().unwrap()).unwrap();
+        vertex::set_tolerance(&mut original, start, 1e-3, true, true).unwrap();
+        original.edge_mut(e).unwrap().tolerance = 5e-4;
+        let fresh = |original: &Brep| {
+            let mut result = original.clone_standing_for_self().unwrap();
+            for v in [start, end] {
+                result.vertex_mut(v).unwrap().tolerance = 1e-5;
+            }
+            result.edge_mut(e).unwrap().tolerance = 1e-5;
+            result
+        };
+        let mut result = fresh(&original);
+        let uv = |b: &Brep, t: f64| {
+            eu3::normalized_evaluate_read_only(&k, b, u, t, true, false)
+                .unwrap()
+                .point
+        };
+        let (a, z) = (uv(&result, 0.0), uv(&result, 1.0));
+        let stalling = |from: Vec3, to: Vec3| {
+            let pts: Vec<CPoint> = [0.0, 1.0, 0.0, 1.0]
+                .into_iter()
+                .map(|s| {
+                    let p = from + (to - from) * s;
+                    CPoint::new(p.x, p.y, 0.0, 1.0)
+                })
+                .collect();
+            Curve::from(
+                BSplineCurve::from_data(2, 3, 7, 3, &pts, &[0., 0., 0., 0., 1., 1., 1., 1.])
+                    .unwrap(),
+            )
+        };
+        result.edgeuse_mut(u).unwrap().uv_trim_curve = Some(stalling(a, z));
+        if uv(&result, 0.0).distance(a) > 1e-12 {
+            result.edgeuse_mut(u).unwrap().uv_trim_curve = Some(stalling(z, a));
+        }
+        assert!(uv(&result, 0.0).distance(a) <= 1e-12);
+        assert!(uv(&result, 1.0).distance(z) <= 1e-12);
+        let stalled = eu3::normalized_evaluate_read_only(&k, &result, u, 0.5, true, true)
+            .unwrap()
+            .first_deriv
+            .unwrap();
+        assert_eq!(stalled.length(), 0.0);
+        keep_source_tolerances(&k, &original, u, e, &mut result, u, e, 1e-6).unwrap();
+        assert_eq!(edge::tolerance(&result, e).unwrap(), 5e-4);
+        assert_eq!(vertex::tolerance(&result, start).unwrap(), 1e-3);
+        assert_eq!(vertex::tolerance(&result, end).unwrap(), 5e-4);
+        let mut result = fresh(&original);
+        keep_source_tolerances(&k, &original, u, e, &mut result, u, e, f64::NAN).unwrap();
+        assert_eq!(edge::tolerance(&result, e).unwrap(), 5e-4);
+        assert_eq!(vertex::tolerance(&result, start).unwrap(), 5e-4);
     }
 
     /// A box whose top is given a plane moved up 1, tilted 2 degrees (so not parallel:

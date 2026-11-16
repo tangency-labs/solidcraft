@@ -27,7 +27,7 @@ use solidcore::topology::brep::validation::{
 };
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::{Brep, Kernel, VertexId};
+use solidcore::{Brep, EdgeId, Kernel, VertexId};
 
 const SHEET: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -76,9 +76,15 @@ fn sheet() -> (Kernel, Brep) {
 /// The kernel and the sheet read from its file, copied and offset by `d`.
 fn offset(d: f64) -> (Kernel, Brep) {
     let (mut k, read) = sheet();
-    let mut b = brep_copy(&mut k, &read).unwrap();
+    let r = offset_sheet(&mut k, &read, d);
+    (k, r)
+}
+
+/// `read` copied and offset by `d`.
+fn offset_sheet(k: &mut Kernel, read: &Brep, d: f64) -> Brep {
+    let mut b = brep_copy(k, read).unwrap();
     let mut r = offset_brep_simple(
-        &mut k,
+        k,
         &mut b,
         OffsetOptions {
             distance: d,
@@ -88,7 +94,7 @@ fn offset(d: f64) -> (Kernel, Brep) {
     )
     .unwrap();
     r.refresh_cached_topology();
-    (k, r)
+    r
 }
 
 /// The largest vertex/edge gap of `r` (`ValidateAndUpdateTolerances`, validate only).
@@ -137,6 +143,79 @@ fn kept_source_tolerances_check_clean() {
         for v in r.vertices().ids() {
             let t = r.vertex(v).unwrap().tolerance;
             assert!(t >= tightest_vertex, "d = {d}: vertex {v:?} tolerance {t}");
+        }
+    }
+}
+
+/// WR-671, entity by entity: the sheet's vertices and edges loosened each to its own
+/// tolerance (vertices 1.0e-4, 1.1e-4, ..; edges 5.0e-5, 5.1e-5, ..), each offset vertex
+/// keeps its own source vertex's and each offset edge its own source edge's, exactly.
+/// An offset vertex's source is the one sheet vertex about `|d|` from it (within 1e-4, the
+/// vertex tolerance scale: the offset surface is a fit, and its corners lie up to ~4e-6 off
+/// `V + d n(V)`; every other sheet vertex is asserted more than 1e-3 farther), and an
+/// edge's source is the sheet edge between its ends' sources.
+#[test]
+fn each_offset_entity_keeps_its_own_sources_tolerance() {
+    let (mut k, mut s) = sheet();
+    let vertices: Vec<VertexId> = s.vertices().ids().collect();
+    let edges: Vec<EdgeId> = s.edges().ids().collect();
+    assert_eq!((vertices.len(), edges.len()), (4, 4));
+    for (i, &v) in vertices.iter().enumerate() {
+        s.vertex_mut(v).unwrap().tolerance = 1e-4 + 1e-5 * i as f64;
+    }
+    for (i, &e) in edges.iter().enumerate() {
+        s.edge_mut(e).unwrap().tolerance = 5e-5 + 1e-6 * i as f64;
+    }
+    let ends_of = |b: &Brep, e: EdgeId| -> Vec<VertexId> {
+        let mut ends: Vec<VertexId> = solidcore::topology::edge::vertices(b, e, None)
+            .unwrap()
+            .into_iter()
+            .map(Option::unwrap)
+            .collect();
+        ends.sort();
+        ends
+    };
+    for d in [0.5, 0.75, -0.75, 1.0, 1.5, -1.5] {
+        let r = offset_sheet(&mut k, &s, d);
+        let source_of = |w: VertexId| -> VertexId {
+            let p = r.vertex(w).unwrap().point;
+            let mut by_distance: Vec<(f64, VertexId)> = vertices
+                .iter()
+                .map(|&v| (s.vertex(v).unwrap().point.distance(p), v))
+                .collect();
+            by_distance.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let (near, v) = by_distance[0];
+            assert!(
+                (near - d.abs()).abs() <= 1e-4,
+                "d = {d}: {w:?} is {near} from {v:?}"
+            );
+            assert!(
+                by_distance[1].0 > d.abs() + 1e-3,
+                "d = {d}: {w:?} {by_distance:?}"
+            );
+            v
+        };
+        let made: Vec<VertexId> = r.vertices().ids().collect();
+        assert_eq!(made.len(), 4, "d = {d}");
+        for &w in &made {
+            let own = s.vertex(source_of(w)).unwrap().tolerance;
+            let t = r.vertex(w).unwrap().tolerance;
+            assert_eq!(t, own, "d = {d}: vertex {w:?}");
+        }
+        let made_edges: Vec<EdgeId> = r.edges().ids().collect();
+        assert_eq!(made_edges.len(), 4, "d = {d}");
+        for e in made_edges {
+            let mut sources: Vec<VertexId> = ends_of(&r, e).into_iter().map(source_of).collect();
+            sources.sort();
+            let between: Vec<EdgeId> = edges
+                .iter()
+                .copied()
+                .filter(|&x| ends_of(&s, x) == sources)
+                .collect();
+            assert_eq!(between.len(), 1, "d = {d}: edge {e:?} {sources:?}");
+            let own = s.edge(between[0]).unwrap().tolerance;
+            let t = r.edge(e).unwrap().tolerance;
+            assert_eq!(t, own, "d = {d}: edge {e:?}");
         }
     }
 }
