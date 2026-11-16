@@ -177,6 +177,7 @@ pub struct WorkCounters {
     orient_boxes: Cell<u64>,
     ball_certified_roots: Cell<u64>,
     blends_recertified: Cell<u64>,
+    vertex_drops: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -339,6 +340,14 @@ impl WorkCounters {
         self.blends_recertified.get()
     }
 
+    /// Face vertices a curve being classified on a face is solved against (the drops of
+    /// `CurveClassification::intersect_vertices_in`): each vertex not passed over as out of
+    /// the curve's reach. Not the fork's.
+    #[must_use]
+    pub fn vertex_drops(&self) -> u64 {
+        self.vertex_drops.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -359,6 +368,13 @@ impl WorkCounters {
         self.orient_boxes.set(0);
         self.ball_certified_roots.set(0);
         self.blends_recertified.set(0);
+        self.vertex_drops.set(0);
+    }
+
+    /// Counts one vertex a classified curve is solved against.
+    pub(crate) fn add_vertex_drop(&self) {
+        self.vertex_drops
+            .set(self.vertex_drops.get().saturating_add(1));
     }
 
     /// Counts one face pair examined for intersection.
