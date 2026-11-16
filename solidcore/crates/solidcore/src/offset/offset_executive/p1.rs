@@ -2792,9 +2792,12 @@ impl OffsetExecutive {
                         // the matched original edge's tolerance and its vertices' largest.
                         if kernel.kernel().fixes.offset_edges_keep_source_tolerance {
                             keep_source_tolerances(
+                                kernel.kernel(),
                                 original,
+                                original_use,
                                 original_edge,
                                 required(self.offset_brep.as_mut())?,
+                                offset,
                                 offset_edge,
                             )?;
                         }
@@ -2846,37 +2849,85 @@ impl OffsetExecutive {
 
 /// (Not upstream, WR-671, `Kernel::fixes.offset_edges_keep_source_tolerance`.) Raises
 /// `offset_edge` of `result` to the tolerance of the original edge it was matched to,
-/// and both its vertices to the larger of the original edge's vertices' tolerances
-/// (matched edge uses may run in opposite directions, so the ends are not paired).
-/// Tolerances only grow (`SetTolerance(.., bUpdateOnlyIfLarger = TRUE)`).
+/// and each of its vertices to the tolerance of the original vertex it stands for.
+/// `original_use` and `offset_use` are the matched edge uses (matched at their
+/// midpoints, so they may run either way). An edge use starts at its vertex use's vertex
+/// and its mate at the other end. Uses that run the same way (their 3D tangents at the
+/// midpoint point the same way: an offset curve runs beside its original) pair start
+/// with start. Uses that run opposite ways pair each start with the start of the other's
+/// mate. An offset edge with one vertex stands for both original ends and takes the
+/// larger. An end takes only its own vertex's tolerance otherwise: taking the larger of
+/// the two ends' grew a thin vertex to its edge's other end's tolerance, one edge further
+/// at each operation, until it reached past a short neighbouring edge and the merge
+/// joined that edge's two ends. Tolerances only grow
+/// (`SetTolerance(.., bUpdateOnlyIfLarger = TRUE)`).
+///
+/// # Errors
+///
+/// [`SolidError::PortInvariant`] for a matched edge use without a mate or vertex, or
+/// matched uses of an edge with two vertices whose tangents do not tell their directions
+/// apart; those of the evaluations.
 fn keep_source_tolerances(
+    k: &Kernel,
     original: &Brep,
+    original_use: EdgeuseId,
     original_edge: EdgeId,
     result: &mut Brep,
+    offset_use: EdgeuseId,
     offset_edge: EdgeId,
 ) -> Result<()> {
+    const OP: &str = "offset::offset_executive::keep_source_tolerances";
     let edge_tolerance = edge::tolerance(original, original_edge)?;
-    let mut vertex_tolerance = 0.0_f64;
-    for v in [
-        edge::start_vertex(original, original_edge)?,
-        edge::end_vertex(original, original_edge)?,
-    ]
-    .into_iter()
-    .flatten()
-    {
-        vertex_tolerance = vertex_tolerance.max(vertex::tolerance(original, v)?);
-    }
     edge::set_tolerance(result, offset_edge, edge_tolerance, true, true)?;
-    for v in [
-        edge::start_vertex(result, offset_edge)?,
-        edge::end_vertex(result, offset_edge)?,
-    ]
-    .into_iter()
-    .flatten()
-    {
-        vertex::set_tolerance(result, v, vertex_tolerance, true, true)?;
+    let mates = |b: &Brep, u: EdgeuseId| -> Result<[VertexId; 2]> {
+        let mate = eu::mate(b, u)?
+            .ok_or_else(|| SolidError::port_invariant(OP, "a matched edge use without a mate"))?;
+        Ok([use_vertex(b, u)?, use_vertex(b, mate)?])
+    };
+    let source = mates(original, original_use)?;
+    let made = mates(result, offset_use)?;
+    let [source_start, source_end] = source;
+    let starts = vertex::tolerance(original, source_start)?;
+    let ends = vertex::tolerance(original, source_end)?;
+    if made[0] == made[1] {
+        vertex::set_tolerance(result, made[0], starts.max(ends), true, true)?;
+        return Ok(());
     }
+    let tangent = |b: &Brep, u: EdgeuseId| -> Result<Vec3> {
+        eu3::normalized_evaluate_read_only(k, b, u, 0.5, false, true)?
+            .first_deriv
+            .ok_or_else(|| SolidError::port_invariant(OP, "an edge use without a tangent"))
+    };
+    let along = tangent(original, original_use)?.dot(tangent(result, offset_use)?);
+    let [made_start, made_end] = if along > 0.0 {
+        made
+    } else if along < 0.0 {
+        [made[1], made[0]]
+    } else {
+        return Err(SolidError::port_invariant(
+            OP,
+            "matched edge uses whose tangents do not tell their directions apart",
+        ));
+    };
+    vertex::set_tolerance(result, made_start, starts, true, true)?;
+    vertex::set_tolerance(result, made_end, ends, true, true)?;
     Ok(())
+}
+
+/// The vertex an edge use starts at (`GetVertexuse()->GetVertex()`).
+fn use_vertex(b: &Brep, u: EdgeuseId) -> Result<VertexId> {
+    let vu = eu::vertexuse(b, u)?.ok_or_else(|| {
+        SolidError::port_invariant(
+            "offset::offset_executive::keep_source_tolerances",
+            "an edge use without a vertex use",
+        )
+    })?;
+    crate::topology::vertexuse::vertex(b, vu)?.ok_or_else(|| {
+        SolidError::port_invariant(
+            "offset::offset_executive::keep_source_tolerances",
+            "a vertex use without a vertex",
+        )
+    })
 }
 
 /// The notification environment of offset-side entities: the caller's records,
@@ -5486,5 +5537,47 @@ mod tests {
             executive.offset_faces(inset).len()
         };
         assert!(offsets() >= 1);
+    }
+
+    /// `keep_source_tolerances` pairs each end of a matched edge with the original vertex
+    /// it stands for, whichever way the matched uses run (tangency-labs/solidcraft#17624):
+    /// a box's copy, matched once by the same edge use and once by its mate (the same edge
+    /// run the other way), gives the loose start vertex's tolerance to that vertex only.
+    #[test]
+    fn keep_source_tolerances_pairs_ends_either_way() {
+        let mut k = Kernel::default();
+        let mut original = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            10.0,
+            10.0,
+            10.0,
+        )
+        .unwrap();
+        let e = original.edges().ids().next().unwrap();
+        let u = edge::edgeuses(&original, e, None, None).unwrap()[0];
+        let start = use_vertex(&original, u).unwrap();
+        let end = use_vertex(&original, eu::mate(&original, u).unwrap().unwrap()).unwrap();
+        vertex::set_tolerance(&mut original, start, 1e-3, true, true).unwrap();
+        let thin = vertex::tolerance(&original, end).unwrap();
+        assert!(thin < 1e-3);
+        for reversed in [false, true] {
+            let mut result = original.clone_standing_for_self().unwrap();
+            for v in [start, end] {
+                result.vertex_mut(v).unwrap().tolerance = thin;
+            }
+            let matched = if reversed {
+                eu::mate(&result, u).unwrap().unwrap()
+            } else {
+                u
+            };
+            keep_source_tolerances(&k, &original, u, e, &mut result, matched, e).unwrap();
+            assert_eq!(
+                vertex::tolerance(&result, start).unwrap(),
+                1e-3,
+                "{reversed}"
+            );
+            assert_eq!(vertex::tolerance(&result, end).unwrap(), thin, "{reversed}");
+        }
     }
 }

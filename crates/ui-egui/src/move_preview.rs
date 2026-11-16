@@ -311,6 +311,7 @@ impl MovePreview {
             placed: None,
             tapered: Vec::new(),
             replaced,
+            outlines: Vec::new(),
             error: None,
             bounds,
             layer,

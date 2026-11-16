@@ -107,8 +107,15 @@ part placed at a station follows the station. Other moves of it (a drag, another
 undo, saving and opening keep the expressions. Renaming a parameter carries into them, and
 deleting one they use is refused. A move by expressions is captured at once (`capture: false` is
 refused with them). If an expression stops working out (say a parameter becomes an angle), the
-part stays where it is until it works out again. The rotation (`axis`, `angle`, `origin`) and a
-`matrix` are still worked out once, when the move is made.
+part stays where it is until it works out again.
+
+The same holds for the `origin` a move turns about (a part that turns about a point that follows a
+parameter is carried by what the turn leaves behind when the point moves), for the translation
+column of a `matrix` (the last entry of each of the first three rows, or entries 4, 8 and 12 of a
+flat one; the rotation entries are numbers), and for the `matrix` of `file.insert_step`, which
+places the new part the same way. A grounded part stays put, as with `translate`. The turn's
+`angle`, the rotation entries of a `matrix` and an absolute placement (`to`, `to_matrix`) are
+worked out once, when the move is made.
 
 Paste New copies nested component definitions, sketches, feature histories and generated
 dimension parameters. Repeated child instances remain shared within the new copy. Materials,
