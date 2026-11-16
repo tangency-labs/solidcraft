@@ -422,7 +422,7 @@ point. The fork's fixes; the rows named by a flag are opt-in, the others always 
 
 | fix or flag (record, issue) | what it adds | file |
 |---|---|---|
-| `ssi_split_curves_at_singular_points` (WR-77, #393) | samples \|n1 × n2\| along each crossing curve, refines each sharp minimum by golden section, and splits the curve where the sine is below 1e-6 and rises above 1e-3 on both sides, more than ten approximation tolerances from its ends | `surface_intersector/singular_splits.rs` |
+| singular-point splits (WR-77, #393) | samples \|n1 × n2\| along each crossing curve, refines each sharp minimum by golden section, and splits the curve where the sine is below 1e-6 and rises above 1e-3 on both sides, more than ten approximation tolerances from its ends | `surface_intersector/singular_splits.rs` |
 | `ssi_tangent_curve_tracer` (WR-75, #395) | traces tangent curves the marcher cannot follow: Levenberg-Marquardt on S1 − S2 = 0 with n1 ∥ n2, directions probed on a small circle in the tangent plane; traces crossing branches through tangent contact nodes and reports the nodes | `surface_intersector/tangent_curves.rs`, `tangent_tracer.rs` |
 | tangential contact points (WR-74, #394) | Newton on a 4 × 4 system (the gap along S2's tangents, S1's tangents against n2) from the leaf pairs the interior search skips, plus the poles; a root is a touch point when the gap is below 1e-7 of the tolerance and the normals agree to 1e-4 rad | `adv_surface_intersector/tangent_contacts.rs` |
 | `ssi_trace_tangent_curves_once` (WR-76, #392) | one start point per cluster of tangent boundary start points, so an open tangent curve is traced once | `surface_intersector/p5.rs` |
@@ -611,7 +611,7 @@ and why the approximation tolerance is half of it.
 |---|---|---|---|---|
 | tangent curve (#17 gap 4) | n1 × n2 = 0 along it; the marcher has no direction | collapses to its end points (#395); fixed with `ssi_tangent_curve_tracer` | a proved valley of the field, or of a Taylor field | flag on by default |
 | touch point inside both faces (#17 gap 1) | no boundary start, normals within 5° at every seed | missed (#394); found by the tangential contact search (WR-74) | a proved extremum of g at zero | always on |
-| branch point (#17 gap 3) | the marcher steps straight through; one curve where two end | wrong topology (#393); split with `ssi_split_curves_at_singular_points` | a proved saddle; branches joined through it, vertex reported | #393 |
+| branch point (#17 gap 3) | the marcher steps straight through; one curve where two end | wrong topology (#393); fixed by the singular-point split | a proved saddle; branches joined through it, vertex reported | #393 |
 | small loop, nearly tangent (#17 gap 2) | every seed below the 5°/2° thresholds | missed (#396); found with `ssi_low_angle_start_on_probation` | loop-free pairs cannot hide it; closed form for plane/sphere and degree-2 | flag on by default |
 | small circle taken as a point | gap to tangency within tolerance though the circle is not | fixed (WR-79): the sphere's closed forms collapse a circle only when its radius is within the tolerance; `FaceIntersect` takes a circle whose cap lies within the tolerance as a touch (§4.6) | the radius from √((R − \|d\|)(R + \|d\|)) | |
 | coincident faces | normals parallel everywhere | closed forms for planes, coaxial revolutions, parallel cylinders; else the boolean's coincidence check before SSI | region boundary from the field's zero coefficients | |

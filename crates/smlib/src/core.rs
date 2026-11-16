@@ -121,7 +121,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.boolean_union_refuses_solid_leak = true;
     f.fillet_exact_round_classes = true;
     f.surface_continuity_checks_last_v_knot = true;
-    f.ssi_split_curves_at_singular_points = true;
     f.geometric_g2_continuity = true;
     f.degen_param_tiebreak_uses_actual_param = true;
     f.local_surface_intersect_guards_max_boundary_retry = true;
