@@ -638,12 +638,9 @@ pub fn passes_through(
         Ok(false)
     })?;
     for (face, level) in far.into_inner() {
+        let [ox, oy, oz] = frame.origin;
         let at = crate::eval::Frame {
-            origin: [
-                frame.origin[0] + level * n.x,
-                frame.origin[1] + level * n.y,
-                frame.origin[2] + level * n.z,
-            ],
+            origin: [ox + level * n.x, oy + level * n.y, oz + level * n.z],
             x_axis: frame.x_axis,
             y_axis: frame.y_axis,
         };
@@ -651,9 +648,9 @@ pub fn passes_through(
         // the face's plane) has none there and is accepted (design v2 5.3).
         let past = crate::eval::Frame {
             origin: [
-                at.origin[0] - tol * n.x,
-                at.origin[1] - tol * n.y,
-                at.origin[2] - tol * n.z,
+                ox + (level - tol) * n.x,
+                oy + (level - tol) * n.y,
+                oz + (level - tol) * n.z,
             ],
             x_axis: frame.x_axis,
             y_axis: frame.y_axis,
