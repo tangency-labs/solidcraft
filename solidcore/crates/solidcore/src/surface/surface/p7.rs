@@ -87,10 +87,15 @@
 //!   parameter `dS` as the first near-best guess when it is in the interval and its
 //!   tangent is defined (the guess nearest the input; where the alignment is the same
 //!   over a stretch, the solve stays at its start, so a sample would replace an input
-//!   that is already an answer). A solve whose answer is aligned worse than its start
-//!   by more than the near-equal tolerance `fTol` (a minimum of the alignment, or past
-//!   a kink downhill), or where the tangent is undefined, counts as not converged;
-//!   upstream accepts any answer of the solve.
+//!   that is already an answer). An answer counts as converged only where it is a
+//!   local maximum of the alignment on the closed interval, checked at the answer
+//!   with the solve's own `F` and `F'`: an end where the alignment grows outward, a
+//!   stationary point with curvature not positive (polished by one Newton step), or a
+//!   knot where the one-sided slopes change from `+` to `-` (a kink). A maximum less
+//!   aligned than the best sample is not the largest: then the best sample's solve,
+//!   and the end where the best sample is an end sample, are tried too, and the most
+//!   aligned maximum is kept. Upstream accepts any answer the solve reports found (a
+//!   minimum, or a point beside a kink).
 //! - **Projection curve class.** `CreateParallelProjectionCurves` takes a [`Curve`] for
 //!   upstream's `const SmBSplineCurve&`; a curve outside the `SmBSplineCurve` classes
 //!   (B-spline, line, ellipse, hyperbola, parabola), which upstream's type rules out,
@@ -150,6 +155,7 @@ use crate::geom::local_solve_nd::{BoundaryHandler, LocalSolveNd};
 use crate::geom::polar_box::PolarBox;
 use crate::geom::pseudo_box::{Planar, PseudoBox};
 use crate::geom::solution_array::{Solution, SolutionArray, SolutionEnd, SolutionObject};
+use crate::geom::tol::scaled_zero;
 use crate::geom::tree::{AuxDataType, Tree};
 use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::sqrt as sm_sqrt;
@@ -1085,11 +1091,15 @@ impl Surface {
     /// Each guess is a parameter where its alignment was measured, the input parameter
     /// (when it is in the interval and its tangent is defined) first, then the samples:
     /// the near-equal tie-break compares those parameters with the input's, and the
-    /// Newton solve starts at (and an unconverged answer is) the chosen guess. A solve
-    /// ending aligned worse than its start (beyond the near-equal tolerance) has not
-    /// converged. Upstream has no input guess, compares the `[0, 1]` sample fractions
-    /// with the input parameter, starts at the fraction mapped onto the whole interval
-    /// and accepts any answer of the solve (WR-57).
+    /// Newton solve starts at the chosen guess. An answer has converged only where it is
+    /// a local maximum of the alignment on the closed interval (an end where the
+    /// alignment grows outward, a stationary point whose curvature is not positive, or
+    /// a knot where the slope changes from `+` to `-`); of the maxima found the most
+    /// aligned is kept when the first is less aligned than the best sample; otherwise
+    /// the best sample is returned, unconverged. Upstream has no input guess,
+    /// compares the `[0, 1]` sample fractions with the input parameter, starts at (and
+    /// returns unconverged) the fraction mapped onto the whole interval and accepts any
+    /// answer the solve reports found (WR-57).
     ///
     /// # Errors
     ///
@@ -1156,7 +1166,10 @@ impl Surface {
             } else {
                 q.y = s;
             }
-            let m = self.evaluate(k, q, 1, 1, flags(Side::Left, Side::Left, true))?;
+            let Some(m) = ignored(self.evaluate(k, q, 1, 1, flags(Side::Left, Side::Left, true)))?
+            else {
+                return Ok(None);
+            };
             let surf_dt = if singular_u {
                 at(&m, 0, 1)?
             } else {
@@ -1236,48 +1249,134 @@ impl Surface {
             ));
         }
 
+        // WR-57: an answer is a local maximum of the alignment `A(s)` on the closed
+        // interval `s_ivl`, checked at the answer with the solve's own function
+        // (`F = A'`, `F' = A''`, the solve's evaluation): an end where `A` grows
+        // outward (`F < 0` at the minimum, `F > 0` at the maximum), or a stationary
+        // point to the solve's accuracy (`|F| < tol`) whose curvature is not positive
+        // (`F' <= SM_EFF_ZERO`, the solve's own zero for `F'`), or a knot where the
+        // one-sided slopes are `+` on the left and `-` on the right. The solve finds where
+        // `F` vanishes or changes sign, so it may end at a minimum, on a shoulder or
+        // beside a kink; upstream accepts any answer it reports found. A stationary
+        // answer takes one more Newton step when that step is still a maximum and
+        // does not grow `|F|`: the solve stops at `|F| < SM_EFF_ZERO`, which bounds
+        // the parameter only through `F'` (on a sphere in degrees, to `3.3e-9`).
+        let efo = super::p1::FindSingularParamWithGivenTangentDir::new(
+            k,
+            self,
+            uv,
+            s_dir,
+            singular_dir,
+            EFF_ZERO,
+        );
+        let slope = |t: f64| -> Result<Option<(f64, f64)>> {
+            Ok(ignored(efo.evaluate(t))?.map(|(f, f_prime, _)| (f, f_prime)))
+        };
+        let is_local_max = |t: f64, f: f64, f_prime: f64| -> bool {
+            (t <= s_ivl.min() && f < 0.0)
+                || (t >= s_ivl.max() && f > 0.0)
+                || (f.abs() < tol && f_prime <= scaled_zero())
+        };
+        // the interior knots in the singular direction: where `A'` may jump (a kink)
+        let knots: Vec<f64> = ignored(self.knots_with_nurb(k, singular_dir, Some(&s_ivl)))?
+            .map(|(kv, _)| kv)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|&x| x > s_ivl.min() && x < s_ivl.max())
+            .collect();
+        let side_slope = |s: f64, side: Side| -> Result<Option<f64>> {
+            ignored(alignment_slope(k, self, uv, s_dir, singular_dir, s, side))
+        };
+        let local_max = |t: f64| -> Result<Option<f64>> {
+            let Some((f, f_prime)) = slope(t)? else {
+                return Ok(None);
+            };
+            if !is_local_max(t, f, f_prime) {
+                // a kink: `A` rises from `t` (`F(t)`, the slope on `t`'s right, gives
+                // the side) to the first knot that way, where its one-sided slopes are
+                // `+` on the left and `-` on the right; the solve's bisection stops
+                // beside it
+                let kink = if f > 0.0 {
+                    knots.iter().copied().find(|&x| x > t)
+                } else if f < 0.0 {
+                    knots.iter().rev().copied().find(|&x| x <= t)
+                } else {
+                    None
+                };
+                if let Some(x) = kink {
+                    // (`Side::Right` is the span `(x_prev, x]`: the limit from the left)
+                    let left = side_slope(x, Side::Right)?;
+                    let right = side_slope(x, Side::Left)?;
+                    if left.is_some_and(|l| l > 0.0) && right.is_some_and(|r| r < 0.0) {
+                        return Ok(Some(x));
+                    }
+                }
+                return Ok(None);
+            }
+            if f.abs() < tol && f_prime < -scaled_zero() {
+                let polished = s_ivl.clamp_value(t - f / f_prime);
+                if let Some((pf, pf_prime)) = slope(polished)? {
+                    if pf.abs() <= f.abs() && is_local_max(polished, pf, pf_prime) {
+                        return Ok(Some(polished));
+                    }
+                }
+            }
+            Ok(Some(t))
+        };
+
         // solve with NewtonRaphson iteration starting at the near best guess, then
         // the best sample (WR-57: the parameters where the alignment was measured;
         // upstream starts at `s_ivl.evaluate` of the fraction, which for 0 or 1 is the
         // domain boundary, possibly a collapsed corner)
         let first =
             singular_param_solve(k, self, uv, s_dir, singular_dir, &s_ivl, near_best_s, tol);
-        // WR-57: the solve finds where the alignment is stationary, or a kink of it,
-        // and so may end at a minimum or past a kink downhill; a solve whose answer is
-        // aligned worse than its start by more than the near-equal tolerance (or not
-        // at all, where the tangent is undefined) has not found the best alignment
-        // near that start, and counts as not converged.
-        let improves = |t: f64, start_f: f64| -> Result<bool> {
-            Ok(alignment_at(t)?.is_some_and(|f| f >= start_f - f_tol))
+        let (stat_ok, mut answer) = match ignored(first)? {
+            Some((_, t)) => (true, local_max(t)?),
+            None => (false, None),
         };
-        let (stat_ok, mut found, mut found_t) = match ignored(first)? {
-            Some((f, t)) => (true, f, t),
-            None => (false, false, 0.0),
+        let best_s = sample_domain.evaluate(best_param);
+        // WR-57: a maximum less aligned than the best sample is not the largest one
+        // (the sample's alignment exceeds it); then the solve also starts at the best
+        // sample, the end is tried where the best sample is an end sample, and the
+        // most aligned maximum found is kept (the first on a tie). The comparison
+        // with the best sample allows for rounding only (`SM_EFF_ZERO`), so on a
+        // plateau the answer from the input stays.
+        let settled = match answer {
+            Some(t) => alignment_at(t)?.is_some_and(|a| a >= best_f - scaled_zero()),
+            None => false,
         };
-        if found {
-            found = improves(found_t, near_best_f)?;
-        }
-        let mut found_s = near_best_s;
-        if !found {
+        if !settled {
+            let mut candidates: Vec<f64> = answer.into_iter().collect();
             // (status ignored upstream; passed on as the fork does)
-            (found, found_t) = singular_param_solve(
-                k,
-                self,
-                uv,
-                s_dir,
-                singular_dir,
-                &s_ivl,
-                sample_domain.evaluate(best_param),
-                tol,
-            )?;
-            if found {
-                found = improves(found_t, best_f)?;
+            let (_, t) =
+                singular_param_solve(k, self, uv, s_dir, singular_dir, &s_ivl, best_s, tol)?;
+            candidates.extend(local_max(t)?);
+            // the best sample is an end sample: the end itself, where it is a maximum
+            // (its tangent defined and the alignment growing outward)
+            if best_param == 0.0 || best_param == 1.0 {
+                let end = if best_param == 0.0 {
+                    s_ivl.min()
+                } else {
+                    s_ivl.max()
+                };
+                candidates.extend(local_max(end)?);
             }
-            found_s = sample_domain.evaluate(best_param);
+            answer = None;
+            let mut answer_a = f64::NEG_INFINITY;
+            for c in candidates {
+                if let Some(a) = alignment_at(c)? {
+                    if a > answer_a {
+                        answer_a = a;
+                        answer = Some(c);
+                    }
+                }
+            }
         }
 
-        // Leave our best value in the return arg (WR-57: the guess itself)
-        let value = if found { found_t } else { found_s };
+        // Leave our best value in the return arg (WR-57: the best sample itself when
+        // no maximum was found)
+        let found = answer.is_some();
+        let value = answer.unwrap_or(best_s);
         let mut out = uv;
         if singular_u {
             out.x = value;
@@ -3230,6 +3329,54 @@ fn evaluate_step(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Vec<Vec<Ve
     surface.evaluate_step(k, uv, 1, 1, flags(Side::Left, Side::Left, true))
 }
 
+/// The slope `F = A'(s)` of `FindDegenParamForDirection`'s alignment
+/// `A(s) = unit(w(s)) . dir` (`w` the derivative across the singular direction) from
+/// `side` of `s` (at a knot, [`Side::Left`]'s span `[s, ..)` gives the limit from the
+/// right, [`Side::Right`]'s `(.., s]` the limit from the left): the solve's own function
+/// ([`super::p1::FindSingularParamWithGivenTangentDir::evaluate`], which takes
+/// `Side::Left`), here with either side, for the one-sided slopes at a knot (WR-57).
+///
+/// # Errors
+///
+/// Those of the evaluation; `SM_ERR` where `w` is zero (the tangent undefined).
+fn alignment_slope(
+    k: &Kernel,
+    surface: &Surface,
+    uv: Point2,
+    dir: Vec3,
+    singular_dir: SurfParamType,
+    s: f64,
+    side: Side,
+) -> Result<f64> {
+    // (only the singular parameter's side changes; the other is the solve's, left)
+    let (q, w, ws, wss, sides) = if singular_dir == SurfParamType::U {
+        (
+            Point2::new(s, uv.y),
+            (0, 1),
+            (1, 1),
+            (2, 1),
+            (side, Side::Left),
+        )
+    } else {
+        (
+            Point2::new(uv.x, s),
+            (1, 0),
+            (1, 1),
+            (1, 2),
+            (Side::Left, side),
+        )
+    };
+    let m = surface.evaluate(k, q, 3, 3, flags(sides.0, sides.1, true))?;
+    let derivs = at(&m, w.0, w.1)?.unitized_derivative2(at(&m, ws.0, ws.1)?, at(&m, wss.0, wss.1)?);
+    let Ok([unit_t, _]) = derivs else {
+        return Err(SolidError::surface_failed(
+            OP_DEGEN,
+            "the unit derivatives of the singular direction are undefined",
+        ));
+    };
+    Ok(unit_t.dot(dir))
+}
+
 /// The Newton solve of `FindDegenParamForDirection`
 /// (`SmFindSingularParamWithGivenTangentDirEFO` with `SmLocalSolve1d::SolveIt` from
 /// `start`): `(found, t)`.
@@ -4178,13 +4325,7 @@ mod tests {
             )
             .unwrap();
         assert!(r_deg.converged);
-        // The root is `u = 0` (not `360`). The Newton solve stops at `|F| < 1e-9`, where
-        // `F(u) = -sin(u w) w` with `w = PI / 180` the turn rate of the pole tangent.
-        let w = PI / 180.0;
-        assert!(
-            (0.0..180.0).contains(&r_deg.uv.x) && (r_deg.uv.x * w).sin().abs() * w < 1e-9,
-            "{r_deg:?}"
-        );
+        assert!(r_deg.uv.x.abs() < 1e-9, "{r_deg:?}");
 
         // `[0, 2 * PI]` angular domain with `input_s = 0.8` rad (`0.8` from `0.0` vs
         // `2 * PI - 0.8` from `2 * PI`; upstream: `|1.0 - 0.8| = 0.2 < |0.0 - 0.8| = 0.8`).
@@ -4204,11 +4345,7 @@ mod tests {
             )
             .unwrap();
         assert!(r_rad.converged);
-        // (as above, with `w = 1`)
-        assert!(
-            (0.0..PI).contains(&r_rad.uv.x) && r_rad.uv.x.sin().abs() < 1e-9,
-            "{r_rad:?}"
-        );
+        assert!(r_rad.uv.x.abs() < 1e-9, "{r_rad:?}");
     }
 
     /// WR-57 (#2209): on B-spline degenerate patches with interior double solutions on
@@ -4437,6 +4574,473 @@ mod tests {
             .unwrap();
         assert!(r.converged, "{r:?}");
         assert_eq!(r.uv, Point2::new(u_in, v1));
+    }
+
+    /// A goldens case's B-spline surface, as the `surface.surface_p7` runner builds it.
+    fn wr57_case_surface(
+        p: usize,
+        q: usize,
+        u: &[f64],
+        v: &[f64],
+        form: u64,
+        net: &[&[[f64; 4]]],
+    ) -> Surface {
+        use crate::nurbs::b_spline_surface::BSplineSurfaceForm;
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+
+        let net = net
+            .iter()
+            .map(|r| {
+                r.iter()
+                    .map(|&[x, y, z, w]| CPoint::new(x, y, z, w))
+                    .collect()
+            })
+            .collect();
+        let nl = NlSurface::new(net, p, q, u.to_vec(), v.to_vec()).unwrap();
+        let mut bs = BSplineSurface::from_nurb(nl, false);
+        bs.set_b_spline_surface_form(BSplineSurfaceForm::from_code(form).unwrap());
+        Surface::from(bs)
+    }
+
+    /// Goldens `surface.surface_p7` gen0114's surface (a rational-form cubic by quadratic
+    /// B-spline, one interior `v` knot).
+    fn wr57_gen0114_surface() -> Surface {
+        use crate::nurbs::math::NOW;
+        wr57_case_surface(
+            3,
+            2,
+            &[
+                -0.32446101115588677,
+                -0.32446101115588677,
+                -0.32446101115588677,
+                -0.32446101115588677,
+                0.2991082956226988,
+                1.1334521839603298,
+                1.1334521839603298,
+                1.1334521839603298,
+                1.1334521839603298,
+            ],
+            &[
+                1.5665666640091418,
+                1.5665666640091418,
+                1.5665666640091418,
+                2.0193823295327666,
+                2.234324184886897,
+                2.234324184886897,
+                2.234324184886897,
+            ],
+            9,
+            &[
+                &[
+                    [-1.0, 1.5, -0.15153150430064888, NOW],
+                    [-1.0, 1.5, -0.15153150430064888, NOW],
+                    [-1.0, 1.5, -0.15153150430064888, NOW],
+                    [-1.0, 1.5, -0.15153150430064888, NOW],
+                ],
+                &[
+                    [
+                        0.9346349187538413,
+                        -0.16025675335582035,
+                        0.012554679830505372,
+                        NOW,
+                    ],
+                    [
+                        1.0238249645276218,
+                        0.9670835588172848,
+                        0.005199989479247688,
+                        NOW,
+                    ],
+                    [
+                        0.8836590819881716,
+                        2.1718040264713885,
+                        -0.03605789282354702,
+                        NOW,
+                    ],
+                    [
+                        0.8100680734850909,
+                        3.029914419263989,
+                        -0.028590026806983578,
+                        NOW,
+                    ],
+                ],
+                &[
+                    [
+                        2.0812083164083437,
+                        0.1042449000603431,
+                        0.033454506579291415,
+                        NOW,
+                    ],
+                    [
+                        1.8334092351486402,
+                        0.8783196404547143,
+                        0.020330173697674918,
+                        NOW,
+                    ],
+                    [
+                        1.8076124761268801,
+                        1.8538152956620184,
+                        0.0031217807615215266,
+                        NOW,
+                    ],
+                    [
+                        2.0575036852100275,
+                        2.816172550559675,
+                        -0.025997700295699783,
+                        NOW,
+                    ],
+                ],
+                &[
+                    [
+                        3.0775493249815398,
+                        0.11542964057817956,
+                        0.021762582745271528,
+                        NOW,
+                    ],
+                    [
+                        2.875510225870819,
+                        0.9480442638540545,
+                        0.03428871973876774,
+                        NOW,
+                    ],
+                    [
+                        3.1091781655812785,
+                        2.000990310795575,
+                        -0.0029049977583734763,
+                        NOW,
+                    ],
+                    [
+                        3.1869893078338136,
+                        3.0868308232625754,
+                        -0.02606005035151585,
+                        NOW,
+                    ],
+                ],
+                &[
+                    [
+                        3.833969286001174,
+                        -0.10744550913698117,
+                        0.028138706867984385,
+                        NOW,
+                    ],
+                    [
+                        3.9699382649146298,
+                        0.8642542486265794,
+                        0.00959694707569341,
+                        NOW,
+                    ],
+                    [
+                        3.8066465977473203,
+                        2.18659814041234,
+                        0.008803661549190146,
+                        NOW,
+                    ],
+                    [
+                        3.8253178134416728,
+                        3.106907113681807,
+                        0.005208593101187217,
+                        NOW,
+                    ],
+                ],
+            ],
+        )
+    }
+
+    /// Goldens `surface.surface_p7` gen2955's surface (a rational bilinear B-spline with
+    /// interior `u` knots `-1.1772...` and `0.8548...`).
+    fn wr57_gen2955_surface() -> Surface {
+        wr57_case_surface(
+            1,
+            1,
+            &[
+                -1.3254852418418386,
+                -1.3254852418418386,
+                -1.1772239791907688,
+                0.8548968118086484,
+                1.2523941973855002,
+                1.2523941973855002,
+            ],
+            &[
+                -1.9302366276332217,
+                -1.9302366276332217,
+                -0.9989840508755348,
+                -0.710211746252218,
+                -0.710211746252218,
+            ],
+            5,
+            &[
+                &[
+                    [
+                        -0.09108594431728984,
+                        0.06726425996230058,
+                        0.16225047069519544,
+                        0.8340679260142728,
+                    ],
+                    [
+                        0.06133422022949313,
+                        1.0134173456873652,
+                        -0.24296016511994936,
+                        0.95422890056938,
+                    ],
+                    [
+                        0.2603032360049141,
+                        2.5775692505482084,
+                        0.5121972867283143,
+                        1.4040164287307144,
+                    ],
+                ],
+                &[
+                    [
+                        0.6200578072999983,
+                        -0.10201901237298894,
+                        -0.13757287286090655,
+                        0.5406586822956583,
+                    ],
+                    [
+                        1.0082264814718493,
+                        1.1557172242872473,
+                        0.1218822067575605,
+                        1.0910707075668147,
+                    ],
+                    [
+                        0.751450364198601,
+                        1.8304748531708714,
+                        -0.03805609219977589,
+                        0.8957020799968565,
+                    ],
+                ],
+                &[
+                    [
+                        1.4062620044990386,
+                        -0.09905531410179921,
+                        0.4796068860144954,
+                        0.7769848544707163,
+                    ],
+                    [
+                        2.7460132132740718,
+                        1.4894323679796777,
+                        0.5851191049049435,
+                        1.2589830227175194,
+                    ],
+                    [
+                        3.919588399952234,
+                        4.1750810012155535,
+                        -0.5531962886367542,
+                        1.9432684479346973,
+                    ],
+                ],
+                &[
+                    [
+                        2.8689316792848185,
+                        0.17165325862213687,
+                        0.06399826410260992,
+                        0.9304502894968791,
+                    ],
+                    [
+                        2.472750767626506,
+                        0.8512967598430061,
+                        -0.19474881121283197,
+                        0.8622581664330136,
+                    ],
+                    [
+                        2.047024856382304,
+                        1.3449767471260274,
+                        0.43988409891353214,
+                        0.725936352123764,
+                    ],
+                ],
+            ],
+        )
+    }
+
+    /// Goldens `surface.surface_p8` gen1302's surface (quadratic by linear, one interior
+    /// `v` knot).
+    fn wr57_gen1302_surface() -> Surface {
+        wr57_case_surface(
+            2,
+            1,
+            &[0.0, 0.0, 0.0, 0.7143527121849615, 1.0, 1.0, 1.0],
+            &[
+                1.159185021476047,
+                1.159185021476047,
+                1.5099273821736103,
+                1.7333678245508755,
+                1.7333678245508755,
+            ],
+            11,
+            &[
+                &[
+                    [
+                        -0.8612502506812623,
+                        0.8612502506812623,
+                        -0.12836797026688865,
+                        0.8612502506812623,
+                    ],
+                    [
+                        -1.5376146985135923,
+                        1.5376146985135923,
+                        -0.22917900777920558,
+                        1.5376146985135923,
+                    ],
+                    [
+                        -1.4081314819461375,
+                        1.4081314819461375,
+                        -0.209879741763034,
+                        1.4081314819461375,
+                    ],
+                ],
+                &[
+                    [
+                        0.9979531669974242,
+                        0.09742283061658573,
+                        0.5131219845229927,
+                        1.0000729935941015,
+                    ],
+                    [
+                        1.930745120925356,
+                        2.0541013571046043,
+                        -1.0317456419409419,
+                        1.9244394871371076,
+                    ],
+                    [
+                        0.7006180286316215,
+                        1.2451744976234154,
+                        -0.2787446425607277,
+                        0.6549898423317401,
+                    ],
+                ],
+                &[
+                    [
+                        3.149842520029806,
+                        0.01731749982166718,
+                        -0.6897879702289559,
+                        1.4981100716204439,
+                    ],
+                    [
+                        2.759176262730861,
+                        1.03424316466755,
+                        -0.6846977999648701,
+                        1.2749933569554919,
+                    ],
+                    [
+                        2.6604684019985565,
+                        2.6110123593274297,
+                        -0.1930400616016503,
+                        1.432138762628583,
+                    ],
+                ],
+                &[
+                    [
+                        5.869446702653353,
+                        0.3293333771083319,
+                        0.42408325412134745,
+                        1.9768590222912008,
+                    ],
+                    [
+                        3.6669679987890214,
+                        1.4163398036805488,
+                        0.26323783346197394,
+                        1.2684675977219309,
+                    ],
+                    [
+                        4.234343046110121,
+                        2.981131594310747,
+                        -0.7840684941738906,
+                        1.4443778991125038,
+                    ],
+                ],
+            ],
+        )
+    }
+
+    /// The alignment `unit(w) . unit(dir)` that `FindDegenParamForDirection` maximises,
+    /// `w` the derivative across the singular direction at `uv`.
+    fn wr57_alignment(s: &Surface, k: &Kernel, uv: Point2, dir: Vec3, sd: SurfParamType) -> f64 {
+        let (_, su, sv) = s.evaluate_1st_derivatives(k, uv, false, false).unwrap();
+        let w = if sd == SurfParamType::U { sv } else { su };
+        w.unitize().unwrap().dot(dir.unitize().unwrap())
+    }
+
+    /// WR-57 (goldens `surface.surface_p7` gen0114): the alignment is largest at the
+    /// interval's start, `v_min`, where it falls inward (`F = A'(v_min) = -0.269`); the
+    /// Newton solve from the best sample ends at an interior root of `F` with `F' > 0`, a
+    /// minimum of the alignment, which upstream returns as converged. The answer is the
+    /// end, a maximum of `A` on the closed interval.
+    #[test]
+    fn wr57_an_end_maximum_replaces_an_interior_minimum() {
+        let s = wr57_gen0114_surface();
+        let k = Kernel::default();
+        let uv = Point2::new(1.1334521839603298, 2.0888639673485128);
+        let dir = Vec3::new(
+            -0.5651479095496454,
+            0.26960174577835194,
+            -0.8706275464533069,
+        );
+        let r = s
+            .find_degen_param_for_direction(&k, uv, dir, true, SurfParamType::V, 1e-9)
+            .unwrap();
+        assert!(r.converged, "{r:?}");
+        let v_min = 1.5665666640091418;
+        assert_eq!(r.uv.y, v_min, "{r:?}");
+        // the alignment falls inward from the end: the end is a maximum (the input `u`
+        // is the domain's maximum and the search is from the pole, so it aligns with
+        // `-dir`)
+        let a = |v: f64| wr57_alignment(&s, &k, Point2::new(uv.x, v), -dir, SurfParamType::V);
+        assert!(
+            a(v_min) > a(v_min + 1e-6),
+            "{} vs {}",
+            a(v_min),
+            a(v_min + 1e-6)
+        );
+    }
+
+    /// WR-57 (goldens `surface.surface_p7` gen2955): the surface is bilinear, so the
+    /// alignment's slope `F = A'` jumps at the `u` knot `0.8548968118086484`, from `+`
+    /// on its left to `-` on its right: a kink maximum where `F` has no root. The solve's
+    /// bisection stops beside the knot with `|F|` about 0.1; upstream returns that stop
+    /// as converged. The answer is the knot itself.
+    #[test]
+    fn wr57_a_kink_maximum_is_the_knot() {
+        let s = wr57_gen2955_surface();
+        let k = Kernel::default();
+        let uv = Point2::new(-1.3254828514677233, -1.9302366276332217);
+        let dir = Vec3::new(0.8875674152136386, 0.5623161016560287, 0.008156115300685718);
+        let r = s
+            .find_degen_param_for_direction(&k, uv, dir, true, SurfParamType::U, 1e-9)
+            .unwrap();
+        assert!(r.converged, "{r:?}");
+        let knot = 0.8548968118086484;
+        assert_eq!(r.uv.x, knot, "{r:?}");
+        // a strict maximum: the alignment falls on both sides
+        let a = |u: f64| wr57_alignment(&s, &k, Point2::new(u, uv.y), dir, SurfParamType::U);
+        assert!(a(knot) > a(knot - 1e-6) && a(knot) > a(knot + 1e-6));
+    }
+
+    /// WR-57 (goldens `surface.surface_p8` gen1302, the arguments its
+    /// `InvertPointNearSingularity` passes): from the input `v = 1.3623` the solve
+    /// reaches a strict local maximum at `v = 1.4461` (`F' = -1.53`), aligned 0.97669;
+    /// the sample at `v = 1.6435` is aligned better, so that maximum is not the largest.
+    /// The answer is the maximum the best sample's solve reaches, `v = 1.6452`, aligned
+    /// 0.98359.
+    #[test]
+    fn wr57_a_maximum_below_the_best_sample_is_not_kept() {
+        let s = wr57_gen1302_surface();
+        let k = Kernel::default();
+        let uv = Point2::new(0.0, 1.3623429996570933);
+        let dir = Vec3::new(
+            0.0830790268399677,
+            0.011803425127355327,
+            0.0008823108237226707,
+        );
+        let r = s
+            .find_degen_param_for_direction(&k, uv, dir, true, SurfParamType::V, 1e-4)
+            .unwrap();
+        assert!(r.converged, "{r:?}");
+        assert!((r.uv.y - 1.6452).abs() < 1e-3, "{r:?}");
+        let a = |v: f64| wr57_alignment(&s, &k, Point2::new(0.0, v), dir, SurfParamType::V);
+        // better aligned than the input's maximum, and itself a maximum
+        assert!(a(r.uv.y) > a(1.4460943352873443) + 1e-3, "{}", a(r.uv.y));
+        assert!(a(r.uv.y) >= a(r.uv.y - 1e-6) && a(r.uv.y) >= a(r.uv.y + 1e-6));
     }
 
     /// The global solve failures keep the operation, status, kind and entity of the bare
