@@ -279,7 +279,10 @@ What the port does today:
   it classifies to imprintable topology in both faces (`topology_intersector/p2.rs`).
 - **Contact curves inside a face.** A union, intersection or difference removes the zero-area
   inner loops a contact curve leaves and splits shells joined only through them (`merge/p4.rs`;
-  `topology/brep/p3.rs`, `remove_slit_loops_where_solids_touch`).
+  `topology/brep/p3.rs`, `remove_slit_loops_where_solids_touch`). The parts of a split shell
+  are regrouped by nesting: parts apart from each other bound solids of their own (a cylinder
+  resting on a box, united), and a void part lying inside an outer part bounds the same solid
+  (a cavity cut that touches the body's outside along a line: one solid with a void).
 - **Solids touching along an edge or at a vertex** are a valid result: ops checks the result with
   `is_outward_touching_solids` (§3).
 - **The sector test near tangency** steps off the edge and compares binormals until they separate
