@@ -55,7 +55,7 @@ use crate::p21::{Entity, Exchange, Param};
 use crate::read::{R, Reader};
 use crate::units;
 
-mod swept;
+pub(crate) mod swept;
 
 /// Tolerance (mm) when the file states no uncertainty.
 pub const DEFAULT_TOLERANCE: f64 = 1e-3;
@@ -1059,7 +1059,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         if !loops.iter().any(|l| matches!(l, Bound::Edges(_))) {
             loops = self.whole_sphere(&step_surface, &loops).map_err(|m| format!("face #{id}: {m}"))?;
         }
-        let extent = self.extent(&loops)?;
+        let extent = self.asm.extent(&loops)?;
         let (surface, reversed) = swept::map_surface(&step_surface, &extent, self.asm.tol).map_err(|m| format!("face #{id}: {m}"))?;
         // Loops relative to the record's natural normal: the face's normal is STEP's surface
         // normal when same_sense, and the record's is STEP's unless `reversed`.
@@ -1118,50 +1118,6 @@ impl<'b, 'a> Builder<'b, 'a> {
         Ok(crate::geom::Surface::Plane {
             position: Placement { origin: [first.x, first.y, first.z], axis: [z.x, z.y, z.z], ref_direction: [x.x, x.y, x.z] },
         })
-    }
-
-    /// Points along a face's loops (each edge at nine points, and its vertex loops), and along
-    /// the edges its loops use twice (its seams).
-    fn extent(&self, loops: &[Bound]) -> R<swept::Extent> {
-        let mut ext = swept::Extent::default();
-        let mut count: HashMap<u32, usize> = HashMap::new();
-        for l in loops {
-            match l {
-                Bound::Edges(es) => {
-                    let mut walk = Vec::new();
-                    for &(e, forward) in es {
-                        *count.entry(e).or_default() += 1;
-                        let edge = self.asm.edges.get(e as usize).ok_or("edge reference")?;
-                        let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
-                        let [lo, hi] = edge.interval;
-                        for k in 0..8 {
-                            let s = f64::from(k) / 8.0;
-                            walk.push(c.point(if forward { lo + (hi - lo) * s } else { hi - (hi - lo) * s }).ok_or("edge point")?);
-                        }
-                    }
-                    if let Some(&p) = walk.first() {
-                        walk.push(p);
-                    }
-                    ext.walks.push(walk);
-                }
-                Bound::Vertex(v) => ext.points.push(v3(self.asm.point(*v)?)),
-            }
-        }
-        let mut edges: Vec<u32> = count.keys().copied().collect();
-        edges.sort_unstable();
-        for e in edges {
-            let edge = self.asm.edges.get(e as usize).ok_or("edge reference")?;
-            let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
-            let [lo, hi] = edge.interval;
-            for k in 0..=8 {
-                let p = c.point(lo + (hi - lo) * f64::from(k) / 8.0).ok_or("edge point")?;
-                ext.points.push(p);
-                if count.get(&e).is_some_and(|n| *n > 1) {
-                    ext.seam.push(p);
-                }
-            }
-        }
-        Ok(ext)
     }
 
     /// The faces of shell `id` but those `left_out`, and whether any was left out.

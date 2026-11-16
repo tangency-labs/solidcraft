@@ -16,6 +16,23 @@ A reader creates an `Assembly` with a tolerance (mm) and, optionally, a `Trims`:
 
 Everything is in millimetres and radians.
 
+## Surfaces that depend on their face
+
+Some surfaces have no single record form: what the record holds depends on the face on them. A reader gives such a surface by its definition, a `SweptSurface`, and asks `swept_surface(surface, bounds)` for the record surface once the face's edges and vertices are added. It returns the record surface and whether its natural normal is opposite the definition's own; the reader then adds the face on that surface with `add_face`, its bounds and side taken relative to the record's natural normal, as for any other surface. The bounds are given as the reader has them, either way round: only the points along them are used.
+
+- **A linear sweep** (`LinearSweep`): a record curve moved along a direction, `profile(s) + t direction`. Its own normal is the profile's tangent × the direction.
+- **A revolution** (`Revolution`): a record curve turned about an axis (a point and a direction), the angle counter-clockwise about the direction. Its own normal is ∂angle × ∂profile.
+- **A cone** (`Cone`): the record's circular cone (a frame, the radius at its origin, the half angle). Its own normal is the record cone's.
+
+What the record holds:
+
+- A line, circle or ellipse profile is bounded where the face needs it: over the parameters of the face's boundary points with a margin, or, on a closed profile, across the widest gap the face's loops leave (so the profile's own start, which may lie inside the face, does not cut it), or the whole turn from the face's seam when a loop goes once round. A swept profile becomes an exact spline along it, degree 1 along the direction; a revolved one a revolution, stopped where the profile meets the axis. A spline or polyline profile is swept whole.
+- A circle swept along its axis is the cylinder it is, and a circle revolved in a plane through the axis the ring torus it is.
+- A cone that stays within the tolerance of the plane through its frame's origin across its axis, over the face's boundary points (and its apex, should the face hold the axis), is that plane: a cone a whisker short of a right angle, as some writers give a plane, has no area in its own parameters.
+
+The STEP reader reads its own surfaces of linear extrusion and of revolution, and its cones, by the same code.
+
+
 ## What `finish` does
 
 `finish(item, name, shells, kind)` takes each shell as a list of faces with the side the shell uses each on, and what they make (`Kind`: a solid, a solid with voids, a surface model, or a solid with faces left out). In order, it:

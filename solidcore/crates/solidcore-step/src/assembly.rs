@@ -8,6 +8,10 @@
 //! kernel's [`Trims`] for the rest), outer loops and face sides checked against the pcurves,
 //! tolerances raised to the gaps the geometry has, regions, and the canonical order.
 //!
+//! A face on a surface whose record form depends on the face (a linear sweep or a revolution of
+//! a record curve, a cone that may be the plane it nearly is) gets that surface from
+//! [`Assembly::swept_surface`], by the code the STEP reader reads its own such surfaces with.
+//!
 //! `docs/import-assembly.md` (solidcore's docs) describes the stage as a whole.
 //!
 //! The STEP reader ([`crate::topology`]) is one such reader; it was where this was written, and
@@ -33,6 +37,7 @@ use solidcore_record::brep::{
 
 use crate::geom::P3;
 use crate::read::R;
+use crate::topology::swept::Extent;
 
 mod frames;
 pub(crate) mod seams;
@@ -138,6 +143,40 @@ pub(crate) struct FaceB {
     pub(crate) forward: bool,
     /// A round face's box on its label (`crate::kernel::form::extent`), once measured.
     pub(crate) extent: Option<[[f64; 2]; 2]>,
+}
+
+/// A surface whose record form depends on the face on it, given by its definition
+/// ([`Assembly::swept_surface`]): in millimetres and radians.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SweptSurface {
+    /// `profile` moved along `direction` (a vector of any length but zero): the surface
+    /// `profile(s) + t direction`. Its own normal is ∂profile × `direction`.
+    LinearSweep {
+        /// The profile, a record curve.
+        profile: BCurve,
+        /// The sweep's direction.
+        direction: P3,
+    },
+    /// `profile` turned about the axis through `origin` along `axis` (any length but zero), the
+    /// angle counter-clockwise about `axis`. Its own normal is ∂angle × ∂profile.
+    Revolution {
+        /// The profile, a record curve.
+        profile: BCurve,
+        /// A point on the axis.
+        origin: P3,
+        /// The axis's direction.
+        axis: P3,
+    },
+    /// The record's circular cone (`Surface::Cone`): `radius` at the frame's origin, opening at
+    /// `half_angle` along the frame's z. Its own normal is the record cone's.
+    Cone {
+        /// The cone's frame.
+        frame: Frame,
+        /// The radius at the frame's origin.
+        radius: f64,
+        /// The half angle.
+        half_angle: f64,
+    },
 }
 
 /// Faces, edges and vertices being assembled into a record ([`Assembly::finish`]).
@@ -284,6 +323,63 @@ impl<'t> Assembly<'t> {
         self.faces.push(FaceB { origin, surface, loops: bounds, outer, forward, extent: None });
         Ok(i)
     }
+    /// Points along a face's bounds (each edge at nine points, and its vertex bounds), along the
+    /// edges its bounds use twice (its seams), and each edge bound walked as it runs: where the
+    /// face lies on a surface whose record form depends on it ([`Assembly::swept_surface`]).
+    pub(crate) fn extent(&self, loops: &[Bound]) -> R<Extent> {
+        let mut ext = Extent::default();
+        let mut count: HashMap<u32, usize> = HashMap::new();
+        for l in loops {
+            match l {
+                Bound::Edges(es) => {
+                    let mut walk = Vec::new();
+                    for &(e, forward) in es {
+                        *count.entry(e).or_default() += 1;
+                        let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                        let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+                        let [lo, hi] = edge.interval;
+                        for k in 0..8 {
+                            let s = f64::from(k) / 8.0;
+                            walk.push(c.point(if forward { lo + (hi - lo) * s } else { hi - (hi - lo) * s }).ok_or("edge point")?);
+                        }
+                    }
+                    if let Some(&p) = walk.first() {
+                        walk.push(p);
+                    }
+                    ext.walks.push(walk);
+                }
+                Bound::Vertex(v) => ext.points.push(v3(self.point(*v)?)),
+            }
+        }
+        let mut edges: Vec<u32> = count.keys().copied().collect();
+        edges.sort_unstable();
+        for e in edges {
+            let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+            let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+            let [lo, hi] = edge.interval;
+            for k in 0..=8 {
+                let p = c.point(lo + (hi - lo) * f64::from(k) / 8.0).ok_or("edge point")?;
+                ext.points.push(p);
+                if count.get(&e).is_some_and(|n| *n > 1) {
+                    ext.seam.push(p);
+                }
+            }
+        }
+        Ok(ext)
+    }
+
+    /// The record surface of a surface whose record form depends on the face it bounds
+    /// ([`SweptSurface`]), for a face with `bounds` (the edges and vertices already added, the
+    /// bounds as the reader has them, either way round), and whether its natural normal is
+    /// opposite the definition's own (stated on each kind). The reader then adds the face on it
+    /// ([`Assembly::add_face`]) with its bounds and side relative to that natural normal. A
+    /// sweep or revolution's profile is bounded where the face's boundary needs it, and a cone
+    /// that stays within the tolerance of the plane across its axis over the boundary is that
+    /// plane. The STEP reader reads its swept surfaces and cones by the same code.
+    pub fn swept_surface(&self, surface: &SweptSurface, bounds: &[Bound]) -> R<(BSurface, bool)> {
+        crate::topology::swept::map_neutral(surface, &self.extent(bounds)?, self.tol)
+    }
+
     pub(crate) fn point(&self, v: u32) -> R<P3> {
         self.vertices.get(v as usize).map(|v| v.point).ok_or_else(|| "vertex reference".to_string())
     }

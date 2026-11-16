@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use super::*;
-use solidcore_record::brep::{Curve as BCurve, Surface as BSurface};
+use solidcore_record::brep::{Curve as BCurve, Frame, Surface as BSurface};
 
 /// The box's corner `c`: bit 0 is x (10 mm), bit 1 y (20 mm), bit 2 z (30 mm).
 fn corner(c: usize) -> [f64; 3] {
@@ -157,4 +157,186 @@ fn weighted_control_points_that_overflow_are_refused() {
     let k = || vec![0.0, 0.0, 1.0, 1.0];
     let e = spline_surface([1, 1], [k(), k()], &grid, Some(&[vec![2.0, 1.0], vec![1.0, 1.0]])).unwrap_err();
     assert!(e.contains("weighted control points"), "{e}");
+}
+
+/// A face added on a surface given by its definition ([`Assembly::swept_surface`]), as a reader
+/// adds one: its bounds run counter-clockwise about the face's side, which is the definition's
+/// own normal when `own`; they and the side are then taken relative to the record surface's
+/// natural normal.
+fn add_swept(asm: &mut Assembly<'_>, origin: u64, definition: &SweptSurface, mut bounds: Vec<Bound>, own: bool) -> R<(u32, BSurface)> {
+    let (surface, reversed) = asm.swept_surface(definition, &bounds)?;
+    let side = own != reversed;
+    if !side {
+        for b in &mut bounds {
+            if let Bound::Edges(uses) = b {
+                reverse(uses);
+            }
+        }
+    }
+    Ok((asm.add_face(origin, surface.clone(), bounds, Some(0), side)?, surface))
+}
+
+/// The record's volume.
+fn volume(solid: &Solid) -> f64 {
+    let (body, _) = solidcore_ops::Body::from_record(&solid.brep, false).unwrap();
+    body.volume(1e-9).unwrap()
+}
+
+/// The 10 × 20 × 30 box with face `f` of [`FACES`] on `definition` (`own`: the definition's own
+/// normal points out of the box there), and the record surface that face got.
+fn box_with(f: usize, definition: &SweptSurface, own: bool) -> R<(Solid, BSurface)> {
+    let mut asm = Assembly::new(1e-6, None);
+    let mut vertices = Vec::new();
+    for c in 0..8 {
+        vertices.push(asm.add_vertex(corner(c))?);
+    }
+    let mut edges: HashMap<(usize, usize), u32> = HashMap::new();
+    let mut faces = Vec::new();
+    let mut got = None;
+    for (k, (corners, u_axis, v_axis)) in FACES.into_iter().enumerate() {
+        let mut uses = Vec::new();
+        for n in 0..4 {
+            let (i, j) = (corners[n], corners[(n + 1) % 4]);
+            let key = (i.min(j), i.max(j));
+            let e = match edges.get(&key) {
+                Some(e) => *e,
+                None => {
+                    let line = BCurve::Line { start: corner(key.0), end: corner(key.1) };
+                    let (e, _) = asm.add_edge(key.0 as u64 * 8 + key.1 as u64, line, [0.0, 1.0], [vertices[key.0], vertices[key.1]])?;
+                    edges.insert(key, e);
+                    e
+                }
+            };
+            uses.push((e, i == key.0));
+        }
+        let bounds = vec![Bound::Edges(uses)];
+        if k == f {
+            let (face, surface) = add_swept(&mut asm, k as u64, definition, bounds, own)?;
+            got = Some(surface);
+            faces.push((face, asm.faces[face as usize].forward));
+        } else {
+            let plane = BSurface::Plane { origin: corner(corners[0]), u_axis, v_axis };
+            faces.push((asm.add_face(k as u64, plane, bounds, Some(0), true)?, true));
+        }
+    }
+    let solid = asm.finish(0, "box".into(), vec![faces], Kind::Solid)?;
+    Ok((solid, got.ok_or("no swept face")?))
+}
+
+/// A prism over the segment of the ellipse `(10 cos t, 6 sin t)` cut off by the chord x = 5
+/// (the ellipse from −60° round its parameter's origin to +60°), 5 mm tall, its curved side the
+/// ellipse swept up (or down, the definition's own normal then pointing in): the side covers
+/// the narrow segment only, not the rest of the ellipse, and the prism has the segment's
+/// volume, the circle's segment (r = 10, 120°) scaled by 6/10 across the chord.
+#[test]
+fn an_ellipse_swept_across_its_parameter_origin_bounds_only_its_face() {
+    let (a, b, h) = (10.0, 6.0, 5.0);
+    let s = (std::f64::consts::PI / 3.0).sin();
+    for up in [true, false] {
+        let mut asm = Assembly::new(1e-6, None);
+        let v: Vec<u32> =
+            [[5.0, -b * s, 0.0], [5.0, b * s, 0.0], [5.0, b * s, h], [5.0, -b * s, h]].into_iter().map(|p| asm.add_vertex(p).unwrap()).collect();
+        let ellipse =
+            |z: f64| BCurve::Ellipse { frame: Frame { origin: [0.0, 0.0, z], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }, radii: [a, b] };
+        let arc = [-std::f64::consts::FRAC_PI_3, std::f64::consts::FRAC_PI_3];
+        let line = |p: usize, q: usize| (BCurve::Line { start: asm.point(v[p]).unwrap(), end: asm.point(v[q]).unwrap() }, [v[p], v[q]]);
+        let lines = [line(1, 0), line(2, 3), line(1, 2), line(0, 3)];
+        let low = asm.add_edge(0, ellipse(0.0), arc, [v[0], v[1]]).unwrap().0;
+        let high = asm.add_edge(1, ellipse(h), arc, [v[3], v[2]]).unwrap().0;
+        let [chord_low, chord_high, rise_plus, rise_minus] = lines.map(|(c, ends)| asm.add_edge(2, c, [0.0, 1.0], ends).unwrap().0);
+        let plane = |o: [f64; 3], u: [f64; 3], w: [f64; 3]| BSurface::Plane { origin: o, u_axis: u, v_axis: w };
+        let bottom = asm
+            .add_face(
+                0,
+                plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, -1.0, 0.0]),
+                vec![Bound::Edges(vec![(low, false), (chord_low, false)])],
+                Some(0),
+                true,
+            )
+            .unwrap();
+        let top = asm
+            .add_face(
+                1,
+                plane([0.0, 0.0, h], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+                vec![Bound::Edges(vec![(high, true), (chord_high, true)])],
+                Some(0),
+                true,
+            )
+            .unwrap();
+        let flat = asm
+            .add_face(
+                2,
+                plane([5.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]),
+                vec![Bound::Edges(vec![(chord_low, true), (rise_minus, true), (chord_high, false), (rise_plus, false)])],
+                Some(0),
+                true,
+            )
+            .unwrap();
+        let sweep = SweptSurface::LinearSweep { profile: ellipse(0.0), direction: [0.0, 0.0, if up { h } else { -1.0 }] };
+        let bounds = vec![Bound::Edges(vec![(low, true), (rise_plus, true), (high, false), (rise_minus, false)])];
+        let (side, surface) = add_swept(&mut asm, 3, &sweep, bounds, up).unwrap();
+        assert!(matches!(surface, BSurface::RationalSpline { .. }), "{surface:?}");
+        let side = (side, asm.faces[side as usize].forward);
+        let solid = asm.finish(0, "segment".into(), vec![vec![(bottom, true), (top, true), (flat, true), side]], Kind::Solid).unwrap();
+        assert_eq!((solid.brep.faces.len(), solid.brep.edges.len(), solid.brep.vertices.len()), (4, 6, 4), "up: {up}");
+        let theta = 2.0 * std::f64::consts::FRAC_PI_3;
+        let expected = b / a * 0.5 * a * a * (theta - theta.sin()) * h;
+        let got = volume(&solid);
+        assert!((got - expected).abs() < 1e-6 * expected, "up: {up}: {got} vs {expected}");
+    }
+}
+
+/// A quarter of the cylinder of radius 10 about z, 5 tall, bounded by two arcs and two lines,
+/// on the line x = 10 (in y = 0) revolved about z: a revolution whose profile reaches the
+/// face's height and on which every point of the face lies, its natural normal the
+/// definition's own (∂angle × ∂profile): out of the axis turning about +z, into it about −z.
+#[test]
+fn a_profile_revolved_through_the_entry_covers_its_face() {
+    let (r, h) = (10.0, 5.0);
+    for (axis, out) in [([0.0, 0.0, 1.0], true), ([0.0, 0.0, -1.0], false)] {
+        let mut asm = Assembly::new(1e-6, None);
+        let v: Vec<u32> = [[r, 0.0, 0.0], [0.0, r, 0.0], [0.0, r, h], [r, 0.0, h]].into_iter().map(|p| asm.add_vertex(p).unwrap()).collect();
+        let arc = |z: f64| BCurve::Circle { frame: Frame { origin: [0.0, 0.0, z], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }, radius: r };
+        let quarter = [0.0, std::f64::consts::FRAC_PI_2];
+        let low = asm.add_edge(0, arc(0.0), quarter, [v[0], v[1]]).unwrap().0;
+        let high = asm.add_edge(1, arc(h), quarter, [v[3], v[2]]).unwrap().0;
+        let rise = |asm: &mut Assembly<'_>, a: u32, z: u32| {
+            let line = BCurve::Line { start: asm.point(a).unwrap(), end: asm.point(z).unwrap() };
+            asm.add_edge(2, line, [0.0, 1.0], [a, z]).unwrap().0
+        };
+        let (left, right) = (rise(&mut asm, v[1], v[2]), rise(&mut asm, v[0], v[3]));
+        let uses = vec![(low, true), (left, true), (high, false), (right, false)];
+        let profile = BCurve::Line { start: [r, 0.0, 0.0], end: [r, 0.0, 1.0] };
+        let revolution = SweptSurface::Revolution { profile, origin: [0.0; 3], axis };
+        let (surface, reversed) = asm.swept_surface(&revolution, &[Bound::Edges(uses)]).unwrap();
+        assert!(matches!(surface, BSurface::PlacedRevolution { forward: false, .. }) && !reversed, "{surface:?}");
+        let s = SurfaceEval::new(&surface).unwrap();
+        for p in [[r, 0.0, 0.0], [0.0, r, 0.0], [0.0, r, h], [r, 0.0, h], [r * 0.6, r * 0.8, 0.5 * h]] {
+            let p = Vec3::from(p);
+            let uv = s.project(p, None, 1e-9).unwrap();
+            assert!(s.point(uv).unwrap().dist(p) < 1e-9, "{axis:?} {p:?}");
+            let (_, du, dv) = s.derivs(uv[0], uv[1]).unwrap();
+            let radial = Vec3::new(p.x, p.y, 0.0);
+            assert_eq!(du.cross(dv).dot(radial) > 0.0, out, "{axis:?} {p:?}");
+        }
+    }
+}
+
+/// The box's top (z = 30) as a cone whose half angle is 7e-12 short of a right angle, of
+/// radius 1 at the face's middle: the plane across its axis, within the tolerance over the
+/// face, so the record has that plane and the box's volume. A cone that opens at 45° is a cone.
+#[test]
+fn a_cone_of_nearly_a_right_angle_is_its_plane_and_a_steeper_one_a_cone() {
+    let frame = Frame { origin: [5.0, 10.0, 30.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] };
+    let flat = SweptSurface::Cone { frame: frame.clone(), radius: 1.0, half_angle: std::f64::consts::FRAC_PI_2 - 7e-12 };
+    // Its own normal (the record cone's) points down the axis, into the box.
+    let (solid, surface) = box_with(1, &flat, false).unwrap();
+    assert!(matches!(surface, BSurface::Plane { .. }), "{surface:?}");
+    assert!(solid.turned.is_empty(), "{:?}", solid.turned);
+    assert!((volume(&solid) - 6000.0).abs() < 1e-6, "{}", volume(&solid));
+    let mut asm = Assembly::new(1e-6, None);
+    let corners: Vec<u32> = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]].into_iter().map(|p| asm.add_vertex(p).unwrap()).collect();
+    let (steep, reversed) =
+        asm.swept_surface(&SweptSurface::Cone { frame, radius: 1.0, half_angle: std::f64::consts::FRAC_PI_4 }, &[Bound::Vertex(corners[0])]).unwrap();
+    assert!(matches!(steep, BSurface::Cone { .. }) && !reversed, "{steep:?}");
 }
