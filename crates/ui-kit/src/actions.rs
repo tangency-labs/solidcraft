@@ -541,7 +541,8 @@ pub fn button_pair(ui: &mut egui::Ui, key: &str, states: [bool; 2], buttons: [Pa
                         f32::from(t.icon.a()) / 255.0,
                     );
                 }
-                painter.galley(egui::pos2(left + icon_width, rect.center().y - galley.size().y / 2.0), galley, t.form_ink);
+                let ink = if on { crate::layout::ink_on(&t, t.selected_bg, t.form_ink, 4.5) } else { t.form_ink };
+                painter.galley(egui::pos2(left + icon_width, rect.center().y - galley.size().y / 2.0), galley, ink);
                 response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), on, label));
                 t.button_bevel(ui, &response, on);
                 pointer_on_hover(ui, &response);
