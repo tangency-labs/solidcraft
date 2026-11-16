@@ -522,6 +522,35 @@ pub fn calculate_tight_bounding_box_into(
         return Ok(());
     }
 
+    // Not upstream: a face with no vertex and no edge (its trim was smaller than the
+    // tolerance) leaves the box so far empty. The search below stands on that box: it
+    // passes over a cell that is monotone, or wholly outside the face, because the edges
+    // already hold the extreme. With no edges that premise fails, and the empty box's
+    // inverted bounds would come back as points (+-1e20 on every axis). The face's points
+    // are the surface's over the face's domain, so each side is that domain's own bound as
+    // the search bounds a cell it leaves unsolved (`unsolved_cell_top`): the control-point
+    // hull of the surface's subpatch over the domain plus its rounding, else the surface's
+    // loose box over it.
+    if is_empty_box(&face_bbox) {
+        let patch = cell_patch(k, surface, &uv_domain)?;
+        let top = |dir: Vec3| -> Result<f64> {
+            let hull = patch.as_ref().and_then(|p| patch_hull_max(p, dir));
+            unsolved_cell_top(k, lb, f, surface, &uv_domain, hull, dir)
+        };
+        let max = Point3::new(
+            top(Vec3::new(1.0, 0.0, 0.0))?,
+            top(Vec3::new(0.0, 1.0, 0.0))?,
+            top(Vec3::new(0.0, 0.0, 1.0))?,
+        );
+        let min = Point3::new(
+            -top(Vec3::new(-1.0, 0.0, 0.0))?,
+            -top(Vec3::new(0.0, -1.0, 0.0))?,
+            -top(Vec3::new(0.0, 0.0, -1.0))?,
+        );
+        *out = Extent3d::from_points(min, max);
+        return Ok(());
+    }
+
     // WR-588 (#1799; tangency-labs/smlib@9d44c1b): the face's own extremes inside
     // its trim (`sm_FaceDirectedMax`), not the surface's global ones alone. The starting
     // values are the box of the vertices and edges, as the fork's.
@@ -590,6 +619,13 @@ pub fn calculate_tight_bounding_box_into(
     face_bbox.add_point(Point3::new(x_max, y_max, z_max));
     *out = face_bbox;
     Ok(())
+}
+
+/// Whether `e` holds no point: still the inside-out extent of [`Extent3d::new`] on some
+/// axis (written so that a NaN bound counts as empty).
+fn is_empty_box(e: &Extent3d) -> bool {
+    let (lo, hi) = (e.min(), e.max());
+    !(lo.x <= hi.x && lo.y <= hi.y && lo.z <= hi.z)
 }
 
 /// `SmSurfaceEval::Pos()`: the position, also when the evaluation failed (then what
@@ -3603,6 +3639,62 @@ mod tests {
     fn tight_box_with_the_peak_inside_the_trim_agrees_with_upstream() {
         let bx = crowned_trimmed_face_box(0.0);
         assert!((bx.max().z - 4.0).abs() <= 1e-9, "z max {}", bx.max().z);
+    }
+
+    /// A face made over a UV domain far smaller than the tolerance has no vertex and no
+    /// edge. Its box is the control-point hull of the surface's subpatch over that domain:
+    /// finite, holding the face's points, and as small as the patch. The search would have
+    /// taken the empty box of its edges as its bounds and returned them as points, +-1e20 on
+    /// every axis.
+    #[test]
+    fn tight_box_of_a_face_without_edges_is_its_surfaces_box() {
+        use crate::topology::brep::p2::ArenaNotifyState;
+        use crate::topology::brep::p8::{create_face_from_surface, FaceBuildEnv};
+        let mut k = Kernel::default();
+        let mut b = crate::topology::brep::p3::new_brep(
+            &mut k,
+            crate::geom::tol::USE_DEFAULT,
+            crate::geom::tol::USE_DEFAULT,
+        )
+        .unwrap();
+        let surface = crowned_height_field(0.0);
+        let domain = Extent2d::from_bounds(0.5, 0.5, 0.500_001, 0.500_001);
+        let f = {
+            let mut state = ArenaNotifyState::new(&b);
+            let mut env = state.env(None);
+            let mut marks = crate::topology::topology_traverser::Marks::default();
+            let this_face = |f: FaceId| crate::topology::loopuse::notify_ref(EntityRef::Face(f));
+            let mut fenv = FaceBuildEnv {
+                env: &mut env,
+                marks: &mut marks,
+                this_face: &this_face,
+            };
+            create_face_from_surface(&mut k, &mut b, Some(surface.clone()), &domain, &mut fenv)
+                .unwrap()
+        };
+        assert!(face_edges(&b, f).unwrap().is_empty(), "no edges");
+        let bx = calculate_tight_bounding_box(&k, &b, f).unwrap();
+        let (lo, hi) = (bx.min(), bx.max());
+        // the surface's points over the domain (its corners and middle) lie in the box,
+        // which is no wider than the patch (1e-6 across in x and y, the crown's slope there
+        // is below 1, and the hull's rounding is far below that)
+        for (s, t) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0), (0.5, 0.5)] {
+            let p = surface.evaluate_point(&k, domain.evaluate(s, t)).unwrap();
+            assert!(
+                p.x >= lo.x
+                    && p.y >= lo.y
+                    && p.z >= lo.z
+                    && p.x <= hi.x
+                    && p.y <= hi.y
+                    && p.z <= hi.z,
+                "{p:?} outside {lo:?} .. {hi:?}"
+            );
+        }
+        let size = hi - lo;
+        assert!(
+            size.x < 2e-6 && size.y < 2e-6 && size.z < 2e-6,
+            "box {lo:?} .. {hi:?}"
+        );
     }
 
     #[test]
