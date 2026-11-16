@@ -140,18 +140,25 @@ fn issue_1480_union_edges_end_at_their_own_vertices() {
 fn issue_1480_union_without_the_extension_keeps_upstream_s_ends() {
     let mut k = kernel(false);
     let (edges, vertices, worst) = union_edge_ends(&mut k);
-    // The end trim alone moves no curve end here: upstream's topology, every end within
-    // 7.5e-6.
+    // The end trim alone moves no curve end here: upstream's topology. Every end was within
+    // 7.5e-6 until WR-306's absorb became the only path (#17888): the eight 1.43e-5 closed
+    // proto edges at the ridge crossings lie inside their vertex's tolerance, so they are
+    // absorbed and the vertex pairs fitted to their edges, which moves those ends to
+    // 1.2200e-5 (MEASURED). Each stays within its vertex's tolerance (3.84e-5; worst
+    // gap / tolerance 0.436), and the union passes level 2 where upstream's had 1.73 mm
+    // vertex tolerances (see the WR-469 test below).
     assert_eq!((edges, vertices), (1096, 712));
-    assert!(worst < 7.5e-6, "worst edge end {worst:e} off its vertex");
+    assert!(
+        close(worst, 1.2200330381431168e-5),
+        "worst edge end {worst:e} off its vertex"
+    );
 }
 
 /// The union, with `new_edge_vertex_tolerance_covers_gap` cleared, then set (every
 /// other `UpstreamFixes` flag default). `tolerances`, `worst_end_gap` and `volume` are
 /// captured before the validity check; `faces`, `edges`, `vertices` and `manifold`
-/// assert on the returned body after it. On this rig the check skips `AssertValid`
-/// (`ValidatePointers` refused first), so the report the test compares is the
-/// segmented-pointer report alone.
+/// assert on the returned body after it. `check` is the level-2 report (empty since
+/// #17888; before it `ValidatePointers` refused and `AssertValid` was skipped).
 struct Union {
     faces: usize,
     edges: usize,
@@ -218,92 +225,21 @@ fn union_with_only_the_new_edge_flag(fix: bool) -> Union {
     }
 }
 
-/// The eight vertices whose tolerance `new_edge_vertex_tolerance_covers_gap` alone
-/// changes on the #1480 union, as `(x, y, z, tolerance with the flag off, with it on)`.
-/// The "on" values are the branch's `2 * gap`-sized stored values: the store-time gap
-/// is not observable from the final body (the p9 routine test bounds the growth at
-/// `>= 2 * gap`), and later booleans move the edge ends, so the current end gaps are
-/// smaller (the fix's value only grows a tolerance).
-const WR469_VERTICES: [(f64, f64, f64, f64, f64); 8] = [
-    (
-        99.5929150054111,
-        57.49996907908349,
-        -0.30001241426386144,
-        1.70348595231800470e-5,
-        2.85897936527436294e-5,
-    ),
-    (
-        57.499969079083485,
-        99.5929150054111,
-        -0.3000124142638605,
-        1.70348595203878130e-5,
-        2.85897936668835265e-5,
-    ),
-    (
-        -57.49996907908349,
-        99.5929150054111,
-        -0.3000124142638637,
-        1.70348595232676946e-5,
-        2.85897936177208906e-5,
-    ),
-    (
-        -99.5929150054111,
-        57.49996907908349,
-        -0.30001241426386155,
-        1.70348595231860914e-5,
-        2.85897936786007297e-5,
-    ),
-    (
-        -99.5929150054111,
-        -57.49996907908349,
-        -0.3000124142638637,
-        1.70348595232676946e-5,
-        2.85897936268689989e-5,
-    ),
-    (
-        -57.49996907908349,
-        -99.5929150054111,
-        -0.30001241426386155,
-        1.70348595231860914e-5,
-        2.85897936891094169e-5,
-    ),
-    (
-        57.49996907908349,
-        -99.5929150054111,
-        -0.3000124142638637,
-        1.70348595232676946e-5,
-        2.85897936805655650e-5,
-    ),
-    (
-        99.5929150054111,
-        -57.49996907908349,
-        -0.30001241426386155,
-        1.70348595231860914e-5,
-        2.85897936891094169e-5,
-    ),
-];
-
-/// The tolerance of the vertex at `point` (within 1e-9, far closer than the rig's
-/// distinct vertices are to each other).
-fn tolerance_at(u: &Union, point: Point3) -> f64 {
-    let mut found = None;
-    for (p, t) in &u.tolerances {
-        if p.distance(point) <= 1e-9 {
-            assert!(found.is_none(), "two vertices at {point:?}");
-            found = Some(*t);
-        }
-    }
-    found.unwrap_or_else(|| panic!("no vertex at {point:?}"))
-}
-
 fn close(got: f64, want: f64) -> bool {
     (got - want).abs() <= 1e-12 * want.abs()
 }
 
-/// WR-469, isolated: on the #1480 union the flag changes no topology, volume or
-/// reported check, and grows exactly these eight vertex tolerances (to the branch's
-/// `2 * gap`-sized stored values). On this rig the report is the segmented-pointer
-/// check (`AssertValid` skipped); the default keeps them, as the pinned C++ does.
+/// WR-469, isolated: the union with `new_edge_vertex_tolerance_covers_gap` cleared, then
+/// set. Until WR-306's absorb became the only path (#17888) the flag grew eight vertex
+/// tolerances at the ridge crossings from 1.70e-5 to its `2 * gap`-sized 2.86e-5, and
+/// the union failed level 2 with 1.73 mm edge and vertex tolerances (upstream's
+/// millimetre tolerances, #1058). Now the eight 1.43e-5 closed proto edges there lie
+/// inside their vertex's tolerance, so they are absorbed and `ImprintIntersections`
+/// fits each vertex pair to its edges (tolerances 3.84e-5, above the flag's 2.86e-5; the
+/// flag only grows a tolerance). The flag then changes nothing on this rig: both runs are
+/// the same body, which passes level 2 (MEASURED). The flag's own growth stays covered
+/// by the p9 routine test (`>= 2 * gap`). The name is kept because the WR-469 records
+/// cite it.
 #[test]
 fn wr469_union_flag_alone_grows_eight_vertex_tolerances() {
     assert!(!Kernel::default().fixes.new_edge_vertex_tolerance_covers_gap);
@@ -312,8 +248,10 @@ fn wr469_union_flag_alone_grows_eight_vertex_tolerances() {
     for (name, u) in [("off", &off), ("on", &on)] {
         assert_eq!((u.faces, u.edges, u.vertices), (388, 1096, 712), "{name}");
         assert!(u.manifold, "{name}");
+        // 7.4750471556652e-6 until #17888 (above): every end stays within its vertex's
+        // tolerance, which the empty level-2 report below checks.
         assert!(
-            close(u.worst_end_gap, 7.4750471556652e-6),
+            close(u.worst_end_gap, 1.2200330381431168e-5),
             "{name} worst end gap {:e}",
             u.worst_end_gap
         );
@@ -324,41 +262,18 @@ fn wr469_union_flag_alone_grows_eight_vertex_tolerances() {
         // the volume moves 4.0e-9 relative. 44443.49387571212 until `brep_volume` closed
         // tolerant edges' gaps (#16735): -3.0e-8 relative with topology, end gap and check
         // unchanged (MEASURED), the move within the old integrator's leak bound on the body
-        // (`moved`).
+        // (`moved`). #17888 moves it a further -3.2e-14 relative (44443.49253850026).
         assert!(
             close(u.volume, 44443.49253850169),
             "{name} volume {:?}",
             u.volume
         );
         assert!(u.moved.is_ok(), "{name}: {:?}", u.moved);
+        // Until #17888 the report held eight "Edge tolerance relative to brep tolerance"
+        // and "Vertex tolerance is too wide" (1.7255363) failures, and `AssertValid` was
+        // skipped.
+        assert!(u.check.is_empty(), "{name}: {:?}", u.check);
     }
-    // The two runs are deterministic: same vertices in the same order, same outcome.
-    assert_eq!(off.tolerances.len(), on.tolerances.len());
-    assert_eq!(off.check, on.check);
-    let mut changed = Vec::new();
-    for ((p_off, t_off), (p_on, t_on)) in off.tolerances.iter().zip(&on.tolerances) {
-        assert_eq!(p_off, p_on);
-        if t_off != t_on {
-            changed.push(*p_on);
-        }
-    }
-    assert_eq!(changed.len(), WR469_VERTICES.len(), "{changed:?}");
-    for (x, y, z, off_tolerance, on_tolerance) in WR469_VERTICES {
-        let point = Point3::new(x, y, z);
-        assert!(
-            changed.iter().any(|p| p.distance(point) <= 1e-9),
-            "vertex {point:?} did not change"
-        );
-        let off_tolerance_at = tolerance_at(&off, point);
-        let on_tolerance_at = tolerance_at(&on, point);
-        assert!(
-            close(off_tolerance_at, off_tolerance),
-            "off {off_tolerance_at:.17e} at {point:?}"
-        );
-        assert!(
-            close(on_tolerance_at, on_tolerance),
-            "on {on_tolerance_at:.17e} at {point:?}"
-        );
-        assert!(on_tolerance_at > off_tolerance_at, "at {point:?}");
-    }
+    // The two runs are deterministic: same vertices in the same order, same tolerances.
+    assert_eq!(off.tolerances, on.tolerances);
 }
