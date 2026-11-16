@@ -2729,3 +2729,48 @@ fn tag_flanges(sh: &mut crate::sheet::SheetBody, from: usize, feature: u64) {
         fl.tag = format!("F{feature}.{}", k - from);
     }
 }
+
+/// The copies a pattern or mirror `f` makes of the Edge Flange `src`: the flange built again on
+/// each copy of its edges (its picks moved by each of `mats`), as the feature builds its own, with
+/// the heights, angles, sides and bend it has. A mirror reverses the way an edge runs, so a split
+/// edge's segments are mirrored along it. The flanges are tagged as `f`'s, numbered on from the
+/// flanges `f` has already made on that sheet, so two copies never share an edge name.
+pub(super) fn sheet_flange_copies(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    src: &Feature,
+    mats: &[Mat],
+    st: &mut ModelState,
+    warning: &mut Option<String>,
+) -> Result<()> {
+    let prefix = format!("F{}.", f.id);
+    for m in mats {
+        let mut copy = src.clone();
+        copy.id = f.id;
+        // The copy's edges are found at the moved points: the names mean the source's edges.
+        copy.edge_names.clear();
+        copy.face_names.clear();
+        let mirrors = crate::apply_vector(m, Vec3::X).cross(crate::apply_vector(m, Vec3::Y)).dot(crate::apply_vector(m, Vec3::Z)) < 0.0;
+        if let FeatureKind::SheetFlange { edges, .. } = &mut copy.kind {
+            for e in edges {
+                e.point.0 = apply_point(m, e.point.0);
+                if mirrors {
+                    e.segments.reverse();
+                    for seg in &mut e.segments {
+                        (seg.from, seg.to) = (1.0 - seg.to, 1.0 - seg.from);
+                    }
+                }
+            }
+        }
+        let before: Vec<usize> = st.sheets.iter().map(|sh| sh.flanges.len()).collect();
+        sheet_eval(doc, vals, &copy, st, warning)?;
+        for (sh, n0) in st.sheets.iter_mut().zip(before) {
+            let made = sh.flanges.iter().take(n0).filter(|fl| fl.tag.starts_with(&prefix)).count();
+            for (k, fl) in sh.flanges.iter_mut().enumerate().skip(n0) {
+                fl.tag = format!("{prefix}{}", made + k - n0);
+            }
+        }
+    }
+    Ok(())
+}
