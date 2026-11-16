@@ -909,7 +909,8 @@ fn profile_keys_cover_the_current_portable_preferences() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 104);
+    // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
+    assert_eq!(expected.len(), 105);
     assert_eq!(actual, expected);
 }
 

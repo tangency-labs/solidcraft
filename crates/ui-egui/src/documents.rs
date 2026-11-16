@@ -3407,7 +3407,7 @@ mod tests {
     /// view, and entering a sketch or Render stays in that view, so the tab looks as it did before
     /// design views. The switcher shows once the user opens a second view, with "Show the design
     /// view switcher" on (even for one view, and a sketch then opens its own view again), and views
-    /// as tabs keeps its sub-tabs.
+    /// as tabs keeps its sub-tabs and the tab's + for a new view.
     #[test]
     fn a_design_tab_shows_no_view_switcher_until_it_has_a_second_view() {
         let mut h = crate::scenario::Harness::new();
@@ -3421,6 +3421,7 @@ mod tests {
         assert!(!h.app.preferences.show_design_view_switcher && !h.app.preferences.design_views_as_tabs, "both off by default");
         assert!(!switcher(&mut h), "one view: no switcher");
         assert!(crate::scenario::handle_at("tab:design:0").is_some(), "the strip is drawn");
+        assert!(crate::scenario::handle_at("tab:view_new").is_none(), "nor the tab's + for a new view");
         h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch1"})).unwrap();
         h.frames(2);
         assert!(h.app.session.active_sketch.is_some(), "the sketch is entered");
@@ -3439,7 +3440,9 @@ mod tests {
         h.frames(2);
         h.app.preferences.show_design_view_switcher = false;
         assert!(switcher(&mut h), "a second view shows it with the preference off");
-        // Views as tabs: sub-tabs, no switcher, whatever the preference.
+        // Views as tabs: sub-tabs, no switcher, whatever the preference (on a bar with room for them;
+        // a narrow one falls back to the switcher).
+        h.call("ui.resize", json!({"width": 1920, "height": 1080}));
         h.app.preferences.design_views_as_tabs = true;
         assert!(!switcher(&mut h), "views as tabs draws sub-tabs instead");
         assert!(crate::scenario::rect_of("tab:view:0").is_some(), "the sub-tabs are drawn");
@@ -3451,6 +3454,10 @@ mod tests {
         let first = h.app.docs.views.views()[0].id;
         view_close_others(&mut h.app, first);
         assert!(!switcher(&mut h), "one view again");
+        h.app.preferences.design_views_as_tabs = true;
+        assert!(!switcher(&mut h));
+        assert!(crate::scenario::handle_at("tab:view_new").is_some(), "views as tabs keeps the tab's + for a new view");
+        h.app.preferences.design_views_as_tabs = false;
         h.call("ui.key", json!({"key": "T", "cmd": true}));
         assert_eq!(h.app.docs.views.len(), 2, "Ctrl+T still opens another view");
         assert!(switcher(&mut h), "and the switcher shows");

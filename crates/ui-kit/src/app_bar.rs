@@ -1064,9 +1064,10 @@ fn more_label(strip: &TabStrip, hidden: usize) -> String {
     strip.view_text.more.replace("{n}", &hidden.to_string())
 }
 
-/// Whether tab `i` is the shown, selected design with a single view: its tab carries a small + after its name.
+/// Whether tab `i` is the shown, selected design with a single view while views are sub-tabs: its
+/// tab carries a small + after its name. With a switcher the tab stays as it was before views.
 fn small_plus(strip: &TabStrip, i: usize) -> bool {
-    i == strip.selected && strip.shown_selected == Some(i) && strip.tabs.get(i).is_some_and(|tab| tab.views.len() == 1)
+    strip.views_as_tabs && i == strip.selected && strip.shown_selected == Some(i) && strip.tabs.get(i).is_some_and(|tab| tab.views.len() == 1)
 }
 
 fn line_colour(t: &Tokens) -> egui::Color32 {
