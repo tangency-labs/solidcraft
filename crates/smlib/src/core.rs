@@ -142,12 +142,10 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
     f.cone_iso_circle_at_axial_height = true;
-    f.fillet_overflow_trim_at_creases = true;
     // Held back: see `HELD_BACK`.
     f.fillet_refuse_rounds_breaking_through = false;
     f.cone_unbounded_parameterized_as_nurb = true;
     f.fillet_round_as_definition = true;
-    f.fillet_overflow_crease_along_edge = true;
     f.keep_exact_pcurves = true;
     f.face_swap_uv_transposes_trims = true;
     f.closed_smooth_pole_tangent_limit = true;
