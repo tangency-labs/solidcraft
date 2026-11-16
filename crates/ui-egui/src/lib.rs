@@ -1989,6 +1989,11 @@ impl SolveApp {
             }
             return;
         }
+        // Dialog OK runs OK in the open dialog and starts nothing (#17416).
+        if id == "ui.dialog_ok" {
+            dialogs::confirm(self);
+            return;
+        }
         self.tree.clear_folder_pick();
         // A command started from the folded ribbon's open panels closes them (#10112).
         self.ui.ribbon_open = false;

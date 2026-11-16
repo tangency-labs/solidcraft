@@ -17,7 +17,7 @@ use solidcore::query::api_queries::{
     self as q, brep_bounding_box, brep_is_manifold_solid, brep_material_census,
     edge_face_gap_samples, face_normal_at_edge,
 };
-use solidcore::query::brep::{BrepClassifier, BrepQuery, LiveBrepObjects};
+use solidcore::query::brep::{BrepClassifier, BrepQuery, LiveBrepObjects, Ray};
 use solidcore::query::face::p1 as face_p1;
 use solidcore::topology::brep::outward_solid_failure;
 use solidcore::topology::edgeuse::p1 as eu1;
@@ -287,6 +287,19 @@ pub struct EdgeRayPoint {
     /// The ray's point nearest it.
     pub on_ray: [f64; 3],
     /// The kernel solve's distance between the two (not certified: a solve's).
+    pub distance: f64,
+}
+
+/// The first face a ray meets ([`Body::face_hit_by_ray`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FaceRayHit {
+    /// The record face.
+    pub face: usize,
+    /// The point where the ray meets it, on the face's surface.
+    pub point: [f64; 3],
+    /// The face's (u, v) there, as [`crate::face_surface::FaceSurface`] evaluates them.
+    pub uv: [f64; 2],
+    /// The distance from the ray's origin to the point, along the ray.
     pub distance: f64,
 }
 
@@ -592,6 +605,42 @@ impl Body {
             parameter: c.parameter,
             on_ray: array(c.on_ray),
             distance: c.distance,
+        }))
+    }
+
+    /// The first face the ray from `origin` along `direction` meets (the kernel's
+    /// `query::brep::BrepQuery::first_face_hit`): a pick on a sheet or a solid lands on the face
+    /// drawn under the pointer, at the point there, with the face's (u, v) at it. A sheet is hit
+    /// from either side; `None` where the ray meets no face. The kernel's solve may add UV trim
+    /// curves to the body.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a coordinate that is not finite or a direction of no length;
+    /// [`Error::Exception`] for a hit face `order` does not list (an order of another body); any
+    /// other kernel error.
+    pub fn face_hit_by_ray(
+        &self,
+        order: &Order,
+        origin: [f64; 3],
+        direction: [f64; 3],
+    ) -> Result<Option<FaceRayHit>> {
+        let ray = Ray::new(point(origin)?, point(direction)?).map_err(|_| Error::Argument)?;
+        let hit = with_body("face_hit_by_ray", self, |k, b| {
+            BrepQuery::of_brep(b).first_face_hit(k, b, ray)
+        })?;
+        let Some(hit) = hit else {
+            return Ok(None);
+        };
+        let face = order
+            .faces
+            .iter()
+            .position(|&f| f == hit.face)
+            .ok_or(Error::Exception)?;
+        Ok(Some(FaceRayHit {
+            face,
+            point: array(hit.point),
+            uv: [hit.uv.x, hit.uv.y],
+            distance: hit.distance,
         }))
     }
 

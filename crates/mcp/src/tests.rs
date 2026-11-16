@@ -900,7 +900,6 @@ fn save_selects_container_or_json_and_reopens_by_contents() {
     for (name, format, is_json) in [
         ("default.solidcraft", None, false),
         ("explicit.solidcraft", Some("json"), true),
-        ("legacy.solvecraft", None, false),
         ("inferred.json", None, true),
         ("container.json", Some("container"), false),
     ] {
@@ -1851,6 +1850,34 @@ fn tool_unknown_command_errors_suggest_close_ids() {
 }
 
 #[test]
+fn tool_unknown_commands_suggest_equivalent_verbs() {
+    let mut s = server();
+    for (id, wanted) in [
+        ("note.create", "note.add"),
+        ("NOTE.CREATE", "note.add"),
+        ("note.new", "note.add"),
+        ("note.remove", "note.delete"),
+        ("parameters.create", "parameters.add"),
+        ("render.lights.create", "render.lights.add"),
+        ("render.lights.delete", "render.lights.remove"),
+    ] {
+        for name in ["describe_command", "execute", "batch"] {
+            let step = json!({"command": id, "params": {}});
+            let args = match name {
+                "describe_command" => json!({"id": id}),
+                "batch" => json!({"commands": [step]}),
+                _ => step,
+            };
+            let r = raw_tool(&mut s, name, args);
+            assert_eq!(r["result"]["isError"], true, "{r}");
+            let text = r["result"]["content"][0]["text"].as_str().unwrap();
+            let prefix = if name == "describe_command" { "did you mean" } else { "closest:" };
+            assert!(text.contains(&format!("{prefix} `{wanted}`")), "{name}: {text}");
+        }
+    }
+}
+
+#[test]
 fn tool_unknown_command_errors_explain_packed_params() {
     let mut s = server();
     for id in ["solid.cube {side: 20}", "solid.box(20)"] {
@@ -2089,10 +2116,10 @@ fn list_commands_narrows_by_prefix_panel_fields_and_page() {
     }
 }
 
-/// Compatibility shims (docs/compatibility.md): a design saved before the rename (legacy
-/// extension and format tag) opens through MCP, and the legacy resource URIs still read.
+/// Compatibility shim (docs/compatibility.md): a design saved before the rename (old extension
+/// and format tag) still opens through MCP, by its contents.
 #[test]
-fn legacy_design_files_and_resource_uris() {
+fn legacy_design_files_open_by_contents() {
     let mut s = server();
     let saved = String::from_utf8(solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::default())).unwrap();
     assert!(saved.contains("\"solidcraft/"), "{saved}");
@@ -2101,7 +2128,7 @@ fn legacy_design_files_and_resource_uris() {
     std::fs::write(&path, legacy).unwrap();
     tool(&mut s, "open", json!({"path": path.to_string_lossy()}));
     let _ = std::fs::remove_file(&path);
-    let d = call(&mut s, 1, "resources/read", json!({"uri": "solvecraft://design"}));
+    let d = call(&mut s, 1, "resources/read", json!({"uri": "solidcraft://design"}));
     assert!(d["result"]["contents"][0]["text"].as_str().unwrap().contains("timeline"));
 
     // `.sc` is what new designs are saved as; a `.solidcraft` file opens and `save {}` writes it
