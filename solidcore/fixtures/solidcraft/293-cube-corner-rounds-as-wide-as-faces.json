@@ -6,7 +6,7 @@
  "cases": [
   {
    "name": "corner_rounds_as_wide_as_faces_refused",
-   "note": "r 20 on the three edges at the origin corner, pinned SMLib: refused (Unable to Process Rollover), with no size.",
+   "note": "r 20 on the three edges at the origin corner, the default kernel: refused by the trim at creases (WR-695), status 1001, because the corners take the whole edge. The status alone is checked here; the next case, the same steps, checks the fit 19.99 it reports. (The pinned SMLib refuses it too, as Unable to Process Rollover, with no size.)",
    "steps": [
     {
      "op": "box",
@@ -55,7 +55,7 @@
   },
   {
    "name": "corner_rounds_as_wide_as_faces_refused_with_their_fit",
-   "note": "r 20 with step 6's crease trim and step 5's sizes: refused because the corners take the whole edge, fit 20 - 0.01.",
+   "note": "r 20, the default kernel (step 6's crease trim and step 5's sizes): refused because the corners take the whole edge, fit 20 - 0.01.",
    "steps": [
     {
      "op": "box",
@@ -109,7 +109,7 @@
   },
   {
    "name": "corner_rounds_at_their_fit_build",
-   "note": "r 19.99, the reported fit, with the same flags: one closed solid.",
+   "note": "r 19.99, the reported fit, the default kernel: one closed solid.",
    "steps": [
     {
      "op": "box",
