@@ -1013,6 +1013,8 @@ pub(crate) fn present(
         .scroll(scroll)
         .shrink(shrink)
         .events_per_row(true)
+        // Not while the app's own name editor is open: it needs Enter, F2 and the arrows itself.
+        .keyboard(app.preferences.browser_arrow_keys && app.menu.rename.is_none())
         .show(ui, |rows| draw(app, rows, acts));
     app.tree.content.current_mut().browser = state;
     crate::semantic_content::record_drawn(ui, &output);
