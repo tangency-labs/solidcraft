@@ -32,6 +32,7 @@ fn schemas_and_the_key_check_agree() {
         "configuration",
         "exploded",
         "hide",
+        "overlays",
         "pose",
         "position_mm",
         "reference_hides_model",
@@ -68,6 +69,7 @@ fn the_edit_contract_lists_a_saved_views_settings() {
         line_group: Some(Default::default()),
         exploded: Some(Default::default()),
         pose: Some(Default::default()),
+        overlays: Some(Vec::new().into()),
         configuration: Some(Default::default()),
     };
     let own = serde_json::to_value(all).unwrap_or_default();

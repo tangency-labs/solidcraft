@@ -108,6 +108,8 @@ pub const MAX_POSE_JOINTS: usize = 64;
 pub const MAX_JOINT_VALUES: usize = 6;
 /// The largest value a position saves, either way, in radians or millimetres.
 pub const MAX_POSE_VALUE: f64 = 1e9;
+/// Most overlays a view draws over its own position.
+pub const MAX_OVERLAYS: usize = 8;
 
 /// One joint's values in a view's position, by the joint's id, in the units and order joints save them
 /// ([`crate::joints::JointKind::dofs`]: angles in radians, distances in mm).
@@ -201,6 +203,10 @@ pub struct ViewOverrides {
     /// The position of its assembly it draws: the design's when no view of its chain sets one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pose: Option<Pose>,
+    /// The other positions of its assembly it draws over its own, in phantom lines (#13048): none
+    /// when no view of its chain sets them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overlays: Option<Arc<[Pose]>>,
     /// The configuration of the design it draws: the active one when no view of its chain sets one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub configuration: Option<ViewConfiguration>,

@@ -321,19 +321,14 @@ pub fn paper_group(lines: &Lines, object: u64, group: LineGroup) -> Group {
 /// from the bottom: hidden pieces, dashed hidden lines, then reference parts' visible ones as thin
 /// lines, then the model's as visible lines.
 pub fn paper_lines(lines: &Lines, object: u64, group: LineGroup) -> (Group, Vec<usize>) {
-    let stroke = |piece: &Piece, width_mm: f64| {
-        let path: Vec<Seg2> = piece.path.iter().copied().filter_map(drawable).collect();
-        let ends_meet = path.first().zip(path.last()).is_some_and(|(first, last)| last.end().dist(first.start()) <= EPS);
-        // One straight line never closes on itself, however short.
-        let closed = ends_meet && !matches!(path.as_slice(), [Seg2::Line { .. }]);
+    let drawn = |piece: &Piece, width_mm: f64| {
         let hidden = piece.visibility == Visibility::Hidden;
-        let pattern = hidden.then(|| LineKind::Hidden.dashes_mm(group)).flatten().map(|d| Dashes { lengths_mm: d.to_vec(), phase_mm: 0.0 });
-        (!path.is_empty()).then_some(Item::Stroke { path, closed, width_mm, pattern })
+        stroke(piece, width_mm, hidden.then(|| LineKind::Hidden.dashes_mm(group)).flatten().map(|d| d.to_vec()))
     };
     let strokes = |reference: bool, visibility: Visibility, width_mm: f64| {
         let pieces = lines.lines.iter().enumerate().filter(move |(_, l)| l.reference == reference);
         let pieces = pieces.flat_map(|(at, l)| l.pieces.iter().map(move |p| (at, p)));
-        pieces.filter(move |(_, p)| p.visibility == visibility).filter_map(move |(at, p)| Some((stroke(p, width_mm)?, at)))
+        pieces.filter(move |(_, p)| p.visibility == visibility).filter_map(move |(at, p)| Some((drawn(p, width_mm)?, at)))
     };
     let hidden_mm = LineKind::Hidden.width_mm(group);
     let hidden = strokes(true, Visibility::Hidden, hidden_mm).chain(strokes(false, Visibility::Hidden, hidden_mm));
@@ -356,6 +351,25 @@ pub fn chain_dashes_mm(dots: usize, group: LineGroup) -> Vec<f64> {
         lengths.extend([0.5 * d, 3.0 * d]);
     }
     lengths
+}
+
+/// `lines`' visible pieces as phantom lines in line `group` (#13048), as an overlay draws the parts its
+/// position moves: each piece one narrow stroke of ISO 128-20's long dash and two dots
+/// ([`chain_dashes_mm`]). No piece is hidden: an overlay draws none.
+pub fn phantom_items(lines: &Lines, group: LineGroup) -> Vec<Item> {
+    let pieces = lines.lines.iter().flat_map(|line| &line.pieces).filter(|piece| piece.visibility == Visibility::Visible);
+    pieces.filter_map(|piece| stroke(piece, LineKind::Thin.width_mm(group), Some(chain_dashes_mm(2, group)))).collect()
+}
+
+/// `piece` as one stroke `width_mm` wide, dashed `dashes` from its start: closed when it ends where
+/// it starts; nothing when it has no length to draw.
+fn stroke(piece: &Piece, width_mm: f64, dashes: Option<Vec<f64>>) -> Option<Item> {
+    let path: Vec<Seg2> = piece.path.iter().copied().filter_map(drawable).collect();
+    let ends_meet = path.first().zip(path.last()).is_some_and(|(first, last)| last.end().dist(first.start()) <= EPS);
+    // One straight line never closes on itself, however short.
+    let closed = ends_meet && !matches!(path.as_slice(), [Seg2::Line { .. }]);
+    let pattern = dashes.map(|lengths_mm| Dashes { lengths_mm, phase_mm: 0.0 });
+    (!path.is_empty()).then_some(Item::Stroke { path, closed, width_mm, pattern })
 }
 
 /// `seg`, or nothing where it has no length to draw: a line whose ends are one point. An arc too
