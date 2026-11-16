@@ -108,8 +108,8 @@ pub trait LocaleNames {
     /// multi-word Hebrew or Arabic name reads from the right like the interface's own labels (#10471).
     fn given_name(self, text: &str) -> String;
     /// Evaluation errors stay English for scripts; the empty Cut/Intersect hint that names
-    /// another component, and a feature's request to reselect a reference it lost, are translated
-    /// where they are shown. Other text is returned unchanged.
+    /// another component, a feature's request to reselect a reference it lost, and an open
+    /// Stitch result are translated where they are shown. Other text is returned unchanged.
     fn diagnostic(self, text: &str) -> String;
     /// Translate generated browser names and labels, preserving custom names otherwise.
     fn dynamic(self, text: &str) -> String;
@@ -150,6 +150,18 @@ impl LocaleNames for Locale {
                 (_, 0) => self.format("diagnostic.lost_projections", &args),
                 _ => self.format("diagnostic.lost_projections_more", &args),
             };
+        }
+        if let Some((before, detail)) = text.split_once("Stitch result `")
+            && let Some((body, detail)) = detail.rsplit_once("` remains open (boundary edges: ")
+            && let Some((count, after)) = detail.split_once(").")
+            && !body.is_empty()
+            && !count.is_empty()
+            && count.bytes().all(|c| c.is_ascii_digit())
+            && count.parse::<usize>().is_ok_and(|count| count > 0)
+        {
+            let body = self.given_name(body);
+            let message = self.format("diagnostic.stitch_open_edges", &[("body", &body), ("count", count)]);
+            return format!("{before}{message}{after}");
         }
         const PREFIX: &str = "there is no body to cut or intersect in component '";
         if let Some((before, detail)) = text.split_once(PREFIX)
@@ -536,6 +548,39 @@ mod tests {
             assert_ne!(translated, message, "{language}");
             // Right-to-left text comes back in display order, so only what it holds is checked.
             assert!(translated.contains("Fillet {2}") && translated.contains("`F4:side:c1#1|F4:top`"), "{language}: {translated}");
+        }
+    }
+
+    #[test]
+    fn stitch_open_edges_diagnostic_preserves_names_counts_and_other_warnings() {
+        install();
+        for body in ["A", "Plate ` {body} {count}", "Plate` remains open (boundary edges: 2). {body}"] {
+            for (before, after) in [("", ""), ("surface.stitch: ", "; another warning")] {
+                let message = format!("{before}Stitch result `{body}` remains open (boundary edges: 14).{after}");
+                assert_eq!(Locale::for_language("en").diagnostic(&message), message);
+                for language in ["ar", "de", "he", "ja", "ko", "vi", "zh"] {
+                    let translated = Locale::for_language(language).diagnostic(&message);
+                    assert_ne!(translated, message, "{language}");
+                    assert!(translated.contains(body) && translated.contains("14"), "{language}: {translated}");
+                    assert!(translated.starts_with(before) && translated.ends_with(after), "{language}: {translated}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn stitch_open_edges_diagnostic_leaves_malformed_lookalikes_unchanged() {
+        install();
+        for count in ["", "0", "-1", "+14", "1.5", " 14", "14 ", "١٤", "184467440737095516160"] {
+            let message = format!("Stitch result `A` remains open (boundary edges: {count}).");
+            assert_eq!(Locale::for_language("ja").diagnostic(&message), message);
+        }
+        for message in [
+            "Stitch result `` remains open (boundary edges: 14).",
+            "Stitch result `A` remains open (boundary edges: 14)",
+            "Stitch result `A` remains open (boundary edges: 14.5).",
+        ] {
+            assert_eq!(Locale::for_language("ja").diagnostic(message), message);
         }
     }
 

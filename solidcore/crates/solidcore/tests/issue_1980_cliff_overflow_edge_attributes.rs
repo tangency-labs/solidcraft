@@ -34,10 +34,7 @@ fn edge_at(b: &Brep, a: Point3, q: Point3) -> EdgeId {
 fn an_edge_tag_crosses_a_cliff_overflow() {
     let p = Point3::new;
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = true;
     let block = create_box(&mut k, Point3::ZERO, 40.0, 30.0, 10.0).unwrap();
     let notch = create_box(&mut k, p(35.0, -1.0, -1.0), 6.0, 6.0, 4.0).unwrap();
     let mut b = boolean_difference(&mut k, block, notch).unwrap();

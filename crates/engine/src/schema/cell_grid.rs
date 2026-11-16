@@ -97,6 +97,10 @@ pub struct CellGridParams {
     /// What happens to cells the field's edge crosses. Default: snap.
     #[serde(default)]
     pub clip: Option<CellClipParam>,
+    /// What happens to cells a keep-out's edge crosses (a loop inside the field). Default: the
+    /// same as `clip`, so one mode serves every loop.
+    #[serde(default)]
+    pub keepout_clip: Option<CellClipParam>,
     /// The least clearance from a cell to every edge of the field and its keep-outs, with
     /// `clip: whole`. Default 0: a cell may touch an edge.
     #[serde(default)]
