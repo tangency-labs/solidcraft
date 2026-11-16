@@ -298,9 +298,14 @@ pub(crate) struct DeferredTouching {
 
 #[cfg(test)]
 impl DeferredTouching {
-    /// A deferred touching point at `point` from `tsp`.
-    pub(crate) fn new(point: Point3, tsp: TsectPnt) -> Self {
-        Self { point, tsp }
+    /// A deferred touching point at `point` from `tsp`, on the boundary curve
+    /// `boundary`.
+    pub(crate) fn new(point: Point3, tsp: TsectPnt, boundary: Curve) -> Self {
+        Self {
+            point,
+            tsp,
+            boundary,
+        }
     }
 }
 

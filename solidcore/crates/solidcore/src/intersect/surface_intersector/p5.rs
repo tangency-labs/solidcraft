@@ -1099,7 +1099,14 @@ mod tests {
         found.curve_types.push(TsectCurveType::Crossing);
         found.deviations.push(0.0);
         push_touching_curve(&mut found, dp, &touching(dp, [dp.x, dp.y])).unwrap();
-        si.deferred_touching = vec![DeferredTouching::new(pp, touching(pp, [pp.x, pp.y]))];
+        // P's boundary curve: A's iso line u = P.x across C, which C does not run
+        // along, so only the removal of D decides P (not the #11749 crossing rule)
+        let boundary = line(3, Vec3::new(pp.x, 0.0, 0.0), Vec3::new(pp.x, 1.0, 0.0));
+        si.deferred_touching = vec![DeferredTouching::new(
+            pp,
+            touching(pp, [pp.x, pp.y]),
+            boundary,
+        )];
         // the premises: D is on C, P is on D and not on C
         assert!(si
             .is_point_on_curve(k, dp, &found.curves_3d[..1], None)
