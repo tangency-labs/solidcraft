@@ -619,7 +619,7 @@ fn a_skip_whose_reverse_is_a_joint_is_swapped() {
         Err(PairSkip::NotSquare(None))
     );
     assert_eq!(with_swap(joint, || panic!("not asked")).unwrap(), Ok(1));
-    let tilt = || Ok(Err(PairSkip::NotSquare(Some(85.0))));
+    let tilt = || Ok(Err::<i32, _>(PairSkip::NotSquare(Some(85.0))));
     assert_eq!(
         with_swap(tilt, || panic!("not asked")).unwrap(),
         Err(PairSkip::NotSquare(Some(85.0)))
