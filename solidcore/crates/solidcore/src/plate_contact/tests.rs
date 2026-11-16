@@ -174,7 +174,9 @@ fn no_square_faces_no_pair() {
 #[test]
 fn plate_faces_must_bound_the_strip() {
     // A strip narrower than the pair (y ∈ [31, 36]: T notched under one face): the y pair's
-    // level −(−30) = 30 is 1 from the strip's 31, over tol: no pair.
+    // level −(−30) = 30 is 1 from the strip's 31, over tol, so the y pair does not qualify.
+    // The strip still runs x ∈ [20, 140], the x pair's levels, so of all six faces the x pair
+    // (120 thick) is the one left (design v2 5.4: a pair qualifies on its own direction only).
     let narrow = |m: Vec3| -> Result<(f64, f64)> {
         let c = [(20.0, 31.0), (140.0, 31.0), (20.0, 36.0), (140.0, 36.0)];
         let l = c.map(|(x, y)| m.dot(Vec3::new(x, y, 6.0)));
@@ -183,8 +185,13 @@ fn plate_faces_must_bound_the_strip() {
             l.iter().copied().fold(f64::NEG_INFINITY, f64::max),
         ))
     };
+    let got = plate_faces(&wall(), Vec3::Z, TOL, narrow).unwrap().unwrap();
+    assert_eq!(got.thickness, 120.0);
+    assert_eq!(got.b.normal, Vec3::X);
+    // With the y pair alone: no pair.
+    let y_pair = [wall()[2], wall()[3]];
     assert_eq!(
-        plate_faces(&wall(), Vec3::Z, TOL, narrow).unwrap(),
+        plate_faces(&y_pair, Vec3::Z, TOL, narrow).unwrap(),
         Err(NoPlateFaces::NoPair)
     );
 }
