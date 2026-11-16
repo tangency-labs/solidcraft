@@ -102,6 +102,11 @@
 //!   radii's sum by more than `SM_EFF_ZERO · (1 + |c1|)`, so circles overlapping from
 //!   outside by between that and its band `SM_EFF_ZERO · (1 + r1 + r2)` got a tangent
 //!   point off by the smaller radius.
+//! - [`line_coplanar_circle_intersect_distinct`] takes a line that overlaps the circle past
+//!   touching by less than its contact tolerance as tangent too (WR-787, #14599): upstream
+//!   merges the two crossings `2√(2rδ)` apart only when they are closer than its band, so
+//!   a line a hair inside a large circle crossed it twice. A circle that lies within the
+//!   contact tolerance of the line all round keeps its crossings.
 //! - `SM_ASSERT*` and `SM_DEBUG_CODE` blocks are not compiled upstream (release build)
 //!   and are not ported.
 
@@ -778,15 +783,18 @@ pub fn line_coplanar_circle_intersect(
         circle_radius,
         tolerance,
         tolerance,
+        0.0,
     )
 }
 
 /// [`line_coplanar_circle_intersect`] with the near-miss band and the point identity
 /// tolerance apart: a line passing within `tolerance` of the circle is still found
-/// (none beyond it), but its two crossings are merged into one tangent point only
-/// when that point (the chord's midpoint) lies within `point_tolerance` of the circle.
-/// A line tangent to the circle up to rounding stays one point however long its
-/// numerical chord.
+/// (none beyond it). Apart from the contact tolerance below, its two crossings are merged
+/// into one tangent point only when that point (the chord's midpoint) lies within
+/// `point_tolerance` of the circle. A line tangent to the circle up to rounding stays one
+/// point however long its numerical chord. A line that overlaps the circle past touching by less than
+/// `contact_tolerance` touches it at the chord's midpoint however long the chord, unless
+/// the whole circle lies within `contact_tolerance` of the line; zero keeps upstream's.
 ///
 /// Not upstream: `smgu_LineCoPlanarCircleIntersect` merges the two crossings whenever
 /// they are closer than its single tolerance, and the circle intersectors call it
@@ -794,7 +802,12 @@ pub fn line_coplanar_circle_intersect(
 /// to ten intersection tolerances apart then became one point in the middle of the
 /// chord, off the circle, so neither crossing was found (a box edge cutting a small
 /// sphere's circle a little inside its tangent line, `boolean_api`
-/// `sphere_box_edge_cutting_a_shallow_cap`).
+/// `sphere_box_edge_cutting_a_shallow_cap`). Nor does upstream have a contact tolerance
+/// (WR-787, #14599): a line δ inside the circle crosses it at two points `2√(2rδ)` apart,
+/// which pass that band once `r` is large (2.2e-4 for δ = 5.8e-10 at radius 10.6), while
+/// the line stays within δ of the circle between them. The boolean passes
+/// [`contact_tol_3d`](crate::geom::tol::contact_tol_3d) where an edge's line meets a
+/// circle, as for two circles ([`circle_coplanar_circle_intersect_in_contact`]).
 ///
 /// # Errors
 /// As [`line_coplanar_circle_intersect`].
@@ -806,6 +819,7 @@ pub fn line_coplanar_circle_intersect_distinct(
     circle_radius: f64,
     tolerance: f64,
     point_tolerance: f64,
+    contact_tolerance: f64,
 ) -> Result<Vec<f64>> {
     // project line to plane
     let line_pnt = point_project_to_plane(line_pnt, circle_center, circle_normal);
@@ -837,6 +851,14 @@ pub fn line_coplanar_circle_intersect_distinct(
 
     // 2. Check for just tangent, or miss within tol: one int.
     if dist_to_ctr >= circle_radius {
+        return Ok(vec![t / scale]);
+    }
+
+    // Not upstream (WR-787, #14599): an overlap below the contact tolerance touches too,
+    // unless the line lies within it of the whole circle (it touches no single point).
+    if circle_radius - dist_to_ctr < contact_tolerance
+        && circle_radius + dist_to_ctr > contact_tolerance
+    {
         return Ok(vec![t / scale]);
     }
 
@@ -2067,6 +2089,7 @@ mod tests {
             r,
             2e-4,
             5e-6,
+            0.0,
         )
         .unwrap();
         assert_eq!(hits.len(), 2);
@@ -2091,10 +2114,75 @@ mod tests {
             r,
             1e-5,
             1e-6,
+            0.0,
         )
         .unwrap();
         assert_eq!(hits.len(), 1);
         assert!((hits[0] - 10.0).abs() < 1e-12);
+    }
+
+    /// WR-787 for a line: a line δ inside a circle below the contact tolerance (1e-5) touches
+    /// it at the chord's midpoint, also where the chord `2√(2rδ)` passes the band of 2e-4
+    /// (radius 10.5667 and δ = 5.8e-10 as in #14599, and radius 500 about a centre far from
+    /// the origin). Without a contact tolerance (upstream's) and past it the two crossings
+    /// stay, and so do those of a circle the line stays within the contact tolerance of all
+    /// round (radius 3e-6).
+    #[test]
+    fn lines_overlapping_a_circle_below_the_contact_tolerance_touch() {
+        let far = v(1e3, -2e3, 50.0);
+        let hits = |c: Vec3, r: f64, delta: f64, contact: f64| {
+            let line = c + v(-2.0 * r, r - delta, 0.0);
+            let t = line_coplanar_circle_intersect_distinct(
+                line,
+                Vec3::X,
+                c,
+                Vec3::Z,
+                r,
+                2e-4,
+                2e-5,
+                contact,
+            )
+            .unwrap();
+            (t, line)
+        };
+        for (c, r) in [(Vec3::ZERO, 10.566_666_676_584_8), (far, 500.0)] {
+            for delta in [5.8e-10, 9.9e-6] {
+                let (t, line) = hits(c, r, delta, 1e-5);
+                assert_eq!(t.len(), 1, "r {r}, δ {delta}: {t:?}");
+                let p = line + t[0] * Vec3::X;
+                assert!(p.distance(c + v(0.0, r - delta, 0.0)) < 1e-9, "{p:?}");
+            }
+            for (delta, contact) in [(5.8e-10, 0.0), (2e-5, 1e-5)] {
+                let (t, line) = hits(c, r, delta, contact);
+                let [t0, t1] = t[..] else {
+                    panic!("r {r}, δ {delta}, contact {contact}: two crossings expected, {t:?}");
+                };
+                let want = 2.0 * (2.0 * r * delta).sqrt();
+                assert!(
+                    ((t1 - t0) - want).abs() < 1e-2 * want,
+                    "{} vs {want}",
+                    t1 - t0
+                );
+                for t in [t0, t1] {
+                    let p = line + t * Vec3::X;
+                    assert!((p.distance(c) - r).abs() < 1e-9, "{p:?}");
+                }
+            }
+        }
+        // a circle within the contact tolerance of the line all round, with a band below
+        // its size
+        let t = line_coplanar_circle_intersect_distinct(
+            v(-1e-5, 1e-7, 0.0),
+            Vec3::X,
+            Vec3::ZERO,
+            Vec3::Z,
+            3e-6,
+            1e-7,
+            1e-8,
+            1e-5,
+        )
+        .unwrap();
+        assert_eq!(t.len(), 2, "{t:?}");
     }
 
     #[test]

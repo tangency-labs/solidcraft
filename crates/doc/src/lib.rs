@@ -16,7 +16,7 @@ pub mod pbr_appearance;
 pub use body_transfer::{valid_transfer_matrix, validate_body_transfer};
 pub mod canvas;
 mod clipboard;
-pub use clipboard::{clone_expression, remap_topology};
+pub use clipboard::{clone_expression, remap_topology, remap_topology_faces};
 pub mod component_color;
 mod component_removal;
 pub use component_removal::RemovedTree;
@@ -94,18 +94,18 @@ pub mod thread_forms;
 pub mod tolerance;
 
 pub use assembly::{
-    BomType, ExpressedMove, ExpressedShift, IDENTITY, MAX_EXPRESSED_MOVES, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence, WorldNames,
-    apply_point, apply_vector, is_identity, is_placement, map_point_expr, map_vector_expr, mat_inverse, mat_mul, rigid,
+    BomType, ExpressedAt, ExpressedMove, ExpressedShift, IDENTITY, MAX_EXPRESSED_MOVES, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence,
+    WorldNames, apply_point, apply_vector, is_identity, is_placement, map_point_expr, map_vector_expr, mat_inverse, mat_mul, rigid,
 };
 pub use document::*;
 pub use eval::cell_grid::{MAX_CUT_CELLS, SLOW_CUT_CELLS};
 pub use eval::{
     EdgeRef, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PlacedBodies, RevolveExtent, SavedModel, SolvedSketch, ThreadInfo,
     blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names, face_point_state, hole_direction_at,
-    hole_on_surface, import_body_names, join_pieces_added, map_wire, metric_thread_sizes, object_height, parse_metric_thread, pattern_matrices,
-    revolve_extent, revolve_extent_for_handle, revolve_extent_with_convention, select_profiles, sketch_hole_direction, sketch_line_plane,
-    state_in_frame, state_in_frame_at, suggested_thread, suggested_thread_in, tangent_face_chain, through_all_distance, with_placed_copies,
-    world_state, world_state_reusing,
+    hole_on_surface, hole_start, import_body_names, join_pieces_added, map_wire, metric_thread_sizes, object_height, parse_metric_thread,
+    pattern_matrices, revolve_extent, revolve_extent_for_handle, revolve_extent_with_convention, select_profiles, sketch_hole_direction,
+    sketch_line_plane, state_in_frame, state_in_frame_at, suggested_thread, suggested_thread_in, tangent_face_chain, through_all_distance,
+    with_placed_copies, world_state, world_state_reusing,
 };
 pub use eval::{EvalCache, KeptResults};
 pub use expr::Expr;

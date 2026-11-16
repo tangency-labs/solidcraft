@@ -340,6 +340,7 @@ mod theme_files_tests;
 use solidcraft_ui_kit::theme_options;
 #[cfg(test)]
 mod thin_extrude_tests;
+pub mod tickets;
 pub mod timeline;
 mod timeline_fold;
 mod timeline_folders;
@@ -422,10 +423,14 @@ pub struct UiState {
     pub dark: bool,
     /// Selection filter: kinds a click doesn't pick (`vertices`, `edges`, `faces`, `sketch`).
     pub pick_off: Vec<String>,
-    /// A click on a face picks its whole body.
+    /// A click on a face picks its whole body (Modelling; Preferences › Sketch › Click selects).
     pub pick_bodies: bool,
-    /// A face picks its exact component occurrence in Design and Render.
+    /// A face picks its exact component occurrence (Modelling).
     pub pick_components: bool,
+    /// The Render workspace's own Body / Face / Component choice: `"body"`, `"face"` or
+    /// `"component"`. It is kept apart from Modelling's so a Body chosen in Render does not
+    /// leave Modelling picking whole bodies, nor reach the preferences file.
+    pub render_pick: String,
     /// The selection shape (#4376): a drag in the view draws a freehand lasso that takes what is
     /// wholly inside it, instead of the window/crossing rectangle. Off by default.
     pub lasso_select: bool,
@@ -478,6 +483,7 @@ impl Default for UiState {
             pick_off: Vec::new(),
             pick_bodies: false,
             pick_components: false,
+            render_pick: "face".into(),
             lasso_select: false,
             visual_style: 0,
             ground_shadow: true,
@@ -546,6 +552,12 @@ pub struct Services {
     /// Upload a model to EasyPrint (Printables' slicer in the browser) and answer with the address
     /// to open (`easyprint_ui`); None: this host can't, and the menu doesn't offer it.
     pub easyprint_upload: Option<easyprint_ui::Upload>,
+    /// HTTP to the ticket server, for problem reports and My tickets (`tickets`); None: reports
+    /// open a GitHub draft instead.
+    pub tickets_http: Option<tickets::Http>,
+    /// Where the ticket server's sign-in is kept: the system keyring (the browser's storage on
+    /// the web). Never a plain file.
+    pub ticket_secrets: Option<std::sync::Arc<dyn agent_chat::backend::Secrets>>,
 }
 
 /// The view before a sketch opened and the view that faced the sketch then (#7038).
@@ -686,6 +698,8 @@ pub struct SolveApp {
     pub messages: messages::Messages,
     /// An editable local issue draft and optional captured app frame.
     pub issue_report: issue_report::ReportState,
+    /// Problem reports on the ticket server: sign-in, sending, the offline queue.
+    pub tickets: tickets::Tickets,
     /// The Crash Reports window.
     pub crashes: crash_ui::CrashUi,
     /// The update check and its window (`update`).
@@ -916,6 +930,27 @@ impl Drop for SolveApp {
 }
 
 impl SolveApp {
+    /// What a click on a face picks now: `"face"`, `"body"` or `"component"`. In the Render
+    /// workspace that is Render's own choice; elsewhere Modelling's.
+    pub(crate) fn pick_mode(&self) -> &'static str {
+        if !render_workspace::active(self) {
+            return self.ui.pick_mode();
+        }
+        match self.ui.render_pick.as_str() {
+            "body" => "body",
+            "component" => "component",
+            _ => "face",
+        }
+    }
+    /// A click on a face picks its whole body ([`SolveApp::pick_mode`]).
+    pub(crate) fn picks_bodies(&self) -> bool {
+        self.pick_mode() == "body"
+    }
+    /// A click on a face picks its component occurrence ([`SolveApp::pick_mode`]).
+    pub(crate) fn picks_components(&self) -> bool {
+        self.pick_mode() == "component"
+    }
+
     /// Publish this frame's tab accent from the open tab, the sketch being edited and the active
     /// tool or dialog, the three values [`theme::publish_tab`] takes.
     pub(crate) fn publish_tab_accent(&self, ctx: &egui::Context) {
@@ -993,6 +1028,7 @@ impl SolveApp {
             help: help::HelpState::default(),
             messages: messages::Messages::default(),
             issue_report: issue_report::ReportState::default(),
+            tickets: tickets::Tickets::new(),
             crashes: crash_ui::CrashUi::default(),
             updater: update::Updater::default(),
             install_steps: None,
@@ -1692,8 +1728,14 @@ impl SolveApp {
             }
             if id == "select.filter" {
                 let mode = v.get("mode").and_then(Value::as_str);
-                self.ui.pick_bodies = mode == Some("body");
-                self.ui.pick_components = mode == Some("component");
+                // In Render the choice is Render's own: it must not leave Modelling picking whole
+                // bodies once Render is left, nor reach the preferences file.
+                if render_workspace::active(self) {
+                    self.ui.render_pick = mode.unwrap_or("face").to_string();
+                } else {
+                    self.ui.pick_bodies = mode == Some("body");
+                    self.ui.pick_components = mode == Some("component");
+                }
                 self.ui.pick_off.retain(|kind| kind != "faces");
             }
             if id == "view.shots_strip"
@@ -3638,6 +3680,7 @@ impl SolveApp {
             ctx.request_repaint();
         }
         issue_report::tick(self, ctx);
+        tickets::tick(self, ctx);
         self.collect_screenshots(ctx);
         self.issue_screenshots(ctx);
         if self.issue_report.draft.is_none() && self.file_picker.is_none() {
