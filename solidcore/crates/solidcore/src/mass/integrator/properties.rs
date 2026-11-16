@@ -796,6 +796,8 @@ fn trim_integrand(
 /// nodes `0, ±x1, ±x2, ±x3` (`x2 = sqrt(3/5)`, the Gauss nodes with `0`), the Kronrod
 /// weights of each, and the Gauss weights (zero where the node is not a Gauss node).
 /// The Kronrod rule integrates polynomials of degree 10 exactly, the Gauss rule degree 5.
+/// [`kronrod_integrate`] reads only the off-centre weights: the centre's are what makes
+/// each rule's weights sum to 2.
 const KRONROD_NODES: [f64; 4] = [
     0.0,
     0.434_243_749_346_802_558_002_071_502_844_628,
@@ -824,6 +826,12 @@ const KRONROD_MAX_PIECES: u32 = 100_000;
 /// are held to their values or that scale); otherwise it is halved.
 /// The pieces are summed left to right. No node is an end of the range, so an integrand
 /// smooth inside `(a, b)` is never read on the far side of a knot at either end.
+/// Each rule is summed about the centre node's value `c`, as `2 c + sum w_i (f_i - c)`
+/// over the other nodes (each rule's weights sum to 2, so this is the same rule): the
+/// weights' rounding (the double Kronrod weights sum to `2 + 2^-54`) then scales only the
+/// integrand's variation about `c`, never its level, and a constant integrand gives
+/// exactly the piece's width times it (#15021: summed weight by weight, a 100 x 100 x 2
+/// box's volume came out 1 ulp over 20000).
 ///
 /// # Errors
 ///
@@ -847,6 +855,7 @@ where
     let mut kronrod = vec![0.0; n];
     let mut gauss = vec![0.0; n];
     let mut dy = vec![0.0; n];
+    let mut centre = vec![0.0; n];
     // the pieces still to integrate, the leftmost last (depth with each)
     let mut stack = vec![(a, b, 0_u32)];
     let mut pieces = 0_u32;
@@ -860,26 +869,44 @@ where
         let half = 0.5 * (hi - lo);
         kronrod.fill(0.0);
         gauss.fill(0.0);
-        for (i, &x) in KRONROD_NODES.iter().enumerate() {
+        // (the centre node first, as the weights' order has it)
+        centre.fill(0.0);
+        integrand(mid, &mut centre)?;
+        if !centre.iter().all(|v| v.is_finite()) {
+            return Err(SolidError::mass(OP_INTEGRAND, MassFailure::Integrand));
+        }
+        for (i, &x) in KRONROD_NODES.iter().enumerate().skip(1) {
             let wk = KRONROD_WEIGHTS.get(i).copied().unwrap_or(0.0);
             let wg = GAUSS_WEIGHTS.get(i).copied().unwrap_or(0.0);
-            let sides: &[f64] = if i == 0 { &[0.0] } else { &[-1.0, 1.0] };
-            for &side in sides {
+            for side in [-1.0, 1.0] {
                 dy.fill(0.0);
                 integrand(mid + side * x * half, &mut dy)?;
                 if !dy.iter().all(|v| v.is_finite()) {
                     return Err(SolidError::mass(OP_INTEGRAND, MassFailure::Integrand));
                 }
-                for ((kv, gv), d) in kronrod.iter_mut().zip(gauss.iter_mut()).zip(&dy) {
-                    *kv += wk * d;
-                    *gv += wg * d;
+                for (((kv, gv), d), c) in kronrod
+                    .iter_mut()
+                    .zip(gauss.iter_mut())
+                    .zip(&dy)
+                    .zip(&centre)
+                {
+                    let off = *d - *c;
+                    *kv += wk * off;
+                    *gv += wg * off;
                 }
             }
         }
         let mut accepted = true;
-        for (i, (kv, gv)) in kronrod.iter_mut().zip(gauss.iter_mut()).enumerate() {
-            *kv *= half;
-            *gv *= half;
+        for (i, ((kv, gv), c)) in kronrod
+            .iter_mut()
+            .zip(gauss.iter_mut())
+            .zip(&centre)
+            .enumerate()
+        {
+            // Each rule's weights sum to 2, so the centre value's share is exactly `2 c`:
+            // a constant integrand is integrated exactly, with no rounding of the weights.
+            *kv = half * (2.0 * *c + *kv);
+            *gv = half * (2.0 * *c + *gv);
             let floor = scale.get(i).copied().unwrap_or(0.0);
             let s = kv.abs().max(floor).max(EFF_ZERO);
             let estimate = (*kv - *gv).abs();
@@ -2783,6 +2810,57 @@ mod tests {
         let mut dy = vec![0.0; layout.num_components];
         let err = trim_integrand(&k, &iso, &trim, 0.0, 0.5, &mut scratch, &mut dy).unwrap_err();
         assert!(err.to_string().contains("not finite"), "{err}");
+    }
+    /// A constant integrand is integrated exactly: the piece's width times it, whatever its
+    /// size (summed weight by weight, the rounded Kronrod weights' sum `2 + 2^-54` put
+    /// 10^4 over `[0, 100]` 1 ulp over 10^6).
+    #[test]
+    fn a_constant_is_integrated_exactly() {
+        let k = Kernel::default();
+        for c in [1.0, 100.0, 10_000.0, 20_000.0, -50.0, 1.0 / 3.0] {
+            for (a, b) in [(0.0, 100.0), (-1.0, 1.0), (0.0, 2.0), (-35.0, 65.0)] {
+                let mut y = [0.0];
+                kronrod_integrate(&k, a, b, 1e-10, &[1.0], &mut y, |_, dy| {
+                    dy[0] = c;
+                    Ok(())
+                })
+                .unwrap();
+                assert_eq!(y[0], (b - a) * c, "{c} over [{a}, {b}]");
+            }
+        }
+    }
+    /// #15021: a 100 x 100 x 2 box away from the origin, about the middle of its box (as the
+    /// app measures a body), has volume exactly 20000 and area exactly 20800: every face's
+    /// integrand is constant.
+    #[test]
+    fn a_plate_box_is_measured_exactly() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_box(
+            &mut k,
+            Point3::new(-30.0, -35.0, 10.0),
+            100.0,
+            100.0,
+            2.0,
+        )
+        .unwrap();
+        let bbox = crate::query::api_queries::brep_bounding_box(&k, &b, true).unwrap();
+        let store = no_attributes();
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &|_| ObjectKey(0),
+        };
+        let p = brep_properties_in_box(
+            &k,
+            &mut b,
+            1e-8,
+            bbox.mid(),
+            MassPropertyBehavior::default(),
+            &attrs,
+            &bbox,
+        )
+        .unwrap();
+        assert_eq!(p.volume, 20_000.0, "{p:?}");
+        assert_eq!(p.area, 20_800.0, "{p:?}");
     }
     fn no_attributes() -> AttributeStore {
         AttributeStore::default()
