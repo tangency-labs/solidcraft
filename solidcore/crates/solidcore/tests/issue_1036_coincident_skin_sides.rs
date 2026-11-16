@@ -222,7 +222,9 @@ fn outcome(k: &mut Kernel, op: usize) -> solidcore::Result<f64> {
 /// #17200: `MergeCurveClasses` failing after its squeeze deleted the vertex
 /// `CloseIntersectionLoop` was closing dropped the deletion, so `MarkCommon` kept the dead
 /// vertex as a loop end and `FixGaps` failed reading it ("topology handle is unknown").
-/// Each Boolean must now give the right body or a refusal that is not that dangling read.
+/// `MarkCommon` ignores the closure's own failure, as upstream does, and starts a new pass;
+/// each Boolean must then give the right body or a typed refusal. Today all three refuse
+/// with 1001 from a later `MergeCurveClasses` (the coincident side faces, WR-473).
 /// The right volumes follow from the operands: A ∩ B is the skin through sections 2..4
 /// (both skins are ruled through the same sections there), A − B = A − A ∩ B and
 /// A ∪ B = A + B − A ∩ B.
@@ -242,7 +244,9 @@ fn issue_17200_no_dangling_vertex_after_failed_squeeze() {
                 "op {op}: volume {v}, want {want}"
             ),
             Err(e) => assert!(
-                !matches!(e, solidcore::SolidError::InvalidInput { .. }),
+                matches!(e, solidcore::SolidError::Failed(_))
+                    && e.operation() == "boolean::topology_intersector::p3::merge_curve_classes"
+                    && e.sm_status() == Some(1001),
                 "op {op}: {e:?}"
             ),
         }
