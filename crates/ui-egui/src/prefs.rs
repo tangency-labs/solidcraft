@@ -1764,6 +1764,12 @@ preference_settings! {
     /// design's and the exported body's names (`export_name`). Empty: each export offers the name
     /// it did before (the design's, or the first body's for a mesh).
     export_name: String = String::new(), PAGE_DESIGN;
+    /// The folder Save and Save As open in for a design that has never been saved (#5522). Empty:
+    /// the folder last used, as before. The desktop app reads it; the web app has no folders.
+    designs_folder: String = String::new(), PAGE_DESIGN;
+    /// The folder export dialogs (File › Export, Save As Mesh, drawings and other saved files)
+    /// open in, until another folder is chosen in one (#5522). Empty: the folder last used.
+    exports_folder: String = String::new(), PAGE_DESIGN;
     /// Save as mesh: the last format (`stl` or `3mf`). Older versions also kept a "send to slicer"
     /// choice here (`save_mesh_send`, `save_mesh_slicer`); a settings file that still has them loads,
     /// and they are ignored.
@@ -7157,6 +7163,55 @@ mod tests {
         assert_eq!(h.app.preferences.stand_up_unknown, StandUpUnknown::Note);
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert_eq!(h.app.preferences.stand_up_unknown, StandUpUnknown::Note);
+    }
+
+    /// #5522: Browse… fills a folder setting with the folder chosen, starting in the one it
+    /// names; Clear empties it; Defaults empties both; a host without folders shows neither.
+    #[test]
+    fn design_folders_browse_clear_defaults_and_a_host_without_folders() {
+        let started = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let seen = started.clone();
+        h.app.services.pick_folder = Some(Box::new(move |current: &str| {
+            seen.borrow_mut().push(current.to_string());
+            Box::pin(async { Some("/home/sam/Picked".to_string()) })
+        }));
+        h.call("ui.prefs", json!({"language":"en","open":"Design"}));
+        assert_eq!((h.app.preferences.designs_folder.as_str(), h.app.preferences.exports_folder.as_str()), ("", ""));
+
+        h.app.prefs_window.shell.filter = "Designs folder".into();
+        h.frames(5);
+        super::reveal_preference(&mut h, "prefs:designs_folder:browse");
+        h.step(&json!({"click":{"handle":"prefs:designs_folder:browse"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.preferences.designs_folder, "/home/sam/Picked");
+        assert_eq!(started.borrow().as_slice(), [""], "an empty setting lets the system choose where Browse… starts");
+        super::reveal_preference(&mut h, "prefs:designs_folder:clear");
+        h.step(&json!({"click":{"handle":"prefs:designs_folder:clear"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.preferences.designs_folder, "");
+
+        h.app.preferences.exports_folder = "/home/sam/Prints".into();
+        h.app.prefs_window.shell.filter = "Exports folder".into();
+        h.frames(5);
+        super::reveal_preference(&mut h, "prefs:exports_folder:browse");
+        h.step(&json!({"click":{"handle":"prefs:exports_folder:browse"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.preferences.exports_folder, "/home/sam/Picked");
+        assert_eq!(started.borrow().last().map(String::as_str), Some("/home/sam/Prints"), "Browse… starts in the folder set");
+
+        h.call("ui.prefs", json!({"designs_folder":"/home/sam/Designs"}));
+        assert_eq!(h.app.preferences.designs_folder, "/home/sam/Designs", "scripts set it by name");
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert_eq!((h.app.preferences.designs_folder.as_str(), h.app.preferences.exports_folder.as_str()), ("", ""));
+
+        // The web app has no folders: no rows to show.
+        h.app.services.pick_folder = None;
+        h.app.prefs_window.shell.filter = "folder".into();
+        h.frames(5);
+        assert!(crate::scenario::rect_of("prefs:designs_folder").is_none() && crate::scenario::rect_of("prefs:exports_folder:browse").is_none());
+        h.call("ui.prefs", json!({"button":"cancel"}));
     }
 
     #[test]
