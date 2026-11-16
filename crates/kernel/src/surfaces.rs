@@ -32,6 +32,14 @@ impl Body {
     pub fn is_surface(&self) -> bool {
         !self.is_mesh() && self.record().edges.iter().any(|e| e.uses.len() == 1)
     }
+
+    /// The number of open boundary edges, read from exact topology. A face's periodic seam
+    /// is used twice and is not open. Mesh bodies and topology the kernel cannot read are errors.
+    pub fn open_edge_count(&self) -> Result<usize> {
+        self.require_brep("open boundary edges")?;
+        let (body, _) = self.ops_body().ok_or_else(|| failed("open boundary edges: the body's topology could not be read"))?;
+        solidcore_ops::stitch::open_edges(body).map(|edges| edges.len()).map_err(|e| failed(format!("open boundary edges: {e}")))
+    }
 }
 
 fn invalid(what: impl Into<String>) -> KernelError {

@@ -41,7 +41,9 @@ pub fn selection_params(app: &SolveApp) -> Value {
         }
     }
     let occurrences: Vec<u64> = app.tree.picked_components.iter().filter_map(|c| app.session.doc.occurrence_of(*c).map(|o| o.id)).collect();
-    json!({ "items": items, "occurrences": occurrences, "canvases": app.tree.picked_canvases, "joints": app.tree.picked_joints })
+    // Undo can remove a canvas while its Browser selection survives.
+    let canvases: Vec<u64> = app.tree.picked_canvases.iter().copied().filter(|id| app.session.doc.canvases.iter().any(|c| c.id == *id)).collect();
+    json!({ "items": items, "occurrences": occurrences, "canvases": canvases, "joints": app.tree.picked_joints })
 }
 
 fn is_empty(p: &Value) -> bool {

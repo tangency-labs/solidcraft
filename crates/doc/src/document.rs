@@ -85,7 +85,13 @@ pub enum PlaneRef {
         pivot: Option<Box<GeoRef>>,
     },
     /// A construction plane feature (by id).
-    Construction { feature: FeatureId },
+    Construction {
+        feature: FeatureId,
+        /// Source component to sketch component when a foreign plane was chosen. The plane's
+        /// geometry stays live, while later assembly motion leaves the sketch inside its part.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        placement: Option<crate::Mat>,
+    },
     /// `base` seen from its other side: the normal reversed by a half turn about the base's
     /// own x axis (y reversed), or about its y axis (x reversed) when `about_y`. A sketch
     /// started from behind a plane faces the viewer this way.
@@ -249,6 +255,8 @@ pub const CELL_GRID_MIN_SIZE: f64 = solidcore_ops::cell_grid::MIN_SIZE;
 
 /// The most sides of a polygon cell.
 pub const CELL_GRID_MAX_SIDES: u32 = solidcore_ops::cell_grid::MAX_SIDES;
+/// The most lattice lines a snapped field edge may be moved in.
+pub const CELL_GRID_MAX_SNAP_INSET: u32 = solidcore_ops::cell_grid::MAX_SNAP_INSET;
 
 fn default_cell_shape() -> solidcore_record::cell_grid::CellShape {
     solidcore_record::cell_grid::CellShape::Hexagon
@@ -1138,6 +1146,10 @@ pub enum FeatureKind {
         /// The definition body for each selected face, primary first. Empty keeps legacy selection.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         target_bodies: Vec<BodyName>,
+        /// Keep single-face replacement in the dialog while retaining the target body's identity.
+        /// Missing on older body-qualified groups, which keep their multiple-face selection mode.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        single_face_selection: bool,
     },
     /// Ruled loft through profiles of several sketches, in order.
     Loft {
@@ -1295,6 +1307,11 @@ pub enum FeatureKind {
         #[serde(default = "zero_expr")]
         #[walk(length = "Margin")]
         margin: Expr,
+        /// A margin for each side instead of `margin`: -X, +X, -Y, +Y, -Z, +Z. A negative one sets
+        /// that side into the bodies.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = ["-X margin", "+X margin", "-Y margin", "+Y margin", "-Z margin", "+Z margin"])]
+        margins: Option<[Expr; 6]>,
     },
     /// A tube along a chain of sketch curves (solid, or hollow with a wall thickness).
     Pipe {
@@ -1485,6 +1502,14 @@ pub enum FeatureKind {
         /// What happens to a cell the field's edge crosses.
         #[serde(default = "default_cell_clip")]
         clip: solidcore_record::cell_grid::Clip,
+        /// What happens to a cell a keep-out's edge crosses (default: the same as `clip`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keepout_clip: Option<solidcore_record::cell_grid::Clip>,
+        /// With `clip: snap`, how many lattice lines further in each straight field edge moves
+        /// after it snaps (default 0).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "SnapInset")]
+        snap_inset: Option<Expr>,
         /// The least clearance from a cell to every edge of the field and its keep-outs, with
         /// `clip: whole` (default 0: a cell may touch an edge).
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2181,6 +2206,10 @@ pub enum FeatureKind {
         /// of each instead of moving them in place.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         copy: bool,
+        /// For each copied body, its captured source frame in the copy's component. Applied
+        /// after the source-local move. Empty in older designs, which copy local geometry.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        copy_frames: Vec<crate::Mat>,
     },
     /// A non-parametric base feature: bodies imported from a STEP file. The STEP text is kept
     /// in the design (it is the B-rep), so the design reopens without the original file.
@@ -3350,10 +3379,13 @@ impl Feature {
 
     /// Keep `made`, the names the feature's bodies have now (in the order it builds them), as
     /// its stored names, so they stay as they are whatever comes and goes before it. An Import's
-    /// skipped file bodies keep the names stored for them.
+    /// skipped file bodies keep the names stored for them, and so do the solids its reader left
+    /// out, whose names it keeps after its bodies (#16857).
     pub fn pin_body_names(&mut self, made: &[String]) {
         let slots = self.body_name_slots(made.len());
-        self.body_names.resize(slots.last().map_or(0, |s| s + 1), String::new());
+        let len = slots.last().map_or(0, |s| s + 1);
+        let len = if matches!(self.kind, FeatureKind::Import { .. }) { len.max(self.body_names.len()) } else { len };
+        self.body_names.resize(len, String::new());
         for (slot, name) in slots.iter().zip(made) {
             if let Some(stored) = self.body_names.get_mut(*slot) {
                 stored.clone_from(name);
@@ -4681,7 +4713,7 @@ impl Document {
                 used.extend(expr::references(e));
             }
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-                used.extend(sketch.constraints.iter().filter_map(|c| c.param.clone()));
+                used.extend(sketch.dimension_params().into_iter().cloned());
                 used.extend(sketch.text_exprs().into_iter().flat_map(|(_, e)| expr::references(e)));
             }
         }
@@ -4889,15 +4921,27 @@ impl Document {
                 Plane::new(o, rot(b.x), rot(b.y)).ok_or_else(|| DocError::Invalid("degenerate plane".into()))
             }
             PlaneRef::Flipped { base, about_y } => Ok(self.resolve_plane_in(vals, base, depth + 1, component, st)?.flipped(*about_y)),
-            PlaneRef::Construction { feature } => {
+            PlaneRef::Construction { feature, placement } => {
+                if placement.as_ref().is_some_and(|matrix| !crate::is_placement(matrix)) {
+                    return Err(DocError::Invalid("invalid captured construction plane placement".into()));
+                }
                 // Evaluated already: as it came out.
                 if let Some(c) = st.and_then(|st| st.construct.iter().find(|c| c.feature == feature.0))
                     && let crate::construct::ConstructGeom::Plane(pl) = &c.geom
                 {
-                    return Ok(*pl);
+                    return match placement {
+                        Some(matrix) => crate::eval::placed_plane(matrix, pl),
+                        None => Ok(*pl),
+                    };
                 }
-                match self.feature(feature.0).map(|f| &f.kind) {
-                    Some(FeatureKind::ConstructionPlane { plane }) => self.resolve_plane_in(vals, plane, depth + 1, component, st),
+                match self.feature(feature.0) {
+                    Some(Feature { kind: FeatureKind::ConstructionPlane { plane }, component: owner, .. }) => {
+                        let resolved = self.resolve_plane_in(vals, plane, depth + 1, if placement.is_some() { *owner } else { component }, st)?;
+                        match placement {
+                            Some(matrix) => crate::eval::placed_plane(matrix, &resolved),
+                            None => Ok(resolved),
+                        }
+                    }
                     // A name that could not be resolved when an older design opened keeps id 0,
                     // which no feature has (#1134): the reference dangles, as it always did.
                     _ => {
@@ -4952,7 +4996,40 @@ impl Document {
         for c in &sk.constraints {
             sk.validate(&c.kind)?;
         }
-        Ok(())
+        self.apply_wire_values(vals, sk)
+    }
+
+    /// Apply parameter values to a sketch's 3D dimensions and to its 3D points placed by
+    /// expressions (#10608), in place.
+    pub fn apply_wire_values(&self, vals: &std::collections::BTreeMap<String, expr::Value>, sk: &mut Sketch) -> Result<()> {
+        if sk.wire_constraints.is_empty() {
+            return Ok(());
+        }
+        let mut wires = std::mem::take(&mut sk.wire_constraints);
+        let applied = (|| -> Result<()> {
+            for c in &mut wires {
+                if let (Some(p), false) = (&c.param, c.driven) {
+                    let kind = if c.kind.is_angle() { Kind::Angle } else { Kind::Length };
+                    let v = vals.get(p).copied().ok_or_else(|| DocError::Unknown(format!("parameter `{p}`")))?.to_kind(kind)?;
+                    c.kind.set_value(v);
+                }
+                if let solidcraft_sketch::WireConstraintKind::Fix { at, exprs: Some(e), .. } = &mut c.kind {
+                    let [x, y, z] = e.by_axis();
+                    let value = |e: Option<&String>, keep: f64| -> Result<f64> {
+                        match e {
+                            Some(e) => crate::eval::val(vals, &expr::Expr::new(e.as_str()), Kind::Length),
+                            None => Ok(keep),
+                        }
+                    };
+                    *at = solidcore_record::Vec3::new(value(x, at.x)?, value(y, at.y)?, value(z, at.z)?);
+                }
+            }
+            Ok(())
+        })();
+        sk.wire_constraints = wires;
+        applied?;
+        // A driven dimension's value need only be a number: it measures (#10608).
+        sk.validate_wire_constraints().map_err(|e| DocError::Invalid(e.to_string()))
     }
 
     /// Resolve circular Quantity expressions before solving. Rebuilding the copies here also
@@ -5094,6 +5171,21 @@ impl Document {
         self.solve_sketch_with_analysis(vals, sk, stored, moved_from, solidcraft_sketch::Analysis::Full)
     }
 
+    /// Take out of sketch `id`'s 3D report the freedoms of its motion traces' curves (#10608):
+    /// the motion places them and they take no 3D constraints, so they are no freedoms to show.
+    pub fn discount_traces(&self, id: u64, sk: &Sketch, report: &mut solidcraft_sketch::SolveReport) {
+        let Some(w) = report.wires.as_mut() else { return };
+        let fits: usize = self
+            .assembly
+            .traces
+            .iter()
+            .filter(|t| t.sketch == id)
+            .filter_map(|t| sk.wires.iter().find(|w| w.id == t.wire && w.link.is_none()))
+            .map(|w| w.fit.len())
+            .sum();
+        w.dof = w.dof.saturating_sub(fits.saturating_mul(3));
+    }
+
     /// [`Self::solve_sketch`] with the diagnostics needed by an internal edit. Parameter
     /// application, continuation and offset refreshes run regardless of the requested level.
     /// Model evaluation uses `solve_sketch` so its published report always has full diagnostics.
@@ -5157,6 +5249,11 @@ impl Document {
             {
                 report = retried;
             }
+        }
+        // The 3D constraints (#10608), reported apart: the planar report is the planar sketch's,
+        // which planar edits compare their freedoms and conflicts with.
+        if sk.wires.iter().any(|w| w.link.is_none() && !w.fit.is_empty()) {
+            report.wires = Some(sk.solve_wires_with(None, analysis != solidcraft_sketch::Analysis::StatusOnly));
         }
         Ok(report)
     }

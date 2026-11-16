@@ -462,7 +462,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 .collect()
         }
         Target::SelectionFilter => {
-            let mode = app.ui.pick_mode();
+            let mode = app.pick_mode();
             [("face", "Faces"), ("body", "Bodies"), ("component", "Components")]
                 .into_iter()
                 .map(|(choice, label)| {
@@ -2927,6 +2927,7 @@ fn level_rows(
     picked: &mut Option<Item>,
 ) -> Seen {
     let mut seen = Seen::default();
+    let mut on_open = false;
     for (k, item) in rows.iter().enumerate() {
         if item.is_sep() || item.is_heading() {
             let _ = list_row_lit(ui, item, false);
@@ -2961,8 +2962,12 @@ fn level_rows(
         }
         if open == Some(k) {
             seen.anchor = Some(row.rect);
+            on_open |= row.hovered();
         }
     }
+    // A separator, a heading or the gap between two rows is not the open row either: its flyout
+    // goes on closing there instead of lighting its row again and starting the delay over (#17668).
+    seen.other_row |= !on_open && ui.rect_contains_pointer(ui.min_rect());
     seen
 }
 
@@ -2988,24 +2993,31 @@ fn show_rename(app: &mut SolveApp, ctx: &egui::Context) {
         done = Some(true);
     }
     match done {
+        // A refused name keeps the box open, focused with the name selected; the status line says
+        // why.
         Some(true) => {
-            let _ = commit_rename(app, &r);
+            if commit_rename(app, &r).is_err() {
+                r.focused = false;
+                app.menu.rename = Some(r);
+            }
         }
         Some(false) => {}
         None => app.menu.rename = Some(r),
     }
 }
 
-/// Finish a rename from automation: commit (true) or cancel.
-pub fn finish_rename(app: &mut SolveApp, text: Option<&str>, commit: bool) -> bool {
-    let Some(mut r) = app.menu.rename.take() else { return false };
+/// Finish a rename from automation: commit (true) or cancel. A refused name is the error and
+/// leaves the rename in progress, as the box stays open for a person.
+pub fn finish_rename(app: &mut SolveApp, text: Option<&str>, commit: bool) -> Result<(), String> {
+    let Some(mut r) = app.menu.rename.take() else { return Err("no rename in progress".into()) };
     if let Some(s) = text {
         r.text = s.to_string();
     }
-    if commit {
-        let _ = commit_rename(app, &r);
+    if commit && let Err(e) = commit_rename(app, &r) {
+        app.menu.rename = Some(r);
+        return Err(e);
     }
-    true
+    Ok(())
 }
 
 /// How the workspace menu shows each of SolidCraft's workspaces ([`Target::Workspace`]).

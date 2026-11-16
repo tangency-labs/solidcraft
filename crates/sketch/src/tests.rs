@@ -288,6 +288,41 @@ fn under_constrained_reports_dof() {
     assert!((a.y - 0.5).abs() < 0.05 && (b.y - 0.5).abs() < 0.05, "{a:?} {b:?}");
 }
 
+/// A distance at its longest reads as fixing more than it does. A point on a vertical line is
+/// held 10 from the origin, level with it, so the distance runs square to the line. The point
+/// can still slide along the line while the line moves in. To first order that slide leaves the
+/// distance unchanged, and the line's place looks fixed. A point dimensioned from the line moves
+/// with it, so it is not determined. Shown as determined, it moved anyway when another point was
+/// dragged, and only then turned free. The count of freedoms is the same either way.
+#[test]
+fn a_distance_at_its_longest_leaves_what_hangs_off_it_free() {
+    use ConstraintKind::*;
+    let build = |q_at: Vec2| {
+        let mut sk = Sketch::new();
+        let r = sk.add_line(v(q_at.x, -5.0), v(q_at.x, 5.0), None, None, None).unwrap();
+        let q = sk.add_point(q_at, None).unwrap();
+        let h = sk.add_line(v(0.0, 0.0), v(20.0, 0.0), None, None, None).unwrap();
+        let t = sk.add_point(v(q_at.x + 4.0, 0.0), None).unwrap();
+        let CurveKind::Line { a: h0, .. } = sk.curves[h].kind else { panic!() };
+        sk.add_constraint(Coincident { p: h0, q: 0 }, None).unwrap();
+        sk.add_constraint(Horizontal { l: h }, None).unwrap();
+        sk.add_constraint(Vertical { l: r }, None).unwrap();
+        sk.add_constraint(PointOnCurve { p: q, c: r }, None).unwrap();
+        sk.add_constraint(Distance { p: 0, q, value: 10.0 }, None).unwrap();
+        sk.add_constraint(PointOnCurve { p: t, c: h }, None).unwrap();
+        sk.add_constraint(PointLineDistance { p: t, l: r, value: 4.0 }, None).unwrap();
+        (sk, t)
+    };
+    let (mut level, t) = build(v(10.0, 0.0));
+    let at_longest = solve(&mut level);
+    let (mut slanted, _) = build(v(8.0, 6.0));
+    let generic = solve(&mut slanted);
+    assert!(at_longest.ok() && generic.ok(), "{at_longest:?} {generic:?}");
+    assert_eq!(at_longest.dof, generic.dof, "{at_longest:?} {generic:?}");
+    assert!(!generic.point_determined[t], "{generic:?}");
+    assert!(!at_longest.point_determined[t], "the point follows the line, which can move in: {at_longest:?}");
+}
+
 #[test]
 fn conflicting_constraints_fail_and_restore() {
     let mut sk = Sketch::new();
@@ -2435,7 +2470,8 @@ fn two_caps_leaving_one_line_along_its_direction_each_close_a_profile() {
         // end, which lies on it, and the wide arc ends 1e-5 mm short of the line's end.
         let (top_left, top_right) = (p(&mut sk, 15.0, 15.0), p(&mut sk, 85.0 + 1.8e-4, 15.0));
         sk.add_line_pts(top_right, top_left, None).unwrap();
-        let wide_right_end = v(85.0 + 1.7e-4, (225.0 - 1.7e-4_f64 * 1.7e-4).sqrt());
+        // On the wide arc (radius 15 about (85, 0)) 1.7e-4 mm right of its top.
+        let wide_right_end = v(85.0 + 1.7e-4, 14.999999999036667);
         let wide_right = p(&mut sk, wide_right_end.x, wide_right_end.y);
         sk.add_arc(v(85.0, 0.0), v(100.0, 0.0), wide_right_end, [None, Some(right), Some(wide_right)], None).unwrap();
         let narrow_right = p(&mut sk, 85.0, 15.0);
@@ -2463,6 +2499,55 @@ fn two_caps_leaving_one_line_along_its_direction_each_close_a_profile() {
         assert_eq!(ps.len(), 4, "tilt {tilt}: {:?}", all());
         for p in &ps {
             assert!(p.region.outer.is_closed(1e-6), "tilt {tilt}: {:?}", p.outer_curves);
+        }
+    }
+}
+
+/// A ring with a rounded corner of radius 6 under a cap of radius 15, and a circle of radius 9
+/// whose top touches the cap's arc and top line where they meet and whose left point is the
+/// ring's corner (the user's sketch, with the circle's centre `e` higher and its radius `e`
+/// smaller, and the cap's arc leaving its line `tilt` rad down, as solved). The circle has no
+/// end at that corner, so the two regions there, between the cap's arc, the ring's corner and
+/// the circle, and the circle above the ring, must close.
+#[test]
+fn circle_touching_two_caps_corner_closes_the_regions_there() {
+    // `above`: the circle's area above the ring's top line, half its disc of radius 9 - e and
+    // the strip e high under its centre (precomputed).
+    for (e, tilt, above) in [(0.0, 0.0, 127.23450247038662), (8e-5, 0.0, 127.2336805209291), (8e-5, 5.5e-6, 127.2336805209291)] {
+        let mut sk = Sketch::new();
+        let p = |sk: &mut Sketch, x: f64, y: f64| sk.add_point(v(x, y), None).unwrap();
+        let (bl, left, left_top) = (p(&mut sk, 0.0, -50.0), p(&mut sk, 0.0, 0.0), p(&mut sk, 6.0, 6.0));
+        let (right_top, right, br) = (p(&mut sk, 94.0, 6.0), p(&mut sk, 100.0, 0.0), p(&mut sk, 100.0, -50.0));
+        sk.add_line_pts(bl, left, None).unwrap();
+        let corner = sk.add_arc(v(6.0, 0.0), v(6.0, 6.0), v(0.0, 0.0), [None, Some(left_top), Some(left)], None).unwrap();
+        let ring_top = sk.add_line_pts(left_top, right_top, None).unwrap();
+        sk.add_arc(v(94.0, 0.0), v(100.0, 0.0), v(94.0, 6.0), [None, Some(right), Some(right_top)], None).unwrap();
+        sk.add_line_pts(right, br, None).unwrap();
+        sk.add_line_pts(br, bl, None).unwrap();
+        let (top_left, top_right) = (p(&mut sk, 15.0, 15.0), p(&mut sk, 85.0, 15.0));
+        sk.add_line_pts(top_right, top_left, None).unwrap();
+        let d = tilt * 15.0;
+        let cap = sk.add_arc(v(15.0 + d, -d), v(15.0, 15.0), v(0.0, 0.0), [None, Some(top_left), Some(left)], None).unwrap();
+        sk.add_arc(v(85.0, 0.0), v(100.0, 0.0), v(85.0, 15.0), [None, Some(right), Some(top_right)], None).unwrap();
+        let r = 9.0 - e;
+        let circle = sk.add_circle(v(15.0, 6.0 + e), r, None, None).unwrap();
+        let ps = find_profiles(&sk);
+        let id = |i: usize| &sk.curves[i].id;
+        let all = || ps.iter().map(|p| (&p.outer_curves, p.area)).collect::<Vec<_>>();
+        let has = |p: &Profile, c: &[usize]| c.iter().all(|&i| p.outer_curves.contains(id(i)));
+        assert!(ps.iter().any(|p| has(p, &[cap, corner, circle])), "e {e} tilt {tilt}: no region left of the circle: {:?}", all());
+        // The circle above and below the ring's top line, each bounded by those two alone.
+        let halves: Vec<f64> = ps
+            .iter()
+            .filter(|p| p.outer_curves.iter().all(|c| c == id(ring_top) || c == id(circle)) && has(p, &[ring_top, circle]))
+            .map(|p| p.area)
+            .collect();
+        assert_eq!(halves.len(), 2, "e {e} tilt {tilt}: {:?}", all());
+        assert!(halves.iter().any(|a| (a - above).abs() < 1e-3), "e {e} tilt {tilt}: {halves:?} vs {above}");
+        // The ring less the circle, the circle's two halves, the regions left and right of it.
+        assert_eq!(ps.len(), 5, "e {e} tilt {tilt}: {:?}", all());
+        for p in &ps {
+            assert!(p.region.outer.is_closed(1e-6), "e {e} tilt {tilt}: {:?}", p.outer_curves);
         }
     }
 }

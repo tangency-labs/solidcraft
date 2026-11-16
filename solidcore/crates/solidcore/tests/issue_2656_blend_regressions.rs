@@ -30,6 +30,9 @@
     clippy::indexing_slicing
 )] // test helpers
 
+#[path = "support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 use solidcore::blend::blend_corner::BlendCornerEvent;
 use solidcore::blend::fillet_executive::p1::{FilletLaw, FilletLawKind};
 use solidcore::blend::fillet_executive::session::FilletSession;
@@ -57,20 +60,13 @@ use solidcore::topology::{edge, Brep, EdgeId};
 use solidcore::Kernel;
 use std::f64::consts::FRAC_PI_4;
 
-/// SolidCraft's fixes at the 5d2635d36 pin: the corpus's `fixes.json` and the bump's other fixes
-/// (tangency-labs/solidcraft#11875).
+/// SolidCraft's whole preset (`kernel_cases/fixes.json`). That includes the 5d2635d36 bump's other
+/// fixes (tangency-labs/solidcraft#11875: `face_swap_uv_transposes_trims`,
+/// `closed_smooth_pole_tangent_limit` and `fillet_chamfer_corner`), and since the file matches
+/// `core::fixes()`, `brep_ray_classifies_current_trims`. Every value here is unchanged under it.
 fn solidcraft_kernel() -> Kernel {
-    let names: Vec<String> = serde_json::from_str(include_str!("kernel_cases/fixes.json")).unwrap();
-    let mut f = UpstreamFixes::default();
-    for name in names.iter().map(String::as_str).chain([
-        "face_swap_uv_transposes_trims",
-        "closed_smooth_pole_tangent_limit",
-        "fillet_chamfer_corner",
-    ]) {
-        *f.flag_mut(name).unwrap_or_else(|| panic!("flag {name}")) = true;
-    }
     Kernel {
-        fixes: f,
+        fixes: solidcraft_fixes::solidcraft_fixes(),
         ..Kernel::default()
     }
 }
@@ -338,7 +334,9 @@ fn upright_runs_on_into_the_earlier_round() {
 /// second rounds run on into the first ones' end arcs as before smlib#124: the plate 8
 /// faces, SolidCraft's closed form 1681.903758348 (to 1e-5 there); the notched block 13
 /// faces, 10198.718249 (the fork's two passes, 9822462; its closed form 10198.718039, 2.1e-8
-/// off). Capped (#2364): 10 and 15 faces.
+/// off) until `brep_volume` closed tolerant edges' gaps (#16735): the 2.1e-8 was the
+/// integrator's leak, and the block is now the closed form 10198.718038816 to 5.8e-12
+/// (MEASURED). Capped (#2364): 10 and 15 faces.
 #[test]
 fn second_pass_runs_on_into_the_first_without_its_faces() {
     let mut k = solidcraft_kernel();
@@ -363,7 +361,7 @@ fn second_pass_runs_on_into_the_first_without_its_faces() {
     blend(&mut k, &mut b, Kind::Round, &second, 8.0).unwrap();
     let ((faces, _, _), v) = measured(&mut k, &mut b);
     assert_eq!(faces, 13, "1080");
-    assert_rel(v, 10_198.718_249, 1e-9, "1080");
+    assert_rel(v, 10_198.718_038_816, 1e-10, "1080");
 }
 
 /// fillets/every-fillet-after-fillet-curvature-front-then-side-r3-partial-chain:

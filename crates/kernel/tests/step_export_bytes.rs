@@ -97,7 +97,7 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/step-regressions/cylinder_spline_rims.step", "609aa9a609b95308"),
     ("tests/step-regressions/rod_doubled_edge.step", "8432fa140e74c146"),
     ("tests/step-regressions/thread_crest_band.step", "30923bc03bcfd757"),
-    ("tests/step-regressions/tiny_rounds_coarse_tolerance.step", "d2c476d6163c1863"),
+    ("tests/step-regressions/tiny_rounds_coarse_tolerance.step", "0909a2e6b030bd2c"),
     ("(assembly)", "45b6ef6cf64529e2"),
 ];
 

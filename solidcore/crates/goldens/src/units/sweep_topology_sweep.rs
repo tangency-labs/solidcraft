@@ -1445,11 +1445,18 @@ mod tests {
         );
         model.b[0].set_editing_enabled(false);
         model.k.context.set_doing_boolean(false);
-        // query.brep (CalculateBoundingBox) is ported: the stitch now fails later,
-        // in the B-rep merge, and still restores the caller's context.
+        // The stitch's bounding box of this fixture's face without surface fails;
+        // upstream ignores that status and the fork passes it on (WR-658), so the
+        // stitch fails there and still restores the caller's context.
         let stitched = model.stitch(b, &mut TopologySweep::default(), 0.125, false);
         assert!(
-            matches!(stitched, Err(ref e) if solidcore::error::upstream_status(e) == Some(1006)),
+            matches!(
+                stitched,
+                Err(SolidError::InvalidInput {
+                    operation: "query::face::p1::calculate_bounding_box",
+                    reason: "face without surface",
+                })
+            ),
             "{stitched:?}"
         );
         assert!(!model.b[0].editing_enabled());
