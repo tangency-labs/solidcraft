@@ -925,8 +925,8 @@ mod fold_witness_tests {
     /// Each refusal names its reversed pair, and the pair is recomputed here from the
     /// surface's own derivatives: both normals are longer than their rounding bound (so
     /// have a direction), their dot product is the one reported and is negative, and the
-    /// pair is one grid step apart in one
-    /// parameter, in the continuation past the surface's own domain.
+    /// pair lies on one grid row or column (it matches the listed pair, one grid step
+    /// apart), in the continuation past the surface's own domain.
     #[test]
     fn six_folded_continuations_refuse_with_their_reversed_pair() {
         for (index, at, next) in FOLDS {

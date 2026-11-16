@@ -58,10 +58,13 @@
 //!   one sheet, and [`CoverCoincident::fold`] names the reversed pair
 //!   ([`ContinuationFold`]). tangency-labs/solidcore#434. The fork also refused any
 //!   sample whose normal is not longer than `SM_EFF_ZERO_SQRT` times the normal at the
-//!   centre of the natural domain. Past the natural domain this rule is kept: a vanishing
-//!   normal there is a degenerate point (a pole or a cusp) that the continuation adds and
-//!   the surface's own domain does not have, such as the pole a hemisphere's continuation
-//!   reaches, and the merged face would take it on ([`ContinuationFold::Vanishes`]).
+//!   centre of the natural domain. Past the natural domain this rule is kept, and a
+//!   normal within its rounding bound refuses there too ([`ContinuationFold::Vanishes`]):
+//!   the continuation may run into a pole or a cusp, such as the pole a hemisphere's
+//!   continuation reaches, and the merged face would take it on. The refusal is
+//!   sampled and conservative: a sample just past one of the surface's own degenerate
+//!   edges can fall below the cut-off and refuse too. ("Natural domain" is the surface's
+//!   current STEP domain, which an earlier cover may already have grown.)
 //!   Inside the natural domain (boundary included) it refused covers at the surface's
 //!   own degenerate points (an edge where `Du` and `Dv` are parallel, whose normal is
 //!   exactly zero, or a collapsed edge, whose evaluated normal is short but has its limit
@@ -127,7 +130,7 @@ const NUM_SAMPLES: usize = 6;
 /// `lNumBdrySamples` of `CoverCoincidentSurface`: the samples along each boundary.
 const NUM_BDRY_SAMPLES: usize = 15;
 /// `lNumFoldSamples` of the fork's `CoverCoincidentSurface`: the `21 x 21` grid over the
-/// extended domain whose normals must not turn back.
+/// extended domain whose normals must not turn back, nor vanish past the natural domain.
 const NUM_FOLD_SAMPLES: usize = 21;
 /// `lNumFoldSamples - 1.0`: the grid's step in fractions of the domain.
 const NUM_FOLD_SAMPLES_DENOM: f64 = (NUM_FOLD_SAMPLES - 1) as f64;
@@ -356,8 +359,10 @@ pub enum ContinuationFold {
     },
     /// At `uv`, outside the surface's natural domain, the normal vanishes: its length
     /// `length` is not above `cutoff`, `SM_EFF_ZERO_SQRT` times the length of the normal
-    /// at the centre of the natural domain. The continuation runs into a degenerate point
-    /// (a pole or a cusp) that the surface's own domain does not have.
+    /// at the centre of the natural domain, or not above its own rounding bound. The
+    /// continuation may run into a degenerate point (a pole or a cusp) there; the
+    /// refusal is conservative and also catches a sample just past one of the surface's
+    /// own degenerate edges.
     Vanishes {
         /// The sample.
         uv: Point2,
@@ -1596,7 +1601,8 @@ impl Surface {
         // its edges (two swept arc walls sharing their top and bottom planes, joined: UV gaps
         // and the wrong volume). The continued surface must not fold over the domain the
         // merge will use: its normal must not turn back between neighbouring samples of a
-        // grid over that domain (WR-407); upstream merges onto the continuation.
+        // grid over that domain, nor vanish at a sample past the natural domain (WR-407);
+        // upstream merges onto the continuation.
         if out_of_bounds_enabled(self).is_some()
             && !update_domain.is_contained_by(&orig_domain, 0.0)
         {
@@ -1627,7 +1633,7 @@ impl Surface {
     /// samples (WR-407): two neighbouring samples whose unit normals turn back
     /// (`!(dot > 0)`, so a NaN dot refuses), a sample past the natural domain whose normal
     /// vanishes (not longer than `SM_EFF_ZERO_SQRT` times the normal at the natural
-    /// domain's centre, the fork's cut-off), or a sample that cannot be evaluated or whose
+    /// domain's centre, the fork's cut-off, or than its own rounding bound), or a sample that cannot be evaluated or whose
     /// normal is not finite. Inside the natural domain (boundary included), a sample whose
     /// computed normal is no longer than its own
     /// rounding bound ([`Surface::step_normal_with_noise`]; an exact zero included, as
@@ -1666,17 +1672,21 @@ impl Surface {
                 if !length.is_finite() || !noise.is_finite() {
                     return Ok(Some(ContinuationFold::NotEvaluated { uv }));
                 }
-                // Past the natural domain, a normal that vanishes is a degenerate point the
-                // surface itself does not have (a pole or a cusp the continuation runs
-                // into): the merged face would take on a singularity, so the cover refuses
-                // (`!(length > cutoff)`, so an incomparable cut-off refuses too).
+                // Past the natural domain, a normal that vanishes (not above the fork's
+                // cut-off, `!(length > cutoff)`, so an incomparable cut-off refuses too)
+                // refuses, as one with no direction (within its rounding bound) does:
+                // neither is skipped there. A pole or a cusp the continuation runs into
+                // would become a singularity of the merged face. The refusal is sampled and
+                // conservative: a continuation sample just past one of the surface's own
+                // degenerate edges can be below the cut-off too, and also refuses.
                 if !Extent2d::from_points(uv, uv).is_contained_by(&natural, 0.0)
-                    && length.partial_cmp(&cutoff) != Some(core::cmp::Ordering::Greater)
+                    && (length.partial_cmp(&cutoff) != Some(core::cmp::Ordering::Greater)
+                        || length <= noise)
                 {
                     return Ok(Some(ContinuationFold::Vanishes { uv, length, cutoff }));
                 }
-                // No direction: within the cross product's own rounding (also an exact
-                // zero, and a normal whose length underflows).
+                // Inside the natural domain, no direction: within the cross product's own
+                // rounding (also an exact zero, and a normal whose length underflows).
                 if length <= noise {
                     continue;
                 }
