@@ -91,7 +91,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.revolve_nested_shells_as_cavities = true;
     f.revolve_holed_profile_void = true;
     f.join_touching_loops = true;
-    f.offset_resolve_crossing_loops = true;
     f.offset_analytic_mate_edges = true;
     f.nurb_cylinder_inside_out_frame = true;
     f.local_operation_refuses_loose_tangent_edges = true;

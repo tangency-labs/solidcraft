@@ -700,8 +700,6 @@ pub struct UpstreamFixes {
     /// mode reports a gap between the two as bad and never fixes it (WR-679, #2111; the
     /// fork's tangency-labs/smlib@8c4bda5 by bherbruck).
     pub validate_tolerances_fixes_reported_gaps: bool,
-    /// Before the piecewise merge, `do_extended_offset` rebuilds every offset face whose loops cross from the stretches of its loops that bound it (WR-345, #854).
-    pub offset_resolve_crossing_loops: bool,
     /// [`crate::topology::edgeuse::p2::is_convex_radial_sector`]
     /// (`SmEdgeuse::IsConvexRadialSector`) propagates a failing
     /// [`crate::topology::edgeuse::p2::evaluate_binormal_step_off`] status on either this

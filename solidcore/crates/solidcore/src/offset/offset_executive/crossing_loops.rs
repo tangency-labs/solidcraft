@@ -17,22 +17,28 @@
 //! | `floor_is_cavity` (private)                  | `sm_FloorIsCavity` (1b016ca)                   |
 //! | `outward_of_body` (private)                  | `sm_OutwardOfBody` (1b016ca)                   |
 //!
-//! Deviations: opt-in (`Kernel::fixes.offset_resolve_crossing_loops`, read by
-//! `do_extended_offset`). The reason a crossing is not resolved is the error's
-//! `operation` text instead of an `smos_ErrorMessage` report. `SmBrep::MakeFaceFromLoopOnFace`
-//! is not ported: a face that comes apart is built with one `MakeFaceWithCurves` per
-//! outer loop (each a sheet of its own, as the fork's `SplitDisconnectedShells` leaves
-//! them), and one that comes apart and keeps holes as well is not resolved
-//! (`SM_ERR_BAD_INTERSECTIONS`). No recursion; every loop is bounded by the face's
-//! edge uses and crossings. The fork's later a759622 ("an offset whose walls would meet
-//! is refused as such": every contact is examined before any crossing, and loops that
-//! touch without crossing fail with `SM_ERR_OFFSET_WALLS_TOUCH`) is built in, not
-//! 6169ea1's routine (contacts checked as they are found, a touch reported as whichever
-//! crossing check fails first, `SM_ERR_BAD_INTERSECTIONS`); like the rest of this file it
-//! runs only with `offset_resolve_crossing_loops`.
+//! Deviations: always on (it was the opt-in `Kernel::fixes.offset_resolve_crossing_loops`
+//! until that flag was retired); called by `do_extended_offset`. The reason a crossing is
+//! not resolved is the error's `operation` text instead of an `smos_ErrorMessage` report.
+//! `SmBrep::MakeFaceFromLoopOnFace` is not ported: a face that comes apart is built with one
+//! `MakeFaceWithCurves` per outer loop (each a sheet of its own, as the fork's
+//! `SplitDisconnectedShells` leaves them), and one that comes apart and keeps holes as well
+//! is not resolved (`SM_ERR_BAD_INTERSECTIONS`). No recursion; every loop is bounded by the
+//! face's edge uses and crossings. The fork's later a759622 ("an offset whose walls would
+//! meet is refused as such": every contact is examined before any crossing, and loops that
+//! touch without crossing fail with `SM_ERR_OFFSET_WALLS_TOUCH`) is built in, not 6169ea1's
+//! routine (contacts checked as they are found, a touch reported as whichever crossing
+//! check fails first, `SM_ERR_BAD_INTERSECTIONS`).
 //! The fork's 1b016ca (regions the loops wind round the other way under an opening are
-//! kept, reversed, where they are the cavity's floor) is part of the same opt-in (WR-345
+//! kept, reversed, where they are the cavity's floor) is part of the routine (WR-345
 //! addendum): it adds the original body to the routine's inputs for its point tests.
+//!
+//! Not in the fork: a stretch from vertex to vertex (a whole edge use no crossing cuts) is
+//! not taken for a stretch too short to build, though a closed edge's two ends meet (the
+//! fork refuses an uncut hole circle beside a crossing as three loops at one point). Where
+//! the offset's results are not merged, a face whose loops cross is refused
+//! ([`crate::error::offset::LoopCrossing::Unmerged`]): only the merge cuts the walls the
+//! crossing loops come from where they pass through each other.
 //!
 //! Not in the fork (solidcraft#16983): a face of one loop is resolved as well. Where the
 //! offsets of the faces either side of a face cross over each other (a wall thicker than
@@ -702,6 +708,17 @@ impl OffsetExecutive {
             }
         }
 
+        // (not in the fork) Rebuilding this face trims it alone. Where its loops cross, the
+        // offset walls the crossing loops' edges bound pass through each other along a
+        // curve through the crossing; only the merge (`PiecewiseMerge` with merged results)
+        // cuts them there. The unmerged path only stitches the offset faces, so the walls
+        // stay whole: the stitch encloses no region (the face rebuilt) or the face keeps
+        // loops that cross (`SmFace` test #38, the face left as it is). No unmerged offset
+        // is valid here, and it is refused as such.
+        if !self.merge_results() {
+            return Err(unresolved(LoopCrossing::Unmerged));
+        }
+
         // Until the merge every offset face is a sheet of its own: its edges bound it
         // alone.
         for &edgeuse in &edgeuses {
@@ -741,8 +758,14 @@ impl OffsetExecutive {
                 let curve = edge_curve(b, e)?;
                 let from_pt = curve.evaluate_point(kernel, lo)?;
                 let to_pt = curve.evaluate_point(kernel, hi)?;
+                // (not in the fork) a stretch from vertex to vertex is a whole edge use no
+                // crossing cuts, the face's own edge: its ends are the edge's, which meet on
+                // a closed curve (a hole's circle, a loop of one edge). Only a stretch that
+                // ends at a crossing can be too short, two crossings or a crossing and a
+                // vertex at one point.
+                let whole_edge = from_node < 0 && to_node < 0;
                 if hi.partial_cmp(&lo) != Some(core::cmp::Ordering::Greater)
-                    || from_pt.distance(to_pt) <= tol_3d
+                    || (!whole_edge && from_pt.distance(to_pt) <= tol_3d)
                 {
                     return Err(unresolved(LoopCrossing::ThreeAtOnePoint));
                 }

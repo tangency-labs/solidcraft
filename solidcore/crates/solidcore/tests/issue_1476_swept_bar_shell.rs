@@ -91,7 +91,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.revolve_analytic_profile_faces = true;
     f.revolve_nested_shells_as_cavities = true;
     f.join_touching_loops = true;
-    f.offset_resolve_crossing_loops = true;
     f.offset_analytic_mate_edges = true;
     f.nurb_cylinder_inside_out_frame = true;
     f.offset_collapsed_rounds_mated = true;

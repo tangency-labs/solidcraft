@@ -91,15 +91,14 @@ pub enum OffsetFailure {
         radius: f64,
     },
     /// Loops of the offset of `face` touch without crossing, so the offset walls they
-    /// come from meet there (with `fixes.offset_resolve_crossing_loops`).
+    /// come from meet there.
     WallsTouch {
         /// The face whose offset's loops touch, when known.
         face: Option<FaceId>,
         /// How they touch.
         contact: WallContact,
     },
-    /// Loops of the offset of `face` cross in a way the offset does not resolve (opt-in
-    /// `fixes.offset_resolve_crossing_loops`).
+    /// Loops of the offset of `face` cross in a way the offset does not resolve.
     LoopsCross {
         /// The face whose offset's loops cross, when known.
         face: Option<FaceId>,
@@ -315,6 +314,9 @@ pub enum LoopCrossing {
     ArriveMoreThanOneWay,
     /// The face comes apart around a hole.
     ComesApartAroundHole,
+    /// The offset's results are not merged, so the walls the crossing loops come from
+    /// are not cut where they pass through each other (merge the results).
+    Unmerged,
 }
 
 impl OffsetFailure {
@@ -539,6 +541,9 @@ impl core::fmt::Display for LoopCrossing {
                 "the loops arrive at a crossing more than one way"
             }
             LoopCrossing::ComesApartAroundHole => "the face comes apart around a hole",
+            LoopCrossing::Unmerged => {
+                "the results are not merged, so the walls the loops come from are not cut where they cross"
+            }
         })
     }
 }

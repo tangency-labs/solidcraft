@@ -4,8 +4,9 @@
 //! case the Rust port covers with `issue_977_closed_shell_excess_faces_after_merge`.
 //! The ladder part is not public; this probe takes the whole offset of #977's plate
 //! (30 x 20 x 6, an r1.5 through hole 1 from the front side) 1.5 inward, by default and
-//! with the #977 and #854 opt-ins (with them, a manifold solid of the closed form's volume;
-//! plan/findings/offset.offset_executive_p2--issue-400-865-shell-probes.md).
+//! with the #977 opt-in (with it, a manifold solid of the closed form's volume;
+//! plan/findings/offset.offset_executive_p2--issue-400-865-shell-probes.md). The offset
+//! faces' crossing loops (#854, WR-345) are always resolved.
 //!
 //! The inward offset is the plate shrunk by 1.5 (27 x 17 x 3) less the hole's offset
 //! (r 3 about (15, 2.5)), which crosses the front's offset at y = 1.5.
@@ -21,11 +22,24 @@ mod offset_fixture;
 
 use core::f64::consts::PI;
 
-use offset_fixture::{offset_full, report};
+use offset_fixture::{offset_full, report, volume};
 use solidcore::boolean::api_brep::boolean_difference;
+use solidcore::error::offset::{LoopCrossing, OffsetFailure};
+use solidcore::error::Reason;
+use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::object::ObjectRef;
 use solidcore::math::Point3;
+use solidcore::offset::offset_executive::p1::{OffsetExecutive, OffsetOperation};
+use solidcore::offset::offset_executive::p2::SolidOffsetOptions;
+use solidcore::offset::offset_executive::p2::{api_offset_brep_full, OffsetOptions};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
-use solidcore::{Brep, Kernel};
+use solidcore::query::api_queries::brep_is_manifold_solid;
+use solidcore::topology::brep::p10::TopologyEnv;
+use solidcore::topology::brep::p7::read_from_file;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+use solidcore::topology::database_io::FileType;
+use solidcore::topology::topology::NotifyRecords;
+use solidcore::{Brep, EntityRef, Kernel};
 
 fn plate(k: &mut Kernel) -> Brep {
     let plate = create_box(k, Point3::new(0.0, 0.0, 0.0), 30.0, 20.0, 6.0).unwrap();
@@ -45,12 +59,11 @@ fn want() -> f64 {
 fn run(fixed: bool) -> bool {
     let mut k = Kernel::default();
     k.fixes.offset_excess_faces_after_merge = fixed;
-    k.fixes.offset_resolve_crossing_loops = fixed;
     let mut b = plate(&mut k);
     let result = offset_full(&mut k, &mut b, -1.5);
     report(
         &k,
-        &format!("issue_865 whole offset -1.5, opt-ins={fixed}"),
+        &format!("issue_865 whole offset -1.5, opt-in={fixed}"),
         result,
         Some(want()),
         1e-6,
@@ -59,11 +72,291 @@ fn run(fixed: bool) -> bool {
 
 #[test]
 fn issue_865_whole_offset_default() {
-    // upstream behaviour: reported only
+    // without the #977 opt-in: reported only
     let _ = run(false);
 }
 
 #[test]
 fn issue_865_whole_offset_with_fixes() {
     assert!(run(true));
+}
+
+/// The plate with a second through hole, r 1 about (15, 12), well clear of everything:
+/// shrunk 1.5 its offset (r 2.5) crosses no other loop. On the offset faces z = 1.5 and
+/// z = 4.5 its loop is one closed edge that no crossing cuts, beside the first hole's
+/// loop, which crosses the front's. That whole edge is one stretch from its vertex round
+/// to the same vertex; it was taken for a stretch too short to build ("three loops cross
+/// at one point", `SM_ERR_BAD_INTERSECTIONS`) and the offset refused.
+///
+/// Closed form: [`want`] less the second hole's offset disc over the height 3.
+#[test]
+fn an_uncut_hole_beside_a_crossing_is_kept_whole() {
+    let mut k = Kernel::default();
+    k.fixes.offset_excess_faces_after_merge = true;
+    let first = plate(&mut k);
+    let second = create_cylinder(&mut k, Point3::new(15.0, 12.0, -1.0), 1.0, 8.0).unwrap();
+    let mut b = boolean_difference(&mut k, first, second).unwrap();
+    let mut result = offset_full(&mut k, &mut b, -1.5).unwrap();
+    result.refresh_cached_topology();
+    result.use_arena_naming().unwrap();
+    let lines = check_brep(&mut k, &mut result, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!(brep_is_manifold_solid(&result).unwrap());
+    let want = want() - PI * 2.5 * 2.5 * 3.0;
+    let got = volume(&k, &mut result).unwrap();
+    assert!(
+        (got - want).abs() <= 1e-6 * want,
+        "volume {got}, closed form {want}"
+    );
+}
+
+/// The whole offset of [`plate`], results not merged: the offset only stitches its faces,
+/// so the hole's offset wall (r 3) and the front's (y = 1.5), which pass through each
+/// other, are never cut, whether the floor and the top are rebuilt or not. That body
+/// was returned as an offset: the top and floor keep loops that cross (`SmFace` test
+/// #38). It is refused, naming the face whose offset's loops cross.
+#[test]
+fn crossing_loops_without_the_merge_are_refused() {
+    let mut k = Kernel::default();
+    let mut b = plate(&mut k);
+    let e = unmerged_offset(&mut k, &mut b, -1.5).unwrap_err();
+    // the API's own failure (1001) keeps the refusal as its cause
+    let cause = e.root_cause();
+    let Some(Reason::Offset(OffsetFailure::LoopsCross {
+        face: Some(_),
+        crossing: LoopCrossing::Unmerged,
+    })) = cause.failure().map(|f| &f.reason)
+    else {
+        panic!("{e:?}");
+    };
+    assert_eq!(cause.sm_status(), Some(1027));
+}
+
+/// Control for the refusal above, and the real defect still caught beside it: the hole
+/// moved to (15, 4.6), so its offset (r 3) reaches y = 1.6, 0.1 clear of the front's
+/// offset (y = 1.5), and no loops cross. Unmerged, the offset is still built: a valid
+/// solid of the closed form, the plate shrunk by 1.5 less the hole's offset disc.
+#[test]
+fn loops_that_do_not_cross_still_offset_without_the_merge() {
+    let mut k = Kernel::default();
+    let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 30.0, 20.0, 6.0).unwrap();
+    let hole = create_cylinder(&mut k, Point3::new(15.0, 4.6, -1.0), 1.5, 8.0).unwrap();
+    let mut b = boolean_difference(&mut k, plate, hole).unwrap();
+    let mut result = unmerged_offset(&mut k, &mut b, -1.5).unwrap();
+    result.refresh_cached_topology();
+    result.use_arena_naming().unwrap();
+    let lines = check_brep(&mut k, &mut result, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!(brep_is_manifold_solid(&result).unwrap());
+    let want = (27.0 * 17.0 - PI * 3.0 * 3.0) * 3.0;
+    let got = volume(&k, &mut result).unwrap();
+    assert!(
+        (got - want).abs() <= 1e-6 * want,
+        "volume {got}, closed form {want}"
+    );
+}
+
+/// `SmApiOffsetBrepFull` with extended convex edges and results not merged.
+fn unmerged_offset(k: &mut Kernel, part: &mut Brep, distance: f64) -> solidcore::Result<Brep> {
+    let mut notifications = offset_fixture::Notifications::new(part);
+    api_offset_brep_full(
+        k,
+        Some(part),
+        OffsetOptions {
+            distance,
+            extend_convex_edges: true,
+            merge_results: false,
+        },
+        &mut notifications.context(),
+    )
+}
+
+/// Upstream's `Fillet/cyl_on_box_w_hole.smb` (`_tan_hole`, `_tan_hole2`): a box with a
+/// cylinder standing on it and a through hole near a side, given in `.smb` text.
+fn cyl_on_box(k: &mut Kernel, name: &str, tolerance: f64) -> Option<Brep> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../upstream/TestFiles/pt_TestFiles/Fillet")
+        .join(name);
+    let Ok(bytes) = std::fs::read(&path) else {
+        assert!(
+            std::env::var_os("SOLIDCORE_REQUIRE_UPSTREAM").is_none(),
+            "SOLIDCORE_REQUIRE_UPSTREAM is set and the upstream test file is missing: {}",
+            path.display()
+        );
+        eprintln!("unavailable upstream test file: {}", path.display());
+        return None;
+    };
+    let mut b = Brep::new_with_infinite_region().unwrap();
+    let mut records = NotifyRecords::new();
+    let mut attributes = AttributeStore::default();
+    let key = |_: EntityRef| ObjectRef {
+        key: ObjectKey(0),
+        type_code: 0,
+    };
+    let mut env = TopologyEnv {
+        all_attributes: &[],
+        attributes: &mut attributes,
+        key_of: &key,
+        records: &mut records,
+        next_key: 1 << 40,
+    };
+    read_from_file(k, &mut b, bytes, FileType::Ascii, false, &mut env).unwrap();
+    b.use_arena_naming().unwrap();
+    b.set_tolerance(tolerance);
+    Some(b)
+}
+
+/// The `offset.offset_executive_p2` goldens cases `pe_Fillet_cyl_on_box_*_d0_*_ext` (and
+/// `fuzz00035`, the first with no approximation tolerance): `DoSolidOffset` of the whole
+/// part by the distance, face `face` given as the shell face, extended convex edges and
+/// results not merged. `None` without the pinned upstream checkout.
+struct CylOnBox {
+    file: &'static str,
+    face: usize,
+    distance: f64,
+    tolerance: f64,
+    approx: f64,
+    inset: bool,
+}
+
+const HOLE: (&str, f64, f64) = ("cyl_on_box_w_hole.smb", 13.1556, 0.001_777_777_811_686);
+const TAN_HOLE: (&str, f64, f64) = ("cyl_on_box_w_tan_hole.smb", 11.1404, 0.001_367_821_375_529);
+const TAN_HOLE2: (&str, f64, f64) = ("cyl_on_box_w_tan_hole2.smb", 10.0, 0.001_626_666_692_098);
+
+fn cyl_on_box_case(
+    (file, distance, tolerance): (&'static str, f64, f64),
+    face: usize,
+    inset: bool,
+) -> CylOnBox {
+    CylOnBox {
+        file,
+        face,
+        distance,
+        tolerance,
+        approx: tolerance,
+        inset,
+    }
+}
+
+impl CylOnBox {
+    fn label(&self) -> String {
+        format!(
+            "{} f{} {} approx {}",
+            self.file,
+            self.face,
+            if self.inset { "in" } else { "out" },
+            self.approx
+        )
+    }
+
+    /// The offset's outcome and the executive's offset B-rep after it.
+    fn run(&self) -> Option<(Kernel, solidcore::Result<Brep>, Option<Brep>)> {
+        let mut k = Kernel::default();
+        let mut part = cyl_on_box(&mut k, self.file, self.tolerance)?;
+        let shell_face = part.face_list()[self.face];
+        let mut exec =
+            OffsetExecutive::new(OffsetOperation::SolidOffset, self.distance, self.approx);
+        exec.set_inset(self.inset);
+        exec.set_extend_convex_edges(true);
+        exec.set_merge_results(false);
+        exec.set_shell_faces(&[shell_face]);
+        let mut notifications = offset_fixture::Notifications::new(&mut part);
+        let result = exec.do_solid_offset(
+            &mut k,
+            Some(&mut part),
+            SolidOffsetOptions::default(),
+            &mut notifications.context(),
+        );
+        let faces = exec
+            .offset_brep()
+            .map(|b| b.clone_standing_for_self().unwrap());
+        Some((k, result, faces))
+    }
+}
+
+/// The eleven goldens cases whose loops cross with results not merged. Each is refused as
+/// [`LoopCrossing::Unmerged`], and the offset faces it would have stitched (the
+/// executive's offset B-rep, kept as it was when refused) fail `check_brep`'s `SmFace`
+/// test #38 (Intersecting Face Loops): the stitch only joins edges, so the body it made of
+/// them had that face too. Main returned that body (status 1000).
+#[test]
+fn upstream_holes_crossing_the_sides_unmerged_are_refused() {
+    let mut cases = vec![
+        cyl_on_box_case(HOLE, 0, true),
+        cyl_on_box_case(HOLE, 1, true),
+        cyl_on_box_case(HOLE, 2, true),
+        cyl_on_box_case(HOLE, 2, false),
+        cyl_on_box_case(TAN_HOLE, 0, false),
+        cyl_on_box_case(TAN_HOLE, 1, false),
+        cyl_on_box_case(TAN_HOLE, 2, false),
+        cyl_on_box_case(TAN_HOLE2, 0, true),
+        cyl_on_box_case(TAN_HOLE2, 1, true),
+        cyl_on_box_case(TAN_HOLE2, 2, true),
+    ];
+    let mut fuzz = cyl_on_box_case(HOLE, 0, true);
+    fuzz.approx = 0.0;
+    cases.push(fuzz);
+    for case in &cases {
+        let Some((mut k, result, faces)) = case.run() else {
+            return;
+        };
+        let label = case.label();
+        let e = result.err().unwrap_or_else(|| panic!("{label}: built"));
+        let Some(Reason::Offset(OffsetFailure::LoopsCross {
+            face: Some(_),
+            crossing: LoopCrossing::Unmerged,
+        })) = e.root_cause().failure().map(|f| &f.reason)
+        else {
+            panic!("{label}: {e:?}");
+        };
+        let mut faces = faces.unwrap_or_else(|| panic!("{label}: no offset faces"));
+        faces.use_arena_naming().unwrap();
+        let lines = check_brep(&mut k, &mut faces, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(
+            lines.iter().any(|l| l.contains("Test #38")),
+            "{label}: {lines:?}"
+        );
+    }
+}
+
+/// The real defect still caught beside the refusals above, and the cases next to them
+/// still built: the other eight configurations of the same three parts, whose loops do
+/// not cross, offset unmerged as before into valid manifold solids (`check_brep` Level 2
+/// clean) of the volumes main gives them.
+#[test]
+fn upstream_holes_clear_of_the_sides_still_offset_unmerged() {
+    let cases = [
+        (cyl_on_box_case(HOLE, 0, false), 7_290_094.858_016_346),
+        (cyl_on_box_case(HOLE, 1, false), 7_561_236.426_576_405),
+        (cyl_on_box_case(TAN_HOLE, 0, true), 859_170.668_806_394_1),
+        (cyl_on_box_case(TAN_HOLE, 1, true), 804_072.097_376_684_1),
+        (cyl_on_box_case(TAN_HOLE, 2, true), 701_583.266_256_480_5),
+        (cyl_on_box_case(TAN_HOLE2, 0, false), 5_075_909.523_810_437),
+        (cyl_on_box_case(TAN_HOLE2, 1, false), 5_213_791.753_009_426),
+        (cyl_on_box_case(TAN_HOLE2, 2, false), 5_314_487.782_083_446),
+    ];
+    for (case, main_volume) in &cases {
+        let Some((mut k, result, _)) = case.run() else {
+            return;
+        };
+        let label = case.label();
+        let mut b = result.unwrap_or_else(|e| panic!("{label}: {e:?}"));
+        b.use_arena_naming().unwrap();
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "{label}: {lines:?}");
+        assert!(brep_is_manifold_solid(&b).unwrap(), "{label}");
+        let v = volume(&k, &mut b).unwrap();
+        assert!(
+            (v - main_volume).abs() <= 1e-9 * main_volume,
+            "{label}: volume {v}, main {main_volume}"
+        );
+    }
 }

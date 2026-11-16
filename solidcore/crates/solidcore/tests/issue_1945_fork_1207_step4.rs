@@ -67,7 +67,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.loops_go_on_round_the_vertex = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes.join_touching_loops = true;
-    k.fixes.offset_resolve_crossing_loops = true;
     k.fixes.local_operation_box_holds_new_surfaces = true;
     k.fixes.local_operation_refuses_loose_tangent_edges = true;
     k.fixes.local_operation_step_walls = true;
