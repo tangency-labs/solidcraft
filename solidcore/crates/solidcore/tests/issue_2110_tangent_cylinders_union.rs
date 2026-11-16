@@ -15,8 +15,9 @@
 //! the C++ crashes checking the result, so that case compares the union only).
 //!
 //! The kernel splits the curves at the node (WR-77, the fork's
-//! tangency-labs/smlib@3c9d1d3, `sm_SplitCurvesAtSingularPoints`), so they end there, and every seam placement (64 tried, 45 degrees apart) unites to a body that
-//! checks clean at level 2 with the closed-form volume
+//! tangency-labs/smlib@3c9d1d3, `sm_SplitCurvesAtSingularPoints`), so they end there,
+//! and every seam placement (64 tried, 45 degrees apart) unites to a body that checks
+//! clean at level 2 with the closed-form volume
 //! `V = 4000 pi + 1000 pi - V_int`, `V_int` the integral over the disc
 //! `x^2 + (z + 5)^2 <= 25` of `2 sqrt(100 - (z + 10)^2)` (tanh-sinh quadrature,
 //! 1270.66448382136; `V` = 14437.2987841276). The fitted intersection curves keep the

@@ -560,13 +560,13 @@ fn issue_395_tracer_covers_every_contact_curve() {
     }
 }
 
-/// Upstream (the default kernel, at parity with the C++ in difftest's
+/// Without the tracer (the default kernel; upstream does the same, as in the goldens'
 /// `tc_quartic_plane_circle`, `tc_cubic_plane_line` and `tc_quartic_ridge_plane_line`):
 /// the closed tangent circle of the quartic is missed, and the 3rd and 4th order
 /// tangent lines collapse to their two end points. The tracer traces each as one
 /// `Tangent` curve.
 #[test]
-fn issue_395_upstream_misses_or_collapses_high_order_contact() {
+fn issue_395_without_the_tracer_high_order_contact_is_missed_or_collapsed() {
     for swapped in [false, true] {
         let circle = pair("quartic_plane_circle");
         let m = run(&circle, swapped, Fixes::NoTracer);
@@ -590,10 +590,10 @@ fn issue_395_upstream_misses_or_collapses_high_order_contact() {
 }
 
 /// The second-order line and circle contacts of the corpus (cylinder, parabolic
-/// cylinder, parallel cylinders, torus, sphere in a cylinder) are traced upstream
-/// already, as one `Tangent` curve; the tracer leaves them as they are.
+/// cylinder, parallel cylinders, torus, sphere in a cylinder) are traced without the
+/// tracer already, as one `Tangent` curve; the tracer leaves them as they are.
 #[test]
-fn issue_395_second_order_contacts_traced_upstream_and_unchanged() {
+fn issue_395_second_order_contacts_traced_without_the_tracer_and_unchanged() {
     for name in [
         "cylinder_plane_line",
         "parabolic_cylinder_plane_line",
@@ -604,12 +604,12 @@ fn issue_395_second_order_contacts_traced_upstream_and_unchanged() {
     ] {
         let p = pair(name);
         for swapped in [false, true] {
-            let up = run(&p, swapped, Fixes::NoTracer);
-            assert_eq!(up.types, [TsectCurveType::Tangent], "{name} {swapped}");
-            assert!(up.covered.iter().all(|&c| c >= 0.995), "{name} {swapped}");
+            let base = run(&p, swapped, Fixes::NoTracer);
+            assert_eq!(base.types, [TsectCurveType::Tangent], "{name} {swapped}");
+            assert!(base.covered.iter().all(|&c| c >= 0.995), "{name} {swapped}");
             let fixed = run(&p, swapped, Fixes::Tracer);
-            assert_eq!(fixed.types, up.types, "{name} {swapped}");
-            assert_eq!(fixed.covered, up.covered, "{name} {swapped}");
+            assert_eq!(fixed.types, base.types, "{name} {swapped}");
+            assert_eq!(fixed.covered, base.covered, "{name} {swapped}");
         }
     }
 }
@@ -626,8 +626,8 @@ fn issue_395_steinmetz_nodes_with_the_tracer() {
                 .filter(|&&t| t == TsectCurveType::Touching)
                 .count()
         };
-        let up = run(&p, swapped, Fixes::NoTracer);
-        assert_eq!(touching(&up), 0, "{swapped}: {up:?}");
+        let base = run(&p, swapped, Fixes::NoTracer);
+        assert_eq!(touching(&base), 0, "{swapped}: {base:?}");
         let fixed = run(&p, swapped, Fixes::Tracer);
         assert_eq!(touching(&fixed), 2, "{swapped}: {fixed:?}");
         assert!(

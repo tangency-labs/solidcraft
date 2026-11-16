@@ -654,9 +654,19 @@ fn with_solidcraft_s_fixes_the_fitted_round_is_its_definition() {
 
 /// The two pipes touching at a point unite on the default kernel: WR-77's split of the
 /// intersection curves at their singular point is always made (upstream's union fails
-/// 1001 there), so grading reaches the round.
+/// 1001 there). The joined and cut body passes the level-2 check, and grading reaches the
+/// round.
 #[test]
 fn the_pipes_join() {
+    let mut k = Kernel::default();
+    let mut body = cylinders_touching_at_a_point(&mut k).unwrap();
+    let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(
+        lines.is_empty(),
+        "the pipes' body fails the check: {lines:?}"
+    );
     let case = cases()
         .into_iter()
         .find(|c| c.name == "cylinders_touching_at_a_point")

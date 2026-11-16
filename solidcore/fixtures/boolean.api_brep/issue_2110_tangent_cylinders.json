@@ -2,7 +2,7 @@
  "cases": [
   {
    "name": "issue2110_tangent_cylinders_union_a135_b225",
-   "note": "#2110: the union of a cylinder R 10 along x through (y, z) = (0, -10), x -20..20, and one R 5 along y through (x, z) = (0, -5), y -20..20, which touch inside at the origin; each SmApiCreateCylinder turned about Z for its seam (A 135 deg, B 225 deg), onto its axis and moved, as crates/solidcore/tests/issue_2110_tangent_cylinders_union.rs builds them. At the default fixes (upstream behaviour, the SSI marcher steps through the node without splitting its curves, WR-77) the result fails SMLib's check (SmFace #29 Face crosses Seam, SmEdgeuse #7 Bad UVTrimCurve), as #2110 reports. Compares the union's status and its result's counts only: the pinned C++ crashes (SIGSEGV) checking this result, so it is not a `checked` case; the Rust check's #29 / #7 failures are pinned by the regression test.",
+   "note": "#2110: the union of a cylinder R 10 along x through (y, z) = (0, -10), x -20..20, and one R 5 along y through (x, z) = (0, -5), y -20..20, which touch inside at the origin; each SmApiCreateCylinder turned about Z for its seam (A 135 deg, B 225 deg), onto its axis and moved, as crates/solidcore/tests/issue_2110_tangent_cylinders_union.rs builds them. The SSI marcher splits its curves at the node (WR-77; upstream steps through it without splitting, and its result failed SMLib's check, SmFace #29 Face crosses Seam and SmEdgeuse #7 Bad UVTrimCurve, as #2110 reports), so the union is a manifold solid that checks clean, with the closed-form volume, as the regression test asserts. Compares the union's status and its result's counts only: the pinned C++ crashes (SIGSEGV) checking its own result, so it is not a `checked` case.",
    "inputs": {
     "api": "union",
     "a": {
@@ -117,7 +117,7 @@
   },
   {
    "name": "issue2110_tangent_cylinders_union_checked_a0_b90",
-   "note": "#2110: the union of a cylinder R 10 along x through (y, z) = (0, -10), x -20..20, and one R 5 along y through (x, z) = (0, -5), y -20..20, which touch inside at the origin; each SmApiCreateCylinder turned about Z for its seam (A 0 deg, B 90 deg), onto its axis and moved, as crates/solidcore/tests/issue_2110_tangent_cylinders_union.rs builds them. At the default fixes (upstream behaviour, the SSI marcher steps through the node without splitting its curves, WR-77) the union checks clean but loses B (volume 4000 pi). Compares the union's status and SMLib's capi check (level 2) of the result.",
+   "note": "#2110: the union of a cylinder R 10 along x through (y, z) = (0, -10), x -20..20, and one R 5 along y through (x, z) = (0, -5), y -20..20, which touch inside at the origin; each SmApiCreateCylinder turned about Z for its seam (A 0 deg, B 90 deg), onto its axis and moved, as crates/solidcore/tests/issue_2110_tangent_cylinders_union.rs builds them. The SSI marcher splits its curves at the node (WR-77; upstream steps through it without splitting, and its union checked clean but lost B, volume 4000 pi), so the union keeps both cylinders, as the regression test asserts. Compares the union's status and SMLib's capi check (level 2) of the result.",
    "inputs": {
     "api": "checked",
     "operation": 1,
@@ -233,7 +233,7 @@
   },
   {
    "name": "issue2110_tangent_cylinders_union_checked_a0_b0",
-   "note": "#2110: the union of a cylinder R 10 along x through (y, z) = (0, -10), x -20..20, and one R 5 along y through (x, z) = (0, -5), y -20..20, which touch inside at the origin; each SmApiCreateCylinder turned about Z for its seam (A 0 deg, B 0 deg), onto its axis and moved, as crates/solidcore/tests/issue_2110_tangent_cylinders_union.rs builds them. At the default fixes (upstream behaviour, the SSI marcher steps through the node without splitting its curves, WR-77) MakeFaceuse fails 1001. Compares the union's status and SMLib's capi check (level 2) of the result.",
+   "note": "#2110: the union of a cylinder R 10 along x through (y, z) = (0, -10), x -20..20, and one R 5 along y through (x, z) = (0, -5), y -20..20, which touch inside at the origin; each SmApiCreateCylinder turned about Z for its seam (A 0 deg, B 0 deg), onto its axis and moved, as crates/solidcore/tests/issue_2110_tangent_cylinders_union.rs builds them. The SSI marcher splits its curves at the node (WR-77; upstream steps through it without splitting, and its MakeFaceuse failed 1001), so the union builds, as the regression test asserts. Compares the union's status and SMLib's capi check (level 2) of the result.",
    "inputs": {
     "api": "checked",
     "operation": 1,
@@ -349,7 +349,7 @@
   },
   {
    "name": "issue2110_tangent_cylinders_union_checked_a180_b270",
-   "note": "#2110: the union of a cylinder R 10 along x through (y, z) = (0, -10), x -20..20, and one R 5 along y through (x, z) = (0, -5), y -20..20, which touch inside at the origin; each SmApiCreateCylinder turned about Z for its seam (A 180 deg, B 270 deg), onto its axis and moved, as crates/solidcore/tests/issue_2110_tangent_cylinders_union.rs builds them. At the default fixes (upstream behaviour, the SSI marcher steps through the node without splitting its curves, WR-77) both seams pass through the touching point, and the union is sound. Compares the union's status and SMLib's capi check (level 2) of the result.",
+   "note": "#2110: the union of a cylinder R 10 along x through (y, z) = (0, -10), x -20..20, and one R 5 along y through (x, z) = (0, -5), y -20..20, which touch inside at the origin; each SmApiCreateCylinder turned about Z for its seam (A 180 deg, B 270 deg), onto its axis and moved, as crates/solidcore/tests/issue_2110_tangent_cylinders_union.rs builds them. Both seams pass through the touching point, and the union is sound, with or without WR-77's split. Compares the union's status and SMLib's capi check (level 2) of the result.",
    "inputs": {
     "api": "checked",
     "operation": 1,
