@@ -1377,6 +1377,295 @@ fn a_batch_the_cursor_acts_out_computes_nothing_on_the_window_thread() {
     }
 }
 
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn plugin_package_for_worker_test(tag: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("solidcraft-plugin-worker-{}-{tag}", std::process::id()));
+    let dir = root.join("sample");
+    std::fs::create_dir_all(&dir).unwrap();
+    let (package, version) = solidcraft_engine::plugin::API.rsplit_once('@').unwrap();
+    let wat = include_str!("plugin_fixture.wat").replace("PLUGIN_PACKAGE", package).replace("PLUGIN_VERSION", version);
+    std::fs::write(dir.join("plugin.wasm"), wat::parse_str(&wat).unwrap()).unwrap();
+    std::fs::write(
+        dir.join("plugin.json"),
+        json!({"id":"sample","name":"Worker sample","version":"1","capabilities":["commands@0.1"],"runtime":{
+        "module":"plugin.wasm","entries":["make"],"commands":[]}})
+        .to_string(),
+    )
+    .unwrap();
+    root
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn plugin_execution_is_off_thread_even_with_agent_off_thread_disabled() {
+    let (mut h, tx) = agent_harness();
+    h.app.preferences.agent_off_thread = false;
+    h.app.run("solid.box", json!({"length":1,"width":1,"height":1,"corner":[100,100,100]})).unwrap();
+    h.app.run("edit.undo", json!({})).unwrap();
+    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    let own_level = h.app.session.param_check;
+    let root = plugin_package_for_worker_test("responsive");
+    let path = root.join("sample").to_string_lossy().into_owned();
+    let inspection = ask(&tx, "engine.execute", json!({"command":"plugin.inspect","params":{"path":path}}));
+    let inspection = reply_to(&mut h, &inspection);
+    assert_eq!(inspection["ok"], true, "{inspection}");
+    let inspected = &inspection["result"];
+    assert_eq!(h.app.session.plugin_state.packages.get("sample"), Some(&path), "async inspection registers namespaced entries");
+    assert_eq!(
+        h.app.run("PLUGIN.RUN", json!({"path":path,"approval":inspected["approval"],"entry":"make"})).unwrap_err(),
+        h.app.tr("ui.plugin_standalone")
+    );
+    let (release, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    let request =
+        ask(&tx, "engine.execute", json!({"command":"sample.make","param_check":"strict","params":{"approval":inspected["approval"],"params":{}}}));
+    h.frames(1);
+    assert!(h.app.agent_computing().is_some());
+    let view = ask(&tx, "ui.inspect", json!({}));
+    h.frames(1);
+    assert_eq!(view.try_recv().unwrap()["ok"], true, "window answers while external code waits");
+    release.send(()).unwrap();
+    let reply = reply_to(&mut h, &request);
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["param_check"], "strict");
+    assert_eq!(h.app.session.param_check, own_level);
+    assert_eq!(reply["result"]["result"], serde_json::Value::Null);
+    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history, "a read-only plugin preserves history");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn a_plugin_result_is_discarded_after_design_or_selection_changes() {
+    for context in ["document", "selection", "plugin_limits"] {
+        let (mut h, tx) = agent_harness();
+        h.app.preferences.language = if context == "selection" { "ja" } else { "en" }.into();
+        h.app.run("solid.box", json!({"length":1,"width":1,"height":1,"corner":[200,200,200]})).unwrap();
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert!(!h.app.session.redo.is_empty());
+        let root = plugin_package_for_worker_test(&format!("stale-{context}"));
+        let path = root.join("sample").to_string_lossy().into_owned();
+        let inspected = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
+        let (release, gate) = std::sync::mpsc::channel();
+        h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+        let request =
+            ask(&tx, "engine.execute", json!({"command":"plugin.run","params":{"path":path,"approval":inspected["approval"],"entry":"make"}}));
+        h.frames(1);
+        assert!(h.app.agent_computing().is_some());
+        if context == "document" {
+            h.app.run("solid.box", json!({"length":2,"width":2,"height":2,"corner":[100,100,100]})).unwrap();
+        } else if context == "plugin_limits" {
+            crate::prefs::set(&mut h.app, &json!({"plugin_max_memory_mib":512})).unwrap();
+        } else {
+            let selection = vec![solidcraft_engine::Sel::Feature { id: feature_ids(&h)[0] }];
+            if h.app.session.selection == selection {
+                h.app.session.selection.clear();
+            } else {
+                h.app.session.selection = selection;
+            }
+        }
+        let before = h.app.session.doc.to_json();
+        let history = (h.app.session.undo.len(), h.app.session.redo.len());
+        release.send(()).unwrap();
+        let reply = reply_to(&mut h, &request);
+        assert_eq!(reply["ok"], false, "{context}: {reply}");
+        let language = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language);
+        assert_eq!(reply["error"], language.text("ui.plugin_context_changed"), "{context}: {reply}");
+        assert_eq!(h.app.session.doc.to_json(), before);
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn cancelling_a_plugin_worker_answers_stopped_without_adopting_its_result() {
+    let (mut h, tx) = agent_harness();
+    let root = plugin_package_for_worker_test("cancelled");
+    let path = root.join("sample").to_string_lossy().into_owned();
+    let inspected = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
+    let (release, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    let before = h.app.session.doc.to_json();
+    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    let (reply, ticket) =
+        ask_ticket(&tx, "engine.execute", json!({"command":"plugin.run","params":{"path":path,"approval":inspected["approval"],"entry":"make"}}));
+    h.frames(1);
+    assert_eq!(ticket.cancel(), crate::control_job::Cancel::Stopped { writes_file: true });
+    let response = reply_to(&mut h, &reply);
+    assert_eq!((response["ok"].clone(), response["stopped"].clone()), (json!(false), json!(true)), "{response}");
+    assert!(response["error"].as_str().unwrap().contains("file may still be written"), "{response}");
+    release.send(()).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn plugin_commands_in_batches_and_scripts_are_refused_before_an_earlier_edit() {
+    let mut h = Harness::new();
+    let before = h.app.session.doc.to_json();
+    for command in ["plugin.run", "PLUGIN.RUN"] {
+        for method in ["engine.batch", "engine.script"] {
+            let reply = h.call(
+                method,
+                json!({"commands":[
+                    {"command":"solid.box","params":{"length":2,"width":3,"height":4}},
+                    {"command":command,"params":{}}
+                ]}),
+            );
+            assert_eq!(reply["ok"], false, "{method}: {reply}");
+            assert_eq!(reply["error"], h.app.tr("ui.plugin_standalone"), "{method}: {reply}");
+            assert_eq!(h.app.session.doc.to_json(), before, "{method}: {command}");
+            assert!(h.app.session.undo.is_empty());
+        }
+    }
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn plugin_preflight_checks_namespaced_calls_after_ten_thousand_steps() {
+    let mut h = Harness::new();
+    let root = plugin_package_for_worker_test("long-script");
+    let inspected = h.app.run("plugin.inspect", json!({"path":root.join("sample")})).unwrap();
+    let before = h.app.session.doc.to_json();
+    let mut steps = vec![json!({"command":"document.inspect","params":{}}); 10_000];
+    steps[0] = json!({"command":"solid.box","params":{"length":2,"width":3,"height":4}});
+    steps.push(json!({"command":"sample.make","params":{"approval":inspected["approval"]}}));
+    let (reply, _) = h.call_queued("engine.script", json!({"commands":steps}));
+    assert_eq!(reply["error"], h.app.tr("ui.plugin_standalone"), "{reply}");
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert!(h.app.session.undo.is_empty());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn plugin_inspections_reject_another_session_and_older_results() {
+    for context in ["tab", "worker", "direct"] {
+        let (mut h, tx) = agent_harness();
+        let root = plugin_package_for_worker_test(&format!("inspect-{context}"));
+        let path = root.join("sample").to_string_lossy().into_owned();
+        let (release, gate) = std::sync::mpsc::channel();
+        h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+        let first = ask(&tx, "engine.execute", json!({"command":"plugin.inspect","params":{"path":path}}));
+        h.frames(1);
+        assert_eq!(h.app.control_answering.len(), 1);
+        h.app.apply_gate = None;
+        let newer_root = if context == "tab" {
+            crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+            None
+        } else {
+            let newer_root = plugin_package_for_worker_test(&format!("inspect-new-{context}"));
+            if context == "direct" {
+                h.app.run("PLUGIN.INSPECT", json!({"path":newer_root.join("sample")})).unwrap();
+            } else {
+                let newer = ask(&tx, "engine.execute", json!({"command":"plugin.inspect","params":{"path":newer_root.join("sample")}}));
+                assert_eq!(reply_to(&mut h, &newer)["ok"], true);
+            }
+            Some(newer_root)
+        };
+        release.send(()).unwrap();
+        let reply = reply_to(&mut h, &first);
+        assert_eq!(reply["ok"], false, "{reply}");
+        assert_eq!(reply["error"], h.app.tr("ui.plugin_context_changed"));
+        if let Some(newer_root) = newer_root {
+            assert_eq!(h.app.session.plugin_state.packages["sample"], newer_root.join("sample").to_string_lossy());
+            let _ = std::fs::remove_dir_all(newer_root);
+        } else {
+            assert!(!h.app.session.plugin_state.packages.contains_key("sample"));
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn stopping_a_plugin_at_the_window_warns_about_possible_file_writes() {
+    let (mut h, tx) = agent_harness();
+    let root = plugin_package_for_worker_test("stop-warning");
+    let path = root.join("sample");
+    let inspected = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
+    let (release, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    let reply = ask(&tx, "engine.execute", json!({"command":"plugin.run","params":{"path":path,"entry":"make","approval":inspected["approval"]}}));
+    h.frames(1);
+    h.app.stop_agent_command();
+    let response = reply.try_recv().unwrap();
+    assert_eq!(response["stopped"], true);
+    assert!(response["error"].as_str().unwrap().contains("file may still be written"), "{response}");
+    release.send(()).unwrap();
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn cancelled_plugin_display_warmup_leaves_parallel_body_meshes_cold() {
+    let mut session = solidcraft_engine::Session::default();
+    for i in 0..17 {
+        session.execute("solid.box", &json!({"length":1,"width":1,"height":1,"corner":[i*3,0,0]})).unwrap();
+    }
+    let prepared = session.scratch().compute_commands(&[], None).unwrap();
+    let progress = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
+    let worker_progress = progress.clone();
+    let (release, gate) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        gate.recv().unwrap();
+        crate::control_job::warm_plugin_display(&prepared, solidcraft_engine::doc::display_quality::DisplayQuality::Normal, &worker_progress)
+            .unwrap();
+        prepared
+    });
+    progress.cancel();
+    release.send(()).unwrap();
+    session.accept_commands(worker.join().unwrap()).unwrap();
+    assert_eq!(session.model.state().bodies.len(), 17);
+    assert!(session.model.state().bodies.iter().all(|body| body.cached_mesh().is_none()), "a stop must reach the parallel display workers");
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn accepted_plugin_sketch_exits_clear_the_window_tool() {
+    for command in ["sketch.finish", "sketch.cancel"] {
+        let (mut h, tx) = agent_harness();
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.tool = crate::tools::Tool::for_command("sketch.line");
+        assert!(h.app.tool.is_some());
+        let root = plugin_package_for_worker_test(command);
+        let path = root.join("sample");
+        let (package, version) = solidcraft_engine::plugin::API.rsplit_once('@').unwrap();
+        let open_args = json!({"sketch":sketch,"restore_marker":false}).to_string();
+        let open = format!(
+            "(func $open i32.const 2048 i32.const 11 i32.const 3072 i32.const {} i32.const 0 call $run)\n    (func $execute",
+            open_args.len()
+        );
+        let wat = include_str!("../../engine/src/plugin/fixture.wat")
+            .replace("__PACKAGE__", package)
+            .replace("__VERSION__", version)
+            .replace("call $box\n      call $box", "call $open\n      call $box")
+            .replacen("(func $execute (;3;)", &format!("{open} (;3;)"), 1)
+            .replace("file.export", "sketch.edit")
+            .replacen("    (@producers", &format!("    (data (i32.const 3072) \"{}\")\n    (@producers", open_args.replace('"', r"\22")), 1)
+            .replace(
+                "i32.const 9\n      i32.const 1024\n      i32.const 33",
+                &format!("i32.const {}\n      i32.const 1024\n      i32.const 2", command.len()),
+            )
+            .replace("solid.box", command)
+            .replace(r#"{\22length\22:2,\22width\22:3,\22height\22:4}"#, "{}");
+        std::fs::write(path.join("plugin.wasm"), wat::parse_str(wat).unwrap()).unwrap();
+        let mut manifest: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path.join("plugin.json")).unwrap()).unwrap();
+        manifest["runtime"]["commands"] = json!(["sketch.edit", command]);
+        std::fs::write(path.join("plugin.json"), manifest.to_string()).unwrap();
+        let inspected = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
+        let request =
+            ask(&tx, "engine.execute", json!({"command":"plugin.run","params":{"path":path,"entry":"make","approval":inspected["approval"]}}));
+        let reply = reply_to(&mut h, &request);
+        assert_eq!(reply["ok"], true, "{command}: {reply}");
+        assert!(h.app.session.active_sketch.is_none());
+        assert!(h.app.tool.is_none(), "{command} must perform sketch window cleanup");
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
 /// The agent's row of the operations panel and the rows queued behind it, as listed by
 /// `ui.operations` (newest first).
 fn agent_rows(h: &mut Harness) -> Vec<serde_json::Value> {

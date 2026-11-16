@@ -288,6 +288,9 @@ fn switches_design(step: &Value) -> Option<&'static str> {
 /// Why `engine.batch` refuses these steps before running any: a step loads a file or switches
 /// to another design (send such steps one by one).
 pub(crate) fn batch_refusal(steps: &[Value]) -> Option<String> {
+    if steps.iter().any(|step| batch_step_command(step).is_some_and(|id| id.eq_ignore_ascii_case("plugin.run"))) {
+        return Some(solidcraft_ui_text::tr("ui.plugin_standalone").into());
+    }
     if let Some((i, c)) = steps.iter().enumerate().find_map(|(i, step)| switches_design(step).map(|c| (i, c))) {
         return Some(format!("engine.batch unavailable: step {i} ({c}) switches to another design"));
     }
@@ -410,6 +413,10 @@ fn batch(app: &mut SolveApp, q: params::Batch) -> Outcome {
 /// and the steps before it stay. Its words are the engine script's, or the panel error when a step
 /// is a panel command.
 fn script(app: &mut SolveApp, p: &Value) -> Outcome {
+    let steps = p.as_array().or_else(|| p.get("commands").and_then(Value::as_array));
+    if steps.is_some_and(|steps| steps.iter().any(|step| batch_step_command(step).is_some_and(|id| id.eq_ignore_ascii_case("plugin.run")))) {
+        return err(solidcraft_ui_text::tr("ui.plugin_standalone"));
+    }
     let steps = match solidcraft_engine::script_steps(p) {
         Ok(steps) => steps,
         Err(e) => return err(e),
@@ -1965,8 +1972,8 @@ mod tests {
             assert!(takeover.is_err());
             assert_eq!(crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap(), second);
             h.step(&json!({"panel_fixture":{"enabled":false}})).unwrap();
-            assert!(h.app.panel_runtime().is_none());
-            assert!(!h.app.universal_panel_host_enabled());
+            assert!(h.app.panel_runtime().is_some());
+            assert!(h.app.universal_panel_host_enabled());
         }
     }
 
@@ -2168,7 +2175,9 @@ mod tests {
         assert_eq!(crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap(), before);
         click_visible_guard(&mut h, &guard);
         h.step(&json!({"panel_fixture":{"enabled":false}})).unwrap();
-        assert!(h.app.panel_runtime().is_none());
+        let layout = h.app.panel_runtime().unwrap().layout().layout();
+        let browser = solidcraft_engine::panels::InstanceId::new("browser").unwrap();
+        assert!(layout.instance(&browser).is_ok(), "the workspace restores production panels after teardown");
     }
 
     #[test]

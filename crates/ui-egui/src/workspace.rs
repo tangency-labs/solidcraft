@@ -243,10 +243,10 @@ pub const SECTIONS: &[Section] = &[
         promoted: 4,
         ids: &[
             "drawing.view.base.planned",
-            "drawing.view.section",
+            "drawing.view.section.planned",
             "drawing.view.detail",
             "drawing.view.break",
-            "drawing.view.auxiliary",
+            "drawing.view.auxiliary.planned",
             "drawing.view.pictorial",
             "drawing.view.draft",
             "drawing.view.flat_pattern",
@@ -353,6 +353,7 @@ pub const SECTIONS: &[Section] = &[
             "joint.as_built",
             "joint.origin",
             "joint.rigid_group",
+            "assembly.constraint.create",
             "joint.limits",
             "joint.gear",
             "joint.rack_pinion",
@@ -638,7 +639,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("drawing.table.edit.planned", "Edit Table"),
     ("drawing.update.planned", "Update"),
     ("drawing.view.flat_pattern", "Flat Pattern"),
-    ("drawing.view.section", "Section View"),
+    ("drawing.view.section.planned", "Section View"),
     ("document.units", "Units"),
     ("inspect.accessibility", "Access"),
     ("inspect.center_of_mass", "Mass Center"),
@@ -1117,6 +1118,10 @@ mod tests {
         }
     }
 
+    fn drawing_inspector_visible(h: &crate::scenario::Harness) -> bool {
+        h.app.universal_panel_frame().is_some_and(|frame| frame.layout.sections.iter().any(|section| section.instance.0 == "drawing-inspector"))
+    }
+
     #[test]
     fn drawing_uses_the_ribbon_without_changing_the_source_design() {
         let mut h = crate::scenario::Harness::new();
@@ -1132,10 +1137,10 @@ mod tests {
         }
         h.step(&json!({"click":{"handle":"button:drawing.view.base.planned"}})).unwrap();
         h.frames(3);
-        assert!(crate::scenario::rect_of("drawing:settings").is_some(), "known options open from the shared ribbon");
-        assert!(h.widget("Apply (not implemented)").is_some());
+        assert!(drawing_inspector_visible(&h), "known options open from the shared ribbon");
+        assert!(h.widget("Finish").is_some());
         assert!(h.app.run("drawing.view.base.planned", json!({})).is_err(), "the preview never enables engine execution");
-        h.step(&json!({"click":{"handle":"drawing:settings:close"}})).unwrap();
+        h.step(&json!({"key":"Escape"})).unwrap();
         h.step(&json!({"click":{"handle":"tab:DRAWING PARTS"}})).unwrap();
         assert!(crate::scenario::handle_at("button:assembly.bom").is_none(), "BOM stays in the Assembly list");
         assert!(
@@ -1158,7 +1163,7 @@ mod tests {
         let buttons = crate::toolbar_custom::buttons(&h.app, "DRAWING LAYOUT", "VIEWS", &views, count);
         assert_eq!(
             buttons.iter().map(|command| command.id).collect::<Vec<_>>(),
-            ["drawing.view.base.planned", "drawing.view.section", "drawing.view.detail", "drawing.view.break"]
+            ["drawing.view.base.planned", "drawing.view.section.planned", "drawing.view.detail", "drawing.view.break"]
         );
         assert!(views.iter().any(|command| command.id == "drawing.view.flat_pattern"));
         assert!(!views.iter().any(|command| command.id == "drawing.view.projected.planned"));
@@ -1176,33 +1181,38 @@ mod tests {
         let buttons = crate::toolbar_custom::buttons(&h.app, "DRAWING LAYOUT", "VIEWS", &views, count);
         assert_eq!(
             buttons.iter().map(|command| command.id).collect::<Vec<_>>(),
-            ["drawing.view.base.planned", "drawing.view.section", "drawing.view.detail", "drawing.view.flat_pattern"]
+            ["drawing.view.base.planned", "drawing.view.section.planned", "drawing.view.detail", "drawing.view.flat_pattern"]
         );
     }
 
     #[test]
     fn drawing_search_and_panels_work_from_the_keyboard() {
         let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
         h.call("ui.workspace", json!({"workspace":"drawing"}));
+        h.app.run("drawing.create", json!({})).unwrap();
+        h.app.run("drawing.sheet.add", json!({"name":"Second sheet"})).unwrap();
         h.frames(3);
         let before = h.app.session.doc.clone();
         let revision = h.app.session.revision;
-        h.step(&json!({"key":"S"})).unwrap();
-        assert!(h.app.ui.palette_open, "S opens the shared Drawing command search");
-        h.step(&json!({"text":"Base View"})).unwrap();
-        h.step(&json!({"key":"Enter"})).unwrap();
-        h.frames(2);
-        assert!(!h.app.ui.palette_open);
-        assert!(crate::scenario::rect_of("drawing:settings").is_some(), "search opens known options");
-        h.step(&json!({"key":"Escape"})).unwrap();
-        h.frames(2);
-        assert!(crate::scenario::rect_of("drawing:settings").is_none(), "Escape closes options");
+        for query in ["Base View", "Projected View"] {
+            h.step(&json!({"key":"S"})).unwrap();
+            assert!(h.app.ui.palette_open, "S opens the shared Drawing command search");
+            h.step(&json!({"text":query})).unwrap();
+            h.step(&json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+            assert!(!h.app.ui.palette_open);
+            assert!(drawing_inspector_visible(&h), "search opens known options for {query}");
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+            assert!(!drawing_inspector_visible(&h), "Escape closes options for {query}");
+        }
         h.step(&json!({"click":{"handle":"drawing:sheets:settings"}})).unwrap();
         h.frames(2);
-        assert!(crate::scenario::rect_of("drawing:settings").is_some());
+        assert!(drawing_inspector_visible(&h));
         h.step(&json!({"key":"Escape"})).unwrap();
         h.frames(2);
-        assert!(crate::scenario::rect_of("drawing:settings").is_none(), "Escape closes Sheet Settings");
+        assert!(!drawing_inspector_visible(&h), "Escape closes Sheet Settings");
         assert_eq!(h.app.session.doc, before);
         assert_eq!(h.app.session.revision, revision);
     }
@@ -1237,6 +1247,17 @@ mod tests {
         let plain = grouped_commands("SURFACE", "CREATE", &commands);
         assert!(plain.iter().all(|(h, _)| h.is_none()));
         assert_eq!(plain.iter().map(|(_, c)| c.id).collect::<Vec<_>>(), commands.iter().map(|c| c.id).collect::<Vec<_>>());
+    }
+
+    /// The Joints section's buttons stay as they were when Constrain joined it (#6061): Constrain
+    /// is in the section's menu, after the four promoted commands, so no one's default ribbon changes.
+    #[test]
+    fn constrain_joins_the_joints_menu_without_changing_its_buttons() {
+        let specs = solidcraft_engine::command_specs();
+        let (commands, count) = layout("ASSEMBLE", "JOINTS", &specs).unwrap();
+        let ids: Vec<&str> = commands.iter().map(|c| c.id).collect();
+        assert_eq!(ids.get(..count), Some(&["joint.create", "joint.as_built", "joint.origin", "joint.rigid_group"][..]), "{ids:?}");
+        assert!(ids.iter().skip(count).any(|id| *id == "assembly.constraint.create"), "{ids:?}");
     }
 
     #[test]

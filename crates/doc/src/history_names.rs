@@ -216,8 +216,11 @@ impl<'a> OperandNames<'a> {
             Operand::Body(_) | Operand::Stage(_) => {
                 let body = self.body.as_ref()?;
                 let names = self.edges.get_or_init(|| crate::naming::edge_names(body));
-                let faces = body.mesh().edge_faces.get(edge).cloned().unwrap_or_default();
-                let verified = faces.iter().all(|f| self.names.verified(*f as usize));
+                let verified = if body.body.is_mesh() {
+                    false
+                } else {
+                    body.body.record().edges.get(edge).map(|e| e.uses.iter().all(|u| self.names.verified(u.face as usize))).unwrap_or(false)
+                };
                 Some((names.get(edge)?.clone(), verified))
             }
             Operand::Copy { .. } | Operand::Inner(_) | Operand::Made(_) | Operand::CopiedTool { .. } => None,

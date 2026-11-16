@@ -5,21 +5,20 @@
 //!
 //! [`check`] fails with "not supported yet" while a test it reaches is unported in solidcore.
 
-use solidcore::error::EntityRef;
 use solidcore::geom::assert_array::{AssertArray, AssertReport, obj_type_string};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::tol::{SmallTopoType, brep_zone_tol_3d, context_xsect_tol_3d};
+use solidcore::geom::tol::{SmallTopoType, context_xsect_tol_3d};
 use solidcore::heal::gap::GapFunction;
-use solidcore::intersect::point_class::PointClassType;
 use solidcore::mass::integrator::properties::{MassPropertyBehavior, PropertyAttributes, brep_properties, face_properties};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::query::api_queries::{brep_bounding_box, brep_is_manifold_solid, brep_material_census, face_bounding_box};
-use solidcore::query::brep::BrepClassifier;
 use solidcore::topology::brep::p1 as bl;
 use solidcore::topology::brep::validation::{CheckLevel as SolidcoreCheckLevel, check_brep};
 use solidcore::topology::face::p2::{PPF_AREA, PPF_AREA_FIRST_MOMENTS};
 use solidcore::topology::{FaceId, FaceuseId, NamingScheme};
 use solidcore::{Kernel, Point3, SolidError, Vec3};
+
+use solidcore_ops::measure::{LocateFailure, Located, locate_points};
 
 use super::blend::status;
 use super::{Body, with_body};
@@ -202,48 +201,41 @@ pub(crate) fn edge_face_distance(body: &Body, edge: usize, face: usize) -> Resul
 /// (`SmTol::GetZoneTol3d` of the body), with boundary intersections, so a point within that
 /// tolerance of a vertex, an edge or a face is on the boundary and never decided by a ray; else
 /// the region it lies in, outside when that region is void (`IsVoid() == TRUE`; `UNSURE` is
-/// material, as the capi compares with `TRUE`). Runs on a private copy when a solve needs one
-/// (`BrepClassifier`): upstream's `const` method may add UV trim curves to the body.
+/// material, as the capi compares with `TRUE`). The classification is the modelling layer's
+/// (`solidcore_ops::measure::locate_points`), which runs on a private copy when a solve needs one:
+/// upstream's `const` method may add UV trim curves to the body.
 pub(crate) fn classify_point(body: &Body, p: [f64; 3]) -> Result<PointClass> {
     if !finite(&p) {
         return Err(Error::Argument);
     }
-    with_body("classify_point", body, |k, b| {
-        let tol = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
-        let mut classifier = BrepClassifier::of_brep(b);
-        Ok(classify_with(k, &mut classifier, tol, p))
-    })?
+    with_body("classify_point", body, |k, b| Ok(point_class(locate_points(k, b, &[p]).pop().unwrap_or(Err(LocateFailure::Unclassified)))))?
 }
 
-/// [`classify_point`] for each of `points`, through one `BrepClassifier`: the body's private copy
-/// and its search structures are made once for all of them, not once a point (on a large body
-/// they cost far more than a point's own solve). Each point's class, or its own error.
+/// [`classify_point`] for each of `points`, through one classification of the body
+/// (`locate_points`): the body's private copy and its search structures are made once for all of
+/// them, not once a point (on a large body they cost far more than a point's own solve). Each
+/// point's class, or its own error.
 pub(crate) fn classify_points(body: &Body, points: &[[f64; 3]]) -> Result<Vec<Result<PointClass>>> {
     if points.iter().all(|p| !finite(p)) {
         return Ok(points.iter().map(|_| Err(Error::Argument)).collect());
     }
-    with_body("classify_points", body, |k, b| {
-        let tol = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
-        let mut classifier = BrepClassifier::of_brep(b);
-        Ok(points.iter().map(|p| if finite(p) { classify_with(k, &mut classifier, tol, *p) } else { Err(Error::Argument) }).collect())
-    })
+    with_body("classify_points", body, |k, b| Ok(locate_points(k, b, points).into_iter().map(point_class).collect()))
 }
 
-/// Where `p` lies, through `classifier` at zone tolerance `tol` ([`classify_point`]).
-fn classify_with(k: &Kernel, classifier: &mut BrepClassifier<'_, '_>, tol: f64, p: [f64; 3]) -> Result<PointClass> {
-    let pc = match classifier.point_3d_classify(k, Point3::new(p[0], p[1], p[2]), tol, true) {
-        Ok(pc) => pc,
+/// [`classify_point`]'s class of a point the modelling layer placed. A region the kernel is unsure
+/// of is material (the capi's `IsVoid() == TRUE` test), where `solidcore_ops`' own
+/// `Body::classify_point` refuses it.
+fn point_class(l: std::result::Result<Located, LocateFailure>) -> Result<PointClass> {
+    match l {
+        Ok(Located::OnBoundary) => Ok(PointClass::OnBoundary),
+        Ok(Located::InRegion { material: Some(false), .. }) => Ok(PointClass::Outside),
+        Ok(Located::InRegion { material: Some(true) | None, .. }) => Ok(PointClass::Inside),
+        Err(LocateFailure::NotFinite) => Err(Error::Argument),
         // Its status, as the capi passes it on (no ray finding a region is SM_ERR).
-        Err(e) => return Err(status(e)),
-    };
-    match (pc.point_class(), pc.object()) {
-        (PointClassType::Vertex | PointClassType::Edge | PointClassType::Face, _) => Ok(PointClass::OnBoundary),
-        (PointClassType::Region, Some(EntityRef::Region(r))) => match classifier.brep().region(r) {
-            Ok(region) => Ok(if region.is_void() == 1 { PointClass::Outside } else { PointClass::Inside }),
-            Err(e) => Err(Error::Solidcore(format!("classify_point: {e}"))),
-        },
-        // Point3DClassify reports only the four classes above on success: SM_ERR.
-        _ => Err(Error::Status(SM_ERR)),
+        Err(LocateFailure::Classify(e)) => Err(status(e)),
+        Err(LocateFailure::Region(e)) => Err(Error::Solidcore(format!("classify_point: {e}"))),
+        // Point3DClassify reports only the four classes on success: SM_ERR.
+        Err(LocateFailure::Unclassified) => Err(Error::Status(SM_ERR)),
     }
 }
 

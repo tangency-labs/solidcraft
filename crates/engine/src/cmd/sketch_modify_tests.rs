@@ -1225,6 +1225,41 @@ fn fillet_keeps_expression_corner_when_parameter_changes() {
     }
 }
 
+/// #15240: a tilted profile with two corners rounded in one fillet call keeps its area when a
+/// parameter moves it. The rebuild used to add a full disc of the fillet radius (pi * 1.5^2
+/// here) to the profile, so an extruded body came out that disc times its depth larger.
+#[test]
+fn a_tilted_profile_with_two_fillets_keeps_its_area_when_a_parameter_moves_it() {
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name": "lean", "expression": "15 deg"}));
+    run(&mut s, "parameters.add", json!({"name": "c0", "expression": "26 mm"}));
+    // The step-shaped profile from the issue: no line horizontal or vertical, every point an
+    // expression of `lean` and `c0`.
+    let pts = [
+        ["c0 + (-19.5 mm) * cos(lean) + (3.5 mm) * sin(lean)", "16 mm - (-19.5 mm) * sin(lean) + (3.5 mm) * cos(lean)"],
+        ["c0 + (-16 mm) * cos(lean) + (3.5 mm) * sin(lean)", "16 mm - (-16 mm) * sin(lean) + (3.5 mm) * cos(lean)"],
+        ["c0 + (-16 mm) * cos(lean) + (0 mm) * sin(lean)", "16 mm - (-16 mm) * sin(lean) + (0 mm) * cos(lean)"],
+        ["c0 + (0 mm) * cos(lean) + (0 mm) * sin(lean)", "16 mm - (0 mm) * sin(lean) + (0 mm) * cos(lean)"],
+        ["c0 + (0 mm) * cos(lean) + (28 mm) * sin(lean)", "16 mm - (0 mm) * sin(lean) + (28 mm) * cos(lean)"],
+        ["c0 + (3 mm) * cos(lean) + (28 mm) * sin(lean)", "16 mm - (3 mm) * sin(lean) + (28 mm) * cos(lean)"],
+        ["c0 + (3 mm) * cos(lean) + (58 mm) * sin(lean)", "16 mm - (3 mm) * sin(lean) + (58 mm) * cos(lean)"],
+        ["c0 + (-19.5 mm) * cos(lean) + (58 mm) * sin(lean)", "16 mm - (-19.5 mm) * sin(lean) + (58 mm) * cos(lean)"],
+    ];
+    let outline = run(&mut s, "sketch.line", json!({"closed": true, "points": pts}));
+    assert_eq!(outline["sketch"]["dof"], 0, "{outline}");
+    let fillet = run(&mut s, "sketch.fillet", json!({"points": ["l2.start", "l5.start"], "radius": "1.5 mm"}));
+    assert_eq!(fillet["sketch"]["dof"], 0, "{fillet}");
+    let area = profiles(&s);
+    assert_eq!(area.len(), 1, "{area:?}");
+    // Moving the whole profile does not change it: the same area, not that plus a disc.
+    run(&mut s, "parameters.change", json!({"name": "c0", "expression": "30 mm"}));
+    let info = run(&mut s, "sketch.inspect", json!({}));
+    assert_eq!(info["dof"], 0, "{info}");
+    let moved = profiles(&s);
+    assert_eq!(moved.len(), 1, "{moved:?}");
+    assert!(close(moved[0], area[0]), "{moved:?} before {area:?}");
+}
+
 #[test]
 fn fillet_and_chamfers() {
     let mut s = new_sketch();

@@ -1,16 +1,22 @@
-//! Links from a design to other design files (Insert Design's linked components, and the kinds of
-//! link to come): where a link keeps its file and how it finds it again. A link keeps the file
-//! relative to the linking design's folder once that design is saved, so a folder of designs can
-//! move together; before the design has a file the path is kept whole.
+//! Links from a design to other design files (Insert Design's linked components, a drawing's
+//! sources, and the kinds of link to come): where a link keeps its file and how it finds it again.
+//! In memory every link path is whole ([`located`], on each open), so Save As, undo, redo,
+//! checkpoints and recovery never change what it names; the file keeps it relative to the linking
+//! design's folder ([`filed`], on each save), so a folder of designs can move together. Before the
+//! design has a file the path is kept whole.
 //!
 //! Reading a linked design ([`read_linked_file`]) gives its bytes or its [`LinkState`] with the
 //! reason, in one set of state words every kind of link reports.
 
+use std::borrow::Cow;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::ErrorKind;
 use std::path::{Component as PathPart, Path, PathBuf};
+use std::sync::Arc;
 
 use schemars::JsonSchema;
 use serde::Serialize;
+use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::{DesignLink, Document};
 
 /// The folder relative link paths are kept against: the design's own, once it has a file.
@@ -72,15 +78,81 @@ pub(super) fn resolve(design: Option<&str>, link: &str) -> PathBuf {
     }
 }
 
-/// The links of `doc` stored for a design saved at `to` instead of at `from`.
-pub(super) fn rebased(doc: &Document, from: Option<&str>, to: &str) -> std::collections::BTreeMap<u64, DesignLink> {
-    doc.links.iter().map(|(c, l)| (*c, DesignLink { path: rebase(&l.path, from, to), ..l.clone() })).collect()
-}
-
 /// One link's path, kept for a design saved at `from`, as a design saved at `to` keeps it: the
 /// one Save As rule every kind of link follows.
 pub(super) fn rebase(link: &str, from: Option<&str>, to: &str) -> String {
     stored(Some(to), &resolve(from, link))
+}
+
+/// Every link path of `doc`, a design saved at `from`, made whole ([`map_paths`]).
+pub(super) fn located(doc: &mut Document, from: Option<&str>) {
+    let whole = mapped(doc, &|path: &str| absolute(&resolve(from, path)).to_string_lossy().into_owned());
+    put(doc, whole);
+}
+
+/// `design`'s link paths as its file at `to` keeps them, its paths taken against `from`
+/// ([`map_paths`]).
+pub(super) fn filed(design: &mut Cow<'_, Document>, from: Option<&str>, to: &str) {
+    map_paths(design, |path| rebase(path, from, to));
+}
+
+/// Every link path of `design` put through `map`, whatever its kind: its component links and its
+/// drawings' sources. The design is copied only when a path changes, and each drawing only when one
+/// of its own does. Opening ([`located`]) and saving ([`filed`]) a design take its paths through
+/// here, and so does anything else that rewrites them (a pack's entry names).
+pub(crate) fn map_paths(design: &mut Cow<'_, Document>, map: impl Fn(&str) -> String) {
+    let changed = mapped(design, &map);
+    if changed.0.is_some() || changed.1.is_some() {
+        put(design.to_mut(), changed);
+    }
+}
+
+/// Each whole file a link path of `doc`, a design saved at `from`, names, once, in the order first
+/// named: its component links', then its drawings' sources'. The read-only side of [`map_paths`].
+#[cfg_attr(not(test), expect(dead_code, reason = "a design pack (#9857) lists the files it packs here"))]
+pub(crate) fn linked_files(doc: &Document, from: Option<&str>) -> Vec<PathBuf> {
+    let links = doc.links.values().map(|link| link.path.as_str());
+    let sources = doc.drawings.iter().flat_map(|d| d.sources.iter().filter_map(|source| source.path.as_deref()));
+    let mut seen = BTreeSet::new();
+    links.chain(sources).map(|path| absolute(&resolve(from, path))).filter(|file| seen.insert(file.clone())).collect()
+}
+
+/// A design's component links and drawings after a map of its link paths, each `None` when none of
+/// its paths changed.
+type Mapped = (Option<BTreeMap<u64, DesignLink>>, Option<Vec<Arc<Drawing>>>);
+
+/// What `map` makes of `doc`'s link paths ([`map_paths`]): the one list of the kinds of link path.
+fn mapped(doc: &Document, map: &impl Fn(&str) -> String) -> Mapped {
+    let links: BTreeMap<u64, DesignLink> = doc.links.iter().map(|(c, l)| (*c, DesignLink { path: map(&l.path), ..l.clone() })).collect();
+    let mut drawings = doc.drawings.clone();
+    let sources = sources_through(&mut drawings, map);
+    ((links != doc.links).then_some(links), sources.then_some(drawings))
+}
+
+/// The links and drawings a map changed, put into `doc`.
+fn put(doc: &mut Document, (links, drawings): Mapped) {
+    if let Some(links) = links {
+        doc.links = links;
+    }
+    if let Some(drawings) = drawings {
+        doc.drawings = drawings;
+    }
+}
+
+/// Each drawing source's path put through `map`, copying a drawing only when one of its paths
+/// changes; whether any did.
+fn sources_through(drawings: &mut [Arc<Drawing>], map: impl Fn(&str) -> String) -> bool {
+    let mut changed = false;
+    for drawing in drawings {
+        let paths: Vec<Option<String>> = drawing.sources.iter().map(|s| s.path.as_deref().map(&map)).collect();
+        if drawing.sources.iter().zip(&paths).any(|(s, path)| s.path != *path) {
+            for (source, path) in Arc::make_mut(drawing).sources.iter_mut().zip(paths) {
+                source.path = path;
+            }
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// Whether two paths name one file: the same path, or (on native hosts) the same file through a
@@ -210,13 +282,59 @@ mod tests {
         assert!(Path::new(&unsaved).is_absolute(), "{unsaved}");
         let mut doc = Document::default();
         doc.links.insert(7, DesignLink { path: unsaved, feature: 3, ..Default::default() });
-        let moved = rebased(&doc, None, &design);
+        let moved = links_filed(&doc, None, &design);
         assert_eq!(moved.get(&7).map(|l| l.path.as_str()), Some("../parts/plate.solidcraft"));
         let beside = root.join("parts").join("asm.solidcraft").to_string_lossy().into_owned();
         assert_eq!(
-            rebased(&Document { links: moved, ..Document::default() }, Some(&design), &beside).get(&7).map(|l| l.path.as_str()),
+            links_filed(&Document { links: moved, ..Document::default() }, Some(&design), &beside).get(&7).map(|l| l.path.as_str()),
             Some("plate.solidcraft")
         );
+    }
+
+    /// The component links of `doc`, a design saved at `from`, as its file at `to` keeps them.
+    fn links_filed(doc: &Document, from: Option<&str>, to: &str) -> std::collections::BTreeMap<u64, DesignLink> {
+        let mut file = Cow::Borrowed(doc);
+        filed(&mut file, from, to);
+        file.links.clone()
+    }
+
+    /// Every link path a design holds goes through one walk, whatever its kind: its component links
+    /// and its drawings' sources are made whole on open, kept relative to the folder of a save, and
+    /// listed as the files they name, each file once. A design whose paths don't change is not
+    /// copied.
+    #[test]
+    fn one_walk_takes_every_kind_of_link_path() {
+        use solidcraft_doc::drawing::Source;
+        use solidcraft_geom::drawing_sheet::{Orientation, PaperSize, Sheet};
+        let root = absolute(Path::new("projects"));
+        let design = root.join("asm").join("case.sc").to_string_lossy().into_owned();
+        let mut doc = Document::default();
+        doc.links.insert(7, DesignLink { path: "../parts/plate.sc".into(), feature: 3, ..Default::default() });
+        let mut ids = solidcraft_doc::ids::IdSource::seeded(3890);
+        let a4 = Sheet::standard(PaperSize::A4, Orientation::Landscape);
+        let mut drawing = Drawing::new("Case", "en", "Sheet 1", a4, None, &Default::default(), &mut ids).unwrap();
+        for path in [None, Some("../parts/plate.sc"), Some("../parts/block.sc")] {
+            let id = drawing.allocate_id(&mut ids).unwrap();
+            drawing.sources.push(Source { id, path: path.map(Into::into) });
+        }
+        drawing.sources.sort_by_key(|s| s.id);
+        doc.drawings.push(drawing.into());
+        let (plate, block) = (root.join("parts").join("plate.sc"), root.join("parts").join("block.sc"));
+        assert_eq!(linked_files(&doc, Some(&design)), [plate.clone(), block.clone()], "as the file keeps them");
+        located(&mut doc, Some(&design));
+        assert_eq!(doc.links[&7].path, plate.to_string_lossy());
+        assert_eq!(linked_files(&doc, None), [plate.clone(), block.clone()], "whole in memory, each file once");
+        let to = root.join("asm").join("v2").join("case.sc").to_string_lossy().into_owned();
+        let mut file = Cow::Borrowed(&doc);
+        filed(&mut file, Some(&design), &to);
+        assert_eq!(file.links[&7].path, "../../parts/plate.sc");
+        let mut kept: Vec<Option<&str>> = file.drawings[0].sources.iter().map(|s| s.path.as_deref()).collect();
+        kept.sort();
+        assert_eq!(kept, [None, Some("../../parts/block.sc"), Some("../../parts/plate.sc")]);
+        assert_eq!(linked_files(&file, Some(&to)), [plate, block], "the file names what memory does");
+        let mut same = Cow::Borrowed(&doc);
+        map_paths(&mut same, str::to_string);
+        assert!(matches!(same, Cow::Borrowed(_)), "no path changed: nothing copied");
     }
 
     #[test]
@@ -228,6 +346,36 @@ mod tests {
         // A link kept whole (the design had no file yet) becomes relative too.
         let whole = root.join("parts").join("plate.solidcraft").to_string_lossy().into_owned();
         assert_eq!(rebase(&whole, None, &to), "../../parts/plate.solidcraft");
+    }
+
+    /// A design deep in folders makes a drawing source's whole path longer than any parameter
+    /// takes (4,096 bytes): the record has no cap on it, so the drawing keeps its rules, and Save As
+    /// keeps the file it names, relative in the file, while the design in memory is never rewritten.
+    #[test]
+    fn a_deep_folder_resolves_to_a_long_absolute_path() {
+        use solidcraft_doc::drawing::{Drawing, Source};
+        use solidcraft_geom::drawing_sheet::{Orientation, PaperSize, Sheet};
+        let deep = (0..25).fold(absolute(Path::new("projects")), |dir, i| dir.join(format!("{i:02}{}", "f".repeat(198))));
+        let design = deep.join("asm").join("case.sc").to_string_lossy().into_owned();
+        let mut ids = solidcraft_doc::ids::IdSource::seeded(3890);
+        let a4 = Sheet::standard(PaperSize::A4, Orientation::Landscape);
+        let mut drawing = Drawing::new("Case", "en", "Sheet 1", a4, None, &Default::default(), &mut ids).unwrap();
+        let id = drawing.allocate_id(&mut ids).unwrap();
+        drawing.sources.push(Source { id, path: Some("../parts/plate.sc".into()) });
+        let mut doc = Document { drawings: vec![drawing.into()], ..Document::default() };
+        located(&mut doc, Some(&design));
+        let part = deep.join("parts").join("plate.sc");
+        let whole = doc.drawings[0].sources[0].path.clone().unwrap();
+        assert!(whole.len() > 4096, "{} bytes", whole.len());
+        assert_eq!(Path::new(&whole), part);
+        doc.drawings[0].validate().unwrap();
+        let to = deep.join("asm").join("sub").join("case.sc").to_string_lossy().into_owned();
+        let mut file = std::borrow::Cow::Borrowed(&doc);
+        filed(&mut file, Some(&design), &to);
+        let kept = file.drawings[0].sources[0].path.clone().unwrap();
+        assert_eq!(kept, "../../parts/plate.sc");
+        assert_eq!(resolve(Some(&to), &kept), part);
+        assert_eq!(doc.drawings[0].sources[0].path.as_deref(), Some(whole.as_str()), "the design in memory is never rewritten");
     }
 
     /// One folder per test, with the files it needs.

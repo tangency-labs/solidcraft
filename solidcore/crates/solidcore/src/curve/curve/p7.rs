@@ -48,8 +48,7 @@
 //!   and intersection, end points, continuities, end-point drops) and
 //!   `GlobalPropertyAnalysis`'s angle, evaluations and frame (its `EvaluateGeometric` and
 //!   comb unitizations stay dropped, as the fork).
-//! - **Property solver `opt_vectors` (WR-35, #2144).** With the opt-in
-//!   `Kernel::fixes.curve_property_gs_branch_bounds`, `GlobalPropertyAnalysis` forwards
+//! - **Property solver `opt_vectors` (WR-35, #2144).** `GlobalPropertyAnalysis` forwards
 //!   its optional vectors into `SolveIt` (`SolveRequest::opt_vectors`) instead of passing
 //!   `NULL` (`&[]`), keeping `SmGlobalSolver::m_cpOptVectors` (`base.opt_vectors`)
 //!   populated throughout the solve.
@@ -1248,11 +1247,7 @@ impl Curve {
                 solution_requested: SolutionRequested::All,
                 tolerance_3d: dist_tol,
                 best_answer_so_far_sq: BIG_DOUBLE,
-                opt_vectors: if k.fixes.curve_property_gs_branch_bounds {
-                    vecs
-                } else {
-                    &[]
-                },
+                opt_vectors: vecs,
             };
             gs.solve_it(&request, &mut out.solutions)?;
         }

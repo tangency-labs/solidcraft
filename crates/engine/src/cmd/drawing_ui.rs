@@ -42,7 +42,7 @@ pub const PENDING_ICONS: &[(&str, &str)] = &[
     ("drawing.surface_texture", "drawing_surface_texture"),
     ("drawing.table.edit.planned", "drawing_edit_table"),
     ("drawing.update.planned", "drawing_update"),
-    ("drawing.view.auxiliary", "drawing_view_auxiliary"),
+    ("drawing.view.auxiliary.planned", "drawing_view_auxiliary"),
     ("drawing.view.base.planned", "drawing_base_view"),
     ("drawing.view.break", "drawing_view_break"),
     ("drawing.view.copy_to_sheet.planned", "drawing_view_copy_to_sheet"),
@@ -52,7 +52,7 @@ pub const PENDING_ICONS: &[(&str, &str)] = &[
     ("drawing.view.move_to_sheet.planned", "drawing_view_move_to_sheet"),
     ("drawing.view.pictorial", "drawing_view_pictorial"),
     ("drawing.view.projected.planned", "drawing_projected_view"),
-    ("drawing.view.section", "drawing_section_view"),
+    ("drawing.view.section.planned", "drawing_section_view"),
     ("drawing.views.align", "drawing_align_views"),
     ("drawing.weld", "drawing_weld"),
 ];
@@ -64,7 +64,7 @@ pub fn pending_icon(id: &str) -> Option<&'static str> {
 pub static COMMANDS: &[CommandSpec] = &[
     planned!("drawing.view.base.planned", "Base View", "4816").at("DRAWING LAYOUT", "VIEWS").icon("drawing_base_view"),
     planned!("drawing.view.projected.planned", "Projected View", "4816").icon("drawing_projected_view"),
-    planned!("drawing.view.section", "Section View", "4816").at("DRAWING LAYOUT", "VIEWS").icon("drawing_section_view"),
+    planned!("drawing.view.section.planned", "Section View", "4816").at("DRAWING LAYOUT", "VIEWS").icon("drawing_section_view"),
     planned!("drawing.view.detail", "Detail View", "4816").at("DRAWING LAYOUT", "VIEWS").icon("drawing_detail_view"),
     planned!("drawing.views.align", "Align Views", "4894").at("DRAWING LAYOUT", "ARRANGE").icon("drawing_align_views"),
     planned!("drawing.image", "Insert Image", "4894").at("DRAWING LAYOUT", "INSERT").icon("drawing_image"),
@@ -87,7 +87,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     planned!("drawing.export.planned", "Export Drawing", "4890").at("DRAWING REVIEW", "OUTPUT").icon("export"),
     planned!("drawing.print", "Print Drawing", "4890").at("DRAWING REVIEW", "OUTPUT").icon("drawing_print"),
     planned!("drawing.view.break", "Break View", "7578").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_break"),
-    planned!("drawing.view.auxiliary", "Auxiliary View", "13044").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_auxiliary"),
+    planned!("drawing.view.auxiliary.planned", "Auxiliary View", "13044").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_auxiliary"),
     planned!("drawing.view.pictorial", "Pictorial View", "13044").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_pictorial"),
     planned!("drawing.view.draft", "Draft View", "4894").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_draft"),
     planned!("drawing.view.flat_pattern", "Flat Pattern View", "13030").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_flat_pattern"),
@@ -117,7 +117,7 @@ mod tests {
     fn drawing_entries_are_metadata_only() {
         let mut session = crate::Session::new(Default::default());
         let before = serde_json::to_value(&session.doc).unwrap();
-        for id in ["drawing.export", "drawing.view.base", "drawing.view.projected"] {
+        for id in ["drawing.export", "drawing.view.base", "drawing.view.projected", "drawing.view.section", "drawing.view.auxiliary"] {
             assert!(crate::find_command(id).unwrap().planned.is_none(), "the executable provider {id} stays registered");
         }
         assert!(crate::find_command("drawing.export.planned").unwrap().planned.is_some(), "the scaffold export stays disabled");

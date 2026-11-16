@@ -5,32 +5,36 @@ use std::collections::BTreeSet;
 use crate::{DocError, ProfileSel, Result, SolvedSketch, WholeProfileBoundary};
 
 const MAX_SELECTIONS: usize = 128;
+pub(crate) const WHOLE_MAX_HOLES: usize = 128;
+pub(crate) const WHOLE_MAX_BOUNDARY_CURVES: usize = 512;
+pub(crate) const WHOLE_MAX_TOTAL_CURVES: usize = 20_000;
+pub(crate) const WHOLE_MAX_ID_BYTES: usize = 512;
 
 fn whole_boundary(profile: &solidcraft_sketch::Profile) -> Option<WholeProfileBoundary> {
     let (outer, holes) = profile.whole_curve_boundaries()?;
     Some(WholeProfileBoundary { outer, holes })
 }
 
-fn validate_whole(profiles: &[WholeProfileBoundary]) -> Result<()> {
+pub(crate) fn validate_whole(profiles: &[WholeProfileBoundary]) -> Result<()> {
     if profiles.is_empty() || profiles.len() > MAX_SELECTIONS {
         return Err(DocError::Invalid("whole-source profile selection needs bounded unique profiles".into()));
     }
     let mut total = 0usize;
     let mut identities = BTreeSet::new();
     for profile in profiles {
-        if profile.holes.len() > 128 || !identities.insert((&profile.outer, &profile.holes)) {
+        if profile.holes.len() > WHOLE_MAX_HOLES || !identities.insert((&profile.outer, &profile.holes)) {
             return Err(DocError::Invalid("invalid whole-source profile holes or duplicate identity".into()));
         }
         let mut all = BTreeSet::new();
         for boundary in std::iter::once(&profile.outer).chain(&profile.holes) {
             total += boundary.len();
-            if boundary.is_empty() || boundary.len() > 512 || total > 20_000 {
+            if boundary.is_empty() || boundary.len() > WHOLE_MAX_BOUNDARY_CURVES || total > WHOLE_MAX_TOTAL_CURVES {
                 return Err(DocError::Invalid("whole-source boundary exceeds its identity budget".into()));
             }
             let mut previous = None;
             for curve in boundary {
                 if curve.is_empty()
-                    || curve.len() > 512
+                    || curve.len() > WHOLE_MAX_ID_BYTES
                     || curve.chars().any(char::is_control)
                     || previous.is_some_and(|previous| previous >= curve)
                     || !all.insert(curve)
@@ -48,15 +52,21 @@ fn validate_whole(profiles: &[WholeProfileBoundary]) -> Result<()> {
 }
 
 fn whole_profile_indices(ss: &SolvedSketch, profiles: &[WholeProfileBoundary]) -> Result<Vec<usize>> {
+    whole_profile_indices_in(&ss.profiles, &ss.name, profiles)
+}
+
+/// Exact complete-boundary matching shared by model profiles and sheet fills.
+/// The caller must refuse an incomplete profile search before asking for picks.
+pub(crate) fn whole_profile_indices_in(solved: &[solidcraft_sketch::Profile], name: &str, profiles: &[WholeProfileBoundary]) -> Result<Vec<usize>> {
     validate_whole(profiles)?;
-    let current = ss.profiles.iter().map(whole_boundary).collect::<Vec<_>>();
+    let current = solved.iter().map(whole_boundary).collect::<Vec<_>>();
     profiles
         .iter()
         .map(|identity| {
             let mut matches = current.iter().enumerate().filter(|(_, candidate)| candidate.as_ref() == Some(identity));
-            let (index, _) = matches.next().ok_or_else(|| DocError::Unknown(format!("complete source profile in {}", ss.name)))?;
+            let (index, _) = matches.next().ok_or_else(|| DocError::Unknown(format!("complete source profile in {name}")))?;
             if matches.next().is_some() {
-                return Err(DocError::Invalid(format!("ambiguous complete source profile in {}", ss.name)));
+                return Err(DocError::Invalid(format!("ambiguous complete source profile in {name}")));
             }
             Ok(index)
         })

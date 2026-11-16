@@ -955,6 +955,7 @@ pub fn delete_topological_vertex_with_notifications(
                 "the edges' curves could not be joined",
             ));
         }
+        remove_join_knot(&mut surviving_copy, b.vertex(vertex)?.point, max_gap)?;
         if let Some(analytic) =
             surviving_copy.create_analytic_curve(k, &surviving_copy.natural_interval())?
         {
@@ -1160,6 +1161,162 @@ fn join_copied_curves(
         ),
     }
 }
+/// Not upstream: merges the two Bezier spans a join of two B-spline curves left at the
+/// deleted vertex `at` into one when they are pieces of one polynomial (or rational)
+/// span, so the joined curve has no knot there.
+///
+/// `CreateByJoining` keeps the junction as a knot of full multiplicity. Where the two
+/// edges were pieces of one curve (an operand edge split by the imprint, the piece past
+/// the split merged back once the split vertex is redundant) that knot is removable: the
+/// joined curve is the original one. Left in, it bounds a span as short as the deleted
+/// edge, which can be shorter than the tolerance: its control points then coincide
+/// (`SmBSplineCurve` test 15) and the UV trim curves made from it fail the polar
+/// conversion test, so the merged body is not valid.
+///
+/// Knot removal (Tiller 1992; The NURBS Book, algorithm A5.8) divides by the short
+/// span's length and cannot tell a removable knot from a corner when that span is
+/// 1e-7 of the curve. The merge here extrapolates the longer span over the shorter one
+/// instead (de Casteljau at a parameter just outside the span, well conditioned since
+/// the step is small), and keeps it only when the shorter span is its piece: the same
+/// weights to 1e-9 and control points within a thousandth of `max_gap`. Only spans that
+/// are whole Bezier segments are merged (the knots at their far ends have full
+/// multiplicity, as the canonical arcs and the intersection curves have them); a
+/// junction that is a real corner keeps its knot.
+fn remove_join_knot(curve: &mut Curve, at: Point3, max_gap: f64) -> Result<()> {
+    use crate::curve::curve::CurveKind;
+    let CurveKind::BSpline(base) = curve.kind_mut() else {
+        return Ok(());
+    };
+    let Some(nurb) = base.gw_nurb() else {
+        return Ok(());
+    };
+    let p = nurb.degree();
+    let knots = nurb.knots();
+    // the interior knot of full multiplicity nearest `at`, within `max_gap` of it
+    let mut junction: Option<(usize, f64)> = None;
+    let mut first = p + 1;
+    while first + p < knots.len() {
+        let u = knots.get(first).copied().unwrap_or(f64::NAN);
+        let run = knots.iter().skip(first).take_while(|&&x| x == u).count();
+        if run == p && first + p + 1 < knots.len() {
+            let distance = base.evaluate_point(u)?.distance(at);
+            if distance <= max_gap && junction.is_none_or(|(_, d)| distance < d) {
+                junction = Some((first, distance));
+            }
+        }
+        first += run.max(1);
+    }
+    let Some((first, _)) = junction else {
+        return Ok(());
+    };
+    if let Some(merged) = merge_bezier_spans(nurb, first, 1e-3 * max_gap)? {
+        base.set_from_gw_nurb(Some(&merged))?;
+    }
+    Ok(())
+}
+
+/// The curve with the two Bezier spans meeting at the knot of multiplicity `p` that
+/// starts at index `first` merged into one ([`remove_join_knot`]), or `None` when they
+/// are not one span to `tol` or are not whole Bezier segments.
+fn merge_bezier_spans(
+    nurb: &crate::nurbs::crv_basic::Curve,
+    first: usize,
+    tol: f64,
+) -> Result<Option<crate::nurbs::crv_basic::Curve>> {
+    use crate::nurbs::math::{CPoint, NOW};
+    let p = nurb.degree();
+    let knots = nurb.knots();
+    let pw = nurb.cpts();
+    // the junction's control point, the first of the left segment's and the knot run
+    // after the junction's
+    let (Some(junction), Some(hi)) = (first.checked_sub(1), first.checked_add(2 * p)) else {
+        return Ok(None);
+    };
+    let Some(left_start) = junction.checked_sub(p) else {
+        return Ok(None);
+    };
+    let (Some(&u), Some(&ul), Some(&ur)) =
+        (knots.get(first), knots.get(junction), knots.get(first + p))
+    else {
+        return Ok(None);
+    };
+    // whole Bezier segments: the knots before and after the junction's run are runs of
+    // at least the degree
+    let full = |range: std::ops::Range<usize>, value: f64| {
+        knots
+            .get(range)
+            .is_some_and(|run| run.iter().all(|&x| x == value))
+    };
+    if !full(left_start + 1..first, ul) || !full(first + p..hi, ur) {
+        return Ok(None);
+    }
+    let (left_len, right_len) = (u - ul, ur - u);
+    if left_len.is_nan() || right_len.is_nan() || left_len <= 0.0 || right_len <= 0.0 {
+        return Ok(None);
+    }
+    let (Some(left), Some(right)) = (
+        pw.get(left_start..=junction),
+        pw.get(junction..=junction + p),
+    ) else {
+        return Ok(None);
+    };
+    // de Casteljau's triangle of `seg` at `t`: the polygons of [0, t] and [t, 1]
+    let split = |seg: &[CPoint], t: f64| {
+        let mut level = seg.to_vec();
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+        while let (Some(&head), Some(&tail)) = (level.first(), level.last()) {
+            before.push(head);
+            after.push(tail);
+            level = level
+                .windows(2)
+                .filter_map(|w| match w {
+                    [a, b] => Some(CPoint::combine2(1.0 - t, *a, t, *b)),
+                    _ => None,
+                })
+                .collect();
+        }
+        after.reverse();
+        (before, after)
+    };
+    let s = left_len / (left_len + right_len);
+    let (merged, short_again, short) = if right_len >= left_len {
+        // the right span run back over the left one: its polygon on [t0, 1]
+        let (_, merged) = split(right, -left_len / right_len);
+        let (piece, _) = split(&merged, s);
+        (merged, piece, left)
+    } else {
+        let (merged, _) = split(left, (left_len + right_len) / left_len);
+        let (_, piece) = split(&merged, s);
+        (merged, piece, right)
+    };
+    if merged.len() != p + 1 || short_again.len() != short.len() {
+        return Ok(None);
+    }
+    for (a, b) in short_again.iter().zip(short) {
+        let distance = a.to_euclid().distance(b.to_euclid());
+        let weights = if a.w == NOW || b.w == NOW {
+            0.0
+        } else {
+            (a.w / b.w - 1.0).abs()
+        };
+        if distance.is_nan() || distance > tol || weights.is_nan() || weights > 1e-9 {
+            return Ok(None);
+        }
+    }
+    // the merged polygon, its ends the neighbours' points as they are
+    let mut cpts = Vec::new();
+    cpts.extend_from_slice(pw.get(..=left_start).unwrap_or(&[]));
+    cpts.extend(merged.iter().skip(1).take(p.saturating_sub(1)).copied());
+    cpts.extend_from_slice(pw.get(junction + p..).unwrap_or(&[]));
+    let mut new_knots = Vec::new();
+    new_knots.extend_from_slice(knots.get(..first).unwrap_or(&[]));
+    new_knots.extend_from_slice(knots.get(first + p..).unwrap_or(&[]));
+    Ok(Some(crate::nurbs::crv_basic::Curve::new(
+        cpts, p, new_knots,
+    )?))
+}
+
 /// The `SmBSplineCurve` part of a curve of that kind. A line's NURB is made first when it
 /// has none, as upstream's `SmBSplineCurve` methods make it (`GetOrCreateGwNurbPointer`).
 fn bspline_curve_base_mut(curve: &mut Curve) -> Result<&mut BSplineCurve> {

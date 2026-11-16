@@ -1,43 +1,31 @@
-//! The History bar as a component: the grip and title, the History controls, and a strip of step
+//! The History strip: a row of step
 //! chips with the history marker between them. The app describes each step as plain data
 //! ([`Step`]) in the order the bar shows them, draws chips of its own between them through
 //! [`Strip::chip`] and [`Strip::inline`] (its [`Contents`]), and runs the [`Action`]s the bar
 //! returns. The bar keeps only which chip, or the marker, is being dragged, and reads nothing of
-//! the app. Its grip, marker and chips publish their places to the widget registry under the
+//! the app. Its marker and chips publish their places to the widget registry under the
 //! names the app gives ([`Handles`]).
 //!
 //! Slots count the steps the bar shows: slot `k` is the gap before the `k`-th of them, slot
 //! `steps` the end. The marker sits in one; a drop lands in one, on one side of the marker.
 
-use crate::{BackingTooltipExt as _, HistoryChip, HistoryStyle, HistoryTransport, PlayLabels};
+use crate::{BackingTooltipExt as _, HistoryChip, HistoryStyle};
 use egui::{Painter, Pos2, Rect, Sense, UiBuilder, pos2, vec2};
 use solidcraft_theme::{TabAccent, Tokens};
 
 /// Where the bar publishes its parts in the widget registry.
 #[derive(Clone, Copy, Debug)]
 pub struct Handles<'a> {
-    /// The grip and title, which drag the bar to another dock.
-    pub grip: &'a str,
     pub marker: &'a str,
     /// Each step's chip, as this followed by the step's label.
     pub step: &'a str,
-    /// Each History control, as this followed by its id (`first`, `back`, `play`...).
-    pub controls: &'a str,
 }
 
 /// The bar as the app describes it this frame.
 #[derive(Clone, Copy, Debug)]
 pub struct Bar<'a> {
-    /// The heading after the grip, left out when the bar is too narrow for it.
-    pub title: &'a str,
     /// The marker's hover text.
     pub marker_tip: &'a str,
-    /// The History controls show Play.
-    pub play: bool,
-    /// History is playing: Play shows Stop.
-    pub playing: bool,
-    /// The Play control's names.
-    pub play_labels: PlayLabels<'a>,
     pub accent: TabAccent,
     /// A dragged chip's colour and its drop bar's.
     pub drag_accent: TabAccent,
@@ -84,103 +72,20 @@ pub struct StepState {
     pub last_done: bool,
 }
 
-/// Where the marker goes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Seek {
-    First,
-    Back,
-    Forward,
-    Last,
-    /// Dropped in `slot`; `before` says on which side of the marker, at the marker's own slot.
-    Slot {
-        slot: usize,
-        before: bool,
-    },
-}
-
 /// What the user chose on the bar this frame, in the order it happened.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
-    Seek(Seek),
-    /// Play, or Stop while playing.
-    Play,
-    /// The History controls' menu, opened at `at` (shown by the app, as for [`Action::Menu`]).
-    ControlsMenu {
-        at: Pos2,
-    },
+    /// The marker dropped in a slot. `before` distinguishes either side of its current slot.
+    Seek { slot: usize, before: bool },
     /// A click on a step, with the modifiers held.
-    Select {
-        step: u64,
-        modifiers: egui::Modifiers,
-    },
+    Select { step: u64, modifiers: egui::Modifiers },
     /// A double click on a step.
     Edit(u64),
     /// A step's menu, opened at `at`; the app shows its own items in its own menu. A host
     /// without a menu system can draw its items with `crate::Menu` at `at`.
-    Menu {
-        step: u64,
-        at: Pos2,
-    },
-    /// A step dropped in `slot`; `before` as for [`Seek::Slot`].
-    Reorder {
-        step: u64,
-        slot: usize,
-        before: bool,
-    },
-}
-
-/// The header drawn: where the strip may start, the grip's response, what was chosen.
-pub struct HeaderOut {
-    pub x: f32,
-    pub grip: egui::Response,
-    pub actions: Vec<Action>,
-}
-
-/// What a History control's response asks for: a click runs it, a right-click opens the
-/// controls' menu. (Crate-wide while `HistoryTransport` is.)
-pub fn transport_actions(control: HistoryTransport, response: &egui::Response) -> Vec<Action> {
-    let mut actions = Vec::new();
-    if response.clicked() {
-        actions.push(match control {
-            HistoryTransport::First => Action::Seek(Seek::First),
-            HistoryTransport::Back => Action::Seek(Seek::Back),
-            HistoryTransport::Play => Action::Play,
-            HistoryTransport::Forward => Action::Seek(Seek::Forward),
-            HistoryTransport::Last => Action::Seek(Seek::Last),
-        });
-    }
-    if response.secondary_clicked() {
-        actions.push(Action::ControlsMenu { at: response.interact_pointer_pos().unwrap_or(response.rect.left_bottom()) });
-    }
-    actions
-}
-
-/// Draws the grip, the title when it fits and the History controls along the left of `rect`.
-pub fn header(ui: &mut egui::Ui, bar: &Bar, rect: Rect) -> HeaderOut {
-    let t = Tokens::get();
-    let p = ui.painter().clone();
-    let mut x = rect.left() + t.space_10;
-    let grip_rect = Rect::from_center_size(pos2(x + t.space_10 / 2.0, rect.center().y), vec2(t.space_10, t.space_16 + t.space_2));
-    let mut grip_ui = ui.new_child(UiBuilder::new().max_rect(grip_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    let grip = crate::panel_grip(&mut grip_ui).rect;
-    x += t.space_10 + t.space_8;
-    let mut drag_rect = grip;
-    let heading = crate::StripHeading::new(&p, bar.title);
-    if x + heading.width() + crate::history_transport_width() <= rect.right() {
-        let title_rect = heading.paint(&p, Rect::from_min_max(pos2(x, rect.top()), rect.right_bottom()));
-        drag_rect = drag_rect.union(title_rect);
-        x += heading.width();
-    }
-    let grip = ui.interact(drag_rect, ui.scope_id().with(("history_bar_grip", bar.handles.grip)), Sense::drag());
-    solidcraft_ui_registry::publish_handle(bar.handles.grip, drag_rect.center());
-    let mut actions = Vec::new();
-    for &control in HistoryTransport::shown(bar.play) {
-        let br = Rect::from_center_size(pos2(x + t.space_24 / 2.0, rect.center().y), vec2(t.space_24, t.space_24));
-        let response = control.show_as(ui, br, bar.playing, bar.handles.controls, bar.play_labels);
-        actions.extend(transport_actions(control, &response));
-        x += t.space_24 + t.space_2;
-    }
-    HeaderOut { x: x + 14.0, grip, actions }
+    Menu { step: u64, at: Pos2 },
+    /// A step dropped in `slot`; `before` as for [`Action::Seek`].
+    Reorder { step: u64, slot: usize, before: bool },
 }
 
 /// What the app draws in the strip.
@@ -331,7 +236,7 @@ fn lay_out(ui: &mut egui::Ui, bar: Bar, rect: Rect, contents: &mut dyn Contents)
         let slot = slot_at(&xs, end, pp.x);
         let before = before_marker(slot, pp.x);
         actions.push(match dg {
-            Drag::Marker => Action::Seek(Seek::Slot { slot, before }),
+            Drag::Marker => Action::Seek { slot, before },
             Drag::Step(step) => Action::Reorder { step, slot, before },
         });
     }

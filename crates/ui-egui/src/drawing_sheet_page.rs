@@ -340,6 +340,15 @@ fn distance_for(scale: f64, height: f32) -> f64 {
     (f64::from(height.max(1.0)) / (2.0 * scale.max(1e-9) * 0.4)).clamp(1e-3, 1e7)
 }
 
+/// Selects this sheet for the worker, then reads the scene after its tick. The final synchronous
+/// step can finish with no work left, so painting the earlier scene would miss its new marks.
+fn scene_for_frame(app: &mut SolveApp, sheet: u64) -> solidcraft_engine::Result<(drawing_scene::SheetView, bool)> {
+    drawing_scene::extract(&mut app.session, sheet)?;
+    let working = crate::drawing_jobs::tick(app);
+    let view = drawing_scene::extract(&mut app.session, sheet)?;
+    Ok((view, working))
+}
+
 /// Draws the sheet of the drawing open, and says whether there was one to draw: without a drawing
 /// open the workspace shows its own message.
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
@@ -360,7 +369,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     app.viewport.rect = Some(canvas);
     crate::viewport::refresh_layout(app, ui.ctx());
     let response = ui.allocate_rect(canvas, Sense::click_and_drag());
-    let view = match drawing_scene::extract(&mut app.session, sheet) {
+    let (view, working) = match scene_for_frame(app, sheet) {
         Ok(view) => view,
         Err(e) => {
             message(ui, canvas, &e.to_string(), t.error);
@@ -368,7 +377,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         }
     };
     // A view worked out beside the window, or text waiting for its font: look again soon.
-    let working = crate::drawing_jobs::tick(app);
     if working || view.waiting_for_fonts {
         ui.ctx().request_repaint_after(Duration::from_millis(16));
     }
@@ -424,6 +432,19 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     crate::scenario::publish_rect("sheet:paper", sheet_rect);
     let hover = response.hover_pos().filter(|p| !crate::shell::covered(app, *p)).map(|p| at.paper(p));
     let hit = hover.and_then(|p| drawing_scene::hit(&view.objects, p, HOVER_BAND / at.scale));
+    if response.double_clicked()
+        && let Some(hit) = hit
+    {
+        let kind = match hit.kind {
+            ObjectKind::View if hit.on_edge => Some("view"),
+            ObjectKind::Dimension => Some("dimension"),
+            ObjectKind::PartsList => Some("parts_list"),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            crate::drawing_workspace::edit_object(app, kind, hit.object);
+        }
+    }
     if let Some(hit) = hit.filter(outlined)
         && let Some(object) = view.objects.iter().find(|o| o.object == hit.object)
     {
@@ -518,8 +539,12 @@ fn hex(c: Color32) -> String {
 fn kind_name(kind: ObjectKind) -> &'static str {
     match kind {
         ObjectKind::View => "view",
+        ObjectKind::Sketch => "sketch",
+        ObjectKind::Fill => "fill",
         ObjectKind::Dimension => "dimension",
         ObjectKind::Note => "note",
+        ObjectKind::ViewLabel => "view_label",
+        ObjectKind::Balloon => "balloon",
         ObjectKind::TitleBlock => "title_block",
         ObjectKind::PartsList => "parts_list",
         ObjectKind::RevisionTable => "revision_table",
