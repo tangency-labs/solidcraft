@@ -492,7 +492,7 @@ impl<'a> Grid<'a> {
         table_custom(ui, id, &layout, self.empty, |ui, table| {
             let header = |ui: &mut Ui, index: usize| {
                 if index == extra && adds_column {
-                    super::plus_header(ui, |ui| source.add_column(ui));
+                    super::add_column_button(ui, |ui| source.add_column(ui));
                     return true;
                 }
                 source.header(ui, index)
