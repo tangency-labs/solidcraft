@@ -312,6 +312,51 @@ fn a_plate_a_ball_sinks_into_has_no_needles_on_the_mesh_path() {
     assert_closed(&w, "sunk ball");
 }
 
+/// The kernel rig's `booleans/1984-rivet-with-flush-heads-a-hair-off-its-hole`, its body `Sheet`
+/// as SolidCraft exports it (frozen in `tests/data`): two cylinders a hair apart and two planes.
+/// On the plane face 5 two arcs leave a vertex tangentially. Their sampled chords cross nowhere
+/// when the body is prepared, but the nodes the shaping's rounds put on the edges move chords,
+/// and a new chord of one arc crossed a chord of the other: the face was refused ("boundary
+/// crosses itself"). Meshed at SolidCraft's export spec (a chord of 1/5000 of its size), the
+/// faces of the edges that took nodes are untangled again, and it meshes: nothing refused,
+/// nothing folds, and the body's mesh is closed.
+#[test]
+fn chords_moved_by_the_shaping_rounds_are_untangled_on_the_mesh_path() {
+    let b = crate::fixtures::fixture("rig_rivet_flush_heads_sheet");
+    // SolidCraft's size of the body (`Body::size`): the box diagonal of its vertices and of each
+    // edge's points at a quarter, a half and three quarters of its interval. It only picks the
+    // spec SolidCraft exports at (and the size the mesher is given), so the face is meshed as
+    // SolidCraft meshes it.
+    let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    let mut add = |p: [f64; 3]| {
+        for k in 0..3 {
+            lo[k] = lo[k].min(p[k]);
+            hi[k] = hi[k].max(p[k]);
+        }
+    };
+    for v in &b.vertices {
+        add(v.point);
+    }
+    for e in &b.edges {
+        let curve = solidcore_convert::curve(e.parameters()).expect("the edge's curve");
+        let c = solidcore::eval::CurveEval::new(&curve).expect("evaluates");
+        let [t0, t1] = e.interval;
+        for i in 1..4 {
+            let p = c.point(t0 + (t1 - t0) * f64::from(i) / 4.0).expect("on the curve");
+            add([p.x, p.y, p.z]);
+        }
+    }
+    let size = length(sub(P::new(hi[0], hi[1], hi[2]), P::new(lo[0], lo[1], lo[2])));
+    let spec = MeshSpec::chord(crate::MeshTolerance::export_of(size).chord);
+    let (plan, _) = meshed(&b, &spec, size, None);
+    let (m, refused) = plan.evaluate();
+    assert!(refused.is_empty(), "{refused:?}");
+    assert_nothing_folds(&m, "rivet sheet");
+    let (w, refused) = plan.welded();
+    assert!(refused.is_empty(), "{refused:?}");
+    assert_closed(&w, "rivet sheet");
+}
+
 /// A 20 x 10 x 5 box at a side of 2 mm: every triangle keeps 25 degrees (the faces' corners
 /// are right angles, so Ruppert shaping reaches its angle everywhere), no side is longer than
 /// 1.5 times the side asked (the refinement's own limit), and it is closed. The display path
