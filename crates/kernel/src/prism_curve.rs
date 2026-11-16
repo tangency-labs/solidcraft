@@ -297,7 +297,7 @@ fn circle_span(c: &[H], center: Vec2, radius: f64, tol: f64, source_error: f64, 
 /// curve one segment): `None` when it doesn't lie in a plane parallel to `plane`, isn't read
 /// exactly, isn't finite or goes over the work budget.
 pub(crate) fn segment(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> Option<Vec<Seg2>> {
-    read(run, plane, tol, work, false)
+    read(run, plane, tol, work, false, false)
 }
 
 /// `run` in `plane` exactly as segments: as [`segment`], and a curve of several Bézier spans
@@ -305,7 +305,7 @@ pub(crate) fn segment(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> O
 /// line, conic or Bézier it is, for a planar region's outline. `None` when the edge doesn't lie
 /// in a plane parallel to `plane` or isn't read exactly.
 pub(crate) fn projected(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> Option<Vec<Seg2>> {
-    read(run, plane, tol, work, true)
+    read(run, plane, tol, work, true, false)
 }
 
 /// A free-form curve of several Bézier spans in a plane, as the one B-spline it is: its degree,
@@ -332,7 +332,7 @@ pub enum PlanarPiece {
 /// curves) as the one B-spline it is, its knots and weights its own. `None` when the edge
 /// doesn't lie in a plane parallel to `plane` or isn't read exactly.
 pub(crate) fn projected_curves(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> Option<Vec<PlanarPiece>> {
-    if let Some(segs) = read(run, plane, tol, work, false) {
+    if let Some(segs) = read(run, plane, tol, work, false, true) {
         return Some(segs.into_iter().map(PlanarPiece::Seg).collect());
     }
     one_spline(run, plane, tol, work).map(|s| vec![PlanarPiece::Spline(s)])
@@ -440,7 +440,7 @@ fn along(run: &Run, (degree, knots, ctrl): (usize, Vec<f64>, Vec<HPoint>)) -> Op
     Some((degree, knots.iter().rev().map(|k| sum - k).collect(), ctrl.into_iter().rev().collect()))
 }
 
-fn read(run: &Run, plane: &Plane, tol: f64, work: &mut usize, each_span: bool) -> Option<Vec<Seg2>> {
+fn read(run: &Run, plane: &Plane, tol: f64, work: &mut usize, each_span: bool, whole: bool) -> Option<Vec<Seg2>> {
     if !tol.is_finite() || tol <= 0. {
         return None;
     }
@@ -470,7 +470,9 @@ fn read(run: &Run, plane: &Plane, tol: f64, work: &mut usize, each_span: bool) -
             return (error < tol * 0.1 && a.dist(b) > tol && (level - plane.height(b3)).abs() + error <= tol).then_some(vec![Seg2::Line { a, b }]);
         }
         Curve::Polyline { points } => return polyline(points, ts, te, plane, level, tol, work),
-        Curve::Circle { frame, radius } => return circle(v3(frame.origin), v3(frame.x_axis), v3(frame.y_axis), *radius, ts, te, a, b, plane, tol),
+        Curve::Circle { frame, radius } => {
+            return circle(v3(frame.origin), v3(frame.x_axis), v3(frame.y_axis), *radius, ts, te, a, b, plane, tol, whole);
+        }
         _ => {}
     }
     let (spans, error) = controls(spans_of(run, work)?, plane, level, tol)?;
@@ -483,7 +485,7 @@ fn read(run: &Run, plane: &Plane, tol: f64, work: &mut usize, each_span: bool) -
     if a.dist(b) > tol && spans.iter().all(|s| line_span(s, a, b, tol, error, work).is_some()) {
         return Some(vec![Seg2::Line { a, b }]);
     }
-    arc(&eval, (ts, te), &spans, plane, a, b, tol, error, work)
+    arc(&eval, (ts, te), &spans, plane, a, b, tol, error, work, whole)
         .or_else(|| free_form(&spans, a, b, tol))
         .or_else(|| if each_span { span_by_span(&spans, a, b, tol) } else { None })
 }
@@ -522,9 +524,9 @@ fn polyline(points: &[[f64; 3]], ts: f64, te: f64, plane: &Plane, level: f64, to
 
 /// A circle (`o + r (cos t x + sin t y)`) from `ts` to `te`, ending at `a` and `b` in `plane`, as
 /// the arc it is: `None` when it doesn't lie in a plane parallel to `plane`. A whole circle comes
-/// back as its two halves.
+/// back as its two halves, or with `whole` (a sketch projecting it) as one arc of a full turn.
 #[allow(clippy::too_many_arguments)]
-fn circle(o: Vec3, x: Vec3, y: Vec3, radius: f64, ts: f64, te: f64, a: Vec2, b: Vec2, plane: &Plane, tol: f64) -> Option<Vec<Seg2>> {
+fn circle(o: Vec3, x: Vec3, y: Vec3, radius: f64, ts: f64, te: f64, a: Vec2, b: Vec2, plane: &Plane, tol: f64, whole: bool) -> Option<Vec<Seg2>> {
     let n = plane.normal();
     let z = x.cross(y);
     let tilt = radius * z.cross(n).len();
@@ -544,7 +546,10 @@ fn circle(o: Vec3, x: Vec3, y: Vec3, radius: f64, ts: f64, te: f64, a: Vec2, b: 
         return None;
     }
     if (sweep.abs() - std::f64::consts::TAU).abs() <= angular_tol {
-        let h = sweep.signum() * std::f64::consts::PI;
+        let h = if whole { sweep.signum() * std::f64::consts::TAU } else { sweep.signum() * std::f64::consts::PI };
+        if whole {
+            return Some(vec![Seg2::Arc { center, radius, start, sweep: h }]);
+        }
         return Some(vec![Seg2::Arc { center, radius, start, sweep: h }, Seg2::Arc { center, radius, start: start + h, sweep: h }]);
     }
     Some(vec![Seg2::Arc { center, radius, start, sweep }])
@@ -645,6 +650,7 @@ fn arc(
     tol: f64,
     error: f64,
     work: &mut usize,
+    whole: bool,
 ) -> Option<Vec<Seg2>> {
     // Samples are only a candidate proposal. Whole-span implicit and oriented
     // angular proofs below are required before converting any spline to an arc.
@@ -683,6 +689,9 @@ fn arc(
     if closed {
         if (sweep.abs() - std::f64::consts::TAU).abs() > angular_tol {
             return None;
+        }
+        if whole {
+            return Some(vec![Seg2::Arc { center, radius, start, sweep: sweep.signum() * std::f64::consts::TAU }]);
         }
         let h = sweep.signum() * std::f64::consts::PI;
         Some(vec![Seg2::Arc { center, radius, start, sweep: h }, Seg2::Arc { center, radius, start: start + h, sweep: h }])

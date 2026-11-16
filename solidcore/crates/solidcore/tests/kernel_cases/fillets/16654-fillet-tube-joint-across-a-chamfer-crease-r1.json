@@ -1,0 +1,418 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b11": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b17": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b8": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 60.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "end": 6.896285307179586,
+              "radius": 25.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  20.446704828949432,
+                  14.385140306504345,
+                  60.0
+                ],
+                [
+                  20.446704828949432,
+                  14.385140306504345,
+                  60.0
+                ]
+              ],
+              "index": 2
+            }
+          ],
+          "points": [
+            [
+              -20.446704828949446,
+              -14.385140306504319,
+              60.0
+            ]
+          ],
+          "tolerance": 4.167695905299988
+        },
+        "kind": "chamfer",
+        "sizes": [
+          10.0
+        ],
+        "turn": "mitre"
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b7"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.894427190999916,
+          -0.0,
+          0.447213595499958
+        ],
+        "distance": 40.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.894427190999916,
+                -0.0,
+                0.447213595499958
+              ],
+              "center": [
+                0.0,
+                0.0,
+                37.5
+              ],
+              "end": 6.896285307179586,
+              "radius": 6.0,
+              "reference": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b10"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b11"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b12"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b14"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b14",
+        "b15"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "op": "union"
+      }
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b19"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b20"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  24.271508809362622,
+                  5.9911484806365,
+                  50.00000000000002
+                ],
+                [
+                  24.271508809362643,
+                  -5.9911484806364355,
+                  50.00000000000003
+                ]
+              ],
+              "index": 0
+            }
+          ],
+          "points": [
+            [
+              24.99999817945207,
+              9.813239404484805e-7,
+              43.29180180863477
+            ]
+          ],
+          "tolerance": 4.949232077699345
+        },
+        "kind": "round",
+        "sizes": [
+          1.0
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "16654-fillet-tube-joint-across-a-chamfer-crease-r1",
+  "expected": {
+    "bbox": {
+      "max": [
+        38.46036921299638,
+        25,
+        60.75510696599781
+      ],
+      "min": [
+        -25,
+        -25,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "cylinder R25 H60 with a 10 mm chamfer on its top edge (side to z=50, cone to R15 at z=60); a R6 tube from (0,0,37.5) along (2,0,1) for 40 joined, crossing the side/chamfer crease. The joint on the side is rounded r1; at each crease vertex the round ends on the chamfer (an Nx1 corner). The joint on the chamfer is one edge split by the tube's seam, which is no wall standing on the chamfer. A concave round adds material inside the joint only, so the box is the unrounded body's: x from -25 to the tube's end disc, 40*2/sqrt5 + 6/sqrt5 = 38.46037; y +-25; z from 0 to 37.5 + 40/sqrt5 + 6*2/sqrt5 = 60.75511; graded to 4e-5, the blends' approximation tolerance. The chamfer's own crease is G0, so the body's blend seams are not graded as one order.",
+    "outcome": "solid",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#16654"
+    ],
+    "tolerance": {
+      "abs_mm": 0.00004
+    },
+    "what": "a 1 mm round along a slanted tube's joint on a cylinder's side, where the joint runs on across the crease into a 10 mm top chamfer, builds as 1.5 mm does"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 14,
+      "faces": 7,
+      "vertices": 9
+    }
+  },
+  "records": "16654-fillet-tube-joint-across-a-chamfer-crease-r1.bodies.json.gz",
+  "result": [
+    {
+      "body": "Case",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 12815.656223654523,
+      "body_count": 1,
+      "edges": 14,
+      "faces": 7,
+      "vertices": 9,
+      "volume_mm3": 112506.83949124035
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#16654"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "a 1 mm round along a slanted tube's joint on a cylinder's side, where the joint runs on across the crease into a 10 mm top chamfer, builds as 1.5 mm does",
+  "why_not": []
+}

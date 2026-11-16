@@ -15,6 +15,8 @@
 //! | [`SectionBlendDefinition`], [`section_blend_surface`] | (none; the face's definition kept, #3140) |
 //! | [`section_frames`], [`FrameOptions`] | (none; SolidCraft's `section_frames`, `bridge::frames`) |
 //! | [`section_frames_outward`] | (none; the frames leaving each edge outward, for a blend between edges) |
+//! | [`point_frames`]   | (none; SolidCraft's `chain_frames`, a section with no face behind it) |
+//! | [`open_section_turns`] | (none; SolidCraft's `open_sections`, the turn of each open section) |
 //!
 //! **The surface.** The sections run along u, each sampled at the same stations along v. Section
 //! `i` sits at `u = i / (n - 1)` and the surface passes through every station of it: each
@@ -904,6 +906,121 @@ pub fn section_frames_outward(
         .zip(leaves)
         .map(|(s, w)| frame_at(k, surf, s.p, w))
         .collect()
+}
+
+const OP_POINTS: &str = "sweep::section_blend::point_frames";
+
+/// The frames of a cross-section given by its points in order, the polyline through them: at
+/// `stations` stations of even arc length along it, its first and last point included, the
+/// station's point, `leave` as given, and no bend. Nothing lies behind such a section for the
+/// blend to continue, so it leaves along the run with no curvature to repeat. A point repeating
+/// the one before it adds no length.
+///
+/// # Errors
+/// `InvalidInput` for stations out of range, a point or `leave` not finite, or a chain whose
+/// length is not positive and finite (fewer than two points, all of them at one place, or a
+/// length past the largest float).
+pub fn point_frames(points: &[Point3], leave: Vec3, stations: usize) -> Result<Vec<SectionFrame>> {
+    let invalid = |reason| SolidError::invalid_input(OP_POINTS, reason);
+    if !(MIN_STATIONS..=MAX_STATIONS).contains(&stations) {
+        return Err(invalid("a section's frames take 2 to 257 stations"));
+    }
+    if !finite(leave) {
+        return Err(invalid("a leave direction that is not finite"));
+    }
+    if !points.iter().all(|&p| finite(p)) {
+        return Err(invalid("a point that is not finite"));
+    }
+    let lengths: Vec<f64> = points
+        .iter()
+        .zip(points.iter().skip(1))
+        .map(|(a, b)| a.distance(*b))
+        .collect();
+    let total: f64 = lengths.iter().sum();
+    let (Some(&first), Some(&end)) = (points.first(), points.last()) else {
+        return Err(invalid("a chain of no length"));
+    };
+    if !(total.is_finite() && total > 0.0) {
+        return Err(invalid("a chain of no length"));
+    }
+    #[allow(clippy::cast_precision_loss)] // at most MAX_STATIONS
+    let last = (stations - 1) as f64;
+    let (mut walked, mut seg) = (0.0, 0);
+    let mut out = Vec::new();
+    for i in 0..stations {
+        let p = if i == 0 {
+            first
+        } else if i + 1 == stations {
+            end
+        } else {
+            #[allow(clippy::cast_precision_loss)] // at most MAX_STATIONS
+            let want = total * (i as f64) / last;
+            // past every segment that ends short of the station
+            while let Some(&l) = lengths.get(seg) {
+                if walked + l < want && seg + 1 < lengths.len() {
+                    walked += l;
+                    seg += 1;
+                } else {
+                    break;
+                }
+            }
+            let (Some(&a), Some(&b), Some(&l)) =
+                (points.get(seg), points.get(seg + 1), lengths.get(seg))
+            else {
+                return Err(invalid("a chain of no length"));
+            };
+            let t = if l > 0.0 {
+                ((want - walked) / l).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            a + (b - a) * t
+        };
+        out.push(SectionFrame {
+            p,
+            leave,
+            bend: Vec3::ZERO,
+            bend_change: Vec3::ZERO,
+        });
+    }
+    Ok(out)
+}
+
+const OP_TURNS: &str = "sweep::section_blend::open_section_turns";
+
+/// Which open cross-sections of a blend to turn round, given each one's first and last point in
+/// the blend's order (`ends`), so that each runs the way the one before it runs once that one is
+/// turned: a blend joins its sections' stations in order, so a section drawn the other way round
+/// would twist the blend through itself. The first stays; a later one is turned where its ends
+/// lie further from the one before's as they are than crosswise (`|s - s'| + |e - e'|` greater
+/// than `|s - e'| + |e - s'|`, `s'` and `e'` the one before's ends once turned); a tie keeps it.
+///
+/// # Errors
+/// `InvalidInput` for a point not finite; `Unsupported` for a closed section, its ends within the
+/// kernel's zone tolerance of each other (where two points are one): it has no ends to pair, and
+/// its winding and seam would have to be matched, which a turn does not do.
+pub fn open_section_turns(k: &crate::kernel::Kernel, ends: &[[Point3; 2]]) -> Result<Vec<bool>> {
+    let invalid = |reason| SolidError::invalid_input(OP_TURNS, reason);
+    let zone = crate::geom::tol::zone_tol_3d(k, crate::geom::tol::SmallTopoType::NormalSize);
+    let mut out = Vec::new();
+    let mut before: Option<[Point3; 2]> = None;
+    for &[s, e] in ends {
+        if !(finite(s) && finite(e)) {
+            return Err(invalid("a section end that is not finite"));
+        }
+        if s.distance(e) <= zone {
+            return Err(SolidError::Unsupported {
+                operation: OP_TURNS,
+                reason: "a closed section: its winding and seam are not matched by a turn",
+            });
+        }
+        let turn = before.is_some_and(|[ps, pe]| {
+            s.distance(ps) + e.distance(pe) > s.distance(pe) + e.distance(ps)
+        });
+        before = Some(if turn { [e, s] } else { [s, e] });
+        out.push(turn);
+    }
+    Ok(out)
 }
 
 /// Face `f`'s direction out across edge `e` at the edge's parameter `t`: the binormal of `f`'s

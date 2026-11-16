@@ -1921,3 +1921,61 @@ fn a_point_placed_by_an_expression_says_so_unfixes_and_refuses_a_move() {
     assert!(e.contains("equation") && e.contains(&curve), "{e}");
     assert_eq!(serde_json::to_value(sketch(&s)).unwrap(), before, "the sketch does not change");
 }
+
+/// A negative value on a sided distance dimension flips the free side to the opposite side of its
+/// reference and stores the positive magnitude; intrinsic sizes (length, radius) still refuse it.
+#[test]
+fn negative_distance_dimension_flips_to_the_opposite_side() {
+    // DistanceX from origin to a point on +X.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.point", json!({"point": [15, 0]}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["origin", "p1"], "type": "horizontal", "value": -10}));
+    assert!((d["measured"].as_f64().unwrap() - 10.0).abs() < 1e-6, "{d}");
+    assert_eq!(d["expression"], "10 mm");
+    assert!((sketch(&s).points[1].pos.x + 10.0).abs() < 1e-6, "p1 should flip to -10: {:?}", sketch(&s).points[1].pos);
+
+    // DistanceY from origin to a point on +Y.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.point", json!({"point": [0, 15]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "p1"], "type": "vertical", "value": -12}));
+    assert!((sketch(&s).points[1].pos.y + 12.0).abs() < 1e-6, "p1 should flip to -12: {:?}", sketch(&s).points[1].pos);
+
+    // PointLineDistance from the sketch's y-axis to a point on +X.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.point", json!({"point": [15, 5]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["y", "p1"], "value": -8}));
+    assert!((sketch(&s).points[1].pos.x + 8.0).abs() < 1e-6, "p1 should flip across y-axis to -8: {:?}", sketch(&s).points[1].pos);
+
+    // Distance between origin and a point on +X.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.point", json!({"point": [15, 0]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "p1"], "value": -10}));
+    assert!((sketch(&s).points[1].pos.x + 10.0).abs() < 1e-6, "p1 should flip to -10: {:?}", sketch(&s).points[1].pos);
+
+    // Negative parametric expression keeps the parameter link.
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "10 mm"}));
+    run(&mut s, "sketch.point", json!({"point": [15, 0]}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["origin", "p1"], "type": "horizontal", "value": "-w"}));
+    assert_eq!(d["expression"], "-(-w)");
+    assert!((sketch(&s).points[1].pos.x + 10.0).abs() < 1e-6);
+
+    // Editing an existing sided distance dimension to a negative value also flips and normalizes.
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "10 mm"}));
+    run(&mut s, "sketch.point", json!({"point": [15, 0]}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["origin", "p1"], "type": "horizontal", "value": 15}));
+    let param = d["param"].as_str().unwrap().to_string();
+    let changed = run(&mut s, "parameters.change", json!({"name": param, "expression": "-10"}));
+    assert_eq!(changed["expression"], "10 mm");
+    assert!((sketch(&s).points[1].pos.x + 10.0).abs() < 1e-6, "p1 should flip to -10: {:?}", sketch(&s).points[1].pos);
+    let changed = run(&mut s, "parameters.change", json!({"name": param, "expression": "-w"}));
+    assert_eq!(changed["expression"], "-(-w)");
+    assert!((sketch(&s).points[1].pos.x - 10.0).abs() < 1e-6, "p1 should flip back to +10: {:?}", sketch(&s).points[1].pos);
+
+    // Intrinsic sizes (line length, circle radius) still refuse negative values.
+    let mut s = sketch_with_len();
+    assert!(s.execute("sketch.dimension", &json!({"entities": ["la"], "value": -10})).is_err());
+    let c = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}))["curves"])[0].clone();
+    assert!(s.execute("sketch.dimension", &json!({"entities": [c], "value": -5})).is_err());
+}

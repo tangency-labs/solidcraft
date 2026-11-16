@@ -190,6 +190,110 @@ fn omitted_print_faces_are_reported_without_changing_the_design() {
     assert_eq!(run(&mut s, "timeline.export_script", json!({}))["omitted"], json!([]));
 }
 
+/// A design with a configuration table: a parameter, a suppression and a material column,
+/// two rows, a rule, and the second row active (#15441).
+fn configured(s: &mut Session) {
+    plate(s);
+    run(s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [60, 0, 0], "body_name": "Tab"}));
+    run(s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [80, 0, 0], "body_name": "Boss"}));
+    let boss = s.doc.features.last().unwrap().name.clone();
+    run(s, "material.create", json!({"name": "Test resin", "density_g_cm3": 1.3}));
+    run(s, "config.configure", json!({"params": ["w"], "features": [boss.clone()], "materials": ["Tab"]}));
+    let mut values = serde_json::Map::new();
+    values.insert("param:w".into(), json!("60 mm"));
+    values.insert(format!("suppress:{boss}"), json!("true"));
+    values.insert("material:Tab".into(), json!("Test resin"));
+    run(s, "config.row", json!({"name": "Wide", "values": values}));
+    let rule = json!({"id": "span", "name": "Width range", "condition": {"type": "always"},
+        "effect": {"type": "parameter_range", "parameter": "w", "minimum": "10 mm", "maximum": "100 mm"}});
+    run(s, "config.rule", json!({"rules": [rule]}));
+    run(s, "config.activate", json!({"row": "Wide"}));
+}
+
+/// A table by what a replay keeps: row ids are new, everything else is the same.
+fn table(s: &Session) -> (Vec<solidcraft_doc::config::Column>, Vec<(String, Vec<String>)>, Vec<solidcraft_doc::config::ConfigRule>, Option<String>) {
+    let t = &s.doc.configs;
+    (t.columns.clone(), t.rows.iter().map(|r| (r.name.clone(), r.cells.clone())).collect(), t.rules.clone(), t.active.clone())
+}
+
+#[test]
+fn a_configuration_table_comes_back() {
+    let mut s = Session::default();
+    configured(&mut s);
+    let r = run(&mut s, "timeline.export_script", json!({}));
+    assert_eq!(r["omitted"], json!([]), "{r}");
+    let mut t = replay(&r["script"]);
+    assert_eq!(table(&t), table(&s));
+    assert!(t.doc.configuration_matches(), "the active row still describes the design");
+    same(&mut s, &mut t);
+    // The replayed rows switch the design as the originals do.
+    run(&mut s, "config.activate", json!({"row": "Default"}));
+    run(&mut t, "config.activate", json!({"row": "Default"}));
+    same(&mut s, &mut t);
+}
+
+#[test]
+fn a_design_that_moved_off_its_active_row_keeps_the_table_and_reports_the_row() {
+    let mut s = Session::default();
+    configured(&mut s);
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "45 mm"}));
+    let r = run(&mut s, "timeline.export_script", json!({}));
+    assert_eq!(r["omitted"], json!(["the active configuration (the design no longer matches its row)"]), "{r}");
+    let mut t = replay(&r["script"]);
+    let (theirs, mut ours) = (table(&t), table(&s));
+    // The replay has no active row; everything else in the table is the same.
+    assert_eq!(theirs.3, None);
+    ours.3 = None;
+    assert_eq!(theirs, ours);
+    same(&mut s, &mut t);
+}
+
+/// The export leaves the whole table out and says why, and the rest of the script replays
+/// without it (#15441).
+fn left_out(s: &mut Session, reason: &str) {
+    let r = run(s, "timeline.export_script", json!({}));
+    let omitted = r["omitted"].to_string();
+    assert!(omitted.contains("configurations (") && omitted.contains(reason), "{r}");
+    let t = replay(&r["script"]);
+    assert!(t.doc.configs.is_empty(), "the table is left out whole");
+}
+
+#[test]
+fn a_column_for_a_text_parameter_leaves_the_table_out() {
+    let mut s = Session::default();
+    plate(&mut s);
+    // The script does not create text parameters, so a replay would have no `Label` to configure.
+    s.doc_mut().text_params.push(solidcraft_doc::text_params::TextParam { name: "Label".into(), text: "Plate".into(), comment: String::new() });
+    run(&mut s, "config.configure", json!({"params": ["Label"]}));
+    left_out(&mut s, "parameter `Label`");
+}
+
+#[test]
+fn a_body_column_whose_body_is_not_there_leaves_the_table_out() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "Tab"}));
+    let tab = s.doc.features.last().unwrap().name.clone();
+    run(&mut s, "config.configure", json!({"materials": ["Tab"]}));
+    // The feature that makes `Tab` is suppressed, so a replay builds no `Tab` to put a column on.
+    run(&mut s, "timeline.suppress", json!({"feature": tab, "suppressed": true}));
+    left_out(&mut s, "body `Tab`");
+}
+
+#[test]
+fn a_row_the_rules_refuse_leaves_the_table_out() {
+    let mut s = Session::default();
+    plate(&mut s);
+    run(&mut s, "parameters.add", json!({"name": "cap", "expression": "100 mm"}));
+    run(&mut s, "config.configure", json!({"params": ["w"]}));
+    run(&mut s, "config.row", json!({"name": "Wide", "values": {"param:w": "60 mm"}}));
+    let rule = json!({"id": "span", "name": "Width range", "condition": {"type": "always"},
+        "effect": {"type": "parameter_range", "parameter": "w", "minimum": "10 mm", "maximum": "cap"}});
+    run(&mut s, "config.rule", json!({"rules": [rule]}));
+    // Lowering the cap leaves the stored row outside the range; `config.rule` would refuse it.
+    run(&mut s, "parameters.change", json!({"name": "cap", "expression": "50 mm"}));
+    left_out(&mut s, "row `Wide`");
+}
+
 #[test]
 fn a_recorded_feature_that_does_not_fit_is_refused_and_changes_nothing() {
     let mut s = Session::default();
@@ -373,4 +477,33 @@ fn add_resolves_legacy_seed_and_plane_names() {
     let kind = serde_json::to_value(&s.doc.find_feature("Lost").unwrap().kind).unwrap();
     assert_eq!(kind["features"], json!([0]), "{kind}");
     assert_eq!(kind["plane"], json!({"type": "construction", "feature": 0}), "{kind}");
+}
+
+#[test]
+fn a_3d_sketch_with_dimensions_and_constraints_replays() {
+    // #10608: a 3D path whose run is dimensioned by parameter `run`, the rise held along Z.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let r = run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [100, 0, 0], [100, 0, 60]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{a}.start")}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": a, "axis": "x"}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": b, "axis": "z"}));
+    run(&mut s, "sketch.dimension", json!({"entities": [a], "value": "run = 120"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let mut t = replay(&script(&mut s));
+    let sketch = |s: &Session| {
+        s.doc.features.iter().find_map(|f| match &f.kind {
+            solidcraft_doc::FeatureKind::Sketch { sketch, .. } => Some(sketch.clone()),
+            _ => None,
+        })
+    };
+    let (was, now) = (sketch(&s).unwrap(), sketch(&t).unwrap());
+    assert_eq!(now.wire_constraints, was.wire_constraints);
+    assert_eq!(now.wires, was.wires);
+    // The parameter still drives the replayed path.
+    run(&mut t, "parameters.change", json!({"name": "run", "expression": "150 mm"}));
+    let end = sketch(&t).unwrap().wires.iter().find(|w| w.id == a).unwrap().fit[1];
+    assert!((end.x - 150.0).abs() < 1e-6, "{end:?}");
 }

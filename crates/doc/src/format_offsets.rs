@@ -67,11 +67,12 @@ fn validate_whole_reference(value: &Value) -> Result<()> {
         if holes.len() > 128 {
             return Err(invalid());
         }
-        let mut all: BTreeSet<_> = outer.iter().cloned().collect();
+        // Holes may share a curve (a curve splitting an island bounds two of them, #17613), but
+        // never one of the outer boundary's.
         let mut canonical_holes = Vec::with_capacity(holes.len());
         for hole in holes {
             let hole = boundary(hole)?;
-            if hole.iter().any(|curve| !all.insert(curve.clone())) {
+            if hole.iter().any(|curve| outer.binary_search(curve).is_ok()) {
                 return Err(invalid());
             }
             canonical_holes.push(hole);
@@ -268,6 +269,12 @@ mod tests {
     fn whole_boundaries_raw_identity_is_bounded_unique_and_complete() {
         let good = json!({"type":"whole_boundaries","profiles":[{"outer":["s2"],"holes":[["s1"]]}]});
         assert!(matches!(whole_profile_selection_from_value(&good).unwrap(), ProfileSel::WholeBoundaries { profiles } if profiles.len() == 1));
+        // Two holes may share a curve: a curve splitting an island bounds both halves (#17613).
+        let split = json!({"type":"whole_boundaries","profiles":[{"outer":["o"],"holes":[["a","m"],["b","m"]]}]});
+        assert!(
+            matches!(whole_profile_selection_from_value(&split).unwrap(), ProfileSel::WholeBoundaries { profiles } if profiles[0].holes.len() == 2)
+        );
+        assert!(validate_raw(&json!({"features":[{"type":"extrude","profiles":split}]})).is_ok());
         let malformed = [
             json!({"type":"whole_boundaries","profiles":[]}),
             json!({"type":"whole_boundaries","profiles":[{"outer":[],"holes":[]}]}),

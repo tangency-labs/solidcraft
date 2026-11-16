@@ -146,7 +146,7 @@ fn install_capturer(capturer: solidcraft_viewport_gpu::capture::Capturer) {
     solidcraft_engine::capture::install(std::sync::Arc::new(move |scene, cam, w, h| picture(&capturer, scene, cam, w, h)));
 }
 
-/// `scene` drawn by `capturer`, or by the CPU rasterizer once its device is lost.
+/// `scene` drawn by `capturer`, or by the CPU rasterizer if the device is lost or the picture is invisible.
 #[cfg(not(target_arch = "wasm32"))]
 fn picture(
     capturer: &solidcraft_viewport_gpu::capture::Capturer,
@@ -155,9 +155,25 @@ fn picture(
     w: u32,
     h: u32,
 ) -> Result<solidcraft_engine::capture::Picture, String> {
-    match capturer.rgba(scene, cam, w, h) {
-        Ok(rgba) => Ok(solidcraft_engine::capture::Picture { rgba, renderer: capturer.renderer() }),
-        Err(solidcraft_viewport_gpu::GpuError::DeviceLost) => Ok(cpu_picture(scene, cam, w, h)),
+    picture_result(capturer.rgba(scene, cam, w, h), capturer.renderer(), || cpu_picture(scene, cam, w, h))
+}
+
+/// Keep a captured picture or draw its CPU replacement when the device is lost or returns no visible pixels.
+#[cfg(not(target_arch = "wasm32"))]
+fn picture_result(
+    captured: solidcraft_viewport_gpu::Result<Vec<u8>>,
+    renderer: &'static str,
+    cpu: impl FnOnce() -> solidcraft_engine::capture::Picture,
+) -> Result<solidcraft_engine::capture::Picture, String> {
+    match captured {
+        // Capturer draws an opaque backdrop before the model. An entirely transparent picture
+        // cannot be a successful capture, even when the readback reports no error (#15986).
+        Ok(rgba) if !rgba.is_empty() && rgba.len().is_multiple_of(4) && rgba.iter().skip(3).step_by(4).all(|&alpha| alpha == 0) => {
+            log::warn!("GPU picture was fully transparent; drawing it with the CPU rasterizer");
+            Ok(cpu())
+        }
+        Ok(rgba) => Ok(solidcraft_engine::capture::Picture { rgba, renderer }),
+        Err(solidcraft_viewport_gpu::GpuError::DeviceLost) => Ok(cpu()),
         Err(e) => Err(e.to_string()),
     }
 }
@@ -1704,6 +1720,59 @@ mod tests {
                 None => eprintln!("skipping {policy:?}: no adapter of that tier"),
             }
         }
+    }
+
+    /// Captures draw an opaque backdrop, so an invisible result is a failed picture even if
+    /// the GPU reports success (#15986). RGB bytes do not make a pixel visible without alpha.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_fully_transparent_gpu_picture_falls_back_to_the_cpu() {
+        let (scene, cam) = (solidcraft_viewport::Scene::default(), solidcraft_viewport::Camera::default());
+        let expected = super::cpu_picture(&scene, &cam, 4, 2);
+        for pixel in [[0, 0, 0, 0], [120, 180, 240, 0]] {
+            let calls = std::cell::Cell::new(0);
+            let picture = super::picture_result(Ok(pixel.repeat(8)), "gpu", || {
+                calls.set(calls.get() + 1);
+                super::cpu_picture(&scene, &cam, 4, 2)
+            })
+            .unwrap();
+            assert_eq!(calls.get(), 1, "an invisible capture must be redrawn");
+            assert_eq!(picture.renderer, "cpu");
+            assert_eq!(picture.rgba, expected.rgba);
+            assert!(picture.rgba.as_chunks::<4>().0.iter().all(|pixel| pixel[3] == 255));
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_visible_gpu_picture_keeps_its_pixels_and_renderer() {
+        for renderer in ["gpu", "gpu-software"] {
+            for rgba in [vec![10, 20, 30, 255, 40, 50, 60, 255], vec![0, 0, 0, 0, 40, 50, 60, 1]] {
+                let picture = super::picture_result(Ok(rgba.clone()), renderer, || panic!("a visible picture needs no CPU replacement")).unwrap();
+                assert_eq!(picture.renderer, renderer);
+                assert_eq!(picture.rgba, rgba);
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn picture_errors_keep_device_loss_recovery_and_other_errors() {
+        use solidcraft_viewport_gpu::GpuError;
+        let (scene, cam) = (solidcraft_viewport::Scene::default(), solidcraft_viewport::Camera::default());
+        let calls = std::cell::Cell::new(0);
+        let picture = super::picture_result(Err(GpuError::DeviceLost), "gpu", || {
+            calls.set(calls.get() + 1);
+            super::cpu_picture(&scene, &cam, 4, 2)
+        })
+        .unwrap();
+        assert_eq!(calls.get(), 1);
+        assert_eq!(picture.renderer, "cpu");
+        assert_eq!(picture.rgba, super::cpu_picture(&scene, &cam, 4, 2).rgba);
+        let error = GpuError::Render("capture readback failed".into());
+        let expected = error.to_string();
+        let actual = super::picture_result(Err(error), "gpu", || panic!("other capture errors must be reported")).err().unwrap();
+        assert_eq!(actual, expected);
     }
 
     /// A device the driver loses (#4172): its lost callback marks it, the painter's probe sees it

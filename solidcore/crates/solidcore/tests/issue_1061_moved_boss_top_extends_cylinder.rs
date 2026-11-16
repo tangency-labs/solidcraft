@@ -115,11 +115,13 @@ fn issue_1061_moved_boss_top_is_exact_with_exact_mate_edges() {
     assert!(off < 1e-12, "{off}");
 }
 
-/// Without the opt-in the rim is marched off the circle and the part comes out short
-/// (measured -9.7e-9 and 7.5e-7), as upstream marches it.
+/// Without the opt-in the rim is marched off the circle (measured 7.5e-7), as upstream
+/// marches it. The part used to come out 9.7e-9 short: the integrator leaked through the
+/// marched rim's gap. With tolerant edges' gaps closed (#16735) its volume is the closed
+/// form (measured -2.7e-14).
 #[test]
 fn issue_1061_without_the_opt_in_the_rim_is_marched() {
     let (rel, off) = moved_top(false);
-    assert!(rel < -1e-9, "{rel}");
+    assert!(rel.abs() < 1e-12, "{rel}");
     assert!(off > 1e-8, "{off}");
 }
