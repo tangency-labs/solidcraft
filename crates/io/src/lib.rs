@@ -15,7 +15,11 @@ pub mod design_lock;
 mod design_metadata;
 mod dxf;
 mod dxf_out;
+mod excellon;
 pub mod formats;
+mod gerber;
+mod gerber_area;
+mod gerber_set;
 mod glb;
 pub use design::{
     DesignCompression, DesignContainerReader, DesignPreview, FileKind, ImportCache, OpenPgpSignature, OpenPgpSigner, ProvenanceChain,
@@ -43,22 +47,34 @@ pub mod safe_write;
 pub mod safe_zip;
 mod sketch2d;
 mod svg;
+/// Explicit development-test seams; absent from ordinary production builds.
+#[cfg(any(test, feature = "dxf-legacy-baseline-tests"))]
+pub mod test_support {
+    pub use crate::dxf_out::{DxfEntity, DxfLayer, legacy_dxf_baseline};
+}
 mod threemf;
 pub mod urdf;
 pub mod vfs;
 
 pub use airfoil::{Airfoil, AirfoilFormat, MAX_AIRFOIL_BYTES, MAX_AIRFOIL_POINTS, read_airfoil};
-pub use dxf::{DxfWriteOptions, read_dxf, write_dxf, write_dxf_entities, write_dxf_opts};
+pub use dxf::{DxfReadProfile, DxfWriteOptions, read_dxf, read_dxf_file, read_dxf_file_with_profile, write_dxf, write_dxf_entities, write_dxf_opts};
 pub use dxf_out::{
-    DxfEntity, DxfLayer, DxfLinetype, DxfShape, loop_lwpolyline, loop_lwpolyline_scaled, loop_shapes, seg_shape, write_dxf_drawing,
-    write_dxf_drawing_units,
+    DxfEntity, DxfEntityWeight, DxfFile, DxfFileEntity, DxfFileLayer, DxfGeometryBounds, DxfLayer, DxfLayerId, DxfLinetype, DxfPath, DxfPathStyle,
+    DxfShape, DxfSourceBlock, DxfStandardWeight, DxfTextHorizontalAlignment, DxfTextRecordKind, DxfTextSource, DxfTextVerticalAlignment, DxfVertex,
+    admit_path, loop_lwpolyline, loop_lwpolyline_scaled, path_shapes, write_dxf_drawing, write_dxf_drawing_units, write_dxf_file,
+    write_dxf_file_with_text_bounds,
+};
+pub use excellon::{DrillArc, DrillHit, DrillSlot, Drills, read_excellon};
+pub use gerber::{GerberLayer, GerberOutline, read_gerber_layer, read_gerber_outline};
+pub use gerber_set::{
+    BOARD_EXTENSIONS, BoardJob, GerberSet, MAX_SET_FILES, SetFile, SetRole, classify_set, is_zip_path, read_gerber_set, zip_entries,
 };
 pub use legacy_dir::{APP_ID, LEGACY_APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
 pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
 pub use svg::{decode_svg, read_svg, svg_nothing_to_import, svg_sheet};
 mod gltf_in;
-pub use gltf_in::{GltfImport, Loader, MAX_GLTF_BYTES, MeshPlan, PlanPlace, glb_container, is_gltf_path, read_gltf};
+pub use gltf_in::{GltfImport, Loader, MeshPlan, PlanPlace, glb_container, is_gltf_path, read_gltf};
 mod kicad_in;
 pub use kicad_in::{
     DEFAULT_BOARD_COLOR, KicadBoard, KicadCopper, KicadDrill, KicadFootprint, KicadImport, KicadLoader, KicadModel, KicadModelFile, KicadOptions,
@@ -78,6 +94,10 @@ use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Metadata, ModelState};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{MassProperties, Mesh};
+
+/// Source commit of the checkout at build time, or `"unknown"` without Git.
+/// Identifies committed source; uncommitted changes are not marked.
+pub const SOURCE_COMMIT: &str = env!("SOLIDCRAFT_SOURCE_COMMIT");
 
 /// Design file extension: new designs, autosaves and recovery files are written as `.sc`.
 pub const DESIGN_EXT: &str = "sc";

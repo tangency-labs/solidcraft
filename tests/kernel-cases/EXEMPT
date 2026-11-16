@@ -64,6 +64,8 @@ diagnostics.crash_reports         crash reports
 diagnostics.crash_reports.clear   crash reports
 diagnostics.crash_test            crash reports
 diagnostics.profile               timing: where a command's time goes
+diagnostics.report_issue          problem reports: tested in issue_report.rs
+diagnostics.report_issue_status   problem reports: tested in issue_report.rs
 diagnostics.validation            a setting: when the body check runs
 doc.open                          opening and recovering documents
 doc.recover                       opening and recovering documents
@@ -83,8 +85,10 @@ engine.describe                   the command registry itself
 explode.delete                    exploded views: display offsets
 explode.list                      exploded views: display offsets
 expr.evaluate                     expression evaluation
+file.gerber_files                 a listing of a board's files: crates/engine/src/cmd/board_import_tests.rs
 file.gpg_keys                     GnuPG key listing: tested in crates/engine/src/gpg.rs tests
 file.import_cache_clear           clears a cache of imported files
+file.insert_gerber                board import, tested in crates/engine/src/cmd/board_import_tests.rs
 file.open_in_easyprint            hands the file to another program
 file.save                         saving the design
 file.save_as                      saving the design
@@ -273,6 +277,7 @@ sketch.circle.three_tangent       2D sketch only (the sketch solver and engine t
 sketch.circle.two_point           2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.circle.two_tangent         2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constrainer                2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.constraint.along_axis      3D sketch solve only (the 3D solver and engine tests, sketch_3d_frame_tests.rs); no kernel operation
 sketch.constraint.coincident      2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.collinear       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.concentric      2D sketch only (the sketch solver and engine tests); no kernel operation

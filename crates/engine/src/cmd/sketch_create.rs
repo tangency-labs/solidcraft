@@ -13,7 +13,10 @@ macro_rules! text_style_doc {
     };
 }
 
-use super::sketch::{add_c, circumcircle, corner_arg, edit, ids_of, length_expr, mark_construction, place_point, req_parg, slot_parts};
+use super::sketch::{
+    add_c, circumcircle, corner_arg, edit, ids_of, length_expr, mark_construction, place_point, req_parg, slot_parts, slot_width,
+    slot_width_dimension,
+};
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, req_vec2, str_, string_list};
@@ -96,21 +99,21 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&SLOT_CENTER_POINT_CONTRACT)
         .output(output_schema_for::<crate::schema::sketch_shapes::SlotResult>)
-        .params(concat!("center: slot centre, end: one arc centre, width; returns centre_line and middle", created_doc!())),
+        .params(concat!("center: slot centre, end: one arc centre, width: number or expression (an expression naming a parameter is a dimension driven by it); returns centre_line and middle", created_doc!())),
     CommandSpec::new("sketch.slot.arc_three_point", "Three Point Arc Slot", crate::checked!("sketch.slot.arc_three_point", arc_slot_three))
         .at("SKETCH", "CREATE")
         .icon("arc_slot")
         .enabled(in_sketch)
         .contract(&ARC_SLOT_THREE_CONTRACT)
         .output(output_schema_for::<ArcSlotResult>)
-        .params(concat!("start, through, end: points on the centre arc, width; returns centre_arc and middle", created_doc!())),
+        .params(concat!("start, through, end: points on the centre arc, width: number or expression (an expression naming a parameter is a dimension driven by it); returns centre_arc and middle", created_doc!())),
     CommandSpec::new("sketch.slot.arc_center", "Center Point Arc Slot", crate::checked!("sketch.slot.arc_center", arc_slot_center))
         .at("SKETCH", "CREATE")
         .icon("arc_slot_center")
         .enabled(in_sketch)
         .contract(&ARC_SLOT_CENTER_CONTRACT)
         .output(output_schema_for::<ArcSlotResult>)
-        .params(concat!("center, start: centre arc start, end: direction of the centre arc end (counter-clockwise) or sweep: degrees (0 < sweep < 360), width; returns centre_arc and middle", created_doc!())),
+        .params(concat!("center, start: centre arc start, end: direction of the centre arc end (counter-clockwise) or sweep: degrees (0 < sweep < 360), width: number or expression (an expression naming a parameter is a dimension driven by it); returns centre_arc and middle", created_doc!())),
     CommandSpec::new("sketch.ellipse", "Ellipse", crate::checked!("sketch.ellipse", ellipse))
         .at("SKETCH", "CREATE")
         .icon("ellipse")
@@ -457,15 +460,33 @@ pub(super) fn text_link<'a>(sk: &'a Sketch, entity: &str) -> Option<&'a str> {
 
 /// Transform a text source as a unit; generated outlines remain linked and editable.
 pub(super) fn move_text(sk: &mut Sketch, link: &str, translate: Vec2, rotation: f64, center: Vec2, copy: bool) -> Result<Vec<usize>> {
+    let (sin, cos) = rotation.sin_cos();
+    let place = move |q: Vec2| {
+        let q = q - center;
+        center + Vec2::new(q.x * cos - q.y * sin, q.x * sin + q.y * cos) + translate
+    };
+    transform_text(sk, "sketch.move", link, &place, rotation, 1.0, copy)
+}
+
+/// Place a text source as a unit: its baseline start goes where `place` takes it, its angle
+/// turns by `rotation` and its height scales by `factor`. Generated outlines remain linked and
+/// editable.
+pub(super) fn transform_text(
+    sk: &mut Sketch,
+    cmd: &str,
+    link: &str,
+    place: &dyn Fn(Vec2) -> Vec2,
+    rotation: f64,
+    factor: f64,
+    copy: bool,
+) -> Result<Vec<usize>> {
     let Some(LinkSource::Text { text, at, height, angle, font, style, mut exprs }) = sk.link(link).map(|l| l.source.clone()) else {
-        return Err(bad("sketch.move", "the selected source is not text"));
+        return Err(bad(cmd, "the selected source is not text"));
     };
     if style.path.is_some() {
-        return Err(bad("sketch.move", "a text on a path follows its curve: move the curve, or take the text off it"));
+        return Err(bad(cmd, "a text on a path follows its curve: move the curve, or take the text off it"));
     }
-    let q = at - center;
-    let (sin, cos) = rotation.sin_cos();
-    let moved = center + Vec2::new(q.x * cos - q.y * sin, q.x * sin + q.y * cos) + translate;
+    let moved = place(at);
     // What the move changes is a number now, not the expression it was; the rest stays.
     if (moved.x - at.x).abs() > 1e-12 {
         exprs.x = None;
@@ -476,7 +497,10 @@ pub(super) fn move_text(sk: &mut Sketch, link: &str, translate: Vec2, rotation: 
     if rotation.abs() > 1e-12 {
         exprs.angle = None;
     }
-    let (at, angle) = (moved, angle + rotation);
+    if (factor - 1.0).abs() > 1e-12 {
+        exprs.height = None;
+    }
+    let (at, height, angle) = (moved, height * factor, angle + rotation);
     let geom = solidcraft_sketch::text_geometry_styled(font.as_deref(), &text, at, height, angle, &style, None)?;
     let source = LinkSource::Text { text, at, height, angle, font, style, exprs };
     let link = if copy {
@@ -484,7 +508,7 @@ pub(super) fn move_text(sk: &mut Sketch, link: &str, translate: Vec2, rotation: 
     } else {
         sk.set_link_source(link, source);
         if sk.update_link(link, &geom)? {
-            return Err(bad("sketch.move", "moving text must preserve its outline topology; edit the text source first"));
+            return Err(bad(cmd, "moving text must preserve its outline topology; edit the text source first"));
         }
         link.to_owned()
     };
@@ -1263,15 +1287,11 @@ fn circle_three_tan(s: &mut Session, p: &Value) -> Result<Value> {
     tangent_circle(s, p, "sketch.circle.three_tangent", 3, None)
 }
 
-fn width(p: &Value, cmd: &str) -> Result<f64> {
-    num(p, "width").filter(|w| *w > 1e-9).ok_or_else(|| bad(cmd, "`width` must be positive"))
-}
-
 fn slot_center_point(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.slot.center_point";
     let (c, e) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "end")?);
-    let w = width(p, cmd)?;
-    reply(slot_parts(s, p, cmd, c * 2.0 - e, e, w)?)
+    let (w, driven) = slot_width(s, p, cmd)?;
+    reply(slot_parts(s, p, cmd, c * 2.0 - e, e, w, driven.as_deref())?)
 }
 
 /// Arc slot around `o` (centre-line radius `r`) from angle `t0` sweeping `sweep` (> 0).
@@ -1280,7 +1300,9 @@ fn slot_center_point(s: &mut Session, p: &Value) -> Result<Value> {
 /// construction chords to both cap centres held equal, so it stays halfway along the arc however
 /// the slot is edited or dragged. On the arc's circle equal chords leave two places (the middle
 /// and the point opposite); the solver keeps the one it is drawn at. The middle adds no freedom.
-fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, sweep: f64, w: f64) -> Result<Value> {
+/// `width` is the slot's width and, when it names parameters, its expression ([`slot_width`]).
+fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, sweep: f64, width: (f64, Option<String>)) -> Result<Value> {
+    let (w, driven) = width;
     let h = w / 2.0;
     if h >= r {
         return Err(bad(cmd, "the slot is wider than its centre arc's diameter"));
@@ -1292,7 +1314,7 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
     let at = |t: f64, rr: f64| o + Vec2::from_angle(t) * rr;
     let mut centre_arc = None;
     let mut middle = None;
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let oc = sk.add_point(o, None)?;
         let ps = sk.add_point(at(t0, r), None)?;
         let pe = sk.add_point(at(t1, r), None)?;
@@ -1326,6 +1348,7 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
             }
         }
         cons.push(add_c(sk, ConstraintKind::Equal { a: to_s, b: to_e })?);
+        cons.extend(slot_width_dimension(sk, doc, cap_e, w, driven.as_deref())?);
         middle = sk.points.get(mid).map(|q| q.id.clone());
         Ok((ids_of(sk, &[outer, cap_e, inner, cap_s]), cons))
     })?;
@@ -1335,7 +1358,7 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
 fn arc_slot_three(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.slot.arc_three_point";
     let (a, t, b) = (req_vec2(cmd, p, "start")?, req_vec2(cmd, p, "through")?, req_vec2(cmd, p, "end")?);
-    let w = width(p, cmd)?;
+    let w = slot_width(s, p, cmd)?;
     let (o, r) = circumcircle(a, t, b).ok_or_else(|| bad(cmd, "the points are collinear"))?;
     let ang = |q: Vec2| (q - o).angle();
     let span = |from: f64, to: f64| (to - from).rem_euclid(std::f64::consts::TAU);
@@ -1347,7 +1370,7 @@ fn arc_slot_three(s: &mut Session, p: &Value) -> Result<Value> {
 fn arc_slot_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.slot.arc_center";
     let (o, a) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "start")?);
-    let w = width(p, cmd)?;
+    let w = slot_width(s, p, cmd)?;
     let r = o.dist(a);
     if r < 1e-9 {
         return Err(bad(cmd, "the points must differ from the centre"));

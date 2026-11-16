@@ -77,19 +77,21 @@ struct DocWork {
     editing_state: Option<crate::dialogs::EditingState>,
     tool: Option<crate::tools::Tool>,
     /// The toolbar tab shown, its contextual tab and the tab a sketch returns to (`None`: the
-    /// design was left without the preference, and comes back on MODEL as before).
+    /// design was left with both preferences off, or is new, and comes back on MODEL).
     tab: Option<(String, Option<String>, Option<String>)>,
 }
 
 /// Take the active design's dialog, tool and toolbar tab, to keep with its tab. A feature still
 /// computing after OK can't wait (its result belongs to the window thread): that dialog is
-/// cancelled, as without the preference.
+/// cancelled, as without the preference. Without the preference the toolbar tab is still kept
+/// (`remember_toolbar_tab`), once the dialog and tool are gone, so it is a tab they leave behind.
 fn take_work(app: &mut SolveApp) -> DocWork {
     let bom = app.bom.take();
     if !app.preferences.keep_work_on_tab_switch || app.applying.is_some() {
         crate::dialogs::cancel(app);
         app.tool = None;
-        return DocWork { bom, ..DocWork::default() };
+        let tab = app.preferences.remember_toolbar_tab.then(|| (app.ui.tab.clone(), app.ui.ribbon_context.clone(), app.ui.sketch_return_tab.clone()));
+        return DocWork { bom, tab, ..DocWork::default() };
     }
     DocWork {
         bom,
@@ -1323,11 +1325,14 @@ pub fn open_sessions(app: &SolveApp) -> Vec<&Session> {
     app.docs.slots.iter().map(|s| s.as_ref().map_or(&app.session, |d| &d.session)).collect()
 }
 
+/// Closing tab `i` asks to save first: it has changes, and is not a STEP, IGES or mesh file
+/// opened and only looked at (#15111), whose file still holds all of it.
 fn dirty(app: &SolveApp, i: usize) -> bool {
+    let asks = |s: &Session| s.is_dirty() && !s.unchanged_import();
     if i == app.docs.active || app.docs.slots.is_empty() {
-        return app.session.is_dirty();
+        return asks(&app.session);
     }
-    app.docs.slots.get(i).and_then(Option::as_ref).is_some_and(|s| s.session.is_dirty())
+    app.docs.slots.get(i).and_then(Option::as_ref).is_some_and(|s| asks(&s.session))
 }
 
 /// A tab's name: the file a saved design was opened or saved as (without its extension), so a
@@ -2749,6 +2754,34 @@ mod tests {
         assert!((volume - 1000.0).abs() < 1e-6, "the first tab's part: {volume}");
     }
 
+    /// #15111: a STEP file opened in a tab and only looked at closes without asking to save,
+    /// although it was never saved as a design. Changed, it asks again.
+    #[test]
+    fn an_opened_step_file_closes_without_asking_until_it_is_changed() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-close-step-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let step = dir.join("Block.step");
+        let mut maker = Session::default();
+        maker.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        maker.execute("file.export", &json!({"path": step.to_string_lossy()})).unwrap();
+        let opened = || {
+            let mut s = Session::default();
+            s.execute("doc.open", &json!({"path": step.to_string_lossy()})).unwrap();
+            s
+        };
+        let mut a = app();
+        open_tab(&mut a, opened()).unwrap();
+        assert!(a.session.is_dirty() && a.session.path.is_none(), "still a design never saved");
+        control(&mut a, &json!({"action": "close", "index": 1}));
+        assert_eq!((a.docs.count(), a.docs.closing), (1, None), "closed without asking");
+
+        open_tab(&mut a, opened()).unwrap();
+        a.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0]})).unwrap();
+        control(&mut a, &json!({"action": "close", "index": 1}));
+        assert_eq!((a.docs.count(), a.docs.closing), (2, Some(1)), "a changed import asks first");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     /// #3055: Close All Tabs, and Cancel at the first question: the tabs not closed yet stay.
     /// Close All Tabs on blank designs leaves one blank design.
     #[test]
@@ -3252,6 +3285,7 @@ mod tests {
     #[test]
     fn the_views_of_a_design_follow_commands_keys_and_the_app() {
         let mut h = crate::scenario::Harness::new();
+        h.app.preferences.design_views_as_tabs = true;
         h.app.home.open = false;
         let call =
             |h: &mut crate::scenario::Harness, command: &str, params: Value| h.call("engine.execute", json!({"command": command, "params": params}));
@@ -3792,9 +3826,10 @@ mod tests {
     }
 
     /// Tab 1: a box measured between two corners, on INSPECT. Tab 2: a sketch with the Line tool.
-    fn measuring_and_drawing(keep: bool) -> (SolveApp, Vec<solidcraft_engine::Sel>) {
+    fn measuring_and_drawing(keep: bool, remember: bool) -> (SolveApp, Vec<solidcraft_engine::Sel>) {
         let mut a = app();
         a.preferences.keep_work_on_tab_switch = keep;
+        a.preferences.remember_toolbar_tab = remember;
         a.run("solid.box", json!({"length": 3, "width": 4, "height": 12, "body_name": "Box"})).unwrap();
         a.session.selection =
             [[0.0, 0.0, 0.0], [3.0, 4.0, 12.0]].into_iter().map(|p| solidcraft_engine::Sel::Vertex { body: "Box".into(), point: p.into() }).collect();
@@ -3815,7 +3850,8 @@ mod tests {
     /// none of them shows in the other design.
     #[test]
     fn tabs_keep_their_dialog_tool_and_toolbar_tab_with_the_preference() {
-        let (mut a, picks) = measuring_and_drawing(true);
+        // Without remember_toolbar_tab, so the toolbar tab comes from this preference alone.
+        let (mut a, picks) = measuring_and_drawing(true, false);
         switch(&mut a, 0);
         assert!(a.tool.is_none(), "the Line tool stays with the sketch's design");
         assert!(matches!(a.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Measure { .. })), "Measure is open again");
@@ -3836,19 +3872,74 @@ mod tests {
         assert!(a.dialog.is_none() && a.ui.tab == "MODEL");
     }
 
-    /// Without the preference (the default), a switch cancels the dialog and the tool and shows
-    /// MODEL, as before #9360.
+    /// Without the preference (the default), a switch cancels the dialog and the tool, as before
+    /// #9360; with `remember_toolbar_tab` on (off by default) the design keeps its toolbar tab.
     #[test]
     fn a_tab_switch_cancels_the_dialog_and_tool_by_default() {
-        assert!(!crate::prefs::Prefs::default().keep_work_on_tab_switch);
-        let (mut a, _) = measuring_and_drawing(false);
+        let defaults = crate::prefs::Prefs::default();
+        assert!(!defaults.keep_work_on_tab_switch && !defaults.remember_toolbar_tab);
+        let (mut a, _) = measuring_and_drawing(false, true);
         switch(&mut a, 0);
         assert!(a.dialog.is_none() && a.tool.is_none());
-        assert_eq!(a.ui.tab, "MODEL");
+        assert_eq!(a.ui.tab, "INSPECT", "the box's design is back on the tab it was using");
         switch(&mut a, 1);
         assert!(a.dialog.is_none() && a.tool.is_none());
         // The sketch itself stays open in its design, so its tab is SKETCH.
         assert_eq!(a.ui.tab, "SKETCH");
+    }
+
+    /// With both preferences off, a switch shows MODEL, as before.
+    #[test]
+    fn without_remember_toolbar_tab_a_switch_shows_model() {
+        let (mut a, _) = measuring_and_drawing(false, false);
+        switch(&mut a, 0);
+        assert!(a.dialog.is_none() && a.tool.is_none());
+        assert_eq!(a.ui.tab, "MODEL");
+        switch(&mut a, 1);
+        assert_eq!(a.ui.tab, "SKETCH", "an open sketch still shows its own tab");
+    }
+
+    /// A new tab with a box in it, so [`new_design`] doesn't reuse it as a blank design.
+    fn new_design_with_a_box(a: &mut SolveApp) {
+        new_design(a);
+        a.run("solid.box", json!({"length": 1, "width": 1, "height": 1})).unwrap();
+    }
+
+    /// Each design comes back on the toolbar tab it was last using: one left on SURFACE is on
+    /// SURFACE again after another design, left on MODEL, was shown; a new design starts on MODEL.
+    #[test]
+    fn each_design_remembers_its_own_toolbar_tab() {
+        let mut a = app();
+        a.preferences.remember_toolbar_tab = true;
+        a.run("solid.box", json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        a.ui.tab = "SURFACE".into();
+        new_design_with_a_box(&mut a);
+        assert_eq!(a.docs.count(), 2);
+        assert_eq!(a.ui.tab, "MODEL", "a new design starts on MODEL");
+        new_design_with_a_box(&mut a);
+        a.ui.tab = "INSPECT".into();
+        for (i, tab) in [(0, "SURFACE"), (1, "MODEL"), (2, "INSPECT"), (0, "SURFACE"), (2, "INSPECT"), (1, "MODEL")] {
+            switch(&mut a, i);
+            assert_eq!(a.ui.tab, tab, "design {i}");
+        }
+        // A tab changed after a switch is the one remembered next time.
+        a.ui.tab = "VIEW".into();
+        switch(&mut a, 0);
+        switch(&mut a, 1);
+        assert_eq!(a.ui.tab, "VIEW");
+    }
+
+    /// A remembered tab hidden from the toolbar since falls back to MODEL, as a hidden tab does.
+    #[test]
+    fn a_remembered_tab_hidden_since_falls_back_to_model() {
+        let mut a = app();
+        a.run("solid.box", json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        a.ui.tab = "SURFACE".into();
+        new_design_with_a_box(&mut a);
+        assert_eq!(a.docs.count(), 2);
+        a.preferences.hidden_toolbar_tabs = vec!["SURFACE".into()];
+        switch(&mut a, 0);
+        assert_eq!(a.ui.tab, "MODEL");
     }
 
     /// #9360: a feature being edited keeps its history rolled back to it in its own design only,

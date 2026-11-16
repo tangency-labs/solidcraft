@@ -999,10 +999,15 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
                         match crate::vrml_in::read_vrml(&model_bytes, &model_path) {
                             Ok(m) => {
                                 let mut notes: Vec<String> = m.warnings.iter().map(|w| format!("{}: {w}", model_label(&model_path))).collect();
-                                match solidcraft_kernel::mesh_body(&m.positions, &m.triangles) {
-                                    Ok(_) => {
-                                        (vec![mesh_data(component_name(footprint, &model.path), m.positions, m.triangles, m.color)], None, notes)
-                                    }
+                                // KiCad's VRML unit is 0.1 inch; the model's own vertices are scaled to
+                                // millimetres here, before the footprint's offset, rotation and scale.
+                                let positions: Vec<Vec3> = m
+                                    .positions
+                                    .iter()
+                                    .map(|p| Vec3::new(p.x * KICAD_VRML_UNIT_MM, p.y * KICAD_VRML_UNIT_MM, p.z * KICAD_VRML_UNIT_MM))
+                                    .collect();
+                                match solidcraft_kernel::mesh_body(&positions, &m.triangles) {
+                                    Ok(_) => (vec![mesh_data(component_name(footprint, &model.path), positions, m.triangles, m.color)], None, notes),
                                     Err(e) => (Vec::new(), Some(short_reason(&e.to_string())), std::mem::take(&mut notes)),
                                 }
                             }
@@ -1107,6 +1112,9 @@ fn board_corner(board: &KicadBoard) -> Option<[f64; 2]> {
     }
     corner.iter().all(|value| value.is_finite()).then_some(corner)
 }
+
+/// Millimetres in one unit of a KiCad VRML model (0.1 inch).
+const KICAD_VRML_UNIT_MM: f64 = 2.54;
 
 fn component_name(footprint: &KicadFootprint, path: &str) -> String {
     let label = footprint.reference.trim();

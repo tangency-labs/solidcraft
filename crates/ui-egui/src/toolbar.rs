@@ -210,8 +210,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
     Container::new(ui.ctx(), Surface::ApplicationBar).show_edge(ui, app_bar.exact_size(APP_BAR_HEIGHT).show_separator_line(false), frame, |ui| {
         let r = ui.max_rect();
         // The bar is the window's title bar: its empty space moves the window, the traffic lights
-        // or the caption buttons take its ends.
-        let chrome = crate::window_chrome::TitleBar { traffic_lights: app.integrated_titlebar, caption_buttons: app.custom_titlebar };
+        // or the caption buttons take its ends. In full screen macOS shows the traffic lights in
+        // its own title bar that slides down over the window, not in the bar: no room for them.
+        let fullscreen = ui.ctx().input(|i| i.viewport().fullscreen.unwrap_or(false));
+        let chrome = crate::window_chrome::TitleBar { traffic_lights: app.integrated_titlebar && !fullscreen, caption_buttons: app.custom_titlebar };
         let action = chrome.show(ui, r, |ui, content| {
             // While a file loads the design waits: no menus or commands from the bar.
             let idle = !app.file_load_holds();
@@ -253,7 +255,11 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 settings: app_bar::BarButton { id: "settings", icon: "settings", tip: &prefs_tip, enabled: true, narrow: false, wide_only: false },
                 report: app_bar::Report {
                     label: solidcraft_ui_text::tr("ui.report_a_bug"),
-                    tip: solidcraft_ui_text::tr_label("Report a bug — review a screenshot and open a GitHub draft"),
+                    tip: if crate::issue_report::ticket::enabled(app) {
+                        solidcraft_ui_text::tr("report.pill_tip")
+                    } else {
+                        solidcraft_ui_text::tr_label("Report a bug — review a screenshot and open a GitHub draft")
+                    },
                     icon_only: app.header.report == ReportButton::Icon,
                 },
                 pills: crate::links::pills(app, r.width() >= app_bar::PILL_LABEL_MIN),
@@ -2373,7 +2379,7 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     ui.label(egui::RichText::new(solidcraft_ui_text::tr_label("Selection filter")).color(t.text_dim).size(t.font_small));
     for (mode, label) in [("body", app.tr_label("Select bodies (a face picks its body)")), ("component", app.tr("ui.select_components_by_face"))] {
-        let mut on = app.ui.pick_mode() == mode;
+        let mut on = app.pick_mode() == mode;
         if ui_kit::checkbox(ui, label, &mut on).changed() {
             // The Faces checkbox below is independent. The standalone command enables faces.
             let filters = std::mem::take(&mut app.ui.pick_off);
@@ -2439,6 +2445,10 @@ pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
     }
     if crate::select_other::is_open(app) {
         crate::select_other::close(app);
+    } else if !app.preferences.escape_closes_analyses && app.tool.as_ref().is_some_and(|t| t.cmd == "inspect.curvature_comb") {
+        // Escape puts the comb tool down and keeps its combs on; a right click or the button
+        // still turns them off. `escape_closes_analyses` brings back Escape turning them off.
+        app.tool = None;
     } else if app.tool.is_some() {
         crate::tools::finish(app);
     } else {
@@ -2651,7 +2661,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 // Not while a tool is still out (its first Esc only ended a chain): this press
                 // puts it down, and the next quick one finishes.
                 if again
-                    && !(crate::viewport_status::enabled(app) && (app.viewport_status.open_key.is_some() || crate::viewport_status::has_effect(app)))
+                    && !(crate::viewport_status::enabled(app) && crate::viewport_status::owns_escape(app))
                     && app.tool.is_none()
                     && app.dialog.is_none()
                     && let Some(sketch) = app.session.active_sketch
@@ -3385,6 +3395,31 @@ mod header_report_tests {
         assert_eq!(search.right(), rect("titlebar:preferences").left() - HEADER_SEARCH_GAP);
         h.step(&json!({"click":{"handle":"titlebar:search"}})).unwrap();
         assert!(h.app.ui.palette_open, "the magnifier opens search");
+    }
+
+    /// macOS keeps room for the traffic lights at the bar's left end in a window, but not in full
+    /// screen, where they are in the title bar that slides down from the top of the screen: the
+    /// logo starts at the left edge there, as it does on Windows and Linux.
+    #[test]
+    fn full_screen_bar_has_no_room_for_the_traffic_lights() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let home_left = |h: &mut crate::scenario::Harness, fullscreen: bool| {
+            for _ in 0..3 {
+                let mut raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1600.0, 1000.0))), ..Default::default() };
+                raw.viewports.get_mut(&egui::ViewportId::ROOT).unwrap().fullscreen = Some(fullscreen);
+                let app = &mut h.app;
+                h.ctx.run_ui(raw, |ui| app.ui(ui)).textures_delta.clear();
+            }
+            crate::scenario::rect_of("titlebar:home").unwrap().left()
+        };
+        let room = crate::window_chrome::TRAFFIC_LIGHTS;
+        for traffic_lights in [true, false, true] {
+            h.app.integrated_titlebar = traffic_lights;
+            let (window, full) = (home_left(&mut h, false), home_left(&mut h, true));
+            let expected = if traffic_lights { room } else { 0.0 };
+            assert!((window - full - expected).abs() < 0.1, "traffic lights {traffic_lights}: {window} in a window, {full} in full screen");
+        }
     }
 
     /// With native menus the bar keeps its own Settings, so search the host put in the bar sits
@@ -4555,11 +4590,11 @@ mod app_bar_tests {
         h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
         h.step(&json!({"widget":"Workshop helper · measure"})).unwrap();
         h.frames(2);
-        let slot_dialog = h.app.plugin_menu.dialog.take().expect("a File slot click opens the Plugins entry dialog");
+        let slot_dialog = h.app.plugin_menu.dialogs.pop().expect("a File slot click opens the Plugins entry dialog");
         assert_eq!(slot_dialog.entry, "measure");
         assert_eq!(slot_dialog.ready(&h.app), Ok(json!({"length":12.0})));
         crate::plugin_menu::open_entry(&mut h.app, 0, 0);
-        let menu_dialog = h.app.plugin_menu.dialog.take().unwrap();
+        let menu_dialog = h.app.plugin_menu.dialogs.pop().unwrap();
         assert_eq!(slot_dialog.fields, menu_dialog.fields);
         assert_eq!(slot_dialog.plugin.approval, menu_dialog.plugin.approval);
         assert_eq!(slot_dialog.plugin.path, menu_dialog.plugin.path);
@@ -4570,19 +4605,19 @@ mod app_bar_tests {
         h.frames(3);
         h.step(&json!({"click":{"handle":"button:workshop-helper.report"}})).unwrap();
         h.frames(2);
-        assert_eq!(h.app.plugin_menu.dialog.as_ref().unwrap().entry, "report", "a ribbon slot opens the same entry dialog");
-        h.app.plugin_menu.dialog = None;
+        assert_eq!(h.app.plugin_menu.dialog().unwrap().entry, "report", "a ribbon slot opens the same entry dialog");
+        h.app.plugin_menu.dialogs.clear();
         h.app.home.show(h.app.session.revision);
         h.frames(3);
         h.step(&json!({"click":{"handle":"appbar:help"}})).unwrap();
         h.step(&json!({"widget":"Workshop helper · report"})).unwrap();
         h.frames(3);
         assert!(h.app.home.open, "the Help slot opens over Home");
-        assert_eq!(h.app.plugin_menu.dialog.as_ref().unwrap().entry, "report");
+        assert_eq!(h.app.plugin_menu.dialog().unwrap().entry, "report");
         assert!(crate::scenario::handle_at("plugin_dialog:run").is_some(), "the entry dialog is drawn while Home is open");
         h.step(&json!({"click":{"handle":"plugin_dialog:cancel"}})).unwrap();
         h.frames(2);
-        assert!(h.app.plugin_menu.dialog.is_none() && h.app.home.open);
+        assert!(h.app.plugin_menu.dialogs.is_empty() && h.app.home.open);
         h.app.home.open = false;
         if let Ok(dir) = std::env::var("SOLIDCRAFT_PLUGINS_EVIDENCE") {
             let dir = std::path::PathBuf::from(dir);
@@ -4605,7 +4640,7 @@ mod app_bar_tests {
                 if (2..4).contains(&capture) {
                     crate::plugin_slots::begin(&mut h.app, "workshop-helper.measure");
                 } else if capture >= 4 {
-                    h.app.plugin_menu.dialog = None;
+                    h.app.plugin_menu.dialogs.clear();
                     h.app.ui.tab = "INSPECT".into();
                     h.ctx.data_mut(|data| data.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
                 }
@@ -4653,9 +4688,9 @@ mod app_bar_tests {
         }
         h.app.preferences.disabled_plugins.insert("workshop-helper".into());
         assert!(crate::plugin_slots::items(&h.app, crate::plugin_slots::Slot::Menu("File")).is_empty());
-        h.app.plugin_menu.dialog = None;
+        h.app.plugin_menu.dialogs.clear();
         run_file_row(&mut h.app, "workshop-helper.measure");
-        assert!(h.app.plugin_menu.dialog.is_none(), "turned-off plugins cannot open a slot dialog");
+        assert!(h.app.plugin_menu.dialogs.is_empty(), "turned-off plugins cannot open a slot dialog");
         h.app.plugin_menu.listed = crate::plugin_menu::list(&h.app, h.app.session.plugin_state.plugins_dir().as_deref());
         assert!(h.app.plugin_menu.listed[0].disabled);
         assert_eq!(h.app.plugin_menu.listed[0].entries.len(), 2, "the Plugins menu keeps all disabled entries");

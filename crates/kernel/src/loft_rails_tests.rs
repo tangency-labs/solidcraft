@@ -93,6 +93,19 @@ fn a_bulging_rail_makes_the_solid_of_revolution_of_the_rail() {
     assert!(close(v, want, 1e-4), "reversed: volume {v} vs {want}");
 }
 
+/// The end on the first section wins even when the other rail end is closer to its centroid.
+#[test]
+fn a_rail_is_oriented_by_its_first_section_not_its_centroid() {
+    let sections = [
+        (Plane { origin: Vec3::new(100.0, 0.0, 0.0), x: Vec3::X, y: Vec3::Z }, circle(100.0)),
+        (Plane { origin: Vec3::new(100.0, 27.0, 0.0), x: Vec3::X, y: Vec3::Z }, circle(75.0)),
+    ];
+    let r = [Vec3::ZERO, Vec3::new(25.0, 27.0, 0.0)];
+    let b = loft_with_rails(&sections, &[r.to_vec()], RailFit::Scale).unwrap();
+    let worst = r.iter().map(|p| off(&b, *p)).fold(0.0, f64::max);
+    assert!(worst < 1e-2, "the rail is {worst} mm off the loft");
+}
+
 /// A rail from the middle of a square's side bulging out by 5: stretching widens the squares
 /// only across to the rail (sections 2w × 10 with w = 5 + 5 sin, volume 4000 + 8000/π); scaling
 /// grows them both ways (sections (2w)², volume 6000 + 16000/π).
@@ -133,6 +146,24 @@ fn two_rails_carry_the_sections_between_them() {
     assert!(close(v, want, 1e-4), "scaled: volume {v} vs {want}");
 }
 
+/// Two rails that run 5 mm on past the last of three sections (#17238), bulging out to radius 15
+/// halfway up: they meet the last section where they cross its plane, and the loft ends there,
+/// the solid of revolution of the rails (volume 4500π + 8000), as rails that end at it make.
+#[test]
+fn rails_that_run_on_past_the_last_section_meet_it_where_they_cross_it() {
+    let want = 4500.0 * PI + 8000.0;
+    let sections = [(at(0.0), circle(10.0)), (at(20.0), circle(15.0)), (at(40.0), circle(10.0))];
+    let longer =
+        |side: f64| -> Vec<Vec3> { (0..=90).map(|i| f64::from(i) * 0.5).map(|z| Vec3::new(side * (10.0 + 5.0 * bulge(z)), 0.0, z)).collect() };
+    let b = loft_with_rails(&sections, &[longer(1.0), longer(-1.0)], RailFit::Scale).unwrap();
+    let ending = [rail(|z| 10.0 + 5.0 * bulge(z)), rail(|z| -10.0 - 5.0 * bulge(z))];
+    let ended = volume(&loft_with_rails(&sections, &ending, RailFit::Scale).unwrap());
+    assert!(close(volume(&b), want, 1e-4), "volume {} vs {want}", volume(&b));
+    assert!(close(volume(&b), ended, 1e-9), "volume {} vs {ended} with rails that end at the last section", volume(&b));
+    let m = measure(&b).unwrap();
+    assert!(m.bbox.min.z.abs() < 1e-9 && (m.bbox.max.z - 40.0).abs() < 1e-9, "{:?}", m.bbox);
+}
+
 /// A sheet lofted between two 20 mm lines with a rail from one end bulging out by 5: the lines
 /// between grow about their middles, 2(10 + 5 sin) long; area 800 + 800/π.
 #[test]
@@ -146,6 +177,29 @@ fn a_sheet_loft_of_lines_follows_its_rail() {
     assert!(worst < 1e-3, "the rail is {worst} mm off the sheet");
     assert!(close(m.area, want, 1e-3), "area {} vs {want}", m.area);
     assert!((m.bbox.max.x - 15.0).abs() < 1e-2 && (m.bbox.min.x + 15.0).abs() < 1e-2, "{:?}", m.bbox);
+}
+
+/// A section that is one straight line lies in every plane through it, so the plane of the
+/// sketch it was drawn in says nothing about the loft. Here the bow's line is drawn on XZ, the
+/// plane the keel rail lies in; the loft still follows both rails, from either end, and stays
+/// between its two sections (#4056).
+#[test]
+fn a_line_section_drawn_in_a_rails_plane_still_takes_the_rail() {
+    let stern = (
+        Plane { origin: Vec3::new(100.0, 0.0, 0.0), x: Vec3::Y, y: Vec3::Z },
+        vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(30.0, 5.0) }, Seg2::Line { a: Vec2::new(30.0, 5.0), b: Vec2::new(40.0, 20.0) }],
+    );
+    // XZ's y runs down world Z: the bow line rises from the keel to the sheer at x = 0.
+    let bow = (Plane::XZ, vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(0.0, -20.0) }]);
+    let keel: Vec<Vec3> = (0..=50).map(|i| Vec3::new(f64::from(i) * 2.0, 0.0, 0.0)).collect();
+    let sheer: Vec<Vec3> = (0..=50).map(|i| Vec3::new(f64::from(i) * 2.0, (f64::from(i) * PI / 100.0).sin() * 40.0, 20.0)).collect();
+    for sections in [[stern.clone(), bow.clone()], [bow.clone(), stern.clone()]] {
+        let b = loft_sheet_with_rails(&sections, &[keel.clone(), sheer.clone()], RailFit::Scale).unwrap();
+        let worst = keel.iter().chain(&sheer).map(|p| off(&b, *p)).fold(0.0, f64::max);
+        assert!(worst < 1e-2, "a rail is {worst} mm off the sheet");
+        let m = measure(&b).unwrap();
+        assert!(m.bbox.min.x > -1e-3 && m.bbox.max.x < 100.0 + 1e-3, "{:?}", m.bbox);
+    }
 }
 
 /// Rails the loft cannot follow are refused, saying why: one that starts off the first section,

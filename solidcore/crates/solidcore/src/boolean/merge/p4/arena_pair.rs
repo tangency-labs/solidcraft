@@ -917,6 +917,12 @@ impl ProtoBrep<H> for ArenaPair<'_> {
             .map(|e| hd(v1.b, K_EDGE, e.index()))
             .collect())
     }
+    fn raise_edge_tolerance(&mut self, k: &Kernel, edge: H, tolerance: f64) -> crate::Result<()> {
+        if edge.kind != K_EDGE {
+            return Err(invalid("not an edge handle"));
+        }
+        IntersectorBrep::set_topology_tolerance(self, k, edge, tolerance, true, true)
+    }
     fn face_coincident_edge(
         &self,
         k: &Kernel,
