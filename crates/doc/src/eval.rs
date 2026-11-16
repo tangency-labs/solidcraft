@@ -6228,6 +6228,26 @@ fn hole_drill_scope(f: &Feature) -> &[String] {
     if f.participants.iter().any(|b| b == "*") { &[] } else { &f.participants }
 }
 
+/// Where hole `f`, placed at one spot `p` (a position, or a Single hole's sketch point), starts
+/// ([`hole_on_surface`]). A spot on a face of any body starts there. Off every face, it moves along
+/// the axis only onto the bodies the hole cuts ([`hole_targets`]): a spot over an opening in its
+/// body never slides through it onto a body the hole leaves alone, such as one of another
+/// component under the opening (#17358). A body the hole cuts further along the axis still takes
+/// it. When the hole cuts every body, or none, every body counts.
+pub fn hole_start(st: &ModelState, f: &Feature, p: Vec3, dir: Vec3) -> Vec3 {
+    let anywhere = hole_on_surface(st, p, dir, &[]);
+    // `hole_on_surface` hands `p` itself back when `p` is on a face (or meets no body at all).
+    if anywhere == p {
+        return p;
+    }
+    let targets = hole_targets(st, f);
+    if targets.len() == st.bodies.len() {
+        return anywhere;
+    }
+    let scope: Vec<String> = targets.iter().map(|b| b.name.clone()).collect();
+    hole_on_surface(st, p, dir, &scope)
+}
+
 fn in_hole_scope(scope: &[String], b: &ModelBody) -> bool {
     scope.is_empty() || scope.contains(&b.name)
 }
@@ -6265,10 +6285,10 @@ fn hole_spots(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, f
         }
         _ => {
             let dir = direction.normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
-            let at = hole_on_surface(st, single_hole_position(vals, st, position, at, points)?, dir, &[]);
+            let at = hole_start(st, f, single_hole_position(vals, st, position, at, points)?, dir);
             let at = with_references(vals, st, f, at, dir, true)?;
             let dir = hole_dir_into_face(st, at, dir, hole_drill_scope(f));
-            return Ok((vec![hole_on_surface(st, at, dir, &[])], dir));
+            return Ok((vec![hole_start(st, f, at, dir)], dir));
         }
     };
     if spots.is_empty() || spots.len() > 10_000 {
@@ -6342,8 +6362,8 @@ fn hole_spots_raw(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature) 
         _ => {
             let dir = direction.normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
             let p = single_hole_position(vals, st, position, at, points)?;
-            let p = if hole_references(f).is_empty() { p } else { with_references(vals, st, f, hole_on_surface(st, p, dir, &[]), dir, false)? };
-            Ok((vec![p], hole_dir_into_face(st, hole_on_surface(st, p, dir, &[]), dir, hole_drill_scope(f))))
+            let p = if hole_references(f).is_empty() { p } else { with_references(vals, st, f, hole_start(st, f, p, dir), dir, false)? };
+            Ok((vec![p], hole_dir_into_face(st, hole_start(st, f, p, dir), dir, hole_drill_scope(f))))
         }
     }
 }
