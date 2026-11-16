@@ -453,6 +453,32 @@ fn edges_measure_between_their_exact_arcs_within_the_arcs() {
     assert!(p.dist(Vec3::new(end[0], end[1], 0.0) * (10.0 / reach) + Vec3::new(0.0, 0.0, 5.0)) < 1e-9, "{r}");
 }
 
+/// Where the kernel's exact solve can't answer for two edges, they still measure, on the display
+/// mesh, and the reply says the distance is approximate: the issue's concentric arcs (#17823),
+/// whose mesh chords run up to the chord tolerance inside the arcs, so a little under 15.
+#[test]
+fn edges_the_exact_solve_cant_answer_still_measure_marked_approximate() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [0, -20], "end": [0, 20], "through": [20, 0]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [0, -35], "end": [0, 35], "through": [35, 0]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, -20], [0, -35]]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [0, 35]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "5 mm", "operation": "new_body"}));
+    let b = body(&s);
+    let items = vec![json!({"type": "edge", "body": b, "point": [20, 0, 5]}), json!({"type": "edge", "body": b, "point": [35, 0, 5]})];
+    let r = {
+        let _failing = crate::cmd::measure_sel::forced::fail();
+        measure(&mut s, items.clone())
+    };
+    assert!(close(&r["distance_mm"], 15.0, 0.1), "{r}");
+    assert_eq!(r["closest_exact"], false, "{r}");
+    assert!(r["closest_note"].as_str().is_some_and(|n| n.starts_with("approximate")), "{r}");
+    let r = measure(&mut s, items);
+    assert!(close(&r["distance_mm"], 15.0, 1e-9) && r.get("closest_exact").is_none(), "{r}");
+}
+
 /// A cylinder's top circle is as long as its circumference, in the same reply: the length
 /// comes from the exact circle, not from the polyline drawn for it, which runs inside it
 /// (#9086, the report's own cylinder).

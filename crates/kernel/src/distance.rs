@@ -265,9 +265,10 @@ pub enum Members<'a> {
 ///
 /// # Errors
 ///
-/// [`KernelError::Failed`] when the kernel finds no closest points or refuses the solve.
+/// [`KernelError::Failed`] for a B-rep body the kernel can't take, and when the kernel finds no
+/// closest points or refuses the solve.
 pub fn edges_closest(a: &Body, edges: &[usize], b: &Body, to: Members) -> Result<Option<BodyDistance>> {
-    let (Some((ops_a, order_a)), Some((ops_b, order_b))) = (a.ops_body(), b.ops_body()) else { return Ok(None) };
+    let (Some((ops_a, order_a)), Some((ops_b, order_b))) = (exact_body(a)?, exact_body(b)?) else { return Ok(None) };
     let (faces, to_edges) = members(to);
     let mut best: Option<BodyDistance> = None;
     for &edge in edges {
@@ -287,13 +288,26 @@ pub fn edges_closest(a: &Body, edges: &[usize], b: &Body, to: Members) -> Result
 ///
 /// # Errors
 ///
-/// [`KernelError::Failed`] when the kernel finds no closest point or refuses the solve.
+/// [`KernelError::Failed`] for a B-rep body the kernel can't take, and when the kernel finds no
+/// closest point or refuses the solve.
 pub fn point_closest(p: Vec3, b: &Body, to: Members) -> Result<Option<BodyDistance>> {
-    let Some((ops_b, order_b)) = b.ops_body() else { return Ok(None) };
+    let Some((ops_b, order_b)) = exact_body(b)? else { return Ok(None) };
     let (faces, edges) = members(to);
     let c = ops_b.closest_to_point(order_b, faces, edges, [p.x, p.y, p.z]).map_err(|e| failed(&e))?;
     let c = c.ok_or_else(|| KernelError::Failed("measure: the kernel found no closest point".into()))?;
     Ok(Some(BodyDistance { distance: c.distance, from: Vec3::from(c.from), to: Vec3::from(c.to), exact: true }))
+}
+
+/// `body`'s exact B-rep for a measurement: `None` for a mesh body, whose triangles are its
+/// geometry, and an error for a B-rep body the kernel can't take, which is never measured on its
+/// display mesh instead.
+fn exact_body(body: &Body) -> Result<Option<&(solidcore_ops::Body, solidcore_ops::Order)>> {
+    if body.is_mesh() {
+        return Ok(None);
+    }
+    body.ops_body()
+        .map(Some)
+        .ok_or_else(|| KernelError::Failed("measure: exact measurement is unavailable: the kernel could not take the body".into()))
 }
 
 /// The face and edge lists of `to`.

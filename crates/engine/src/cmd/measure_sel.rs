@@ -602,11 +602,19 @@ fn closest(a: &Item, b: &Item) -> Option<(Vec3, Vec3)> {
 
 /// The closest points of two items on their bodies' exact B-reps: an edge (its curve over its own
 /// interval) against an edge, a face (as it is trimmed) or a vertex, solved by the kernel. `None`
-/// for other pairs and for a mesh body, whose triangles are its geometry.
+/// for other pairs and for a mesh body, whose triangles are its geometry; an error where the
+/// kernel can't answer for B-rep items (the caller then marks the mesh's answer approximate).
 fn exact_closest(st: &solidcraft_doc::ModelState, a: &Item, b: &Item) -> std::result::Result<Option<solidcraft_kernel::BodyDistance>, String> {
     use solidcraft_kernel::{BodyDistance, Members, edges_closest, point_closest};
     let body = |name: &str| st.body(name).map(|b| &b.body).ok_or_else(|| format!("no body named '{name}'"));
     let swap = |d: Option<BodyDistance>| d.map(|d| BodyDistance { from: d.to, to: d.from, ..d });
+    #[cfg(test)]
+    let forced_failure = forced::failing();
+    #[cfg(not(test))]
+    let forced_failure = false;
+    if forced_failure {
+        return Err("the kernel's solve was made to fail for a test".into());
+    }
     let found = match (&a.exact, &b.exact) {
         (Some(Exact::Edges { body: x, edges }), Some(Exact::Edges { body: y, edges: to })) => {
             edges_closest(body(x)?, edges, body(y)?, Members::Edges(to))
@@ -622,6 +630,35 @@ fn exact_closest(st: &solidcraft_doc::ModelState, a: &Item, b: &Item) -> std::re
         _ => Ok(None),
     };
     found.map_err(|e| e.to_string())
+}
+
+/// A forced failure of [`exact_closest`], for the measure tests: no geometry the tests can build
+/// makes the kernel's solve fail, so a test asks for it. Compiled only for tests.
+#[cfg(test)]
+pub(crate) mod forced {
+    use std::cell::Cell;
+
+    thread_local! {
+        static FAIL: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// Fails every exact closest-points solve on this thread until the guard is dropped.
+    pub(crate) struct Failing;
+
+    impl Drop for Failing {
+        fn drop(&mut self) {
+            FAIL.with(|f| f.set(false));
+        }
+    }
+
+    pub(crate) fn fail() -> Failing {
+        FAIL.with(|f| f.set(true));
+        Failing
+    }
+
+    pub(super) fn failing() -> bool {
+        FAIL.with(Cell::get)
+    }
 }
 
 /// Two straight edges sharing exactly one end define rays away from that corner. Their
@@ -752,9 +789,15 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
             out.set_closest(d, p, q);
         }
         // Edges, faces and vertices of B-rep bodies come nearest where their exact curves and
-        // surfaces do, not where the display mesh's chords and triangles do (#17823).
-        if let Some(e) = exact_closest(&world, a, b).map_err(|e| bad(cmd, e))? {
-            out.set_closest(e.distance, e.from, e.to);
+        // surfaces do, not where the display mesh's chords and triangles do (#17823). Where the
+        // kernel's solve can't answer, the mesh's closest points stand, marked approximate.
+        match exact_closest(&world, a, b) {
+            Ok(Some(e)) => out.set_closest(e.distance, e.from, e.to),
+            Ok(None) => {}
+            Err(e) => {
+                out.closest_exact = Some(false);
+                out.closest_note = Some(format!("approximate, from the display mesh: {e}"));
+            }
         }
         let unbounded = |i: usize| matches!(sels.get(i), Some(Sel::Plane { .. } | Sel::Axis { .. }));
         if let Some((d, p, q)) = exact_min(&a.shape, &b.shape, near.map(|(p, _)| p), (unbounded(0), unbounded(1)))
