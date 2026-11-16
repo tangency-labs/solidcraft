@@ -4661,3 +4661,118 @@ fn a_section_views_letter_is_given() {
     }
     assert_eq!(letters, ["A", "B"]);
 }
+
+/// A 40 x 40 x 20 mm block from the origin with an M8 tapped hole down from the middle of its top:
+/// drilled Ø6.8 16 deep, threaded 12 deep. At 1:1 the block's centre is the A3 sheet's (210, 148.5),
+/// so from above the hole is round it, and from the front its top is at y = 158.5 on the sheet.
+fn tapped_block() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.hole", json!({"position": [20, 20, 20], "direction": [0, 0, -1], "thread": "M8", "depth": 16, "thread_depth": 12}));
+    s
+}
+
+/// Every segment of `v`'s thread pieces of `stroke` at `visibility`, on the sheet.
+fn thread_segs(v: &Value, stroke: &str, visibility: &str) -> Vec<Value> {
+    let pieces = v["threads"].as_array().into_iter().flatten().flat_map(|t| t["pieces"].as_array().into_iter().flatten());
+    let wanted = pieces.filter(|p| p["stroke"] == stroke && p["visibility"] == visibility);
+    wanted.flat_map(|p| p["path"].as_array().into_iter().flatten().cloned()).collect()
+}
+
+/// A line segment's ends, top first.
+fn top_first(seg: &Value) -> (Vec2, Vec2) {
+    let (a, b) = (point(&seg["a"]), point(&seg["b"]));
+    if a.y >= b.y { (a, b) } else { (b, a) }
+}
+
+/// From above, the M8 tapped hole draws its root as a thin three-quarter arc of radius 4.0 round
+/// the hole's centre, from 90° round to 360°, so its gap is the upper right quadrant: the Ø6.8 drill
+/// is the circle the view draws already.
+#[test]
+fn a_tapped_holes_root_is_a_three_quarter_arc_seen_from_above() {
+    let mut s = tapped_block();
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1"}));
+    let schema = output_schema_for::<SnapshotResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &v), "{v}");
+    let roots = thread_segs(&v, "root", "visible");
+    assert_eq!(roots.len(), 1, "{v}");
+    let arc = &roots[0];
+    assert_eq!(arc["type"], "arc", "{arc}");
+    assert!(point(&arc["center"]).dist(Vec2::new(210.0, 148.5)) < 1e-6, "{arc}");
+    let (radius, start, sweep) = (arc["radius"].as_f64().unwrap(), arc["start"].as_f64().unwrap(), arc["sweep"].as_f64().unwrap());
+    assert!(
+        (radius - 4.0).abs() < 1e-6 && (start - std::f64::consts::FRAC_PI_2).abs() < 1e-6 && (sweep - 3.0 * std::f64::consts::FRAC_PI_2).abs() < 1e-6,
+        "{arc}"
+    );
+    assert!(thread_segs(&v, "limit", "visible").is_empty() && thread_segs(&v, "limit", "hidden").is_empty(), "end on, no limit line: {v}");
+    assert!(arcs(&v, "visible").iter().any(|(c, r, ..)| c.dist(Vec2::new(210.0, 148.5)) < 1e-6 && (r - 3.4).abs() < 1e-6), "the drill: {v}");
+}
+
+/// From the front, with hidden lines drawn, the hole's thread is hidden: two dashed root lines 8.0
+/// apart, each 12.0 long down from the top, and a limit line 8.0 long across at 12 deep, where the
+/// thread stops in its 16 mm hole. With hidden lines left out, the thread draws nothing.
+#[test]
+fn a_tapped_holes_thread_is_hidden_from_the_side() {
+    let mut s = tapped_block();
+    let v = snap(&mut s, json!({"scale": "1:1", "visual_style": "visible_hidden"}));
+    let mut roots: Vec<(Vec2, Vec2)> = thread_segs(&v, "root", "hidden").iter().map(top_first).collect();
+    roots.sort_by(|p, q| p.0.x.total_cmp(&q.0.x));
+    assert_eq!(roots.len(), 2, "{v}");
+    for ((top, bottom), x) in roots.iter().zip([206.0, 214.0]) {
+        assert!(top.dist(Vec2::new(x, 158.5)) < 1e-6 && bottom.dist(Vec2::new(x, 146.5)) < 1e-6, "{top:?} {bottom:?} {v}");
+    }
+    let limits: Vec<(Vec2, Vec2)> = thread_segs(&v, "limit", "hidden").iter().map(top_first).collect();
+    assert_eq!(limits.len(), 1, "{v}");
+    let (a, b) = limits[0];
+    assert!(
+        (a.dist(b) - 8.0).abs() < 1e-6 && (a.y - 146.5).abs() < 1e-6 && (b.y - 146.5).abs() < 1e-6 && ((a.x + b.x) / 2.0 - 210.0).abs() < 1e-6,
+        "{v}"
+    );
+    assert!(thread_segs(&v, "root", "visible").is_empty() && thread_segs(&v, "limit", "visible").is_empty(), "{v}");
+    let v = snap(&mut s, json!({"scale": "1:1"}));
+    assert_eq!(v["threads"], json!([]), "{v}");
+}
+
+/// A tapped block drawn from the mesh (a mesh cube stands in front of its lower right corner, clear
+/// of the hole) still draws its thread: two hidden root lines 8.0 apart, each 12.0 long, and a limit
+/// line 8.0 long across their lower ends. The thread lines pair with the mesh's crest lines as with
+/// exact ones.
+#[test]
+fn a_tapped_block_drawn_from_the_mesh_draws_its_thread() {
+    let mut s = tapped_block();
+    with_mesh_cube(&mut s, [30.0, -30.0, -10.0], "tapped");
+    let v = snap(&mut s, json!({"scale": "1:1", "visual_style": "visible_hidden"}));
+    assert_eq!(v["status"]["provenance"], "mesh_projection", "{v}");
+    let mut roots: Vec<(Vec2, Vec2)> = thread_segs(&v, "root", "hidden").iter().map(top_first).collect();
+    roots.sort_by(|p, q| p.0.x.total_cmp(&q.0.x));
+    assert_eq!(roots.len(), 2, "{v}");
+    let (left, right) = (roots[0], roots[1]);
+    assert!((right.0.x - left.0.x - 8.0).abs() < 1e-6 && (left.0.y - right.0.y).abs() < 1e-6, "{roots:?}");
+    assert!(roots.iter().all(|(top, bottom)| (top.x - bottom.x).abs() < 1e-6 && (top.y - bottom.y - 12.0).abs() < 1e-6), "{roots:?}");
+    let limits: Vec<(Vec2, Vec2)> = thread_segs(&v, "limit", "hidden").iter().map(top_first).collect();
+    assert_eq!(limits.len(), 1, "{v}");
+    let (a, b) = limits[0];
+    assert!((a.dist(b) - 8.0).abs() < 1e-6 && (a.y - left.1.y).abs() < 1e-6 && (b.y - left.1.y).abs() < 1e-6, "{limits:?} {roots:?}");
+}
+
+/// An M8 shaft threaded 10 mm down from its top, seen from the side: its root lines are thin and
+/// seen, at the minor radius a modelled M8 is cut to (4 - 5H/8 for H = 1.25 √3 / 2), 10 long; a
+/// limit line goes across where the thread stops, and none at the free end, where the shaft's own
+/// edge is drawn.
+#[test]
+fn a_shafts_thread_is_seen_from_the_side() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 20, "body_name": "Shaft"}));
+    run(&mut s, "solid.thread", json!({"face": [4, 0, 10], "designation": "M8", "length": 10, "from": [4, 0, 20]}));
+    let v = snap(&mut s, json!({"scale": "1:1"}));
+    let minor = 4.0 - 5.0 * (1.25 * 3f64.sqrt() / 2.0) / 8.0;
+    let mut roots: Vec<(Vec2, Vec2)> = thread_segs(&v, "root", "visible").iter().map(top_first).collect();
+    roots.sort_by(|p, q| p.0.x.total_cmp(&q.0.x));
+    assert_eq!(roots.len(), 2, "{v}");
+    for ((top, bottom), x) in roots.iter().zip([210.0 - minor, 210.0 + minor]) {
+        assert!(top.dist(Vec2::new(x, 158.5)) < 1e-6 && bottom.dist(Vec2::new(x, 148.5)) < 1e-6, "{top:?} {bottom:?} {v}");
+    }
+    let limits: Vec<(Vec2, Vec2)> = thread_segs(&v, "limit", "visible").iter().map(top_first).collect();
+    assert_eq!(limits.len(), 1, "{v}");
+    assert!((limits[0].0.y - 148.5).abs() < 1e-6 && (limits[0].0.dist(limits[0].1) - 8.0).abs() < 1e-6, "{v}");
+}

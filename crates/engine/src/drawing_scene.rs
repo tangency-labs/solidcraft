@@ -74,7 +74,7 @@ use solidcraft_doc::drawing::note::{Anchor, Note};
 use solidcraft_doc::drawing::view::{FlatOf, ResolvedView, View};
 use solidcraft_doc::drawing::{Drawing, Sheet, Updates};
 use solidcraft_doc::drawing_view::TangentEdges;
-use solidcraft_doc::{DocError, Document, ModelState, ids};
+use solidcraft_doc::{DocError, Document, ModelState, ThreadInfo, ids};
 use solidcraft_geom::cell::{Part, Projection};
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::hlr::Source;
@@ -695,7 +695,7 @@ fn draw(
             let pictures = picture_items(id, &view_parts(&set, styles), rect);
             // The pictures go under the strokes, so the owners start with one empty entry for each.
             let owner = |at: usize| lines.lines.get(at).map(|line| (line.shown, line.source));
-            let items = std::iter::repeat_n(None, pictures.len()).chain(drew.into_iter().map(owner)).collect();
+            let items = std::iter::repeat_n(None, pictures.len()).chain(drew.into_iter().map(|at| at.and_then(owner))).collect();
             group.items.splice(0..0, pictures);
             if group.records() > MAX_RECORDS {
                 return none(Status::Failed(format!("its lines are more than a paper scene's {MAX_RECORDS} records: choose a smaller scale")));
@@ -1411,19 +1411,24 @@ pub struct Cache {
 }
 
 /// What a view's lines show: each body of the world state by the occurrences that place it, its
-/// definition's body name, whether it is a reference, and its geometry where it stands. A world state
+/// definition's body name, whether it is a reference, its geometry where it stands, and its cosmetic
+/// threads (which change no geometry, yet draw lines of their own). A world state
 /// with the same draws the same lines, so an appearance, or an edit taken back, draws nothing. It
 /// keys the whole set, not a view's own bodies: which bodies share a mesh, so the lines' last bits,
 /// hangs on all of them ([`crate::mesh_lines`]).
 #[derive(Debug, PartialEq)]
-pub(crate) struct SourceKey(Vec<(Vec<u64>, String, bool, u64)>);
+pub(crate) struct SourceKey(Vec<(Vec<u64>, String, bool, u64, Vec<ThreadInfo>)>);
 
 impl SourceKey {
     /// None when there is nothing to show, or a body's geometry has no key: a view drawn from it
     /// always draws again.
     fn of(shown: &std::result::Result<ShownSet, Unmeasured>) -> Option<Arc<SourceKey>> {
         let set = shown.as_ref().ok()?;
-        let body = |one: &Shown| Some((one.path.clone(), one.body.clone(), one.reference, set.body(one)?.geometry_key()?));
+        let body = |one: &Shown| {
+            let body = set.body(one)?;
+            let threads = set.state.threads.iter().filter(|t| t.body == body.name).cloned().collect();
+            Some((one.path.clone(), one.body.clone(), one.reference, body.geometry_key()?, threads))
+        };
         set.bodies.iter().map(body).collect::<Option<Vec<_>>>().map(|bodies| Arc::new(SourceKey(bodies)))
     }
 }

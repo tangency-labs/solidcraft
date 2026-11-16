@@ -3677,3 +3677,76 @@ fn a_rule_change_draws_the_flat_view_again() {
     settled(&mut s, sheet);
     assert!(extract(&mut s, sheet).unwrap().stale.is_empty());
 }
+
+/// [`front_and_top`]'s block with a hole drilled Ø6.8 16 deep down from the middle of its top, and an
+/// M8 cosmetic thread 12 deep in it (the feature `Tap`): a thread of its own, so editing it changes
+/// no geometry.
+fn tapped_front_and_top() -> (Session, u64, [u64; 2]) {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.hole", json!({"position": [50, 25, 20], "direction": [0, 0, -1], "diameter": 6.8, "depth": 16}));
+    run(&mut s, "solid.thread", json!({"face": [53.4, 25, 15], "designation": "M8", "length": 12, "from": [53.4, 25, 20], "name": "Tap"}));
+    front_and_top_of(s)
+}
+
+/// The arcs of `group`'s strokes of `radius` (paper millimetres).
+fn arcs_of(group: &Group, radius: f64) -> usize {
+    let segs = group.items.iter().filter_map(|item| match item {
+        Item::Stroke { path, .. } => Some(path),
+        _ => None,
+    });
+    segs.flatten().filter(|seg| matches!(seg, Seg2::Arc { radius: r, .. } if (r - radius).abs() < 1e-9)).count()
+}
+
+/// A sheet's view draws a cosmetic thread's lines as its snapshot does: from the front, hidden
+/// (two root lines and the limit line, dashed); from above, the root's three-quarter arc, radius 2
+/// on paper at 1:2. Changing only the thread's depth draws the front view again, with its limit line
+/// moved, though the block's geometry is the same.
+#[test]
+fn a_views_threads_draw_as_its_snapshot_does_and_follow_the_thread() {
+    let (mut s, sheet, [front, top]) = tapped_front_and_top();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"visual_style": "visible_hidden"}}));
+    let scene = settled(&mut s, sheet).scene;
+    let group = |scene: &Scene, id: u64| scene.groups.iter().find(|g| g.object == id).unwrap().clone();
+    let ours = group(&scene, front);
+    assert_eq!(arcs_of(&group(&scene, top), 2.0), 1, "{:?}", group(&scene, top));
+    let dashed = ours.items.iter().filter(|item| matches!(item, Item::Stroke { pattern: Some(_), .. })).count();
+    // The drill's two sides and its floor, its cone's two sides, and the thread's three lines.
+    assert!(dashed >= 6, "{ours:?}");
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    let p = json!({"view": "front", "scale": "1:2", "position_mm": [150, 150], "scene": true, "visual_style": "visible_hidden"});
+    let v = run(&mut s, "drawing.view.snapshot", p);
+    let snapped: Scene = serde_json::from_value(v["scene"].clone()).unwrap();
+    assert!(same_within(&ours, &snapped.groups[0], 1e-9), "{ours:?} {:?}", snapped.groups[0]);
+    assert_eq!(v["threads"].as_array().map(Vec::len), Some(1), "{v}");
+    let geometry = s.world_state().unwrap().bodies[0].geometry_key();
+    run(&mut s, "timeline.edit", json!({"feature": "Tap", "set": {"length": "8"}}));
+    assert_eq!(s.world_state().unwrap().bodies[0].geometry_key(), geometry, "a cosmetic thread changes no geometry");
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    let moved = group(&settled(&mut s, sheet).scene, front);
+    assert_ne!(bytes_of(&moved), bytes_of(&ours), "the limit line moves with the thread");
+    run(&mut s, "drawing.close", json!({}));
+    let v = run(
+        &mut s,
+        "drawing.view.snapshot",
+        json!({"view": "front", "scale": "1:2", "position_mm": [150, 150], "scene": true, "visual_style": "visible_hidden"}),
+    );
+    let snapped: Scene = serde_json::from_value(v["scene"].clone()).unwrap();
+    assert!(same_within(&moved, &snapped.groups[0], 1e-9), "{moved:?} {:?}", snapped.groups[0]);
+}
+
+/// Two placements of a tapped plate each draw their own thread: two root arcs from above.
+#[test]
+fn each_placement_of_a_tapped_part_draws_its_thread() {
+    let mut s = Session::default();
+    let plate = run(&mut s, "component.create", json!({"name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "body_name": "PlateBody"}));
+    run(&mut s, "solid.hole", json!({"position": [20, 20, 10], "direction": [0, 0, -1], "thread": "M8", "depth": 8}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.copy", json!({"component": plate["component"], "translate": [60, 0, 0]}));
+    let (mut s, sheet, [_, top]) = front_and_top_of(s);
+    let scene = settled(&mut s, sheet).scene;
+    let top = scene.groups.iter().find(|g| g.object == top).unwrap();
+    assert_eq!(arcs_of(top, 2.0), 2, "{top:?}");
+}
