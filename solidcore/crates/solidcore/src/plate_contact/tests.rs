@@ -597,7 +597,6 @@ fn the_pair_is_a_joint_a_skip_or_not_square() {
     ];
     match pair(touch, &tilted, Vec3::Z, 60.0, TOL, |m| Ok(strip(m))).unwrap() {
         Err(PairSkip::NotSquare(Some(deg))) => assert!((deg - 85.0).abs() < 1e-9, "{deg}"),
-        ),
         other => panic!("{other:?}"),
     }
 }
