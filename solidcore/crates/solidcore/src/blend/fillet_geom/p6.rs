@@ -2788,24 +2788,14 @@ impl FilletBrep {
                     }
                     pieces.push((index, bin2));
                 }
-                // No candidate piece (a rail whose edge uses lie on none of the faces the
-                // main rail names, as a rollover's other rail can): nothing is chosen and
-                // nothing deleted, as before. Otherwise the fillet's side at the rail is the
-                // chord to the other rail, square to this one ([`fillet_side_at_rail`]), not
-                // the fillet face's binormal; no point on the other rail (the pseudo B-rep's
-                // rails run the whole fillet) or no piece on the chord's side (the chord
-                // square to the face: faces tangent along the edge) is a defect, never a
-                // size that would build.
-                let inside = if pieces.is_empty() {
-                    None
-                } else {
-                    let defect = || SolidError::blend(OP_TRIM, BlendFailure::StageFailed);
-                    let side = self
+                // The fillet's side at the rail is the chord to the other rail, square to
+                // this one ([`fillet_side_at_rail`]), not the fillet face's binormal; it is
+                // looked for only where there are pieces to choose from ([`chosen_piece`]).
+                let inside = chosen_piece(&pieces, || {
+                    Ok(self
                         .other_rail_point(k, geom, ii, mid_pnt)?
-                        .and_then(|o| fillet_side_at_rail(mid_pnt, fillet_eval.tangent, o))
-                        .ok_or_else(defect)?;
-                    Some(inside_piece(side, &pieces).ok_or_else(defect)?)
-                };
+                        .and_then(|o| fillet_side_at_rail(mid_pnt, fillet_eval.tangent, o)))
+                })?;
                 // (a loop, not a lookup, so the marking below keeps upstream's shape)
                 for (index, &eu) in edgeuses.iter().enumerate().step_by(2) {
                     // The inside piece (and all Faces connected to it) get marked for
@@ -3107,6 +3097,27 @@ pub(crate) fn inside_piece(side: Vec3, pieces: &[(usize, Vec3)]) -> Option<usize
         }
     }
     inside
+}
+
+/// The piece the trim deletes along a rail, of `pieces` ([`inside_piece`]), with the
+/// fillet's `side` there asked for only when there is a piece to choose.
+///
+/// No candidate piece (a rail whose edge uses lie on none of the faces the main rail names,
+/// as a rollover's other rail can) chooses none and deletes none, as before the chord rule;
+/// `side` is not asked. Otherwise no side (no point on the other rail: the pseudo B-rep's
+/// rails run the whole fillet) or no piece on that side (the chord square to the
+/// face: faces tangent along the edge) is a defect, `BlendFailure::StageFailed`, never a
+/// size that would build.
+fn chosen_piece(
+    pieces: &[(usize, Vec3)],
+    side: impl FnOnce() -> Result<Option<Vec3>>,
+) -> Result<Option<usize>> {
+    if pieces.is_empty() {
+        return Ok(None);
+    }
+    let defect = || SolidError::blend(OP_TRIM, BlendFailure::StageFailed);
+    let side = side()?.ok_or_else(defect)?;
+    Ok(Some(inside_piece(side, pieces).ok_or_else(defect)?))
 }
 
 #[cfg(test)]
@@ -4092,5 +4103,24 @@ mod tests {
             fillet_side_at_rail(at, Vec3::new(0.0, 0.0, 0.0), Point3::new(1.0, 0.0, 0.0)),
             None
         );
+    }
+
+    /// A rail with no candidate piece (a rollover's other rail whose edge uses lie on none of
+    /// the main rail's faces) chooses none and deletes none, as before the chord rule, and
+    /// never asks for the side, so it neither fails nor looks for the other rail. With pieces,
+    /// a missing side or no piece on it is `StageFailed`; a side picks its piece.
+    #[test]
+    fn a_rail_with_no_candidate_piece_deletes_none_and_does_not_fail() {
+        let never = || -> Result<Option<Vec3>> { panic!("the side was asked for no piece") };
+        assert_eq!(chosen_piece(&[], never).unwrap(), None);
+
+        let pieces = [(0, INTO), (2, -INTO)];
+        let no_side = chosen_piece(&pieces, || Ok(None)).unwrap_err();
+        assert_eq!(no_side.blend_failure(), Some(&BlendFailure::StageFailed));
+        let square = Vec3::new(0.0, 1.0, 0.0);
+        let no_piece = chosen_piece(&pieces, || Ok(Some(square))).unwrap_err();
+        assert_eq!(no_piece.blend_failure(), Some(&BlendFailure::StageFailed));
+        assert_eq!(chosen_piece(&pieces, || Ok(Some(INTO))).unwrap(), Some(0));
+        assert_eq!(chosen_piece(&pieces, || Ok(Some(-INTO))).unwrap(), Some(2));
     }
 }
