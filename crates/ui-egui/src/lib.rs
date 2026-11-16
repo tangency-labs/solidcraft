@@ -1819,6 +1819,9 @@ impl SolveApp {
                 if id == "sketch.move" {
                     released_status(self, language, v);
                 }
+                if id == "occurrence.ground" {
+                    unground_joint_status(self, language, v);
+                }
                 if id == "file.new" {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);
@@ -4177,6 +4180,30 @@ fn released_status(app: &mut SolveApp, language: solidcraft_ui_text::Locale, v: 
     let msg = language.format(id, &[("count", &count), ("names", &names.join(", "))]);
     app.set_status(msg, false);
     app.status_undo = true;
+}
+
+/// Grounding succeeds even when a joint has lost its origin or conflicts with another joint.
+/// Keep every reported issue in Messages without treating an unchanged placement as a failure.
+fn unground_joint_status(app: &mut SolveApp, language: solidcraft_ui_text::Locale, v: &Value) {
+    use i18n::LocaleNames;
+
+    if v.get("grounded").and_then(Value::as_bool) != Some(false) {
+        return;
+    }
+    let Some(id) = v.get("occurrence").and_then(Value::as_u64) else { return };
+    let occurrence = app.session.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.clone()).unwrap_or_else(|| id.to_string());
+    let occurrence = language.given_name(&occurrence);
+    for problem in ["errors", "conflicts"].iter().filter_map(|key| v.get(key).and_then(Value::as_array)).flatten() {
+        let (Some(joint), Some(reason)) = (problem.get("name").and_then(Value::as_str), problem.get("why").and_then(Value::as_str)) else {
+            continue;
+        };
+        let msg = language.format(
+            "joint.unground_issue",
+            &[("occurrence", &occurrence), ("joint", &language.given_name(joint)), ("reason", &language.diagnostic(reason))],
+        );
+        app.session.echo(msg.clone());
+        app.set_status(msg, false);
+    }
 }
 
 /// An edit in place command's result, saying when it waits for the end of the agent's turn.

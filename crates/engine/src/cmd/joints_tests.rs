@@ -274,6 +274,56 @@ fn two_cubes() -> Session {
 }
 
 #[test]
+fn unground_reports_a_joint_whose_origin_was_removed() {
+    let mut s = two_cubes();
+    let b = occ(&s, "B");
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
+    run(&mut s, "solid.box", json!({"length": 6, "width": 6, "height": 3, "corner": [22, 2, -2], "operation": "join", "name": "Foot"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let joint = run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "name": "Foot joint", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, -2]}}),
+    )["joint"]
+        .clone();
+    run(&mut s, "timeline.suppress", json!({"feature": "Foot"}));
+    let before = s.doc.occurrences.iter().find(|o| o.id == b).unwrap().transform;
+    let reply = run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": false}));
+    assert_eq!(reply["grounded"], false);
+    assert_eq!(reply["errors"][0]["joint"], joint, "{reply}");
+    assert_eq!(reply["errors"][0]["name"], "Foot joint", "{reply}");
+    assert!(reply["errors"][0]["why"].as_str().unwrap().contains("no longer exists"), "{reply}");
+    assert_eq!(reply["moved"], json!([]), "{reply}");
+    assert_eq!(reply["transform"], json!(before), "{reply}");
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == b).unwrap().transform, before);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.occurrences.iter().find(|o| o.id == b).unwrap().grounded);
+}
+
+#[test]
+fn unground_reports_the_solved_placement_and_moves() {
+    let mut s = two_cubes();
+    let b = occ(&s, "B");
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
+    run(&mut s, "joint.create", json!({"type": "rigid", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 0]}}));
+    super::solve_counts::take();
+    let reply = run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": false}));
+    assert_eq!(reply["moved"], json!(["B:1"]), "{reply}");
+    assert_eq!(reply["errors"], json!([]), "{reply}");
+    assert_eq!(reply["conflicts"], json!([]), "{reply}");
+    assert_eq!(reply["transform"], json!(s.doc.occurrences.iter().find(|o| o.id == b).unwrap().transform));
+    assert!(near(place(&s, "B", Vec3::new(25., 5., 0.)), Vec3::new(5., 5., 10.)));
+    assert_eq!(super::solve_counts::take(), (1, 0), "unground and refresh share one placement solve");
+    // An already placed part does not need to move. That is not a failed placement.
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
+    let settled = run(&mut s, "occurrence.ground", json!({"occurrence": b}));
+    assert_eq!(settled["moved"], json!([]), "{settled}");
+    assert_eq!(settled["errors"], json!([]), "{settled}");
+    assert_eq!(settled["conflicts"], json!([]), "{settled}");
+    assert_eq!(settled["transform"], reply["transform"]);
+}
+
+#[test]
 fn slider_limits_clamp() {
     let mut s = two_cubes();
     // B's bottom face onto A's top face (faces meet), sliding along their common normal.

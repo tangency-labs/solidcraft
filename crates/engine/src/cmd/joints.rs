@@ -335,7 +335,7 @@ fn response_analysis(p: &Value) -> joints::Analysis {
 }
 
 /// A solve's answer; `quiet: true` in the command's params leaves out the per-occurrence lists.
-fn solve_report(sol: &joints::Solution, p: &Value) -> SolveReport {
+pub(super) fn solve_report(sol: &joints::Solution, p: &Value) -> SolveReport {
     let problems = |list: &[(u64, String, String)]| -> Vec<JointProblem> {
         list.iter().map(|(joint, name, why)| JointProblem { joint: *joint, name: name.clone(), why: why.clone() }).collect()
     };
