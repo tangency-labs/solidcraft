@@ -919,8 +919,8 @@ impl Cone {
         let mut nurb_z_axis = center_top - center_bot;
         let height = nurb_z_axis.length();
 
-        // not a cone - height of cone is degenerate (cone is a disk)
-        if height < EFF_ZERO_SQRT {
+        // A shallow cone is not degenerate when its radial span is nondegenerate.
+        if height < EFF_ZERO || height.max((top.radius - bot.radius).abs()) < EFF_ZERO_SQRT {
             return Ok(None);
         }
         nurb_z_axis = nurb_z_axis.unitize_or_z();
@@ -2149,6 +2149,32 @@ mod tests {
             assert!((found.top_radius() - cone.top_radius()).abs() < 1e-9);
             assert_eq!(found.rev().swap_uv(), swap);
         }
+    }
+
+    #[test]
+    fn nearly_flat_cone_keeps_its_analytic_parametrisation() {
+        use crate::surface::implicit::AnalyticSupport;
+        use crate::surface::surface::Surface;
+
+        let k = kernel();
+        for (swap, inside) in [(false, false), (true, false), (false, true), (true, true)] {
+            for top in [1.95, 2.05] {
+                let cone = canonical(&k, 2.0, top, 5.0e-7, swap, inside);
+                let form = cone.rev().base();
+                let found = Cone::is_nurb_surface_cone(&k, form, 1.0)
+                    .unwrap()
+                    .expect("a shallow cone is still a cone");
+                assert!((found.bot_radius() - cone.bot_radius()).abs() < 1e-12);
+                assert!((found.top_radius() - cone.top_radius()).abs() < 1e-12);
+                assert_eq!(found.rev().swap_uv(), swap);
+                let support = AnalyticSupport::of(&Surface::from(cone.clone())).unwrap();
+                support.build(&k, form.copy()).unwrap();
+            }
+        }
+        let tiny = canonical(&k, 2.0e-6, 2.5e-6, 8.0e-7, false, false);
+        assert!(Cone::is_nurb_surface_cone(&k, tiny.rev().base(), 1.0)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
