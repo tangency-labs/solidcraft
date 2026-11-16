@@ -152,7 +152,8 @@ impl GlbMaterial {
             if let Some((ior, nm)) = glass.film.filter(|(i, t)| i.is_finite() && *i >= 1.0 && t.is_finite() && *t >= 0.0) {
                 extensions.insert(
                     "KHR_materials_iridescence".into(),
-                    json!({"iridescenceFactor": 1.0, "iridescenceIor": ior, "iridescenceThicknessMinimum": nm, "iridescenceThicknessMaximum": nm}),
+                    // Without a thickness texture glTF reads the maximum alone.
+                    json!({"iridescenceFactor": 1.0, "iridescenceIor": ior, "iridescenceThicknessMaximum": nm}),
                 );
             }
         }

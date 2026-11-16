@@ -457,10 +457,7 @@ fn closed_glass_writes_transmission_volume_dispersion_and_film() {
     near(x["KHR_materials_volume"]["attenuationDistance"].as_f64().unwrap(), 0.01);
     assert_eq!(x["KHR_materials_volume"]["attenuationColor"], json!([1.0, (-0.5f64).exp(), (-1.0f64).exp()]));
     assert_eq!(x["KHR_materials_dispersion"], json!({"dispersion": 0.5}));
-    assert_eq!(
-        x["KHR_materials_iridescence"],
-        json!({"iridescenceFactor": 1.0, "iridescenceIor": 1.38, "iridescenceThicknessMinimum": 300.0, "iridescenceThicknessMaximum": 300.0})
-    );
+    assert_eq!(x["KHR_materials_iridescence"], json!({"iridescenceFactor": 1.0, "iridescenceIor": 1.38, "iridescenceThicknessMaximum": 300.0}));
     let used: Vec<&str> = doc["extensionsUsed"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
     assert_eq!(
         used,
