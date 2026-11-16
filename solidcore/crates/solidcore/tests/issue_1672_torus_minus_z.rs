@@ -10,8 +10,8 @@
 //!   measures the interval signed.
 //! - The rebuilt major radius is 14 less a few ulps, so the horn torus is a spindle by
 //!   rounding. Upstream's check then clears its result with no report (WR-539). The
-//!   fix is `fixes.torus_check_spindle_apex`: the apexes at V = +-(90 + asin(R/r)) lie
-//!   outside -90..90.
+//!   port's spindle check (always on) tests the apexes at V = +-(90 + asin(R/r)), which
+//!   lie outside -90..90.
 //!
 //! About +z nothing is swapped and the body is valid either way.
 
@@ -37,7 +37,6 @@ const EXPECTED_VOLUME: f64 = 28_932.176_098_892_29;
 fn fixed_kernel() -> Kernel {
     let mut k = Kernel::default();
     k.fixes.revolve_analytic_profile_faces = true;
-    k.fixes.torus_check_spindle_apex = true;
     k
 }
 

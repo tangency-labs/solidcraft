@@ -66,7 +66,7 @@
 //!   `RailEdgeuseIntersect` widens a straight side edge's parameter interval on a planar
 //!   base surface past both ends (`run_side_edge_on_along_its_line`, the fork's
 //!   tangency-labs/smlib@6e77631), past the end away from the filleted edge's vertex
-//!   only (WR-643, the fork's tangency-labs/smlib@7224896). With `fixes.fillet_run_on_bspline_trims` too, a widened
+//!   only (WR-643, the fork's tangency-labs/smlib@7224896). A widened
 //!   side edge's B-spline UV trim (its local copy) evaluates out of bounds, so it runs on
 //!   along its line as a line trim does instead of clamping to its ends
 //!   (`continue_bspline_trim_past_its_ends`, WR-654, #1981). With far-end-only (and WR-600,
@@ -649,7 +649,7 @@ fn line_in_domain(
     Ok((reach([a.x, a.y], -1.0), reach([c.x, c.y], 1.0)))
 }
 
-/// Opt-in (`fixes.fillet_run_on_bspline_trims`, WR-654, #1981), not upstream: turns
+/// Not upstream (WR-654, #1981): turns
 /// on out-of-bounds evaluation of a side edge's B-spline UV trim that
 /// [`run_side_edge_on_along_its_line`] widened, so the solve finds a point of its line
 /// past its ends, as on a line trim (whose evaluation is never clamped). An
@@ -2144,11 +2144,11 @@ impl FilletSolver {
                     ops.solver(),
                     &mut intervals,
                 )?;
-                // Opt-in (`fixes.fillet_run_on_bspline_trims`, WR-654, #1981): a B-spline
-                // trim clamps to its ends, so the widened interval reached no point of
-                // its line past them; a line trim on the other wall did, and the two
-                // rails' ends at the side vertex fell apart.
-                if widened && k.fixes.fillet_run_on_bspline_trims {
+                // Not upstream (WR-654, #1981): a B-spline trim clamps to its ends, so
+                // the widened interval reached no point of its line past them; a line
+                // trim on the other wall did, and the two rails' ends at the side vertex
+                // fell apart.
+                if widened {
                     continue_bspline_trim_past_its_ends(&mut uv_trim);
                 }
             }
@@ -3489,7 +3489,7 @@ mod tests {
     /// WR-654 (#1981): a side edge's degree-1 B-spline UV trim clamps the parameter to
     /// its natural interval, so past its start it gives the start point, where a line
     /// trim runs on; `continue_bspline_trim_past_its_ends` (what `RailEdgeuseIntersect`
-    /// applies to its copy of a widened trim with `fillet_run_on_bspline_trims`) makes it
+    /// applies to its copy of a widened trim) makes it
     /// run on along its line past both ends, and leaves its points inside and a line
     /// trim as they were.
     #[test]
