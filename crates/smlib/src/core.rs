@@ -147,7 +147,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ellipse_step_interval_checks = true;
     f.corner_patch_face_side_twist = true;
     f.boolean_union_refuses_solid_leak = true;
-    f.offset_swap_uv_extended_distance = true;
     f.validation_does_not_make_uv_trims = true;
     f.proto_edge_split_upper_keeps_the_old_max = true;
     f.point_on_start_point_squared_tolerance = true;
@@ -155,8 +154,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_exact_round_classes = true;
     f.offset_edges_keep_source_tolerance = true;
     f.surface_continuity_checks_last_v_knot = true;
-    f.volume_lift_third_derivative_terms = true;
-    f.volume_representational_end_continuities = true;
     f.offset_open_edge_second_trim_point = true;
     f.ssi_split_curves_at_singular_points = true;
     f.surface_parallel_to_vector_checks = true;
@@ -519,6 +516,18 @@ mod tests {
         for name in HELD_BACK {
             assert!(flags.contains(&(*name, false)), "{name} is on or gone: drop it from HELD_BACK");
         }
+    }
+
+    /// solidcore's tests and kernel rig read this preset from `kernel_cases/fixes.json`: the file
+    /// names exactly the flags `fixes()` turns on.
+    #[test]
+    fn the_kernel_corpus_fix_list_is_this_preset() {
+        let listed: Vec<String> = serde_json::from_str(include_str!("../../../solidcore/crates/solidcore/tests/kernel_cases/fixes.json")).unwrap();
+        let mut listed: Vec<&str> = listed.iter().map(String::as_str).collect();
+        listed.sort_unstable();
+        let mut on: Vec<&str> = fixes().flags().filter(|(_, on)| *on).map(|(name, _)| name).collect();
+        on.sort_unstable();
+        assert_eq!(listed, on, "kernel_cases/fixes.json must list exactly the flags fixes() turns on");
     }
 
     #[test]
