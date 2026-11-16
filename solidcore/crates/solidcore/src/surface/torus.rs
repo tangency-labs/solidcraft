@@ -32,6 +32,9 @@
 //! | [`Torus::inside_out`], [`Torus::major_radius`], [`Torus::minor_radius`] | `GetInsideOut`, `GetMajorRadius`, `GetMinorRadius` (inline) |
 //!
 //! Deviations:
+//! - **Offset orientation.** UV swapping and an inside-out generator each reverse
+//!   the NURB normal. Both reversals apply to the offset radius and its collapse
+//!   test; upstream's offset sign omits the inside-out reversal (#17091).
 //! - **Horn torus rebuild.** (WR-697, the fork's tangency-labs/smlib af7a4d9)
 //!   [`Torus::rebuild_step_from_nurb_parameters`] takes radii
 //!   within its scaled zero as one (a horn torus) and the generator angles' start
@@ -697,15 +700,24 @@ impl Torus {
     /// radius is below `tol`, where [`Self::create_offset_surface`] gives no surface.
     #[must_use]
     pub fn offset_collapses(&self, signed_offset_distance: f64, tol: f64) -> bool {
-        let sign = if self.base.swap_uv { -1.0 } else { 1.0 };
-        self.minor_radius + sign * signed_offset_distance < tol
+        self.minor_radius + self.offset_sign() * signed_offset_distance < tol
+    }
+
+    /// Each reversal changes the sign of Su × Sv relative to the tube's outward normal.
+    fn offset_sign(&self) -> f64 {
+        if self.base.swap_uv == self.inside_out {
+            1.0
+        } else {
+            -1.0
+        }
     }
 
     /// The torus offset by `signed_offset_distance` along the NURB normal
     /// (`CreateOffsetSurface`): a copy with the minor radius changed by the distance
-    /// (negated with [`SurfOfRevolution::swap_uv`]), the generator scaled about its
-    /// centre and every NURB control point scaled from the torus origin and moved back
-    /// towards the axis to keep the major radius. `None` when the new minor radius is
+    /// (negated by each of [`SurfOfRevolution::swap_uv`] and [`Self::inside_out`]),
+    /// the generator scaled about its centre and every NURB control point scaled from
+    /// the torus origin and moved back towards the axis to keep the major radius.
+    /// `None` when the new minor radius is
     /// below `approx_tol_3d`.
     ///
     /// # Errors
@@ -718,12 +730,9 @@ impl Torus {
         signed_offset_distance: f64,
         approx_tol_3d: f64,
     ) -> Result<Option<Self>> {
-        // When UVs are swapped - reverse orientation of offset
-        let offset_sign = 1.0 * (if self.base.swap_uv { -1.0 } else { 1.0 });
-
         // get new radius
         let old_min_radius = self.minor_radius;
-        let new_min_radius = self.minor_radius + offset_sign * signed_offset_distance;
+        let new_min_radius = self.minor_radius + self.offset_sign() * signed_offset_distance;
 
         // skip building degenerate or negative radius minor circles
         if new_min_radius < approx_tol_3d {
@@ -2248,6 +2257,79 @@ mod tests {
             .create_offset_surface(&k, -2.0, 1e-6)
             .expect("offset")
             .is_none());
+    }
+
+    #[test]
+    fn offset_follows_the_nurb_normal_in_every_orientation() {
+        let k = Kernel::default();
+        for swap in [false, true] {
+            for inside_out in [false, true] {
+                let t = canonical(&k, swap, inside_out);
+                let source = t.base.base();
+                let domain = source.natural_uv_domain();
+                for distance in [-0.25, 0.0, 0.25] {
+                    let offset = t
+                        .create_offset_surface(&k, distance, 1e-6)
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(offset.major_radius(), t.major_radius());
+                    for u in [0.1, 0.3, 0.5, 0.7, 0.9] {
+                        for v in [0.1, 0.3, 0.5, 0.7, 0.9] {
+                            let uv = domain.evaluate(u, v);
+                            let derivatives = source
+                                .evaluate_simple(uv, 1, 1, false, false, false)
+                                .unwrap();
+                            let normal = derivatives[1][0].cross(derivatives[0][1]);
+                            let expected =
+                                derivatives[0][0] + distance * (normal / normal.length());
+                            let actual = offset.base.base().evaluate_point(uv).unwrap();
+                            assert!(
+                                (actual - expected).length() < 1e-9,
+                                "swap={swap}, inside_out={inside_out}, distance={distance}, uv={uv:?}: {actual:?} vs {expected:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn offset_collapse_follows_the_nurb_normal_in_every_orientation() {
+        let k = Kernel::default();
+        // A binary fraction makes the radius exactly equal to the tolerance at the boundary.
+        let tolerance = 1.0 / 1048576.0;
+        for (swap, inside_out, outward) in [
+            (false, false, 1.0),
+            (false, true, -1.0),
+            (true, false, -1.0),
+            (true, true, 1.0),
+        ] {
+            let t = canonical(&k, swap, inside_out);
+            for (radial_change, collapses) in [
+                (-1.5, true),
+                (-1.0, true),
+                (-1.0 + tolerance * 0.5, true),
+                (-1.0 + tolerance, false),
+                (-1.0 + tolerance * 2.0, false),
+                (0.0, false),
+                (0.25, false),
+            ] {
+                let distance = outward * radial_change;
+                assert_eq!(
+                    t.offset_collapses(distance, tolerance),
+                    collapses,
+                    "swap={swap}, inside_out={inside_out}, distance={distance}"
+                );
+                assert_eq!(
+                    t.create_offset_surface(&k, distance, tolerance)
+                        .unwrap()
+                        .is_none(),
+                    collapses,
+                    "swap={swap}, inside_out={inside_out}, distance={distance}"
+                );
+            }
+        }
     }
 
     #[test]

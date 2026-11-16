@@ -401,8 +401,69 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
                 }
             }
         }
+        // The new nodes move chords: where two curves of a face run closer than their chords sag
+        // (two arcs leaving a vertex tangentially), a chord from a node put in may cross a chord
+        // of the other curve that crossed none before. The faces that moved are untangled as
+        // every face was before planning ([`untangle`]), and every face of an edge that takes
+        // nodes doing so is planned again; a face that still crosses itself is left out, named.
+        if !moved.is_empty() {
+            // Left out: faces left out before planning, and faces whose slot holds an error that
+            // stands (not planned again this round: an edge that could not take its nodes, a
+            // boundary that could not be read). A face planned again is untangled with the rest.
+            let mut replanned = vec![false; faces.len()];
+            for &fi in &again {
+                if let Some(r) = replanned.get_mut(fi) {
+                    *r = true;
+                }
+            }
+            for &fi in &lost {
+                if let Some(r) = replanned.get_mut(fi) {
+                    *r = false;
+                }
+            }
+            let mut left: Vec<Option<TessError>> = (0..faces.len())
+                .map(|fi| match slots.get(fi) {
+                    Some(Some(Err(e))) if !replanned.get(fi).copied().unwrap_or(false) => Some(e.clone()),
+                    _ => why.get(fi).cloned().flatten(),
+                })
+                .collect();
+            let was: Vec<Option<TessError>> = left.clone();
+            let counts: Vec<usize> = nodes.iter().map(|n| n.points.len()).collect();
+            let face_boundary = |fi: usize, nodes: &[edges::Nodes]| match (faces.get(fi), evals.get(fi), params.get(fi)) {
+                (Some(face), Some(eval), Some(map)) => boundary(b, fi, face, eval, map, nodes, &rules),
+                _ => Err(unsupported(format!("face {fi}: missing"))),
+            };
+            let still = untangle(b, &evals, &edge_faces, rules.tol, &mut nodes, &mut boundaries, &face_boundary, &mut left, Some(&moved))?;
+            for (e, n) in nodes.iter().enumerate() {
+                if counts.get(e) != Some(&n.points.len()) {
+                    // A face left out stays out: its boundary was not built again.
+                    for &fi in edge_faces.get(e).map_or(&[][..], Vec::as_slice).iter().filter(|fi| left.get(**fi).is_some_and(Option::is_none)) {
+                        if let Some(k) = kept.get_mut(fi) {
+                            *k = false;
+                        }
+                        again.push(fi);
+                    }
+                }
+            }
+            for (fi, (now, before)) in left.into_iter().zip(was).enumerate() {
+                if let (Some(e), None) = (now, before) {
+                    if let Some(slot) = slots.get_mut(fi) {
+                        *slot = Some(Err(e));
+                    }
+                    lost.push(fi);
+                }
+            }
+            for (fi, reason) in still {
+                if let Some(slot) = slots.get_mut(fi) {
+                    *slot = Some(Err(unsupported(reason)));
+                }
+                lost.push(fi);
+            }
+        }
         // A face whose edge could not take its nodes stays left out.
-        again.retain(|fi| !lost.contains(fi));
+        lost.sort_unstable();
+        lost.dedup();
+        again.retain(|fi| lost.binary_search(fi).is_err());
         again.sort_unstable();
         again.dedup();
         if again.is_empty() {
@@ -614,7 +675,7 @@ pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
             }
         });
     }
-    let tangled = untangle(b, &evals, &edge_faces, rules.tol, &mut nodes, &mut boundaries, &face_boundary, &mut why)?;
+    let tangled = untangle(b, &evals, &edge_faces, rules.tol, &mut nodes, &mut boundaries, &face_boundary, &mut why, None)?;
     Ok(Prepared { rules, forward, edge_faces, evals, sizes, nodes, unsampled_edges, kept_strict, boundaries, params, why, tangled })
 }
 
@@ -855,6 +916,8 @@ struct Boundary {
 /// so every face of the edge gets the new nodes; the faces of every edge split are checked again,
 /// until no chords cross. Boundaries that still cross after [`MAX_UNTANGLE`] rounds, or would
 /// put more than [`edges::MAX_EDGE_NODES`] on an edge, are an error naming the face and edges.
+/// `only`: the faces looked at first (every face where `None`); every face of an edge split is
+/// looked at again, whichever it is.
 #[allow(clippy::too_many_arguments)]
 fn untangle(
     b: &brep::Brep,
@@ -865,6 +928,7 @@ fn untangle(
     boundaries: &mut [Boundary],
     face_boundary: &(dyn Fn(usize, &[edges::Nodes]) -> Result<Boundary> + Sync),
     why: &mut [Option<TessError>],
+    only: Option<&[usize]>,
 ) -> Result<Vec<(usize, String)>> {
     // An edge that cannot be split further (it has all the nodes an edge may have) leaves out
     // the faces it bounds, each naming it; so does a face whose boundary cannot then be read.
@@ -879,7 +943,18 @@ fn untangle(
     };
     let indexed: Vec<usize> = (0..boundaries.len()).collect();
     let curved = evals.iter().filter(|e| !matches!(***e, EvalSurface::Plane { .. })).count();
-    let left_out: Vec<bool> = why.iter().map(Option::is_some).collect();
+    let mut left_out: Vec<bool> = why.iter().map(Option::is_some).collect();
+    if let Some(only) = only {
+        let mut looked = vec![false; left_out.len()];
+        for &fi in only {
+            if let Some(l) = looked.get_mut(fi) {
+                *l = true;
+            }
+        }
+        for (l, k) in left_out.iter_mut().zip(looked) {
+            *l = *l || !k;
+        }
+    }
     let found: Vec<Vec<(u32, u32)>> = crate::par::map("boundary crossings", &indexed, curved >= PARALLEL_FACES, |&fi| {
         if left_out.get(fi).copied().unwrap_or(false) {
             return Ok(Vec::new());
@@ -897,7 +972,7 @@ fn untangle(
             // Halving cannot part two curves that touch or cross: where they come within the chord
             // tolerance of each other, they share nodes.
             let faces: Vec<usize> = tangled.iter().map(|(fi, _)| *fi).collect();
-            tangled = snap_touches(evals, edge_faces, tol, nodes, boundaries, face_boundary, &faces)?;
+            tangled = snap_touches(evals, edge_faces, tol, nodes, boundaries, face_boundary, &faces, why)?;
             // Each face still crossing, with why: planned leniently, and named (`plan_or_fill`).
             return Ok(tangled
                 .iter()
@@ -967,7 +1042,7 @@ const MAX_SNAP: u32 = 8;
 /// polyline there: a slit, which bounds the face on neither side. A node is not snapped where the
 /// pinch would turn part of its loop inside out by more than the tolerance (two curves crossing
 /// at an angle: the boundary is wrong there, not within the tolerance). Every face of a changed
-/// edge has its boundary built again. Returns the faces whose boundaries still cross, with the
+/// edge has its boundary built again, except one already left out (`why`). Returns the faces whose boundaries still cross, with the
 /// crossing segments.
 #[allow(clippy::too_many_arguments)]
 fn snap_touches(
@@ -978,6 +1053,7 @@ fn snap_touches(
     boundaries: &mut [Boundary],
     face_boundary: &(dyn Fn(usize, &[edges::Nodes]) -> Result<Boundary> + Sync),
     faces: &[usize],
+    why: &[Option<TessError>],
 ) -> Result<Vec<(usize, Vec<(u32, u32)>)>> {
     let crossing = |fi: usize, fb: &Boundary| -> Vec<(usize, usize)> {
         let Some(s) = evals.get(fi) else { return Vec::new() };
@@ -1010,6 +1086,10 @@ fn snap_touches(
         redo.dedup();
         tangled.clear();
         for fi in redo {
+            // A face already left out keeps its reason, as in [`untangle`]'s rounds.
+            if why.get(fi).is_some_and(Option::is_some) {
+                continue;
+            }
             let fb = face_boundary(fi, nodes)?;
             let crosses = !crossing(fi, &fb).is_empty();
             if let Some(slot) = boundaries.get_mut(fi) {
