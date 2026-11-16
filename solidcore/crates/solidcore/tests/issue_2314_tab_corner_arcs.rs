@@ -180,13 +180,14 @@ fn the_pair_is_the_sum_of_each_alone() {
     let (a, fa) = removed(&[CORNER]).unwrap();
     let (b, fb) = removed(&[CORNER_L]).unwrap();
     // from the Pappus wedge: x > 0 2.1e-12 more, x < 0 3.2e-13 more (with Runge-Kutta trim
-    // pieces 1.15e-10 less and 5.5e-11 more, the bounds a decade above those)
+    // pieces 1.15e-10 less and 5.5e-11 more, the bounds a decade above those; the pins
+    // below hold the values to 1e-12)
     assert!((a - pappus()).abs() <= 1.2e-9, "x > 0 alone {a}");
     assert!((b - pappus()).abs() <= 6e-10, "x < 0 alone {b}");
     // pinned at the values measured here: the fork at 18e96f1 and 63c7962
     // (`SmApiFilletEdges`, r 0.5, section 1, continuity 1) removes 0.159135839575356 and
-    // 0.159135839836381; these lie 3.1e-11 and 5.9e-11 from it because of the
-    // solidcore-native exact spine. Since #2890 (precise properties integrate from the
+    // 0.159135839836381, 1.5e-10 below and 1.1e-10 above the Pappus wedge (the fork's
+    // volume accuracy). Since #2890 (precise properties integrate from the
     // trims' base); they were 0.15913583961037148 and 0.15913583978226598, 1.12e-10 below
     // and 6.0e-11 above the Pappus wedge. Since the trim pieces integrate by Gauss-Kronrod
     // (#14460) they are 2.1e-12 and 3.2e-13 above it, where they were 0.1591358396067335 and

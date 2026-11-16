@@ -626,7 +626,7 @@ fn an_unbanded_long_face_integrates_its_trim_pieces_by_gauss_kronrod() {
         eprintln!("accuracy {accuracy:e}: {evaluations} iso evaluations, errors {errors:?}");
         for (gi, err) in errors.iter().enumerate() {
             assert!(
-                *err <= 1e-12,
+                *err <= 1e-13,
                 "accuracy {accuracy:e}, group {gi}: {err:e} off"
             );
         }

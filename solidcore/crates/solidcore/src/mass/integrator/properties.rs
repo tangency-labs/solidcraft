@@ -36,8 +36,13 @@
 //! quadrature (`kronrod_integrate`, bisection bounded at 48 levels and 100,000 pieces),
 //! not by nested Runge-Kutta steps: a dense spline grid has a band cell per pair of knot
 //! spans, and two Runge-Kutta steps a level cost 144 samples a cell at the least.
-//! Each span-wise iso-u piece is evaluated at its end from its own knot span, the
-//! one-sided limit from inside the piece (WR-670, #2091): upstream takes the span above.
+//! Every face's trim pieces, banded or not, are integrated the same way (#14460): the
+//! outer rule runs along the trim piece and the inner one along each sample's iso-u line,
+//! each level with its own bounds of 48 levels and 100,000 pieces (so the work is bounded
+//! by their product), cancel polled in both, and no recursion. Neither level has a node
+//! at a piece's end, so the WR-670 one-sided end evaluation (#2091) is not needed on this
+//! path; a trim that crosses a surface v knot inside a piece (an unbanded face) leaves a
+//! kink in the outer integrand, which the bisection resolves.
 //! An edge's tube area, volume and moments each have an error scale of their own size
 //! (#2887): upstream's are `BIG_DOUBLE`, so only the edge's length was under error control.
 use super::{OdeIntegrator, OdeOptions};
@@ -702,7 +707,9 @@ pub fn boundary_properties(
             // pair a level cost at least 144 samples a piece, and an iso-u line long in v
             // (a cylinder's quarter turns) hundreds a sample; the 7-point rule takes 49 a
             // piece when no piece is halved. Neither level's nodes reach a piece's ends,
-            // so no sample is read across a knot of the trim or of the surface.
+            // so no sample is read at a knot of the trim, or at a piece's end on a band's
+            // knot line; inside an unbanded piece a surface knot is a kink the bisection
+            // resolves.
             let base = floor(band);
             span_y.fill(0.0);
             kronrod_integrate(k, a, b, accuracy / 10.0, &scale, &mut span_y, |t, dy| {
@@ -1408,7 +1415,8 @@ impl MassPropertyRequest {
 /// [`brep_mass_properties_estimated`]'s result.
 ///
 /// **Requested accuracy, estimated, not proved.** Every number comes from an adaptive
-/// Runge-Kutta integration whose per-step error estimate is held under
+/// integration (Gauss-Kronrod over faces, Runge-Kutta along edges) whose error estimate
+/// per piece or step is held under
 /// `requested_accuracy` times a per-property scale. That estimate is not a bound: the
 /// error is not proved to be below the requested accuracy, and no caller may treat it
 /// as one (decide a tolerance on these numbers only with that in mind). A certified
