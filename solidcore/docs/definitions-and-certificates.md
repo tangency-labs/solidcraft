@@ -353,6 +353,11 @@ Every face is in one of three classes:
 | **certified** | B is within a proved ε of S | > 0, stored | `ProceduralBlend` (traced spines, Gⁿ sections, radius laws, rounds on rounds); `ProceduralSweep`; Mixed corners (the construction's tolerance); B-spline extensions past a side (§6) |
 | **refused** | no B is proved within the bound | none | the construction returns a typed error naming the cause and, where one exists, the size that builds |
 
+One kind is not in a class yet: a foot blend's section face (a weld bead's on curved faces,
+`blend::foot_blend`, #15129) is checked at samples, 0.01 mm at the midpoints between its stations,
+and states that tolerance as its bound; it moves into the certified class with its certificate
+(Krawczyk on the foot solve, `generic-blend.md` §2.5).
+
 There is no fourth class. A face that is none of these (a bare NURBS a blend made) is a defect, and
 `blend::definition_check::bare_blend_faces` lists it. The kinds still bare are named in the ledger
 `crates/solidcore/tests/data/blend_definition_ledger/` (today `offset.md`: the offset of a round is
@@ -515,6 +520,10 @@ A reviewer checks each of these on a change that touches a definition, a net or 
    section's sagitta (`ChamferRecord::sagitta`, written only when it is not 0, so a chamfer's
    record is as before). `convert::rebuild`, `exact_rebuild` and
    `corner_rebuild` make the definition exactly and certify the net again before it is an operand.
+   A weld bead's foot blend is a record of its own kind (`FootBlendRecord`: supports, sides,
+   leader and piece, legs, sagitta, spans, ends, tolerance, motions, net); `foot_blend_rebuild`
+   makes it and compares the net with its rebuild, to rounding (invariant 9 does not hold for it
+   yet: its feet are solved again, and its arcs' weights come from trigonometric functions).
 9. **A record rebuilds bit for bit.** Written, read back and rebuilt, a definition evaluates as the
    one written; evaluation is a pure function of the definition, and the station memo keys a
    definition by its identity (`DefinitionIdentity`), so two threads agree with one bit for bit.

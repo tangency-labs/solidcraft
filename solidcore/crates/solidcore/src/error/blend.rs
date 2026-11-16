@@ -22,6 +22,7 @@
 //! | [`BlendFailure::SkinPastStationCap`]   | [`ErrorKind::NotWithinTolerance`] (9)         |
 //! | [`BlendFailure::BallsNest`]            | [`ErrorKind::BallsFold`] (105)                |
 //! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
+//! | [`BlendFailure::WeldNotBuilt`]         | [`ErrorKind::Unsupported`]: neither defect nor refusal |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
@@ -42,6 +43,7 @@
 //! | [`BlendFailure::NotWithinTolerance`]   | `SM_ERR_NOT_WITHIN_TOLERANCE`     |
 //! | [`BlendFailure::PassedOn`]             | the status of the stage passed on |
 //! | [`BlendFailure::NotCertified`]         | `SM_ERR`                          |
+//! | [`BlendFailure::WeldNotBuilt`]         | `SM_ERR`                          |
 //!
 //! **The phrase causes** ([`BlendFailure::Failed`] to [`BlendFailure::PassedOn`]) are the
 //! shape the blend sites were converted to before the record, some of them refusals not yet
@@ -201,6 +203,22 @@ pub enum BlendFailure {
         /// The certificate's stations when it was refused.
         stations: usize,
     },
+    /// A weld bead the kernel does not build yet (#15129, [`crate::blend::weld_bead`]), for
+    /// the gap named: not a fact of the geometry and not a defect, so no size is named. Its
+    /// class is [`ErrorKind::Unsupported`]. Not upstream.
+    WeldNotBuilt(WeldGap),
+}
+
+/// What a weld bead the kernel does not build yet needs ([`BlendFailure::WeldNotBuilt`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum WeldGap {
+    /// Beads that meet at a vertex need a corner piece (#17916); the failure's site names the
+    /// vertex.
+    BeadsMeetAtVertex,
+    /// A tapered or rounded end of a bead on a joint that is not straight between two planes:
+    /// only the planar sweep cuts those ends so far; the foot blend ends square.
+    EndShapeOnCurvedJoint,
 }
 
 /// The class of a blend larger than its faces allow, for `reason`: one of the blend's
@@ -248,6 +266,8 @@ pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
         R::EndAtSeamVertex => ErrorKind::EndAtSeamVertex,
         R::TangentContinuationEndUnsupported => ErrorKind::TangentContinuationEnd,
         R::OverflowKeepsNothing => ErrorKind::OverflowKeepsNothing,
+        // a weld bead larger than its faces take: the error names the size that builds
+        R::LegPastFace | R::NoToeAtLeg | R::BeadCutsFace => ErrorKind::FilletTooLarge,
     }
 }
 
@@ -358,6 +378,7 @@ impl BlendFailure {
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
             | Self::NotCertified { .. }
+            | Self::WeldNotBuilt(_)
             | Self::Failed(_) => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
@@ -393,6 +414,7 @@ impl BlendFailure {
                 ErrorKind::NotWithinTolerance
             }
             Self::BallsNest { .. } => ErrorKind::BallsFold,
+            Self::WeldNotBuilt(_) => ErrorKind::Unsupported,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -422,7 +444,8 @@ impl BlendFailure {
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
-            | Self::NotCertified { .. } => false,
+            | Self::NotCertified { .. }
+            | Self::WeldNotBuilt(_) => false,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -463,7 +486,8 @@ impl BlendFailure {
             | Self::OutsideDomain(_)
             | Self::NotWithinTolerance(_)
             | Self::PassedOn { .. }
-            | Self::NotCertified { .. } => true,
+            | Self::NotCertified { .. }
+            | Self::WeldNotBuilt(_) => true,
         }
     }
 }
@@ -524,6 +548,16 @@ impl core::fmt::Display for BlendFailure {
             | Self::NotWithinTolerance(what)
             | Self::PassedOn { what, .. } => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::WeldNotBuilt(WeldGap::BeadsMeetAtVertex) => write!(
+                f,
+                "{}: weld beads that meet at a vertex are not built yet (their corner, #17916)",
+                self.class()
+            ),
+            Self::WeldNotBuilt(WeldGap::EndShapeOnCurvedJoint) => write!(
+                f,
+                "{}: a tapered or rounded bead end is built only straight between two planes so far",
+                self.class()
+            ),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::NotCertified { halvings, stations } => write!(
                 f,
@@ -873,6 +907,28 @@ mod tests {
                 BlendFailure::NoRoom(R::OverflowKeepsNothing),
                 ErrorKind::OverflowKeepsNothing,
             ),
+            // a weld bead's (#15129): too large, naming the size that builds
+            (
+                BlendFailure::NoRoom(R::LegPastFace),
+                ErrorKind::FilletTooLarge,
+            ),
+            (
+                BlendFailure::NoRoom(R::NoToeAtLeg),
+                ErrorKind::FilletTooLarge,
+            ),
+            (
+                BlendFailure::NoRoom(R::BeadCutsFace),
+                ErrorKind::FilletTooLarge,
+            ),
+            // a weld bead not built yet: neither a defect nor a refusal
+            (
+                BlendFailure::WeldNotBuilt(WeldGap::BeadsMeetAtVertex),
+                ErrorKind::Unsupported,
+            ),
+            (
+                BlendFailure::WeldNotBuilt(WeldGap::EndShapeOnCurvedJoint),
+                ErrorKind::Unsupported,
+            ),
             (
                 BlendFailure::StationDidNotConverge {
                     s: 0.42,
@@ -1194,7 +1250,8 @@ mod tests {
             | BlendFailure::SkinPastStationCap { .. }
             | BlendFailure::SkinMeasureNotFinite { .. }
             | BlendFailure::BallsNest { .. }
-            | BlendFailure::NotCertified { .. } => None,
+            | BlendFailure::NotCertified { .. }
+            | BlendFailure::WeldNotBuilt(_) => None,
             BlendFailure::Failed(_) => Some("BlendFailure::Failed("),
             BlendFailure::Missing(_) => Some("BlendFailure::Missing("),
             BlendFailure::InvalidValue(_) => Some("BlendFailure::InvalidValue("),

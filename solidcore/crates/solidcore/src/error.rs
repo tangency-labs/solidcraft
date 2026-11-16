@@ -606,6 +606,13 @@ impl TargetEdge {
         }
     }
 
+    /// The edge `edge` of the caller's body, named by an operation that works on that body
+    /// itself (a weld bead's refusal, #15129).
+    #[must_use]
+    pub(crate) const fn of_target(edge: EdgeId) -> Self {
+        Self(edge)
+    }
+
     /// The edge's id in the caller's body.
     #[must_use]
     pub const fn id(self) -> EdgeId {
@@ -630,6 +637,13 @@ impl TargetFace {
     #[must_use]
     pub const fn id(self) -> FaceId {
         self.0
+    }
+
+    /// The face `face` of the caller's body, named by an operation that works on that body
+    /// itself (a weld bead's refusal, #15129).
+    #[must_use]
+    pub(crate) const fn of_target(face: FaceId) -> Self {
+        Self(face)
     }
 }
 
@@ -772,6 +786,10 @@ pub enum FitMeasure {
     Wall,
     /// A distance (an extension's, a chamfer's).
     Distance,
+    /// A weld bead's leg (#15129): from the joint line to the toe, straight.
+    Leg,
+    /// A weld bead's sagitta (#15129): how far the arc's middle may stand off the chord.
+    Sagitta,
 }
 
 impl FitMeasure {
@@ -785,6 +803,8 @@ impl FitMeasure {
             Self::Setback => "setback",
             Self::Wall => "wall",
             Self::Distance => "distance",
+            Self::Leg => "leg",
+            Self::Sagitta => "sagitta",
         }
     }
 }

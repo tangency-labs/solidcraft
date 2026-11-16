@@ -75,7 +75,8 @@ or a law r(t).
   each edge. Where the wedge varies the sizes hold only where it was measured.
 
 Every geometric quantity downstream (rails, sections, events, corner boundaries) is built from the
-same exact spine points.
+same exact spine points. The foot blend of §2.5 (weld beads) has no spine: its quantities come from
+its leader, the joint edge itself, and its feet.
 
 ### 2.2 The section
 
@@ -229,6 +230,84 @@ the floor follow the round's size and not its distance from the origin; a round 
 mirrored is certified again within its bound. The net is refused where
 the sum with one floor passes ε, where a piece runs across a station, or where a foot crosses a support's knot line
 between two stations (the construction puts a station there).
+
+### 2.5 The foot blend: weld beads
+
+A weld bead is not a rolling ball's round: a leg gauge measures it straight from the root (the
+joint line) to the toe, and both legs hold along the whole joint, on flat and curved faces alike
+(#15129). The **foot blend** (`blend::foot_blend`) is that definition, a kind of its own beside the
+rolling-ball blend, which it leaves unchanged.
+
+- **Leader.** The joint edge e(t) itself, as its B-spline form in the edge curve's own parameter (a
+  line or a conic by its stored NURBS form; an edge whose form runs in another parameter is
+  refused).
+- **Feet.** At each t, foot i is the point Fᵢ of support Sᵢ with (Fᵢ − e(t))·e′(t) = 0 and
+  |Fᵢ − e(t)| = zᵢ: in the plane square to the leader through the root, at the leg zᵢ from it. Two
+  equations in the foot's two surface parameters, solved by Newton to rounding.
+- **Side.** Where the circle of radius zᵢ meets the support's section twice, the foot is the one
+  on the branch leaving e(t) along the face: bᵢ = σᵢ·unit(nᵢ × e′), nᵢ the support's own normal at
+  the root and σᵢ = ±1 the face's side. σᵢ is read once from the part, from the edge use's binormal
+  at the middle of the edge, and kept; no station reads the part. Newton starts from e(t) + zᵢbᵢ
+  dropped onto the support. Where that start ends on the other branch, finds no foot or does not
+  converge, it starts again from the previous station's foot before the station is refused. A
+  Newton that stops on the rim of the support's domain means the support ends within the leg.
+- **Section.** The chord between the feet, or the circular arc over it at the sagitta h in the
+  station's plane (§2.2), its bounds read at each station from the angles βᵢ at which the chord
+  leaves the faces there.
+- **Net.** Stations on every knot of the leader (at least four), doubled between them (at most
+  2⁹ times) until the net holds the feet, the section's middle and the root within the weld's fit
+  tolerance, 0.01 mm, at the midpoint between each two stations. That is a **sampled** check, not
+  a certificate (§2.4): until the foot solve is certified (Krawczyk, one root per box, on the
+  branch along the face) the foot blend's stated bound is the sampled tolerance.
+- **Body.** The bead is a body of its own: per span the section face, a strip on each support
+  between the root and its foot, and square end caps in the stations' planes, stitched and
+  oriented. A closed joint is built in four segments, so no face runs a full turn. A strip on a
+  periodic support takes its parameters on one side of the support's seam. The part is only read:
+  its file is the same, byte for byte, whether the bead is built or refused.
+
+**What the definition and its record store** (`FootBlendDefinition`, `FootBlendRecord` in
+`surface::procedural_blend::record`), one per section face:
+
+| field | content |
+|---|---|
+| supports | the two faces' surfaces, by value (NURBS forms with their kinds, as §2.3's) |
+| sides | σ₁, σ₂ = ±1 |
+| leader | the joint edge's curve as its B-spline form |
+| interval | the face's piece a < b of the leader's parameter |
+| legs | z₁, z₂ |
+| sagitta | h: > 0 convex, < 0 concave, 0 the chord |
+| spans | the weld's spans along the leader, as its parameters (a stitch is a list); the face's piece lies in one |
+| ends | the end shape at each span's start and end: square, taper or round |
+| tol | the fit tolerance the net was made to |
+| motions | the motions the net took, replayed on the rebuilt net (as a section blend's) |
+| net | the face's net |
+
+A weld's spans are asked as fractions of the joint's length and stored as the leader's parameters,
+found by arc length. Square ends are built on any joint. Tapered and rounded ends are built so far
+only straight between two planes with a sagitta, where the bead is the planar sweep cut at its ends
+and its bead face keeps the chord's exact definition with the sagitta (§4); on other joints they
+are refused as not built yet (`BlendFailure::WeldNotBuilt`).
+
+**Rebuild.** The definition rebuilds its net from itself alone: the stations solved again from the
+stored supports and sides, the same refinement, then the motions. A record's net is accepted when
+the rebuilt net is it in some orientation of the parameter square, the same degrees and knots and
+its control points within 10⁻⁸ (1 + the net's size); a record whose legs, sagitta, sides or piece
+were changed is refused. Not bit for bit: the feet are solved again to rounding, and the arc's
+weights come from trigonometric functions that round differently between platforms' math libraries.
+The foot blend is a record kind of its own, not a field added to an older record, so no reader
+that predates it can take a bead for a chamfer (as one that predates `ChamferRecord::sagitta` can,
+§2.2). The part file (`FaceDefinition`) does not carry it yet: how it enters the format is open.
+
+**Refusals.** Every station refused is typed, with the size that builds over the stations checked:
+
+| cause | reason | class | fit |
+|---|---|---|---|
+| a toe on its face's surface but off the face (classified on the face, at least 32 stations) | `NoRoomReason::LegPastFace` | `FilletTooLarge` | the largest leg on that side whose toes stay on the face, halved down |
+| no point of the face at the leg on its side (the face turns away or ends within the leg) | `NoRoomReason::NoToeAtLeg` | `FilletTooLarge` | the largest leg on that side that finds its toes, halved down |
+| the arc would cut into a face at a station | `NoRoomReason::BeadCutsFace` | `FilletTooLarge` | the least of the stations' bounds, (c/2) tan(min βᵢ/2) concave, a hair below it |
+| Newton does not converge from either start | `StationDidNotConverge` | a defect | none |
+| the net does not hold the tolerance after its refinements | `SkinPastStationCap` | `NotWithinTolerance` | none |
+| beads meeting at a vertex | `WeldNotBuilt(BeadsMeetAtVertex)`, naming the vertex | `Unsupported` | none (#17916) |
 
 ## 3. Events of the trace
 

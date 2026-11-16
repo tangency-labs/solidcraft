@@ -817,6 +817,13 @@ pub(crate) fn check_geometry_nesting(
                         },
                         // a section blend's definition holds frames, no geometry
                         KeptDefinition::Sweep(_) | KeptDefinition::SectionBlend(_) => {}
+                        KeptDefinition::FootBlend(blend) => {
+                            for i in 0..2 {
+                                if let Some(support) = blend.support(i) {
+                                    push(Geometry::Surface(support));
+                                }
+                            }
+                        }
                         KeptDefinition::Draft(draft) => push(Geometry::Surface(&draft.source)),
                     }
                 }
@@ -1271,6 +1278,12 @@ impl Surface {
             Some(KeptDefinition::SectionBlend(blend)) => {
                 return Some(BlendRef::SectionBlend { blend, net: self })
             }
+            Some(KeptDefinition::FootBlend(blend)) => {
+                return Some(BlendRef::FootBlend {
+                    blend: blend.as_ref(),
+                    net: self,
+                })
+            }
             Some(KeptDefinition::Sweep(_)) | None => {}
         }
         match self.kind() {
@@ -1339,6 +1352,15 @@ impl Surface {
         blend: crate::sweep::section_blend::SectionBlendDefinition,
     ) {
         self.definition = Some(Box::new(KeptDefinition::SectionBlend(blend)));
+    }
+
+    /// Keeps `blend` as the definition of this surface, a foot blend's section face's net
+    /// ([`crate::blend::foot_blend`], a weld bead's, #15129).
+    pub(crate) fn set_foot_blend_definition(
+        &mut self,
+        blend: crate::blend::foot_blend::FootBlendDefinition,
+    ) {
+        self.definition = Some(Box::new(KeptDefinition::FootBlend(Box::new(blend))));
     }
 
     /// Drops any definition this surface keeps.

@@ -129,7 +129,8 @@ fn definitions(b: &Brep) -> Vec<ProceduralBlend> {
                 BlendRef::Exact { .. } => panic!("a chamfer on a cylinder is certified"),
                 BlendRef::Corner { .. }
                 | BlendRef::Draft { .. }
-                | BlendRef::SectionBlend { .. } => None,
+                | BlendRef::SectionBlend { .. }
+                | BlendRef::FootBlend { .. } => None,
             },
         )
         .collect()
