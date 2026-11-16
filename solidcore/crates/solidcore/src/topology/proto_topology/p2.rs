@@ -481,6 +481,11 @@ fn ignore_soft<T>(r: Result<T>) -> Result<Option<T>> {
     }
 }
 
+/// Whether every coordinate of `p` is finite.
+fn finite_point(p: Point3) -> bool {
+    p.x.is_finite() && p.y.is_finite() && p.z.is_finite()
+}
+
 /// `SM_CAST_PTR(SmTopology, obj)`.
 fn as_topology<O: ClassObject>(o: Option<O>) -> Option<O> {
     o.filter(|o| {
@@ -1595,7 +1600,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         }
 
         // Pairwise:
-        let mut absorbed: Vec<(Point3, f64)> = Vec::new();
+        // Not upstream (#16637): the computed points of the definitions combined away, and
+        // whether every one of them could be computed (gathered before each delete, never
+        // an error: a point that cannot be computed only stops the move below).
+        let mut absorbed: Vec<Point3> = Vec::new();
+        let mut absorbed_any = false;
+        let mut absorbed_bounded = true;
         for ii in 0..num_vds - 1 {
             let Some(vd1) = vds.get(ii).copied().flatten() else {
                 continue;
@@ -1613,6 +1623,16 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         Err(e) => {
                             vds.retain(Option::is_some);
                             self.write_vertex_definitions(pv, &vds)?;
+                            // the points of those combined away so far stay covered
+                            if absorbed_any {
+                                let (ends, ends_bounded) = self.attached_curve_ends(k, brep, pv);
+                                absorbed.extend(ends);
+                                self.cover_in_place(
+                                    pv,
+                                    &absorbed,
+                                    absorbed_bounded && ends_bounded,
+                                )?;
+                            }
                             return Err(e);
                         }
                     }
@@ -1620,7 +1640,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     self.can_combine_vertex_definitions_ignored(k, brep, vd1, vd2, factor)?
                 };
                 if delete_which == 1 {
-                    absorbed.extend(self.absorbed_points_of(k, brep, vd1)?);
+                    let (points, bounded) = self.absorbed_points_of(k, brep, vd1);
+                    absorbed.extend(points);
+                    absorbed_any = true;
+                    absorbed_bounded = absorbed_bounded && bounded;
                     self.delete_vertex_definition(vd1);
                     if let Some(s) = vds.get_mut(ii) {
                         *s = None;
@@ -1628,7 +1651,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     // We're done with PV[ii].
                     jj = num_vds + 1;
                 } else if delete_which == 2 {
-                    absorbed.extend(self.absorbed_points_of(k, brep, vd2)?);
+                    let (points, bounded) = self.absorbed_points_of(k, brep, vd2);
+                    absorbed.extend(points);
+                    absorbed_any = true;
+                    absorbed_bounded = absorbed_bounded && bounded;
                     self.delete_vertex_definition(vd2);
                     if let Some(s) = vds.get_mut(jj) {
                         *s = None;
@@ -1640,82 +1666,160 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
         vds.retain(Option::is_some);
         self.write_vertex_definitions(pv, &vds)?;
-        if !absorbed.is_empty() {
-            self.place_at_survivors(pv, &absorbed)?;
+        if absorbed_any {
+            let (ends, ends_bounded) = self.attached_curve_ends(k, brep, pv);
+            absorbed.extend(ends);
+            self.place_at_survivors(pv, &absorbed, absorbed_bounded && ends_bounded)?;
         }
         Ok(())
     }
 
-    /// Not upstream (#16637): balls (centre, radius) holding the points of a vertex
-    /// definition about to be combined away: its position (radius 0) and, where its
-    /// classifications evaluate, each source object's point (`FindObjPoint3d`) with the
-    /// classification's measured gap as radius (`m_dGap3d`: the distance from the point it
-    /// was classified at, such as an intersection curve's end, to that object point). Each
-    /// is a computed point and a measured distance, no estimate: the proto vertex's
-    /// tolerance is widened to cover exactly these (`place_at_survivors`). A gap that is not
-    /// a finite number gives no ball (the tolerance is not widened for it).
+    /// Not upstream (#16637): the points a vertex definition about to be combined away
+    /// holds, computed now: its position and, for each classification to an object that
+    /// has points (all but unknown, nothing and region, whose point is the position
+    /// itself), the object point at its parameters (`FindObjPoint3d`). Returns them and
+    /// whether every one was computed and is finite. The classifications' stored gaps
+    /// (`m_dGap3d`) are not used: several writers set them to something other than the
+    /// distance at the stored parameters. An object point that cannot be computed (parameters
+    /// not set, an evaluation error of any kind, a non-finite result) makes the result
+    /// unbounded instead of an error, so a resolution that combines definitions never fails
+    /// here.
     fn absorbed_points_of(
         &self,
         k: &Kernel,
         brep: &impl ProtoBrep<O>,
         vd: VertexDefId,
-    ) -> Result<Vec<(Point3, f64)>> {
-        let d = self.vd_ref(vd)?;
-        let mut balls = vec![(d.position(), 0.0)];
+    ) -> (Vec<Point3>, bool) {
+        let Ok(d) = self.vd_ref(vd) else {
+            return (Vec::new(), false);
+        };
+        let position = d.position();
+        let mut bounded = finite_point(position);
+        let mut points = vec![position];
         for which in [1, 2] {
             let pc = d.brep_point_classif(which);
-            if !pc.are_parameters_set() {
+            if matches!(
+                pc.point_class(),
+                PointClassType::Unknown | PointClassType::Nothing | PointClassType::Region
+            ) {
                 continue;
             }
-            let Some(gap) = ignore_soft(pc.gap_3d(k, brep, None))? else {
-                continue;
-            };
-            if !gap.is_finite() {
-                continue;
-            }
-            if let Some(p) = ignore_soft(pc.find_obj_point_3d(k, brep))? {
-                balls.push((p, max2(gap, 0.0)));
+            match pc.find_obj_point_3d(k, brep) {
+                Ok(p) if finite_point(p) => points.push(p),
+                _ => bounded = false,
             }
         }
-        Ok(balls)
+        (points, bounded)
     }
 
-    /// Not upstream (#16637): after `resolve_proto_vertex` combined definitions, records
-    /// `absorbed` (balls holding the points of the definitions combined away,
-    /// `absorbed_points_of`) at `pv`, places `pv` at the average of the definitions that
-    /// remain and widens its tolerance to the farthest reach from that position of any ball
-    /// it has absorbed, in this or an earlier resolution (distance plus radius, rounded up
-    /// by `γ_4`): computed points and measured distances, so the tolerance grows by no
-    /// estimate. Upstream leaves the proto vertex at the average of all its definitions,
-    /// absorbed ones included: a point no remaining definition is at, which an edge end was
-    /// then continued to (out of its face's domain at a pole).
-    fn place_at_survivors(&mut self, pv: ProtoVertexId, absorbed: &[(Point3, f64)]) -> Result<()> {
-        self.proto_vertex_mut(pv)
-            .ok_or(dangling("proto vertex is deleted"))?
-            .extend_absorbed_points(absorbed);
-        let live = self
-            .proto_vertex(pv)
-            .map(|v| v.vertex_definitions().to_vec())
-            .unwrap_or_default();
-        if live.is_empty() {
-            return Ok(());
+    /// Not upstream (#16637): the ends at `pv` of the intersection curves of the edge
+    /// definitions on the proto edges that start or end at `pv`, evaluated now. A curve
+    /// end is the point a vertex definition classified (a definition stores the position
+    /// it computed and the object points, not that point), so a proto vertex that combined
+    /// definitions away covers the ends attached to it too. Returns them and whether every
+    /// one was evaluated and is finite; a failure makes the result unbounded, never an
+    /// error.
+    fn attached_curve_ends(
+        &self,
+        k: &Kernel,
+        brep: &impl ProtoBrep<O>,
+        pv: ProtoVertexId,
+    ) -> (Vec<Point3>, bool) {
+        let Some(v) = self.proto_vertex(pv) else {
+            return (Vec::new(), false);
+        };
+        // a closed proto edge is listed twice
+        let mut pes = v.proto_edges().to_vec();
+        pes.sort_unstable();
+        pes.dedup();
+        let mut points = Vec::new();
+        let mut bounded = true;
+        for pe in pes {
+            let Some(e) = self.proto_edge(pe) else {
+                bounded = false;
+                continue;
+            };
+            let at_start = e.start_proto_vertex() == Some(pv);
+            let at_end = e.end_proto_vertex() == Some(pv);
+            for &ed in e.edge_definitions() {
+                let Ok(d) = self.ed_ref(ed) else {
+                    bounded = false;
+                    continue;
+                };
+                let Ok(curve) = curve_of(brep, d.xsect_curve_3d()) else {
+                    bounded = false;
+                    continue;
+                };
+                let ivl = d.xsect_interval();
+                for (attached, t) in [(at_start, ivl.min()), (at_end, ivl.max())] {
+                    if !attached {
+                        continue;
+                    }
+                    match curve.evaluate_point(k, t) {
+                        Ok(p) if finite_point(p) => points.push(p),
+                        _ => bounded = false,
+                    }
+                }
+            }
         }
-        let mut sum = Point3::new(0.0, 0.0, 0.0);
-        for &vd in &live {
-            sum += self.vd_ref(vd)?.position();
-        }
-        let position = sum / live.len() as f64;
+        (points, bounded)
+    }
+
+    /// Not upstream (#16637): records `absorbed` (the computed points of definitions combined
+    /// away, `absorbed_points_of`) at `pv` and covers every point it has absorbed where it
+    /// is, without moving it ([`ProtoVertex::cover_absorbed`]).
+    fn cover_in_place(
+        &mut self,
+        pv: ProtoVertexId,
+        absorbed: &[Point3],
+        bounded: bool,
+    ) -> Result<()> {
         let v = self
             .proto_vertex_mut(pv)
             .ok_or(dangling("proto vertex is deleted"))?;
-        let mut reach = 0.0_f64;
-        for &(at, radius) in v.absorbed_points() {
-            reach = max2(reach, (position.distance(at) + radius) * (1.0 + gamma(4)));
+        v.absorb(absorbed, bounded);
+        v.cover_absorbed();
+        Ok(())
+    }
+
+    /// Not upstream (#16637): after `resolve_proto_vertex` combined definitions, records
+    /// `absorbed` at `pv` and places `pv` at the average of the definitions that remain;
+    /// the write widens its tolerance to reach every point it has absorbed, in this or an
+    /// earlier resolution ([`ProtoVertex::set_position`]). Upstream leaves the proto vertex
+    /// at the average of all its definitions, absorbed ones included: a point no remaining
+    /// definition is at, which an edge end was then continued to (out of its face's domain
+    /// at a pole).
+    ///
+    /// The move needs every absorbed point. When one could not be computed (`bounded`
+    /// false, now or in an earlier resolution) or the average is not finite, `pv` stays at
+    /// upstream's position and only covers the points it has there.
+    fn place_at_survivors(
+        &mut self,
+        pv: ProtoVertexId,
+        absorbed: &[Point3],
+        bounded: bool,
+    ) -> Result<()> {
+        let v = self
+            .proto_vertex_mut(pv)
+            .ok_or(dangling("proto vertex is deleted"))?;
+        v.absorb(absorbed, bounded);
+        let unbounded = v.absorbed_unbounded();
+        let live = v.vertex_definitions().to_vec();
+        let mut position = None;
+        if !unbounded && !live.is_empty() {
+            let mut sum = Point3::new(0.0, 0.0, 0.0);
+            for &vd in &live {
+                sum += self.vd_ref(vd)?.position();
+            }
+            let average = sum / live.len() as f64;
+            position = finite_point(average).then_some(average);
         }
-        v.set_position(position);
-        // (written to accept: a NaN reach leaves the tolerance)
-        if reach > v.raw_tolerance() {
-            v.set_raw_tolerance(reach);
+        let v = self
+            .proto_vertex_mut(pv)
+            .ok_or(dangling("proto vertex is deleted"))?;
+        match position {
+            Some(p) => v.set_position(p),
+            None => v.cover_absorbed(),
         }
         Ok(())
     }
@@ -1852,6 +1956,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let this = self
             .proto_vertex_mut(pv)
             .ok_or(dangling("proto vertex is deleted"))?;
+        // (also covers the points of definitions combined away here earlier, #16637)
         this.set_position(position);
         let tol = max3(this.raw_tolerance(), tol1, tol2);
         this.set_raw_tolerance(tol);
@@ -4083,6 +4188,222 @@ mod tests {
                 v.raw_tolerance()
             );
         }
+    }
+
+    /// The point of the classification vertices `V0`, `V1` (and `V2`, `V3` at `R_AT`) of
+    /// the absorption tests below.
+    const P: Point3 = Point3::new(1.0, 2.0, 3.0);
+    const FAR: Point3 = Point3::new(1.0 + 3e-5, 2.0, 3.0);
+    const Q: Point3 = Point3::new(1.0, 2.0, 3.0 + 4e-5);
+    const R_AT: Point3 = Point3::new(1.0, 2.0 - 8e-5, 3.0);
+
+    fn absorb_geo() -> Geo {
+        Geo {
+            points: vec![Q, Q, R_AT, R_AT],
+            ..Geo::default()
+        }
+    }
+
+    /// A vertex classification of `H(i, Vertex)` (its point `absorb_geo().points[i]`)
+    /// whose stored gap is `gap`.
+    fn vertex_pc_at(i: usize, gap: f64) -> PointClassification<H> {
+        let mut pc = PointClassification::new(1e-5);
+        pc.set_class_object(PointClassType::Vertex, Some(H(i, ClassObjectKind::Vertex)));
+        pc.set_gap_3d(gap);
+        pc
+    }
+
+    /// A proto vertex at `P` (tolerance 1e-5) listing, in this order, `first` and `second`:
+    /// vertex definitions on the vertices `V0` (B-rep 1) and `V1` (B-rep 2), both at `Q`,
+    /// placed at `FAR` and `P`; the one at `FAR` has the larger definition gap (it is
+    /// combined away) and classifications whose stored gap is `far_pc_gap`. Returns the
+    /// manager, the proto vertex and the definitions at `FAR` and `P`, before resolution.
+    fn vertex_defs_on_one_vertex(
+        k: &Kernel,
+        geo: &Geo,
+        far_first: bool,
+        far_vd_gap: f64,
+        far_pc_gap: f64,
+    ) -> (
+        ProtoTopologyManager<H>,
+        ProtoVertexId,
+        VertexDefId,
+        VertexDefId,
+    ) {
+        let mut m = manager();
+        let mut mk = |at: Point3, vd_gap: f64, pc_gap: f64| {
+            let vd = VertexDefinition::new(
+                k,
+                geo,
+                &vertex_pc_at(0, pc_gap),
+                &vertex_pc_at(1, pc_gap),
+                at,
+                1e-4,
+                vd_gap,
+                None,
+            )
+            .unwrap();
+            m.insert_vertex_definition(vd).unwrap()
+        };
+        let a = mk(FAR, far_vd_gap, far_pc_gap);
+        let b = mk(P, 1e-6, 0.0);
+        let pv = m.new_proto_vertex(P, 1e-5).unwrap();
+        m.add_proto_vertex(pv);
+        let order = if far_first { [a, b] } else { [b, a] };
+        for vd in order {
+            m.add_vertex_definition(pv, vd).unwrap();
+        }
+        (m, pv, a, b)
+    }
+
+    /// Asserts that the proto vertex's tolerance reaches each of `points`.
+    fn assert_covers(m: &ProtoTopologyManager<H>, pv: ProtoVertexId, points: &[Point3]) {
+        let v = m.proto_vertex(pv).unwrap();
+        for &at in points {
+            assert!(
+                v.position().distance(at) <= v.raw_tolerance(),
+                "{at:?} is {:e} from the vertex at {:?}, its tolerance {:e}",
+                v.position().distance(at),
+                v.position(),
+                v.raw_tolerance()
+            );
+        }
+    }
+
+    /// #16638 review: a definition on vertex classifications is combined away. The
+    /// tolerance reaches its position and its object point (the vertex's point `Q`), each
+    /// computed, and exactly that: the classifications' stored gap (2e-6, not a distance
+    /// at their parameters) adds nothing.
+    #[test]
+    fn an_absorbed_vertex_classification_is_covered_at_its_object_point() {
+        let k = Kernel::default();
+        let geo = absorb_geo();
+        let (mut m, pv, a, b) = vertex_defs_on_one_vertex(&k, &geo, true, 2e-6, 2e-6);
+        m.resolve_proto_vertex(&k, &geo, pv).unwrap();
+        assert!(m.vertex_def(a).is_none());
+        let v = m.proto_vertex(pv).unwrap();
+        assert_eq!(v.vertex_definitions(), &[b]);
+        assert_eq!(v.position(), P);
+        assert_eq!(v.absorbed_points(), &[FAR, Q, Q]);
+        assert!(!v.absorbed_unbounded());
+        assert_eq!(
+            v.raw_tolerance(),
+            P.distance(Q) * (1.0 + gamma(4)),
+            "the computed distance to the object point, no stored gap added"
+        );
+    }
+
+    /// #16638 review: a classification whose stored gap is NaN still has its object point
+    /// covered (the gap is not read), and the vertex moves to the survivor.
+    #[test]
+    fn an_absorbed_classification_with_a_nan_gap_is_still_covered() {
+        let k = Kernel::default();
+        let geo = absorb_geo();
+        // listed second: `b`'s gap is not greater than NaN, so the NaN one goes
+        let (mut m, pv, a, b) = vertex_defs_on_one_vertex(&k, &geo, false, f64::NAN, f64::NAN);
+        m.resolve_proto_vertex(&k, &geo, pv).unwrap();
+        assert!(m.vertex_def(a).is_none());
+        let v = m.proto_vertex(pv).unwrap();
+        assert_eq!(v.vertex_definitions(), &[b]);
+        assert_eq!(v.position(), P);
+        assert_covers(&m, pv, &[FAR, Q]);
+    }
+
+    /// #16638 review: an absorbed definition whose object point cannot be computed (its
+    /// parameters were unset after it was made) has no bound, so the proto vertex is not
+    /// moved: it stays where upstream leaves it, covering the points it has there, and the
+    /// resolution still succeeds.
+    #[test]
+    fn an_unbounded_absorbed_definition_does_not_move_the_vertex() {
+        let k = Kernel::default();
+        let geo = absorb_geo();
+        let (mut m, pv, a, b) = vertex_defs_on_one_vertex(&k, &geo, true, 2e-6, 0.0);
+        m.vertex_def_mut(a)
+            .unwrap()
+            .brep_point_classif_mut(1)
+            .unset_parameters();
+        let start = P + Vec3::new(0.0, 1e-5, 0.0);
+        m.proto_vertex_mut(pv).unwrap().set_position(start);
+        m.resolve_proto_vertex(&k, &geo, pv).unwrap();
+        assert!(m.vertex_def(a).is_none());
+        let v = m.proto_vertex(pv).unwrap();
+        assert_eq!(v.vertex_definitions(), &[b]);
+        assert!(v.absorbed_unbounded());
+        assert_eq!(v.position(), start, "not moved without a bound");
+        assert_covers(&m, pv, &[FAR, Q]);
+
+        // and a later resolution that absorbs a bounded one (the larger gap) does not move
+        // it either: the earlier unbounded one still has no bound
+        let (pc1, pc2) = (vertex_pc_at(0, 0.0), vertex_pc_at(1, 0.0));
+        let c = VertexDefinition::new(&k, &geo, &pc1, &pc2, P, 1e-4, 5e-6, None).unwrap();
+        let c = m.insert_vertex_definition(c).unwrap();
+        m.add_vertex_definition(pv, c).unwrap();
+        m.resolve_proto_vertex(&k, &geo, pv).unwrap();
+        let v = m.proto_vertex(pv).unwrap();
+        assert_eq!(v.vertex_definitions(), &[b]);
+        assert_eq!(v.position(), start);
+    }
+
+    /// #16638 review: a proto vertex that absorbed definitions and is then combined with
+    /// another (`CombineProtoVertex`, which re-averages the position) keeps covering them.
+    #[test]
+    fn a_combined_proto_vertex_covers_what_either_absorbed() {
+        let k = Kernel::default();
+        let geo = absorb_geo();
+        let (mut m, pv, _, _) = vertex_defs_on_one_vertex(&k, &geo, true, 2e-6, 0.0);
+        m.resolve_proto_vertex(&k, &geo, pv).unwrap();
+        let other_at = P + Vec3::new(0.0, -6e-5, 0.0);
+        let e = VertexDefinition::new(
+            &k,
+            &geo,
+            &region_pc(R0),
+            &region_pc(L0),
+            other_at,
+            1e-5,
+            1e-6,
+            None,
+        )
+        .unwrap();
+        let e = m.insert_vertex_definition(e).unwrap();
+        let other = m.new_proto_vertex(other_at, 1e-5).unwrap();
+        m.add_proto_vertex(other);
+        m.add_vertex_definition(other, e).unwrap();
+        m.combine_proto_vertex(pv, other).unwrap();
+        let v = m.proto_vertex(pv).unwrap();
+        let moved = P + Vec3::new(0.0, -3e-5, 0.0);
+        assert!(v.position().distance(moved) < 1e-15);
+        assert_covers(&m, pv, &[FAR, Q]);
+        let reach = v.position().distance(Q) * (1.0 + gamma(4));
+        assert_eq!(
+            v.raw_tolerance(),
+            reach,
+            "the computed distance, no estimate"
+        );
+    }
+
+    /// #16638 review: a definition added after a resolution (`AddVertexDefinition` from two
+    /// classifications, which re-averages the position) leaves the absorbed points covered.
+    #[test]
+    fn a_definition_added_after_resolution_keeps_absorbed_points_covered() {
+        let k = Kernel::default();
+        let geo = absorb_geo();
+        let (mut m, pv, _, b) = vertex_defs_on_one_vertex(&k, &geo, true, 2e-6, 0.0);
+        m.resolve_proto_vertex(&k, &geo, pv).unwrap();
+        let (vd, created) = m
+            .add_vertex_definition_from_pcs(
+                &k,
+                &geo,
+                pv,
+                &mut vertex_pc_at(2, 0.0),
+                &mut vertex_pc_at(3, 0.0),
+            )
+            .unwrap();
+        assert!(created);
+        let v = m.proto_vertex(pv).unwrap();
+        assert_eq!(v.vertex_definitions(), &[b, vd]);
+        let moved = P + Vec3::new(0.0, -4e-5, 0.0);
+        assert!(v.position().distance(moved) < 1e-15);
+        assert_covers(&m, pv, &[FAR, Q]);
     }
 
     /// A proto edge from a proto vertex back to itself along an open curve 5e-5 long

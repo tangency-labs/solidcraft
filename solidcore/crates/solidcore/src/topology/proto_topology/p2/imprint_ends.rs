@@ -149,12 +149,16 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// pole, inside the domain); on the other face, the vertex's foot (a local point solve
     /// from the end's parameters, within the vertex's tolerance of it).
     ///
-    /// It applies when the gap is within the proto vertex's tolerance, which for a vertex
-    /// that absorbed definitions covers the measured distance to each one's points
-    /// (`resolve_proto_vertex`): the end is then a point the vertex stands for. Each curve is clamped, so its end is
-    /// its end control point, and moving that point by `Δ` moves every point of the curve by
-    /// at most `|Δ|` (the basis functions, rational ones with positive weights included, are
-    /// a partition of unity, each at most 1): the 3d curve stays within the gap of where it
+    /// It applies when the gap (the distance from the evaluated end to the vertex,
+    /// computed here) is within the proto vertex's tolerance. For a vertex that combined
+    /// definitions away, that tolerance reaches the computed position and object points of
+    /// each of them, and the curve ends attached when it combined them, from where the
+    /// vertex now is (`ProtoVertex::set_position`); it is not a bound on where any other
+    /// end lies, which is why the gap is measured. Each curve is
+    /// clamped, so its end is its end control point, and moving that point by `Δ` moves
+    /// every point of the curve by at most `|Δ|` (the basis functions, rational ones with
+    /// positive weights included, are a partition of unity, each at most 1): the 3d curve
+    /// stays within the gap of where it
     /// was, ARGUED (not asserted in code). A continuation past the end instead
     /// (`extend_end_to_proto_vertex`) follows the end span's polynomial, which near a pole
     /// runs out of the face's UV domain. Returns whether the curves were replaced.
