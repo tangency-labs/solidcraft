@@ -9173,7 +9173,8 @@ mod right_click_tests {
         assert_eq!(h.app.status.as_ref().map(|(text, _, _)| text.as_str()), Some(h.app.tr("ui.dialog_ok_none")));
         let mut h = mirror();
         h.app.preferences.right_click_confirms = false;
-        crate::keymap::bind(&mut h.app, "ui.dialog_ok", "F9", false).unwrap();
+        let bound = h.call("ui.shortcut", json!({"command": "ui.dialog_ok", "key": "F9"}));
+        assert_eq!(bound["result"]["key"], "F9", "the control channel binds Dialog OK: {bound}");
         h.step(&json!({"click": {"world": [25, 15, 20]}})).unwrap();
         h.app.dialog.as_mut().unwrap().active = 1;
         h.step(&json!({"click": {"world": [50, 15, 10]}})).unwrap();
