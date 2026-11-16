@@ -1454,9 +1454,7 @@ pub(crate) fn record_edge(curve: BCurve, ps: P3, pe: P3, closed: bool, full: boo
             let position = placement(frame);
             conic(curve.clone(), &position, radii, ps, pe, true, full)?
         }
-        BCurve::Spline { .. } | BCurve::RationalSpline { .. } | BCurve::Polyline { .. } => {
-            open_or_closed(curve, ps, pe, true, closed, tol)?
-        }
+        BCurve::Spline { .. } | BCurve::RationalSpline { .. } | BCurve::Polyline { .. } => open_or_closed(curve, ps, pe, true, closed, tol)?,
         BCurve::SurfaceIntersection { .. } => return Err(unsupported("an intersection curve without an interval")),
     };
     Ok((mapped.curve, mapped.interval, mapped.with_step))
