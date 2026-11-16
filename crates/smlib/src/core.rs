@@ -136,7 +136,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ssi_split_curves_at_singular_points = true;
     f.surface_parallel_to_vector_checks = true;
     f.geometric_g2_continuity = true;
-    f.degen_param_tiebreak_uses_actual_param = true;
     f.local_surface_intersect_guards_max_boundary_retry = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
