@@ -96,6 +96,7 @@ use crate::surface::surface_cache::PatchBoundaryBoundingPlanes;
 
 use super::p1::{flush_crv, IntersectionPointType, SrfIndex, SurfaceIntersector, TsectPnt};
 use super::p4::IntersectorVirtuals;
+use super::sphere_span;
 
 const OP_CPV: &str = "intersect::surface_intersector::p2::SurfaceIntersector::compute_point_values";
 const OP_SING: &str =
@@ -1059,6 +1060,24 @@ impl SurfaceIntersector<'_> {
             i += 1;
         }
 
+        // Not upstream (#17110): a UV trim on a sphere is made monotone in its sweep
+        // coordinate wherever the 3D curve is monotone in longitude, certified, or the
+        // curve is refused
+        for (srf, ctrl) in [SrfIndex::First, SrfIndex::Second]
+            .into_iter()
+            .zip(&mut ctrl_uv)
+        {
+            let fitted = sphere_span::fit_monotone_sweep(
+                self.surface(srf),
+                ctrl,
+                &ctrl_3d,
+                self.this_approx_tol_3d,
+            );
+            if let Err(why) = fitted {
+                return Err(SolidError::intersect_failed(OP_FLUSH, sweep_refusal(why)));
+            }
+        }
+
         // build the B-spline curves
         flush_crv(3, &ctrl_3d, &knots, &mut out.curves_3d)?;
         let [uv0, uv1] = &ctrl_uv;
@@ -1883,6 +1902,24 @@ pub fn compute_law_point_values_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         OP_LAW,
         "no delta step gives the law point's values",
     ))
+}
+
+/// Not upstream (#17110): the message of a refused monotone sweep fit
+/// ([`sphere_span::fit_monotone_sweep`]).
+const fn sweep_refusal(why: sphere_span::SweepRefusal) -> &'static str {
+    match why {
+        sphere_span::SweepRefusal::Off(_) => {
+            "no UV trim on the sphere monotone in its sweep coordinate where the curve is \
+             monotone in longitude lies within the tolerance of the 3D curve"
+        }
+        sphere_span::SweepRefusal::TurnsBack => {
+            "the UV trim on the sphere turns back in its sweep coordinate where the curve \
+             does not in longitude, and no handles make it monotone"
+        }
+        sphere_span::SweepRefusal::Shape => {
+            "the UV and 3D control points of the traced curve are not matching cubic spans"
+        }
+    }
 }
 
 #[cfg(test)]
