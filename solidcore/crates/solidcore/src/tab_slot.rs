@@ -167,7 +167,8 @@ pub fn place(
                 return too_short(width + 2.0 * end_distance);
             }
             let room = usable - width;
-            if !(room / q <= MAX_TABS as f64) {
+            // room is finite and q positive and finite, so room / q is not NaN.
+            if room / q > MAX_TABS as f64 {
                 return Err(invalid("more tabs on one stretch than MAX_TABS"));
             }
             let fits = |m: usize| {
@@ -273,11 +274,10 @@ fn rectangle(lo: (f64, f64), hi: (f64, f64)) -> Region2 {
     ];
     Region2 {
         outer: Loop2 {
-            segs: (0..4)
-                .map(|i| Seg2::Line {
-                    a: p[i],
-                    b: p[(i + 1) % 4],
-                })
+            segs: p
+                .iter()
+                .zip(p.iter().cycle().skip(1))
+                .map(|(&a, &b)| Seg2::Line { a, b })
                 .collect(),
         },
         holes: Vec::new(),

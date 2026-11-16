@@ -106,7 +106,7 @@ fn count_names_the_most_that_fit() {
             assert_eq!(most, 4);
             assert_eq!(length, 120.0);
         }
-        other => panic!("{other:?}"),
+        other @ StretchSkip::SpacingTooSmall { .. } => panic!("{other:?}"),
     }
     assert_eq!(tabs((20.0, 140.0), Layout::Count(4), 20.0, 10.0).len(), 4);
     // Auto with a tiny W is capped by g_min too.
@@ -139,14 +139,16 @@ fn the_spacing_rule_at_its_boundary() {
             assert!((space - 0.6999).abs() < 1e-9);
             assert_eq!(least, LASER);
         }
-        other => panic!("{other:?}"),
+        other @ StretchSkip::TooShort { .. } => panic!("{other:?}"),
     }
 }
 
 #[test]
 fn a_spacing_fitting_a_whole_number_of_times_keeps_its_last_tab() {
-    // U − W = 3 q exactly up to rounding: 0.1 spacing over 0.3 + W.
-    let v = tabs((0.0, 0.3 + 0.05), Layout::Spacing(0.1), 0.05, 0.0);
+    // U − W = 3 q exactly up to rounding: 0.1 spacing over 0.3 + W; g_min 0 (q − W = 0.05).
+    let v = place((0.0, 0.3 + 0.05), Layout::Spacing(0.1), 0.05, 0.0, 0.0)
+        .unwrap()
+        .unwrap();
     assert_eq!(v.len(), 4, "{v:?}");
 }
 
