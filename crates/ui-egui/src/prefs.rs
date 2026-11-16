@@ -1086,6 +1086,10 @@ preference_settings! {
     /// C for Cancel (#9841). Off by default: typing does nothing to the buttons, as before.
     /// A letter that fits two buttons does nothing, and a focused text field keeps the keystroke.
     dialog_first_letter_buttons: bool = false, PAGE_GENERAL => check_id("prefs.dialog_first_letter_buttons");
+    /// The upright orbit stands a rolled view up as the pointer moves, turning the way the
+    /// pointer goes on screen (#12458). Off: a rolled view keeps its roll and turns about the
+    /// world's up axis, as before, so an upside-down view stays upside down.
+    upright_orbit_unrolls: bool = true, PAGE_NAVIGATION => check_tr("nav.upright_orbit_unrolls.label");
     /// The Donate button (Ko-fi) at the status bar's right end. The button's × turns it off; the Help
     /// menu, About and the start page keep their link.
     show_donate_button: bool = true, PAGE_GENERAL => check_id("prefs.show_donate_button");
