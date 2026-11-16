@@ -771,7 +771,11 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
             i.pointer.delta(),
         )
     });
-    let hover = hover.filter(|p| !crate::frame::dock_dragging(ui.ctx()) && !crate::shell::covered(app, *p));
+    let hover = hover.filter(|_| !crate::frame::dock_dragging(ui.ctx()));
+    // Pan, Orbit and Zoom Mode follow the pointer over the toolbars and panels around the view
+    // too, as their key still turns them off there; only the view's own input stops at them.
+    let toggled_hover = hover.filter(|_| app.viewport.nav_toggle.is_some());
+    let hover = hover.filter(|p| !crate::shell::covered(app, *p));
     let delta = unwrapped_delta(app, delta);
     // The right button belongs to the marking menu while it is open.
     let secondary_down = secondary_down && app.viewport.context_menu.is_none();
@@ -1041,7 +1045,11 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     };
     // Without orbit (a flat page), bindings that orbit do nothing.
     let allowed = |m: NavMode| caps.orbit || m != NavMode::Orbit;
-    let motion = modifier_motion(app, ui, inside, hover, mods, picking).filter(|(m, _)| allowed(*m));
+    let motion = match toggled_hover {
+        Some(p) => modifier_motion(app, ui, ui.is_enabled(), Some(p), mods, picking),
+        None => modifier_motion(app, ui, inside, hover, mods, picking),
+    }
+    .filter(|(m, _)| allowed(*m));
     let mode = motion
         .map(|(m, _)| m)
         .or_else(|| {

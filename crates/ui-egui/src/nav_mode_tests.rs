@@ -73,6 +73,28 @@ fn a_mode_starts_only_with_the_pointer_over_the_view() {
 }
 
 #[test]
+fn a_mode_keeps_moving_the_view_over_the_toolbars_and_panels() {
+    // Out to the top of the window, over the toolbars, and on along them, as a held Zoom drag
+    // goes on there.
+    let (mut h, at) = setup();
+    let top = Pos2::new(at.x, 4.0);
+    assert!(crate::shell::covered(&h.app, top) || !h.app.viewport.rect.is_some_and(|r| r.contains(top)), "off the view");
+    for k in [Key::P, Key::O, Key::Z] {
+        h.frame_with(vec![Event::PointerMoved(at)]);
+        press(&mut h, k);
+        h.frame_with(vec![Event::PointerMoved(top)]);
+        let before = h.app.cam;
+        h.frame_with(vec![Event::PointerMoved(top + vec2(40.0, 30.0))]);
+        assert_ne!(h.app.cam, before, "{k:?}: the view goes on moving over the toolbar");
+        press(&mut h, k);
+        assert_eq!(h.app.viewport.nav_toggle, None, "{k:?}: its key ends it there");
+        let after = h.app.cam;
+        h.frame_with(vec![Event::PointerMoved(top)]);
+        assert_eq!(h.app.cam, after, "{k:?}: once ended, motion leaves the view");
+    }
+}
+
+#[test]
 fn plain_motion_pans_orbits_and_zooms_without_touching_the_design() {
     let (mut h, at) = setup();
     let doc = h.app.session.doc.to_json();
