@@ -7699,8 +7699,8 @@ mod tests {
     fn the_3d_view_takes_a_gradient_of_its_own() {
         use egui::Color32;
         use serde_json::json;
-        use solidcraft_viewport::Rgb;
         use solidcraft_theme::Tokens;
+        use solidcraft_viewport::Rgb;
         let mut h = crate::scenario::Harness::new();
         assert_eq!(h.app.preferences.viewport_background_bottom, None);
         let (top, bottom) = ([250, 200, 120], [20, 40, 90]);
@@ -7737,8 +7737,8 @@ mod tests {
     fn the_3d_view_gradient_takes_a_middle_colour() {
         use egui::Color32;
         use serde_json::json;
-        use solidcraft_viewport::Rgb;
         use solidcraft_theme::{Tokens, ViewBackground};
+        use solidcraft_viewport::Rgb;
         let mut h = crate::scenario::Harness::new();
         assert_eq!(h.app.preferences.viewport_background_middle, None);
         let (top, middle, bottom) = ([250, 200, 120], [90, 160, 60], [20, 40, 90]);
@@ -7753,7 +7753,9 @@ mod tests {
         // The view: two bands, the middle colour across the middle.
         let ctx = egui::Context::default();
         let t = Tokens::get();
-        let out = ctx.run_ui(egui::RawInput::default(), |ui| solidcraft_viewport_egui::paint_background(ui.painter(), ui.max_rect(), t.viewport_top, t.viewport_middle, t.viewport_bottom));
+        let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            solidcraft_viewport_egui::paint_background(ui.painter(), ui.max_rect(), t.viewport_top, t.viewport_middle, t.viewport_bottom)
+        });
         let mesh = out
             .shapes
             .iter()
