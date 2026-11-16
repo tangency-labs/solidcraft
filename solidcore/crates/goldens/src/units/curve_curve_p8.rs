@@ -1078,8 +1078,11 @@ mod tests {
     ///   the same derivative identity gives `|c'| <= 2 p (w_max / w_min) D / min_span`
     ///   with `D` the control polygon's diameter (`c` lies in its hull, `W >= w_min`).
     ///
-    /// A clamped B-spline evaluated past its ends only slows down, so the bound holds
-    /// there too. The bound is widened by `1e-9` relative to cover rounding.
+    /// A clamped B-spline evaluated past its ends stays at its end point (speed 0), so the
+    /// bound holds there too; one with out-of-bounds evaluation errors there instead, and
+    /// the `unwrap` fails the test rather than passing an unbounded stretch. The Hermite
+    /// and line bounds use evaluated derivatives; the widening (`1e-9` relative plus
+    /// `1e-12`) covers their rounding and is a margin, not a derived error bound.
     fn speed_bound(k: &Kernel, ci: &CurveIn, c: &Curve, lo: f64, hi: f64) -> f64 {
         let d1 = |t: f64| c.evaluate(k, t, 1, true, false).unwrap()[1];
         let b = match resolve(ci).unwrap() {
@@ -1171,8 +1174,9 @@ mod tests {
 
     /// Every changed `gci` answer is certified (closed-form bounds, no sampling):
     ///
-    /// 1. each solution now reported is a contact: both parameters inside their
-    ///    intervals and the two curve points within `tol` (plus a rounding margin);
+    /// 1. each point now reported, and each end of each range now reported, is a contact:
+    ///    both parameters inside their intervals and the two curve points within `tol`
+    ///    (plus a rounding margin; a range's interior is not certified here);
     /// 2. each solution reported before is either still reported, or joined to one now
     ///    reported (a point, or an end of a range) by a stretch over which the curves stay
     ///    within `tol` of each other ([`path_within`]), so it is the same contact, now

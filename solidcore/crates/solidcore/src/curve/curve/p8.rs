@@ -65,13 +65,14 @@
 //!   end (`sm_MoveContactsToCurveEnds`, the fork's tangency-labs/smlib@51eefa5), so a
 //!   tangential contact is not placed inside the curve. Upstream leaves it inside. Not for
 //!   a self intersection, where the stretch test would compare the curve with itself.
+//!   A failed evaluation or solve in the move leaves the solution where it is.
 
 use crate::curve::curve::p1::refine_cc_solutions;
 use crate::curve::curve::p2::{at, CciGlobalSolver, Curve};
 use crate::curve::curve::p4::{analytic_curve_intersect, AnalyticOperand};
 use crate::curve::curve::p5::make_curve_cache_with_zone_tol;
 use crate::curve::curve_cache::CurveCache;
-use crate::error::{Result, SolidError};
+use crate::error::{native_failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::{
     Branch, GlobalSolve, SolutionRequested, SolveRequest, SolverOperation, MAX_SOLVER_TREES,
@@ -161,8 +162,9 @@ impl<'a, O: SolutionObject> Named<'a, O> {
     }
 }
 
-/// `sm_MoveContactsToCurveEnds` (the fork's tangency-labs/smlib@51eefa5, WR-455): a point solution whose contact runs on to an end of either curve's interval
-/// is at that end. It moves there when that end lies within `dist_tol` of the other
+/// `sm_MoveContactsToCurveEnds` (the fork's tangency-labs/smlib@51eefa5, WR-455): a
+/// point solution whose contact runs on to an end of either curve's interval is at that
+/// end. It moves there when that end lies within `dist_tol` of the other
 /// curve and the two curves stay within `dist_tol` of each other over the whole stretch
 /// between the end and the solution, measured on each curve.
 fn move_contacts_to_curve_ends<O: SolutionObject>(
@@ -206,8 +208,14 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
                 if end_t == sol_on_end {
                     continue; // already there
                 }
-                let end_pt = end_curve.evaluate_point(k, end_t)?;
-                let dropped = drop_curve.drop_point(
+                // A failure on the way (an end past an unclamped curve's knots, a
+                // failed solve) leaves the solution where upstream leaves it: this
+                // pass only refines solutions already found, so it never fails the
+                // intersection. Errors with no upstream status still propagate.
+                let Some(end_pt) = native_failure(end_curve.evaluate_point(k, end_t))? else {
+                    continue;
+                };
+                let Some(dropped) = native_failure(drop_curve.drop_point(
                     k,
                     drop_ivl,
                     end_pt,
@@ -215,15 +223,19 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
                     dist_tol,
                     Some(sol_on_drop),
                     SolverOperation::Minimize,
-                )?;
+                ))?
+                else {
+                    continue;
+                };
                 if !dropped.success || dropped.distance.is_nan() || dropped.distance > dist_tol {
                     continue;
                 }
                 let drop_t = dropped.parameter;
                 // A stretch of one point on the drop curve cannot be measured: the
                 // second gap below drops the end curve's samples onto that one-point
-                // interval, the local solves fail, and failed samples count as no gap, so
-                // the test would pass a closed curve's whole turn (goldens `curve.curve_p8`
+                // interval, the local solves find nothing to measure there, and a sample
+                // not measured adds no gap, so the test would pass a closed curve's whole
+                // turn (goldens `curve.curve_p8`
                 // gen2153). Such a solution stays where it is.
                 if drop_t == sol_on_drop {
                     continue;
@@ -240,7 +252,7 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
                 } else {
                     (sol_on_drop, drop_t)
                 };
-                let gap = end_curve.curve_max_distance_between(
+                let Some(gap) = native_failure(end_curve.curve_max_distance_between(
                     k,
                     &stretch,
                     drop_curve,
@@ -248,7 +260,10 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
                     drop_at_max,
                     0,
                     Some(dist_tol),
-                )?;
+                ))?
+                else {
+                    continue;
+                };
                 if gap.distance.is_nan() || gap.distance > dist_tol {
                     continue;
                 }
@@ -257,7 +272,7 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
                 } else {
                     (sol_on_end, end_t)
                 };
-                let gap = drop_curve.curve_max_distance_between(
+                let Some(gap) = native_failure(drop_curve.curve_max_distance_between(
                     k,
                     &drop_stretch,
                     end_curve,
@@ -265,7 +280,10 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
                     end_at_max,
                     0,
                     Some(dist_tol),
-                )?;
+                ))?
+                else {
+                    continue;
+                };
                 if gap.distance.is_nan() || gap.distance > dist_tol {
                     continue;
                 }
