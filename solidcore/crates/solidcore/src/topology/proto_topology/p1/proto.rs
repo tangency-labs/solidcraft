@@ -1839,14 +1839,17 @@ impl ProtoVertex {
     /// Not upstream (#16637): widens the tolerance to reach every absorbed point from the
     /// position: the largest computed distance, rounded up by `γ_4` for the distance's own
     /// rounding. Distances between computed points only, no stored gap and no estimate.
-    /// A non-finite distance (a non-finite position or point: NaN or infinite) never
-    /// widens, so the tolerance stays finite.
+    /// A non-finite distance (a non-finite position, or a distance that overflows) never
+    /// widens, so the tolerance stays finite; that point is then not covered, so it marks
+    /// the absorbed points unbounded ([`ProtoVertex::absorbed_unbounded`]: no later move).
     pub fn cover_absorbed(&mut self) {
         use crate::nurbs::math::gamma;
         let mut reach = 0.0_f64;
         for &at in &self.absorbed_points {
             let r = self.position.distance(at) * (1.0 + gamma(4));
-            if r.is_finite() && r > reach {
+            if !r.is_finite() {
+                self.absorbed_unbounded = true;
+            } else if r > reach {
                 reach = r;
             }
         }

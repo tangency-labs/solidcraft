@@ -1773,15 +1773,23 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     }
 
     /// Not upstream (#16637): the points a vertex definition (one about to be combined
-    /// away, or one that remains when the proto vertex moves) holds, computed now: its position and, for each classification to an object that
-    /// has points (all but unknown, nothing and region, whose point is the position
-    /// itself), the object point at its parameters (`FindObjPoint3d`). Returns them and
-    /// whether every one was computed and is finite (only finite points are returned). The classifications' stored gaps
-    /// (`m_dGap3d`) are not used: several writers set them to something other than the
-    /// distance at the stored parameters. An object point that cannot be computed (parameters
-    /// not set, an evaluation error of any kind, a non-finite result) makes the result
-    /// unbounded instead of an error, so a resolution that combines definitions never fails
-    /// here.
+    /// away, or one that remains when the proto vertex moves) holds, computed now: its
+    /// position and, for each classification to an object that has points (all but
+    /// unknown, nothing and region, whose point is the position itself), the object point
+    /// at its parameters (`FindObjPoint3d`). Returns them and whether every one was
+    /// computed, is finite and is consistent with the definition. The classifications'
+    /// stored gaps (`m_dGap3d`) are not used: several writers set them to something other
+    /// than the distance at the stored parameters.
+    ///
+    /// Only finite points are returned. An object point is returned only when it lies
+    /// within the definition's tolerance of the definition's position (the distance
+    /// rounded up by `γ_4`, as `attached_curve_ends` attributes ends): one farther off is
+    /// not a point the definition stands for (a definition the kernel builds takes its
+    /// position from its object points), so covering it would only widen the tolerance
+    /// by an inconsistency of the input. An object point that cannot be computed
+    /// (parameters not set, an evaluation error of any kind, a non-finite result) or that
+    /// is not consistent makes the result unbounded instead of an error, so the vertex
+    /// does not move and a resolution that combines definitions never fails here.
     fn absorbed_points_of(
         &self,
         k: &Kernel,
@@ -1792,6 +1800,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             return (Vec::new(), false);
         };
         let position = d.position();
+        let tol = d.tolerance(k);
         let mut bounded = finite_point(position);
         // only finite points are recorded: a non-finite one has no distance to cover
         let mut points = Vec::new();
@@ -1807,7 +1816,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 continue;
             }
             match pc.find_obj_point_3d(k, brep) {
-                Ok(p) if finite_point(p) => points.push(p),
+                Ok(p) if finite_point(p) && p.distance(position) * (1.0 + gamma(4)) <= tol => {
+                    points.push(p);
+                }
                 _ => bounded = false,
             }
         }
@@ -1963,7 +1974,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let v = self
             .proto_vertex_mut(pv)
             .ok_or(dangling("proto vertex is deleted"))?;
-        if position.is_some() {
+        // a move: the remaining definitions' points are covered from the new position. With
+        // no move the position is the one upstream's tolerance was set around, which then
+        // stands for them (as when the vertex does not move at all).
+        if position.is_some_and(|p| p != v.position()) {
             v.absorb(&held, true);
         }
         match position {
@@ -4465,8 +4479,9 @@ mod tests {
         let v = m.proto_vertex(pv).unwrap();
         assert_eq!(v.vertex_definitions(), &[b]);
         assert_eq!(v.position(), P);
-        // `a`'s position and object points, then the survivor `b`'s (recorded at the move)
-        assert_eq!(v.absorbed_points(), &[FAR, Q, Q, P, Q, Q]);
+        // `a`'s position and object points; the survivor `b` is at `P` already, so there is
+        // no move and its points are not recorded (#17839 review r2)
+        assert_eq!(v.absorbed_points(), &[FAR, Q, Q]);
         assert!(!v.absorbed_unbounded());
         assert_eq!(
             v.raw_tolerance(),
@@ -4476,15 +4491,16 @@ mod tests {
     }
 
     /// #16638 review: a classification whose stored gap is NaN still has its object point
-    /// covered (the gap is not read), and the vertex moves to the survivor.
+    /// covered (the gap is not read), and the vertex is at the survivor.
     #[test]
     fn an_absorbed_classification_with_a_nan_gap_is_still_covered() {
         let k = Kernel::default();
         let geo = absorb_geo();
         // listed second: `b`'s gap is not greater than NaN, so the NaN one goes. Its
-        // tolerance (5e-6) is no pad that reaches `Q` from `P` (3e-5 + 5e-6 < 4e-5).
+        // tolerance (6e-5) holds its object point `Q` (5e-5 from `FAR`), so the definition
+        // is consistent (#17839 review r2: an object point outside it would not be covered).
         let (mut m, pv, a, b) =
-            vertex_defs_on_one_vertex(&k, &geo, false, 1e-4, 5e-6, f64::NAN, f64::NAN);
+            vertex_defs_on_one_vertex(&k, &geo, false, 1e-4, 6e-5, f64::NAN, f64::NAN);
         m.resolve_proto_vertex(&k, &geo, pv).unwrap();
         assert!(m.vertex_def(a).is_none());
         let v = m.proto_vertex(pv).unwrap();
@@ -4527,6 +4543,60 @@ mod tests {
         let v = m.proto_vertex(pv).unwrap();
         assert_eq!(v.vertex_definitions(), &[b]);
         assert_eq!(v.position(), start);
+    }
+
+    /// #17839 review r2: a remaining definition whose object point lies far outside its own
+    /// tolerance of its position (here `R_AT`, 8e-5 off with a tolerance of 1e-5: input no
+    /// kernel-built definition can have) is not a point it stands for. It is not recorded,
+    /// the result is unbounded and the vertex stays; the tolerance reaches only the absorbed
+    /// position `FAR`. Before the fix the object point was recorded on a zero move and the
+    /// tolerance grew to reach it (the `edge_vertex_defs_huge` golden row, 0.1 -> 9999).
+    #[test]
+    fn a_survivor_object_point_outside_its_tolerance_does_not_widen_the_vertex() {
+        let k = Kernel::default();
+        let geo = absorb_geo();
+        let mut m = manager();
+        let mut mk = |pc2: PointClassification<H>, at: Point3, tol: f64, gap: f64| {
+            let vd =
+                VertexDefinition::new(&k, &geo, &region_pc(R0), &pc2, at, tol, gap, None).unwrap();
+            m.insert_vertex_definition(vd).unwrap()
+        };
+        let a = mk(region_pc(R1), FAR, 1e-5, 2e-6);
+        let b = mk(region_pc(R1), P, 1e-5, 1e-6);
+        let c = mk(vertex_pc_at(2, 0.0), P, 1e-5, 1e-6);
+        let pv = m.new_proto_vertex(P, 1e-5).unwrap();
+        m.add_proto_vertex(pv);
+        for vd in [a, b, c] {
+            m.add_vertex_definition(pv, vd).unwrap();
+        }
+        m.resolve_proto_vertex(&k, &geo, pv).unwrap();
+        assert!(m.vertex_def(a).is_none());
+        let v = m.proto_vertex(pv).unwrap();
+        assert_eq!(v.vertex_definitions(), &[b, c]);
+        assert_eq!(v.position(), P);
+        assert!(!v.absorbed_points().contains(&R_AT));
+        assert_eq!(
+            v.raw_tolerance(),
+            P.distance(FAR) * (1.0 + gamma(4)),
+            "only the absorbed position is reached, not the inconsistent object point"
+        );
+    }
+
+    /// #17839 review r2: a distance between finite points that overflows (x = -1e300 to
+    /// x = 1e300) does not widen the tolerance to +inf; the point is left uncovered and
+    /// marks the absorbed points unbounded, so the vertex does not move later.
+    #[test]
+    fn an_overflowing_absorbed_distance_marks_the_vertex_unbounded() {
+        let mut m = manager();
+        let pv = m
+            .new_proto_vertex(Point3::new(-1e300, 0.0, 0.0), 1e-5)
+            .unwrap();
+        let v = m.proto_vertex_mut(pv).unwrap();
+        v.absorb(&[Point3::new(1e300, 0.0, 0.0)], true);
+        assert!(!v.absorbed_unbounded());
+        v.cover_absorbed();
+        assert_eq!(v.raw_tolerance(), 1e-5, "not widened");
+        assert!(v.absorbed_unbounded());
     }
 
     /// #17839 review: an absorbed definition placed at an infinite position records only
@@ -4719,7 +4789,8 @@ mod tests {
     }
 
     /// #17839 re-review: the move to the remaining definitions also covers their own
-    /// points. `s1` (on the vertices `V2`, `V3`, at `P`, object point `R_AT` 8e-5 below)
+    /// points. `s1` (on the vertices `V2`, `V3`, at `P`, object point `R_AT` 8e-5 below,
+    /// within its tolerance 1e-4)
     /// stays alone; `a` combines into `s2` (both on the regions `R0`, `R1`). The vertex moves
     /// to the average of `s1` and `s2`, which is 1.2e-4 from `R_AT`: much more than the
     /// 2e-5 to what was absorbed.
@@ -4734,7 +4805,7 @@ mod tests {
             &vertex_pc_at(2, 0.0),
             &vertex_pc_at(3, 0.0),
             P,
-            1e-5,
+            1e-4,
             1e-6,
             None,
         )
