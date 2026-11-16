@@ -7203,15 +7203,8 @@ fn feature_tools_with_constructor(
                 }
                 None => val(vals, &extent.distance, Kind::Length)?,
             };
-            // To a curved (or slanted) face: run right through the target body, then keep what
-            // lies before that face's surface, offset by the To offset along the travel
-            // (`trim_to_face`, #12617), with a taper or without (#15820). An end the offset
-            // carries back across the start, away from that face, never meets it: it ends at its
-            // level, as for a plane, instead of running out through the whole body. A wall that
-            // runs along the extrusion (a cylinder's side, when extruding along its axis) and lies
-            // clear of the profile is never reached: the point picked on it stands for the plane
-            // through it, as a point in space does (#11923). A wall that crosses the profile seen
-            // along the extrusion still trims the tool to the body.
+            // The curved (or slanted) To face the tool is cut back to, with a taper or without
+            // (#15820): see the straight path below.
             let curved = curved_face(&tst, to_end_face, Some(n))
                 .filter(|_| toward_to)
                 .filter(|_| !to_end_face.is_some_and(|face| runs_along(&tst, face, n) && !meets_footprint(&tst, face, &ss.plane, &regions)));
@@ -7239,47 +7232,14 @@ fn feature_tools_with_constructor(
                         Some(e) => val(vals, e, Kind::Length)?,
                         None => 0.0,
                     };
-                let start_plane = ss.plane.offset(base);
-                // To a curved face the tool is cut back to the face once built (#15820), so it runs
-                // past the face, but no farther than it must: a taper that narrows the profile, or
-                // a hole in it, closes it a finite way along, inside a deep target. An envelope
-                // that holds the tool and never closes says how far: the outer loop alone, drafted
-                // when the taper grows it (only the holes narrow) and straight when the taper
-                // narrows it. Run right through the target (past the far side of its exact box by
-                // the margin the straight path takes) and cut back to the face, its far end is the
-                // farthest the tool meets the face; the tool runs a hair past that.
+                // To a curved face the tool runs past the face and is cut back to it once built.
                 let target = curved.and_then(|bi| tst.bodies.get(bi)).zip(to_face).zip(extent.to);
                 let len = match target {
-                    Some(((tb, (_, fi)), p)) => {
-                        let far_side = |body: &Body| -> Result<f64> {
-                            let bb = body.exact_bounds().map_err(|e| DocError::Invalid(e.to_string()))?;
-                            let (c, half) = (bb.center(), bb.size() * 0.5);
-                            Ok(sign * (ss.plane.height(c) - base) + half.x * n.x.abs() + half.y * n.y.abs() + half.z * n.z.abs())
-                        };
-                        let through = far_side(&tb.body)?.max(len) + tb.body.size() * 0.05 + 1.0 + to_offset.abs();
-                        extrude_within_reach([base, base + sign * through])?;
-                        let mut envelopes = Vec::new();
-                        for r in &regions {
-                            let outer = Region2 { outer: r.outer.clone(), holes: Vec::new() };
-                            if taper > 0.0 {
-                                let corner = match extent.corner {
-                                    Some(c) => c,
-                                    None => draft_corner_for(&ss, &outer, through, taper, &mut Vec::new())?,
-                                };
-                                let body = kernel::extrude_tapered_between(&start_plane, &outer, 0.0, through, 0.0, sign, taper, corner)?;
-                                envelopes.push(Traced::unnamed(body));
-                            } else {
-                                let (lo, hi) = if sign < 0.0 { (base - through, base) } else { (base, base + through) };
-                                envelopes.extend(centered_extrude(&ss.plane, &outer, lo, hi, None, None, false)?);
-                            }
-                        }
-                        let cut = trim_to_curved_face(envelopes, tb, fi, p.0, to_offset, &ss.plane, base, base + sign * through)?;
-                        let reach = cut.iter().map(|t| far_side(&t.body)).collect::<Result<Vec<_>>>()?.into_iter().fold(len, f64::max);
-                        reach + tb.body.size() * 1e-3
-                    }
+                    Some(((tb, (_, fi)), p)) => tapered_reach(&ss, &regions, (tb, fi, p.0, to_offset), base, sign, len, taper, extent.corner)?,
                     None => len,
                 };
                 extrude_within_reach([base, base + sign * len])?;
+                let start_plane = ss.plane.offset(base);
                 let caps = [
                     Some(crate::lineage::extrude_cap_role(base)),
                     Some(crate::lineage::extrude_cap_role(if sign < 0.0 { base - len } else { base + len })),
@@ -7336,6 +7296,15 @@ fn feature_tools_with_constructor(
             let (a, b) = extent_sides(vals, extent, d, direction)?;
             // A negative distance flips the side.
             let (mut lo, mut hi) = if a <= b { (a, b) } else { (b, a) };
+            // To a curved (or slanted) face: run right through the target body, then keep what
+            // lies before that face's surface, offset by the To offset along the travel
+            // (`trim_to_face`, #12617). An end the offset carries back across the start, away from
+            // that face, never meets it: it ends at its level, as for a plane, instead of running
+            // out through the whole body. A wall that runs along the extrusion (a cylinder's side,
+            // when extruding along its axis) and lies clear of the profile is never reached: the
+            // point picked on it stands for the plane through it, as a point in space does
+            // (#11923). A wall that crosses the profile seen along the extrusion still trims the
+            // tool to the body.
             if let Some(bi) = curved
                 && let Some(tb) = tst.bodies.get(bi)
             {
@@ -9701,6 +9670,54 @@ fn trim_to_curved_face(
         return Err(DocError::Invalid("the profile reaches past the offset surface of the To face".into()));
     }
     Ok(trimmed)
+}
+
+/// How long a tool drafted by `taper` over `regions`, from level `base` along `sign` times the
+/// sketch's normal, runs to go past the curved To face `face` of `target` (`to` is the To pick,
+/// `to_offset` its offset), to be cut back to it with [`trim_to_curved_face`] (#15820). No longer
+/// than it must: a taper that narrows the profile, or a hole in it, closes it a finite way along,
+/// which can lie inside a deep target. An envelope that holds the tool and never closes says how
+/// far: the outer loop alone, drafted when the taper grows it (only the holes narrow) and
+/// straight when the taper narrows it. Run right through the target (past the far side of its
+/// exact box by the margin the straight path takes) and cut back to the face, its far end is the
+/// farthest the tool meets the face; the tool runs a hair past that, and at least `len`.
+#[allow(clippy::too_many_arguments)]
+fn tapered_reach(
+    ss: &SolvedSketch,
+    regions: &[Region2],
+    (target, face, to, to_offset): (&ModelBody, usize, Vec3, f64),
+    base: f64,
+    sign: f64,
+    len: f64,
+    taper: f64,
+    corner: Option<kernel::DraftCorner>,
+) -> Result<f64> {
+    let n = ss.plane.normal();
+    let far_side = |body: &Body| -> Result<f64> {
+        let bb = body.exact_bounds().map_err(|e| DocError::Invalid(e.to_string()))?;
+        let (c, half) = (bb.center(), bb.size() * 0.5);
+        Ok(sign * (ss.plane.height(c) - base) + half.x * n.x.abs() + half.y * n.y.abs() + half.z * n.z.abs())
+    };
+    let through = far_side(&target.body)?.max(len) + target.body.size() * 0.05 + 1.0 + to_offset.abs();
+    extrude_within_reach([base, base + sign * through])?;
+    let start_plane = ss.plane.offset(base);
+    let mut envelopes = Vec::new();
+    for r in regions {
+        let outer = Region2 { outer: r.outer.clone(), holes: Vec::new() };
+        if taper > 0.0 {
+            let corner = match corner {
+                Some(c) => c,
+                None => draft_corner_for(ss, &outer, through, taper, &mut Vec::new())?,
+            };
+            envelopes.push(Traced::unnamed(kernel::extrude_tapered_between(&start_plane, &outer, 0.0, through, 0.0, sign, taper, corner)?));
+        } else {
+            let (lo, hi) = if sign < 0.0 { (base - through, base) } else { (base, base + through) };
+            envelopes.extend(centered_extrude(&ss.plane, &outer, lo, hi, None, None, false)?);
+        }
+    }
+    let cut = trim_to_curved_face(envelopes, target, face, to, to_offset, &ss.plane, base, base + sign * through)?;
+    let reach = cut.iter().map(|t| far_side(&t.body)).collect::<Result<Vec<_>>>()?.into_iter().fold(len, f64::max);
+    Ok(reach + target.body.size() * 1e-3)
 }
 
 /// The surface of `target`'s face `face` as a sheet body `offset` past the face along `travel`
