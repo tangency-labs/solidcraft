@@ -216,6 +216,47 @@ fn a_consuming_call_reports_its_operands_as_they_came() {
 /// A configuration-sensitive test gets its own process, so corpus tests cannot replace its
 /// process-wide fixes between session calls. Child completion, rather than elapsed time,
 /// determines the result. The child runs the same test body exactly once.
+/// The kernel a call panicked on never goes back to the idle kernels, so no later call is handed
+/// it; the kernel a call finished on does go back, mark and all, and the next call on the thread
+/// takes it (which shows the check below looks where a kernel would be).
+#[test]
+fn a_kernel_that_panicked_is_never_handed_to_another_call() {
+    in_own_process(
+        "session::tests::a_kernel_that_panicked_is_never_handed_to_another_call",
+        || {
+            all_fixes();
+            const MARK: &str = "pool marker";
+            let marked = |k: &Kernel| k.upstream_ub_passed.contains(&MARK);
+            let idle_marked = || IDLE.lock().unwrap().iter().filter(|k| marked(k)).count();
+
+            run("marks and finishes", |k| {
+                k.upstream_ub_passed.push(MARK);
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(idle_marked(), 1, "a finished call's kernel is idle again");
+            assert!(run("takes it", |k| Ok(marked(k))).unwrap());
+            run("clears the mark", |k| {
+                k.upstream_ub_passed.retain(|m| *m != MARK);
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(idle_marked(), 0);
+
+            let r: Result<()> = run("marks and panics", |k| {
+                k.upstream_ub_passed.push(MARK);
+                panic!("part way")
+            });
+            assert!(matches!(r, Err(Error::Internal(_))), "{r:?}");
+            assert_eq!(idle_marked(), 0, "the kernel that panicked is not idle");
+            for _ in 0..4 {
+                assert!(!run("after", |k| Ok(marked(k))).unwrap());
+            }
+            assert_eq!(idle_marked(), 0);
+        },
+    );
+}
+
 fn in_own_process(test: &str, f: impl FnOnce()) {
     const CHILD: &str = "SOLIDCORE_SESSION_TEST_CHILD";
     if std::env::var(CHILD).as_deref() == Ok(test) {
