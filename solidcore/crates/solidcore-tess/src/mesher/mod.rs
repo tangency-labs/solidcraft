@@ -1943,6 +1943,18 @@ fn plan_face(
             let g = if i < map.len() { *map.get(i)? } else { base + (i - map.len()) };
             u32::try_from(g).ok()
         };
+        // Each boundary node as the triangles name it ([`cdt::Meshed::merged`]): where a loop
+        // passes one point twice (a slit's two runs, the vertex where the slit leaves the rest of
+        // its loop), the triangles name its first node, so the shaping keys the boundary's sides
+        // by the same nodes and keeps every one of them.
+        let mut named: Vec<u32> = (0..nb).filter_map(|k| u32::try_from(k).ok()).collect();
+        for (k, m) in meshed.merged.iter().enumerate() {
+            if let (Some(&own), Some(g)) = (map.get(k), global(*m))
+                && let Some(slot) = named.get_mut(own)
+            {
+                *slot = g;
+            }
+        }
         let mut tris: Vec<[u32; 3]> = Vec::new();
         for t in &meshed.triangles {
             let (Some(a), Some(b), Some(c)) = (global(t[0]), global(t[1]), global(t[2])) else { return Err(fail("a triangle's node is missing")) };
@@ -1978,7 +1990,7 @@ fn plan_face(
         };
         // Shaped whole: the fans kept as they are, the rings split in the face where they must,
         // the face's own boundary sides on their edges.
-        match shape::shape(&mut nodes, &mut pos, &mut tris, &ranges, (ring_sides.as_slice(), fans, &pole_ids), &point, &shaping) {
+        match shape::shape(&mut nodes, &mut pos, &mut tris, (&ranges, &named), (ring_sides.as_slice(), fans, &pole_ids), &point, &shaping) {
             // The sides its shaping would split go on their edges first ([`plan_at`]).
             shape::Shaped::Split(split) => {
                 let sides = split.into_iter().filter_map(|(i, j, at)| Some(SplitSide { from: *fixed.get(i)?, to: *fixed.get(j)?, at })).collect();

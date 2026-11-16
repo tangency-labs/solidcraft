@@ -835,8 +835,17 @@ impl OffsetExecutive {
     /// [`super::reach::extended_by_margin`], which the local reach's ball check builds too): a plane,
     /// cone, sphere or torus as itself, a ball patch with its pole (a side collapsed to a
     /// point) as a ball patch on the same sphere (one without a pole takes the generic ruled
-    /// extension), a procedural blend by its definition, an offset surface as the offset of
-    /// its base extended. A hit never re-extends or replaces the cached surface.
+    /// extension), an offset surface as the offset of its base extended. A hit never
+    /// re-extends or replaces the cached surface.
+    ///
+    /// A procedural blend is extended as its net, the B-spline the face's surface is (its
+    /// definition is the certificate's, within its bound of the net): the margin runs past
+    /// where the definition holds. Along the spine the definition is
+    /// continued only while each foot stays on its support, and a round's supports end with
+    /// the face; across, its bound grows by the closed-form Chebyshev factor of the span
+    /// continued (`surface::extend::blend`). A margin is a ruled piece of surface for the
+    /// neighbours' offsets to meet, which the net continued gives at any distance, as for
+    /// every other spline face (#17373).
     ///
     /// The margin is how far the face's offset must reach past the face for its
     /// neighbours' offsets to meet it ([`Self::original_extension_margin`],
@@ -871,7 +880,20 @@ impl OffsetExecutive {
             std::collections::btree_map::Entry::Vacant(entry) => {
                 // The obsolete offset-specific `else` at cpp:2158 is unreachable:
                 // NER(pBase) already established pOrigSurf == pBase != NULL.
-                let extension = super::reach::extended_by_margin(kernel, base, margin)?;
+                let extension = if margin == 0.0 {
+                    base.clone()
+                } else {
+                    // a blend as its net (above)
+                    let net;
+                    let base = match base.kind() {
+                        SurfaceKind::ProceduralBlend(pb) => {
+                            net = Surface::from(pb.net.clone());
+                            &net
+                        }
+                        _ => base,
+                    };
+                    super::reach::extended_by_margin(kernel, base, margin)?
+                };
                 Ok(entry.insert(extension))
             }
         }
@@ -4094,6 +4116,52 @@ mod tests {
             7.0
         );
         assert_eq!(executive.extended_surfaces.len(), 2);
+    }
+
+    /// A round's margin is its net continued, past where its definition holds (#17373).
+    /// The round's spine runs x = 0 to 10 and its supports x = 0 to 20, so its definition
+    /// continued 15 before x = 0 leaves both supports and is refused; the margin of 15 is
+    /// the net extended ruled on every side, the net itself over the face and its straight
+    /// spine continued 15 past each end.
+    #[test]
+    fn a_rounds_margin_is_its_net_continued_past_its_supports() {
+        let (kernel, pb) = crate::surface::extend::tests::round_blend(1, true);
+        let round = Surface::from(pb);
+        let margin = 15.0;
+        assert!(round
+            .extended_sides_keeping_parameters(&kernel, &BoxSide::ALL, Continuity::Ruled, margin)
+            .is_err());
+        let mut executive = executive();
+        let made = executive
+            .get_create_extended_surface(&kernel, 7, &round, margin)
+            .unwrap()
+            .clone();
+        assert!(
+            matches!(made.kind(), SurfaceKind::BSpline(_)),
+            "{:?}",
+            made.kind()
+        );
+        let face = round.natural_uv_domain_with_nurb(&kernel).unwrap();
+        let grown = made.natural_uv_domain_with_nurb(&kernel).unwrap();
+        assert!(
+            grown.min().x < face.min().x
+                && grown.max().x > face.max().x
+                && grown.min().y < face.min().y
+                && grown.max().y > face.max().y,
+            "{face:?} {grown:?}"
+        );
+        for i in 0..=4 {
+            for j in 0..=4 {
+                let uv = face.evaluate(f64::from(i) / 4.0, f64::from(j) / 4.0);
+                let a = made.evaluate_point(&kernel, uv).unwrap();
+                let b = round.evaluate_point(&kernel, uv).unwrap();
+                assert!(a.distance(b) <= 1e-9, "{uv:?}: {a:?} {b:?}");
+            }
+        }
+        let mid = 0.5 * (face.min().y + face.max().y);
+        let end = |u: f64| made.evaluate_point(&kernel, Vec2::new(u, mid)).unwrap().x;
+        assert!(end(grown.max().x) >= 25.0 - 1e-6, "{}", end(grown.max().x));
+        assert!(end(grown.min().x) <= -15.0 + 1e-6, "{}", end(grown.min().x));
     }
 
     #[test]
