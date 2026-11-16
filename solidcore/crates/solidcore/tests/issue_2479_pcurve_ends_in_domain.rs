@@ -20,12 +20,15 @@ mod support;
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::curve::curve::{Curve, CurveKind};
-use solidcore::primitive::api_curves::{create_analytic_circle, create_line_segment};
+use solidcore::nurbs::math::{NOW, NOZ};
+use solidcore::primitive::api_curves::{
+    create_analytic_circle, create_ellipse, create_line_segment,
+};
 use solidcore::primitive::api_primitives::{
     create_box, create_cone, create_cylinder, create_sphere, create_torus,
 };
 use solidcore::sweep::api_brep::{create_linear_sweep, create_rotational_sweep};
-use solidcore::topology::edgeuse::p1::{mate, uv_trim_curve};
+use solidcore::topology::edgeuse::p1::{mate, set_uv_trim_curve, uv_trim_curve, UvTrimCurveArg};
 use solidcore::topology::face::p1::swap_uv;
 use solidcore::topology::face::p2::loops;
 use solidcore::topology::loopuse::loop_edgeuses;
@@ -181,13 +184,13 @@ fn survey() {
     }
 }
 
-/// The bits of `c`'s NURB control points' weighted u and v and weight: a B-spline's own
-/// NURB, a line's made as `SwapUV` makes it.
-fn nurb_uvw(c: &Curve) -> Vec<[u64; 3]> {
-    let bits = |n: &solidcore::nurbs::crv_basic::Curve| -> Vec<[u64; 3]> {
+/// The bits of `c`'s NURB control points' weighted u, v and z and weight: a B-spline's own
+/// NURB, a line's made as `SwapUV` makes it, an ellipse's made beforehand by the test.
+fn nurb_uvw(c: &Curve) -> Vec<[u64; 4]> {
+    let bits = |n: &solidcore::nurbs::crv_basic::Curve| -> Vec<[u64; 4]> {
         n.cpts()
             .iter()
-            .map(|p| [p.x.to_bits(), p.y.to_bits(), p.w.to_bits()])
+            .map(|p| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits(), p.w.to_bits()])
             .collect()
     };
     match c.kind() {
@@ -198,12 +201,13 @@ fn nurb_uvw(c: &Curve) -> Vec<[u64; 3]> {
                 .gw_nurb()
                 .expect("a line trim's NURB"),
         ),
-        other => panic!("a trim that is neither a B-spline nor a line: {other:?}"),
+        CurveKind::Ellipse(e) => bits(e.base().gw_nurb().expect("an ellipse trim with its NURB")),
+        other => panic!("a trim that is neither a B-spline, a line nor an ellipse: {other:?}"),
     }
 }
 
 /// Every trim of `f`'s loops (its upward loop uses), by edge use.
-fn face_trims(b: &Brep, f: FaceId) -> Vec<(EdgeuseId, Vec<[u64; 3]>)> {
+fn face_trims(b: &Brep, f: FaceId) -> Vec<(EdgeuseId, Vec<[u64; 4]>)> {
     let mut out = Vec::new();
     for l in loops(b, f, false, None).unwrap() {
         for eu in loop_edgeuses(b, l).unwrap() {
@@ -215,18 +219,51 @@ fn face_trims(b: &Brep, f: FaceId) -> Vec<(EdgeuseId, Vec<[u64; 3]>)> {
     out
 }
 
+/// A box whose first face's first trim is an ellipse (`SwapUV`'s conic arm). The ellipse
+/// is not on the face's boundary; `SwapUV` only transposes it.
+fn box_with_ellipse_trim(k: &mut Kernel) -> Brep {
+    let mut b = create_box(k, p(-5.0, 3.0, 7.0), 10.0, 20.0, 30.0).unwrap();
+    let f = b.faces().iter().map(|(f, _)| f).next().unwrap();
+    let l = loops(&b, f, false, None).unwrap()[0];
+    let eu = loop_edgeuses(&b, l).unwrap()[0];
+    let mut e = create_ellipse(k, p(0.3, 0.7, 0.0), 0.25, 0.125).unwrap();
+    e.make_nurb(k).unwrap();
+    set_uv_trim_curve(
+        &mut b,
+        eu,
+        UvTrimCurveArg::New(Box::new(Curve::from(e))),
+        0.0,
+        true,
+        None,
+    )
+    .unwrap();
+    b
+}
+
+/// The bits of a weighted `z` once its curve is 3D: a 2D NURB's [`NOZ`] becomes `0`, as
+/// upstream's mirror makes it (`N_CrvTransform` on a 2D curve).
+fn made_3d(z: u64) -> u64 {
+    if f64::from_bits(z) == NOZ {
+        0.0f64.to_bits()
+    } else {
+        z
+    }
+}
+
 /// WR-729: `SmFace::SwapUV` transposes each trim exactly. After a swap, the trim set on each
-/// edge use's mate has its old NURB's control points with `u` and `v` swapped, bit for bit,
-/// and a second swap gives every trim back bit for bit. Upstream's mirror through the
-/// rounded matrix (`I - 2nn^T`, `-2.2e-16` on the diagonal) fails both: it moves each
-/// coordinate by up to an ulp (`v = 0` became `-2.2e-16`).
+/// edge use's mate has its old NURB's control points with `u` and `v` swapped, bit for bit
+/// (the weight unchanged, a 2D trim made 3D at `z = 0`), and a second swap gives every trim back bit for bit.
+/// Upstream's mirror through the rounded matrix (`I - 2nn^T`, `-2.2e-16` on the diagonal)
+/// fails both: it moves each coordinate by up to an ulp (`v = 0` became `-2.2e-16`). The
+/// cylinder's cap circles are rational and the third body's ellipse takes the conic arm.
 #[test]
 fn swap_uv_transposes_every_trim_bit_for_bit() {
-    let bodies: [fn(&mut Kernel) -> Brep; 2] = [
+    let bodies: [fn(&mut Kernel) -> Brep; 3] = [
         |k| create_box(k, p(-5.0, 3.0, 7.0), 10.0, 20.0, 30.0).unwrap(),
         |k| create_cylinder(k, p(1.0, 2.0, 3.0), 2.5, 7.0).unwrap(),
+        box_with_ellipse_trim,
     ];
-    let mut checked = 0;
+    let (mut checked, mut rational, mut ellipses) = (0, 0, 0);
     for build in bodies {
         let mut k = Kernel::default();
         let mut b = build(&mut k);
@@ -234,17 +271,44 @@ fn swap_uv_transposes_every_trim_bit_for_bit() {
         for f in faces {
             let before = face_trims(&b, f);
             assert!(!before.is_empty());
+            for (eu, _) in &before {
+                let c = uv_trim_curve(&b, *eu).unwrap().0.unwrap();
+                ellipses += usize::from(matches!(c.kind(), CurveKind::Ellipse(_)));
+            }
             swap_uv(&k, &mut b, f).unwrap();
             for (eu, cpts) in &before {
                 let m = mate(&b, *eu).unwrap().unwrap();
                 let swapped = nurb_uvw(uv_trim_curve(&b, m).unwrap().0.unwrap());
-                let want: Vec<[u64; 3]> = cpts.iter().map(|&[u, v, w]| [v, u, w]).collect();
+                let want: Vec<[u64; 4]> = cpts
+                    .iter()
+                    .map(|&[u, v, z, w]| [v, u, made_3d(z), w])
+                    .collect();
                 assert_eq!(swapped, want, "face {f:?} edge use {eu:?}");
                 checked += 1;
+                rational += usize::from(cpts.iter().any(|q| {
+                    let w = f64::from_bits(q[3]);
+                    w != NOW && w != 1.0
+                }));
             }
             swap_uv(&k, &mut b, f).unwrap();
-            assert_eq!(face_trims(&b, f), before, "face {f:?}: swapped twice");
+            let made_3d_before: Vec<_> = before
+                .iter()
+                .map(|(eu, c)| {
+                    let c: Vec<[u64; 4]> = c
+                        .iter()
+                        .map(|&[u, v, z, w]| [u, v, made_3d(z), w])
+                        .collect();
+                    (*eu, c)
+                })
+                .collect();
+            assert_eq!(
+                face_trims(&b, f),
+                made_3d_before,
+                "face {f:?}: swapped twice"
+            );
         }
     }
-    assert!(checked >= 24, "{checked} trims checked");
+    assert_eq!(checked, 54, "{checked} trims checked");
+    assert_eq!(rational, 3, "{rational} rational trims checked");
+    assert_eq!(ellipses, 1, "{ellipses} ellipse trims checked");
 }
