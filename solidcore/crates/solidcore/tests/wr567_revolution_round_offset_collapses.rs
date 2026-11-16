@@ -28,6 +28,8 @@ use core::f64::consts::PI;
 use offset_fixture::{planar_faces_at, report, shell};
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::curve::curve::Curve;
+use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
+use solidcore::geom::extent1d::Extent1d;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
@@ -181,6 +183,45 @@ fn wr567_an_exact_arc_generatrix_is_proved_and_collapses() {
     let d = if inward { 2.0 * R } else { -2.0 * R };
     assert!(s.create_offset_surface(&k, d, 1e-7).unwrap().is_none());
     assert!(s.create_offset_surface(&k, -d, 1e-7).unwrap().is_some());
+}
+
+/// A circle generatrix is its own arc by definition, at any tolerance: turned about Z, its
+/// offset by twice its radius towards the centre collapses even at a tolerance below its
+/// NURB's rounding (`1e-15`; the goldens' `surface.offset_surface` gen1247 asks this of a
+/// circle turned many times round). Bounding the NURB instead refused it as unproved.
+#[test]
+fn wr567_a_circle_generatrix_collapses_at_any_tolerance() {
+    let k = Kernel::default();
+    let circle = Ellipse::new_circle(
+        &k,
+        Point3::new(10.0, 0.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 0.0, 1.0),
+        Extent1d::from_min_max(0.0, 90.0),
+        R,
+        &EllipseOptions::default(),
+    )
+    .unwrap();
+    let s = Surface::from(
+        SurfOfRevolution::create_canonical(
+            &k,
+            Curve::from(circle),
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            false,
+        )
+        .unwrap(),
+    );
+    for tol in [1e-7, 1e-15] {
+        let inward = s.offset_collapses(&k, 2.0 * R, tol).unwrap();
+        let outward = s.offset_collapses(&k, -2.0 * R, tol).unwrap();
+        assert!(inward != outward, "{tol}: {inward} {outward}");
+        let d = if inward { 2.0 * R } else { -2.0 * R };
+        assert!(
+            s.create_offset_surface(&k, d, tol).unwrap().is_none(),
+            "{tol}"
+        );
+    }
 }
 
 /// solidcraft#17790's review: a generatrix that is the circle at every one of the arc
