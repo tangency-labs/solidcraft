@@ -1490,6 +1490,24 @@ fn cut_at_level(seg: &Seg2, n: Vec2, level: f64, out: &mut Vec<Seg2>) {
     out.push(rest);
 }
 
+/// The band (see [`curved_fold`]) of an edge of a counter-clockwise outline that lies along one of
+/// a fold zone's lines (`s0` or `s0 + ba` along `n`): the outline's edge short of the zone (band
+/// 0) when it runs along the near line with its material on the near side, or beyond it (band 2)
+/// along the far line with its material on the far side, as when a plate's edge is the line where
+/// a tab's bend starts. Anything else along a line, and anything only touching one, is `None`.
+fn along_zone_line(piece: &Seg2, n: Vec2, s0: f64, ba: f64, on_line: f64) -> Option<i32> {
+    let Seg2::Line { a, b } = *piece else { return None };
+    let inside = Vec2::new(a.y - b.y, b.x - a.x).dot(n);
+    let on = |s: f64| (a.dot(n) - s).abs() <= on_line && (b.dot(n) - s).abs() <= on_line;
+    if on(s0) && inside < 0.0 {
+        Some(0)
+    } else if on(s0 + ba) && inside > 0.0 {
+        Some(2)
+    } else {
+        None
+    }
+}
+
 /// A panel's outline cut exactly across a fold whose zone a curved edge crosses, each piece
 /// keeping its exact curves.
 #[derive(Clone, Debug, PartialEq)]
@@ -1523,8 +1541,12 @@ fn curved_fold(outline: &Loop2, n: Vec2, d: Vec2, s0: f64, ba: f64) -> Option<Cu
     let mut bands = Vec::with_capacity(pieces.len());
     for piece in &pieces {
         let v = piece.mid().dot(n);
-        if !v.is_finite() || (v - s0).abs() <= ON_LINE || (v - s0 - ba).abs() <= ON_LINE {
+        if !v.is_finite() {
             return None;
+        }
+        if (v - s0).abs() <= ON_LINE || (v - s0 - ba).abs() <= ON_LINE {
+            bands.push(along_zone_line(piece, n, s0, ba, ON_LINE)?);
+            continue;
         }
         bands.push(if v < s0 {
             0
@@ -1643,8 +1665,12 @@ fn tab_cut(outline: &Loop2, n: Vec2, d: Vec2, s0: f64, ba: f64) -> Option<TabCut
     let mut bands = Vec::with_capacity(pieces.len());
     for piece in &pieces {
         let v = piece.mid().dot(n);
-        if !v.is_finite() || (v - s0).abs() <= ON_LINE || (v - s0 - ba).abs() <= ON_LINE {
+        if !v.is_finite() {
             return None;
+        }
+        if (v - s0).abs() <= ON_LINE || (v - s0 - ba).abs() <= ON_LINE {
+            bands.push(along_zone_line(piece, n, s0, ba, ON_LINE)?);
+            continue;
         }
         bands.push(if v < s0 {
             0

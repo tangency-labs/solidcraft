@@ -3425,6 +3425,48 @@ fn fold_across_two_rounded_tabs_keeps_one_face_per_arc() {
     assert_eq!((rounded_faces, rounded_cylinders), (sharp_faces + 4, sharp_cylinders + 6), "rounded, sharp: {counts:?}");
 }
 
+/// A fold whose bend starts on the plate's own edge keeps the outline's arcs. A 60 x 100 plate with
+/// its top corners rounded 8 and a 20 wide tab standing 30 above its top edge, folded on a line across
+/// the tab only, the bend starting where the tab leaves the plate: the plate's top edge lies on the zone's
+/// near line, and the exact cut of the outline gave up there, so the fold cut the panel from the
+/// outline's chords and each rounded corner came out as dozens of flat faces (116 faces; the flat
+/// pattern's DXF had no arc left). The same blank with sharp corners is the reference: each rounded
+/// corner is one cylinder face more.
+#[test]
+fn fold_starting_on_the_plates_edge_keeps_one_face_per_arc() {
+    let blank = |s: &mut Session, r: f64| {
+        run(s, "sheet.manage_rules", json!({"name": "Steel 1.5", "thickness": "1.5 mm", "bend_radius": "1.5 mm", "k_factor": 0.5, "active": true}));
+        run(s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
+        let line = |s: &mut Session, pts: Value| run(s, "sketch.line", json!({"points": pts}));
+        let h = r * (1.0 - 0.5f64.sqrt());
+        line(s, json!([[0.0, 100.0 - r], [0, 0], [60, 0], [60.0, 100.0 - r]]));
+        if r > 0.0 {
+            run(s, "sketch.arc.three_point", json!({"start": [60.0, 100.0 - r], "end": [60.0 - r, 100.0], "through": [60.0 - h, 100.0 - h]}));
+        }
+        line(s, json!([[60.0 - r, 100.0], [40, 100], [40, 130], [20, 130], [20, 100], [r, 100.0]]));
+        if r > 0.0 {
+            run(s, "sketch.arc.three_point", json!({"start": [r, 100.0], "end": [0.0, 100.0 - r], "through": [h, 100.0 - h]}));
+        }
+        run(s, "sketch.finish", json!({}));
+        run(s, "sheet.flange", json!({"sketch": "Blank"}));
+    };
+    let folded = |r: f64| {
+        let mut s = Session::default();
+        blank(&mut s, r);
+        let flat = volume(&mut s);
+        run(&mut s, "sheet.fold", json!({"points": [[20, 100, 1.5], [40, 100, 1.5]], "fixed": [30, 50, 1.5], "position": "start"}));
+        assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+        assert!(rel(volume(&mut s), flat) < 1e-3, "a fold keeps the material");
+        let bb = &run(&mut s, "inspect.measure", json!({}))["bodies"][0]["bbox"];
+        assert!(bb["max"][2].as_f64().unwrap() > 20.0, "the tab stands up: {bb}");
+        let (arcs, _) = relief_drawing(&mut s);
+        (faces(&mut s), arcs.len())
+    };
+    let (((sharp_faces, sharp_cylinders), sharp_arcs), ((rounded_faces, rounded_cylinders), rounded_arcs)) = (folded(0.0), folded(8.0));
+    assert_eq!((rounded_faces, rounded_cylinders), (sharp_faces + 2, sharp_cylinders + 2), "rounded, sharp");
+    assert_eq!(rounded_arcs, sharp_arcs + 2, "the flat pattern draws both rounded corners as arcs");
+}
+
 /// After one of two collinear tabs is folded, the other one folds in its own feature too (#638, follow-up to #264).
 #[test]
 fn fold_second_collinear_tab_after_the_first() {
