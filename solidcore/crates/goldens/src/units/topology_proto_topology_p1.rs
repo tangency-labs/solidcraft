@@ -5397,11 +5397,12 @@ fn run_transform(
     Ok(o)
 }
 
+#[cfg(test)]
 pub(super) fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
-    rust_run_logged(s, #[cfg(test)] &mut CertificateLog::default())
+    rust_run_logged(s, &mut CertificateLog::default())
 }
 
-/// [`rust_run`], with the case's certificate log in test builds.
+/// Runs the script (`rust_run` in tests), with the case's certificate log in test builds.
 fn rust_run_logged(
     s: &Script,
     #[cfg(test)] log: &mut CertificateLog,

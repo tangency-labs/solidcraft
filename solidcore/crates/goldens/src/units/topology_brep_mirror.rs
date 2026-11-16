@@ -204,7 +204,6 @@ fn clear_logical_lists(b: &mut Brep) -> SolidResult<()> {
 impl Runner {
     /// [`UnitDiff::run_rust`], with the case's certificate log in test builds.
     fn run(
-        &self,
         case: &Case,
         #[cfg(test)] log: &mut CertificateLog,
     ) -> Result<Output, HarnessError> {
@@ -260,7 +259,7 @@ impl super::topology_brep_p5::transform_certificate::Certified for Runner {
         case: &Case,
         log: &mut CertificateLog,
     ) -> Result<Output, HarnessError> {
-        self.run(case, log)
+        Self::run(case, log)
     }
 }
 
@@ -270,7 +269,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        self.run(
+        Self::run(
             case,
             #[cfg(test)]
             &mut CertificateLog::default(),

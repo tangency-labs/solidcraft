@@ -579,7 +579,6 @@ fn own_fixture(f: &[f64; 11]) -> Result<Result<Brep, Output>, HarnessError> {
 impl Runner {
     /// [`UnitDiff::run_rust`], with the case's certificate log in test builds.
     fn run(
-        &self,
         case: &Case,
         #[cfg(test)] log: &mut transform_certificate::Fired,
     ) -> Result<Output, HarnessError> {
@@ -625,7 +624,7 @@ impl transform_certificate::Certified for Runner {
         case: &Case,
         log: &mut transform_certificate::Fired,
     ) -> Result<Output, HarnessError> {
-        self.run(case, log)
+        Self::run(case, log)
     }
 }
 
@@ -634,7 +633,7 @@ impl UnitDiff for Runner {
         "topology.brep_p5"
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        self.run(case, #[cfg(test)] &mut transform_certificate::Fired::default())
+        Self::run(case, #[cfg(test)] &mut transform_certificate::Fired::default())
     }
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
         let scale = 10f64.powi(rng.range_i64(-6, 6) as i32);
