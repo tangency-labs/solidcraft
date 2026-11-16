@@ -171,17 +171,22 @@ fn a_sections_sketch_facing_does_not_change_a_railed_loft() {
 #[test]
 fn a_loft_through_a_quarter_turn_follows_rails_of_several_curves() {
     let mut s = Session::default();
-    let quad = [[2.0, 0.0], [5.0, 0.0], [25.0, 8.0], [25.0, 10.0]];
-    for (name, x_dir, sign) in [("Start", [-1, 0, 0], 1.0), ("End", [0, -1, 0], -1.0)] {
+    // The same quadrilateral either side, its x the distance from the Z axis.
+    let start = [[2, 0], [5, 0], [25, 8], [25, 10]];
+    let end = [[-2, 0], [-5, 0], [-25, 8], [-25, 10]];
+    for (name, x_dir, points) in [("Start", [-1, 0, 0], start), ("End", [0, -1, 0], end)] {
         run(&mut s, "sketch.create", json!({"name": name, "plane": {"origin": [0, 0, 0], "x_dir": x_dir, "y_dir": [0, 0, 1]}}));
-        let points: Vec<[f64; 2]> = quad.iter().map(|[x, y]| [sign * x, *y]).collect();
         run(&mut s, "sketch.line", json!({"points": points, "infer": false, "closed": true}));
         run(&mut s, "sketch.finish", json!({}));
     }
     run(&mut s, "sketch.create", json!({"name": "Rail", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
-    let on = |r: f64, degrees: f64| [r * degrees.to_radians().cos(), r * degrees.to_radians().sin()];
-    for (id, r, from, to) in [("o1", 5.0, 90.0, 120.0), ("o2", 5.0, 120.0, 150.0), ("o3", 5.0, 150.0, 180.0), ("i", 2.0, 90.0, 180.0)] {
-        run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": on(r, from), "end": on(r, to), "id": id}));
+    // Arcs round the origin: radius 5 from 90° to 180° in three pieces of 30° (cos 30° · 5 =
+    // 4.330127018922193), and radius 2 whole.
+    let h = 4.330127018922193;
+    for (id, start, end) in
+        [("o1", [0.0, 5.0], [-2.5, h]), ("o2", [-2.5, h], [-h, 2.5]), ("o3", [-h, 2.5], [-5.0, 0.0]), ("i", [0.0, 2.0], [-2.0, 0.0])]
+    {
+        run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": start, "end": end, "id": id}));
     }
     run(&mut s, "sketch.line", json!({"points": [[-5, 0], [-2, 0]], "infer": false, "ids": ["s"]}));
     run(&mut s, "sketch.line", json!({"points": [[0, 2], [0, 5]], "infer": false, "ids": ["e"]}));
@@ -194,14 +199,9 @@ fn a_loft_through_a_quarter_turn_follows_rails_of_several_curves() {
     loft("Turned", json!([rail(&["o2", "o1", "o3"]), rail(&["i"])]), "stretch");
     loft("Inner", json!([rail(&["i"])]), "scale");
     loft("Outline", json!([rail(&["o1", "o2", "o3", "s", "i", "e"])]), "scale");
-    // The quadrilateral's first moment about the axis: ∫ x dA.
-    let moment: f64 = (0..quad.len())
-        .map(|i| {
-            let ([x0, y0], [x1, y1]) = (quad[i], quad[(i + 1) % quad.len()]);
-            (x0 + x1) * (x0 * y1 - x1 * y0) / 6.0
-        })
-        .sum();
-    let revolved = PI / 2.0 * moment;
+    // Pappus: the quadrilateral's area is 35 and its centroid 316/21 from the axis, so its
+    // first moment is 1580/3 and a quarter turn sweeps π/2 · 1580/3 = 790π/3.
+    let revolved = 790.0 * PI / 3.0;
     let turned = measure(&s, "Turned");
     assert!((turned.volume - revolved).abs() < 2e-3 * revolved, "volume {} vs {revolved}", turned.volume);
     assert!((turned.bbox.max.y - 25.0).abs() < 1e-6 && (turned.bbox.min.x + 25.0).abs() < 1e-6, "{:?}", turned.bbox);

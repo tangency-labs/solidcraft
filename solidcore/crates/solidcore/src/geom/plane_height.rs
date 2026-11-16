@@ -2,6 +2,10 @@
 //! (not upstream, #16713): the test of a prism's planar cap, which an extrusion's start and
 //! end faces are. And whether a point, or a planar face by its corners, lies on such a plane
 //! (not upstream, #16864): Delete Face extending a neighbour's plane across a gap.
+//!
+//! For a loft (not upstream, #17580): whether a section faces back from the one before it
+//! ([`faces_back`]), and where a polyline leaves a plane ([`plane_departures`]): a closed guide
+//! rail is opened where it leaves the first section.
 
 use crate::geom::vector3d::Vec3;
 
@@ -56,9 +60,103 @@ pub fn is_face_on_plane_at(
         && corners.iter().all(|p| is_point_at(*p, normal, height, tol))
 }
 
+/// Whether a loft section with plane normal `normal` and middle `middle` faces back from the
+/// section before it, with normal `before_normal` (as turned to face along the loft) and middle
+/// `before_middle`: whether the two normals point to opposite sides of the step from the one
+/// middle to the other, one along the loft and the other against it. The rule is the same at
+/// every angle between the planes: parallel planes face the same way when their normals do,
+/// and at a quarter turn, where the normals are square whichever way the sections were drawn,
+/// only the step tells. A normal square to the step faces neither way, and a section with it
+/// does not face back; so does a value that is not finite.
+#[must_use]
+pub fn faces_back(before_normal: Vec3, before_middle: Vec3, normal: Vec3, middle: Vec3) -> bool {
+    let step = middle - before_middle;
+    let (a, b) = (before_normal.dot(step), normal.dot(step));
+    (a < 0.0 && b > 0.0) || (a > 0.0 && b < 0.0)
+}
+
+/// Where the polyline `points` leaves the plane through `origin` with unit normal `normal`, in
+/// order along it: each as the index of the segment it is on and the point. A segment leaves
+/// the plane where it crosses it (its ends on opposite sides, each farther than `tol`: the
+/// point where the segment meets the plane) or where it starts on the plane (within `tol`) and
+/// ends off it (its start). A run along the plane leaves it at its last point; a segment that
+/// ends on the plane arrives and does not leave.
+#[must_use]
+pub fn plane_departures(
+    points: &[Vec3],
+    origin: Vec3,
+    normal: Vec3,
+    tol: f64,
+) -> Vec<(usize, Vec3)> {
+    let side = |q: Vec3| (q - origin).dot(normal);
+    points
+        .windows(2)
+        .enumerate()
+        .filter_map(|(k, w)| {
+            let [a, b] = w else { return None };
+            let (fa, fb) = (side(*a), side(*b));
+            if fa.abs() <= tol && fb.abs() > tol {
+                Some((k, *a))
+            } else if fa.abs() > tol && fb.abs() > tol && (fa < 0.0) != (fb < 0.0) {
+                Some((k, *a + (*b - *a) * (fa / (fa - fb))))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_section_faces_back_when_its_normal_and_the_one_before_part_along_the_step() {
+        let (x, y, z) = (
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        );
+        let o = Vec3::new(0.0, 0.0, 0.0);
+        // Parallel planes: the normals decide, whichever way the step runs.
+        assert!(!faces_back(z, o, z, Vec3::new(3.0, 0.0, 10.0)));
+        assert!(faces_back(z, o, -z, Vec3::new(3.0, 0.0, 10.0)));
+        assert!(!faces_back(z, o, z, Vec3::new(3.0, 0.0, -10.0)));
+        // A quarter turn about z (#17580): a section on y = 0 facing +y, then one on x = 20
+        // beyond it, its middle ahead along both: facing +x it faces along, facing -x back.
+        let (m0, m1) = (Vec3::new(-15.0, 0.0, 5.0), Vec3::new(0.0, 15.0, 5.0));
+        assert!(faces_back(y, m0, -x, m1), "facing -x, against the step");
+        assert!(!faces_back(y, m0, x, m1), "facing +x, along the step");
+        // A normal square to the step faces neither way.
+        assert!(!faces_back(z, o, -z, Vec3::new(5.0, 0.0, 0.0)));
+        assert!(!faces_back(z, o, -z, Vec3::new(0.0, 0.0, f64::NAN)));
+    }
+
+    #[test]
+    fn a_polyline_leaves_a_plane_where_it_crosses_it_or_a_run_along_it_ends() {
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let o = Vec3::new(0.0, 0.0, 0.0);
+        let p = |x: f64, zz: f64| Vec3::new(x, 0.0, zz);
+        // Down through the plane, along it, up off it, back down onto it.
+        let line = [
+            p(0.0, 2.0),
+            p(1.0, -2.0),
+            p(2.0, 0.0),
+            p(3.0, 0.0),
+            p(4.0, 1.0),
+            p(5.0, 0.0),
+        ];
+        let left = plane_departures(&line, o, z, 1.0e-9);
+        assert_eq!(left.len(), 2, "{left:?}");
+        assert_eq!(left[0].0, 0);
+        assert!((left[0].1 - p(0.5, 0.0)).length() < 1.0e-12, "{left:?}");
+        assert_eq!(left[1].0, 3);
+        assert!(
+            (left[1].1 - p(3.0, 0.0)).length() < 1.0e-12,
+            "the run along the plane leaves at its end"
+        );
+        assert!(plane_departures(&line[..1], o, z, 1.0e-9).is_empty());
+    }
 
     #[test]
     fn a_plane_square_to_the_direction_at_its_height_is_found() {

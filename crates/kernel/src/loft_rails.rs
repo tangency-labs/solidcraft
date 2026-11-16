@@ -493,24 +493,6 @@ pub(crate) fn section_normals(sections: &[Section], direction: impl Fn(f64) -> O
     normals
 }
 
-/// Whether a section whose plane has the normal `n` faces back from the section before it, whose
-/// normal (turned as it faces along the loft) is `before`; `step` is the loft's direction from the
-/// one to the other (unit), if it has one. Planes within 60° of each other face the same way
-/// when their normals do. Between planes further apart that says nothing (at a quarter turn the
-/// normals are square whichever way the sketches face, #17580), so a section faces back when it
-/// faces the other way along `step` from the one before, as [`section_normals`] turns the
-/// sections' normals; where the loft cannot tell (a plane along `step`), the normals decide.
-pub(crate) fn faces_back(before: Vec3, n: Vec3, step: Option<Vec3>) -> bool {
-    let turned = n.dot(before).abs() < 0.5;
-    if let Some(d) = step.filter(|_| turned) {
-        let (a, b) = (before.dot(d), n.dot(d));
-        if a.abs() > 1e-3 && b.abs() > 1e-3 {
-            return (a < 0.0) != (b < 0.0);
-        }
-    }
-    n.dot(before) < 0.0
-}
-
 /// Orient the rail toward the first outline, then check that it meets every section in order.
 /// It meets every section but the last at the first crossing after the section before, and the
 /// last at the first crossing walking back from the end. Thus a rail may run on past either end.
@@ -579,24 +561,15 @@ fn rail(pts: &[Vec3], sections: &[Section], tol: f64) -> Result<Rail> {
 
 /// The closed rail `ring` (its last point its first) opened where it first leaves `section`'s
 /// plane at a point of its curves (within `tol`): where it crosses the plane, or where a run of
-/// it along the plane (an edge of the section drawn into the rail) ends. It then runs from that
-/// point round the ring and back to it. `None` when it leaves the section nowhere on its curves.
+/// it along the plane (an edge of the section drawn into the rail) ends (the kernel's
+/// departures). It then runs from that point round the ring and back to it. `None` when it
+/// leaves the section nowhere on its curves.
 fn opened(ring: &[Vec3], section: Option<&Section>, tol: f64) -> Option<Vec<Vec3>> {
     let section = section?;
-    let (origin, normal) = (section.plane.origin, section.plane.normal());
-    let f = |q: Vec3| (q - origin).dot(normal);
-    let (k, hit) = ring.windows(2).enumerate().find_map(|(k, w)| {
-        let (a, b) = (w[0], w[1]);
-        let (fa, fb) = (f(a), f(b));
-        let hit = if fa.abs() <= tol && fb.abs() > tol {
-            a
-        } else if fa.abs() > tol && fb.abs() > tol && (fa < 0.0) != (fb < 0.0) {
-            a.lerp(b, fa / (fa - fb))
-        } else {
-            return None;
-        };
-        nearest_on(&section.curves, hit).is_some_and(|(_, _, d)| d <= tol).then_some((k, hit))
-    })?;
+    let points: Vec<[f64; 3]> = ring.iter().map(|p| <[f64; 3]>::from(*p)).collect();
+    let departures = solidcore_ops::sweep::polyline_plane_departures(&points, section.plane.origin.into(), section.plane.normal().into(), tol);
+    let (k, hit) =
+        departures.into_iter().map(|(k, p)| (k, Vec3::from(p))).find(|(_, p)| nearest_on(&section.curves, *p).is_some_and(|(_, _, d)| d <= tol))?;
     // From that point on to the end of the ring, which is its start, and on to the point again.
     let mut out = vec![hit];
     out.extend(ring.iter().skip(k + 1));

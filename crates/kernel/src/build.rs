@@ -1153,7 +1153,8 @@ pub(crate) fn loft_reversed(sections: &[(Plane, Loop2)]) -> Result<bool> {
 /// started at the segment that lines up with the section before it. Every section is matched to
 /// its neighbour, as the walls pair them: it winds the way the section before it does about the
 /// normal they share (its plane's normal, turned over where it faces back from the one before,
-/// as [`crate::loft_rails::faces_back`] decides), so sections whose planes turn on round the loft
+/// as the kernel's `faces_back` decides: its normal and the one before point to opposite sides
+/// of the step between their middles), so sections whose planes turn on round the loft
 /// (a bar bent half a turn, a bend of a quarter turn) keep one winding;
 /// and it starts where its vertices line up best with the section before it. The first section is
 /// matched to the one with the most segments, whose count every section takes.
@@ -1194,7 +1195,8 @@ pub(crate) fn loft_numbered_loops(sections: &[(Plane, NumberedLoop)], reversed: 
     let mut before: Option<Vec3> = None;
     for (p, l) in &ordered {
         let centre = p.to_world(l.lp.centroid());
-        let back = crate::loft_rails::faces_back(normal, p.normal(), before.and_then(|c| (centre - c).normalized()));
+        let back =
+            before.is_some_and(|c: Vec3| solidcore_ops::sweep::loft_section_faces_back(normal.into(), c.into(), p.normal().into(), centre.into()));
         before = Some(centre);
         let local: Vec<Vec2> = dirs.iter().map(|d| Vec2::new(d.dot(p.x), d.dot(p.y))).collect();
         // Break angles: the matched corners seen in this plane. A re-split circle runs counter-
