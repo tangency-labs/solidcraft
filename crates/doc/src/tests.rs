@@ -1410,6 +1410,20 @@ fn construction_plane_name_collisions_leave_the_document_unchanged() {
 }
 
 #[test]
+fn a_second_sketch_cannot_take_an_existing_sketch_name() {
+    let sketch = || FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() };
+    let mut doc = Document::new("names");
+    doc.add_feature(sketch(), Some("Sketch2")).unwrap();
+    let before = doc.clone();
+    let error = doc.add_feature(sketch(), Some("Sketch2")).unwrap_err().to_string();
+    assert!(error.contains("another feature is called `Sketch2`"), "{error}");
+    assert_eq!(doc, before);
+    // Automatic names skip the taken one.
+    let auto = doc.add_feature(sketch(), None).unwrap();
+    assert_ne!(doc.feature(auto).unwrap().name, "Sketch2");
+}
+
+#[test]
 fn empty_boolean_targets_name_overlapping_component() {
     for (operation, offset) in [(Operation::Cut, 0.0), (Operation::Intersect, 0.0), (Operation::Cut, 40.0)] {
         let (mut doc, sketch) = plate_doc();

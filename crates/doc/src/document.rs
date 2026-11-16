@@ -4487,7 +4487,15 @@ impl Document {
         // Plane references share the feature namespace. A duplicate would silently select
         // the first feature. Other shared names (a sketch and its extrude) remain supported.
         let is_plane = matches!(kind, FeatureKind::ConstructionPlane { .. });
-        if self.features.iter().any(|f| f.name == name && (is_plane || matches!(f.kind, FeatureKind::ConstructionPlane { .. }))) {
+        // Sketches are also referenced by name (`extrude` by sketch name takes the first match),
+        // so two sketches may not share one (#17963).
+        let is_sketch = matches!(kind, FeatureKind::Sketch { .. });
+        if self.features.iter().any(|f| {
+            f.name == name
+                && (is_plane
+                    || matches!(f.kind, FeatureKind::ConstructionPlane { .. })
+                    || (is_sketch && matches!(f.kind, FeatureKind::Sketch { .. })))
+        }) {
             return Err(DocError::Invalid(format!("another feature is called `{name}`")));
         }
         let id = self.next_id.max(1);
