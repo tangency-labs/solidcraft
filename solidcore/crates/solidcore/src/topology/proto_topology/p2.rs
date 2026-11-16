@@ -2137,10 +2137,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// and every definition's curve, over its own interval, to lie within that
     /// definition's tolerance of its position, decided on a certified hull of the curve
     /// ([`curve_piece_within`]). That is what is proven; the vertex made from that
-    /// definition standing for the whole curve is argued: ImprintIntersections then fits
-    /// it to its edges and grows its tolerance to cover them. A curve with no certain hull, or one reaching past the
-    /// tolerance, is not absorbed: the capture distance, which only says how far apart
-    /// definitions are merged, never decides it.
+    /// definition standing for the whole curve is argued: `ImprintIntersections` then fits
+    /// it to its edges and grows its tolerance to cover them. A curve with no certain
+    /// hull, or one reaching past the tolerance, is not absorbed: the capture distance,
+    /// which only says how far apart definitions are merged, never decides it.
     fn curve_inside_one_vertex(
         &self,
         k: &Kernel,

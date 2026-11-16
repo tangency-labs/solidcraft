@@ -13,5 +13,6 @@ Measured at main `96280b89a` with that path as the only one:
 | `topology.proto_topology_p2` (14 rows the old bound moved) | moved | no row moves |
 | `boolean.api_brep` `tess0033` | moved | no row moves |
 | #1058 pleated-skins union | tolerances under 1e-4 | tolerances under 1e-4, level-2 clean |
+| #1480 pleated-skins union | (flag off by default: 1.7255 mm tolerances, 12 level-2 failures) | same topology, level-2 clean, every edge end within half its vertex's tolerance |
 
 `tess0033` and `tess0095` keep the results they have on main (no `boolean.api_brep` row moves).
