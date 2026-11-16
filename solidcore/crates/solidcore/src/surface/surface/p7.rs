@@ -2862,7 +2862,8 @@ pub fn check_seam_drop<S: SurfaceEvaluate + ?Sized>(
 ///   as it does without a guess;
 /// - not upstream or the fork: a result at the guess itself (equal parameters) uses
 ///   the result's point as the guess point, where upstream's `EvaluatePoint` can round
-///   one ulp away and so measured the result farther than its own guess.
+///   one ulp away, so that with the distances in order the result could measure
+///   farther than its own guess.
 ///
 /// # Errors
 ///
@@ -3843,6 +3844,9 @@ mod tests {
         let (by_derivs, su, sv) =
             evaluate_1st_derivatives(&k, &s, uv, Side::Left, Side::Left).unwrap();
         assert_ne!(by_point, by_derivs);
+        // and the result's point is the farther one, so measuring the guess with
+        // `EvaluatePoint` (distances in order) would refuse the result
+        assert!(p.distance_squared(by_derivs) > p.distance_squared(by_point));
         // both sides of the domain allow the gap's components (only the distance test
         // decides)
         assert!(uv.x < dom.min().x && uv.y < dom.min().y);
