@@ -122,6 +122,17 @@ fn a_round_whose_crease_runs_along_the_bottom_edge_keeps_its_closed_form() {
             }
         }
         assert_eq!(ends, 2, "r {r}: the bottom edge's two ends");
+        // the box with its back face replaced by the round: bottom, top, front, the two
+        // ends and the round, a box's 12 edges and 8 vertices (V - E + F = 2)
+        assert_eq!(
+            (
+                b.face_list().len(),
+                b.edge_list().len(),
+                b.vertex_list().len()
+            ),
+            (6, 12, 8),
+            "r {r}: faces, edges, vertices"
+        );
         assert_valid(&mut k, &mut b, &format!("r {r}"));
     }
 }

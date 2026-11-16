@@ -1,12 +1,12 @@
-//! Opt-in search for isolated tangential contact points inside both surfaces
-//! (`Kernel::fixes.ssi_tangent_contact_points`, WR-74, tangency-labs/solidcore#394).
+//! Search for isolated tangential contact points inside both surfaces
+//! (WR-74, tangency-labs/solidcore#394).
 //!
 //! Not upstream: the SolidCraft fork's change to `SmAdvSurfaceIntersector.cpp`
 //! (tangency-labs/smlib@c26edbc). `FindInteriorCurves` only traces crossing curves:
 //! a leaf pair whose normals are within 5 degrees at the seed, whose local
 //! intersection finds nothing, or whose normals are within 2 degrees at the solution
 //! is dropped, so a point where the surfaces merely touch inside both patches is
-//! never reported. With the fix those pairs seed a Newton solve for a tangential
+//! never reported. Here those pairs seed a Newton solve for a tangential
 //! contact (Yang, Jia & Yan 2023: zeros of `S1 - S2` with parallel normals):
 //!
 //! ```text

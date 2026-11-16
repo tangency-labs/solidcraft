@@ -3828,7 +3828,9 @@ mod tests {
     #[test]
     fn brep_intersect_mut_empty_controls_and_point_options() {
         let mut k = Kernel::default();
-        // Native also returns no singular point for this exact tangency.
+        // At z = 0 the paraboloid z = (u - 1/2)^2 + (v - 1/2)^2 touches the plane at its
+        // apex (1/2, 1/2, 0) only, with both normals along z: no curve, one touching point
+        // (WR-74's contact point search). At z = -1/8 they do not meet.
         for z in [0.0, -0.125] {
             for reverse in [false, true] {
                 for want_points in [false, true] {
@@ -3841,7 +3843,18 @@ mod tests {
                     let (curves, points) =
                         brep_intersect_mut(&k, first, second, 1e-6, 2.0, want_points).unwrap();
                     assert!(curves.is_empty());
-                    assert_eq!(points, want_points.then(Vec::new));
+                    let Some(points) = points else {
+                        assert!(!want_points);
+                        continue;
+                    };
+                    assert!(want_points);
+                    if z == 0.0 {
+                        assert_eq!(points.len(), 1, "{points:?}");
+                        let apex = Point3::new(0.5, 0.5, 0.0);
+                        assert!((points[0] - apex).length() <= 1e-12, "{points:?}");
+                    } else {
+                        assert!(points.is_empty(), "{points:?}");
+                    }
                 }
             }
         }

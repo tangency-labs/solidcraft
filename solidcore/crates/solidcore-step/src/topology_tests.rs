@@ -6,7 +6,10 @@
 use std::fmt::Write as _;
 
 use super::*;
+use crate::assembly::{OPEN_DOMAIN_SPAN, face_domain, onto_form, onto_knots, seams};
 use crate::p21;
+use solidcore_ops::pcurve::TrimFace;
+use solidcore_record::brep::{Curve2, EdgeUseRef, Face, Loop, Region, Shell};
 
 type V = [f64; 3];
 
@@ -383,7 +386,7 @@ fn the_two_ends_of_an_edge_read_later_are_never_joined() {
         let err = b.bound(bound, &mut edges).err().unwrap_or_default();
         assert!(err.contains("is not connected"), "{err}");
         let (e, _) = b.edge(short).unwrap();
-        let [s, t] = b.edges[e as usize].vertices;
+        let [s, t] = b.asm.edges[e as usize].vertices;
         assert_ne!(s, t);
     });
 }
@@ -405,19 +408,19 @@ fn a_loop_through_three_vertices_at_one_point_joins_all_three() {
     let ex = w.file(&[bound]);
     with_builder(&ex, |b| {
         let mut edges = 0;
-        let (LoopB::Edges(uses), _) = b.bound(bound, &mut edges).unwrap() else { panic!("an edge loop") };
+        let (Bound::Edges(uses), _) = b.bound(bound, &mut edges).unwrap() else { panic!("an edge loop") };
         b.join_vertices().unwrap();
         let ends: Vec<[u32; 2]> = uses
             .iter()
             .map(|&(e, fwd)| {
-                let [s, t] = b.edges[e as usize].vertices;
+                let [s, t] = b.asm.edges[e as usize].vertices;
                 if fwd { [s, t] } else { [t, s] }
             })
             .collect();
         for (k, e) in ends.iter().enumerate() {
             assert_eq!(e[1], ends[(k + 1) % ends.len()][0], "{ends:?}");
         }
-        assert_eq!(b.edges.iter().flat_map(|e| e.vertices).collect::<HashSet<_>>().len(), 2);
+        assert_eq!(b.asm.edges.iter().flat_map(|e| e.vertices).collect::<HashSet<_>>().len(), 2);
     });
 }
 
