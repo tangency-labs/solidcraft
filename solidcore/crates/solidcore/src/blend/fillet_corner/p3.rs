@@ -729,7 +729,9 @@ impl FilletCorner {
     /// `fixes.fillet_refuse_mixed_corner_crossing_rails` (WR-710, not upstream),
     /// [`SolidError::Unsupported`] with the reason [`MIXED_CORNER_RAILS_CROSS`] for a 3x2
     /// mixed-convexity corner whose two filleted edges leave the vertex along one
-    /// tangent, so their rails cross before the corner.
+    /// tangent, so their rails cross before the corner. [`SolidError::Unsupported`] with
+    /// the reason [`MIXED_CORNER_OF_FOUR_EDGES`] for a convex and a concave blend at a
+    /// vertex of four edges that are not the blend corner's Mixed one (#10876).
     pub fn create(
         k: &Kernel,
         b: &mut Brep,
@@ -1062,6 +1064,22 @@ impl FilletCorner {
                             } else {
                                 Some(false)
                             };
+                            // Not upstream (#10876): of four edges, a convex and a concave
+                            // blend that are not the Mixed corner have no corner. The
+                            // Turn below is for blends of one convexity: on their common
+                            // face a convex blend lies in the material and a concave one
+                            // outside it, so the two meet only on that face, at any size,
+                            // and there is no crossing to mitre them on.
+                            if mixed != Some(true)
+                                && total_eus == 4
+                                && eu2::is_convex_radial_sector(k, b, eu0, 4, false, 0.0)?
+                                    != eu2::is_convex_radial_sector(k, b, eu1_, 4, false, 0.0)?
+                            {
+                                return Err(SolidError::Unsupported {
+                                    operation: OP_CREATE,
+                                    reason: MIXED_CORNER_OF_FOUR_EDGES,
+                                });
+                            }
                             if mixed == Some(true) {
                                 let mut c = make(FilletCornerKind::NByTwo);
                                 c.blend = Some(crate::blend::blend_corner::BlendCorner {
@@ -2377,6 +2395,14 @@ fn bspline_part_mut(kind: &mut CurveKind) -> Option<&mut BSplineCurve> {
         _ => None,
     }
 }
+
+/// Not upstream (#10876): the reason [`FilletCorner::create`] refuses a corner of four edges
+/// where a convex and a concave blend meet, other than the Mixed corner (one continuing
+/// the other across a tangent seam).
+pub const MIXED_CORNER_OF_FOUR_EDGES: &str = "a convex and a concave round meeting at a \
+    vertex of four edges are not supported unless one continues the other across a tangent \
+    seam: they lie on opposite sides of their faces there and have no crossing to mitre on, \
+    at any size (#10876)";
 
 /// The reason of the [`SolidError::Unsupported`] that [`FilletCorner::create`] returns,
 /// with `Kernel::fixes.fillet_refuse_mixed_corner_crossing_rails` (WR-710, #2256), for a

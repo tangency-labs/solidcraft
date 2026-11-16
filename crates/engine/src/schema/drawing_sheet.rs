@@ -61,16 +61,6 @@ fn number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
     }
 }
 
-/// A line group by its wide line, as `LineGroup` reads it, or `null` for the drawing's.
-fn line_group<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
-    let v = Value::deserialize(d)?;
-    if !v.is_null() && serde_json::from_value::<solidcraft_geom::paper::line::LineGroup>(v.clone()).is_err() {
-        let names = solidcraft_geom::paper::line::LineGroup::NAMES.join(", ");
-        return Err(serde::de::Error::custom(whole(format!("`line_group` is one of {names}, or null"))));
-    }
-    Ok(Some(v))
-}
-
 /// What a sheet documents: `{source, component?}`, or `null` for nothing.
 fn documents<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
     let v = Value::deserialize(d)?;
@@ -176,9 +166,8 @@ pub struct SheetSettings {
     pub dpi: Option<f64>,
     /// The ISO 128 line group its views are drawn in, by its wide line: `"0.25"`, `"0.35"`,
     /// `"0.5"`, `"0.7"`, `"1"`, `"1.4"` or `"2"`; `null` for the drawing's. A view may choose another.
-    #[serde(default, deserialize_with = "line_group", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<String>")]
-    pub line_group: Option<Value>,
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    pub line_group: Option<Option<super::drawing_view::LineGroupParam>>,
     /// The component it documents, `{"source": id, "component": id}` (component 0, the
     /// default, is the design itself), or `null` for none.
     #[serde(default, deserialize_with = "documents", skip_serializing_if = "Option::is_none")]

@@ -2,8 +2,9 @@
 //! and change the open drawing's own settings. A drawing lives in its design's file
 //! ([`solidcraft_doc::Document::drawings`]); while one is open, the drawing commands change it and
 //! the model's wait ([`super::Part`]). Each change of a drawing is one undo step of that drawing,
-//! and evaluates nothing; making and deleting one are steps of the model, whose list of drawings
-//! they change.
+//! and evaluates no model, but a view of another configuration it measures evaluates a copy of the
+//! design; the design is unchanged. Making and deleting one are steps of the model, whose list of
+//! drawings they change.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -13,26 +14,28 @@ use serde_json::{Value, json};
 use solidcraft_doc::bom::{self, Tree};
 use solidcraft_doc::drawing::balloon::balloons_by_row;
 use solidcraft_doc::drawing::table::Kind;
-use solidcraft_doc::drawing::view::{MAX_VIEW_DEPTH, View, ViewKind};
+use solidcraft_doc::drawing::view::{Diagonal, MAX_VIEW_DEPTH, View, ViewKind};
 use solidcraft_doc::drawing::{self, Drawing, Source, template};
 use solidcraft_doc::drawing_view::ViewDirection;
-use solidcraft_doc::{Document, ids};
+use solidcraft_doc::ids;
 use solidcraft_geom::cell::Warning;
 use solidcraft_geom::drawing_view::ProjectedSide;
 use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_sketch::PaperFonts;
 
 use super::CommandSpec;
+use super::design_link::{absolute, link_presence, same_file, stored};
 use crate::params::{bad, str_};
 use crate::schema::drawing::{
     DrawingCreateParams, DrawingSetParams, SheetTemplateChange, TemplateApplyParams, TemplateApplyResult, TemplateEntry, TemplateListParams,
     TemplateListResult, TemplateSaveParams, TemplateSaveResult,
 };
+use crate::schema::drawing_view::LineGroupParam;
 use crate::schema::{TypedContract, output_schema_for};
 use crate::title_block_text::{self, CellText, Note};
 use crate::{EngineError, Result, Session};
 
-/// The longest template file path taken, in bytes, as the sheet export's.
+/// The longest template or source file path taken, in bytes, as the sheet export's.
 const MAX_PATH_BYTES: usize = 4096;
 const CREATE_CONTRACT: TypedContract<DrawingCreateParams> = TypedContract::new();
 const SET_CONTRACT: TypedContract<DrawingSetParams> = TypedContract::new();
@@ -42,7 +45,7 @@ const TEMPLATE_SAVE_CONTRACT: TypedContract<TemplateSaveParams> = TypedContract:
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.create", "Create Drawing", crate::checked!("drawing.create", create)).any_part().icon("new").doc_only().contract(&CREATE_CONTRACT).params(
-        "name?: the drawing's name (default: the design's); template?: a built-in's name (drawing.template.list; default iso-a3-part for a part, iso-a2-assembly for an assembly, a design that places components) or a .json template file (drawing.template.save); language?: the drawing's content language, a BCP 47 tag (default: the template's, en for the built-ins); units?: \"follow_model\" or one length unit such as \"mm\" (default: the template's); projection?: first or third (angle) (default: the template's, third for the built-ins); font?: the font family its text is set in, by name (default: the template's, the built-in font for the built-ins); line_group?: the ISO 128 line group its lines are drawn in, by its wide line, one of 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2 (default: the template's, 0.5 for the built-ins). Adds a drawing of this design made from the template, with ids of its own, and opens it (one undo step of the model) → as drawing.inspect",
+        "name?: the drawing's name (default: the design's); template?: a built-in's name (drawing.template.list; default iso-a3-part for a part, iso-a2-assembly for an assembly, a design that places components) or a .json template file (drawing.template.save); language?: the drawing's content language, a BCP 47 tag (default: the template's, en for the built-ins); units?: \"follow_model\" or one length unit such as \"mm\" (default: the template's); projection?: first or third (angle) (default: the template's, third for the built-ins); font?: the font family its text is set in, by name (default: the template's, the built-in font for the built-ins); line_group?: the ISO 128 line group its lines are drawn in, by its wide line, one of 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2 (default: the template's, 0.5 for the built-ins); source?: another design file to draw instead of this design, which may then be empty: a design file's path of at most 4096 bytes, kept relative to this design's folder when saved. Adds a drawing of this design (or of the file) made from the template, with ids of its own, and opens it (one undo step of the model) → as drawing.inspect",
     ),
     CommandSpec::new("drawing.template.apply", "Apply Drawing Template", crate::checked!("drawing.template.apply", template_apply))
         .in_drawing()
@@ -95,14 +98,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         "drawing: id → deleted: its id; closed when it was open (one undo step of the model)",
     ),
     CommandSpec::new("drawing.inspect", "Inspect Drawing", inspect).in_drawing().icon("inspect").noundo().doc_only().params(
-        "→ {id, name, units, projection, updates: automatic or deferred, language, font, line_group, font_note: why its text is set in the built-in font instead (the font isn't on this computer, or can't be set on paper), or null, font_fallbacks: which font set each script of its title blocks' text that the drawing's font lacks, as lines such as \"Kana set in BIZ UDPGothic\", properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, title_block (its definition, or null), title_block_cells: [{name, text, value?, notes?}] (each text cell as the sheet shows it, a cell that shows a logo, its `image` in `title_block`, left out: its fields' values, nothing for one with none, or the text typed over it with the value it hides as `value`; `notes` are what doesn't fit on paper, each {fit: chars (with count and max), height or width}, shown whole, or {refused: why} for a label or value the drawing's font can't set, left off the sheet), title_block_overrides, dpi, line_group (its own, or null for the drawing's), documents, excluded, views: [{id, kind: base|projected, parent?, side?, label, dimensions: [ids], balloons: [ids]}], base views by id, each followed by those projected from it}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
+        "→ {id, name, units, projection, updates: automatic or deferred, language, font, line_group, view_letters: {reuse, given} (whether a deleted view's letter is given again, and how many letters have been given), font_note: why its text is set in the built-in font instead (the font isn't on this computer, or can't be set on paper), or null, font_fallbacks: which font set each script of its title blocks' text that the drawing's font lacks, as lines such as \"Kana set in BIZ UDPGothic\", properties, sources: [{id, path?: another design's file, as this design's file keeps it; none for the design itself}], sheets: [{id, name, size_mm, orientation, title_block (its definition, or null), title_block_cells: [{name, text, value?, notes?}] (each text cell as the sheet shows it, a cell that shows a logo, its `image` in `title_block`, left out: its fields' values, nothing for one with none, or the text typed over it with the value it hides as `value`; `notes` are what doesn't fit on paper, each {fit: chars (with count and max), height or width}, shown whole, or {refused: why} for a label or value the drawing's font can't set, left off the sheet), title_block_overrides, dpi, line_group (its own, or null for the drawing's), documents, excluded, views: [{id, kind: base|projected|section, parent?, side?, label, dimensions: [ids], balloons: [ids], notes: [ids]}], base views by id, each followed by those projected or cut from it, notes: [ids] (on the sheet itself), tables, images, revision_tags: [ids], each list by id: what the sheet shows, as the Browser lists it}], symbols: [{id, name, prompts: [keys]}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
     ),
     CommandSpec::new("drawing.set", "Drawing Settings", crate::checked!("drawing.set", set))
         .in_drawing()
         .icon("settings")
         .doc_only()
         .contract(&SET_CONTRACT)
-        .params("name?, language?: a BCP 47 tag, units?: \"follow_model\" or one length unit such as \"mm\", projection?: first or third (angle), which every projected view follows, updates?: automatic, or deferred: its views follow a changed model only on drawing.update, font?: the font family its text is set in, by name, never a file (\"\": the built-in font). line_group?: the ISO 128 line group its lines are drawn in, by its wide line: 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2; a sheet or a view may choose another. revision_numbering?: {start: 0 or 1}, the number new revisions count from: rows already there stay as typed. One undo step."),
+        .params("name?, language?: a BCP 47 tag, units?: \"follow_model\" or one length unit such as \"mm\", projection?: first or third (angle), which every projected view follows, updates?: automatic, or deferred: its views follow a changed model only on drawing.update, font?: the font family its text is set in, by name, never a file (\"\": the built-in font). line_group?: the ISO 128 line group its lines are drawn in, by its wide line: 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2; a sheet or a view may choose another. revision_numbering?: {start: 0 or 1}, the number new revisions count from: rows already there stay as typed. view_letters_reuse?: whether a deleted view's letter is given again (true, the default) or never (false). One undo step."),
     CommandSpec::new("drawing.properties", "Drawing Properties", properties).in_drawing().icon("settings").noundo().doc_only().params(
         "→ metadata: the drawing's properties as saved (other tools' keys too); properties: project, part_number, revision, author, organization, description and license, each its text or null. The design properties' rules (document.metadata).",
     ),
@@ -116,18 +119,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("key, or keys: [keys] → metadata, removed: [keys that were there]"),
 ];
 
-/// A `line_group` as given, for a drawing, a sheet or a view: one of ISO 128's groups, by its wide line.
-pub(crate) fn line_group_of(v: &Value) -> std::result::Result<LineGroup, String> {
-    serde_json::from_value(v.clone()).map_err(|_| format!("`line_group` is one of {}", LineGroup::NAMES.join(", ")))
-}
-
-/// [`line_group_of`], refused as `cmd`.
+/// A sheet's `line_group` as given, refused as `cmd` in the words every line group is.
 pub(super) fn line_group(cmd: &str, v: &Value) -> Result<LineGroup> {
-    line_group_of(v).map_err(|e| bad(cmd, e))
+    serde_json::from_value::<LineGroupParam>(v.clone()).map(|group| group.0).map_err(|e| bad(cmd, format!("`line_group` {e}")))
 }
 
 /// `font` as given: a font family's name, never a file (drawings name fonts by family, so they
-/// travel).
+/// travel). Checked as given, before the trim, so a control character or an overlong name is
+/// refused even where trimming would hide it; `Drawing::validate` checks the trimmed name the
+/// drawing keeps, and a drawing read from a file.
 fn font<'a>(cmd: &str, font: Option<&'a str>) -> Result<Option<&'a str>> {
     if let Some(family) = font {
         solidcraft_sketch::check_family(family).map_err(|e| bad(cmd, e.to_string()))?;
@@ -151,11 +151,15 @@ fn named(cmd: &str, s: &Session, p: &Value) -> Result<u64> {
 
 fn create(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.create";
-    if s.doc.features.is_empty() {
-        return Err(bad(cmd, "the design is empty: there is nothing to draw yet"));
-    }
     drawing::check_count(s.doc.drawings.len() + 1).map_err(|e| bad(cmd, e.to_string()))?;
     let request: DrawingCreateParams = crate::schema::read(cmd, p)?;
+    let linked = match request.source.as_deref() {
+        Some(given) => Some(linked_source(cmd, s, given)?),
+        None => None,
+    };
+    if linked.is_none() && s.doc.features.is_empty() {
+        return Err(bad(cmd, "the design is empty: there is nothing to draw yet"));
+    }
     let name = request.name.unwrap_or_else(|| s.doc.name.clone());
     let fail = |e: solidcraft_doc::DocError| bad(cmd, e.to_string());
     let from = request.template.as_deref().unwrap_or_else(|| template::default_for(template::is_assembly(&s.doc)));
@@ -170,11 +174,12 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(projection) = request.projection {
         d.projection = projection;
     }
-    if let Some(group) = request.line_group {
+    if let Some(LineGroupParam(group)) = request.line_group {
         d.line_group = group;
     }
+    // The design it is in, unless it draws another design's file.
     let source = d.allocate_id(&mut s.ids).map_err(fail)?;
-    d.sources.push(Source { id: source });
+    d.sources.push(Source { id: source, path: linked });
     if let Some(units) = request.units {
         d.units = units;
     }
@@ -185,6 +190,30 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     s.open_drawing = Some(d.id);
     s.doc_mut().put_drawing(Arc::new(d));
     inspect(s, &Value::Null)
+}
+
+/// The whole path of the design file `given` names as a new drawing's source, or why it can't be one,
+/// each refused before the next is asked: the record's rule for a path and the parameter's length,
+/// a network location not allowed or a device (judged from the text, before anything asks the disk
+/// or the network), a design file's name, not this design's own file, and a file there.
+fn linked_source(cmd: &str, s: &Session, given: &str) -> Result<String> {
+    drawing::check_source_path(given).map_err(|e| bad(cmd, e.to_string()))?;
+    if given.len() > MAX_PATH_BYTES {
+        return Err(bad(cmd, format!("`source` is at most {MAX_PATH_BYTES} bytes")));
+    }
+    let own = s.path.as_deref();
+    solidcraft_io::vfs::check_design_path(given, own).map_err(|e| bad(cmd, e.to_string()))?;
+    if !solidcraft_io::is_design_path(given) {
+        return Err(bad(cmd, format!("{given}: not a .{} design", solidcraft_io::DESIGN_EXT)));
+    }
+    let file = absolute(Path::new(given));
+    if own.is_some_and(|own| same_file(Path::new(own), &file)) {
+        return Err(bad(cmd, "`source` is this design's own file: leave it out to draw the design it is in"));
+    }
+    if let Some(problem) = link_presence(&file, own) {
+        return Err(bad(cmd, problem.reason));
+    }
+    Ok(file.to_string_lossy().into_owned())
 }
 
 fn template_apply(s: &mut Session, p: &Value) -> Result<Value> {
@@ -293,15 +322,21 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"deleted": ids::encode(id)}))
 }
 
-/// What view `view` is called until views have saved names: which way it looks, or where it sits of
-/// the view it is projected from (`Front`, `Right of Front`, `Above Right of Front`).
+/// What view `view` is called until views have saved names: which way it looks, where it sits of
+/// the view it is made from, or what it is a section of (`Front`, `Right of Front`, `Section of
+/// Front`, `Pictorial above right of Front`, `Auxiliary of Right of Front`).
 fn view_label(d: &Drawing, view: &View) -> String {
     let mut label = String::new();
     let mut at = view;
     for _ in 0..MAX_VIEW_DEPTH {
-        match at.kind {
+        match &at.kind {
+            ViewKind::Flat { body, .. } => {
+                label.push_str("Flat pattern of ");
+                label.push_str(body);
+                break;
+            }
             ViewKind::Base { view: ViewDirection::Named(named), .. } => {
-                let name = super::drawing_view::snake_name(named).replace('_', " ");
+                let name = super::drawing_view::snake_name(*named).replace('_', " ");
                 let mut letters = name.chars();
                 label.extend(letters.next().map(|first| first.to_ascii_uppercase()));
                 label.push_str(letters.as_str());
@@ -318,7 +353,27 @@ fn view_label(d: &Drawing, view: &View) -> String {
                     ProjectedSide::Above => "Above ",
                     ProjectedSide::Below => "Below ",
                 });
-                let Some(next) = d.view(parent) else { break };
+                let Some(next) = d.view(*parent) else { break };
+                at = next;
+            }
+            ViewKind::Section { parent, .. } => {
+                label.push_str("Section of ");
+                let Some(next) = d.view(*parent) else { break };
+                at = next;
+            }
+            ViewKind::Pictorial { parent, diagonal } => {
+                label.push_str(match diagonal {
+                    Diagonal::AboveRight => "Pictorial above right of ",
+                    Diagonal::AboveLeft => "Pictorial above left of ",
+                    Diagonal::BelowRight => "Pictorial below right of ",
+                    Diagonal::BelowLeft => "Pictorial below left of ",
+                });
+                let Some(next) = d.view(*parent) else { break };
+                at = next;
+            }
+            ViewKind::Auxiliary { parent, .. } => {
+                label.push_str("Auxiliary of ");
+                let Some(next) = d.view(*parent) else { break };
                 at = next;
             }
         }
@@ -326,16 +381,48 @@ fn view_label(d: &Drawing, view: &View) -> String {
     label
 }
 
-/// Sheet `sheet`'s views as `drawing.inspect` lists them: those with no parent on it by id, each
-/// followed by the views projected from it. `dimensions` and `balloons` hold each view's, by its id.
-fn sheet_views(d: &Drawing, sheet: u64, dimensions: &BTreeMap<u64, Vec<String>>, balloons: &BTreeMap<u64, Vec<String>>) -> Vec<Value> {
-    let on: BTreeSet<u64> = d.views.iter().filter(|v| v.sheet == sheet).map(|v| v.id).collect();
+/// `objects`, each under the view `view_of` gives it, by view id; one with no view is left out.
+fn by_view(objects: &[u64], view_of: impl Fn(u64) -> Option<u64>) -> BTreeMap<u64, Vec<String>> {
+    let mut by_view: BTreeMap<u64, Vec<String>> = BTreeMap::new();
+    for &object in objects {
+        if let Some(view) = view_of(object) {
+            by_view.entry(view).or_default().push(ids::encode(object));
+        }
+    }
+    by_view
+}
+
+/// What sheet `id` shows as `drawing.inspect` lists it, from the one rule the Browser and a sheet's delete
+/// read ([`Drawing::on_sheet`]): its views ([`sheet_views`]), each with the dimensions, balloons and notes in
+/// it, and the notes on the sheet itself, its tables, images and revision tags, each list by id.
+fn sheet_contents(d: &Drawing, id: u64) -> [(&'static str, Value); 5] {
+    let on = d.on_sheet(id);
+    let in_views = [
+        by_view(&on.dimensions, |object| d.dimension(object).map(|dimension| dimension.view)),
+        by_view(&on.balloons, |object| d.balloons.by_id(object).map(|balloon| balloon.view)),
+        by_view(&on.notes, |object| d.notes.by_id(object).and_then(|note| note.anchor.view())),
+    ];
+    let encoded = |objects: &[u64]| objects.iter().map(|object| ids::encode(*object)).collect::<Vec<_>>();
+    let on_sheet: Vec<u64> = on.notes.iter().copied().filter(|note| d.notes.by_id(*note).is_some_and(|note| note.anchor.view().is_none())).collect();
+    [
+        ("views", json!(sheet_views(d, &on.views, &in_views))),
+        ("notes", json!(encoded(&on_sheet))),
+        ("tables", json!(encoded(&on.tables))),
+        ("images", json!(encoded(&on.images))),
+        ("revision_tags", json!(encoded(&on.tags))),
+    ]
+}
+
+/// A sheet's views `on` (by id, as [`Drawing::on_sheet`] lists them) as `drawing.inspect` lists them:
+/// those with no parent on it by id, each followed by the views projected from it. `[dimensions,
+/// balloons, notes]` hold each view's, by its id.
+fn sheet_views(d: &Drawing, on: &[u64], [dimensions, balloons, notes]: &[BTreeMap<u64, Vec<String>>; 3]) -> Vec<Value> {
     let mut first = Vec::new();
     let mut projected: BTreeMap<u64, Vec<&View>> = BTreeMap::new();
-    for view in d.views.iter().filter(|v| on.contains(&v.id)) {
-        match view.kind {
-            ViewKind::Projected { parent, .. } if on.contains(&parent) => projected.entry(parent).or_default().push(view),
-            _ => first.push(&**view),
+    for view in on.iter().filter_map(|id| d.view(*id)) {
+        match view.kind.parent() {
+            Some(parent) if on.binary_search(&parent).is_ok() => projected.entry(parent).or_default().push(view),
+            _ => first.push(view),
         }
     }
     let mut stack: Vec<&View> = first.into_iter().rev().collect();
@@ -343,13 +430,17 @@ fn sheet_views(d: &Drawing, sheet: u64, dimensions: &BTreeMap<u64, Vec<String>>,
     while let Some(view) = stack.pop() {
         let mut entry = json!({
             "id": ids::encode(view.id),
-            "kind": if matches!(view.kind, ViewKind::Base { .. }) { "base" } else { "projected" },
+            "kind": view.kind.name(),
             "label": view_label(d, view),
             "dimensions": dimensions.get(&view.id).map_or(&[][..], Vec::as_slice),
             "balloons": balloons.get(&view.id).map_or(&[][..], Vec::as_slice),
+            "notes": notes.get(&view.id).map_or(&[][..], Vec::as_slice),
         });
-        if let ViewKind::Projected { parent, side } = view.kind {
+        if let Some(parent) = view.kind.parent() {
             entry["parent"] = json!(ids::encode(parent));
+        }
+        // A side (a projected view) or a diagonal (a pictorial view), by the name the command takes.
+        if let Some(side) = view.kind.beside() {
             entry["side"] = json!(side);
         }
         listed.push(entry);
@@ -364,15 +455,6 @@ fn sheet_views(d: &Drawing, sheet: u64, dimensions: &BTreeMap<u64, Vec<String>>,
 fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
     let cmd = "drawing.inspect";
     let d = s.drawing(cmd)?;
-    // One pass over each list for the whole drawing, however many sheets and views it has.
-    let mut dimensions: BTreeMap<u64, Vec<String>> = BTreeMap::new();
-    for dimension in &d.dimensions {
-        dimensions.entry(dimension.view).or_default().push(ids::encode(dimension.id));
-    }
-    let mut balloons: BTreeMap<u64, Vec<String>> = BTreeMap::new();
-    for balloon in &d.balloons {
-        balloons.entry(balloon.view).or_default().push(ids::encode(balloon.id));
-    }
     let state = s.model.state();
     // One tree for the drawing: each component it documents is weighed once.
     let mut tree = Tree::new(&s.doc, &state);
@@ -381,10 +463,10 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
     let mut texts: Vec<String> = Vec::new();
     for (at, sheet) in d.sheets.iter().enumerate() {
         let size = sheet.sheet.size_mm().map_err(|e| bad(cmd, e.to_string()))?;
-        let cells = title_block_cells(&s.doc, &mut tree, d, at)?;
+        let cells = title_block_cells(s, &mut tree, d, at)?;
         texts.extend(cells.iter().filter_map(|cell| cell["text"].as_str()).map(str::to_string));
         texts.extend(sheet.title_block.iter().flat_map(|block| &block.cells).filter_map(|cell| cell.label.as_ref()).map(|label| label.text.clone()));
-        sheets.push(json!({
+        let mut listed = json!({
             "id": ids::encode(sheet.id),
             "name": sheet.name,
             "size_mm": [size.x, size.y],
@@ -396,11 +478,13 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
             "line_group": sheet.line_group,
             "documents": sheet.documents.map(|c| json!({"source": ids::encode(c.source), "component": c.component})),
             "excluded": sheet.excluded,
-            "views": sheet_views(d, sheet.id, &dimensions, &balloons),
-            "tables": d.tables.iter().filter(|t| t.sheet == sheet.id).map(|t| ids::encode(t.id)).collect::<Vec<_>>(),
-        }));
+        });
+        for (key, list) in sheet_contents(d, sheet.id) {
+            listed[key] = list;
+        }
+        sheets.push(listed);
     }
-    let parts_lists = parts_lists(d, &mut tree);
+    let parts_lists = parts_lists(s, d, &mut tree);
     Ok(json!({
         "id": ids::encode(d.id),
         "name": d.name,
@@ -410,12 +494,14 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
         "language": d.language,
         "font": d.font,
         "line_group": d.line_group,
+        "view_letters": d.view_letters,
         "font_note": solidcraft_sketch::paper_font_note(&solidcraft_sketch::font_dirs(), &d.font),
         "font_fallbacks": solidcraft_sketch::paper_fallback_notes(&solidcraft_sketch::font_dirs(), &d.font, &d.language, texts.iter().map(String::as_str)),
         "properties": d.properties,
-        "sources": d.sources.iter().map(|source| json!({"id": ids::encode(source.id)})).collect::<Vec<_>>(),
+        "sources": d.sources.iter().map(|source| listed_source(s.path.as_deref(), source)).collect::<Vec<_>>(),
         "sheets": sheets,
         "parts_lists": parts_lists,
+        "symbols": d.symbols.iter().map(|symbol| json!({"id": ids::encode(symbol.id), "name": symbol.name, "prompts": symbol.prompts()})).collect::<Vec<_>>(),
         "revisions": {
             "numbering": d.revisions.numbering,
             "rows": super::drawing_revision::rows(&d.revisions),
@@ -426,10 +512,19 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
     }))
 }
 
+/// A source as `drawing.inspect` lists it: another design's file as the file of the design saved at
+/// `design` keeps it (relative to its folder), the design itself by its id alone.
+fn listed_source(design: Option<&str>, source: &Source) -> Value {
+    match &source.path {
+        None => json!({"id": ids::encode(source.id)}),
+        Some(path) => json!({"id": ids::encode(source.id), "path": stored(design, Path::new(path))}),
+    }
+}
+
 /// Each parts list with how many balloons point at each of its rows, its editor's ballooned column
-/// (`drawing.inspect`): null for a list that can't be made, its component deleted or too large.
-fn parts_lists(d: &Drawing, tree: &mut Tree<'_>) -> Vec<Value> {
-    let lists = ballooned(d, tree).into_iter().map(|(id, rows)| {
+/// (`drawing.inspect`): null for a list that can't be made, its component deleted or too large, or its design unread.
+fn parts_lists(s: &Session, d: &Drawing, tree: &mut Tree<'_>) -> Vec<Value> {
+    let lists = ballooned(s, d, tree).into_iter().map(|(id, rows)| {
         let rows = rows.map(|rows| rows.into_iter().map(|(item, balloons)| json!({"item": item, "balloons": balloons})).collect::<Vec<_>>());
         json!({"table": ids::encode(id), "ballooned": rows})
     });
@@ -438,13 +533,17 @@ fn parts_lists(d: &Drawing, tree: &mut Tree<'_>) -> Vec<Value> {
 
 /// Each parts list of `d` by id, with how many balloons point at each of its rows by item, in its
 /// order: none for a list that can't be made. One count for `drawing.inspect` and `drawing.check`.
-pub(super) fn ballooned(d: &Drawing, tree: &mut Tree<'_>) -> Vec<(u64, Option<Vec<(String, usize)>>)> {
+/// `tree` is this design's (`s`), so a list counts only when its source means this design
+/// ([`Session::drawn`]): a list of a design that can't be read, or of another, counts none.
+pub(super) fn ballooned(s: &Session, d: &Drawing, tree: &mut Tree<'_>) -> Vec<(u64, Option<Vec<(String, usize)>>)> {
     let reading = d.balloons_by_list();
     let lists = d.tables.iter().filter_map(|t| if let Kind::PartsList(list) = &t.kind { Some((t.id, list)) } else { None });
     lists
         .map(|(id, list)| {
-            let rows = bom::list_with(tree, &list.request(), true)
-                .ok()
+            let this_design = s.drawn(d, list.of.source).is_ok_and(|on| std::ptr::eq(on, s));
+            let rows = this_design
+                .then(|| bom::list_with(tree, &list.request(), true).ok())
+                .flatten()
                 .map(|listed| balloons_by_row(reading.get(&id).map_or(&[], Vec::as_slice), &listed, tree));
             (id, rows)
         })
@@ -453,8 +552,8 @@ pub(super) fn ballooned(d: &Drawing, tree: &mut Tree<'_>) -> Vec<(u64, Option<Ve
 
 /// The text cells of sheet `at`'s title block as the sheet shows them (`drawing.inspect`), each
 /// with what doesn't fit on paper or why its text is off the sheet.
-fn title_block_cells(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize) -> Result<Vec<Value>> {
-    let shown = title_block_text::shown(doc, tree, d, at);
+fn title_block_cells(s: &Session, tree: &mut Tree<'_>, d: &Drawing, at: usize) -> Result<Vec<Value>> {
+    let shown = title_block_text::shown(s, tree, d, at);
     // Laid out for its notes only: nothing is placed on a sheet here.
     // `Drawing::validate` checks the layout, so an error here is a drawing that skipped it.
     let block = match d.sheets.get(at) {
@@ -503,7 +602,7 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(updates) = request.updates {
             d.updates = updates;
         }
-        if let Some(group) = request.line_group {
+        if let Some(LineGroupParam(group)) = request.line_group {
             d.line_group = group;
         }
         if let Some(font) = font(cmd, request.font.as_deref())? {
@@ -511,6 +610,9 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if let Some(numbering) = request.revision_numbering {
             Arc::make_mut(&mut d.revisions).numbering = numbering;
+        }
+        if let Some(reuse) = request.view_letters_reuse {
+            d.view_letters.reuse = reuse;
         }
         Ok(())
     })?;

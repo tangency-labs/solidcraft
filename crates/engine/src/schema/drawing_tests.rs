@@ -6,9 +6,9 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    let create = ["font", "language", "line_group", "name", "projection", "template", "units"];
+    let create = ["font", "language", "line_group", "name", "projection", "source", "template", "units"];
     assert_keys(input_schema_for::<DrawingCreateParams>(), &create);
-    let set = ["font", "language", "line_group", "name", "projection", "revision_numbering", "units", "updates"];
+    let set = ["font", "language", "line_group", "name", "projection", "revision_numbering", "units", "updates", "view_letters_reuse"];
     assert_keys(input_schema_for::<DrawingSetParams>(), &set);
     assert_keys(input_schema_for::<TemplateListParams>(), &[]);
     assert_keys(input_schema_for::<TemplateApplyParams>(), &["dry_run", "template"]);
@@ -51,6 +51,8 @@ fn strict_keeps_todays_errors() {
         ("drawing.set", json!({"language": "e"})),
         ("drawing.set", json!({"revision_numbering": {"start": 2}})),
         ("drawing.set", json!({"revision_numbering": {"begin": 1}})),
+        ("drawing.sheet.add", json!({"line_group": "0.6"})),
+        ("drawing.sheet.set", json!({"sheet": "Sheet 1", "line_group": "0.6"})),
     ];
     for (id, p) in calls {
         let error = |level| drawing_session(level).0.execute(id, &p).err().map(|e| e.to_string());

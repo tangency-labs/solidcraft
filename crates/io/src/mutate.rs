@@ -244,8 +244,9 @@ fn designs_survive_mutation() {
     survives("design JSON", &mutations(&json, true, 0xde6), usize::MAX, |b| crate::read_design(b).ok().map(|d| d.features.len()));
 }
 
-/// A design with two drawings, as a container and as plain JSON: every mutation gives an error
-/// or a design, never a panic, and never more drawings than a design may hold.
+/// A design with two drawings, each drawing it and another design's file, as a container and as
+/// plain JSON: every mutation (of the path too: another type, odd bytes, a copy of the source)
+/// gives an error or a design, never a panic, and never more drawings than a design may hold.
 #[test]
 fn designs_with_drawings_survive_mutation() {
     use solidcraft_doc::drawing::{Drawing, MAX_DRAWINGS, Source};
@@ -257,7 +258,10 @@ fn designs_with_drawings_survive_mutation() {
         let taken = doc.drawings.iter().map(|d| d.id).collect();
         let mut drawing = Drawing::new(name, "en", "Sheet 1", a3, Some(DrawingBorderProfile::iso()), &taken, &mut ids).unwrap();
         let id = drawing.allocate_id(&mut ids).unwrap();
-        drawing.sources.push(Source { id });
+        drawing.sources.push(Source { id, path: None });
+        let id = drawing.allocate_id(&mut ids).unwrap();
+        drawing.sources.push(Source { id, path: Some("../parts/plate.sc".into()) });
+        drawing.sources.sort_by_key(|s| s.id);
         doc.drawings.push(drawing.into());
     }
     let container = crate::write_design_container(&doc).unwrap();

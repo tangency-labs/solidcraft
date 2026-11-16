@@ -407,12 +407,20 @@ fn a_body_the_view_leaves_out_is_skipped_as_not_drawn() {
     assert!(why.contains("doesn't draw that part: its source draws only the occurrences it chose"), "{why}");
 }
 
-/// A view that draws an exploded view takes no model dimensions, as `drawing.dimension.add` takes none
-/// there: one rule where both place a dimension. They would measure its parts where the design places
-/// them. The refusal leaves the drawing and the undo steps as they were.
+/// Whether `reply` brought in the plate's sketch's two dimensions, `width` reading 100 and `height` 60,
+/// as a top view of the plate reads them.
+fn brought_the_plates_two(s: &mut Session, reply: &Value, [width, height]: &[String; 2]) -> bool {
+    let read = added(s, reply);
+    read.len() == 2 && read[0].0 == *width && near(read[0].1, 100.0) && read[1].0 == *height && near(read[1].1, 60.0)
+}
+
+/// A view that draws an exploded view takes its model dimensions, as `drawing.dimension.add` takes
+/// dimensions there (#13048): read where the view draws its parts. Apart moves only the bolt, so the
+/// plate's sketch's 100 and 60 come in reading as on any top view of the plate.
 #[test]
-fn an_exploded_view_takes_no_model_dimensions() {
+fn an_exploded_view_takes_its_model_dimensions() {
     let (mut s, _) = plate();
+    let two: [String; 2] = dimensions_of(&s, "Plate").try_into().unwrap();
     run(&mut s, "component.create", json!({"name": "Bolt"}));
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 40, "corner": [0, 0, 20], "body_name": "Shank"}));
     run(&mut s, "component.activate", json!({"component": "root"}));
@@ -424,18 +432,17 @@ fn an_exploded_view_takes_no_model_dimensions() {
     run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": bolt, "translate": [0, 0, 50]}]}));
     let top = view(&mut s, json!("top"), [150.0, 150.0]);
     run(&mut s, "drawing.view.edit", json!({"view": top, "set": {"exploded": "Apart"}}));
-    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
-    let e = refused(&mut s, json!({"view": top}));
-    assert!(e.contains("not supported yet: dimensions on an exploded view"), "{e}");
-    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    let reply = brought(&mut s, &top, json!({}));
+    assert!(brought_the_plates_two(&mut s, &reply, &two), "{reply}");
 }
 
-/// A view in a position of its own takes no model dimensions either, by the same rule: they would
-/// measure its parts where the design places them. The plate, with its sketch's two dimensions to bring
-/// in, and a bolt on revolute joint Turn turned 30°. The drawing and the undo steps are left as they were.
+/// A view in a position of its own takes its model dimensions too, by the same rule. The plate, with
+/// its sketch's two dimensions to bring in, and a bolt on revolute joint Turn turned 30°, which leaves
+/// the plate where it is: the 100 and 60 come in as on any top view of the plate.
 #[test]
-fn a_posed_view_takes_no_model_dimensions() {
+fn a_posed_view_takes_its_model_dimensions() {
     let (mut s, _) = plate();
+    let two: [String; 2] = dimensions_of(&s, "Plate").try_into().unwrap();
     run(&mut s, "component.create", json!({"name": "Bolt", "grounded": false}));
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 40, "corner": [0, 0, 20], "body_name": "Shank"}));
     run(&mut s, "component.activate", json!({"component": "root"}));
@@ -443,8 +450,6 @@ fn a_posed_view_takes_no_model_dimensions() {
     run(&mut s, "joint.as_built", json!({"type": "revolute", "name": "Turn", "a": 0, "b": "Bolt", "at": at}));
     let view = view(&mut s, json!("top"), [150.0, 150.0]);
     run(&mut s, "drawing.view.edit", json!({"view": view, "set": {"pose": [{"joint": "Turn", "values": [30]}]}}));
-    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
-    let e = refused(&mut s, json!({"view": view}));
-    assert!(e.contains("not supported yet: dimensions on a view in a position of its own"), "{e}");
-    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    let reply = brought(&mut s, &view, json!({}));
+    assert!(brought_the_plates_two(&mut s, &reply, &two), "{reply}");
 }

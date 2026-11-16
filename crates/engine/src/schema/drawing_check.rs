@@ -73,6 +73,8 @@ pub enum CheckedKind {
     Image,
     /// A sheet's title block: its id is the sheet's.
     TitleBlock,
+    /// A view's label: its id is the view's.
+    ViewLabel,
 }
 
 /// The record a finding names.

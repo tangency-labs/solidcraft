@@ -7,7 +7,7 @@
 //! untrusted: every count and nesting depth is capped, and what cannot be read becomes a
 //! warning rather than a failure wherever the rest of the file is still usable.
 
-pub(crate) mod p21;
+pub mod p21;
 mod parallel;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -68,6 +68,8 @@ pub struct ImportedBody {
     /// too, naming each face left out): `body` is an open surface body of the solid's exact faces
     /// but those.
     pub refused: Option<String>,
+    /// The file marks the body invisible (`INVISIBILITY`), so the design starts with it hidden.
+    pub hidden: bool,
 }
 
 /// One product occurrence in the file's assembly tree.
@@ -286,6 +288,12 @@ struct Reader {
     color_names: HashMap<u64, String>,
     /// Opacity of styled items with a transparency (1 = opaque).
     opacity: HashMap<u64, f32>,
+    /// Styled item → the item it styles.
+    styled_items: HashMap<u64, u64>,
+    /// Items, styled items and representations an `INVISIBILITY` record lists.
+    invisible_targets: HashSet<u64>,
+    /// Items whose bodies the file marks invisible, after resolving the targets above.
+    invisible: HashSet<u64>,
     /// Items that gave no part: reported once when the file could not be read, else (the
     /// body could not be made) at every instance, as the message says.
     unreadable: HashMap<u64, Option<String>>,
@@ -342,6 +350,9 @@ impl Reader {
             colors: HashMap::new(),
             color_names: HashMap::new(),
             opacity: HashMap::new(),
+            styled_items: HashMap::new(),
+            invisible_targets: HashSet::new(),
+            invisible: HashSet::new(),
             unreadable: HashMap::new(),
             once: HashSet::new(),
             shown: HashMap::new(),
@@ -458,6 +469,9 @@ impl Reader {
                     }
                 }
                 "STYLED_ITEM" | "OVER_RIDING_STYLED_ITEM" => {
+                    if let Some(item) = rf(2) {
+                        self.styled_items.insert(id, item);
+                    }
                     if let Some(item) = rf(2)
                         && let Some((c, name)) = self.find_colour(p.get(1))
                     {
@@ -472,9 +486,35 @@ impl Reader {
                         }
                     }
                 }
+                "INVISIBILITY" => {
+                    if let Some(items) = p.first().and_then(Param::as_list) {
+                        self.invisible_targets.extend(items.iter().filter_map(Param::as_ref_id));
+                    }
+                }
                 _ => {}
             }
         }
+        // An INVISIBILITY record names styled items or representations; a representation hides
+        // every item it lists, including the representations it is linked to.
+        let mut invisible = HashSet::new();
+        for target in std::mem::take(&mut self.invisible_targets) {
+            let mut queue = vec![self.styled_items.get(&target).copied().unwrap_or(target)];
+            let mut seen = HashSet::new();
+            while let Some(target) = queue.pop() {
+                if !seen.insert(target) {
+                    continue;
+                }
+                if let Some((items, _)) = self.reps.get(&target) {
+                    invisible.extend(items.iter().copied());
+                    if let Some(links) = self.rep_links.get(&target) {
+                        queue.extend(links.iter().copied());
+                    }
+                } else {
+                    invisible.insert(target);
+                }
+            }
+        }
+        self.invisible = invisible;
         for (d, r) in sdrs {
             if let Some(&pd) = pds.get(&d) {
                 self.pd_reps.entry(pd).or_default().push(r);
@@ -977,6 +1017,7 @@ impl Reader {
                         source_item: item,
                         face_origin,
                         refused: part.refused.clone(),
+                        hidden: self.invisible.contains(&item),
                     });
                 }
                 Err(parallel::Failure { read, msg }) => {

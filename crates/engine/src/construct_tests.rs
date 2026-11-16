@@ -1197,3 +1197,21 @@ fn snapped_centres_and_middles_follow_the_model() {
     let bad = s.execute("construct.point.vertex", &json!({"point": snap(json!({"type": "origin"}), "middle", [0.0, 0.0, 0.0])}));
     assert!(bad.is_err() || construction_points(&s).len() == 2, "{bad:?}");
 }
+
+/// #6959: a turn about a given `origin` carries the constructions built on the body about that
+/// origin too, not about the world origin, so they stay on the body.
+#[test]
+fn construction_on_a_body_turned_about_an_origin_turns_about_it_too() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "body_name": "Pin"}));
+    run(&mut s, "construct.axis.through_cylinder", json!({"face": {"face": [5, 0, 10]}, "name": "PinAxis"}));
+    run(&mut s, "construct.point.center", json!({"of": {"edge": [5, 0, 20]}, "name": "PinTop"}));
+    // A quarter turn about Y through the top centre (0, 0, 20): that centre stays put and the
+    // axis lies along X at height 20. About the world origin the top would go to (20, 0, 0).
+    run(&mut s, "solid.move", json!({"bodies": ["Pin"], "origin": [0, 0, 20], "axis": [0, 1, 0], "angle": "90 deg"}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    assert!(near(point(&s, "PinTop"), Vec3::new(0.0, 0.0, 20.0)), "{:?}", point(&s, "PinTop"));
+    let (o, d) = axis(&s, "PinAxis");
+    assert!(parallel(d, Vec3::X) && on_line(o, d, Vec3::new(-20.0, 0.0, 20.0)), "{o:?} {d:?}");
+}

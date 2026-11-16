@@ -13,7 +13,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<OccurrenceBomTypeParams>(), &["bom_type", "occurrence", "path"]);
     assert_keys(
         input_schema_for::<BomParams>(),
-        &["component", "format", "group_by", "group_children", "levels", "mass", "path", "show_purchased_contents"],
+        &["component", "format", "group_by", "group_children", "levels", "mass", "path", "show_purchased_contents", "show_suppressed_parts"],
     );
     assert_keys(input_schema_for::<ComponentMetadataParams>(), &["component"]);
     assert_keys(
@@ -123,6 +123,7 @@ fn strict_keeps_todays_errors_of_a_bill_of_materials() {
         ("assembly.bom", json!({"group_children": "yes"})),
         ("assembly.bom", json!({"mass": "yes"})),
         ("assembly.bom", json!({"show_purchased_contents": 1})),
+        ("assembly.bom", json!({"show_suppressed_parts": "yes"})),
         ("assembly.bom", json!({"path": file.replace(".csv", ".txt")})),
         ("assembly.bom", json!({"path": file, "format": "xml"})),
         ("component.metadata", json!({})),
@@ -189,6 +190,7 @@ fn a_bill_of_materials_replies_with_its_schema() {
     assert!(r.get("path").is_none() && r["rows"].as_array().is_some_and(|rows| rows.iter().all(|row| row.get("children").is_none())), "{r}");
     matches(&run(&mut s, "assembly.bom", json!({"component": 0, "levels": "top", "group_by": "definition"})), false);
     matches(&run(&mut s, "assembly.bom", json!({"levels": "all", "show_purchased_contents": true, "mass": true})), false);
+    matches(&run(&mut s, "assembly.bom", json!({"show_suppressed_parts": true})), false);
     matches(&run(&mut s, "assembly.bom", json!({"group_children": true, "mass": true})), false);
     let r = run(&mut s, "assembly.bom", json!({"levels": "flat", "group_by": ["part_number"], "group_children": true}));
     matches(&r, false);

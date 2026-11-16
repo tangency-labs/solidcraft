@@ -29,7 +29,7 @@
 //! quantity is evaluated once for every list made from the [`Tree`].
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -120,6 +120,9 @@ pub struct Request {
     /// In all levels, what a purchased part holds is listed under it too (it is still one row,
     /// weighed whole).
     pub purchased_contents: bool,
+    /// A part a configuration switches off (no bodies, a suppressed feature of its own) is listed
+    /// as placed; by default it counts nowhere.
+    pub suppressed_parts: bool,
 }
 
 /// A component as one placement counts: its id and the bill of materials type it counts as there.
@@ -282,8 +285,9 @@ pub enum Unlisted {
     NotFound,
     /// It counts as a reference, or is inside one: no bill of materials counts it.
     Reference,
-    /// It has no row of its own and isn't inside one: a phantom without bodies, or in parts only
-    /// a subassembly listed through its parts (the assembly listed, an empty path, is none either).
+    /// It has no row of its own and isn't inside one: a phantom without bodies, a part a
+    /// configuration switches off, or in parts only a subassembly listed through its parts (the
+    /// assembly listed, an empty path, is none either).
     NoRow,
 }
 
@@ -306,7 +310,8 @@ impl Bom {
 
     /// The row a placement is counted in, by its occurrence path from the assembly listed: the row
     /// that lists it, else the row of the part it is inside (a nut inside a purchased bolt is
-    /// counted in the bolt's). `tree` is the one the list was made from, with its members
+    /// counted in the bolt's), but none for a part switched off that the list doesn't list. `tree`
+    /// is the one the list was made from, with its members
     /// (`list_with`).
     pub(crate) fn row_of(&self, tree: &Tree, path: &[u64]) -> std::result::Result<(Vec<u32>, &Row), Unlisted> {
         if path.len() > MAX_PLACEMENT_DEPTH {
@@ -319,6 +324,10 @@ impl Bom {
                 return Err(Unlisted::Reference);
             }
             component = placed.member.component;
+        }
+        // A part switched off counts nowhere unless the list lists it: not in the row it is inside.
+        if tree.switched_off(component) && !self.index.contains_key(path) {
+            return Err(Unlisted::NoRow);
         }
         // Each placement is in one row or none, so the longest member path it starts with is its row's.
         let at = (1..=path.len()).rev().find_map(|n| path.get(..n).and_then(|start| self.index.get(start)));
@@ -380,6 +389,8 @@ pub struct Tree<'a> {
     components: HashMap<u64, &'a Component>,
     /// Each component's own bodies, in body order; a component that owns none isn't here.
     bodies: HashMap<u64, Vec<&'a ModelBody>>,
+    /// The components with a suppressed feature of their own in the timeline (before the marker).
+    suppressing: HashSet<u64>,
     /// What one of each definition weighs, by what it stands for.
     weighed: BTreeMap<(u64, Holds), Weighed>,
     /// The materials of what one of each definition stands for, each once, in body order.
@@ -415,9 +426,17 @@ impl<'a> Tree<'a> {
         for (body, owner) in state.bodies.iter().zip(doc.model_body_components(state)) {
             bodies.entry(owner).or_default().push(body);
         }
+        let suppressing = doc.features.iter().take(doc.marker.unwrap_or(usize::MAX)).filter(|f| f.suppressed).map(|f| f.component).collect();
         let values = std::cell::OnceCell::new();
         let amounts = components.values().filter_map(|c| Some((c.id, quantity::amount_in(doc, &values, c.metadata.bom_quantity()?).ok()))).collect();
-        Tree { doc, children, components, bodies, weighed: BTreeMap::new(), made_of: BTreeMap::new(), amounts }
+        Tree { doc, children, components, bodies, suppressing, weighed: BTreeMap::new(), made_of: BTreeMap::new(), amounts }
+    }
+
+    /// Component `id` is a part a configuration switches off: it places nothing and has no bodies,
+    /// and a feature of its own is suppressed. Lists leave it out unless they ask for it
+    /// ([`Request::suppressed_parts`]).
+    fn switched_off(&self, id: u64) -> bool {
+        !self.children.contains_key(&id) && !self.bodies.contains_key(&id) && self.suppressing.contains(&id)
     }
 
     /// What a component places.
@@ -441,9 +460,11 @@ impl<'a> Tree<'a> {
     }
 
     /// The components placed in `id` whose parts are part of what `id` stands for as `holds` says
-    /// (see `adds`), one for each placement, with the type each counts as there.
+    /// (see `adds`), one for each placement, with the type each counts as there. A part switched off
+    /// isn't, whatever the list shows: it weighs nothing, and its static material names nothing.
     fn adding(&self, id: u64, holds: Holds) -> Vec<Member> {
-        self.contents(id).iter().filter(|p| adds(holds, p.member.bom_type)).map(|p| p.member).collect()
+        let adds_here = |p: &&Placed| adds(holds, p.member.bom_type) && !self.switched_off(p.member.component);
+        self.contents(id).iter().filter(adds_here).map(|p| p.member).collect()
     }
 
     /// The static material typed in for a component, if any.
@@ -747,6 +768,9 @@ struct Shape {
     /// What it holds is listed under it if it is purchased ([`Request::purchased_contents`], all
     /// levels).
     open_purchased: bool,
+    /// It is a part a configuration switches off (`Tree::switched_off`), in a list that doesn't ask
+    /// for those ([`Request::suppressed_parts`]).
+    off: bool,
 }
 
 /// How one placement counts.
@@ -762,7 +786,8 @@ struct Step {
     holds: Holds,
 }
 
-/// How a placement counts in `view`: the one rule every list and every mass read. A reference
+/// How a placement counts in `view`: the one rule every list and every mass read. A part a
+/// configuration switches off counts nowhere, unless the list asks for it. A reference
 /// counts nowhere and nothing inside it does; a phantom's own bodies, when it has any, are a row of
 /// their own (as a subassembly's are in parts only) and what it holds counts where it is placed; a purchased part is one row with nothing inside it listed (in all levels, its
 /// contents under it when asked); an inseparable part is one row, and in parts only its purchased
@@ -775,6 +800,7 @@ fn classify(view: View, walk: Walk, bom_type: BomType, shape: Shape) -> Step {
     let row = |holds| Step { row: true, holds, ..nothing };
     let contents = |walk| shape.contents.then_some(walk);
     match (bom_type, walk) {
+        _ if shape.off => nothing,
         (BomType::Reference, _) => nothing,
         (BomType::Phantom, Walk::Listed) => Step { row: shape.bodies, inside: Some(Walk::Listed), kit: false, holds: Holds::Own },
         (BomType::Phantom, Walk::PurchasedOnly) => Step { inside: Some(walk), ..nothing },
@@ -851,6 +877,7 @@ fn walk(tree: &Tree, request: &Request, members: bool) -> Result<(Vec<Entry>, Ve
                 bodies: tree.bodies.contains_key(&component),
                 folded: folds && numbered,
                 open_purchased: request.purchased_contents,
+                off: !request.suppressed_parts && tree.switched_off(component),
             };
             let step = classify(view, frame.walk, placed.member.bom_type, shape);
             let path = if members { [frame.path.as_slice(), &[placed.occurrence]].concat() } else { Vec::new() };

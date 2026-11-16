@@ -122,6 +122,329 @@ fn set_text(
     measure(dirs, text, family, language, height, None, style, wait)?.set(at, angle)
 }
 
+/// Original logical text and its association with the runs returned by the paper producer.
+/// Ranges are UTF-8 bytes in `text`, in the unchanged paint order of the runs. Only the producer
+/// issues this capability; it is not deserialized from a public scene or inferred from placement.
+#[derive(Debug)]
+pub struct PaperTextFlow {
+    text: String,
+    run_ranges: Vec<std::ops::Range<u32>>,
+    run_fingerprints: Vec<[u8; 32]>,
+}
+
+impl PaperTextFlow {
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    pub fn run_ranges(&self) -> &[std::ops::Range<u32>] {
+        &self.run_ranges
+    }
+
+    /// Check the exact records a writer is about to use, without resolving a font or shaping.
+    /// Changing text, glyphs, clusters, font identity, placement or run order invalidates the binding.
+    pub fn check_runs<'a>(&self, runs: impl IntoIterator<Item = &'a TextRun>) -> Result<()> {
+        let mut count = 0usize;
+        let mut records = 0usize;
+        for run in runs {
+            let range = self.run_ranges.get(count).ok_or_else(|| flow_invalid("more runs than the producer issued"))?;
+            let fingerprint = self.run_fingerprints.get(count).ok_or_else(|| flow_invalid("missing producer fingerprint"))?;
+            let logical = self.text.get(range.start as usize..range.end as usize).ok_or_else(|| flow_invalid("invalid original-text range"))?;
+            if logical != run.text || &flow_fingerprint(run, &mut records)? != fingerprint {
+                return Err(flow_invalid("a run differs from its producer-issued source binding"));
+            }
+            count = count.checked_add(1).ok_or_else(|| flow_invalid("run count overflow"))?;
+        }
+        if count != self.run_ranges.len() || count != self.run_fingerprints.len() {
+            return Err(flow_invalid("fewer runs than the producer issued"));
+        }
+        Ok(())
+    }
+
+    fn issue(text: &str, runs: &[TextRun], run_ranges: Vec<std::ops::Range<u32>>) -> Result<Self> {
+        use solidcraft_geom::paper::text::MAX_RUN_TEXT_BYTES;
+        if text.chars().take(MAX_TEXT_CHARS + 1).count() > MAX_TEXT_CHARS
+            || text.len() > MAX_RUN_TEXT_BYTES
+            || runs.len() > MAX_TEXT_CHARS
+            || run_ranges.len() != runs.len()
+        {
+            return Err(flow_invalid("original-text or run count exceeds its bound"));
+        }
+        // A sorted view checks coverage, without changing the records' paint order. All non-LF
+        // bytes belong to exactly one run; gaps are the original line breaks, including empty lines.
+        let mut order = Vec::new();
+        order.try_reserve_exact(run_ranges.len()).map_err(|_| flow_invalid("cannot allocate bounded source-range validation"))?;
+        order.extend(0..run_ranges.len());
+        order.sort_unstable_by_key(|&i| run_ranges.get(i).map(|range| (range.start, range.end)));
+        let mut end = 0usize;
+        for index in order {
+            let range = run_ranges.get(index).ok_or_else(|| flow_invalid("missing original-text range"))?;
+            let run = runs.get(index).ok_or_else(|| flow_invalid("missing source run"))?;
+            let (start, next) = (range.start as usize, range.end as usize);
+            let gap = text.get(end..start).ok_or_else(|| flow_invalid("overlapping or non-UTF-8 original-text ranges"))?;
+            let logical = text.get(start..next).ok_or_else(|| flow_invalid("invalid original-text range"))?;
+            if start >= next || gap.bytes().any(|byte| byte != b'\n') || logical.contains('\n') || logical != run.text {
+                return Err(flow_invalid("original-text ranges must cover each run exactly and omit only LF line breaks"));
+            }
+            end = next;
+        }
+        if text.get(end..).is_none_or(|tail| tail.bytes().any(|byte| byte != b'\n')) {
+            return Err(flow_invalid("original text contains unbound non-LF bytes"));
+        }
+        let mut records = 0usize;
+        let mut run_fingerprints = Vec::new();
+        run_fingerprints.try_reserve_exact(runs.len()).map_err(|_| flow_invalid("cannot allocate bounded run fingerprints"))?;
+        for run in runs {
+            run_fingerprints.push(flow_fingerprint(run, &mut records)?);
+        }
+        let mut original = String::new();
+        original.try_reserve_exact(text.len()).map_err(|_| flow_invalid("cannot allocate bounded original text"))?;
+        original.push_str(text);
+        let flow = Self { text: original, run_ranges, run_fingerprints };
+        flow.check_runs(runs)?;
+        Ok(flow)
+    }
+}
+
+/// Original text and exact source spans for measured lines, including wrapped lines.
+/// Each run's spans concatenate to that run's text. Spaces removed by wrapping remain in
+/// `text`, outside the spans. The spans stay in paint order, including bidirectional runs.
+#[derive(Debug)]
+pub struct PaperSourceFlow {
+    text: String,
+    run_spans: Vec<Vec<std::ops::Range<u32>>>,
+    run_fingerprints: Vec<[u8; 32]>,
+}
+
+impl PaperSourceFlow {
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    pub fn run_spans(&self) -> &[Vec<std::ops::Range<u32>>] {
+        &self.run_spans
+    }
+
+    /// Check the exact painted records, without shaping or changing the original text.
+    pub fn check_runs<'a>(&self, runs: impl IntoIterator<Item = &'a TextRun>) -> Result<()> {
+        let mut count = 0usize;
+        let mut records = 0usize;
+        for run in runs {
+            let spans = self.run_spans.get(count).ok_or_else(|| flow_invalid("more runs than the producer issued"))?;
+            let fingerprint = self.run_fingerprints.get(count).ok_or_else(|| flow_invalid("missing producer fingerprint"))?;
+            check_source_spans(&self.text, spans, &run.text)?;
+            if &flow_fingerprint(run, &mut records)? != fingerprint {
+                return Err(flow_invalid("a run differs from its producer-issued source binding"));
+            }
+            count += 1;
+        }
+        if count != self.run_spans.len() || count != self.run_fingerprints.len() {
+            return Err(flow_invalid("fewer runs than the producer issued"));
+        }
+        Ok(())
+    }
+
+    fn issue(text: &str, runs: &[TextRun], run_spans: Vec<Vec<std::ops::Range<u32>>>, wrapped: bool) -> Result<Self> {
+        use solidcraft_geom::paper::text::MAX_RUN_TEXT_BYTES;
+        if text.chars().take(MAX_TEXT_CHARS + 1).count() > MAX_TEXT_CHARS
+            || text.len() > MAX_RUN_TEXT_BYTES
+            || runs.len() > MAX_TEXT_CHARS
+            || run_spans.len() != runs.len()
+        {
+            return Err(flow_invalid("original-text or run count exceeds its bound"));
+        }
+        let mut order = Vec::new();
+        for (spans, run) in run_spans.iter().zip(runs) {
+            check_source_spans(text, spans, &run.text)?;
+            if spans.len() > text.len().saturating_sub(order.len()) {
+                return Err(flow_invalid("source span count exceeds the original-text bound"));
+            }
+            order.try_reserve(spans.len()).map_err(|_| flow_invalid("cannot allocate bounded source spans"))?;
+            order.extend(spans.iter());
+        }
+        order.sort_unstable_by_key(|span| (span.start, span.end));
+        let gap = |s: &str| s.bytes().all(|b| b == b'\n' || (wrapped && b == b' '));
+        let mut end = 0usize;
+        for span in order {
+            let omitted = text.get(end..span.start as usize).ok_or_else(|| flow_invalid("overlapping source spans"))?;
+            if !gap(omitted) {
+                return Err(flow_invalid("source spans omit bytes other than line breaks or wrapped spaces"));
+            }
+            end = span.end as usize;
+        }
+        if text.get(end..).is_none_or(|tail| !gap(tail)) {
+            return Err(flow_invalid("original text contains unbound non-whitespace bytes"));
+        }
+        let mut records = 0usize;
+        let run_fingerprints = runs.iter().map(|run| flow_fingerprint(run, &mut records)).collect::<Result<Vec<_>>>()?;
+        let flow = Self { text: text.to_string(), run_spans, run_fingerprints };
+        flow.check_runs(runs)?;
+        Ok(flow)
+    }
+}
+
+fn check_source_spans(source: &str, spans: &[std::ops::Range<u32>], text: &str) -> Result<()> {
+    if spans.is_empty() || spans.len() > source.len() {
+        return Err(flow_invalid("empty or overlong source-span list"));
+    }
+    let mut offset = 0usize;
+    let mut end = 0u32;
+    for span in spans {
+        let piece = source.get(span.start as usize..span.end as usize).ok_or_else(|| flow_invalid("invalid UTF-8 source span"))?;
+        if span.start < end || span.start >= span.end || piece.contains('\n') {
+            return Err(flow_invalid("source spans are not ordered nonempty text"));
+        }
+        let next = offset.checked_add(piece.len()).ok_or_else(|| flow_invalid("source-span length overflow"))?;
+        if text.get(offset..next) != Some(piece) {
+            return Err(flow_invalid("source spans do not spell the painted run"));
+        }
+        offset = next;
+        end = span.end;
+    }
+    if offset != text.len() {
+        return Err(flow_invalid("source spans do not cover the painted run"));
+    }
+    Ok(())
+}
+
+fn source_byte_spans(bytes: &[usize]) -> Result<Vec<std::ops::Range<u32>>> {
+    let mut spans: Vec<std::ops::Range<u32>> = Vec::new();
+    for &byte in bytes {
+        let start = u32::try_from(byte).map_err(|_| flow_invalid("source byte exceeds u32"))?;
+        let end = start.checked_add(1).ok_or_else(|| flow_invalid("source byte overflow"))?;
+        match spans.last_mut() {
+            Some(span) if span.end == start => span.end = end,
+            _ => spans.push(start..end),
+        }
+    }
+    Ok(spans)
+}
+
+/// A producer result with source-flow information. Existing `paper_text` APIs keep their tuple
+/// result and their `None` for empty lines; this additive API retains even all-LF logical text.
+#[derive(Debug)]
+pub struct FlowedPaperText<F = PaperTextFlow> {
+    runs: Vec<TextRun>,
+    fonts: Vec<Font>,
+    flow: F,
+}
+
+impl<F> FlowedPaperText<F> {
+    pub fn runs(&self) -> &[TextRun] {
+        &self.runs
+    }
+
+    pub fn fonts(&self) -> &[Font] {
+        &self.fonts
+    }
+
+    pub fn flow(&self) -> &F {
+        &self.flow
+    }
+
+    pub fn into_parts(self) -> (Vec<TextRun>, Vec<Font>, F) {
+        (self.runs, self.fonts, self.flow)
+    }
+}
+
+fn flow_invalid(reason: &str) -> SketchError {
+    SketchError::Invalid(format!("paper text source flow: {reason}"))
+}
+
+fn flow_fingerprint(run: &TextRun, records: &mut usize) -> Result<[u8; 32]> {
+    use solidcraft_geom::paper::MAX_RECORDS;
+    use solidcraft_geom::paper::text::{MAX_RUN_GLYPHS, MAX_RUN_TEXT_BYTES};
+    if run.glyphs.is_empty() || run.glyphs.len() > MAX_RUN_GLYPHS || run.text.len() > MAX_RUN_TEXT_BYTES || run.clusters.len() > run.glyphs.len() {
+        return Err(flow_invalid("a run exceeds the paper record bounds"));
+    }
+    *records = records
+        .checked_add(1)
+        .and_then(|count| count.checked_add(run.glyphs.len()))
+        .and_then(|count| count.checked_add(run.clusters.len()))
+        .filter(|count| *count <= MAX_RECORDS)
+        .ok_or_else(|| flow_invalid("aggregate source-flow records exceed the paper bound"))?;
+    let mut hash = Sha256::new();
+    hash.update(b"SolidCraft paper text source-flow run v1\0");
+    hash.update(run.font);
+    for value in [run.scale, run.origin.x, run.origin.y, run.angle, run.slant] {
+        hash.update(value.to_bits().to_le_bytes());
+    }
+    hash.update([u8::from(run.rtl)]);
+    hash.update((run.text.len() as u64).to_le_bytes());
+    hash.update(run.text.as_bytes());
+    hash.update((run.glyphs.len() as u64).to_le_bytes());
+    for glyph in &run.glyphs {
+        hash.update(glyph.id.to_le_bytes());
+        for value in [glyph.x, glyph.rise, glyph.advance] {
+            hash.update(value.to_bits().to_le_bytes());
+        }
+    }
+    hash.update((run.clusters.len() as u64).to_le_bytes());
+    for cluster in &run.clusters {
+        for value in [cluster.glyphs.start, cluster.glyphs.end, cluster.text.start, cluster.text.end] {
+            hash.update(value.to_le_bytes());
+        }
+    }
+    Ok(hash.finalize().into())
+}
+
+/// `paper_text` with a producer-issued logical-source certificate beside its unchanged records.
+#[allow(clippy::too_many_arguments)]
+pub fn paper_text_with_flow(
+    text: &str,
+    family: Option<&str>,
+    language: &str,
+    at: Vec2,
+    height: f64,
+    angle: f64,
+    style: &TextStyle,
+) -> Result<FlowedPaperText> {
+    paper_text_with_flow_in(&font_dirs(), text, family, language, at, height, angle, style)
+}
+
+/// `paper_text_with_flow` with the same explicit font folders as `paper_text_in`.
+#[allow(clippy::too_many_arguments)]
+pub fn paper_text_with_flow_in(
+    dirs: &[PathBuf],
+    text: &str,
+    family: Option<&str>,
+    language: &str,
+    at: Vec2,
+    height: f64,
+    angle: f64,
+    style: &TextStyle,
+) -> Result<FlowedPaperText> {
+    set_text_with_flow(dirs, text, family, language, (at, height, angle), style, true)
+}
+
+/// The nonblocking source-flow producer; font-pending behavior is `paper_text_now`'s.
+#[allow(clippy::too_many_arguments)]
+pub fn paper_text_with_flow_now(
+    dirs: &[PathBuf],
+    text: &str,
+    family: Option<&str>,
+    language: &str,
+    at: Vec2,
+    height: f64,
+    angle: f64,
+    style: &TextStyle,
+) -> Result<FlowedPaperText> {
+    set_text_with_flow(dirs, text, family, language, (at, height, angle), style, false)
+}
+
+fn set_text_with_flow(
+    dirs: &[PathBuf],
+    text: &str,
+    family: Option<&str>,
+    language: &str,
+    place: (Vec2, f64, f64),
+    style: &TextStyle,
+    wait: bool,
+) -> Result<FlowedPaperText> {
+    let (at, height, angle) = place;
+    PaperFonts::in_dirs(dirs.to_vec(), family.unwrap_or_default(), language, wait).text_with_flow(text, at, height, angle, style)
+}
+
 /// A text measured for paper: the lines it is set in, each with its width (mm), and the distance
 /// between their baselines, with its runs and fonts, so [`PaperLines::set`] only places them.
 #[derive(Clone)]
@@ -134,6 +457,10 @@ pub struct PaperLines {
     runs: Vec<((f64, f64), TextRun)>,
     /// Each font once, in order of id, holding the glyphs its runs place.
     fonts: Vec<Font>,
+    /// Original bytes and each run's source spans, before placement changes its fingerprint.
+    source: String,
+    source_spans: Vec<Vec<std::ops::Range<u32>>>,
+    wrapped: bool,
 }
 
 impl std::fmt::Debug for PaperLines {
@@ -143,6 +470,14 @@ impl std::fmt::Debug for PaperLines {
 }
 
 impl PaperLines {
+    /// Place the measured lines and retain their exact logical source. Wrapped words keep
+    /// separate source spans when wrapping removed spaces; no contiguous range is invented.
+    pub fn set_with_flow(&self, at: Vec2, angle: f64) -> Result<FlowedPaperText<PaperSourceFlow>> {
+        let (runs, fonts) = self.set(at, angle)?.unwrap_or_default();
+        let flow = PaperSourceFlow::issue(&self.source, &runs, self.source_spans.clone(), self.wrapped)?;
+        Ok(FlowedPaperText { runs, fonts, flow })
+    }
+
     /// The lines on paper, the first line's baseline starting at `at` (sheet mm) and turned `angle`
     /// radians about it, each aligned on it as the style said: their runs, and the fonts they use
     /// (each once, in order of id, holding the glyphs its runs place); None when they set no glyph
@@ -227,6 +562,23 @@ impl PaperFonts {
         measure(&self.dirs, text, Some(&self.family), &self.language, height, wrap, style, self.wait)
     }
 
+    /// Unwrapped text with its original source, using this sheet's font-waiting rule.
+    /// For wrapped text, use [`Self::lines`] and [`PaperLines::set_with_flow`].
+    pub fn text_with_flow(&self, text: &str, at: Vec2, height: f64, angle: f64, style: &TextStyle) -> Result<FlowedPaperText> {
+        let measured = self.lines(text, height, None, style)?;
+        let (runs, fonts) = measured.set(at, angle)?.unwrap_or_default();
+        let ranges = measured
+            .source_spans
+            .iter()
+            .map(|spans| match spans.as_slice() {
+                [range] => Ok(range.clone()),
+                _ => Err(flow_invalid("an unwrapped run needs one exact source range")),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let flow = PaperTextFlow::issue(text, &runs, ranges)?;
+        Ok(FlowedPaperText { runs, fonts, flow })
+    }
+
     /// `text` set as [`paper_text`] sets it.
     pub fn text(&self, text: &str, at: Vec2, height: f64, angle: f64, style: &TextStyle) -> Result<Option<(Vec<TextRun>, Vec<Font>)>> {
         set_text(&self.dirs, text, Some(&self.family), &self.language, (at, height, angle), style, self.wait)
@@ -294,35 +646,53 @@ fn measure(
             mixed_line(line, &faces, &found, &scales, language, &family, dirs.is_empty())
         }
     };
-    let mut laid: Vec<(String, LaidLine)> = Vec::new();
+    // Each painted byte names its original byte. A wrapped separator uses the first
+    // original space after the preceding word; other removed spaces remain source gaps.
+    let mut laid: Vec<(String, LaidLine, Vec<usize>)> = Vec::new();
+    let mut paragraph_start = 0usize;
     for paragraph in text.split('\n') {
+        let base = paragraph_start;
+        paragraph_start += paragraph.len() + 1;
         let Some(wrap) = wrap else {
-            laid.push((paragraph.to_string(), lay(paragraph)?));
+            laid.push((paragraph.to_string(), lay(paragraph)?, (base..base + paragraph.len()).collect()));
             continue;
         };
-        let mut words = paragraph.split(' ').filter(|w| !w.is_empty());
-        let Some(first) = words.next() else {
-            laid.push((String::new(), lay("")?));
+        let mut offset = base;
+        let mut words = paragraph.split(' ').filter_map(|word| {
+            let start = offset;
+            offset += word.len() + 1;
+            (!word.is_empty()).then_some((word, start))
+        });
+        let Some((first, start)) = words.next() else {
+            laid.push((String::new(), lay("")?, Vec::new()));
             continue;
         };
-        let mut line = (first.to_string(), lay(first)?);
-        for word in words {
+        let mut line = (first.to_string(), lay(first)?, (start..start + first.len()).collect::<Vec<_>>());
+        for (word, start) in words {
             let longer = format!("{} {word}", line.0);
             let wider = lay(&longer)?;
             if wider.width <= wrap {
-                line = (longer, wider);
+                let space = line.2.last().and_then(|index| index.checked_add(1)).ok_or_else(|| flow_invalid("missing wrapped word"))?;
+                line.2.push(space);
+                line.2.extend(start..start + word.len());
+                line.0 = longer;
+                line.1 = wider;
             } else {
-                laid.push(std::mem::replace(&mut line, (word.to_string(), lay(word)?)));
+                let next = (word.to_string(), lay(word)?, (start..start + word.len()).collect());
+                laid.push(std::mem::replace(&mut line, next));
             }
         }
         laid.push(line);
     }
     let lean = SLANT_DEG.to_radians().tan();
     let mut placed: Vec<(usize, (f64, f64), TextRun)> = Vec::new();
-    for (row, (line, laid)) in laid.iter().enumerate() {
+    let mut source_spans = Vec::new();
+    for (row, (line, laid, source)) in laid.iter().enumerate() {
         // The line's start: along the baseline by its alignment, then down a pitch a row.
         let start = (style.align.start(laid.width), row as f64 * pitch);
         for run in laid.runs.iter().filter(|run| !run.glyphs.is_empty()) {
+            let bytes = source.get(run.text.clone()).ok_or_else(|| flow_invalid("run text is outside its measured line"))?;
+            source_spans.push(source_byte_spans(bytes)?);
             let (glyphs, text, clusters) = run_records(laid, run, line)?;
             let record = records.get(run.face).ok_or_else(|| SketchError::Invalid("a run in a font it wasn't given".into()))?;
             let slant = if style.italic && !record.metrics.flags.italic { lean } else { 0.0 };
@@ -344,9 +714,9 @@ fn measure(
     for record in records.into_iter().filter(|record| !record.glyphs.is_empty()) {
         fonts.entry(record.id).or_insert(record);
     }
-    let lines = laid.iter().map(|(line, laid)| (line.clone(), laid.width)).collect();
+    let lines = laid.iter().map(|(line, laid, _)| (line.clone(), laid.width)).collect();
     let runs = placed.into_iter().map(|(_, start, run)| (start, run)).collect();
-    Ok(PaperLines { lines, pitch, runs, fonts: fonts.into_values().collect() })
+    Ok(PaperLines { lines, pitch, runs, fonts: fonts.into_values().collect(), source: text.to_string(), source_spans, wrapped: wrap.is_some() })
 }
 
 /// The fonts `lacking` falls back to, each with its record, and the font (by its place among

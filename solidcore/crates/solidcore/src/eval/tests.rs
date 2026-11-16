@@ -834,6 +834,55 @@ fn a_point_beside_a_pole_is_one_within_its_reach() {
     assert_eq!(sphere.pole([0.3, FRAC_PI_2]).unwrap(), [true, false]);
 }
 
+/// At the threshold, r = reach / 2: a form whose circles are no wider than the reach is thin,
+/// not collapsed. A cylinder of radius 0.049, 0.05 or 0.051 at a reach of 0.1 (a pin's round in a
+/// file of 0.1 mm uncertainty) is a pole nowhere; a ball of radius 0.05 only at its exact poles, a torus's tube
+/// of radius 0.05 nowhere. A ball a little wider still has its poles within the reach.
+#[test]
+fn a_surface_no_wider_than_the_reach_is_thin_not_a_pole() {
+    let reach = 0.1;
+    // A cylinder just under, at and just over r = reach / 2: a pole nowhere.
+    for k in [0.49, 0.5, 0.51] {
+        let cylinder = SurfaceEval::new(&Surface::Cylinder {
+            frame: a_frame(),
+            radius: k * reach,
+        })
+        .unwrap();
+        assert_eq!(
+            cylinder.pole_within([0.3, 0.5], reach).unwrap(),
+            [false, false],
+            "r = {k} reach"
+        );
+    }
+    let ball = SurfaceEval::new(&Surface::Sphere {
+        frame: a_frame(),
+        radius: 0.5 * reach,
+    })
+    .unwrap();
+    assert_eq!(ball.pole_within([0.3, 0.2], reach).unwrap(), [false, false]);
+    assert_eq!(
+        ball.pole_within([0.3, FRAC_PI_2], reach).unwrap(),
+        [true, false]
+    );
+    let wider = SurfaceEval::new(&Surface::Sphere {
+        frame: a_frame(),
+        radius: 0.501 * reach,
+    })
+    .unwrap();
+    assert_eq!(wider.pole_within([0.3, 0.2], reach).unwrap(), [true, false]);
+    let torus = SurfaceEval::new(&Surface::Torus {
+        frame: a_frame(),
+        major_radius: 4.0,
+        minor_radius: 0.5 * reach,
+        tube_start: 0.0,
+    })
+    .unwrap();
+    assert_eq!(
+        torus.pole_within([0.3, 0.2], reach).unwrap(),
+        [false, false]
+    );
+}
+
 /// A curve's curvature vector, exactly, on every kind: a circle's is 1/R towards its centre (as
 /// a conic and as its rational quadratic B-spline); an ellipse's at its vertices is a/b² and
 /// b/a²; a line is straight; and the circle where a plane z = 3 cuts a sphere of radius 5 about

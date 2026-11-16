@@ -83,7 +83,10 @@ fn from_model(s: &mut Session, p: &Value) -> Result<Value> {
     let request: FromModelParams = crate::schema::read(FROM_MODEL, p)?;
     let record = s.drawing(FROM_MODEL)?.clone();
     let view = request.view.0;
-    record.view(view).ok_or_else(|| bad(FROM_MODEL, format!("the drawing has no view {}", ids::encode(view))))?;
+    let on = record.view(view).ok_or_else(|| bad(FROM_MODEL, format!("the drawing has no view {}", ids::encode(view))))?;
+    if let Some(why) = crate::drawing_view::no_model_edges(on) {
+        return Err(bad(FROM_MODEL, why));
+    }
     let basis = record.resolve_view(view).map_err(|e| bad(FROM_MODEL, e.to_string()))?.basis;
     let candidates = candidates(s, &request, &basis)?;
     let mut staged = Drawing::clone(&record);

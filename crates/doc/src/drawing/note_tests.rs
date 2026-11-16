@@ -25,7 +25,7 @@ fn noted() -> (Drawing, [u64; 3]) {
     let a3 = drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape);
     let mut d = Drawing::new("Noted", "en", "Sheet 1", a3, None, &BTreeSet::new(), &mut id_source).unwrap();
     let source = d.allocate_id(&mut id_source).unwrap();
-    d.sources.push(DrawingSource { id: source });
+    d.sources.push(DrawingSource { id: source, path: None });
     let (view, sheet) = (d.allocate_id(&mut id_source).unwrap(), d.sheets[0].id);
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     d.add_views([Arc::new(View {
@@ -35,6 +35,7 @@ fn noted() -> (Drawing, [u64; 3]) {
         place: ViewPlace::At([150.0, 150.0]),
         settings: ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() },
         reference_shown_percent: 0.0,
+        label: None,
     })]);
     let edge = ModelEdge { body: "Bolt".into(), origin_feature: 4, name: "F1:side|F2:head".into(), path: vec![3] };
     let anchors = [Anchor::Sheet(sheet), Anchor::View(view), Anchor::Edge { view, edge }];

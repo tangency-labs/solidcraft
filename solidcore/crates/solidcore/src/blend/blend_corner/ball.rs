@@ -53,10 +53,12 @@ use crate::blend::fillet_corner::p3::{CornerPatchEnv, FilletCorner};
 use crate::blend::fillet_custom_solver::{offset_local_point_solve, offset_natural_uv_domain};
 use crate::blend::fillet_exact::{BlendQuadric, QuadricKind};
 use crate::blend::fillet_geom::p1::{FilletBrep, FilletEdgeType, FilletSolverId};
+use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverType, FilletSurfaceGeneratorType};
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
+use crate::geom::krawczyk::{contraction, k_operator};
 use crate::intersect::surface_intersector::p1::SrfIndex;
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
@@ -266,6 +268,32 @@ impl BallImplicit {
         (d, abs)
     }
 
+    /// `Value` over a box, in rounded intervals: `c + Σ_i (2 b_i x_i + Σ_j x_i a_ij x_j)`,
+    /// the terms in [`Self::value`]'s order.
+    fn value_over(&self, x: &[Ivl; 3]) -> Ivl {
+        let mut d = Ivl::from(self.c);
+        for ((bi, row), xi) in self.b.iter().zip(self.a.iter()).zip(x.iter()) {
+            d = d + Ivl::from(2.0 * bi) * *xi;
+            for (aij, xj) in row.iter().zip(x.iter()) {
+                d = d + *xi * Ivl::from(*aij) * *xj;
+            }
+        }
+        d
+    }
+
+    /// `Gradient` over a box, in rounded intervals: `2 (A x + b)`, exact as an enclosure for
+    /// the affine gradient (component `j`: `2 (Σ_l a_jl x_l + b_j)`).
+    fn gradient_over(&self, x: &[Ivl; 3]) -> [Ivl; 3] {
+        core::array::from_fn(|j| {
+            let row = self.a.get(j).copied().unwrap_or([f64::NAN; 3]);
+            let mut g = Ivl::from(self.b.get(j).copied().unwrap_or(f64::NAN));
+            for (ajl, xl) in row.iter().zip(x.iter()) {
+                g = g + Ivl::from(*ajl) * *xl;
+            }
+            Ivl::from(2.0) * g
+        })
+    }
+
     /// `Gradient`: `2 (A x + b)`.
     fn gradient(&self, x: &[f64; 3]) -> [f64; 3] {
         let [x0, x1, x2] = *x;
@@ -313,9 +341,11 @@ fn ball_inverse(m: &[[f64; 3]; 3]) -> Option<[[f64; 3]; 3]> {
 /// quadrics' implicit equations vanish: Newton's method from the origin, then Krawczyk's
 /// test on the box of half-width `half` about the iterate, which proves it holds exactly
 /// one root (the gradients are affine, so the Jacobian over the box is the iterate's plus
-/// `2 A` times the box, exactly). Rounding is bounded by the sum of the terms' magnitudes.
-/// The iterate, and whether it is proved (`false` where Newton fails or the test does not
-/// prove the box). Bounded: at most 50 Newton steps.
+/// `2 A` times the box, exactly), through the crate's one Krawczyk operator in rounded
+/// intervals (`geom::krawczyk`, tangency-labs/solidcraft#15140; the fork bounds the rounding
+/// by the terms' magnitudes in floating point instead). The iterate, and whether it is
+/// proved (`false` where Newton fails or the test does not prove the box). Bounded: at most
+/// 50 Newton steps.
 fn ball_certified_root(f: &[BallImplicit; 3], half: f64) -> ([f64; 3], bool) {
     let mut x = [0.0; 3];
     let mut fx = [0.0; 3];
@@ -340,54 +370,30 @@ fn ball_certified_root(f: &[BallImplicit; 3], half: f64) -> ([f64; 3], bool) {
             break;
         }
     }
-    // Krawczyk: K = x - Y f(x) + (I - Y J(X)) (X - x) inside X proves exactly one root in X.
-    // With J(X) = J(x) + dJ, |dJ_mk| <= 2 half sum_l |A_m,kl|, component i of K - x is within
-    // |(Y f)_i| + half sum_k ( |(I - Y J(x))_ik| + sum_m |Y_im| |dJ_mk| ), each term padded for
-    // rounding (f by its terms' magnitudes).
-    let mut bound = [0.0; 3];
-    for (((fi, bi), ji), fq) in fx
-        .iter_mut()
-        .zip(bound.iter_mut())
-        .zip(jac.iter_mut())
-        .zip(f.iter())
-    {
-        (*fi, *bi) = fq.value(&x);
+    // Krawczyk's test on ball's own box X = x ± half, through the crate's one operator
+    // (#15140): Y the inverse of F′ at the iterate, F(x) and F′(X) in rounded intervals
+    // (the gradients are affine, so F′(X) = 2 (A_i X + b_i) exactly as intervals), and
+    // K = x − Y F(x) + (I − Y F′(X)) (X − x) strictly inside X proves exactly one root in X
+    for (ji, fq) in jac.iter_mut().zip(f.iter()) {
         *ji = fq.gradient(&x);
     }
     let Some(y) = ball_inverse(&jac) else {
         return (x, false);
     };
-    let eps = 16.0 * f64::EPSILON;
-    let mut spread = [[0.0; 3]; 3];
-    for (sm, fq) in spread.iter_mut().zip(f.iter()) {
-        for (smk, ak) in sm.iter_mut().zip(fq.a.iter()) {
-            let [a0, a1, a2] = *ak;
-            *smk = 2.0 * half * (a0.abs() + a1.abs() + a2.abs());
-        }
-    }
-    for i in 0..3 {
-        let mut rad = 0.0;
-        for k in 0..3 {
-            let (fk, bk) = (
-                fx.get(k).copied().unwrap_or(0.0),
-                bound.get(k).copied().unwrap_or(0.0),
-            );
-            rad += at3(&y, i, k).abs() * (fk.abs() + eps * bk);
-            let mut iyj = if i == k { 1.0 } else { 0.0 };
-            let mut scale = 1.0;
-            for m in 0..3 {
-                iyj -= at3(&y, i, m) * at3(&jac, m, k);
-                scale += (at3(&y, i, m) * at3(&jac, m, k)).abs();
-                rad += at3(&y, i, m).abs() * at3(&spread, m, k) * half;
-            }
-            rad += (iyj.abs() + eps * scale) * half;
-        }
-        // !(rad < half), NaN included
-        if rad.partial_cmp(&half) != Some(std::cmp::Ordering::Less) {
-            return (x, false);
-        }
-    }
-    (x, true)
+    let xi = x.map(Ivl::from);
+    let xb = x.map(|m| Ivl::new(m - half, m + half));
+    let at_x: [Ivl; 3] = core::array::from_fn(|i| {
+        f.get(i)
+            .map_or_else(|| Ivl::from(f64::NAN), |q| q.value_over(&xi))
+    });
+    let over: [[Ivl; 3]; 3] = core::array::from_fn(|i| {
+        f.get(i)
+            .map_or_else(|| [Ivl::from(f64::NAN); 3], |q| q.gradient_over(&xb))
+    });
+    let (c, _) = contraction(&y, &over);
+    let k = k_operator(&x, &y, &at_x, &c, &xb);
+    let inside = k.iter().zip(&xb).all(|(a, b)| a.lo > b.lo && a.hi < b.hi);
+    (x, inside)
 }
 
 /// `GetSurface(rail)->GetOffsetDistance()` of a solver, absolute (`NER` on none).
@@ -1292,6 +1298,49 @@ pub fn create_ball_patch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A sphere of centre `c` and radius `r`, as `x . x + 2 b . x + c` ([`BallImplicit`]).
+    fn sphere(c: [f64; 3], r: f64) -> BallImplicit {
+        BallImplicit {
+            a: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            b: [-c[0], -c[1], -c[2]],
+            c: c[0] * c[0] + c[1] * c[1] + c[2] * c[2] - r * r,
+        }
+    }
+
+    /// #15140: three spheres of radius 1 centred at `p + e_i`, which meet at `p` (near the
+    /// origin, where Newton starts) and at `p + (2/3)(1, 1, 1)`: the ball's centre is proved
+    /// through the crate's Krawczyk operator on the box `x ± half`, and that box holds the
+    /// exact meeting point `p`.
+    #[test]
+    fn three_spheres_meeting_near_the_origin_are_proved_at_their_point() {
+        let p = [1e-4, -2e-4, 3e-4];
+        let f = [
+            sphere([p[0] + 1.0, p[1], p[2]], 1.0),
+            sphere([p[0], p[1] + 1.0, p[2]], 1.0),
+            sphere([p[0], p[1], p[2] + 1.0], 1.0),
+        ];
+        let half = 1e-12;
+        let (x, proved) = ball_certified_root(&f, half);
+        assert!(proved, "not proved at {x:?}");
+        for (xi, pi) in x.iter().zip(&p) {
+            assert!((xi - pi).abs() <= half, "{x:?} against {p:?}");
+        }
+    }
+
+    /// #15140: two of the spheres tangent at `p` (one inside the other, both normal to z
+    /// there), so the three gradients at the meeting are dependent: no ball centre is proved.
+    #[test]
+    fn spheres_tangent_at_their_meeting_are_refused() {
+        let p = [1e-4, -2e-4, 3e-4];
+        let f = [
+            sphere([p[0], p[1], p[2] + 1.0], 1.0),
+            sphere([p[0], p[1], p[2] + 2.0], 2.0),
+            sphere([p[0] + 1.0, p[1], p[2]], 1.0),
+        ];
+        let (x, proved) = ball_certified_root(&f, 1e-12);
+        assert!(!proved, "proved at {x:?}");
+    }
 
     /// Three planes through one line meet in no single point: a typed `Failed`, with the
     /// `SM_ERR` status the bare status had.

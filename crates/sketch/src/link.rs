@@ -220,6 +220,10 @@ pub struct Link {
     /// geometry refresh. None: the edge is the one nearest the source's point.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edge_name: Option<String>,
+    /// Persistent model vertex identity of a `Vertex` source, resolved by the document before
+    /// geometry refresh. None: the vertex is the one nearest the source's point.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertex_name: Option<String>,
     /// Automatically projected borders owned by a durable sketch face attachment.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto_face: bool,
@@ -754,7 +758,7 @@ impl Sketch {
             return Err(SketchError::TooLarge);
         }
         let id = self.fresh("j")?;
-        self.links.push(Link { id: id.clone(), kind, source, face_name: None, edge_name: None, auto_face: false, lost: false });
+        self.links.push(Link { id: id.clone(), kind, source, face_name: None, edge_name: None, vertex_name: None, auto_face: false, lost: false });
         self.build_link(&id, &lay)?;
         Ok(id)
     }

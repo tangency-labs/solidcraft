@@ -407,3 +407,75 @@ fn hiding_the_reference_parts_leaves_their_picture_out() {
     let pictures = ViewPictures::new(&s, &d, sheet).unwrap();
     assert!(pictures.has(id) && !pictures.has(id ^ UNDER), "the hidden reference parts' picture");
 }
+
+/// A drawing file can hold a shaded view of an exploded view, which the commands refuse to make
+/// (#14531): the sheet marks it failed with why and draws nothing for it, and it has no picture of the
+/// parts where the design places them.
+#[test]
+fn a_shaded_exploded_view_from_a_file_draws_no_lines_and_no_picture() {
+    let mut s = Session::default();
+    let mut part = |name: &str, corner: [f64; 3]| {
+        let occurrence = run(&mut s, "component.create", json!({"name": name}))["occurrence"].clone();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": corner, "operation": "new"}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        occurrence.as_u64().unwrap()
+    };
+    part("A", [0.0, 0.0, 0.0]);
+    let b = part("B", [30.0, 0.0, 0.0]);
+    let made = run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": b, "translate": [30, 0, 0]}]}));
+    let apart = made["view"].as_u64().unwrap();
+    run(&mut s, "drawing.create", json!({}));
+    let p = json!({"sheet": "Sheet 1", "view": "front", "scale": "1:1", "position_mm": [200, 150], "visual_style": "shaded"});
+    let id = ids::decode(run(&mut s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap();
+    // The file's record: the shaded view draws the exploded view.
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let at = d.views.iter().position(|v| v.id == id).unwrap();
+    std::sync::Arc::make_mut(&mut d.views[at]).settings.exploded = Some(solidcraft_doc::drawing_view::Exploded::View(apart));
+    s.doc_mut().put_drawing(std::sync::Arc::new(d));
+
+    let d = s.drawing("test").unwrap().clone();
+    let sheet = d.sheets[0].id;
+    let built = crate::drawing_scene::build(&s, &d, sheet).unwrap();
+    let status = built.views.iter().find(|v| v.view == id).map(|v| v.status.clone());
+    let why = "not supported yet: a shaded view of an exploded view";
+    assert_eq!(status, Some(crate::drawing_scene::Status::Failed(why.into())));
+    assert!(!built.scene.groups.iter().any(|g| g.object == id), "nothing drawn for it: {:?}", built.scene.groups);
+    assert!(!ViewPictures::new(&s, &d, sheet).unwrap().has(id), "no picture of the parts as the design places them");
+}
+
+/// A view's picture lists only the bodies it draws, each by its place among the design's bodies and
+/// with its role: B hidden leaves A and C; C as a reference part with lines only that hides the model
+/// hides without painting; C shaded under the model is a picture of its own, left out of the model's.
+#[test]
+fn a_views_picture_keeps_only_the_bodies_it_draws() {
+    use solidcraft_render::job::BodyRole::{DepthOnly, Painted};
+    let (mut s, sheet, id, [b, c]) = three_parts();
+    let shown = crate::drawing_view::shown(&s).unwrap();
+    let place = |occurrence: &Value| {
+        let occurrence = occurrence.as_u64().unwrap();
+        shown.bodies.iter().find(|body| body.path == [occurrence]).unwrap().index
+    };
+    let (b_at, c_at) = (place(&b), place(&c));
+    assert_eq!(shown.bodies.len(), 3);
+    let a_at = (0..3).find(|at| ![b_at, c_at].contains(at)).unwrap();
+    assert!(a_at < b_at && b_at < c_at, "B lies between A and C among the bodies: {a_at} {b_at} {c_at}");
+    let bodies = |s: &Session, source: u64| {
+        let d = s.drawing("test").unwrap().clone();
+        ViewPictures::new(s, &d, sheet).unwrap().pictures.get(&source).map(|picture| picture.bodies.clone())
+    };
+    let edit = |s: &mut Session, set: Value| run(s, "drawing.view.edit", json!({"view": ids::encode(id), "set": set}));
+
+    edit(&mut s, json!({"hide": [[b]]}));
+    assert_eq!(bodies(&s, id), Some(vec![(a_at, Painted), (c_at, Painted)]), "B hidden");
+
+    let drawing = ids::encode(s.drawing("test").unwrap().id);
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": c, "bom_type": "reference"}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    edit(&mut s, json!({"hide": null, "reference_style": "visible", "reference_hides_model": true}));
+    assert_eq!(bodies(&s, id), Some(vec![(a_at, Painted), (b_at, Painted), (c_at, DepthOnly)]), "C hides with its lines only");
+
+    edit(&mut s, json!({"reference_style": "shaded", "reference_hides_model": false}));
+    assert_eq!(bodies(&s, id ^ UNDER), Some(vec![(c_at, Painted)]), "C's own picture, under the model's");
+    assert_eq!(bodies(&s, id), Some(vec![(a_at, Painted), (b_at, Painted)]), "the model's, without C");
+}

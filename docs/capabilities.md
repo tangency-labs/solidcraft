@@ -60,7 +60,7 @@ and help is welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
   replace the parametric design. Export to STEP (AP242 with body names, colours and
   components as assemblies; revolved faces as native planes, cylinders, cones, spheres and tori),
   IGES 5.3 (manifold solid B-reps with names and colours), 3MF, STL (binary/ASCII), OBJ and GLB (placed bodies with their opaque
-  colours, metallic and roughness, in metres with Y up), and
+  colours, metallic and roughness, in metres with Y up, each part under a node named after its occurrence), and
   assemblies with joints as URDF for robot simulators (urdf.md);
   3MF, STL, OBJ and glTF 2.0 (`.glb`/`.gltf`, its node tree as components and its materials as
   appearances) import as mesh bodies (they render, measure, move and export; solid features
@@ -72,7 +72,9 @@ and help is welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
   that later features build on — open a `.step`/`.stp`/`.igs`/`.iges` file, insert one into a
   design, or drop it on the window ([docs/step-import.md](step-import.md)); FreeCAD
   `.FCStd` and Rhino `.3dm` solids import the same way through
-  [cadmpeg](https://github.com/cadmpeg/cadmpeg) in the desktop app, the browser app and the CLI.
+  [cadmpeg](https://github.com/cadmpeg/cadmpeg) in the desktop app, the browser app and the CLI,
+  and a FreeCAD file's sketches, pads, pockets, revolutions, grooves, fillets, chamfers and
+  primitives come in as editable features when every one can be rebuilt.
 - **Render:** opaque surfaces can use metal fraction, roughness and dielectric IOR in the
   integrated product viewport and CPU preview PNGs. Existing simple colors remain supported.
   Fixed direct lighting is a preview; HDRI, refraction and texture maps are not implemented.

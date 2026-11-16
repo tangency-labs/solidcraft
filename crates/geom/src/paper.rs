@@ -156,6 +156,10 @@ pub enum ObjectKind {
     Dimension,
     /// A note's text, with its leader when it points at the model.
     Note,
+    /// A view's label: its letter, name and scale, above the view unless moved (#13044).
+    ViewLabel,
+    /// A balloon's circle and number, with its leader to the part it numbers.
+    Balloon,
 }
 
 impl ObjectKind {
@@ -172,8 +176,38 @@ impl ObjectKind {
             ObjectKind::View => "VIEW",
             ObjectKind::Dimension => "DIMENSION",
             ObjectKind::Note => "NOTE",
+            ObjectKind::ViewLabel => "VIEW_LABEL",
+            ObjectKind::Balloon => "BALLOON",
         }
     }
+
+    /// The band this kind's groups paint in on a sheet, drawn `of` a view or the sheet itself: the
+    /// sheet paints its groups band by band from 0, each band over the ones below it. Borders,
+    /// images, views, the views' annotations, tables, the sheet's own annotations, then the title
+    /// block over them all, so a note on the sheet stays readable over a table. Only a note is drawn
+    /// for either.
+    pub fn band(self, of: DrawnFor) -> u8 {
+        match self {
+            ObjectKind::SheetBorder | ObjectKind::DrawingBorder => 0,
+            ObjectKind::SheetImage => 1,
+            ObjectKind::View => 2,
+            ObjectKind::Dimension | ObjectKind::ViewLabel | ObjectKind::Balloon => 3,
+            ObjectKind::Note => match of {
+                DrawnFor::View => 3,
+                DrawnFor::Sheet => 5,
+            },
+            ObjectKind::PartsList | ObjectKind::RevisionTable => 4,
+            ObjectKind::TitleBlock => 6,
+        }
+    }
+}
+
+/// What a group on a sheet is drawn for: one of its views (the view's lines and their annotations)
+/// or the sheet itself. It picks a note's paint band ([`ObjectKind::band`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DrawnFor {
+    View,
+    Sheet,
 }
 
 /// One mark on the paper.
@@ -300,6 +334,16 @@ impl Budget {
     }
 }
 
+/// A stroke's path by the module's notes: at least one piece, each piece's numbers checked, each
+/// starting where the one before ends, and the last ending where the first starts when `closed`.
+/// A record that keeps a path to draw later checks it here, so the scene it makes then is valid.
+pub fn check_path(path: &[Seg2], closed: bool) -> Result<()> {
+    require(!path.is_empty(), "a stroke has at least one piece")?;
+    pieces(path)?;
+    require(path.iter().zip(path.iter().skip(1)).all(|(a, b)| meet(a, b)), "a stroke's pieces meet end to start")?;
+    require(!closed || path.last().zip(path.first()).is_some_and(|(a, b)| meet(a, b)), "a closed stroke ends where it starts")
+}
+
 fn pieces(segs: &[Seg2]) -> Result<()> {
     segs.iter().try_for_each(|s| s.check(MAX_COORDINATE_MM).map_err(Invalid))
 }
@@ -397,12 +441,7 @@ impl Scene {
             match item {
                 Item::Stroke { path, closed, width_mm, pattern } => {
                     require(*width_mm > 0.0 && *width_mm <= MAX_LINE_MM, "a line is above 0 and at most 10 mm wide")?;
-                    require(!path.is_empty(), "a stroke has at least one piece")?;
-                    pieces(path)?;
-                    require(path.iter().zip(path.iter().skip(1)).all(|(a, b)| meet(a, b)), "a stroke's pieces meet end to start")?;
-                    if *closed {
-                        require(path.last().zip(path.first()).is_some_and(|(a, b)| meet(a, b)), "a closed stroke ends where it starts")?;
-                    }
+                    check_path(path, *closed)?;
                     if let Some(dashes) = pattern {
                         dashes.check(path)?;
                     }

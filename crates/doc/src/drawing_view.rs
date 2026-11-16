@@ -89,6 +89,18 @@ pub enum Exploded {
     View(u64),
 }
 
+/// Which configuration of the design a view draws (#13048): the design's active one, as the design
+/// is now (the default), or a row of its configuration table by the row's id
+/// ([`crate::config::ConfigRow`]), which a rename keeps. The design is never changed: the view draws a
+/// copy. A row the design no longer has draws a placeholder, never refuses the file.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewConfiguration {
+    #[default]
+    Active,
+    Row(u64),
+}
+
 /// Most joints a view's position sets.
 pub const MAX_POSE_JOINTS: usize = 64;
 /// Most values one joint has in a position: at least as many as any joint kind has
@@ -106,15 +118,34 @@ pub struct JointPose {
     pub values: Vec<f64>,
 }
 
+/// A step of one of the design's motion studies, by the study's id: a whole step, as studies count
+/// them ([`crate::motion::MotionStudy::steps`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StudyStep {
+    pub id: u64,
+    pub step: u32,
+}
+
+impl StudyStep {
+    /// Its study among `studies` and the step a view draws of it: a step past the study's end draws
+    /// its last. None when the design no longer has the study.
+    pub fn drawn<'a>(&self, studies: &'a [crate::motion::MotionStudy]) -> Option<(&'a crate::motion::MotionStudy, u32)> {
+        studies.iter().find(|m| m.id == self.id).map(|m| (m, self.step.min(m.steps)))
+    }
+}
+
 /// The position of its assembly a view draws (#13048): as the design places its parts (the
-/// default), or with some of its joints at values of its own. The design is never changed: the view
-/// draws a copy. A joint the design no longer has is skipped, never refuses the file.
+/// default), with some of its joints at values of its own, or at a step of one of its motion
+/// studies. The design is never changed: the view draws a copy. A joint or study the design no
+/// longer has is skipped, never refuses the file.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Pose {
     #[default]
     Designed,
     Joints(Arc<[JointPose]>),
+    Study(StudyStep),
 }
 
 /// What a view shows and how. Every field has a default: the front view at the scale that fits
@@ -170,6 +201,9 @@ pub struct ViewOverrides {
     /// The position of its assembly it draws: the design's when no view of its chain sets one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pose: Option<Pose>,
+    /// The configuration of the design it draws: the active one when no view of its chain sets one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub configuration: Option<ViewConfiguration>,
 }
 
 impl ViewOverrides {

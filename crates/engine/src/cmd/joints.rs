@@ -1749,7 +1749,11 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
 fn body_centre(s: &Session, occ: u64) -> Vec3 {
     let comp = s.doc.occurrences.iter().find(|o| o.id == occ).map(|o| o.component).unwrap_or(0);
     let st = s.model.state();
-    st.bodies.iter().filter(|b| s.doc.model_body_component(b) == comp).fold(Aabb3::EMPTY, |bb, b| bb.union(&b.mesh().bounds())).center()
+    st.bodies
+        .iter()
+        .filter(|b| s.doc.model_body_component(b) == comp)
+        .fold(Aabb3::EMPTY, |bb, b| bb.union(&b.body.exact_bounds().unwrap_or(Aabb3::EMPTY)))
+        .center()
 }
 
 fn motion_link(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2416,7 +2420,7 @@ pub(in crate::cmd) fn revert_values(s: &mut Session) -> usize {
 
 #[cfg(test)]
 #[path = "joints_tests.rs"]
-mod tests;
+pub(crate) mod tests;
 #[cfg(test)]
 #[path = "joints_turn_tests.rs"]
 mod turn_tests;

@@ -212,6 +212,15 @@ impl Extended {
 }
 
 impl Surface {
+    /// Whether a face on this surface is extended by growing its trim within it
+    /// ([`crate::topology::brep::trim_extend::extend_trim`]) rather than by continuing the
+    /// surface past its box ([`Surface::extended_by_distance`]): the surface goes on past every
+    /// trim as itself, its own continuation of every order. A plane.
+    #[must_use]
+    pub fn reaches_past_trims(&self) -> bool {
+        matches!(self.kind(), SurfaceKind::Plane(_))
+    }
+
     /// Whether `dom` is exactly the box of the surface's NURBS form, as
     /// [`Surface::extended_by_distance`] needs a spline's face box to be: every bound equal.
     ///
@@ -272,7 +281,7 @@ impl Surface {
     /// `at`'s side (the same side coordinate as `dom`'s) rather than `dom`'s: where earlier
     /// sides grew the box, `at` is the face's own extent along the side, so the distance is
     /// met at the face, not where the surface has grown ([`Surface::extended_sides`]).
-    pub(super) fn extended_by_distance_at(
+    pub fn extended_by_distance_at(
         &self,
         k: &Kernel,
         dom: &Extent2d,

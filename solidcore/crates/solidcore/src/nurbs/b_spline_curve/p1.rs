@@ -824,6 +824,18 @@ impl BSplineCurve {
         })
     }
 
+    /// The Euclidean control points whose convex hull holds the curve over `ivl`, each
+    /// with the error bound of its coordinates
+    /// ([`crv_hull_points`](crate::nurbs::nurbs_crv::crv_hull_points)); `None` without a
+    /// NURB or when no such hull is certain (a 2D curve, a weight not positive, `ivl`
+    /// outside the natural domain).
+    ///
+    /// Not upstream.
+    #[must_use]
+    pub(crate) fn hull_points_over(&self, ivl: &Extent1d) -> Option<Vec<(Vec3, f64)>> {
+        crate::nurbs::nurbs_crv::crv_hull_points(self.nurb_ref().ok()?, ivl)
+    }
+
     /// The unique knots and their multiplicities, optionally only those in `ivl`
     /// (`GetKnots`, through `sm_GetKnots`).
     ///

@@ -94,7 +94,7 @@ fn classify(e: &EngineError) -> Outcome {
         EngineError::Other(_) if msg.starts_with("invalid input") => Outcome::new("rejected", msg),
         EngineError::Other(_) if msg.contains("boolean") => Outcome::new("failed", msg),
         EngineError::Other(_) if msg.contains("not supported") || msg.contains("only ") => Outcome::new("unsupported", msg),
-        EngineError::Other(_) => Outcome::new("failed", msg),
+        EngineError::Other(_) | EngineError::Plugin(_) => Outcome::new("failed", msg),
     }
 }
 
