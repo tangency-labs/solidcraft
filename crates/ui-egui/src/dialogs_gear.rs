@@ -174,7 +174,8 @@ fn number(ui: &mut egui::Ui, label_key: &str, handle: &str, v: &mut f64, range: 
 }
 
 pub fn rows(ui: &mut egui::Ui, g: &mut Gear) {
-    form_row(ui, solidcraft_ui_text::tr("gear.presets"), |ui| {
+    {
+        ui.label(solidcraft_ui_text::tr("gear.presets"));
         ui.horizontal_wrapped(|ui| {
             for (key, handle, p) in [
                 ("gear.preset_spur", "dialog:gear:preset_spur", Preset::Spur),
@@ -194,7 +195,7 @@ pub fn rows(ui: &mut egui::Ui, g: &mut Gear) {
                 g.reset();
             }
         });
-    });
+    }
     form_row(ui, "", |ui| {
         let r = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("gear.internal"), &mut g.internal);
         crate::scenario::publish_handle("dialog:gear:internal", r.rect.center());
