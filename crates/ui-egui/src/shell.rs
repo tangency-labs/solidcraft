@@ -71,7 +71,7 @@ pub(crate) fn host_usable(app: &SolveApp) -> solidcraft_engine::panels::PanelRes
     resolve_usable_region(frame.layout.render_domain, &obstacles)
 }
 
-fn occluding_rects(app: &SolveApp, fitting: bool, input: bool, include_confirm: bool) -> Vec<Rect> {
+pub(crate) fn occluding_rects(app: &SolveApp, fitting: bool, input: bool, include_confirm: bool) -> Vec<Rect> {
     let mut rects = Vec::new();
     if let Some(frame) = app.universal_panel_frame() {
         let regions = if input { &frame.layout.input } else { &frame.layout.occlusion };

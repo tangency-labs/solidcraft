@@ -8622,10 +8622,13 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
             return;
         }
         let navigation = if app.ui.show_navigation_bar { crate::navigation_bar_view::measured(app, ctx, rect).rect } else { Rect::NOTHING };
+        // Persistent panels (browser, timeline, docked dialogs) reduce the free viewport that
+        // Home and Fit frame into, as the host path does via `host_usable`.
+        let docks = crate::shell::occluding_rects(app, true, false, false);
         app.viewport.layout = Some(crate::viewport_layout::Layout::with_content(
             rect,
             rect,
-            &[],
+            &docks,
             ctx.pixels_per_point(),
             app.preferences.navigator_style,
             crate::view_confirm::size(app),
