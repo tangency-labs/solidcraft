@@ -1130,4 +1130,35 @@ mod tests {
             println!("op {code} status {st} first {first}: {n}");
         }
     }
+
+    /// The row `gen0433` moved when the WR-305 flag (`classify_edge_interval`) was retired:
+    /// `IntersectTopology` of `plane_circ.smb` with `Endcap.smb` (approximation 0.01) now
+    /// ends with 5 proto vertices and 3 proto edges, where with the flag off it kept 8 and 5.
+    /// Two curved pieces of the intersection, each tangent to a B-spline edge of an operand
+    /// at both its ends and proved within the intersection tolerance (7.6e-3) of that edge as
+    /// a whole (`curve_runs_along`'s certified Hausdorff bound), are classified on those
+    /// edges, so the edges stand for them instead of two new proto edges. This replays the
+    /// row and checks that it went through exactly those two certificates.
+    #[test]
+    fn gen0433_puts_two_certified_curved_pieces_on_their_edges() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: MIN_GENERATED,
+        };
+        let cases = Runner.cases(&ctx).expect("cases");
+        let case = cases.iter().find(|c| c.name == "gen0433").expect("gen0433");
+        let i: Inputs = case.parse().expect("inputs");
+        let k = solidcore::kernel::Kernel::default();
+        let Ok(p) = super::super::boolean_topology_intersector_p1::prepare(&k, &i) else {
+            panic!("gen0433 prepares");
+        };
+        let Ok((state, _, runs)) =
+            super::super::boolean_topology_intersector_p1::run_rust_script_counted(&i, p)
+        else {
+            panic!("gen0433 runs");
+        };
+        // IntersectTopology (45), status 0, then the manager's proto vertices, edges, faces
+        assert_eq!(state.get(state.len() - 5..), Some(&[45.0, 0.0, 5.0, 3.0, 0.0][..]));
+        assert_eq!(runs, 2);
+    }
 }

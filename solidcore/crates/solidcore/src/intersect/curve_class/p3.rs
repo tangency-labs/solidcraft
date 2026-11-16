@@ -2500,14 +2500,18 @@ fn curve_piece_runs_along_edge<O: ClassObject>(
             return Ok(false);
         }
     }
-    curve_runs_along(
+    let runs = curve_runs_along(
         k,
         curve,
         interval,
         edge_crv,
         &Extent1d::from_min_max(s0.min(s1), s0.max(s1)),
         tol,
-    )
+    )?;
+    if runs {
+        k.work_counters.add_curved_edge_run();
+    }
+    Ok(runs)
 }
 
 /// Not upstream (#15718): whether `curve` over `interval` runs along the line of
@@ -2995,6 +2999,8 @@ mod tests {
         assert_eq!(ivl.start.point_class(), PointClassType::Edge);
         assert_eq!(ivl.start.object(), Some(edge));
         assert_eq!(ivl.end.point_class(), PointClassType::Vertex);
+        // by the curved piece's certificate
+        assert_eq!(k.work_counters.curved_edge_runs(), 1);
     }
 
     #[test]
@@ -3016,6 +3022,7 @@ mod tests {
         let ivl = cc.at(0).expect("interval");
         assert_eq!(ivl.mid.point_class(), PointClassType::Unknown);
         assert_ne!(ivl.mid.object(), Some(edge));
+        assert_eq!(k.work_counters.curved_edge_runs(), 0);
     }
 
     #[test]
@@ -3042,5 +3049,6 @@ mod tests {
         let ivl = cc.at(0).expect("interval");
         assert_eq!(ivl.mid.point_class(), PointClassType::Unknown);
         assert_ne!(ivl.mid.object(), Some(edge));
+        assert_eq!(k.work_counters.curved_edge_runs(), 0);
     }
 }
