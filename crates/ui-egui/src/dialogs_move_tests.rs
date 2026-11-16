@@ -969,6 +969,17 @@ fn editing_a_turn_about_a_slanted_axis_keeps_its_axis_and_angle_expression() {
     }
     let after = bounds(&h);
     assert!((after.min - moved.min).len() < 1e-6 && (after.max - moved.max).len() < 1e-6, "turned once: {moved:?} -> {after:?}");
+    // A translation that is zero only for now (a parameter) stays in Free Move, which keeps it.
+    h.app.run("parameters.change", json!({"name": "gap", "expression": "0 mm"})).unwrap();
+    let id = h
+        .app
+        .run("solid.move", json!({"bodies": ["Body1"], "translate": ["gap", "0 mm", "0 mm"], "origin": origin, "axis": axis, "angle": "-tent"}))
+        .unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    let d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    let Kind::Move { mode, x, .. } = &d.kind else { panic!("not a move") };
+    assert_eq!((*mode, x.as_str()), (FREE, "gap"), "a translation a parameter drives is kept");
 }
 
 /// A design with a component `Part` holding a 20 mm cube at the origin, seen from above, with no

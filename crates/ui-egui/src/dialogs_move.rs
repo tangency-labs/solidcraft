@@ -1177,7 +1177,10 @@ pub fn for_feature(
         axis = solidcraft_engine::doc::apply_vector(frame, axis);
     }
     let world = [Vec3::X, Vec3::Y, Vec3::Z].iter().position(|w| axis.cross(*w).len() < 1e-9 && axis.dot(*w) > 0.0);
-    let still = translate.iter().all(|e| doc.eval(e, ValueKind::Length).is_ok_and(|v| v.abs() < 1e-12));
+    // No translation, and none that a parameter could bring back: Rotate does not keep one.
+    let still = translate
+        .iter()
+        .all(|e| solidcraft_engine::doc::expr::references(e).is_empty() && doc.eval(e, ValueKind::Length).is_ok_and(|v| v.abs() < 1e-12));
     let mode = if angle.is_some() && world.is_none() && still { ROTATE } else { FREE };
     let [x, y, z] = translate.map(String::from);
     let mut k = kind(mode, doc);
