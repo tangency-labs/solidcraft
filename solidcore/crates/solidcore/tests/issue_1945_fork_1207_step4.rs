@@ -45,7 +45,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.keep_operand_uv_trims = true;
     k.fixes.geometric_g2_continuity = true;
     k.fixes.proto_vertex_miss_is_false = true;
-    k.fixes.edge_check_orders_tangent_faces = true;
     k.fixes.ellipse_step_interval_checks = true;
     k.fixes.good_drop_result_distances_in_order = true;
     k.fixes.cylinder_rebuild_mean_radius = true;
@@ -90,7 +89,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.ssi_trace_tangent_curves_once = true;
     k.fixes.ssi_pole_point_keeps_its_tangent = true;
     k.fixes.ssi_tangent_curve_tracer = true;
-    k.fixes.delete_vertex_joins_seam_iso_curve = true;
     k.fixes.box_face_failures_propagate = true;
     k.fixes.fillet_removal_takes_ring_fillets = true;
 }

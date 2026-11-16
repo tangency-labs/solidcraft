@@ -166,8 +166,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.curve_loop_normal_from_area = true;
     k.fixes.cylinder_rebuild_mean_radius = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
-    k.fixes.delete_vertex_joins_seam_iso_curve = true;
-    k.fixes.edge_check_orders_tangent_faces = true;
     k.fixes.ellipse_trim_seam_lines_span_cone_height = true;
     k.fixes.face_tight_box_searches_trim = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
