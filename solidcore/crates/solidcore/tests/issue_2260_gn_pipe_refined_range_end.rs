@@ -59,7 +59,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "degenerate_proto_edge_in_one_vertex",
     "degen_param_tiebreak_uses_actual_param",
     "edgeuse_convexity_propagates_step_off_failure",
-    "face_tight_box_searches_trim",
     "fillet_chamfer_cone_on_arc",
     "fillet_cleanup_keeps_target_faces",
     "fillet_exact_round_classes",
