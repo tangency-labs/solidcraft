@@ -48,13 +48,15 @@ use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::query::api_queries::point_distance;
 use solidcore::surface::procedural_blend::chamfer::ChamferSize;
 use solidcore::topology::brep::p2::{is_manifold_solid, ArenaNotifyState};
-use solidcore::topology::brep::p3::{brep_copy, delete_face, DeleteFaceOptions};
-use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
+use solidcore::topology::brep::p3::{brep_copy, brep_copy_mapped, delete_face, DeleteFaceOptions};
+use solidcore::topology::brep::p5::{
+    remove_topological_edges_and_vertices, stitch_and_orient, StitchAndOrientOptions,
+};
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::face::p2::outer_faceuse;
 use solidcore::topology::face::p4 as face4;
 use solidcore::topology::topology_traverser::Marks;
-use solidcore::topology::{edge, EdgeId, FaceId, VertexId};
+use solidcore::topology::{edge, vertex, EdgeId, FaceId, VertexId};
 use solidcore::{Brep, EntityRef, Kernel, SolidError, Vec3};
 
 use crate::body::{finish, Body, Expect};
@@ -1558,8 +1560,33 @@ fn blend_on_body(
             }));
         }
     };
-    let may_go_first =
-        OVERFLOW_GOES_FIRST && back.is_empty() && corners == Corners::Filled && picked.len() > 1;
+    // Where two picks meet at a vertex that is there only for splits of the faces beside them on
+    // their own surfaces (a seam, or the slivers a boolean leaves on a tube's cylinder), the
+    // blend runs through that vertex as along one edge: those splits are taken out before the
+    // construction, which then meets no corner there (#16654).
+    let through = if back.is_empty() {
+        without_splits_at_picks(k, b, &picked, each)?
+    } else {
+        None
+    };
+    let merged = through.is_some();
+    let (picked, sizes): (Vec<EdgeId>, Vec<f64>) = match through {
+        Some((clean, picks, kept)) => {
+            *b = clean;
+            let sizes = kept
+                .iter()
+                .map(|&i| each.get(i).copied().unwrap_or(0.0))
+                .collect();
+            (picks, sizes)
+        }
+        None => (picked, each.to_vec()),
+    };
+    let each = sizes.as_slice();
+    let may_go_first = OVERFLOW_GOES_FIRST
+        && !merged
+        && back.is_empty()
+        && corners == Corners::Filled
+        && picked.len() > 1;
     // the untouched input, for the overflowing rounds to go first on
     let fresh = if may_go_first {
         Some(brep_copy(k, b)?)
@@ -1767,6 +1794,161 @@ fn blend_on_body(
         holes,
         made: Vec::new(),
     }))
+}
+
+/// What [`without_splits_at_picks`] gives: the copy, the picks left as its edges, and the place
+/// of each in the picks asked.
+pub type WithoutSplits = (Brep, Vec<EdgeId>, Vec<usize>);
+
+/// A copy of `b` without the splits of its faces where two picked edges meet, the picks as its
+/// edges (in their order) and the place of each in `picked`: at every vertex two picks share
+/// where every other edge lies between two faces on one surface (a seam, or a split a boolean
+/// left on a tube's cylinder), those edges are taken out as a boolean's post-process takes such
+/// edges out, and the vertex with them where that leaves it redundant. Only the kernel decides
+/// which edges are such splits (`SmBrep::RemoveTopologicalEdgesAndVertices`); every other edge
+/// and vertex of the body stays. A vertex where an edge that is no such split meets the picks
+/// too (the four-edge corner of #10876: two picks, a seam and a sharp edge) is a corner of the
+/// body and keeps its splits. `None` when no two picks share a vertex with another edge, no
+/// vertex has only splits beside its picks, no pick is left, or a pick is gone into another (the
+/// removal joins two picks where it takes out the vertex between them) while the `sizes` asked
+/// differ (#16654). The blend then runs through those vertices as along one edge; SolidCraft's
+/// blend calls use it before their construction as [`blend`] does.
+///
+/// # Errors
+/// The kernel's, copying the body, reading the picks' vertices and edges, and taking the splits
+/// out.
+pub fn without_splits_at_picks(
+    k: &mut Kernel,
+    b: &Brep,
+    picked: &[EdgeId],
+    sizes: &[f64],
+) -> solidcore::Result<Option<WithoutSplits>> {
+    // the vertices two picks share, and the other edges there
+    let mut uses: HashMap<VertexId, usize> = HashMap::new();
+    for &e in picked {
+        let (a, z) = edge::start_end_vertices(b, e)?;
+        for v in [a, z].into_iter().flatten() {
+            *uses.entry(v).or_default() += 1;
+        }
+    }
+    let mut shared = false;
+    for (&v, &n) in &uses {
+        if n == 2
+            && vertex::edges(b, v, None)?
+                .iter()
+                .any(|e| !picked.contains(e))
+        {
+            shared = true;
+            break;
+        }
+    }
+    if !shared {
+        return Ok(None);
+    }
+    // Which of those vertices have only splits beside their picks is read off the body with the
+    // splits taken out at all of them: one where an edge that is no pick is left has another
+    // edge of the body, and its splits stay.
+    let Some((all, picks, at)) = splits_out_at(k, b, picked, None)? else {
+        return Ok(None);
+    };
+    let pairs: HashSet<(usize, usize)> = at.values().copied().collect();
+    let mut only_splits = pairs.clone();
+    for (&v, pair) in &at {
+        if all.vertex_list().contains(&v)
+            && vertex::edges(&all, v, None)?
+                .iter()
+                .any(|e| !picks.contains(e))
+        {
+            only_splits.remove(pair);
+        }
+    }
+    let (c, picks) = if only_splits.len() == pairs.len() {
+        (all, picks)
+    } else if only_splits.is_empty() {
+        return Ok(None);
+    } else {
+        let Some((c, picks, _)) = splits_out_at(k, b, picked, Some(&only_splits))? else {
+            return Ok(None);
+        };
+        (c, picks)
+    };
+    if c.edge_list().len() == b.edge_list().len() {
+        return Ok(None);
+    }
+    let (left, kept): (Vec<EdgeId>, Vec<usize>) = picks
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| c.edge_list().contains(e))
+        .map(|(i, &e)| (e, i))
+        .unzip();
+    // Two picks the removal joined are one edge now, which takes one size: where the sizes asked
+    // for a pick that is gone and for the others differ, the body is blended as it is.
+    let one_size = sizes.windows(2).all(|w| w.first() == w.get(1));
+    if left.is_empty() || (left.len() < picks.len() && !one_size) {
+        return Ok(None);
+    }
+    Ok(Some((c, left, kept)))
+}
+
+/// The vertices two picks share, each with the places of its two picks.
+type PickVertices = HashMap<VertexId, (usize, usize)>;
+
+/// [`without_splits_at_picks`]'s removal: a copy of `b` with the splits taken out at the
+/// vertices two picks share (those of the pairs in `only`, or all of them), the picks as the
+/// copy's edges, and those vertices with the places of their two picks. `None` when the picks
+/// are not all in the copy.
+fn splits_out_at(
+    k: &mut Kernel,
+    b: &Brep,
+    picked: &[EdgeId],
+    only: Option<&HashSet<(usize, usize)>>,
+) -> solidcore::Result<Option<(Brep, Vec<EdgeId>, PickVertices)>> {
+    // a copy's ids are its own: the picks are mapped through the copy
+    let (mut c, map) = brep_copy_mapped(k, b)?;
+    let Some(picks) = crate::split::copies_of(&map, picked, EntityRef::Edge, |e| match e {
+        EntityRef::Edge(x) => Some(x),
+        _ => None,
+    }) else {
+        return Ok(None);
+    };
+    let mut seen: HashMap<VertexId, Vec<usize>> = HashMap::new();
+    for (i, &e) in picks.iter().enumerate() {
+        let (a, z) = edge::start_end_vertices(&c, e)?;
+        for v in [a, z].into_iter().flatten() {
+            seen.entry(v).or_default().push(i);
+        }
+    }
+    let at: PickVertices = seen
+        .into_iter()
+        .filter_map(|(v, at)| match at.as_slice() {
+            &[i, j] => Some((v, (i.min(j), i.max(j)))),
+            _ => None,
+        })
+        .filter(|(_, pair)| only.is_none_or(|only| only.contains(pair)))
+        .collect();
+    let mut free: HashSet<EdgeId> = HashSet::new();
+    for &v in at.keys() {
+        free.extend(
+            vertex::edges(&c, v, None)?
+                .into_iter()
+                .filter(|e| !picks.contains(e)),
+        );
+    }
+    let keep_edges: Vec<EdgeId> = c
+        .edge_list()
+        .iter()
+        .copied()
+        .filter(|e| !free.contains(e))
+        .collect();
+    let keep_vertices: Vec<VertexId> = c
+        .vertex_list()
+        .iter()
+        .copied()
+        .filter(|v| !at.contains_key(v))
+        .collect();
+    remove_topological_edges_and_vertices(k, &mut c, Some(&keep_edges), Some(&keep_vertices))?;
+    c.refresh_cached_topology();
+    Ok(Some((c, picks, at)))
 }
 
 /// The result contract on the body in place ([`finish`]).

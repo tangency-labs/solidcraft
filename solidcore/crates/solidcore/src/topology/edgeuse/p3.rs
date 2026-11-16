@@ -1093,7 +1093,6 @@ fn trim_other_uv_curves(
     tk.rng = k.rng.clone();
     tk.cancel.clone_from(&k.cancel);
     tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
-    tk.fixes.bspline_trim_keeps_rational_end_spans = k.fixes.bspline_trim_keeps_rational_end_spans;
     for x in crate::topology::edge::edgeuses(b, e, None, None)? {
         if x == this {
             continue;
@@ -2706,7 +2705,71 @@ mod tests {
             if enabled {
                 assert!(gap < 1e-12, "enabled fix was lost: gap {gap}");
             } else {
-                assert!(gap > k.tolerances.zone_tol_3d, "default gap {gap}");
+                // the circle segment is rational: WR-575 keeps its short end span, so the
+                // trimmed curve is the original's sub-arc with or without the UV fix
+                assert!(gap < 1e-12, "rational end span was lost: gap {gap}");
+            }
+        }
+    }
+
+    /// As [`uv_trim_fix_survives_edge_zone_kernel`] on a polynomial UV curve (weights
+    /// 1), whose short end span upstream's cleanup still removes by default: the UV fix
+    /// must reach the edge-zone kernel the trim runs in, or the span goes and the curve
+    /// moves.
+    #[test]
+    fn uv_trim_fix_survives_edge_zone_kernel_on_a_polynomial_curve() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::nurbs_crv::allocate_nurb_curve;
+
+        for enabled in [false, true] {
+            let mut k = Kernel::default();
+            k.fixes.bspline_trim_preserves_uv_spans = enabled;
+            let r = 0.14;
+            let mut nurb = allocate_nurb_curve(4, 2, 7).unwrap();
+            nurb.cpts_mut().copy_from_slice(&[
+                CPoint::new(r, 0.0, 0.0, NOW),
+                CPoint::new(r, r, 0.0, NOW),
+                CPoint::new(0.0, r, 0.0, NOW),
+                CPoint::new(-r, r, 0.0, NOW),
+                CPoint::new(-r, 0.0, 0.0, NOW),
+            ]);
+            nurb.knots_mut()
+                .copy_from_slice(&[0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0]);
+            let original = Curve::from(BSplineCurve::from_nurb(nurb, 2, false));
+            let mut b = Brep::new();
+            let v0 = b.add_vertex(Vec3::ZERO).unwrap();
+            let v1 = b.add_vertex(Vec3::X).unwrap();
+            let edge = b.add_edge(v0, v1).unwrap();
+            let this = b
+                .add_edgeuse_record(Edgeuse {
+                    edge: Some(edge),
+                    ..Edgeuse::default()
+                })
+                .unwrap();
+            let other = b
+                .add_edgeuse_record(Edgeuse {
+                    edge: Some(edge),
+                    uv_trim_curve: Some(original.clone()),
+                    ..Edgeuse::default()
+                })
+                .unwrap();
+            b.edge_mut(edge).unwrap().edgeuses = vec![this, other];
+            let mut ivl = Extent1d::from_min_max(0.5 - 3.5e-6, 0.9);
+            trim_other_uv_curves(&k, &mut b, edge, this, &mut ivl).unwrap();
+            let trimmed = b.edgeuse(other).unwrap().uv_trim_curve.as_ref().unwrap();
+            let gap = (0..=64)
+                .map(|i| {
+                    let t = ivl.evaluate(f64::from(i) / 64.0);
+                    (trimmed.evaluate_point(&k, t).unwrap()
+                        - original.evaluate_point(&k, t).unwrap())
+                    .length()
+                })
+                .fold(0.0, f64::max);
+            if enabled {
+                assert!(gap < 1e-12, "enabled fix was lost: gap {gap}");
+            } else {
+                assert!(gap > 1e-9, "default gap {gap}");
             }
         }
     }
