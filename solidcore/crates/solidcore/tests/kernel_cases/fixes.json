@@ -46,7 +46,6 @@
   "ssi_low_angle_start_on_probation",
   "ssi_trace_tangent_curves_once",
   "ssi_tangent_curve_tracer",
-  "ssi_split_curves_at_singular_points",
   "point_class_gap_3d_propagates_no_drop_error",
   "fillet_variable_span_follows_fillet",
   "box_face_failures_propagate",
