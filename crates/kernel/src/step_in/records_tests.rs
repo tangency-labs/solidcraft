@@ -20,6 +20,7 @@ fn kept(text: &str) -> ImportRecords {
             path: Vec::new(),
             instance: None,
             color: None,
+            paint: None,
             hidden: false,
             placement: None,
             brep: Some(s.brep),
@@ -237,4 +238,29 @@ fn a_copy_of_nothing_it_can_use_is_left_out_with_why() {
     assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
     assert!(imp.warnings.iter().any(|w| w.contains("not finite")), "{:?}", imp.warnings);
     assert_eq!((imp.report.parts, imp.report.solids), (1, 1));
+}
+
+/// A record body's paint names faces by their face in the file; the body's paint has them on its
+/// own faces. Colours and opacities from a file are hostile: each comes in within 0..1, and a
+/// colour on a face the body does not have is dropped.
+#[test]
+fn a_record_bodys_paint_is_on_its_own_faces_within_range() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let mut records = kept(&std::fs::read_to_string(dir.join("washer.step")).unwrap());
+    let file_face = records.bodies[0].face_origin[2];
+    records.bodies[0].paint = Some(crate::Paint {
+        opacity: f32::NAN,
+        faces: vec![
+            crate::FacePaint { face: file_face as usize, color: [2.0, -1.0, 0.5], opacity: 0.25, name: Some("Accent".into()) },
+            crate::FacePaint { face: usize::MAX, color: [0.0; 3], opacity: 1.0, name: None },
+        ],
+        name: Some("Body".into()),
+    });
+    let imp = records_import(&records).unwrap();
+    let body = &imp.bodies[0];
+    let paint = body.body.paint().expect("paint");
+    assert_eq!((paint.opacity, paint.name.as_deref()), (1.0, Some("Body")));
+    assert_eq!(paint.faces.len(), 1, "{paint:?}");
+    let f = &paint.faces[0];
+    assert_eq!((body.face_origin[f.face], f.color, f.opacity, f.name.as_deref()), (file_face, [1.0, 0.0, 0.5], 0.25, Some("Accent")));
 }

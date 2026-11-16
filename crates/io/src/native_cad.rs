@@ -89,9 +89,10 @@ pub fn native_cad_design(bytes: &[u8], file: &str) -> Result<NativeDesign, Strin
 /// come with their own names, visibility and rigid placements, which the records keep. Where the
 /// file has a product structure (occurrences), the tree is that structure and each body is placed
 /// once for each use of its part ([`assembly`]); otherwise the bodies are one product called
-/// `product`. What could not be read (and what was repaired on the way) is in the warnings, each
-/// naming its body.
-pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, system: &str) -> solidcraft_kernel::ImportRecords {
+/// `product`. With `colours`, each body takes the colours the file gives it and its faces
+/// ([`paint_of`]). What could not be read (and what was repaired on the way) is in the warnings,
+/// each naming its body.
+pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, system: &str, colours: bool) -> solidcraft_kernel::ImportRecords {
     use solidcraft_kernel::{ImportRecords, RecordBody, StepNode};
     let _span = solidcraft_profile::span("import", "cadir.records");
     let read = solidcore_cadir::read_bodies(ir, Some(solidcraft_kernel::import_trims()));
@@ -99,16 +100,19 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
     let label = |id: &str| by_id.get(id).and_then(|b| b.name.clone()).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| id.to_string());
     let mut warnings = Vec::new();
     let mut unplaced = Vec::with_capacity(read.read.len());
+    let looks = colours.then(|| Looks::of(ir));
     for r in read.read {
         let body = by_id.get(r.body.as_str());
+        let (color, paint) = looks.as_ref().map_or((None, None), |l| l.paint_of(ir, &r.body, &r.solid.face_origin));
         warnings.extend(r.solid.notes.iter().map(|n| format!("{}: {n}", label(&r.body))));
         let record = RecordBody {
             name: body.and_then(|b| b.name.clone()).unwrap_or_default(),
             path: vec![product.to_string()],
             instance: None,
-            // Not yet: a Rhino object's colour is often its layer's default (black), which is not
-            // how Rhino shades it; the STEP route brought no colour over either.
-            color: None,
+            // Only where asked: a Rhino object's colour is often its layer's default (black),
+            // which is not how Rhino shades it.
+            color,
+            paint,
             hidden: body.is_some_and(|b| b.visible == Some(false)),
             placement: r.placement,
             brep: Some(r.solid.brep),
@@ -138,6 +142,59 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
 }
 
 mod assembly;
+
+/// A file's appearances by what they colour: whole bodies and single faces (CADIR ids).
+struct Looks<'a> {
+    bodies: std::collections::HashMap<&'a str, &'a cadmpeg_ir::appearance::Appearance>,
+    faces: std::collections::HashMap<&'a str, &'a cadmpeg_ir::appearance::Appearance>,
+}
+
+impl<'a> Looks<'a> {
+    fn of(ir: &'a cadmpeg_ir::document::CadIr) -> Self {
+        use cadmpeg_ir::appearance::AppearanceTarget;
+        let by_id: std::collections::HashMap<&str, &cadmpeg_ir::appearance::Appearance> =
+            ir.model.appearances.iter().map(|a| (a.id.as_str(), a)).collect();
+        let (mut bodies, mut faces) = (std::collections::HashMap::new(), std::collections::HashMap::new());
+        for b in &ir.model.appearance_bindings {
+            let Some(look) = by_id.get(b.appearance.as_str()).copied().filter(|a| a.base_color.is_some()) else { continue };
+            match &b.target {
+                AppearanceTarget::Body(id) => {
+                    bodies.insert(id.as_str(), look);
+                }
+                AppearanceTarget::Face(id) => {
+                    faces.insert(id.as_str(), look);
+                }
+                _ => {}
+            }
+        }
+        Looks { bodies, faces }
+    }
+
+    /// Body `body`'s colour and paint (its opacity, the colour's name, and each face of
+    /// `face_origin`, indices into the model's faces, with a colour of its own), as a STEP import
+    /// paints a solid: `None` for both where the file colours neither the body nor its faces.
+    fn paint_of(&self, ir: &cadmpeg_ir::document::CadIr, body: &str, face_origin: &[u64]) -> (Option<[f32; 3]>, Option<solidcraft_kernel::Paint>) {
+        let rgb = |a: &cadmpeg_ir::appearance::Appearance| a.base_color.map(|c| [c.r(), c.g(), c.b()]);
+        let opacity = |a: &cadmpeg_ir::appearance::Appearance| a.base_color.map_or(1.0, |c| c.a());
+        let named = |a: &cadmpeg_ir::appearance::Appearance| {
+            a.name.clone().filter(|n| !n.trim().is_empty()).map(|n| n.chars().take(solidcraft_kernel::COLOUR_NAME_MAX).collect())
+        };
+        let own = self.bodies.get(body).copied();
+        let faces: Vec<solidcraft_kernel::FacePaint> = face_origin
+            .iter()
+            .filter_map(|&f| {
+                let face = ir.model.faces.get(usize::try_from(f).ok()?)?;
+                let look = self.faces.get(face.id.as_str()).copied()?;
+                Some(solidcraft_kernel::FacePaint { face: usize::try_from(f).ok()?, color: rgb(look)?, opacity: opacity(look), name: named(look) })
+            })
+            .collect();
+        if own.is_none() && faces.is_empty() {
+            return (None, None);
+        }
+        let color = own.and_then(rgb);
+        (color, Some(solidcraft_kernel::Paint { opacity: own.map_or(1.0, opacity), faces, name: own.and_then(named) }))
+    }
+}
 mod design;
 pub use design::NativeDesign;
 
@@ -376,7 +433,7 @@ mod convert {
             "step" => "",
             other => other,
         };
-        let records = super::cadir_records(&ir, &product, system);
+        let records = super::cadir_records(&ir, &product, system, format == "step");
         if records.bodies.is_empty() {
             let why = records.warnings.first().map(|w| format!(" ({w})")).unwrap_or_default();
             return Err(format!("{name}: this {format} file has no solids that can be imported{why}"));

@@ -46,6 +46,11 @@ pub struct RecordBody {
     /// Surface colour, linear RGB in 0..1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<[f32; 3]>,
+    /// How the file shows it beyond its colour: its opacity, the colour's name, and the faces with
+    /// colours of their own, each `face` being the file's face (a value of `face_origin`), not the
+    /// body's face, as a STEP import's paint is before its body is made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paint: Option<crate::Paint>,
     /// The file hides it: the design starts with it hidden.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,
@@ -156,6 +161,10 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
             continue;
         };
         let body = body.with_color(r.color).with_face_sources(Some(Arc::new(sources)));
+        let body = match &r.paint {
+            Some(paint) => body.with_paint(Some(body_paint(paint, &part.face_origin))),
+            None => body,
+        };
         // A part is counted once, by the first of its bodies that comes in.
         if part.closed && counted.insert(source) {
             report.solids += 1;
@@ -240,6 +249,23 @@ pub fn records_import_shared(records: &ImportRecords) -> Result<Arc<StepImport>>
 /// import is (its cache key and its bodies' certificates are of this).
 pub fn records_text(records: &ImportRecords) -> Result<String> {
     serde_json::to_string(records).map_err(|e| KernelError::Invalid(format!("import records: {e}")))
+}
+
+/// `paint` with each face colour on the body's faces that come from its file face (`face_origin`,
+/// the file face of each body face), as a STEP import paints them; a colour on a face the body
+/// does not have is dropped. Colours and opacities from a file are hostile: each is kept in 0..1.
+fn body_paint(paint: &crate::Paint, face_origin: &[u64]) -> crate::Paint {
+    let unit = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) } else { 1.0 };
+    let by_file: std::collections::HashMap<u64, &crate::FacePaint> = paint.faces.iter().map(|f| (f.face as u64, f)).collect();
+    let faces = face_origin
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| {
+            let p = by_file.get(f)?;
+            Some(crate::FacePaint { face: i, color: p.color.map(unit), opacity: unit(p.opacity), name: p.name.clone() })
+        })
+        .collect();
+    crate::Paint { opacity: unit(paint.opacity), faces, name: paint.name.clone() }
 }
 
 /// The body SMLib makes of one record, checked first: a record from a file is hostile input.
