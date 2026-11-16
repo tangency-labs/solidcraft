@@ -268,7 +268,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
     k.fixes.good_drop_result_distances_in_order = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
-    k.fixes.imprint_reuses_coincident_face_edge = true;
     k.fixes.join_touching_loops = true;
     k.fixes.keep_operand_uv_trims = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;

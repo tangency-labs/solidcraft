@@ -6268,6 +6268,26 @@ fn hole_drill_scope(f: &Feature) -> &[String] {
     if f.participants.iter().any(|b| b == "*") { &[] } else { &f.participants }
 }
 
+/// Where hole `f`, placed at one spot `p` (a position, or a Single hole's sketch point), starts
+/// ([`hole_on_surface`]). A spot on a face of any body starts there. Off every face, it moves along
+/// the axis only onto the bodies the hole cuts ([`hole_targets`]): a spot over an opening in its
+/// body never slides through it onto a body the hole leaves alone, such as one of another
+/// component under the opening (#17358). A body the hole cuts further along the axis still takes
+/// it. When the hole cuts every body, or none, every body counts.
+pub fn hole_start(st: &ModelState, f: &Feature, p: Vec3, dir: Vec3) -> Vec3 {
+    let anywhere = hole_on_surface(st, p, dir, &[]);
+    // `hole_on_surface` hands `p` itself back when `p` is on a face (or meets no body at all).
+    if anywhere == p {
+        return p;
+    }
+    let targets = hole_targets(st, f);
+    if targets.len() == st.bodies.len() {
+        return anywhere;
+    }
+    let scope: Vec<String> = targets.iter().map(|b| b.name.clone()).collect();
+    hole_on_surface(st, p, dir, &scope)
+}
+
 fn in_hole_scope(scope: &[String], b: &ModelBody) -> bool {
     scope.is_empty() || scope.contains(&b.name)
 }
@@ -6305,10 +6325,10 @@ fn hole_spots(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, f
         }
         _ => {
             let dir = direction.normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
-            let at = hole_on_surface(st, single_hole_position(vals, st, position, at, points)?, dir, &[]);
+            let at = hole_start(st, f, single_hole_position(vals, st, position, at, points)?, dir);
             let at = with_references(vals, st, f, at, dir, true)?;
             let dir = hole_dir_into_face(st, at, dir, hole_drill_scope(f));
-            return Ok((vec![hole_on_surface(st, at, dir, &[])], dir));
+            return Ok((vec![hole_start(st, f, at, dir)], dir));
         }
     };
     if spots.is_empty() || spots.len() > 10_000 {
@@ -6382,8 +6402,8 @@ fn hole_spots_raw(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature) 
         _ => {
             let dir = direction.normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
             let p = single_hole_position(vals, st, position, at, points)?;
-            let p = if hole_references(f).is_empty() { p } else { with_references(vals, st, f, hole_on_surface(st, p, dir, &[]), dir, false)? };
-            Ok((vec![p], hole_dir_into_face(st, hole_on_surface(st, p, dir, &[]), dir, hole_drill_scope(f))))
+            let p = if hole_references(f).is_empty() { p } else { with_references(vals, st, f, hole_start(st, f, p, dir), dir, false)? };
+            Ok((vec![p], hole_dir_into_face(st, hole_start(st, f, p, dir), dir, hole_drill_scope(f))))
         }
     }
 }
@@ -7298,6 +7318,15 @@ fn feature_tools_with_constructor(
                 }
                 None => val(vals, &extent.distance, Kind::Length)?,
             };
+            // The curved (or slanted) To face the tool is cut back to, with a taper or without
+            // (#15820): see the straight path below.
+            let curved = curved_face(&tst, to_end_face, Some(n))
+                .filter(|_| toward_to)
+                .filter(|_| !to_end_face.is_some_and(|face| runs_along(&tst, face, n) && !meets_footprint(&tst, face, &ss.plane, &regions)));
+            let to_offset = match (&extent.to, &extent.to_offset) {
+                (Some(_), Some(e)) => val(vals, e, Kind::Length)?,
+                _ => 0.0,
+            };
             // A taper of 0 is a straight extrusion (the dialog stores one, and designs carry it);
             // the tapered path refuses a profile with holes without a draft (#13188).
             if let Some(tp) = &extent.taper
@@ -7318,6 +7347,12 @@ fn feature_tools_with_constructor(
                         Some(e) => val(vals, e, Kind::Length)?,
                         None => 0.0,
                     };
+                // To a curved face the tool runs past the face and is cut back to it once built.
+                let target = curved.and_then(|bi| tst.bodies.get(bi)).zip(to_face).zip(extent.to);
+                let len = match target {
+                    Some(((tb, (_, fi)), p)) => tapered_reach(&ss, &regions, (tb, fi, p.0, to_offset), base, sign, len, taper, extent.corner)?,
+                    None => len,
+                };
                 extrude_within_reach([base, base + sign * len])?;
                 let start_plane = ss.plane.offset(base);
                 let caps = [
@@ -7327,7 +7362,7 @@ fn feature_tools_with_constructor(
                 // How far a tool grows past its profile, at most: its sides' run over its length.
                 let growth = len * taper.tan().abs();
                 let mut notes = Vec::new();
-                let tools: Vec<Traced> = regions
+                let mut tools: Vec<Traced> = regions
                     .iter()
                     .map(|r| {
                         let roles =
@@ -7358,8 +7393,11 @@ fn feature_tools_with_constructor(
                 if at_once && tools.len() > 1 && regions_apart(&regions, APART_GAP + 2.0 * growth) {
                     let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
                     if let Some(one) = kernel::join_apart(&bodies)? {
-                        return Ok(vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())]);
+                        tools = vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())];
                     }
+                }
+                if let Some(((tb, (_, fi)), p)) = target {
+                    tools = trim_to_curved_face(tools, tb, fi, p.0, to_offset, &ss.plane, base, base + sign * len)?;
                 }
                 return Ok(tools);
             }
@@ -7382,13 +7420,6 @@ fn feature_tools_with_constructor(
             // point picked on it stands for the plane through it, as a point in space does
             // (#11923). A wall that crosses the profile seen along the extrusion still trims the
             // tool to the body.
-            let curved = curved_face(&tst, to_end_face, Some(n))
-                .filter(|_| toward_to)
-                .filter(|_| !to_end_face.is_some_and(|face| runs_along(&tst, face, n) && !meets_footprint(&tst, face, &ss.plane, &regions)));
-            let to_offset = match (&extent.to, &extent.to_offset) {
-                (Some(_), Some(e)) => val(vals, e, Kind::Length)?,
-                _ => 0.0,
-            };
             if let Some(bi) = curved
                 && let Some(tb) = tst.bodies.get(bi)
             {
@@ -7428,24 +7459,11 @@ fn feature_tools_with_constructor(
             }
             if let Some(tb) = curved.and_then(|bi| tst.bodies.get(bi))
                 && let Some((_, fi)) = to_face
+                && let Some(p) = extent.to
             {
                 let start = if hi > 0.0 { lo + off } else { hi + off };
                 let far = if hi > 0.0 { hi + off } else { lo + off };
-                tools = match extent.to {
-                    // A To offset: the end is the face's offset surface, not the face (#12617).
-                    Some(p) if to_offset.abs() > 1e-9 => {
-                        let travel = if hi > 0.0 { n } else { n * -1.0 };
-                        let trimmed =
-                            trim_to_offset_face(tools, tb, fi, p.0, travel, to_offset, |q: Vec3| ((q - ss.plane.origin).dot(n) - start).abs())?;
-                        // A tool the offset surface misses comes back whole, its end cap still at
-                        // the far height the extent was run out to: refused, as `trim_to_face` does.
-                        if trimmed.iter().any(|t| kernel::has_cap_at(&t.body, &ss.plane, far, far - start)) {
-                            return Err(DocError::Invalid("the profile reaches past the offset surface of the To face".into()));
-                        }
-                        trimmed
-                    }
-                    _ => trim_to_face(tools, tb, fi, &ss.plane, start, far)?,
-                };
+                tools = trim_to_curved_face(tools, tb, fi, p.0, to_offset, &ss.plane, start, far)?;
             }
             // A join's profile grows into the material it joins; its sketch plane and depth as drawn
             // still serve a join into sheet metal (`sheet_join`), which takes the sketch's regions.
@@ -9516,13 +9534,15 @@ fn nearest_object_face(b: &ModelBody, p: Vec3, normal: Option<Vec3>) -> Option<(
 }
 
 /// The face a To / From Object point stands for, `(body index, face index)`: the face its
-/// stored `name` finds when the point lies on it (evaluation has moved the point onto its named
-/// face), else the nearest face at the point. The name settles a tie: in an assembly a part of
-/// another component may rest on the target and touch it at the point.
+/// stored `name` finds, else the nearest face at the point. The name settles a tie: in an
+/// assembly a part of another component may rest on the target and touch it at the point.
+/// Evaluation has moved the point onto its named face. A pattern's or mirror's copy keeps the
+/// point where the feature found that face before it ran (#15054), and a later feature may have
+/// cut the face away there: the copy still ends at the face the feature names, as the feature
+/// did, not at a face that later feature left at the point, such as a chamfer's slope (#17692).
 fn object_face(st: &ModelState, name: Option<&str>, p: Vec3, normal: Option<Vec3>) -> Option<(usize, usize)> {
     if let Some(n) = name.filter(|n| !n.is_empty())
         && let Some(hit) = crate::naming::locate_face(st, n, p)
-        && hit.on_point
     {
         return Some((hit.body, hit.face));
     }
@@ -9739,6 +9759,82 @@ fn trim_to_offset_face(
         return Err(DocError::Invalid("nothing lies between the profile and the To object".into()));
     }
     Ok(out)
+}
+
+/// Tools run from level `start` along `plane`'s normal out to `far`, through `target`, cut back
+/// to its curved To face `face` (`to` is the To pick): to the face itself ([`trim_to_face`]), or
+/// with a To offset to the face's offset surface ([`trim_to_offset_face`], #12617).
+#[allow(clippy::too_many_arguments)]
+fn trim_to_curved_face(
+    tools: Vec<Traced>,
+    target: &ModelBody,
+    face: usize,
+    to: Vec3,
+    to_offset: f64,
+    plane: &Plane,
+    start: f64,
+    far: f64,
+) -> Result<Vec<Traced>> {
+    if to_offset.abs() <= 1e-9 {
+        return trim_to_face(tools, target, face, plane, start, far);
+    }
+    let n = plane.normal();
+    let travel = if far > start { n } else { n * -1.0 };
+    let trimmed = trim_to_offset_face(tools, target, face, to, travel, to_offset, |q: Vec3| ((q - plane.origin).dot(n) - start).abs())?;
+    // A tool the offset surface misses comes back whole, its end cap still at the far height the
+    // extent was run out to: refused, as `trim_to_face` does.
+    if trimmed.iter().any(|t| kernel::has_cap_at(&t.body, plane, far, far - start)) {
+        return Err(DocError::Invalid("the profile reaches past the offset surface of the To face".into()));
+    }
+    Ok(trimmed)
+}
+
+/// How long a tool drafted by `taper` over `regions`, from level `base` along `sign` times the
+/// sketch's normal, runs to go past the curved To face `face` of `target` (`to` is the To pick,
+/// `to_offset` its offset), to be cut back to it with [`trim_to_curved_face`] (#15820). No longer
+/// than it must: a taper that narrows the profile, or a hole in it, closes it a finite way along,
+/// which can lie inside a deep target. An envelope that holds the tool and never closes says how
+/// far: the outer loop alone, drafted when the taper grows it (only the holes narrow) and
+/// straight when the taper narrows it. Run right through the target (past the far side of its
+/// exact box by the margin the straight path takes) and cut back to the face, its far end is the
+/// farthest the tool meets the face; the tool runs a hair past that, and at least `len`.
+#[allow(clippy::too_many_arguments)]
+fn tapered_reach(
+    ss: &SolvedSketch,
+    regions: &[Region2],
+    (target, face, to, to_offset): (&ModelBody, usize, Vec3, f64),
+    base: f64,
+    sign: f64,
+    len: f64,
+    taper: f64,
+    corner: Option<kernel::DraftCorner>,
+) -> Result<f64> {
+    let n = ss.plane.normal();
+    let far_side = |body: &Body| -> Result<f64> {
+        let bb = body.exact_bounds().map_err(|e| DocError::Invalid(e.to_string()))?;
+        let (c, half) = (bb.center(), bb.size() * 0.5);
+        Ok(sign * (ss.plane.height(c) - base) + half.x * n.x.abs() + half.y * n.y.abs() + half.z * n.z.abs())
+    };
+    let through = far_side(&target.body)?.max(len) + target.body.size() * 0.05 + 1.0 + to_offset.abs();
+    extrude_within_reach([base, base + sign * through])?;
+    let start_plane = ss.plane.offset(base);
+    let mut envelopes = Vec::new();
+    for r in regions {
+        let outer = Region2 { outer: r.outer.clone(), holes: Vec::new() };
+        if taper > 0.0 {
+            let corner = match corner {
+                Some(c) => c,
+                None => draft_corner_for(ss, &outer, through, taper, &mut Vec::new())?,
+            };
+            envelopes.push(Traced::unnamed(kernel::extrude_tapered_between(&start_plane, &outer, 0.0, through, 0.0, sign, taper, corner)?));
+        } else {
+            let (lo, hi) = if sign < 0.0 { (base - through, base) } else { (base, base + through) };
+            envelopes.extend(centered_extrude(&ss.plane, &outer, lo, hi, None, None, false)?);
+        }
+    }
+    let cut = trim_to_curved_face(envelopes, target, face, to, to_offset, &ss.plane, base, base + sign * through)?;
+    let reach = cut.iter().map(|t| far_side(&t.body)).collect::<Result<Vec<_>>>()?.into_iter().fold(len, f64::max);
+    Ok(reach + target.body.size() * 1e-3)
 }
 
 /// The surface of `target`'s face `face` as a sheet body `offset` past the face along `travel`
@@ -11065,12 +11161,17 @@ fn eval_sketch(
     // The stored sketch is solved for its stored values, with its links where they
     // were stored: a link that moved must not change the side a dimension from it is on.
     let stored = sk.driving_values();
-    let report = doc.solve_sketch(vals, &mut sk, &stored, Some(sketch))?;
+    let mut report = doc.solve_sketch(vals, &mut sk, &stored, Some(sketch))?;
+    doc.discount_traces(f.id, &sk, &mut report);
     if !report.keeps_orientation() {
         warns.insert(0, report.failure(|f| format!("the sketch constraints conflict ({f})")));
     } else {
         // The solve may have moved the curve a text runs along.
         warns.extend(crate::project::relay_path_texts(&mut sk));
+    }
+    // 3D constraints that fail leave the 3D curves where they were (#10608).
+    if let Some(w) = report.wires.as_ref().filter(|w| !w.ok) {
+        warns.push(w.failure(|f| format!("the 3D sketch constraints conflict ({f})")));
     }
     if !warns.is_empty() {
         *warning = Some(warns.join("; "));
