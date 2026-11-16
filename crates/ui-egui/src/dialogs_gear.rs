@@ -13,6 +13,8 @@ use crate::selection::SelInput;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Gear {
     pub component: Option<u64>,
+    /// The values the gear had when the form opened on it: what Reset goes back to. A new gear has none.
+    original: Option<Box<Gear>>,
     pub internal: bool,
     pub module: f64,
     pub teeth: f64,
@@ -37,6 +39,7 @@ impl Gear {
     fn new() -> Self {
         Self {
             component: None,
+            original: None,
             internal: false,
             module: 2.0,
             teeth: 20.0,
@@ -58,8 +61,15 @@ impl Gear {
     }
 
     fn saved(component: u64, g: &SpurGear) -> Self {
+        let mut gear = Self::saved_values(component, g);
+        gear.original = Some(Box::new(gear.clone()));
+        gear
+    }
+
+    fn saved_values(component: u64, g: &SpurGear) -> Self {
         Self {
             component: Some(component),
+            original: None,
             internal: g.internal,
             module: g.module,
             teeth: f64::from(g.teeth),
@@ -77,6 +87,43 @@ impl Gear {
             bore_offset: g.bore_offset,
             helix_angle: g.helix_angle,
             double_helical: g.double_helical,
+        }
+    }
+}
+
+/// The starting points the form offers: each sets what makes the kind of gear and leaves the size
+/// (module, pressure angle, face width) as it is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Preset {
+    Spur,
+    Helical,
+    Herringbone,
+    Ring,
+}
+
+impl Gear {
+    /// Back to what the form opened with: the saved values of the gear being edited, or the defaults.
+    pub fn reset(&mut self) {
+        *self = match self.original.take() {
+            // The copy stays, so a second Reset goes to the same place.
+            Some(o) => Self { original: Some(o.clone()), ..*o },
+            None => Self::new(),
+        };
+    }
+
+    /// Make this a spur, helical, herringbone or ring gear; the axle hole, clearance and roundings stay.
+    pub fn preset(&mut self, p: Preset) {
+        (self.internal, self.helix_angle, self.double_helical) = (false, 0.0, false);
+        match p {
+            Preset::Spur => self.teeth = 20.0,
+            Preset::Helical => (self.teeth, self.helix_angle) = (20.0, 20.0),
+            Preset::Herringbone => (self.teeth, self.helix_angle, self.double_helical) = (20.0, 20.0, true),
+            Preset::Ring => {
+                self.internal = true;
+                self.teeth = 40.0;
+                self.rim_thickness = self.module * 2.0;
+                (self.bore_diameter, self.bore_offset) = (0.0, 0.0);
+            }
         }
     }
 }
@@ -127,6 +174,25 @@ fn number(ui: &mut egui::Ui, label_key: &str, handle: &str, v: &mut f64, range: 
 }
 
 pub fn rows(ui: &mut egui::Ui, g: &mut Gear) {
+    form_row(ui, solidcraft_ui_text::tr("gear.presets"), |ui| {
+        for (key, handle, p) in [
+            ("gear.preset_spur", "dialog:gear:preset_spur", Preset::Spur),
+            ("gear.preset_helical", "dialog:gear:preset_helical", Preset::Helical),
+            ("gear.preset_herringbone", "dialog:gear:preset_herringbone", Preset::Herringbone),
+            ("gear.preset_ring", "dialog:gear:preset_ring", Preset::Ring),
+        ] {
+            let r = crate::ui_kit::button(ui, solidcraft_ui_text::tr(key), crate::ui_kit::Button::Normal);
+            crate::scenario::publish_handle(handle, r.rect.center());
+            if r.clicked() {
+                g.preset(p);
+            }
+        }
+        let r = crate::ui_kit::button(ui, solidcraft_ui_text::tr("gear.reset"), crate::ui_kit::Button::Normal);
+        crate::scenario::publish_handle("dialog:gear:reset", r.rect.center());
+        if r.clicked() {
+            g.reset();
+        }
+    });
     form_row(ui, "", |ui| {
         let r = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("gear.internal"), &mut g.internal);
         crate::scenario::publish_handle("dialog:gear:internal", r.rect.center());
@@ -301,6 +367,112 @@ mod tests {
         h.frames(3);
         let Some(Kind::Gear(g)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("no gear form") };
         assert_eq!((g.clearance, g.root_fillet, g.tip_round, g.flank_points, g.backlash_thicker), (0.3, 0.5, 0.2, 12.0, true));
+    }
+
+    /// Wait, within a bound, for the preview of the form's values to be computed.
+    #[track_caller]
+    fn wait_preview(h: &mut Harness) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        h.frames(2);
+        while h.app.preview.busy || !(h.app.preview.active || h.app.preview.error.is_some()) {
+            assert!(std::time::Instant::now() < deadline, "the gear preview did not finish");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            h.frame();
+        }
+        h.frames(2);
+    }
+
+    /// The form previews the gear before anything is inserted, follows the values, and leaves the
+    /// design and its history alone when it is cancelled.
+    #[test]
+    fn the_form_previews_the_gear_and_cancel_changes_nothing() {
+        let mut h = Harness::new();
+        let (doc, undo) = (h.app.session.doc.clone(), h.app.session.undo.len());
+        h.app.start("gear.insert");
+        wait_preview(&mut h);
+        assert!(h.app.dialog.as_ref().is_some_and(|d| d.previews()), "the gear form previews");
+        assert!(h.app.preview.active && h.app.preview.error.is_none(), "a preview is up: {:?}", h.app.preview.error);
+        assert!(h.app.session.doc.gears.is_empty() && h.app.session.undo.len() == undo, "nothing is inserted");
+        let first = h.app.preview.bounds;
+        if let Some(Kind::Gear(g)) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            g.teeth = 40.0;
+        }
+        wait_preview(&mut h);
+        assert!(h.app.preview.active && h.app.preview.bounds != first, "the preview follows the values");
+        // A value that makes no gear says so in the form, not in a preview.
+        if let Some(Kind::Gear(g)) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            g.root_fillet = 1.9;
+        }
+        wait_preview(&mut h);
+        assert!(h.app.preview.error.is_some() || !h.app.preview.active, "a refused value shows no gear");
+        crate::dialogs::cancel(&mut h.app);
+        h.settle();
+        assert!(!h.app.preview.active, "cancel takes the preview away");
+        assert_eq!((h.app.session.doc.clone(), h.app.session.undo.len()), (doc, undo));
+    }
+
+    /// The presets set the kind of gear and keep the size; Reset goes back to what the form opened with.
+    #[test]
+    fn presets_set_the_kind_and_reset_goes_back_to_what_the_form_opened_with() {
+        let mut g = Gear::new();
+        g.module = 3.0;
+        g.bore_diameter = 6.0;
+        g.preset(Preset::Herringbone);
+        assert_eq!((g.module, g.teeth, g.helix_angle, g.double_helical, g.internal, g.bore_diameter), (3.0, 20.0, 20.0, true, false, 6.0));
+        g.preset(Preset::Ring);
+        assert_eq!((g.internal, g.teeth, g.rim_thickness, g.helix_angle, g.double_helical, g.bore_diameter), (true, 40.0, 6.0, 0.0, false, 0.0));
+        g.preset(Preset::Helical);
+        assert_eq!((g.internal, g.helix_angle, g.double_helical), (false, 20.0, false));
+        g.preset(Preset::Spur);
+        assert_eq!((g.internal, g.helix_angle, g.teeth), (false, 0.0, 20.0));
+        g.reset();
+        assert_eq!(g, Gear::new(), "a new gear resets to the defaults");
+        // An edit form resets to the gear as it was saved, still on that gear.
+        let saved = SpurGear {
+            module: 1.5,
+            teeth: 30,
+            pressure_angle: 25.0,
+            face_width: 8.0,
+            profile_shift: 0.0,
+            backlash: 0.05,
+            flank_points: 12,
+            clearance: 0.3,
+            root_fillet: 0.0,
+            tip_round: 0.0,
+            backlash_thicker: false,
+            internal: false,
+            rim_thickness: 0.0,
+            bore_diameter: 5.0,
+            bore_offset: 0.0,
+            helix_angle: 15.0,
+            double_helical: false,
+        };
+        let mut e = Gear::saved(7, &saved);
+        let opened = e.clone();
+        e.preset(Preset::Ring);
+        e.module = 9.0;
+        e.reset();
+        assert_eq!(e, opened);
+        assert_eq!((e.component, e.teeth, e.helix_angle, e.flank_points), (Some(7), 30.0, 15.0, 12.0));
+    }
+
+    /// The buttons are on the form, and a preset's gear builds.
+    #[test]
+    fn the_form_offers_the_presets_and_reset_and_a_preset_builds() {
+        let mut h = Harness::new();
+        h.app.start("gear.insert");
+        h.frames(3);
+        for k in ["preset_spur", "preset_helical", "preset_herringbone", "preset_ring", "reset"] {
+            assert!(handle_at(&format!("dialog:gear:{k}")).is_some(), "{k}");
+        }
+        if let Some(Kind::Gear(g)) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            g.preset(Preset::Herringbone);
+        }
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+        let (_, saved) = gear(&h).expect("a gear is saved");
+        assert_eq!((saved.helix_angle, saved.double_helical), (20.0, true));
     }
 
     /// Edit Gear starts from the selected gear's saved values and rebuilds it in place.

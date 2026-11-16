@@ -20,13 +20,13 @@ const INSERT_CONTRACT: TypedContract<GearInsertParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("gear.edit", "Edit Gear", crate::checked!("gear.edit", edit_atomic))
-        .icon("fastener")
+        .icon("gear")
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<InsertedGear>)
         .params("component: id|name of an inserted gear; module?, teeth?, pressure_angle?, face_width?, profile_shift?, backlash?, flank_points?, clearance?, root_fillet?, tip_round?, backlash_direction?, internal?, rim_thickness?, bore_diameter?, bore_offset?, helix_angle?, double_helical? (the values given replace the saved ones) → rebuilds the teeth in place; component, occurrence, name, diameters"),
     CommandSpec::new("gear.insert", "Insert Gear", crate::checked!("gear.insert", insert_atomic))
         .at("SOLID", "INSERT")
-        .icon("fastener")
+        .icon("gear")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<InsertedGear>)
         .params("module (mm), teeth (6..1000), pressure_angle? (deg, default 20), face_width? (mm), profile_shift?, backlash? (mm), flank_points? (2..64, default 8: the profile accuracy), clearance? (0..0.6 of the module, default 0.25: how far the roots lie below the dedendum line), root_fillet? (mm, 0..module: rounds where a flank meets the root), tip_round? (mm, 0..module: rounds where a flank meets the tip), backlash_direction? (thinner, the default: the backlash comes off the teeth; thicker: it is added, for a mate that carries the clearance), internal? (bool: a ring with its teeth inward; no profile shift), rim_thickness? (mm, internal only, default 2 × module), bore_diameter? (mm, external only: an axle hole), bore_offset? (mm: the hole's centre along +X), helix_angle? (deg, -45..45, default 0: teeth twisted over the face width, positive right-hand), double_helical? (bool, external only: two mirrored halves), name? → component, occurrence, name, pitch/base/tip/root diameters"),
