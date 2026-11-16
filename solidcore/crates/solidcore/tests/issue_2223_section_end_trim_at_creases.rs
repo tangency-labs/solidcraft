@@ -8,7 +8,7 @@
 //! only a lone round both of whose ends are section ends, so with the rim picked too the
 //! fillet was refused (`FilletErrorType::NoRoom`, 1001 in `cliff_overflow`). With WR-706 the
 //! section-ended round is trimmed at its creases and sewn in with the rim's round
-//! (`fillet_overflow_trim_at_creases`, WR-695).
+//! (WR-695, once `fillet_overflow_trim_at_creases`).
 //!
 //! Expected values are closed form, not the fork's: at tangency-labs/smlib 5e8c9c1 the fork
 //! leaves the corner arc unrounded (rim alone, corner alone and both remove 7.95867347,
