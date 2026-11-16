@@ -6537,7 +6537,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::tools::on_click(app, &proj, p, mods.shift);
     }
     if let Some(p) = hover.filter(|_| inside) {
-        let pen_select = app.preferences.pencil_mode && resp.clicked_by(egui::PointerButton::Primary) && crate::pencil::is_pen_release(app.pen_release, p);
+        let pen_select =
+            app.preferences.pencil_mode && resp.clicked_by(egui::PointerButton::Primary) && crate::pencil::is_pen_release(app.pen_release, p);
         if app.tool.is_some() {
             crate::tools::on_hover(app, &proj, p, mods.shift);
         }
@@ -8957,7 +8958,8 @@ mod tests {
         // `pointerup` and `touchend` report the lift a few points apart (3.2 points on an iPad),
         // and their two releases come in one frame.
         let end = pos + egui::vec2(2.5, 2.0);
-        let release = |at| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE };
+        let release =
+            |at| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE };
         let touch_end = egui::Event::Touch { device_id: egui::TouchDeviceId(1), id, phase: egui::TouchPhase::End, pos: end, force: Some(0.0) };
         h.frame_with_taps(
             vec![button(false), release(end), egui::Event::PointerGone, touch_end],
@@ -8971,7 +8973,10 @@ mod tests {
     fn finger_tap(h: &mut crate::scenario::Harness, pos: Pos2, id: u64) {
         let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
         let touch = |phase| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(id), phase, pos, force: None };
-        h.frame_with_taps(vec![egui::Event::PointerMoved(pos), button(true)], crate::pencil::PlatformTaps { finger_down: Some(pos), ..Default::default() });
+        h.frame_with_taps(
+            vec![egui::Event::PointerMoved(pos), button(true)],
+            crate::pencil::PlatformTaps { finger_down: Some(pos), ..Default::default() },
+        );
         h.frame_with(vec![button(true), touch(egui::TouchPhase::Start)]);
         h.frame_with(vec![button(false), egui::Event::PointerGone, touch(egui::TouchPhase::End)]);
     }
@@ -9064,7 +9069,8 @@ mod tests {
         let mut h = pencil_box();
         let start = screen(&mut h, [5.0, 5.0, 10.0]);
         let (yaw, pitch) = (h.app.cam.yaw, h.app.cam.pitch);
-        let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        let button =
+            |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
         let touch = |phase, pos| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(7), phase, pos, force: None };
         h.frame_with_taps(vec![button(start, true)], crate::pencil::PlatformTaps { finger_down: Some(start), ..Default::default() });
         h.frame_with(vec![button(start, true), touch(egui::TouchPhase::Start, start)]);

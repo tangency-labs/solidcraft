@@ -210,7 +210,8 @@ pub(crate) fn filter(app: &mut SolveApp, ctx: &egui::Context, raw: &mut RawInput
     }
     // The last finger has lifted (its release was just taken out), or a finger reported down
     // never sent its touch events: presses are the pointer's again.
-    let lifted = fingers.contacts.is_empty() && raw.events.iter().any(|e| matches!(e, Event::Touch { phase: TouchPhase::End | TouchPhase::Cancel, .. }));
+    let lifted =
+        fingers.contacts.is_empty() && raw.events.iter().any(|e| matches!(e, Event::Touch { phase: TouchPhase::End | TouchPhase::Cancel, .. }));
     let orphaned = fingers.contacts.is_empty() && now - fingers.held_since > ORPHAN_TIME;
     if lifted || orphaned {
         fingers.holding = false;
