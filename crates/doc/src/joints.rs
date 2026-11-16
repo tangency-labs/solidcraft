@@ -1273,7 +1273,7 @@ fn resolve_snap(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<Mat>
             // planes, a placement's datum) and is mapped into the side's frame — through the
             // side's exact occurrence, not `resolve_datum_in`'s first-placement mapping.
             let pl = match plane.as_ref() {
-                PlaneRef::Construction { feature } => {
+                PlaneRef::Construction { feature, .. } => {
                     if doc.feature(feature.0).map(|f| f.component) != Some(comp) {
                         return Err(DocError::Unknown(format!("construction plane is not on this component (occurrence {})", o.occurrence)));
                     }
@@ -3320,8 +3320,10 @@ mod tests {
         // 3. Construction plane by feature (PlaneRef::Construction: the name-overload of
         //    PlaneRef::Origin is gone — a construction plane is a feature, bound to its
         //    component).
-        let o_wp =
-            JointOrigin::new(0, Snap::Plane { plane: Box::new(PlaneRef::Construction { feature: plane_feature.into() }), pick: None, x: None });
+        let o_wp = JointOrigin::new(
+            0,
+            Snap::Plane { plane: Box::new(PlaneRef::Construction { feature: plane_feature.into(), placement: None }), pick: None, x: None },
+        );
         let m_wp = resolve_origin(&doc, &st, &o_wp).unwrap();
         assert_eq!(apply_point(&m_wp, Vec3::ZERO), Vec3::new(0.0, 0.0, 15.0));
         assert_eq!(apply_vector(&m_wp, Vec3::Z), Vec3::Z);

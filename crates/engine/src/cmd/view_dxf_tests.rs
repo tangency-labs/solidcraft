@@ -296,12 +296,12 @@ fn view_dxf_zero_origin_puts_the_model_origin_at_the_drawing_zero() {
 
 /// The lines of a regular polygon with `n` sides round `c`, from angle `from` to `to`.
 /// Over a whole turn the last line returns to the first point and the ring is closed.
-fn ring(c: Vec2, r: f64, n: usize, from: f64, to: f64) -> Vec<DxfEntity> {
+fn ring(c: Vec2, r: f64, n: usize, from: f64, to: f64) -> Vec<(Vec2, Vec2)> {
     let at = |i: usize| {
         let t = from + (to - from) * i as f64 / n as f64;
         Vec2::new(c.x + r * t.cos(), c.y + r * t.sin())
     };
-    (0..n).map(|i| DxfEntity { layer: "VISIBLE".into(), shape: DxfShape::Line(at(i), at(i + 1)) }).collect()
+    (0..n).map(|i| (at(i), at(i + 1))).collect()
 }
 
 #[test]
@@ -312,12 +312,12 @@ fn view_dxf_arcs_turn_a_tessellated_circle_into_a_circle_and_keep_polygons_as_li
     // circle for the 0.01 mm the drawing was made with, so they are polygons and stay lines.
     let fine = arcs::recognise(ring(c, 10., 64, 0., tau), 0.01);
     assert_eq!(fine.len(), 1, "{fine:?}");
-    let DxfShape::Circle { c: found, r } = &fine[0].shape else { panic!("{fine:?}") };
+    let DxfShape::Circle { c: found, r } = &fine[0] else { panic!("{fine:?}") };
     assert!((*found - c).len() < 1e-9 && (r - 10.).abs() < 1e-9, "{fine:?}");
     for sides in [6, 8, 32] {
         let polygon = arcs::recognise(ring(c, 10., sides, 0., tau), 0.01);
         assert_eq!(polygon.len(), sides, "{sides} sides");
-        assert!(polygon.iter().all(|e| matches!(e.shape, DxfShape::Line(..))));
+        assert!(polygon.iter().all(|shape| matches!(shape, DxfShape::Line(..))));
     }
 }
 
@@ -328,12 +328,10 @@ fn view_dxf_arcs_turn_a_run_of_lines_into_an_arc_that_runs_counter_clockwise() {
     // The run goes round clockwise, from 90 to 0 degrees: the DXF arc names 0 first, then 90.
     let run = arcs::recognise(ring(c, 10., 40, quarter, 0.), 0.01);
     assert_eq!(run.len(), 1, "{run:?}");
-    let DxfShape::Arc { r, a0, a1, .. } = &run[0].shape else { panic!("{run:?}") };
+    let DxfShape::Arc { r, a0, a1, .. } = &run[0] else { panic!("{run:?}") };
     assert!((r - 10.).abs() < 1e-9 && a0.abs() < 1e-6 && (a1 - 90.).abs() < 1e-6, "{run:?}");
     // A straight run, and a few lines, are never an arc.
-    let straight: Vec<DxfEntity> = (0..10)
-        .map(|i| DxfEntity { layer: "VISIBLE".into(), shape: DxfShape::Line(Vec2::new(i as f64, 0.), Vec2::new(i as f64 + 1., 0.)) })
-        .collect();
+    let straight: Vec<(Vec2, Vec2)> = (0..10).map(|i| (Vec2::new(i as f64, 0.), Vec2::new(i as f64 + 1., 0.))).collect();
     assert_eq!(arcs::recognise(straight, 0.01).len(), 10);
     assert_eq!(arcs::recognise(ring(c, 10., 3, 0., quarter), 0.01).len(), 3);
 }
@@ -358,6 +356,26 @@ fn view_dxf_curves_arcs_write_a_round_hole_as_one_circle_and_the_default_still_w
     assert!(as_lines.len() > 40);
     let err = s.execute(CMD, &json!({"camera": top, "curves": "splines"})).unwrap_err().to_string();
     assert!(err.contains("curves must be lines or arcs"), "{err}");
+}
+
+/// With `curves: "arcs"` and dashed hidden lines, each kind of entity sits on its own layer: the
+/// circle and the plate's sides on VISIBLE, the blind hole's dashed runs on HIDDEN, and the hidden
+/// runs come first in the file, as they always have (the order is part of the file's bytes).
+#[test]
+fn view_dxf_curves_arcs_with_dashed_hidden_lines_keep_their_layers_and_order() {
+    let mut s = sample();
+    run(&mut s, "solid.cylinder", json!({"radius":5,"height":10,"base":[20,15,0],"operation":"cut","targets":["Plate"]}));
+    let v = run(&mut s, CMD, json!({"camera": camera(StandardView::Top), "curves": "arcs", "hidden": "dashed"}));
+    let file = solidcraft_io::read_dxf_file(v["dxf"].as_str().unwrap()).unwrap();
+    let on = |entity: &solidcraft_io::DxfFileEntity<DxfShape>| file.layer(entity.layer()).unwrap().name().to_string();
+    let layers: Vec<String> = file.entities().iter().map(on).collect();
+    let first_visible = layers.iter().position(|name| name == "VISIBLE").unwrap();
+    assert!(first_visible > 0 && layers[..first_visible].iter().all(|name| name == "HIDDEN"), "{layers:?}");
+    assert!(layers[first_visible..].iter().all(|name| name == "VISIBLE"), "{layers:?}");
+    let kinds = |layer: &str| -> Vec<&DxfShape> { file.entities().iter().filter(|e| on(e) == layer).map(|e| e.geometry()).collect() };
+    assert!(kinds("HIDDEN").iter().all(|shape| matches!(shape, DxfShape::Polyline { .. })));
+    assert_eq!(kinds("VISIBLE").iter().filter(|shape| matches!(shape, DxfShape::Circle { .. })).count(), 1);
+    assert_eq!(kinds("VISIBLE").iter().filter(|shape| matches!(shape, DxfShape::Line(..))).count(), 4);
 }
 
 // Frozen pre-X2 assembly recipe, with its real shared projection and legacy

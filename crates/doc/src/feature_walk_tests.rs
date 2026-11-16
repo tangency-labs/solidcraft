@@ -235,7 +235,7 @@ fn construction_reference_walk_keeps_its_depth_limit_across_geometry() {
     use crate::construct::GeoRef;
     use crate::walk::{Ref, Walk};
 
-    let mut plane = crate::PlaneRef::Construction { feature: crate::FeatureId(7) };
+    let mut plane = crate::PlaneRef::Construction { feature: crate::FeatureId(7), placement: None };
     for _ in 0..80 {
         plane = crate::PlaneRef::Perpendicular { plane: Box::new(GeoRef::Plane { plane }), line: Box::new(GeoRef::Axis { name: "Side".into() }) };
     }

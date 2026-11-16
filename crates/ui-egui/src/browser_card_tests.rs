@@ -110,7 +110,7 @@ fn f2_on_a_clicked_browser_group_renames_the_group() {
 }
 
 /// #10654: a refused inline rename keeps the editor open and says why, instead of closing
-/// silently and leaving the old name.
+/// silently and leaving the old name; the name can then be corrected without a click.
 #[test]
 fn a_refused_inline_rename_keeps_the_editor_and_shows_the_error() {
     let mut h = Harness::new();
@@ -131,6 +131,10 @@ fn a_refused_inline_rename_keeps_the_editor_and_shows_the_error() {
     let (text, _, error) = h.app.status.clone().expect("the refusal is shown");
     assert!(error && text.contains("another body is called"), "{text}");
     assert!(h.app.session.world_state().unwrap().body("B").is_some(), "the body keeps its name");
+    h.step(&json!({"text":"C"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.frames(2);
+    assert!(h.app.session.world_state().unwrap().body("C").is_some(), "the name can be corrected at once; status {:?}", h.app.status);
 }
 
 /// Renaming a component to a name another component has takes the next free number; a name

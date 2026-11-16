@@ -176,6 +176,7 @@ pub struct WorkCounters {
     classification_snapshots: Cell<u64>,
     orient_boxes: Cell<u64>,
     ball_certified_roots: Cell<u64>,
+    blends_recertified: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -329,6 +330,15 @@ impl WorkCounters {
         self.ball_certified_roots.get()
     }
 
+    /// Procedural blends recertified as a record's faces got their definitions back
+    /// (`surface::procedural_blend::convert::definition_surface`): each certificate that
+    /// ran, not each blend [`Kernel::recertify_memo`] answered. Not the fork's (a test's
+    /// witness that an unchanged blend is certified once, #17640).
+    #[must_use]
+    pub fn blends_recertified(&self) -> u64 {
+        self.blends_recertified.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -348,6 +358,7 @@ impl WorkCounters {
         self.classification_snapshots.set(0);
         self.orient_boxes.set(0);
         self.ball_certified_roots.set(0);
+        self.blends_recertified.set(0);
     }
 
     /// Counts one face pair examined for intersection.
@@ -448,6 +459,12 @@ impl WorkCounters {
     pub(crate) fn add_ball_certified_root(&self) {
         self.ball_certified_roots
             .set(self.ball_certified_roots.get().saturating_add(1));
+    }
+
+    /// Counts one procedural blend recertified as its record's face got it back.
+    pub(crate) fn add_blend_recertified(&self) {
+        self.blends_recertified
+            .set(self.blends_recertified.get().saturating_add(1));
     }
 }
 
@@ -553,8 +570,6 @@ pub struct UpstreamFixes {
     /// corner's degeneracy test takes anti-parallel side normals for an ordinary corner.
     /// Upstream refuses the edge as tangent (WR-570; the fork's tangency-labs/smlib@b7ec55b).
     pub fillet_knife_edge_rounds: bool,
-    /// `SmOffsetExecutive::MapEdgeuses` raises each offset edge it matches to an original edge to that edge's tolerance, and the offset edge's vertices to the original edge's vertices' largest. Upstream builds the offset faces' edges and vertices afresh at the B-rep's zone tolerance, so the offset of a sheet whose edges and vertices carry their own, larger tolerances (a trimmed B-spline patch: B-rep 2.08e-5, edges 4.15e-5, vertices 8.31e-5) is checked against half the B-rep's tolerance at its vertices, and its offset by 0.75 fails `check_brep` with edge/vertex Bad Gaps of 2.4e-5 to 3.9e-5, inside the original's own tolerances (WR-671, #2111).
-    pub offset_edges_keep_source_tolerance: bool,
     /// A face a Boolean takes over from its second operand keeps that operand's exact UV trims (WR-361, #488).
     pub keep_operand_uv_trims: bool,
     /// `smgu_EvaluateCurveContinuity`'s G2 test compares the two sides' Frenet curvatures and normals (WR-380, #933/#838).
@@ -678,8 +693,6 @@ pub struct UpstreamFixes {
     pub new_edge_vertex_tolerance_covers_gap: bool,
     /// `SmTorus::IsNurbSurfaceTorus` and `SmSphere::IsNurbSurfaceSphere` keep the NURB they tested (rebuilding the analytic data from it, as `SetFromGwNurb` does), not the one made from the fitted circles (~1e-11 off), and the sphere test takes a half meridian within `180 + 360 * SM_EFF_ZERO` degrees, not `180 + SM_EFF_ZERO` (WR-493, #1433; tangency-labs/smlib@7ea6a96). The sphere's sweep interval is its polar curve's, so a small corner sphere passes `SmSurfOfRevolution` tests #6 and #7 (#2073; not in the fork).
     pub found_torus_sphere_keep_tested_nurb: bool,
-    /// `SmEdgeDefinition::Imprint` continues an intersection edge's 3d and UV curves, each by the polynomial of its own end span, to a proto vertex that lies a few tolerances past the curve's end, so the edge reaches its vertex (internal thread cuts; WR-453, #410; tangency-labs/smlib bf5d3ae (was a8caccd)). The end goes to its proto vertex's position only when that proto vertex is one vertex in each B-rep, else to its own final vertex (WR-498, #1480; tangency-labs/smlib 0b1b945 (was ffaf4e8)).
-    pub imprint_extends_edge_to_proto_vertex: bool,
     /// `SmFilletSolver::ComputePointValues` chooses its finite-difference step for each point (1e-3 at a tangent point, 1e-5 otherwise), not once per process as the function-local static `sdStaticStep`, so a blend does not depend on the blends before it ([`Kernel::fillet_point_step`] is then neither read nor set, and an existing latch is kept as it is) (ND-3, #1173; the fork's tangency-labs/smlib@9e17f64 (was 0a05860)).
     pub fillet_point_step_per_point: bool,
     /// `SmBSplineSurface::CopyAndAddAnalytics` keeps an exact copy where the recognised analytic surface does not give the same points at the same parameters (7 x 7 grid), so a face split by `MakeEdgeInFaceWithVU` keeps trims that still lie on its edges (WR-450, #387; the fork's tangency-labs/smlib@7af1987 (was 276b509)).
@@ -1053,6 +1066,12 @@ pub struct Kernel {
     /// A [`RefCell`]: the certificate runs through `&Kernel`; it is never borrowed across a
     /// certificate, and a hit returns what certifying the loop again returns.
     pub loop_area_memo: RefCell<crate::mass::loop_area::LoopAreaMemo>,
+    /// Not upstream: the memo of the procedural blends this kernel recertified as it gave a
+    /// record's faces their definitions back
+    /// ([`crate::surface::procedural_blend::convert::RecertifyMemo`]), on with
+    /// [`Kernel::memoize_curve_caches`]. A [`RefCell`]: it is never borrowed across a
+    /// certificate, and a hit returns what recertifying the same blend again returns.
+    pub recertify_memo: RefCell<crate::surface::procedural_blend::convert::RecertifyMemo>,
     /// Not upstream: the fork's `thread_local` count of open blend operation scopes
     /// (`t_lOperationScopes`; [`crate::blend::fillet_section::section::OperationScope`]).
     /// Shared, so that a scope can outlive a borrow of the kernel (a fillet session holds
@@ -1110,6 +1129,7 @@ impl Kernel {
             ),
             blend_w_memo: RefCell::default(),
             loop_area_memo: RefCell::default(),
+            recertify_memo: RefCell::default(),
             blend_operation_scopes: Arc::default(),
             work_counters: WorkCounters::default(),
             blend_face_log: None,
