@@ -145,13 +145,14 @@ impl Meridian {
 }
 
 /// The meridians of `surface` in the plane through `plane_point` with unit normal `n`, when the
-/// plane holds the axis within `tol` over `reach` from its point (a sphere's: when it holds the
-/// centre); `None` otherwise. The axis is taken into the plane, so the meridians lie in it.
+/// plane holds the axis within `tol` wherever it passes the points `extent` (the face's box:
+/// along the axis as far as they reach, wherever the surface's own point is), or at its point
+/// when there are none (a sphere's: when it holds the centre); `None` otherwise. The axis is taken into the plane, so the meridians lie in it.
 fn meridians(
     surface: &Revolved,
     plane_point: Point3,
     n: Vec3,
-    reach: f64,
+    extent: &[Point3],
     tol: f64,
 ) -> Option<Vec<Meridian>> {
     let into_plane = |p: Point3| p - n * (p - plane_point).dot(n);
@@ -160,7 +161,12 @@ fn meridians(
     // direction square to it in the plane (counter-clockwise from it about `n`).
     let axial = |o: Point3, axis: Vec3| -> Option<(Point3, Vec3, Vec3)> {
         let a = axis.unitize().ok()?;
-        if !on_plane(o) || a.dot(n).abs() * reach > tol {
+        // The axis's height above the plane changes linearly along it, so it is greatest at
+        // one of the points of the axis abreast of the extent's farthest points each way.
+        let along: Vec<f64> = extent.iter().map(|p| (*p - o).dot(a)).collect();
+        let lo = along.iter().copied().reduce(f64::min).unwrap_or(0.0);
+        let hi = along.iter().copied().reduce(f64::max).unwrap_or(0.0);
+        if !(on_plane(o + a * lo) && on_plane(o + a * hi)) {
             return None;
         }
         let e1 = (a - n * a.dot(n)).unitize().ok()?;
@@ -288,28 +294,27 @@ fn trimmed<E>(
     })
 }
 
-/// The section of a face on `surface` by the plane through `plane_point` square to
-/// `plane_normal` (any length), when the plane holds the surface's axis: within `tol` (the
-/// model's tolerance) at the axis's point and at `reach` (the body's size) along it, or for a
-/// sphere at its centre. `cuts` are the points where the face's boundary crosses the plane;
-/// each lies on a meridian, which it splits. A piece between cuts is the face's when
-/// `on_face` says its middle is. Lines start and end at the cuts' feet on them, so on the
-/// face's edges; arcs run counter-clockwise about the normal; a circle the face keeps all of
-/// is whole. `Ok(None)` when the plane does not hold the axis, or for a number that is not
-/// finite or a normal of no length; `Ok(Some(vec![]))` when the plane misses the face.
-///
-/// # Errors
-///
-/// `on_face`'s error.
-pub fn axial_section<E>(
+/// Whether the plane through `plane_point` square to `plane_normal` (any length) holds the axis
+/// of `surface` within `tol` (the model's tolerance) wherever the axis passes the points
+/// `extent` (the corners of a box around the face), or for a sphere its centre: whether
+/// [`axial_section`] sections a face there. `false` for a number that is not finite or a normal
+/// of no length.
+#[must_use]
+pub fn holds_axis(
     surface: &Revolved,
     plane_point: Point3,
     plane_normal: Vec3,
-    reach: f64,
+    extent: &[Point3],
     tol: f64,
-    cuts: &[Point3],
-    mut on_face: impl FnMut(Point3) -> Result<bool, E>,
-) -> Result<Option<Vec<AxialPiece>>, E> {
+) -> bool {
+    usable(surface, plane_point, extent, tol)
+        && plane_normal
+            .unitize()
+            .is_ok_and(|n| meridians(surface, plane_point, n, extent, tol).is_some())
+}
+
+/// Whether every number is finite and `tol` positive.
+fn usable(surface: &Revolved, plane_point: Point3, points: &[Point3], tol: f64) -> bool {
     let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
     let numbers_ok = match *surface {
         Revolved::Cylinder {
@@ -330,20 +335,41 @@ pub fn axial_section<E>(
             minor,
         } => finite(centre) && finite(axis) && major.is_finite() && minor.is_finite(),
     };
-    if !(numbers_ok
+    numbers_ok
         && finite(plane_point)
-        && cuts.iter().all(|p| finite(*p))
-        && reach.is_finite()
-        && reach > 0.0
+        && points.iter().all(|p| finite(*p))
         && tol.is_finite()
-        && tol > 0.0)
-    {
+        && tol > 0.0
+}
+
+/// The section of a face on `surface` by the plane through `plane_point` square to
+/// `plane_normal` (any length), when the plane holds the surface's axis ([`holds_axis`] over
+/// `extent`, the corners of a box around the face). `cuts` are the points where the face's boundary crosses the plane;
+/// each lies on a meridian, which it splits. A piece between cuts is the face's when
+/// `on_face` says its middle is. Lines start and end at the cuts' feet on them, so on the
+/// face's edges; arcs run counter-clockwise about the normal; a circle the face keeps all of
+/// is whole. `Ok(None)` when the plane does not hold the axis, or for a number that is not
+/// finite or a normal of no length; `Ok(Some(vec![]))` when the plane misses the face.
+///
+/// # Errors
+///
+/// `on_face`'s error.
+pub fn axial_section<E>(
+    surface: &Revolved,
+    plane_point: Point3,
+    plane_normal: Vec3,
+    extent: &[Point3],
+    tol: f64,
+    cuts: &[Point3],
+    mut on_face: impl FnMut(Point3) -> Result<bool, E>,
+) -> Result<Option<Vec<AxialPiece>>, E> {
+    if !(usable(surface, plane_point, extent, tol) && usable(surface, plane_point, cuts, tol)) {
         return Ok(None);
     }
     let Ok(n) = plane_normal.unitize() else {
         return Ok(None);
     };
-    let Some(lines) = meridians(surface, plane_point, n, reach, tol) else {
+    let Some(lines) = meridians(surface, plane_point, n, extent, tol) else {
         return Ok(None);
     };
     // Each cut on the meridian it lies on (the nearest: every point of the boundary is on the

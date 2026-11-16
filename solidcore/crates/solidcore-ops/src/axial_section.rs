@@ -134,9 +134,31 @@ fn piece(p: KPiece) -> AxialPiece {
     }
 }
 
+/// Whether the plane through `plane_point` square to `plane_normal` holds the axis of `on`
+/// within `tol` (the model's tolerance) wherever it passes `extent` (a box around the face), or
+/// a sphere's centre (the kernel's [`k::holds_axis`]): whether [`axial_section`] sections the
+/// face there.
+#[must_use]
+pub fn holds_axis(
+    on: &Revolved,
+    plane_point: [f64; 3],
+    plane_normal: [f64; 3],
+    extent: &[[f64; 3]],
+    tol: f64,
+) -> bool {
+    let extent: Vec<Vec3> = extent.iter().map(|p| vec(*p)).collect();
+    k::holds_axis(
+        &surface(on),
+        vec(plane_point),
+        vec(plane_normal),
+        &extent,
+        tol,
+    )
+}
+
 /// The section of a face on `surface` by the plane through `plane_point` square to
 /// `plane_normal`, when the plane holds the surface's axis within `tol` (the model's
-/// tolerance) over `reach` (the body's size); `cuts` are where the face's boundary crosses the
+/// tolerance) wherever it passes `extent` (a box around the face, [`holds_axis`]); `cuts` are where the face's boundary crosses the
 /// plane, and `on_face` says whether a point of the surface is the face's (the kernel's
 /// [`k::axial_section`]). `Ok(None)` when the plane does not hold the axis or a number is not
 /// usable; `Ok(Some(vec![]))` when the plane misses the face.
@@ -148,17 +170,18 @@ pub fn axial_section<E>(
     on: &Revolved,
     plane_point: [f64; 3],
     plane_normal: [f64; 3],
-    reach: f64,
+    extent: &[[f64; 3]],
     tol: f64,
     cuts: &[[f64; 3]],
     mut on_face: impl FnMut([f64; 3]) -> Result<bool, E>,
 ) -> Result<Option<Vec<AxialPiece>>, E> {
     let cuts: Vec<Vec3> = cuts.iter().map(|p| vec(*p)).collect();
+    let extent: Vec<Vec3> = extent.iter().map(|p| vec(*p)).collect();
     let made = k::axial_section(
         &surface(on),
         vec(plane_point),
         vec(plane_normal),
-        reach,
+        &extent,
         tol,
         &cuts,
         |p| on_face(p.to_array()),
