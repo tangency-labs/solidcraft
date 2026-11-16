@@ -404,7 +404,13 @@ fn a_sliver_narrower_than_the_chord_is_not_split_without_end_on_the_mesh_path() 
     let (w, refused) = plan.welded();
     assert!(refused.is_empty(), "{refused:?}");
     assert_closed(&w, "lips on a base");
-    assert!(stats.unshaped.iter().any(|u| u.limits.contains(&crate::ShapeLimit::Narrow)), "no face named narrower than the chord: {:?}", stats.unshaped);
+    // Faces 11 and 17, the lips' end walls (1 x 18 mm), each have a side 0.0001 mm long at a
+    // corner, beside which the triangles are narrower than the chord: they are named. Their ears
+    // (two sides on the boundary) are still split, so they keep a smallest angle near the spec's.
+    for face in [11, 17] {
+        let u = stats.unshaped.iter().find(|u| u.face == face);
+        assert!(u.is_some_and(|u| u.limits.contains(&crate::ShapeLimit::Narrow) && u.smallest_angle > 15.0), "face {face}: {u:?}");
+    }
     let most = plan.edges.iter().map(Vec::len).max().unwrap_or(0);
     assert!(most < edges::MAX_EDGE_NODES / 10, "an edge has {most} nodes");
 }
