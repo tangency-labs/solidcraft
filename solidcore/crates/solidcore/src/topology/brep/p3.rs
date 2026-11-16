@@ -3055,21 +3055,12 @@ fn delete_face_in(
         if surviving == del_region {
             return Err(ser("the two shells are in the same region")); // Should not happen
         }
-        ignore_soft(crate::error::passed_on(
-            shell::region_remove_shell(b, del_region, os),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        shell::region_remove_shell(b, del_region, os)?;
         shell::destroy(k, b, os, env)?;
         other_shell = None;
         for s in region_shells(b, del_region)? {
-            ignore_soft(crate::error::passed_on(
-                shell::region_remove_shell(b, del_region, s),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
-            ignore_soft(crate::error::passed_on(
-                shell::region_post_insert_shell(b, surviving, s),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            shell::region_remove_shell(b, del_region, s)?;
+            shell::region_post_insert_shell(b, surviving, s)?;
         }
         if Some(del_region) == b.infinite_region() {
             b.set_infinite_region(Some(surviving));
@@ -3090,10 +3081,7 @@ fn delete_face_in(
         ))?;
 
         // Remove and Delete the DelRegion
-        ignore_soft(crate::error::passed_on(
-            b.remove_region_from_list(del_region),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        b.remove_region_from_list(del_region)?;
         b.remove_region_record(del_region)?;
     }
 
@@ -3212,15 +3200,9 @@ fn delete_face_in(
     }
 
     // Take care of face and faceuses - remove from lists
-    ignore_soft(crate::error::passed_on(
-        shell::shell_remove_faceuse(b, shell, fu),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    shell::shell_remove_faceuse(b, shell, fu)?;
     if let Some(os) = other_shell {
-        ignore_soft(crate::error::passed_on(
-            shell::shell_remove_faceuse(b, os, other_fu),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        shell::shell_remove_faceuse(b, os, other_fu)?;
     }
 
     // Don't allow stale pointers to remain in the Faces.
@@ -3262,39 +3244,33 @@ fn delete_face_in(
         // delete every edge converted into a wire
         for e in new_wire_edges {
             deleted.push(EntityRef::Edge(e));
-            ignore_soft(crate::error::passed_on(
-                match body {
-                    Some(body) => super::p4::delete_edge_with_body_identity(
-                        k,
-                        b,
-                        &mut super::p4::DeleteEnv::from_notify(env),
-                        e,
-                        None,
-                        body,
-                    ),
-                    None => delete_edge(k, b, env, e, None),
-                },
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            match body {
+                Some(body) => super::p4::delete_edge_with_body_identity(
+                    k,
+                    b,
+                    &mut super::p4::DeleteEnv::from_notify(env),
+                    e,
+                    None,
+                    body,
+                ),
+                None => delete_edge(k, b, env, e, None),
+            }?;
         }
 
         // remove vertices that have become shell vertices
         for v in orig_vertices {
             if vertex::is_shell_vertex(b, v)? {
                 deleted.push(EntityRef::Vertex(v));
-                ignore_soft(crate::error::passed_on(
-                    match body {
-                        Some(body) => super::p4::delete_vertex_with_body_identity(
-                            k,
-                            b,
-                            &mut super::p4::DeleteEnv::from_notify(env),
-                            v,
-                            body,
-                        ),
-                        None => delete_vertex(k, b, env, v),
-                    },
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                match body {
+                    Some(body) => super::p4::delete_vertex_with_body_identity(
+                        k,
+                        b,
+                        &mut super::p4::DeleteEnv::from_notify(env),
+                        v,
+                        body,
+                    ),
+                    None => delete_vertex(k, b, env, v),
+                }?;
             }
         }
     }
@@ -3322,10 +3298,7 @@ fn delete_face_nesting(
     let mut vertices_needing_new_shell = 0usize;
     if any_edgeuse.is_none() && remaining(*vertex_count) == 0 {
         let r = eu1::shell_region(b, shell)?.ok_or(null_deref("shell without region"))?;
-        ignore_soft(crate::error::passed_on(
-            shell::region_remove_shell(b, r, shell),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        shell::region_remove_shell(b, r, shell)?;
         // delete pShell
         shell::destroy(k, b, shell, env)?;
     } else {
@@ -3484,10 +3457,7 @@ fn delete_face_nesting(
 
         // Transfer faceuses from the old shell to the new shell
         for &x in &faceuses {
-            ignore_soft(crate::error::passed_on(
-                shell::shell_remove_faceuse(b, shell, x),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            shell::shell_remove_faceuse(b, shell, x)?;
             shell::shell_post_insert_faceuse(b, new_shell, x)?;
         }
     }
@@ -3510,14 +3480,8 @@ fn delete_face_nesting(
     // pLastNewShell
     let last = last_new_shell.ok_or(null_deref("no new shell"))?;
     let r = eu1::shell_region(b, shell)?.ok_or(null_deref("shell without region"))?;
-    ignore_soft(crate::error::passed_on(
-        shell::transfer_children(k, b, last, shell, None),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
-    ignore_soft(crate::error::passed_on(
-        shell::region_remove_shell(b, r, last),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    shell::transfer_children(k, b, last, shell, None)?;
+    shell::region_remove_shell(b, r, last)?;
     shell::destroy(k, b, last, env)
 }
 
@@ -4680,16 +4644,11 @@ fn turn_to_nurbs_in(
             // first extend the new surface in all directions by a small amount
             let new_surface = Surface::from(new_bss);
             let domain = new_surface.natural_uv_domain_with_nurb(k)?;
-            // (status not checked upstream: a failed call leaves the Init() box, whose
-            // size clamps to 1.0 below)
-            let srf_bbox =
-                match new_surface.calculate_bounding_box(k, &domain, [true, false, false], true) {
-                    Ok(boxes) => boxes.normal_box.unwrap_or_else(Extent3d::new),
-                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                    // (fork 60a8a51 passes this status on: `SER`)
-                    Err(e) if k.fixes.brep_edit_statuses_pass_on => return Err(e),
-                    Err(_) => Extent3d::new(),
-                };
+            // (status not checked upstream; fork 60a8a51 passes it on: `SER`)
+            let srf_bbox = new_surface
+                .calculate_bounding_box(k, &domain, [true, false, false], true)?
+                .normal_box
+                .unwrap_or_else(Extent3d::new);
             let mut size = srf_bbox.size().length();
             if size >= 1.0e15 || size <= 0.0 {
                 size = 1.0;
@@ -4954,10 +4913,7 @@ fn orient_body(
         // If this face needs swapping, do it. Aids in bookkeeping later.
         if in_swap(face) {
             // (no SER upstream; fork 60a8a51 passes the status on)
-            ignore_soft(crate::error::passed_on(
-                face1::swap_uv_with_notifications(k, b, face, env),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            face1::swap_uv_with_notifications(k, b, face, env)?;
         }
 
         let (reverse_votes, same_votes) = if just_unify_normals {
@@ -6476,9 +6432,8 @@ mod tests {
 
     /// WR-701 through a caller: `orient_trimmed_surfaces` asked to swap a cylinder face. With
     /// the face's net moved onto the axis the polar converter cannot be made on the
-    /// transposed net: the run returns the same error the face's own swap returns when
-    /// `brep_edit_statuses_pass_on` passes statuses on, and succeeds without it (the status
-    /// dropped as upstream drops it); either way the face keeps its surface, domain, face use
+    /// transposed net: the run returns the same error the face's own swap returns (the
+    /// status upstream drops is passed on), and the face keeps its surface, domain, face use
     /// and trims. The control: the unmoved face's own swap succeeds, and so does the run.
     #[test]
     fn orienting_with_a_face_whose_swap_is_refused_leaves_that_face_as_it_was() {
@@ -6551,41 +6506,29 @@ mod tests {
             (format!("{:?}", f.uv_domain), f.faceuse, kind, trims)
         };
 
-        for pass_on in [false, true] {
-            for on_axis in [false, true] {
-                let mut k = Kernel::default();
-                k.fixes.brep_edit_statuses_pass_on = pass_on;
-                // the face's own swap on a second, equal body: its error, if refused
-                let (mut direct, f2) = cylinder(&mut k, on_axis);
-                let swapped = face1::swap_uv(&k, &mut direct, f2);
-                assert_eq!(swapped.is_err(), on_axis, "{swapped:?}");
+        for on_axis in [false, true] {
+            let mut k = Kernel::default();
+            // the face's own swap on a second, equal body: its error, if refused
+            let (mut direct, f2) = cylinder(&mut k, on_axis);
+            let swapped = face1::swap_uv(&k, &mut direct, f2);
+            assert_eq!(swapped.is_err(), on_axis, "{swapped:?}");
 
-                let (mut b, face) = cylinder(&mut k, on_axis);
-                let before = state(&b, face);
-                b.set_editing_enabled(true);
-                let mut marks = Marks::default();
-                let r = with_env(|env| {
-                    orient_trimmed_surfaces(
-                        &mut k,
-                        &mut b,
-                        env,
-                        &mut marks,
-                        true,
-                        true,
-                        Some(&[face]),
-                    )
-                });
-                let what = format!("pass_on {pass_on}, on_axis {on_axis}");
-                if on_axis {
-                    match (pass_on, &r, &swapped) {
-                        (true, Err(e), Err(d)) => assert_eq!(e, d, "{what}"),
-                        (false, Ok(_), _) => {}
-                        _ => panic!("{what}: {r:?}"),
-                    }
-                    assert_eq!(state(&b, face), before, "{what}: the refused face changed");
-                } else {
-                    assert!(r.is_ok(), "{what}: {r:?}");
+            let (mut b, face) = cylinder(&mut k, on_axis);
+            let before = state(&b, face);
+            b.set_editing_enabled(true);
+            let mut marks = Marks::default();
+            let r = with_env(|env| {
+                orient_trimmed_surfaces(&mut k, &mut b, env, &mut marks, true, true, Some(&[face]))
+            });
+            let what = format!("on_axis {on_axis}");
+            if on_axis {
+                match (&r, &swapped) {
+                    (Err(e), Err(d)) => assert_eq!(e, d, "{what}"),
+                    _ => panic!("{what}: {r:?}"),
                 }
+                assert_eq!(state(&b, face), before, "{what}: the refused face changed");
+            } else {
+                assert!(r.is_ok(), "{what}: {r:?}");
             }
         }
     }

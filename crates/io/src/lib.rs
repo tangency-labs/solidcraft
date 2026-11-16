@@ -15,7 +15,11 @@ pub mod design_lock;
 mod design_metadata;
 mod dxf;
 mod dxf_out;
+mod excellon;
 pub mod formats;
+mod gerber;
+mod gerber_area;
+mod gerber_set;
 mod glb;
 pub use design::{
     DesignCompression, DesignContainerReader, DesignPreview, FileKind, ImportCache, OpenPgpSignature, OpenPgpSigner, ProvenanceChain,
@@ -60,6 +64,11 @@ pub use dxf_out::{
     admit_path, loop_lwpolyline, loop_lwpolyline_scaled, path_shapes, write_dxf_drawing, write_dxf_drawing_units, write_dxf_file,
     write_dxf_file_with_text_bounds,
 };
+pub use excellon::{DrillArc, DrillHit, DrillSlot, Drills, read_excellon};
+pub use gerber::{GerberLayer, GerberOutline, read_gerber_layer, read_gerber_outline};
+pub use gerber_set::{
+    BOARD_EXTENSIONS, BoardJob, GerberSet, MAX_SET_FILES, SetFile, SetRole, classify_set, is_zip_path, read_gerber_set, zip_entries,
+};
 pub use legacy_dir::{APP_ID, LEGACY_APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
 pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
@@ -85,6 +94,10 @@ use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Metadata, ModelState};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{MassProperties, Mesh};
+
+/// Source commit of the checkout at build time, or `"unknown"` without Git.
+/// Identifies committed source; uncommitted changes are not marked.
+pub const SOURCE_COMMIT: &str = env!("SOLIDCRAFT_SOURCE_COMMIT");
 
 /// Design file extension: new designs, autosaves and recovery files are written as `.sc`.
 pub const DESIGN_EXT: &str = "sc";

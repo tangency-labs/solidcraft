@@ -1004,6 +1004,15 @@ impl Surface {
         }
     }
 
+    /// Gives this surface, an evaluation copy ([`Surface::clone_for_evaluation`]) about to
+    /// be edited, a cache slot and NURB cells of its own
+    /// ([`Surface::detach_nurb_cells`]), so that nothing it caches after its edits reaches
+    /// the surface it was copied from.
+    pub(crate) fn detach_for_edit(&mut self) {
+        self.cache_slot = CacheSlot::default();
+        self.detach_nurb_cells();
+    }
+
     /// This surface as a B-rep's [`Snapshot`](crate::topology::Snapshot) keeps it: an
     /// exact copy ([`Surface::clone_exact_bounded`]: its kind, its owner, the face its
     /// owner chain reaches and that face's tolerance, its exact round and its made NURB)

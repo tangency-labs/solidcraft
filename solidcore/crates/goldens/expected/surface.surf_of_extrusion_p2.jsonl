@@ -592,7 +592,7 @@
 {"case":"gen0460","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0461","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":31}}}
 {"case":"gen0462","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,0.0,0.0,0.0,0.0]}}
-{"case":"gen0463","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"gen0463","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":32}}}
 {"case":"gen0464","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":163}}}
 {"case":"gen0465","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0466","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,1.0,0.0,0.0,0.0,0.0,0.0]}}
@@ -710,7 +710,7 @@
 {"case":"gen0578","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0579","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0580","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":89}}}
-{"case":"gen0581","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"gen0581","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":32}}}
 {"case":"gen0582","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0583","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,1.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0584","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":{"blocks":[[29141.70422227485,62219530.15131427,809269252.954534]],"n":177}}}
@@ -755,7 +755,7 @@
 {"case":"gen0623","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":31}}}
 {"case":"gen0624","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":117}}}
 {"case":"gen0625","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":{"blocks":[[29301.047969651634,29757.472942011453,654434.1155041998]],"n":121}}}
-{"case":"gen0626","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"gen0626","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":32}}}
 {"case":"gen0627","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0628","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":{"blocks":[[14113.652876690287,14118.060492696803,72024.40286378004]],"n":47}}}
 {"case":"gen0629","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,1.0,0.0,0.0,0.0,0.0,0.0]}}
@@ -1147,7 +1147,7 @@
 {"case":"gen1015","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,1.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen1016","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":{"blocks":[["-inf","inf","-inf"],["-inf","inf","-inf"],["-inf","inf","-inf"],[226.699997575022,226.699997575022,8098.713214601486]],"n":839}}}
 {"case":"gen1017","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0]}}
-{"case":"gen1018","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"gen1018","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":32}}}
 {"case":"gen1019","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,1.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen1020","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,1.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen1021","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,1.0,0.0,0.0,0.0,0.0,0.0]}}
@@ -1329,10 +1329,10 @@
 {"case":"gen1197","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":55}}}
 {"case":"gen1198","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,0.0]}}
 {"case":"gen1199","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":43}}}
-{"case":"global_bspline","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"global_bspline","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":32}}}
 {"case":"global_cone_tilted","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":32}}}
 {"case":"global_cylinder_class","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
-{"case":"global_extrusion_skew","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"global_extrusion_skew","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":32}}}
 {"case":"global_plane_oblique","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"global_plane_seam","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":56}}}
 {"case":"global_plane_seam_as_surface","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":56}}}

@@ -350,6 +350,7 @@ fn volume_pair(kernel: &Kernel, brep: Option<&mut Brep>) -> RResult<[f64; 2]> {
         store: &store,
         key_of: &|_| ObjectKey(0),
     };
+    crate::dump::body(kernel, "volume", brep);
     let (status, volume) = operation(brep_volume(kernel, brep, VOLUME_ACCURACY, &attributes))?;
     Ok([f64::from(status), volume.unwrap_or(0.0)])
 }
