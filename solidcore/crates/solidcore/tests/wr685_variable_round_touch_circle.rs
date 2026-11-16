@@ -258,13 +258,16 @@ fn a_cliff_overflows_variable_round_holds_its_law_on_its_touch_circles() {
     // the exact circles: here to the last digit printed until `brep_volume` closed tolerant
     // edges' gaps (#16735). The fork's figures leak through the round's tolerant edges as
     // this integrator did; each body is now pinned at its closed-gap volume, the fork's
-    // figure checked within the old leak's bound of it.
+    // figure checked within the old leak's bound of it. Since the trim pieces integrate by
+    // Gauss-Kronrod (#14460) the pinned volumes are its own: forced to accuracy 1e-11 and
+    // 1e-12 it gives them within 6.3e-14 of themselves and the earlier Runge-Kutta trim pieces
+    // forced to 1e-12 within 7.7e-14; the Runge-Kutta figures were 1.5e-10 to 1.6e-9 off.
     for (r0, r1, fork, want) in [
-        (2.0, 11.0, 5802.4435349841779, 5802.443146052507),
-        (11.0, 2.0, 5802.4435208241775, 5802.4431461379545),
-        (2.0, 20.0, 5503.8871700927575, 5503.887122636036),
-        (2.0, 30.0, 5184.0573578203966, 5184.057276011837),
-        (2.0, 50.0, 4693.6093103438334, 4693.608894404652),
+        (2.0, 11.0, 5802.4435349841779, 5802.443145192929),
+        (11.0, 2.0, 5802.4435208241775, 5802.443145280857),
+        (2.0, 20.0, 5503.8871700927575, 5503.887121258945),
+        (2.0, 30.0, 5184.0573578203966, 5184.0572736820695),
+        (2.0, 50.0, 4693.6093103438334, 4693.60888697157),
     ] {
         let (k, mut b) = cliff_rounded(kernel(true), r0, r1).expect("builds");
         let v = volume(&k, &mut b);
