@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                  }},\n\
              }});\n\
          }}\n\
-         use importer_bindings::{namespace}::{name}::{{design, source}};\n\
+         use importer_bindings::{namespace}::{name}::{{design, evaluate, source}};\n\
          macro_rules! call_import {{ ($guest:expr, $store:expr, $entry:expr, $file:expr, $options:expr) => {{ $guest.{namespace}_{name}_importer().call_import_file($store, $entry, $file, $options) }}; }}\n"
     );
     fs::write(PathBuf::from(env::var("OUT_DIR")?).join("importer.rs"), importer)?;

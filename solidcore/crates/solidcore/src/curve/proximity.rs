@@ -10,6 +10,7 @@
 //! |----------------------------|---------------------------------------------------------|
 //! | [`Curve::proved_near`]     | a line, a B-spline, and a conic by its rational B-spline |
 //! | [`Curve::proved_together`] | both ways                                               |
+//! | [`Curve::proved_overlap`]  | where two curves run together, the run proved both ways |
 //!
 //! **A tube.** A piece of a curve is enclosed by its chord and a radius `rho`: every point
 //! of the piece lies within `rho` of the chord's segment. A line's piece is its segment,
@@ -43,6 +44,14 @@
 //! length (the sagitta), so pieces whose curves run `d` apart are proved within any radius
 //! above `d` once they are about `sqrt(8 R (radius - d))` long, `R` their radius of
 //! curvature.
+//!
+//! **The run.** Two curves that run together over part of each (two sheets' edges along one
+//! seam, one shorter or shifted along the other) meet over a run whose ends are ends of the
+//! curves: at each end of the run, one curve ends on the other. [`Curve::proved_overlap`] drops
+//! each curve's two ends on the other; the ends that land within the radius bound the run
+//! (on this curve, the first and last of them by its parameter), and the run is then proved by
+//! [`Curve::proved_together`] over its two intervals. The drops only find where to look: a run
+//! is reported only as proved, or as found and not proved.
 //!
 //! Deviations: not a port. Curves of other kinds (offset, composite, iso, projected and
 //! curve-on-surface curves, a Hermite curve, a conic without its B-spline) have no hull
@@ -107,6 +116,50 @@ fn soft<T>(r: Result<T>) -> Result<Option<T>> {
         Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(None),
     }
+}
+
+/// The foot of `p` on `curve` over `interval`: its parameter, clamped to the interval, and the
+/// drop's distance. Where to look, never part of a proof (the drop snaps a foot to an end of
+/// the interval only within the scaled zero). `None` where the drop finds none.
+fn foot_on(k: &Kernel, curve: &Curve, interval: &Extent1d, p: Vec3) -> Result<Option<(f64, f64)>> {
+    let zero = EFF_ZERO * (1.0 + p.x.abs().max(p.y.abs()).max(p.z.abs()));
+    let dropped =
+        soft(curve.drop_point(k, interval, p, None, zero, None, SolverOperation::Minimize))?;
+    Ok(dropped
+        .filter(|d| d.success && d.parameter.is_finite())
+        .map(|d| {
+            (
+                d.parameter.max(interval.min()).min(interval.max()),
+                d.distance,
+            )
+        }))
+}
+
+/// Where two curves run together ([`Curve::proved_overlap`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Overlap {
+    /// No run: fewer than two ends of the curves lie within the radius of the other, or the
+    /// ends that do are within the radius of each other (the curves touch at a point).
+    Apart,
+    /// The curves run together over the run, proved: every point of each part within the
+    /// radius of the other part.
+    Proved(Run),
+    /// The run's ends were found within the radius, but the run is not proved: the curves may
+    /// part between its ends, be of a kind without a hull, or be closer than the pieces tried
+    /// could show.
+    Unproved(Run),
+}
+
+/// The run of two curves ([`Overlap`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Run {
+    /// The run's part of this curve's interval, then of the other's.
+    pub intervals: [Extent1d; 2],
+    /// The same as fractions of the intervals given (0 at the start, 1 at the end), this
+    /// curve's, then the other's, each `[low, high]`.
+    pub fractions: [[f64; 2]; 2],
+    /// Whether the other curve runs along the run in this curve's sense.
+    pub same_sense: bool,
 }
 
 /// An upper bound of the distance from `p` to the segment from `a` to `b` (module docs).
@@ -515,22 +568,9 @@ impl Curve {
                 _ => None,
             })
             .collect();
-        // the foot of a point on the other curve: where to look, not part of the proof (the
-        // drop snaps a foot to an end of the interval only within the scaled zero)
+        // the foot of a point on the other curve: where to look, not part of the proof
         let foot = |p: Vec3| -> Result<Option<f64>> {
-            let zero = EFF_ZERO * (1.0 + p.x.abs().max(p.y.abs()).max(p.z.abs()));
-            let dropped = soft(other.drop_point(
-                k,
-                other_interval,
-                p,
-                None,
-                zero,
-                None,
-                SolverOperation::Minimize,
-            ))?;
-            Ok(dropped
-                .filter(|d| d.success && d.parameter.is_finite())
-                .map(|d| d.parameter.max(lo).min(hi)))
+            Ok(foot_on(k, other, other_interval, p)?.map(|(t, _)| t))
         };
         let mut tried = 0_usize;
         while let Some((x, y, depth)) = stack.pop() {
@@ -592,6 +632,93 @@ impl Curve {
         Ok(
             self.proved_near(k, interval, other, other_interval, radius, ends)?
                 && other.proved_near(k, other_interval, self, interval, radius, ends)?,
+        )
+    }
+
+    /// Where this curve over `interval` and `other` over `other_interval` run together within
+    /// `radius` (module docs, "The run"): each curve's two ends dropped on the other, those
+    /// within `radius` bounding the run, and the run proved by [`Curve::proved_together`].
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`](crate::error::SolidError::InvalidInput) for a radius not finite
+    /// and positive or an interval not finite or reversed; the evaluations' errors and those
+    /// of the proof (its cancellation).
+    pub fn proved_overlap(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        other: &Self,
+        other_interval: &Extent1d,
+        radius: f64,
+    ) -> Result<Overlap> {
+        let bounds = [
+            interval.min(),
+            interval.max(),
+            other_interval.min(),
+            other_interval.max(),
+        ];
+        if !(bounds.iter().all(|v| v.is_finite())
+            && interval.min() <= interval.max()
+            && other_interval.min() <= other_interval.max()
+            && radius.is_finite()
+            && radius > 0.0)
+        {
+            return Err(crate::error::SolidError::invalid_input(
+                "curve::proximity::proved_overlap",
+                "a radius not finite and positive, or an interval not finite or reversed",
+            ));
+        }
+        // each end within the radius of the other curve: (this curve's parameter, the
+        // other's, the point)
+        let mut ends: Vec<(f64, f64, Vec3)> = Vec::new();
+        for t in [interval.min(), interval.max()] {
+            let p = self.evaluate_point(k, t)?;
+            if let Some((s, d)) = foot_on(k, other, other_interval, p)? {
+                if d <= radius {
+                    ends.push((t, s, p));
+                }
+            }
+        }
+        for s in [other_interval.min(), other_interval.max()] {
+            let q = other.evaluate_point(k, s)?;
+            if let Some((t, d)) = foot_on(k, self, interval, q)? {
+                if d <= radius {
+                    ends.push((t, s, q));
+                }
+            }
+        }
+        let first = ends.iter().min_by(|a, b| a.0.total_cmp(&b.0));
+        let last = ends.iter().max_by(|a, b| a.0.total_cmp(&b.0));
+        let (Some(&(t0, s0, p0)), Some(&(t1, s1, p1))) = (first, last) else {
+            return Ok(Overlap::Apart);
+        };
+        // ends within the radius of each other: a point of contact, not a run
+        if (p1 - p0).length() <= radius {
+            return Ok(Overlap::Apart);
+        }
+        let mine = Extent1d::from_min_max(t0, t1);
+        let theirs = Extent1d::from_min_max(s0.min(s1), s0.max(s1));
+        let fraction = |ivl: &Extent1d, v: f64| ivl.inversion(v).parameter;
+        let (Some(a0), Some(a1), Some(b0), Some(b1)) = (
+            fraction(interval, mine.min()),
+            fraction(interval, mine.max()),
+            fraction(other_interval, theirs.min()),
+            fraction(other_interval, theirs.max()),
+        ) else {
+            return Ok(Overlap::Apart);
+        };
+        let run = Run {
+            intervals: [mine, theirs],
+            fractions: [[a0, a1], [b0, b1]],
+            same_sense: s0 <= s1,
+        };
+        Ok(
+            if self.proved_together(k, &mine, other, &theirs, radius, &[])? {
+                Overlap::Proved(run)
+            } else {
+                Overlap::Unproved(run)
+            },
         )
     }
 }
@@ -708,6 +835,87 @@ mod tests {
         assert!(!within(&[]));
         assert!(within(&balls(0.11)));
         assert!(!within(&balls(0.04)));
+    }
+
+    /// Two lines along x: one from 0 to 10, one from 5 to 15 (either way along), run together
+    /// from 5 to 10, the second half of the first and the first half of the second; a copy
+    /// of the first runs with it all along; one half a unit off runs with neither at a
+    /// hundredth; one meeting it end to end only touches.
+    #[test]
+    fn lines_along_one_another_run_together_over_their_shared_part() {
+        let k = Kernel::default();
+        let line = |a: f64, b: f64, y: f64| {
+            Curve::from(Line::from_points(
+                Point3::new(a, y, 0.0),
+                Point3::new(b, y, 0.0),
+                3,
+            ))
+        };
+        let a = line(0.0, 10.0, 0.0);
+        let ia = a.natural_interval();
+        for (b, same) in [(line(5.0, 15.0, 0.0), true), (line(15.0, 5.0, 0.0), false)] {
+            let ib = b.natural_interval();
+            let Overlap::Proved(run) = a.proved_overlap(&k, &ia, &b, &ib, 1e-2).unwrap() else {
+                panic!("not proved");
+            };
+            assert_eq!(run.same_sense, same);
+            let near = |x: [f64; 2], y: [f64; 2]| {
+                (x[0] - y[0]).abs() <= 1e-12 && (x[1] - y[1]).abs() <= 1e-12
+            };
+            assert!(near(run.fractions[0], [0.5, 1.0]), "{run:?}");
+            let theirs = if same { [0.0, 0.5] } else { [0.5, 1.0] };
+            assert!(near(run.fractions[1], theirs), "{run:?}");
+        }
+        let copy = line(0.0, 10.0, 0.0);
+        let Overlap::Proved(run) = a
+            .proved_overlap(&k, &ia, &copy, &copy.natural_interval(), 1e-2)
+            .unwrap()
+        else {
+            panic!("not proved");
+        };
+        assert_eq!(run.fractions, [[0.0, 1.0]; 2]);
+        let off = line(0.0, 10.0, 0.5);
+        assert_eq!(
+            a.proved_overlap(&k, &ia, &off, &off.natural_interval(), 1e-2)
+                .unwrap(),
+            Overlap::Apart
+        );
+        let after = line(10.0, 20.0, 0.0);
+        assert_eq!(
+            a.proved_overlap(&k, &ia, &after, &after.natural_interval(), 1e-2)
+                .unwrap(),
+            Overlap::Apart
+        );
+        assert!(a.proved_overlap(&k, &ia, &copy, &ia, f64::NAN).is_err());
+        assert!(a.proved_overlap(&k, &ia, &copy, &ia, 0.0).is_err());
+    }
+
+    /// An arc and its chord share their ends but part by the sagitta between them: at a
+    /// radius below it the run's ends are found and the run is not proved; above it, proved.
+    #[test]
+    fn a_chord_and_its_arc_run_together_only_within_the_sagitta() {
+        let k = Kernel::default();
+        let circle = ellipse(&k, Point3::new(0.0, 0.0, 0.0), 4.0, 4.0);
+        let half = (0.1_f64 / 4.0).asin();
+        let p = Point3::new(-0.1, 4.0 * half.cos(), 0.0);
+        let q = Point3::new(0.1, 4.0 * half.cos(), 0.0);
+        let chord = Curve::from(Line::from_points(p, q, 3));
+        let (s, t) = (at(&k, &circle, p), at(&k, &circle, q));
+        let arc = Extent1d::from_min_max(s.min(t), s.max(t));
+        let sagitta = 4.0 * (1.0 - half.cos());
+        let seg = chord.natural_interval();
+        assert!(matches!(
+            chord
+                .proved_overlap(&k, &seg, &circle, &arc, 0.5 * sagitta)
+                .unwrap(),
+            Overlap::Unproved(_)
+        ));
+        assert!(matches!(
+            chord
+                .proved_overlap(&k, &seg, &circle, &arc, 1.01 * sagitta)
+                .unwrap(),
+            Overlap::Proved(_)
+        ));
     }
 
     /// A line across a circle of radius 2 at the origin: the crossing's reach along the
