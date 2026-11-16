@@ -189,7 +189,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.offset_extension_as_itself = true;
     k.fixes.offset_extension_from_base = true;
     k.fixes.point_solve_keeps_triangle_guess = true;
-    k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.proto_vertex_miss_is_false = true;
     k.fixes.revolution_round_offset_collapses = true;
@@ -198,12 +197,8 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.simple_coincidence_crossing_is_point = true;
     k.fixes.ssi_low_angle_start_on_probation = true;
-    k.fixes.ssi_pole_point_keeps_its_tangent = true;
-    k.fixes.ssi_tangent_contact_points = true;
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
-    k.fixes.transform_model_size_from_body_box = true;
-    k.fixes.transform_scales_each_tolerance = true;
     k.fixes.uv_trim_corner_end_points_only = true;
     let mut b = plate(&mut k);
     let before = volume(&k, &mut b);

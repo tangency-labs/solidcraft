@@ -778,6 +778,7 @@ fn run_rust(
         store: &store,
         key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
     };
+    crate::dump::body(k, "mass", &body);
     match solidcore::mass::integrator::properties::brep_mass_properties(
         k,
         &mut body,
@@ -1127,6 +1128,7 @@ fn shell_rust(k: &mut Kernel, input: &RealSolid, shell: ShellAfter) -> SolidResu
         store: &store,
         key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
     };
+    crate::dump::body(k, "shell_mass", &result);
     match solidcore::mass::integrator::properties::brep_mass_properties(
         k,
         &mut result,

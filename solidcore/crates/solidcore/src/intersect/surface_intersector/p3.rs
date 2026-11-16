@@ -81,6 +81,13 @@
 //!   pole point with an ill-conditioned UV tangent and singular parameter, and the trims
 //!   failed the body check. Such a step goes on to the pole
 //!   ([`SurfaceIntersector::pole_corner_step`]).
+//! - **Boundary curve intervals** (not upstream). `FindBoundaryStartPoints` intersects
+//!   each iso boundary curve with the other surface over the domain's interval
+//!   (`sIntervals`), though the curve's trim to that domain can end it at a knot just
+//!   inside it (a short end span of a rational curve snapped to the knot, or a
+//!   degenerate one removed). The solve then returned range ends outside the curve, and
+//!   trimming the curve to them failed (#17450). The interval is the domain's within
+//!   the curve's own, so its ends are the curve's where the curve is the shorter.
 //! - **Unported callees.**
 //!   `SmSurface::DropAndTrimCurve`'s trace (`intersect.surface_drop_curve`, through
 //!   [`Surface::drop_and_trim_curve`]) return [`SolidError::Unported`], which always propagates (also where upstream
@@ -289,11 +296,28 @@ pub(crate) struct DeferredTouching {
     boundary: Curve,
 }
 
+#[cfg(test)]
+impl DeferredTouching {
+    /// A deferred touching point at `point` from `tsp`, on the boundary curve
+    /// `boundary`.
+    pub(crate) fn new(point: Point3, tsp: TsectPnt, boundary: Curve) -> Self {
+        Self {
+            point,
+            tsp,
+            boundary,
+        }
+    }
+}
+
 /// Appends the touching curve of `tsp` to `out`: degenerate 3D and UV curves at
 /// `point` and the UV points of `tsp`, of type touching, deviated by the distance
 /// between `tsp`'s surface points (the degenerate point branch of
 /// `FindBoundaryStartPoints`).
-fn push_touching_curve(out: &mut TsectCurves, point: Point3, tsp: &TsectPnt) -> Result<()> {
+pub(crate) fn push_touching_curve(
+    out: &mut TsectCurves,
+    point: Point3,
+    tsp: &TsectPnt,
+) -> Result<()> {
     // 3D curve, then the UV curves
     let c3 = BSplineCurve::create_degenerate_curve(3, point)?;
     out.curves_3d.push(Curve::from(c3));
@@ -485,7 +509,17 @@ impl SurfaceIntersector<'_> {
                 let norm_param = if l_crv < 2 { 0.0 } else { 1.0 };
                 let l_coord = l_crv % 2;
                 let l_side = usize::from(l_crv >= 2);
-                let bsc_ivl = intervals.get(l_crv).copied().unwrap_or_default();
+                // the boundary curve's own interval within the domain's: its trim to the
+                // domain may end it at a knot just inside (a short end span kept or removed),
+                // and a solve over the domain's interval then finds ends outside the curve
+                let Ok(bsc_ivl) = intervals
+                    .get(l_crv)
+                    .copied()
+                    .unwrap_or_default()
+                    .intersect(&tgt.natural_interval())
+                else {
+                    continue;
+                };
 
                 // skip degenerate TargetCurves
                 if tgt.is_degenerate(k, EFF_ZERO, Some(&bsc_ivl))? {
@@ -732,7 +766,9 @@ impl SurfaceIntersector<'_> {
     /// Adds the touching points [`SurfaceIntersector::find_boundary_start_points`]
     /// left out for a start point on them (in the order it found them) whose two
     /// surface points are closer than `this_approx_tol_3d` and which are on none of
-    /// the curves found (boundary, traced and interior); the list is emptied.
+    /// the curves `out` holds; the list is emptied. `DoIntersection` calls it last,
+    /// on the curves left once it has removed degenerate curves that lie on others, so
+    /// a removed curve covers nothing.
     ///
     /// Upstream drops a touching point on a start point for good, as the curve traced
     /// from that start point is to cover it ("due to seams"). A start point that traces
@@ -2507,5 +2543,62 @@ mod tests {
             .is_err());
         assert!(out.curves_3d.is_empty());
         assert!(si.start_points().is_empty());
+    }
+
+    /// A boundary curve whose trim to the domain ends at a knot just inside it is
+    /// intersected over its own interval (#17450). The first surface is the unit square
+    /// of the plane z = 0 as a rational B-spline with a double knot at u = 0.5, and its
+    /// domain starts a hundredth of the zone tolerance before that knot: the trim of its
+    /// v = 1 boundary curve keeps no span that short and starts at the knot. That curve
+    /// lies in the plane y = 1, a coincident range up to that plane's edge. Solved over
+    /// the domain's interval, the range started before the curve, and trimming the
+    /// curve to it failed.
+    #[test]
+    fn a_boundary_curve_ending_at_a_knot_inside_the_domain_is_intersected_over_its_interval() {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as NurbSurface;
+
+        let k = Kernel::default();
+        let net = [0.0, 0.25, 0.5, 0.75, 1.0]
+            .iter()
+            .map(|&x| vec![CPoint::new(x, 0.0, 0.0, 1.0), CPoint::new(x, 1.0, 0.0, 1.0)])
+            .collect();
+        let square = Surface::from(BSplineSurface::from_nurb(
+            NurbSurface::new(
+                net,
+                2,
+                1,
+                vec![0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0],
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .expect("net"),
+            false,
+        ));
+        // the plane y = 1 over x in [-2, 0.75] and z in [-2, 2]: the range ends inside
+        // the curve, so the curve is trimmed to it
+        let wall = Surface::from(Plane::new(
+            Vec3::new(-2.0, 1.0, -2.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Point2::new(2.75, 4.0),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        ));
+        let short = ZONE_TOL_3D / 100.0;
+        let domain = Extent2d::from_bounds(0.5 - short, 0.0, 1.0, 1.0);
+        let whole = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let mut si = SurfaceIntersector::new(&k, &square, &domain, &wall, &whole, false)
+            .expect("intersector");
+        let mut out = TsectCurves::default();
+        let all = Extent3d::from_bounds(-10.0, -10.0, -10.0, 10.0, 10.0, 10.0);
+        si.find_boundary_start_points(&k, &all, &mut out)
+            .expect("boundary start points");
+        // the boundary curve from the knot to the wall's edge
+        let found: Vec<Extent1d> = out.curves_3d.iter().map(Curve::natural_interval).collect();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found.iter().all(|ivl| ivl.min() == 0.5 && ivl.max() < 1.0),
+            "{found:?}"
+        );
     }
 }

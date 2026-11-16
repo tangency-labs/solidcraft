@@ -196,22 +196,27 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
 /// coordinates, so two parts built alike (two screws of one size) each have a face at the same
 /// point, and without this the second part's thread went on the first part's body.
 pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>, p: Vec3, ask: &ThreadAsk) -> Result<ThreadOn> {
-    let found: Vec<(usize, kernel::CylinderFace)> = st
-        .bodies
-        .iter()
-        .enumerate()
-        .filter(|(_, b)| !super::more::beyond_cylinder_reach(b, p))
-        .filter_map(|(i, b)| {
-            #[cfg(test)]
-            super::cost_tests::count(|c| c.cylinder_search += 1);
-            kernel::cylinder_face_at(&b.body, p).map(|c| (i, c))
-        })
-        .collect();
-    let own = |i: &usize| component.is_some_and(|c| st.bodies.get(*i).is_some_and(|b| b.component == c));
-    let any_own = found.iter().any(|(i, _)| own(i));
+    // The component's own bodies are searched first; the others only when none of its own has
+    // a face there (each body searched is tessellated).
+    let own = |b: &ModelBody| component.is_some_and(|c| b.component == c);
+    let search = |want_own: bool| -> Vec<(usize, kernel::CylinderFace)> {
+        st.bodies
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| own(b) == want_own && !super::more::beyond_cylinder_reach(b, p))
+            .filter_map(|(i, b)| {
+                #[cfg(test)]
+                super::cost_tests::count(|c| c.cylinder_search += 1);
+                kernel::cylinder_face_at(&b.body, p).map(|c| (i, c))
+            })
+            .collect()
+    };
+    let mut found = search(true);
+    if found.is_empty() {
+        found = search(false);
+    }
     let (bi, cyl) = found
         .into_iter()
-        .filter(|(i, _)| !any_own || own(i))
         .min_by(|a, b| {
             let dist = |c: &kernel::CylinderFace| ((p - c.axis_point - c.axis * (p - c.axis_point).dot(c.axis)).len() - c.radius).abs();
             dist(&a.1).total_cmp(&dist(&b.1))

@@ -593,18 +593,6 @@ pub struct UpstreamFixes {
     pub linear_sweep_arc_is_cylinder: bool,
     /// Planar faces from curves join a loop touching another loop at a vertex into that loop (WR-405, #892).
     pub join_touching_loops: bool,
-    /// `sm_CheckEdgeuseGeometry` evaluates the clockwise neighbour in UV space with
-    /// `SmEdgeuse::NormalizedEvaluate(.., TRUE, ..)`, whose `GetOrCreateUVTrimCurve`
-    /// stores a new UV trim curve on that neighbour: a `const` validation
-    /// (`SmBrep::ValidatePointers`, e.g. from `SmBrepConstructor::EndShell(TRUE)`) then
-    /// changes the B-rep it is asked to check (WR-446;
-    /// `plan/upstream-issues/WR-446--brepconstructor-endshell-validatepointers-makes-uv-trim-curves.md`).
-    /// With this set the neighbour is evaluated with `ok_to_make_uv_trim_curve = FALSE`:
-    /// the 3D point is still evaluated and dropped onto the existing face, but no trim
-    /// is made; the self evaluation, the existing trims and the statuses are unchanged.
-    /// Off by default for pinned C++ parity. This is not the WR-406 trim-reversal check:
-    /// validation still repairs existing trims as before.
-    pub validation_does_not_make_uv_trims: bool,
     /// [`crate::topology::edgeuse::p2::is_convex_radial_sector`]
     /// (`SmEdgeuse::IsConvexRadialSector`) propagates a failing
     /// [`crate::topology::edgeuse::p2::evaluate_binormal_step_off`] status on either this
@@ -617,8 +605,6 @@ pub struct UpstreamFixes {
     pub edgeuse_convexity_propagates_step_off_failure: bool,
     /// `SmBrep::LocalOperation` sizes the offset executive's distance (by which it extends the neighbouring surfaces to meet the moved ones) from a box that also holds the replacement surfaces, not from the original body alone, so a face moved further than about the body's size away is still reached (WR-534; the fork's tangency-labs/smlib@a1ee273).
     pub local_operation_box_holds_new_surfaces: bool,
-    /// An inset's `do_extended_offset` makes manifold only the finite regions of the merged offset that are cavity, not every finite region (upstream's own TODO there: "we will need to select regions to keep"): a region is cavity where one of its faces has the body's face the wall's thickness behind it and none has the body's face that far ahead. Where a floor is no thicker than the wall its two faces' offsets cross and the merge closes the region between them; kept, the cavity was no manifold solid and the shell failed with `SM_ERR` (1001) (WR-667; the fork's tangency-labs/smlib@37af643).
-    pub offset_keep_cavity_regions: bool,
     /// In a local operation (`SmBrep::LocalOperation`), `SmOffsetGeometryCreation::ExtendTrimEdges` fails a tangent or lamina edge whose lift onto one face's new surface drops onto the other's farther than ten times `max(the offset edge's tolerance, the approximation tolerance)`, and `EdgeuseOffset` passes that failure on, so the operation is refused; upstream ignores it ("will be fixed later", which no later step of a local operation does) and returns a body with an edge as loose as the gap between a moved face and its unmoved tangent neighbour (WR-530, #402; the fork's tangency-labs/smlib@23c5b0a). Offsets and shells are unchanged.
     pub local_operation_refuses_loose_tangent_edges: bool,
     /// A local operation that moves one of two tangent faces along its normal builds the step: `EdgeuseOffset` finds the two faces parallel but apart across the edge (`IsStepAcrossEdge`) and builds the ruled wall between their edges (`CreateStepWall`, rails of uniform weight made non-rational), kept out of the face extensions; `CloseLoopGaps` closes the gaps the wall leaves at its ends and the edges running past its corners are split; a vertex moved past an edge's other end is `SM_ERR_OFFSET_EDGE_VANISHES` (1043) (WR-530 addendum; tangency-labs/smlib 5d428ae, 90aabff, 34318f4).
@@ -634,8 +620,6 @@ pub struct UpstreamFixes {
     /// removes it, so the trim passes the check (#2129). Off by default for pinned SMLib
     /// compatibility.
     pub bspline_trim_preserves_uv_spans: bool,
-    /// The Boolean's topology intersector treats a self-loop proto edge whose ends a vertex definition on a vertex combined (`CanCombineVertexDefinitions`) as degenerate, instead of `SmProtoEdge::Resolve` splitting it onto that one vertex, after which `SmMerge::MakeFaceuse` returns `SM_ERR` (WR-214, #480; `plan/upstream-issues/WR-214--smprotoedge-resolve-splits-a-self-loop-proto-edge-onto-one.md`).
-    pub proto_edge_self_loop_on_vertex_degenerate: bool,
     /// Extrusions, revolutions, sweeps, lofts and the station sweeps (`SmPrimitiveCreation`,
     /// `SmTopologySweep`, the translational and rotational sweep geometry and `SM_API`'s
     /// primitive wrappers) pass on the statuses SMLib drops: a failed evaluation, copy,
@@ -698,22 +682,12 @@ pub struct UpstreamFixes {
     pub boolean_vertex_by_best_crossing: bool,
     /// `SmProtoEdge::Resolve` splits a proto edge from a proto vertex back to itself whose curve ends find two of its vertex definitions at each other definition of that proto vertex lying on the curve (`DropPoint` within the larger of the two tolerances, farther than twice it from both ends), then resolves the proto vertex; upstream keeps the edge whole past that third vertex, a vertex of its own face, and the merge fails (`SM_ERR`; two equal tubes a hair apart end to end) (WR-579, #1517; the fork's tangency-labs/smlib@9eec159).
     pub proto_edge_splits_at_captured_vertices: bool,
-    /// `SmProtoEdge::Split` gives the new upper child proto edge the split parameter to this
-    /// edge's old maximum, `[dT, old_max]`, where pinned v1.0.1 reads this edge's maximum
-    /// after clamping it and the upper child gets the empty interval `[dT, dT]` (WR-101;
-    /// `plan/upstream-issues/WR-101--addendum-2026-10-31-opt-in-upper-interval.md`). The
-    /// lower child is `[old_min, dT]` either way. Off by default for pinned C++ parity.
-    pub proto_edge_split_upper_keeps_the_old_max: bool,
     /// `SmFace::CurveOnClassify` classifies an interval whose two ends lie on one face edge (or its vertices) and whose midpoint is within the intersection tolerance of it as on that edge (the fork's `ClassifyEdgeInterval`, WR-305, #1057). Curved pieces only: a straight interval along a straight edge is always classified, by a certificate on its two ends (the distance is affine along it), with or without this flag.
     pub classify_edge_interval: bool,
     /// `SmProtoEdge::Resolve` treats a proto edge from a proto vertex back to itself whose ends find one vertex definition as degenerate below twice the proto vertex's containment radius, and `ImprintIntersections` fits that vertex to its edges (WR-306, #1058).
     pub degenerate_proto_edge_in_one_vertex: bool,
     /// `MakeEdgeInFaceWithVU` grows each end vertex's tolerance to twice its gap to the new edge's end (only if larger), after `RefreshTolerance` keeps it as it was, so `AssertValid` does not refuse the edge (WR-469, #870; a solidcore-only fix, not in the SolidCraft fork at tangency-labs/smlib@26cc451, whose `MakeEdgeInFaceWithVU` ends with `RefreshTolerance` only; `plan/upstream-issues/WR-469--make-edge-in-face-vertex-tolerance-gap.md`).
     pub new_edge_vertex_tolerance_covers_gap: bool,
-    /// `SmBrep::Transform` changes no tolerance under a scale of 1 (a rotation or reflection), and under a scale s sets each vertex, edge and face tolerance to the larger of its own times s and the new body tolerance, not every one to the body tolerance (WR-507, #1520; tangency-labs/smlib#49).
-    pub transform_scales_each_tolerance: bool,
-    /// `SmBrep::Transform` takes a scaled body's model size from the body's bounding box (vertices, edges and faces, not grown by tolerances), not from its vertices alone, so a body with no vertices (a lone torus) does not get a zero tolerance (WR-508, #1521; tangency-labs/smlib#50).
-    pub transform_model_size_from_body_box: bool,
     /// `SmTorus::IsNurbSurfaceTorus` and `SmSphere::IsNurbSurfaceSphere` keep the NURB they tested (rebuilding the analytic data from it, as `SetFromGwNurb` does), not the one made from the fitted circles (~1e-11 off), and the sphere test takes a half meridian within `180 + 360 * SM_EFF_ZERO` degrees, not `180 + SM_EFF_ZERO` (WR-493, #1433; tangency-labs/smlib@7ea6a96). The sphere's sweep interval is its polar curve's, so a small corner sphere passes `SmSurfOfRevolution` tests #6 and #7 (#2073; not in the fork).
     pub found_torus_sphere_keep_tested_nurb: bool,
     /// `FindPolygonGuess` keeps a suspicious control-net triangle guess as a candidate against the nearest control point's, and returns the nearer one on the surface, so a rational surface whose control points are farther apart than its neighbouring parts does not lose a good guess (WR-444, #1164).
@@ -746,14 +720,10 @@ pub struct UpstreamFixes {
     pub fillet_trace_reaches_rails: bool,
     /// `SmFilletGeom::TrimRailCurves` trims a rail at its own knot next to the parameter its end vertex drops to, inside the trim, when the rail between the two is no longer than the target B-rep's zone tolerance (`sm_SnapRailEndToKnot`): a trim there left an end span shorter than the tolerance with coincident control points, an internal point singularity of the rail and of the face curves trimmed with it, which the body check refuses. It happens where the rail stands still at a face's boundary past its end and where the section's other rail crosses its side edge there (WR-664; the fork's tangency-labs/smlib@7d79866).
     pub fillet_rail_trim_at_near_knot: bool,
-    /// `SmAdvSurfaceIntersector::FindInteriorCurves` seeds a Newton search for isolated tangential contact points (zeros of `S1 - S2` with parallel normals, 4x4 system with the exact Jacobian) from the leaf pairs it cannot trace (normals within 5 or 2 degrees, no local intersection), plus the poles, and adds each contact with a numerically zero gap and normals within 1e-4 rad that is not on a curve already found as a degenerate `TOUCHING` curve (WR-74, #394; the fork's tangency-labs/smlib@9e8bf10 (was c26edbc)). Higher-order contacts (equal curvature) are not found.
-    pub ssi_tangent_contact_points: bool,
     /// `SmAdvSurfaceIntersector::FindInteriorCurves` traces a start point whose surface normals are within 5 degrees (guess) or 2 degrees (solution) on probation instead of skipping it, keeping the trace only when it closes into a crossing loop whose box diagonal exceeds twice the tolerance; starts below `2 tol / model size` radians are still skipped and rejected traces (and their start points) are remembered so neighbouring starts are not retraced. A small loop between nearly tangent surfaces (a plane just above a NURBS paraboloid's apex) was otherwise never found (WR-79 part 2, #396; the fork's tangency-labs/smlib@1f5c0f7 (was 30d25bf)).
     pub ssi_low_angle_start_on_probation: bool,
     /// `SmSurfaceIntersector` traces an open tangent curve once: `AddStartPoint` keeps one start point per cluster of tangent boundary start points (`IsSameTangentCluster`), a finished trace removes the clusters at its ends (`DoIntersection`), `TraceCurve` runs its "already traced" test on a first step that snapped onto another start point, and a near-tangent trace stops at the free end of a curve already found instead of running over it (WR-76, #392; the SolidCraft fork's tangency-labs/smlib@920da20 (was 0ce09f2)).
     pub ssi_trace_tangent_curves_once: bool,
-    /// `SmSurfaceIntersector::StepBackFromSingularity` leaves each point its own curve tangent: the tangent at a surface pole comes from the pole's limit normal and is exact, and copying the previous point's over it bent the Hermite span into the pole (a line projected through a sphere's pole, r 20, came out 2.02e-4 off the sphere). Only the surface derivatives come from the stepped-back point (WR-550; the fork's tangency-labs/smlib@8d95600).
-    pub ssi_pole_point_keeps_its_tangent: bool,
     /// `DoIntersection` traces the tangential intersection curves the marcher cannot follow (the surfaces touch along them, `n1 x n2 = 0`), and the crossing branches through the contact points where crossing curves meet, which it reports as touching points (WR-75; tangency-labs/smlib ef4ab25, e9fde8f, d8c61db, 1693c9d). `FindInteriorCurves` keeps the node pairs it skips for parallel normals as seeds. A crossing branch the marcher's curve covers except inside the band where the surfaces are within tolerance of each other is dropped, not traced on along a tangency past that curve's end (#2089).
     pub ssi_tangent_curve_tracer: bool,
     /// `SmSurfaceIntersector::DoIntersection` splits each traced crossing (or near-tangent) B-spline curve, with its two UV curves, where it passes through a singular point of the intersection (the normals parallel while two branches cross): `|n1 x n2|` is sampled 8 times per knot span, each sharp minimum refined by golden section, and the curve split where the sine is below 1e-6 and rises above 1e-3 again on both sides, more than 10 approximation tolerances from its ends; the tails are appended. Upstream's marcher steps straight through such a node, so the curves cross there without ending; two cylinders touching inside at one point then union to a body that loses one of them, fails 1001 in `MakeFaceuse`, or fails the check's seam tests (WR-77, #393, #2110; the fork's tangency-labs/smlib@3c9d1d3, `sm_SplitCurvesAtSingularPoints`).
