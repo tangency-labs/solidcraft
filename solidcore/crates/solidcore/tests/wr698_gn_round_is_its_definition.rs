@@ -156,7 +156,7 @@ fn check(what: &str, k: &Kernel, b: &mut Brep, want: &Fork, size: f64) {
 
 /// Two edges of different wedges after the box's top back edge is chamfered 5 (the
 /// chamfer's top edge and the box's bottom front edge), rounded r 2 at the equal area
-/// default; and, without the definition flag, the same rounds stay B-splines.
+/// default.
 #[test]
 fn a_gn_round_is_its_definition() {
     const FORK: Fork = Fork {

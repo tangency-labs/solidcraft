@@ -21,7 +21,8 @@ reader reads `SmProceduralBlend_TYPE` on every kernel.
   changes.
 - **Goldens:** `blend.fillet_executive_p3` moves 38 rows; every other unit passes unchanged. Each moved row is replayed
   by the unit's own tests (`round_definition_rows` in `end_to_end.rs` and `two_offset_chamfer.rs`): its blend faces are
-  definitions whose nets re-certify within their bounds and no logged blend face is bare, its counts are the
+  definitions whose nets re-certify within their bounds, no logged blend face is a bare net (a face without a
+  definition is an exact plane, sphere, cone or torus, or a face of a pinned corner), its counts are the
   golden's, and on a closed result the integrator's converged volume lies in the certified volume enclosure of the new
   body widened by the nets' certified distances. Topology moves: the bottle's rail splits where
   its foot crosses the shoulder face's C1 knot (one vertex and one edge more), and the half rim's chamfer at setbacks

@@ -1887,14 +1887,14 @@ pub(super) mod round_definition_proof {
     /// narrows, are wider) widened by `spread`. Asserts that the volume the integrator
     /// converges to (its estimate at its finest accuracy, 1e-8 relative) lies in it. The
     /// golden's own estimate (at 1e-4) and the row before (`old`, the old body's) are
-    /// returned for the record only: an estimate is not a bound.
+    /// printed beside the band for the record only: an estimate is not a bound.
     pub(in super::super) fn volume_band(
         k: &Kernel,
         b: &mut Brep,
         spread: f64,
         old: f64,
         name: &str,
-    ) -> (f64, f64) {
+    ) {
         let store = solidcore::geom::attribute::AttributeStore::default();
         let attributes = PropertyAttributes {
             store: &store,
@@ -1916,10 +1916,9 @@ pub(super) mod round_definition_proof {
         );
         eprintln!(
             "{name}: converged {converged}, the golden's estimate {new} (before {old}), \
-             band width {:e}",
+             certified [{lo}, {hi}], band width {:e}",
             hi - lo
         );
-        (lo, hi)
     }
 }
 
@@ -1970,8 +1969,8 @@ pub(super) mod round_definition_rows {
     /// No face the operation logged as a blend face (`blend::definition_check`) is a bare
     /// net that a definition should hold: a face without a definition is either an exact
     /// analytic surface (a plane, sphere, cone or torus: the ball's own surface, nothing
-    /// approximated) or a face of a pinned corner (the corner hierarchy this flag never made
-    /// definitions; its faces are definitions only with the blend corner's fixes).
+    /// approximated) or a face of a pinned corner (a corner hierarchy that is not built as a
+    /// definition; its faces are definitions only with the blend corner's fixes).
     pub(in super::super) fn no_bare_blend_face(k: &Kernel, b: &Brep, name: &str) {
         let made = k.blend_face_log.as_ref().unwrap().last().to_vec();
         assert!(!made.is_empty(), "{name}: no blend face logged");
@@ -2006,7 +2005,7 @@ pub(super) mod round_definition_rows {
     /// Every moved row of the full real-solid form, in three groups: its blend faces are
     /// definitions whose nets re-certify, its counts are the golden's (unchanged but for
     /// the bottle's rail, split at the shoulder face's C1 knot), and a closed result's
-    /// volume, before and after, lies within the mass accuracy of its certified band.
+    /// converged volume lies in its certified band.
     #[test]
     fn moved_law_rows_are_certified_definitions() {
         check(|name| name.starts_with("law-"));
@@ -2044,8 +2043,7 @@ pub(super) mod round_definition_rows {
             }
             let spread = certified_blends(&k, &mut body, name);
             if let Some(old) = old_volume {
-                let (lo, hi) = volume_band(&k, &mut body, spread, old, name);
-                eprintln!("{name}: certified volume [{lo}, {hi}], before {old}");
+                volume_band(&k, &mut body, spread, old, name);
             }
         }
     }
@@ -2110,12 +2108,16 @@ pub(super) mod round_definition_rows {
                     .unwrap();
                 let degree = net.degree(SurfParamType::U);
                 let (knots, mults) = net.knots(SurfParamType::U, None).unwrap();
-                let (&knot, _) = knots
+                // interior knots only: the clamped end knots bound the domain, where the
+                // face is not C1-limited
+                let last = knots.len() - 1;
+                let (_, (&knot, _)) = knots
                     .iter()
                     .zip(&mults)
-                    .filter(|(_, &m)| m + 1 >= degree)
-                    .min_by(|a, c| (a.0 - uv.x).abs().total_cmp(&(c.0 - uv.x).abs()))
-                    .expect("a knot of multiplicity at least the degree less one");
+                    .enumerate()
+                    .filter(|&(i, (_, &m))| i > 0 && i < last && m + 1 >= degree)
+                    .min_by(|a, c| (a.1 .0 - uv.x).abs().total_cmp(&(c.1 .0 - uv.x).abs()))
+                    .expect("an interior knot of multiplicity at least the degree less one");
                 let on_iso = s.evaluate_point(k, Point2::new(knot, uv.y)).unwrap().distance(p);
                 assert!(
                     on_iso <= tol,

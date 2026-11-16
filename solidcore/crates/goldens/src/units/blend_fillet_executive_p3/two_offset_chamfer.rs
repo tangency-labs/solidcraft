@@ -470,8 +470,8 @@ mod round_definition_rows {
     ];
 
     /// Every moved chamfer row: its chamfer faces are chamfers by their definition whose
-    /// nets re-certify, its counts are the golden's, and its volume before and after lies
-    /// within the mass accuracy of its certified band.
+    /// nets re-certify, its counts are the golden's, and its converged volume lies in its
+    /// certified band.
     #[test]
     fn moved_chamfer_rows_are_certified_definitions() {
         let cases = crate::fixtures::load_fixture_dir(
@@ -514,8 +514,7 @@ mod round_definition_rows {
                 }
             }
             let spread = certified_blends(&k, &mut done.body, name);
-            let (lo, hi) = volume_band(&k, &mut done.body, spread, old, name);
-            eprintln!("{name}: certified volume [{lo}, {hi}], before {old}");
+            volume_band(&k, &mut done.body, spread, old, name);
         }
     }
 }

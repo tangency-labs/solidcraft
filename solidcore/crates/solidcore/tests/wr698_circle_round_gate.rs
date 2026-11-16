@@ -371,8 +371,8 @@ fn the_exact_circle_s_round_is_its_definition() {
 }
 
 /// Otherwise the round is built as before (a B-spline, the rails as they were): the
-/// approximated circle (asked for explicitly: the cross-section type 1), the flag
-/// off, a ball whose rails are not its feet, and two radii.
+/// approximated circle (asked for explicitly: the cross-section type 1), a ball whose
+/// rails are not its feet, and two radii.
 #[test]
 fn otherwise_the_round_is_built_as_before() {
     let before = |k: &Kernel, g: &mut FilletSurfaceGenerator, radii: [f64; 2], what: &str| {
