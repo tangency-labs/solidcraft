@@ -1,6 +1,6 @@
 //! Drawing's entry choices before a sheet is open (D19).
 
-use egui::{Rect, Sense, Stroke, pos2, vec2};
+use egui::{Rect, RichText, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
 use solidcraft_engine::geom::drawing_sheet::{Orientation, PaperSize};
 use solidcraft_theme::Tokens;
@@ -55,7 +55,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect) {
                 ui.set_width((width - t.space_24 * 2.0).max(0.0));
                 let title = solidcraft_ui_text::format("ui.drawing_first.title", &[("name", &app.session.doc.name)]);
                 ui.vertical_centered(|ui| {
-                    ui.heading(title);
+                    ui.heading(RichText::new(title).strong());
                     ui.label(tr(if app.session.doc.features.is_empty() { "ui.drawing_first.empty_model" } else { "ui.drawing_first.subtitle" }));
                 });
                 ui.add_space(t.space_16);
@@ -72,7 +72,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect) {
                     ui.add_space(t.space_12);
                     let paper = super::panels::size_caption(size);
                     let defaults = solidcraft_ui_text::format("ui.drawing_first.defaults", &[("paper", &paper)]);
-                    ui.vertical_centered(|ui| ui_kit::text(ui, &defaults, ui_kit::Text::Note("drawing_first_defaults")));
+                    ui.vertical_centered(|ui| ui.label(RichText::new(defaults).size(t.font_small).color(t.text_dim)));
                 }
                 match chosen {
                     Some(Choice::Blank) => app.drawing_workspace.first_sheet = Some(blank),
@@ -100,12 +100,14 @@ fn card(ui: &mut egui::Ui, choice: Choice, enabled: bool, picker: bool) -> Optio
         .show_frame(ui, frame, bounds, |ui| {
             thumbnail(ui, &choice);
             ui.add_space(t.space_8);
-            ui.heading(tr(title));
+            ui.heading(RichText::new(tr(title)).strong());
             ui.label(tr(description));
             ui.add_space(t.space_8);
             let style = if enabled && matches!(choice, Choice::Blank) { Button::Primary } else { Button::Enabled(enabled) };
-            let button = ui_kit::button(ui, tr(action), style);
-            crate::scenario::publish_target(&format!("drawing:first:{target}"), button.rect);
+            let id = format!("drawing:first:{target}");
+            let (_, button_rect) = ui.allocate_space(vec2(ui.available_width(), t.control_height));
+            let button = ui_kit::button_at(ui, &id, button_rect, tr(action), style);
+            crate::scenario::publish_target(&id, button.rect);
             button.backing_on_disabled_hover_text(tr("ui.drawing_first.unavailable")).clicked().then_some(choice)
         })
         .inner
