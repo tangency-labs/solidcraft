@@ -1179,6 +1179,13 @@ preference_settings! {
     graphics_backend: String = "auto".into(), PAGE_GRAPHICS;
     /// Exact graphics adapter name; empty selects automatically on the next start.
     graphics_adapter: String = String::new(), PAGE_GRAPHICS;
+    /// Show the window and the design in a VR headset from the next start (#2172, docs/vr.md). Off
+    /// by default: the app starts as it always has, with no VR software touched.
+    vr_headset: bool = false, PAGE_GRAPHICS => check_id("prefs.vr_headset");
+    /// In the headset, the model and its grid fill the room around the window instead of showing
+    /// only through the design view. Off by default: the window shows what it shows on the
+    /// desktop. Applies at once.
+    vr_model_in_room: bool = false, PAGE_GRAPHICS => check_id("prefs.vr_model_in_room");
     /// Soft contact shading in the GPU viewport; optional and applied immediately.
     ambient_occlusion: bool = false, PAGE_GRAPHICS;
     /// Restore the shadow plane at the lowest visible body, including above the origin (#9838).
@@ -2109,7 +2116,7 @@ impl Snapshot {
         if self.prefs.graphics_backend != app.preferences.graphics_backend && app.services.graphics_path.is_some() {
             save_graphics_backend(app, &self.prefs.graphics_backend)?;
         }
-        let graphics = (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
+        let graphics = StartupGraphics::of(&app.preferences);
         let units_changed = app.preferences.default_units != self.prefs.default_units;
         // Update bookkeeping isn't a setting: a check that finished while the dialog was open stays.
         let update = std::mem::take(&mut app.preferences.update);
@@ -2144,7 +2151,7 @@ impl Snapshot {
         app.toolbar_custom.load(&self.toolbar);
         app.sbox.pinned = self.favourites;
         app.settings_profiles.active = self.profile.filter(|name| app.settings_profiles.names().contains(name));
-        if (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone()) != graphics {
+        if StartupGraphics::of(&app.preferences) != graphics {
             save_graphics(app);
         }
         Ok(())
@@ -2407,7 +2414,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
         app.set_status(error, true);
         return;
     }
-    let (msaa, window_system, adapter) = (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
+    let graphics = StartupGraphics::of(&app.preferences);
     let units = app.preferences.default_units.clone();
     reset_preferences(&mut app.preferences, page);
     if page == PAGE_PLUGINS {
@@ -2444,7 +2451,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
             app.ui.show_grid = true;
             app.ui.ground_shadow = true;
             app.ui.perspective = false;
-            if app.preferences.msaa != msaa || app.preferences.window_system != window_system || app.preferences.graphics_adapter != adapter {
+            if StartupGraphics::of(&app.preferences) != graphics {
                 save_graphics(app);
             }
         }
@@ -2897,6 +2904,23 @@ pub fn request_graphics_restart(app: &mut SolveApp) -> Result<(), String> {
     Ok(())
 }
 
+/// The settings `graphics.json` keeps for the next start, beside the graphics API: a change to
+/// any of them writes the file ([`save_graphics`]).
+#[derive(Clone, PartialEq, Debug)]
+struct StartupGraphics {
+    msaa: u32,
+    window_system: String,
+    adapter: String,
+    vr: bool,
+}
+
+impl StartupGraphics {
+    /// What `p` asks of the next start.
+    fn of(p: &Prefs) -> StartupGraphics {
+        StartupGraphics { msaa: p.msaa, window_system: p.window_system.clone(), adapter: p.graphics_adapter.clone(), vr: p.vr_headset }
+    }
+}
+
 /// Write ordinary startup settings without changing a backend choice or its recovery record.
 fn save_graphics(app: &SolveApp) {
     if let Some(path) = &app.services.graphics_path {
@@ -2906,6 +2930,11 @@ fn save_graphics(app: &SolveApp) {
             graphics["msaa"] = json!(app.preferences.msaa);
             graphics["window_system"] = json!(app.preferences.window_system);
             graphics["adapter"] = json!(app.preferences.graphics_adapter);
+            // The VR choice is written once it has been made: a file that never had it keeps the
+            // keys it had, so saving another setting leaves it as older versions wrote it.
+            if app.preferences.vr_headset || graphics.get("vr").is_some() {
+                graphics["vr"] = json!(app.preferences.vr_headset);
+            }
             solidcraft_engine::io::safe_write::write_atomic(path, graphics.to_string().as_bytes(), false).map_err(|error| error.to_string())
         })();
         if let Err(error) = result {
@@ -3039,10 +3068,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         }
         crate::space_mouse_calibration::show(app, ctx);
-        if app.preferences.msaa != before.msaa
-            || app.preferences.window_system != before.window_system
-            || app.preferences.graphics_adapter != before.graphics_adapter
-        {
+        if StartupGraphics::of(&app.preferences) != StartupGraphics::of(&before) {
             save_graphics(app);
         }
         if app.preferences.up_axis != before.up_axis {
@@ -4602,9 +4628,7 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
     }
     let units_changed = new.default_units != app.preferences.default_units;
     let up_changed = new.up_axis != app.preferences.up_axis;
-    let graphics_changed = new.msaa != app.preferences.msaa
-        || new.window_system != app.preferences.window_system
-        || new.graphics_adapter != app.preferences.graphics_adapter;
+    let graphics_changed = StartupGraphics::of(&new) != StartupGraphics::of(&app.preferences);
     if p.get("layout").is_some() {
         app.ui.layout = new.layout;
     }
@@ -9552,6 +9576,77 @@ mod tests {
         let out = h.call("ui.prefs", json!({"button": "cancel"}));
         assert_eq!(out["result"]["window_system"], "wayland", "Cancel takes the change back");
         assert_eq!(saved()["window_system"], "wayland", "and the file with it");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Preferences › Graphics › Show in a VR headset (#2172): off by default and in settings saved
+    /// before it existed; `ui.prefs` saves the choice in `graphics.json` beside the other
+    /// settings for the next start, refuses what is not a yes or no, and Cancel and Graphics'
+    /// Restore Defaults take it back, in the file too. The row shows only where the host has a
+    /// VR view, with what the host says this run is doing.
+    #[test]
+    fn the_vr_headset_view_is_off_by_default_and_saved_for_the_next_start() {
+        use serde_json::json;
+        let dir = std::env::temp_dir().join(format!("sc_vr_headset_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("graphics.json");
+        std::fs::write(&path, r#"{"msaa":4,"backend":"vulkan","adapter":"Named GPU"}"#).unwrap();
+        let saved = || -> serde_json::Value { serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_default()).unwrap_or_default() };
+        assert!(!Prefs::default().vr_headset && !lenient(&json!({"msaa": 4})).vr_headset);
+        let mut h = crate::scenario::Harness::new();
+        h.app.services.graphics_path = Some(path.to_string_lossy().to_string());
+        h.app.preferences.graphics_adapter = "Named GPU".into();
+        assert!(!h.app.preferences.vr_headset);
+        assert!(saved().get("vr").is_none(), "nothing is written until it changes");
+        // Saving another setting for the next start leaves a file that never had the choice
+        // without it: the file stays as versions before this setting wrote it.
+        h.call("ui.prefs", json!({"msaa": 2}));
+        assert_eq!(saved()["msaa"], 2);
+        assert!(saved().get("vr").is_none(), "another setting saved: still no VR key");
+
+        for bad in [json!({"vr_headset": "yes"}), json!({"vr_headset": 1}), json!({"vr_headset": null}), json!({"vr_headset": [true]})] {
+            assert!(h.call("ui.prefs", bad.clone())["error"].as_str().is_some(), "{bad}");
+            assert!(!h.app.preferences.vr_headset && saved().get("vr").is_none(), "{bad}: a refused value changes nothing");
+        }
+        let out = h.call("ui.prefs", json!({"vr_headset": true}));
+        assert_eq!(out["result"]["vr_headset"], true, "{out}");
+        assert_eq!(saved()["vr"], true);
+        assert_eq!(
+            (saved()["backend"].as_str(), saved()["adapter"].as_str(), saved()["msaa"].as_u64()),
+            (Some("vulkan"), Some("Named GPU"), Some(2))
+        );
+
+        // The row: only where the host has a VR view, with the host's words under it.
+        h.call("ui.prefs", json!({"open": "Graphics"}));
+        h.frames(2);
+        assert!(crate::scenario::handle_at("prefs:vr_headset").is_none(), "no VR view on this host: no row");
+        h.app.services.vr_status = Some("Showing in the headset: Test headset on Test runtime.".into());
+        super::reveal_preference(&mut h, "prefs:vr_headset");
+        assert!(crate::scenario::handle_at("prefs:vr_headset").is_some());
+        assert!(crate::scenario::handle_at("prefs:vr_model_in_room").is_some(), "the model in the room is offered with it");
+
+        // The model in the room: off by default and in older settings, an ordinary setting that
+        // is not one of the next start's (the file keeps what it had), refused when not a yes or no.
+        assert!(!Prefs::default().vr_model_in_room && !lenient(&json!({"msaa": 4})).vr_model_in_room && !h.app.preferences.vr_model_in_room);
+        assert!(h.call("ui.prefs", json!({"vr_model_in_room": "room"}))["error"].as_str().is_some());
+        assert!(!h.app.preferences.vr_model_in_room, "a refused value changes nothing");
+        let out = h.call("ui.prefs", json!({"vr_model_in_room": true}));
+        assert_eq!(out["result"]["vr_model_in_room"], true, "{out}");
+        assert!(saved().get("vr_model_in_room").is_none() && saved()["vr"] == true);
+
+        // Cancel takes changes made in the window back, in the file too.
+        h.call("ui.prefs", json!({"vr_headset": false}));
+        assert_eq!(saved()["vr"], false);
+        let out = h.call("ui.prefs", json!({"button": "cancel"}));
+        assert_eq!(out["result"]["vr_headset"], true, "Cancel takes the change back");
+        assert_eq!(out["result"]["vr_model_in_room"], false, "and the model out of the room");
+        assert_eq!(saved()["vr"], true, "and the file with it");
+
+        // Graphics' Restore Defaults turns both off again.
+        h.app.preferences.vr_model_in_room = true;
+        super::defaults(&mut h.app, super::PAGE_GRAPHICS);
+        assert!(!h.app.preferences.vr_headset && !h.app.preferences.vr_model_in_room);
+        assert_eq!(saved()["vr"], false);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

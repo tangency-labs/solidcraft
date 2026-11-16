@@ -1755,6 +1755,120 @@ mod tests {
         assert_eq!(lost.survive(&device, &queue, met), None, "the frame's panic was the loss");
         assert!(lost.is_lost());
     }
+
+    /// The copy of the UI a headset shows (#2172): with the cut-out on, the design view clears
+    /// its rectangle to transparent, within the clip it is given, instead of drawing the scene,
+    /// so what was painted under it goes and the model drawn behind the window shows through.
+    /// Off (as it is unless a host switches it on), without one installed, and for the product
+    /// preview whatever it says, the view is drawn as ever.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_cutout_clears_the_design_view_and_only_that() {
+        use super::*;
+        use solidcraft_viewport_egui::{Cutout, ViewportCallback};
+        let Some((_, device, queue)) = offscreen_device() else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        const SIZE: u32 = 64;
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let scene = GpuTarget { format, depth: Some(solidcraft_viewport_gpu::depth_format(&device, true)), samples: 1, tess: false, oit: false };
+        let window = GpuTarget { depth: None, ..scene };
+        let mut resources = egui_wgpu::CallbackResources::default();
+        resources.insert(Renderer::with_window_target(&device, scene, window, None));
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("cutout"),
+            size: wgpu::Extent3d { width: SIZE, height: SIZE, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = target.create_view(&Default::default());
+        // The view in the middle half of an opaque green picture, clipped to the picture's left
+        // 40 pixels: (x, y) is in the view and its clip for 16 <= x < 40 and 16 <= y < 48.
+        let draw = |resources: &mut egui_wgpu::CallbackResources, product: bool, key: u64| -> Vec<u8> {
+            // A red triangle over the whole view, lit from the front; no section, no extras.
+            let mut frame = crate::stereo::test_frame();
+            let mut red = GpuScene::default();
+            let colour = red.color([255, 0, 0, 255]);
+            for p in [[-20.0, -20.0, 0.0], [20.0, -20.0, 0.0], [0.0, 20.0, 0.0]] {
+                red.tri(p, [0.0, 0.0, 1.0], colour);
+            }
+            frame.product = product;
+            frame.key = key;
+            frame.slot = Arc::new(Mutex::new(Some(red)));
+            frame.view_proj = [[0.1, 0.0, 0.0, 0.0], [0.0, 0.1, 0.0, 0.0], [0.0, 0.0, -0.01, 0.0], [0.0, 0.0, 0.5, 1.0]];
+            frame.size_px = [32.0, 32.0];
+            (frame.clip, frame.outline, frame.ssaa, frame.ao_radius, frame.upload_error) = ([0.0; 4], false, 1.0, 0.0, None);
+            let cb = ViewportCallback(frame);
+            let mut encoder = device.create_command_encoder(&Default::default());
+            let screen = egui_wgpu::ScreenDescriptor { size_in_pixels: [SIZE, SIZE], pixels_per_point: 1.0 };
+            let extra = egui_wgpu::CallbackTrait::prepare(&cb, &device, &queue, &screen, &mut encoder, resources);
+            {
+                let mut pass = encoder
+                    .begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("cutout"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &view,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::GREEN), store: wgpu::StoreOp::Store },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                        multiview_mask: None,
+                    })
+                    .forget_lifetime();
+                let rect = egui::Rect::from_min_size(egui::pos2(16.0, 16.0), egui::vec2(32.0, 32.0));
+                let clip = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(40.0, SIZE as f32));
+                // egui sets the scissor to the clip before it calls a paint callback.
+                pass.set_scissor_rect(0, 0, 40, SIZE);
+                let info = egui::PaintCallbackInfo { viewport: rect, clip_rect: clip, pixels_per_point: 1.0, screen_size_px: [SIZE, SIZE] };
+                egui_wgpu::CallbackTrait::paint(&cb, info, &mut pass, resources);
+            }
+            queue.submit(extra.into_iter().chain([encoder.finish()]));
+            test_support::read_egui_pixels(&device, &queue, &target)
+        };
+        let at = |pixels: &[u8], x: u32, y: u32| -> [u8; 4] {
+            let i = ((y * SIZE + x) * 4) as usize;
+            pixels.get(i..i + 4).and_then(|p| p.try_into().ok()).unwrap_or([9; 4])
+        };
+        const GREEN: [u8; 4] = [0, 255, 0, 255];
+        const CLEAR: [u8; 4] = [0; 4];
+        let drawn = |p: [u8; 4]| p[3] == 255 && p != CLEAR;
+
+        // No cut-out installed: the scene over the picture, nothing cleared.
+        let plain = draw(&mut resources, false, 1);
+        assert!(plain.as_chunks::<4>().0.iter().all(|p| drawn(*p)), "nothing is transparent without a cut-out");
+        assert!(at(&plain, 32, 40)[0] > 200, "the model is drawn in the view: {:?}", at(&plain, 32, 40));
+
+        // Installed but off: the same picture.
+        resources.insert(Cutout::new(&device, format));
+        assert!(!resources.get::<Cutout>().is_some_and(Cutout::is_on), "off until a host switches it on");
+        assert_eq!(draw(&mut resources, false, 1), plain, "a cut-out that is off changes nothing");
+
+        // On: the view's rectangle within its clip is transparent, the rest untouched.
+        resources.get::<Cutout>().unwrap().set(true);
+        let cut = draw(&mut resources, false, 1);
+        for (x, y) in [(16, 16), (32, 40), (39, 47), (20, 30)] {
+            assert_eq!(at(&cut, x, y), CLEAR, "({x}, {y}) is in the view and its clip");
+        }
+        for (x, y) in [(15, 30), (30, 15), (30, 48), (40, 30), (47, 30), (2, 2), (60, 60)] {
+            assert_eq!(at(&cut, x, y), GREEN, "({x}, {y}) is outside the view or its clip");
+        }
+
+        // The product preview is not what a headset draws in depth: it stays in the picture.
+        let product = draw(&mut resources, true, 2);
+        assert!(product.as_chunks::<4>().0.iter().all(|p| drawn(*p)), "the product preview is not cut out");
+
+        // Off again: drawn as at first.
+        resources.get::<Cutout>().unwrap().set(false);
+        assert_eq!(draw(&mut resources, false, 1), plain);
+    }
 }
 
 #[cfg(test)]

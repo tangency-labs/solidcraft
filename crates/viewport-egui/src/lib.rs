@@ -29,6 +29,81 @@ pub fn paint_background(painter: &egui::Painter, rect: egui::Rect, top: egui::Co
     painter.add(egui::Shape::mesh(mesh));
 }
 
+/// A pass in which design views are cut out of the picture instead of drawn into it: while
+/// [`Cutout::set`] is on, a [`ViewportCallback`] for the design view clears its rectangle (within
+/// the clip egui gives it) to transparent, erasing what was painted under it and leaving what is
+/// painted over it. A host draws the frame's UI a second time that way to show it over a scene
+/// drawn some other way: a headset's two eyes behind the window (#2172). The product preview is
+/// drawn as ever. In a host's callback resources; without one, and while it is off, nothing
+/// changes.
+pub struct Cutout {
+    pipeline: wgpu::RenderPipeline,
+    on: std::sync::atomic::AtomicBool,
+}
+
+/// A triangle over the whole viewport, transparent black.
+const CUTOUT_SHADER: &str = r#"
+@vertex
+fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
+    let x = f32((i << 1u) & 2u);
+    let y = f32(i & 2u);
+    return vec4<f32>(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0);
+}
+@fragment
+fn fs() -> @location(0) vec4<f32> {
+    return vec4<f32>(0.0);
+}
+"#;
+
+impl Cutout {
+    /// For passes into a `format` target with one sample and no depth, which is what a host's
+    /// copy of the UI is drawn into. Off until [`Cutout::set`].
+    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Cutout {
+        let module = device
+            .create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("sc_cutout"), source: wgpu::ShaderSource::Wgsl(CUTOUT_SHADER.into()) });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("sc_cutout"),
+            layout: None,
+            vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), buffers: &[], compilation_options: Default::default() },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs"),
+                // No blending: the transparent colour replaces what is there.
+                targets: &[Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        Cutout { pipeline, on: std::sync::atomic::AtomicBool::new(false) }
+    }
+
+    /// Cut design views out of the passes drawn from now on (`true`), or draw them again.
+    pub fn set(&self, on: bool) {
+        self.on.store(on, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether design views are being cut out.
+    pub fn is_on(&self) -> bool {
+        self.on.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Clear `viewport` (x, y, width, height in physical pixels) of `pass` to transparent, within
+    /// the pass's scissor.
+    fn cut(&self, pass: &mut wgpu::RenderPass<'static>, viewport: [f32; 4]) {
+        let [x, y, w, h] = viewport;
+        if !(w > 0.0 && h > 0.0) {
+            return;
+        }
+        pass.set_viewport(x, y, w, h, 0.0, 1.0);
+        pass.set_pipeline(&self.pipeline);
+        pass.draw(0..3, 0..1);
+    }
+}
+
 /// The GPU plan evaluation compiling beside the window: there once it is ready ([`install`]).
 pub type TessReady = Arc<std::sync::OnceLock<solidcraft_viewport_gpu::TessGpu>>;
 
@@ -147,9 +222,16 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
     }
 
     fn paint(&self, info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
-        let Some(res) = resources.get::<Renderer>() else { return };
         let vp = info.viewport_in_pixels();
-        res.paint(&self.0, pass, [vp.left_px as f32, vp.top_px as f32, vp.width_px as f32, vp.height_px as f32]);
+        let viewport = [vp.left_px as f32, vp.top_px as f32, vp.width_px as f32, vp.height_px as f32];
+        if !self.0.product
+            && let Some(cutout) = resources.get::<Cutout>().filter(|c| c.is_on())
+        {
+            cutout.cut(pass, viewport);
+            return;
+        }
+        let Some(res) = resources.get::<Renderer>() else { return };
+        res.paint(&self.0, pass, viewport);
     }
 }
 

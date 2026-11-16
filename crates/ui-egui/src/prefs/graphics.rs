@@ -381,6 +381,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if app.services.graphics_path.is_some() {
                     graphics_api_row(app, ui, help_label_width);
                     graphics_card_row(app, ui, help_label_width);
+                    vr_headset_row(app, ui);
                 }
                 #[cfg(target_os = "linux")]
                 window_system_row(app, ui, help_label_width);
@@ -613,6 +614,23 @@ fn graphics_card_row(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
         }
     }
 }
+
+/// The VR headset view (#2172), where the host has one: the setting for the next start, and what
+/// this run is doing (running on a headset, or why not).
+fn vr_headset_row(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let Some(status) = app.services.vr_status.clone() else { return };
+    ui.horizontal_wrapped(|ui| {
+        let response = setting::vr_headset(app, ui).backing_on_hover_text(app.tr("prefs.vr_headset_help"));
+        crate::scenario::publish_target("prefs:vr_headset", response.rect);
+        ui_kit::settings_badge(ui, app.tr("prefs.graphics_page.restart"), true);
+    });
+    if !status.is_empty() {
+        ui_kit::text(ui, &status, ui_kit::Text::Hint("vr_status"));
+    }
+    let response = setting::vr_model_in_room(app, ui).backing_on_hover_text(app.tr("prefs.vr_model_in_room_help"));
+    crate::scenario::publish_target("prefs:vr_model_in_room", response.rect);
+}
+
 /// Perspective view's Field of view (#5364): the kit slider in degrees, typed or dragged, kept to
 /// whole degrees and written back in radians. No step on the slider itself: it would round the
 /// default 0.6 (34.4°) just by being drawn, so an untouched angle stays exactly as saved.

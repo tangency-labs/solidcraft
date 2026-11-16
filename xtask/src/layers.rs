@@ -64,6 +64,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("engine", Class::Layer(4)),
     ("ui-egui", Class::Layer(5)),
     ("gpu", Class::Layer(5)),
+    // the VR view: an OpenXR session on the window's Vulkan device, and its view maths (no workspace dependencies)
+    ("xr", Class::Layer(5)),
     ("mcp", Class::Layer(5)),
     ("testkit", Class::Testkit),
     // App-agnostic plugin contracts and the component runtime (RFC 0002 §6b).

@@ -1,0 +1,31 @@
+[package]
+name = "solidcraft-xr"
+description = "SolidCraft in a VR headset: an OpenXR session on the window's own Vulkan device, its swapchains and frame loop, and the view maths that place the window and the model in the room"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# The workspace lints, except unsafe_code: denied, not forbidden, so that src/session/interop.rs
+# can allow it: an OpenXR runtime creates the Vulkan instance and device and owns the images it
+# shows, and handing those to wgpu has no safe API. Keep the rest in sync with [workspace.lints].
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"
+neg_cmp_op_on_partial_ord = "allow"
+
+# The view maths and the session's decisions build everywhere and take no dependency.
+
+# The session itself: where wgpu has a Vulkan backend to share with an OpenXR runtime (a browser
+# has WebXR, not OpenXR, and macOS has neither).
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+ash = { workspace = true }
+log = { workspace = true }
+openxr = { workspace = true }
+thiserror = { workspace = true }
+wgpu = { workspace = true, features = ["vulkan"] }

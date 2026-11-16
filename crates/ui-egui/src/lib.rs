@@ -329,6 +329,7 @@ pub(crate) mod verify_job;
 pub use solidcraft_ui_kit::start_page;
 pub mod starting;
 mod status_bar;
+pub mod stereo;
 #[cfg(test)]
 mod sweep_dialog_tests;
 pub(crate) mod test_boat;
@@ -521,6 +522,10 @@ pub struct Services {
     pub graphics_restart: Option<(std::path::PathBuf, Vec<String>)>,
     /// Adapter names and descriptive labels from the desktop renderer's chosen backends.
     pub graphics_adapters: Vec<(String, String)>,
+    /// The host can show the window in a VR headset (#2172): what this run is doing about it, in
+    /// words for Preferences › Graphics, where the setting for the next start is then offered.
+    /// `None`: this host has no VR view (the browser, macOS), and Preferences does not mention it.
+    pub vr_status: Option<String>,
     /// HTTPS GET for the update check (`update`); None: never check (browser, tests).
     pub http_get: Option<update::HttpGet>,
     /// HTTPS download to a file, with progress, for one-click updates (`update::install`).

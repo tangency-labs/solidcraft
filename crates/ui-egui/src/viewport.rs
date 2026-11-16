@@ -153,6 +153,8 @@ pub struct ViewportState {
     /// greys out with it.
     pub(crate) corner_ok: bool,
     pub gpu: Option<GpuTarget>,
+    /// The design view for a headset's eyes (#2172): off unless a host shows it there.
+    pub stereo: crate::stereo::Stereo,
     /// The view's pipelines could not be built (the thread compiling them at start failed): the
     /// view says so where the model would be, instead of staying empty (#1210).
     pub gpu_unavailable: bool,
@@ -5947,6 +5949,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         })
         .map(|p| pick_cached(app, &proj, p))
         .unwrap_or_default();
+    app.viewport.stereo.pointing(&hits);
     // The Fillet and Chamfer window resolves its own corners: the nearest sketch point to a
     // corner drawn from the origin is the fixed origin, which ends no two curves.
     let corner = hover.filter(|_| inside && !navigating).and_then(|p| crate::sketch_modify_ui::corner_hit(app, &proj, p));
@@ -6077,6 +6080,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             sky: sky_uniform(app.preferences.dark_parts_shading, app.preferences.viewport_material_finish, proj.cam.up),
             moving,
         });
+        app.viewport.stereo.publish(&cb.0, proj.cam, rect, [t.viewport_top, t.viewport_bottom]);
         crate::blur::viewport(&painter, rect, cb, rect, [t.viewport_top, t.viewport_bottom]);
         // The graphics card had no memory for the view's frame (#7296): say once why it looks
         // coarser.
