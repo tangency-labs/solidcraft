@@ -32,7 +32,7 @@ use solidcore::topology::{edge, loopuse};
 use solidcore::{EdgeId, FaceId, Point2, Vec3};
 use solidcore_record::brep::Brep as Record;
 
-use solidcore_ops::sweep::{extrude, Curve, DraftCorner};
+use solidcore_ops::sweep::{extrude, Curve, DraftCorner, SweepFrame};
 use solidcore_ops::{
     blend, blend_ordered, chamfer_sides, edge_faces_along, fillet_variable, make_box, make_cone,
     make_cylinder, tangent_chain, Blend, BlendOptions, Body, ChamferSecond, CheckLevel, Corners,
@@ -3235,6 +3235,57 @@ fn a_rim_round_across_a_loft_s_creases_is_certified_or_refused() {
             "{e:?}"
         ),
     }
+}
+
+/// SolidCraft #17263: a 12.2 x 2.2 bar swept along an arc with its orientation kept (the arc from
+/// (0, 0, 0) to (30, 0, 0) about (15, 0, 330), dipping to z = 330 - R at its middle, R = hypot(15,
+/// 330)), its lower long edge at y = 0 rounded at 0.2. The faces beside the edge are 2.2 and 12.2
+/// wide; the round was refused as cutting the part in pieces, naming about 0.07, because the middle
+/// of a section's arc, inside the material, was classified as lying outside the part. Past that,
+/// the round (a torus about the arc's axis) took its section from the solver's first one, which
+/// lies past the edge's end on the lower face's ruled extension, 5.5e-6 off the half-plane through
+/// the axis: the revolution failed its own check and the result was refused as no solid. It builds.
+/// The bar is 12.2 x 2.2 x 30 (each section x = const is the profile moved). The round takes off
+/// its corner section A = (1 - pi/4) r^2, whose centroid lies d = r (10 - 3 pi) / (12 - 3 pi)
+/// inside the lower face, swept about the arc's axis through its angle theta (Pappus), and at each
+/// end the wedge between the upright end face and the radial plane through the edge's end, A 15 d /
+/// 330.
+#[test]
+fn a_round_on_a_bar_swept_along_a_wide_arc_is_not_refused_as_cutting_the_part() {
+    all_fixes();
+    let (c, r, w, h) = (330.0_f64, 0.2, 12.2, 2.2);
+    let big = 15.0_f64.hypot(c);
+    let theta = 2.0 * (15.0 / big).asin();
+    let line = |a: [f64; 3], b: [f64; 3]| Curve::Line { start: a, end: b };
+    let profile = [
+        line([0.0, 0.0, 0.0], [0.0, 0.0, h]),
+        line([0.0, 0.0, h], [0.0, w, h]),
+        line([0.0, w, h], [0.0, w, 0.0]),
+        line([0.0, w, 0.0], [0.0, 0.0, 0.0]),
+    ];
+    let path = [Curve::Arc {
+        center: [15.0, 0.0, c],
+        axis: [0.0, -1.0, 0.0],
+        reference: [-15.0 / big, 0.0, -c / big],
+        radius: big,
+        start: 0.0,
+        end: theta,
+    }];
+    let (b, _, _) =
+        solidcore_ops::sweep::sweep_placed(&profile, &path, SweepFrame::Translate, true).unwrap();
+    assert!(rel(volume(&b), w * h * 30.0) < 1e-9, "{}", volume(&b));
+    let e = edge_at(&b, [15.0, 0.0, c - big]);
+    // `blend` rounds `b` in place (its result names the faces it made, not a new body)
+    let made = blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled).unwrap();
+    assert!(!made.made.is_empty());
+    let area = (1.0 - PI / 4.0) * r * r;
+    let d = r * (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI);
+    let want = w * h * 30.0 - area * (big - d) * theta - 2.0 * area * 15.0 * d / c;
+    assert!(
+        (volume(&b) - want).abs() < 1e-6,
+        "{} (want {want})",
+        volume(&b)
+    );
 }
 
 /// #17016: the round at the foot of a cylinder boss (radius 6 about the z axis, from z = 25)
