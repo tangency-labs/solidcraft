@@ -961,11 +961,14 @@ pub fn axis_foot(axis_point: Point3, axis: Vec3, near: Point3) -> Option<(Point3
 /// ([`one_sign`]: some Bernstein coefficient beyond its error with that sign, none beyond it
 /// with the other). **PROVEN:** then `x` keeps that sign along the whole generatrix to
 /// rounding, and within `tol` of the axis at an end of the generatrix: for a positive sign,
-/// `x >= -2 e / w` away from the ends and `x >= -max(tol, 2 e / w)` everywhere (`e` the
-/// coefficients' error, `w` the weight's lower bound; [`one_sign`], `meridian_piece`). So the generatrix may end on the axis (a pole) or up to `tol` past it (a pole
-/// snapped with noise, decided to the tolerance), and may touch the axis inside only where a
-/// piece ends with a zero (a horn torus, whose touch is a knot or a halving point; an
-/// interior touch elsewhere leaves a coefficient of the other sign and is refused). Where
+/// `x >= -2 e / w` on every piece that does not end the generatrix and
+/// `x >= -max(tol, 2 e / w)` everywhere (`e` the coefficients' error, `w` the weight's lower
+/// bound; [`one_sign`], `meridian_piece`). So the generatrix may end on the axis (a pole) or
+/// up to `tol` past it (a pole snapped with noise, decided to the tolerance; only that
+/// depth is bounded, not how far along the axis the part past it runs), and may touch the
+/// axis inside only where a piece ends with a zero (a horn torus, whose touch is a knot or a
+/// halving point; an interior touch elsewhere leaves a coefficient of the other sign and is
+/// refused). Where
 /// `x` keeps its sign the normal `N ~ x (x' a - z' e)` keeps its side of the profile; past a
 /// tangential touch it does not change. With
 /// `A = W H' - W' H` (so `X' = A / W^2`) and `B = (A x A') . m` the curvature is
