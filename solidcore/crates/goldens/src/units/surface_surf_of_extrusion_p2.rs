@@ -1635,6 +1635,77 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    /// WR-51: `GlobalSurfaceIntersect` cases where the boundary search dropped its
+    /// touching point for a start point that then traced nothing, so upstream found
+    /// no curve. The touching point is now the answer, certified on both surfaces and
+    /// within the intersector's tolerance.
+    #[test]
+    fn wr51_restored_touching_points_are_certified_contacts() {
+        use solidcore::intersect::surface_intersector::SurfaceIntersector;
+        let names = [
+            "global_extrusion_skew",
+            "global_bspline",
+            "gen0463",
+            "gen0581",
+            "gen0626",
+            "gen1018",
+        ];
+        for name in names {
+            let case = crate::case::regression_case(&Runner, name);
+            let Inputs::Op { src, op } = case.parse().unwrap() else {
+                panic!("{name}: expected an operation");
+            };
+            let OpIn::Global {
+                target,
+                dom,
+                other_dom,
+                tol,
+                ang,
+            } = &*op
+            else {
+                panic!("{name}: expected GlobalSurfaceIntersect");
+            };
+            let k = Kernel::default();
+            let first = rust_src(&k, &src)
+                .unwrap()
+                .unwrap_or_else(|_| panic!("{name}: the extrusion builds"));
+            let d = dom.map_or_else(|| first.base().natural_uv_domain(), dom4);
+            let (other, od) = match target {
+                TargetIn::Cone { cone } => {
+                    let c = rust_cone(&k, cone).unwrap();
+                    let od = other_dom.map_or_else(|| c.rev().base().natural_uv_domain(), dom4);
+                    (Surface::from(c), od)
+                }
+                TargetIn::Extrusion { other } => {
+                    let e = rust_src(&k, other).unwrap().unwrap_or_else(|_| panic!("{name}"));
+                    let od = other_dom.map_or_else(|| e.base().natural_uv_domain(), dom4);
+                    (Surface::from(e), od)
+                }
+                TargetIn::Bspline { other } => {
+                    let e = rust_src(&k, other).unwrap().unwrap_or_else(|_| panic!("{name}"));
+                    let b = nurb_surface(&e).unwrap();
+                    let od = other_dom.map_or_else(|| b.natural_uv_domain(), dom4);
+                    (Surface::from(b), od)
+                }
+                TargetIn::Plane { .. } => panic!("{name}: no plane target here"),
+            };
+            let this = Surface::from(first);
+            let default_tol = SurfaceIntersector::new(&k, &this, &d, &other, &od, false)
+                .unwrap()
+                .this_approx_tol_3d;
+            let r = this
+                .global_surface_intersect(&k, &d, &other, &od, [true, true], *tol, *ang)
+                .unwrap();
+            crate::units::intersect_surface_intersector_p5::certify_restored_touching_point(
+                &k,
+                [&this, &other],
+                [&d, &od],
+                tol.unwrap_or(default_tol),
+                &r,
+            );
+        }
+    }
+
     /// The default SSI tolerance comes from the unbounded surface's size, not the
     /// kernel's approximation tolerance. This case returns a coarse touching point;
     /// its finite status and coordinates must remain observable despite NOW weights.

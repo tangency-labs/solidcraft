@@ -171,6 +171,67 @@ fn a_basin_shells_past_its_rim_to_its_closed_form() {
     }
 }
 
+/// A frustum (r 27.5 at its foot, drafted out 1 degree, 30 high) standing on a slab 30 deep
+/// whose plan is a half disc of the same radius and a 55 x 69.94 rectangle off its diameter
+/// (#17469). At each end of the diameter the rectangle's side runs tangent into the half
+/// disc's wall and the frustum's foot meets the ledge: four faces at one vertex. Shelled in
+/// by t, open at the top and at the rectangle's far end, the side's and the ledge's offsets
+/// meet at z = -t, the wall's and the frustum's at z1 = t (1 / cos a - 1) / tan a above it,
+/// and the vertex's offset is the triangle between them in the plane through the axis; the
+/// shell is closed. Its volume is the body less the cavity: the stadium shrunk by t from
+/// z = t - 30 up to -t, then the half disc of radius 27.5 - t and the frustum's offset half
+/// (radius 27.5 + z tan a - t / cos a) up to z1, then the frustum's offset up to the top.
+#[test]
+fn a_frustum_on_a_ledge_tangent_into_its_wall_shells_closed() {
+    all_fixes();
+    // ops computes no trigonometry, so the draft's numbers are written out.
+    // tan(1 degree).
+    let tan = 0.017_455_064_928_217_585;
+    // cos(1 degree).
+    let cos = 0.999_847_695_156_391_3;
+    let (r, h, len) = (27.5, 30.0, 69.94);
+    let body = crate::boolean::union_all(vec![
+        crate::make_cone([0.0; 3], r, r + h * tan, h).unwrap(),
+        make_cylinder([0.0, 0.0, -h], r, h).unwrap(),
+        make_box([-r, 0.0, -h], [2.0 * r, len, h]).unwrap(),
+    ])
+    .unwrap();
+    // the frustum's top radius
+    let top = r + h * tan;
+    let frustum = PI * h / 3.0 * (r * r + r * top + top * top);
+    let whole = frustum + (PI * r * r / 2.0 + 2.0 * r * len) * h;
+    assert!(rel(volume(&body), whole) < 1e-9);
+    for t in [0.5, 1.0, 2.0] {
+        let wall = r - t;
+        let inner = |z: f64| r + z * tan - t / cos;
+        // the integral of inner(z)^2 from z0 to z1
+        let cube = |z: f64| inner(z) * inner(z) * inner(z);
+        let squared = |z0: f64, z1: f64| (cube(z1) - cube(z0)) / (3.0 * tan);
+        let z1 = t * (1.0 / cos - 1.0) / tan;
+        let cavity = (PI * wall * wall / 2.0 + 2.0 * wall * len) * (h - 2.0 * t)
+            + PI * wall * wall / 2.0 * (z1 + t)
+            + PI / 2.0 * squared(-t, z1)
+            + PI * squared(z1, h);
+        let b = body.copy().unwrap();
+        let o = order(&b);
+        let end = face(&b, &o, |bx| {
+            (bx.min().y - len).abs() < 1e-9 && (bx.max().y - len).abs() < 1e-9
+        });
+        let lid = face(&b, &o, |bx| {
+            (bx.min().z - h).abs() < 1e-9 && (bx.max().z - h).abs() < 1e-9
+        });
+        shell(&b, &o, &[end, lid], -t).unwrap_or_else(|e| panic!("t {t}: {e:?}"));
+        assert!(
+            rel(volume(&b), whole - cavity) < 1e-9,
+            "t {t}: {} vs {}",
+            volume(&b),
+            whole - cavity
+        );
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "t {t}: {}", report.text);
+    }
+}
+
 #[test]
 fn a_wall_with_no_room_is_refused_before_the_kernel() {
     all_fixes();

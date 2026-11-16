@@ -620,6 +620,39 @@ fn a_cone_with_its_seam_to_the_apex_gets_no_other() {
     faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(1.0, 2.0)]);
 }
 
+/// A cone point (radius 3 at z = 0, half-angle atan ½, its apex at z = −6) closed by a disk,
+/// every bound a plain FACE_BOUND, the file's uncertainty 1e-5 mm: its apex VERTEX_LOOP's point
+/// written 1e-6 mm off the apex, across the axis or along it (within the uncertainty, as a
+/// writer's rounding leaves it). The vertex is the cone's pole: the seam from the rim runs up the
+/// ruling to the apex itself, the vertex's tolerance covering its gap, and the point reads closed.
+#[test]
+fn a_cone_point_whose_apex_vertex_is_a_little_off_its_apex_reads_closed() {
+    for off in [[6e-7, 8e-7, 0.0], [0.0, 0.0, 1e-6], [0.0, 0.0, -1e-6]] {
+        let mut w = W::default();
+        let v = w.vertex([3.0, 0.0, 0.0]);
+        let k = w.circle([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 3.0);
+        let rim = w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"));
+        let apex = w.vertex([off[0], off[1], -6.0 + off[2]]);
+        let point = w.add(format!("VERTEX_LOOP('',#{apex})"));
+        let point = w.add(format!("FACE_BOUND('',#{point},.T.)"));
+        let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let cone = w.add(format!("CONICAL_SURFACE('',#{a},3.,{})", real(0.5f64.atan())));
+        // The cone's normal points out and down: the face lies below its rim, which runs −u.
+        let x = w.oe(rim, false);
+        let bx = w.bound(&[x], false, true);
+        let side = w.face(&[point, bx], cone, true);
+        let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let x = w.oe(rim, true);
+        let bx = w.bound(&[x], false, true);
+        let disk = w.face(&[bx], plane, true);
+        let shell = closed_shell(&mut w, &[side, disk]);
+        let solid = w.add(format!("MANIFOLD_SOLID_BREP('point',#{shell})"));
+        let s = one_solid(&w.file_with_uncertainty(&[solid], 1e-5));
+        assert_eq!(counts(&s.brep), [2, 1, 2, 2, 2], "{off:?}");
+        faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(-4.0, -1.0)]);
+    }
+}
+
 /// A tube (radius 5 outside, 3 inside, from z = 0 to 4) whose cylinders carry no seam edges:
 /// each side is bounded by two circles whose vertices sit at different angles.
 #[test]

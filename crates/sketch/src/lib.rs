@@ -46,6 +46,7 @@ mod text;
 mod thin;
 mod union_find;
 mod wire;
+mod wire_solve;
 
 pub use curves::{
     MAX_SPLINE_POINTS, bspline_beziers, conic_point, conic_rho_from_point, ellipse_point, end_curvature, fit_beziers, fit_beziers_mode,
@@ -88,6 +89,7 @@ pub use solver::{
 pub use text::{MAX_TEXT_CHARS, TextAlign, TextMetrics, TextStyle, TextVerticalAlign, text_geometry, text_geometry_in, text_geometry_styled};
 pub use thin::{MAX_THIN_SEGMENTS, thin_wall_regions};
 pub use wire::{MAX_FIT_POINTS, MAX_WIRE_POINTS, Wire, WireArc, WireCurve, WireSpace, arc_from_3_points, arc_polyline, arc_sweep, fit_polyline};
+pub use wire_solve::{Axis, MAX_WIRE_ROWS, MAX_WIRE_VARS, WireConstraint, WireConstraintKind, WirePoint, WireReport};
 
 #[cfg(test)]
 mod circle_edge_tests;

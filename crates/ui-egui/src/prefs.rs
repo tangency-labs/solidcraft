@@ -1371,6 +1371,9 @@ preference_settings! {
     /// Show engine-derived persistent selection in the ribbon; off retains neutral buttons.
     persistent_ribbon_pressed: bool = true, PAGE_LAYOUT;
     viewport_analysis_status: bool = true, PAGE_GRAPHICS;
+    /// An idle Escape (nothing else owns it) turns off the newest analysis or the section view,
+    /// as before. Off by default: they close only from their status item, toggle or command.
+    escape_closes_analyses: bool = false, PAGE_GRAPHICS;
     viewport_section_status: bool = true, PAGE_GRAPHICS;
     viewport_status_details: bool = true, PAGE_GRAPHICS;
     viewport_status_summary: bool = true, PAGE_GRAPHICS;
@@ -6897,6 +6900,7 @@ mod tests {
             ("ribbon_labels", json!(false), PAGE_LAYOUT),
             ("persistent_ribbon_pressed", json!(false), PAGE_LAYOUT),
             ("viewport_analysis_status", json!(false), PAGE_GRAPHICS),
+            ("escape_closes_analyses", json!(true), PAGE_GRAPHICS),
             ("viewport_section_status", json!(false), PAGE_GRAPHICS),
             ("viewport_status_details", json!(false), PAGE_GRAPHICS),
             ("viewport_status_summary", json!(false), PAGE_GRAPHICS),
@@ -11396,6 +11400,30 @@ mod tests {
         }
         assert_eq!(h.app.session.revision, revision);
         assert_eq!(h.app.session.doc.to_json(), design);
+    }
+
+    #[test]
+    fn escape_closes_analyses_preference_is_off_by_default_and_its_chip_persists_cancels_and_resets() {
+        assert!(!Prefs::default().escape_closes_analyses);
+        assert!(!lenient(&json!({"theme":"light"})).escape_closes_analyses);
+        assert!(!lenient(&json!({"escape_closes_analyses":"yes"})).escape_closes_analyses);
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open":"Graphics"}));
+        super::reveal_preference(&mut h, "prefs:escape_closes_analyses");
+        let chip = crate::scenario::handle_at("prefs:escape_closes_analyses").unwrap();
+        h.call("ui.click", json!({"x":chip.x,"y":chip.y}));
+        assert!(h.app.preferences.escape_closes_analyses);
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["escape_closes_analyses"], true);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.preferences.escape_closes_analyses);
+        h.call("ui.prefs", json!({"open":"Graphics","escape_closes_analyses":true,"button":"apply"}));
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(restored.preferences.escape_closes_analyses);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(!h.app.preferences.escape_closes_analyses);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.preferences.escape_closes_analyses);
     }
 
     #[test]

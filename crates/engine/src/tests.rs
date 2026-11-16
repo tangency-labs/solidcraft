@@ -2561,6 +2561,24 @@ fn pipe_scale_offset_bounding_and_materials() {
     let m = run(&mut s, "inspect.measure", json!({"bodies": ["Stock"]}));
     let bb = &m["bodies"][0]["bbox"];
     assert!((bb["min"][1].as_f64().unwrap() + 3.0).abs() < 1e-6 && (bb["max"][1].as_f64().unwrap() - 41.0).abs() < 1e-6, "{bb}");
+    // A margin per side (#17043): none at the bottom, more on top, one side set into the tube.
+    let tube = run(&mut s, "inspect.measure", json!({"bodies": ["Tube"]}))["bodies"][0]["bbox"].clone();
+    let at = |b: &Value, end: &str, axis: usize| b[end][axis].as_f64().unwrap();
+    run(&mut s, "solid.bounding_solid", json!({"bodies": ["Tube"], "margin": 9, "margins": [1, 2, "-1 mm", 3, 0, "2 * 2"], "body_name": "Sided"}));
+    let sided = run(&mut s, "inspect.measure", json!({"bodies": ["Sided"]}))["bodies"][0]["bbox"].clone();
+    for (axis, lo, hi) in [(0, 1.0, 2.0), (1, -1.0, 3.0), (2, 0.0, 4.0)] {
+        assert!((at(&tube, "min", axis) - lo - at(&sided, "min", axis)).abs() < 1e-6, "{axis}: {sided} around {tube}");
+        assert!((at(&tube, "max", axis) + hi - at(&sided, "max", axis)).abs() < 1e-6, "{axis}: {sided} around {tube}");
+    }
+    let features = s.doc.features.len();
+    for margins in [json!([1, 2, 3]), json!([0, 0, 0, 0, -50, -50])] {
+        let refused = s.execute("solid.bounding_solid", &json!({"bodies": ["Tube"], "margins": margins}));
+        assert!(refused.is_err() || s.model.results.last().is_some_and(|r| r.error.is_some()), "{margins}: {refused:?}");
+        if refused.is_ok() {
+            run(&mut s, "edit.undo", json!({}));
+        }
+    }
+    assert_eq!(s.doc.features.len(), features);
     run(&mut s, "solid.box", json!({"corner": [100, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
     run(&mut s, "solid.scale", json!({"bodies": ["Cube"], "factor": 2, "origin": [100, 0, 0]}));
     let vc = run(&mut s, "inspect.measure", json!({"bodies": ["Cube"]}))["total"]["volume_mm3"].as_f64().unwrap();
@@ -5317,6 +5335,62 @@ fn a_round_as_large_as_the_round_it_runs_along_is_refused_not_failed() {
     }
 }
 
+/// #17224: a sphere of radius 25 with a cylinder of radius 15 cut through it along Y, its axis 10.1
+/// above the centre, so the cylinder comes out at the top and meets the sphere in one loop of three
+/// edges (split where the cylinder's seam, at +X, crosses it). Rounding the loop, the two rounds
+/// that meet at a seam vertex end on one section where their contact lines cross the seam. The
+/// ball touching the cylinder on the seam (x = 15, z = 10.1) and the sphere inside has radius
+/// (297.99 - y^2) / 80, at most 3.725: a larger round's contact line never reaches the seam, and
+/// it failed there with "Unable to Compute Geometry". It is refused naming the largest radius
+/// that fits (297.99 / 80 less the fit margin, 3.724 mm, which builds); 2 mm builds as before.
+fn sphere_with_a_cylindrical_cut() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "flip": true}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [0, 25], "end": [0, -25]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 25], [0, -25]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"axis": {"curve": "l1"}, "angle": "360 deg"}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "flip": true}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 10.1], "radius": 15}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 60, "direction": "symmetric", "operation": "cut"}));
+    s
+}
+
+#[test]
+fn a_round_whose_contact_line_misses_the_seam_it_joins_across_names_the_radius_that_fits() {
+    let loop_edges = json!([
+        [-11.698264765965028, -22.08234508421787, 0.7117938036342516],
+        [2.716453680812133, 0, 24.851978818427593],
+        [-11.69826476596502, 22.08234508421787, 0.7117938036342424]
+    ]);
+    let mut s = sphere_with_a_cylindrical_cut();
+    run(&mut s, "solid.fillet", json!({"edges": loop_edges, "radius": 2}));
+    assert!(rel(volume(&mut s), 36554.03) < 1e-5, "{}", volume(&mut s));
+    // The kernel's own refusal: without the search that builds candidates to confirm the size.
+    let mut s = sphere_with_a_cylindrical_cut();
+    s.set_validation(solidcraft_kernel::Validation::Off);
+    let e = s.execute("solid.fillet", &json!({"edges": loop_edges, "radius": 6})).unwrap_err().to_string();
+    assert!(!e.contains("Unable to Compute Geometry"), "{e}");
+    assert!(e.contains("larger than the faces beside its edges allow"), "{e}");
+    // The size named: the largest ball touching the seam, 297.99 / 80 at y = 0, less the fit
+    // margin (a thousand of the edge's tolerances, about 1.2e-5 here: 0.012).
+    let named: f64 = e
+        .split_once("the largest radius that fits is ")
+        .and_then(|(_, rest)| rest.split_once(" mm"))
+        .and_then(|(n, _)| n.parse().ok())
+        .unwrap_or_else(|| panic!("no radius named: {e}"));
+    let bound = 297.99 / 80.0;
+    assert!(named < bound && bound - named < 0.02, "named {named}, bound {bound}: {e}");
+    // The size named builds: its contact line crosses the seam just inside the bound.
+    let mut s = sphere_with_a_cylindrical_cut();
+    if let Err(e) = s.execute("solid.fillet", &json!({"edges": loop_edges, "radius": named})) {
+        panic!("the named radius {named} does not build: {e}");
+    }
+    let v = volume(&mut s);
+    assert!(v > 0.0 && v < 36554.03, "{v}");
+}
+
 #[test]
 fn fillet_fit_reduce_uses_the_largest_radius_that_fits() {
     // #293: 3.5 is too large for the 6 mm end faces of a 14 x 6 x 10 box; reduce gives 3 (a full
@@ -5566,6 +5640,68 @@ fn tapered_extrude_of_a_profile_mixing_lines_and_an_arc() {
     let (a0, p, k) = (7.4 * 9.2 + PI * 4.6 * 4.6 / 2.0, 2.0 * 7.4 + 9.2 + PI * 4.6, 2.0 + PI / 2.0);
     let expect = a0 * h + p * t * h * h / 2.0 + k * t * t * h.powi(3) / 3.0;
     assert!(rel(volume(&mut s), expect) < 1e-3, "{} vs {expect}", volume(&mut s));
+}
+
+/// A tapered extrude To a curved face ends on that face, as an untapered one does (#15820),
+/// not on a flat cap where the profile's middle meets it. A circle r 4 on XY, with or without a
+/// hole r 1.5, up to a ball R 10 at z 20. A wall r(z) = r₀ + s·z (s = tan of the taper for the
+/// outside, its negative for the hole, which the taper narrows as it grows the outside) meets
+/// the ball at z_c, the smaller root of r(z)² + (z − 20)² = R², so the column inside it is the
+/// frustum to z_c less the ball's cap below z_c, and the post is the outside's column less the
+/// hole's. Joined to the ball it adds just that. At −15° the outside would close at z 14.9 and
+/// at +5° the hole at z 17.1, both inside the ball: the tools only run as far as they must.
+#[test]
+fn tapered_extrude_to_a_curved_face_ends_on_it() {
+    let (a, b, c, big_r) = (4.0, 1.5, 20.0, 10.0);
+    let setup = |hole: bool| {
+        let mut s = Session::default();
+        run(&mut s, "solid.sphere", json!({"radius": big_r, "center": [0, 0, c], "body_name": "Ball"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "P"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": a}));
+        if hole {
+            run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": b}));
+        }
+        run(&mut s, "sketch.finish", json!({}));
+        s
+    };
+    let column = |r0: f64, slope: f64| {
+        let (qa, qb, qc) = (slope * slope + 1.0, 2.0 * (r0 * slope - c), r0 * r0 + c * c - big_r * big_r);
+        let z_c = (-qb - (qb * qb - 4.0 * qa * qc).sqrt()) / (2.0 * qa);
+        let (r_c, h) = (r0 + slope * z_c, z_c - (c - big_r));
+        PI * z_c / 3.0 * (r0 * r0 + r0 * r_c + r_c * r_c) - PI * h * h * (3.0 * big_r - h) / 3.0
+    };
+    let ball = 4.0 / 3.0 * PI * big_r.powi(3);
+    let measure = |s: &mut Session, body: &str| run(s, "inspect.measure", json!({"bodies": [body]}))["bodies"][0].clone();
+    let topology = |m: &Value| (m["faces"].as_u64(), m["edges"].as_u64(), m["vertices"].as_u64());
+    for hole in [false, true] {
+        // Untapered, the straight path: the post's faces are its base, its sides and the ball's cap.
+        let mut s = setup(hole);
+        run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [0, 0, c - big_r], "operation": "new", "body_name": "Post"}));
+        let straight = topology(&measure(&mut s, "Post"));
+        assert_eq!(straight.0, Some(if hole { 4 } else { 3 }), "{straight:?}");
+        let cones = if hole { 2 } else { 1 };
+        // At −15° the hole would grow into the outside before the ball: no hole there.
+        let degs: &[f64] = if hole { &[5.0, -5.0] } else { &[5.0, -5.0, -15.0] };
+        for &deg in degs {
+            let t = deg.to_radians().tan();
+            let post = column(a, t) - if hole { column(b, -t) } else { 0.0 };
+            let taper = format!("{deg} deg");
+            let mut s = setup(hole);
+            run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [0, 0, c - big_r], "taper": taper, "operation": "new", "body_name": "Post"}));
+            let m = measure(&mut s, "Post");
+            let got = m["volume_mm3"].as_f64().unwrap();
+            assert!(rel(got, post) < 1e-4, "{deg} deg, hole {hole}: {got} vs {post}");
+            assert_eq!(topology(&m), straight, "{deg} deg, hole {hole}: {m}");
+            assert_eq!(m["face_types"], json!({"cone": cones, "plane": 1, "sphere": 1}), "{deg} deg, hole {hole}: only the base is flat: {m}");
+            let mut s = setup(hole);
+            run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [0, 0, c - big_r], "taper": taper, "operation": "join", "targets": ["Ball"]}));
+            assert_eq!(s.model.state().bodies.len(), 1, "{deg} deg, hole {hole}");
+            assert!(rel(volume(&mut s), ball + post) < 1e-4, "{deg} deg, hole {hole}: {} vs {}", volume(&mut s), ball + post);
+            // The ball's face, less the post's foot; with a hole also the ball's face in the hole.
+            let m = measure(&mut s, "Ball");
+            assert_eq!(m["face_types"], json!({"cone": cones, "plane": 1, "sphere": cones}), "{deg} deg, hole {hole}: {m}");
+        }
+    }
 }
 
 /// A feature that joins into a body creates none, and its reply says so; a primitive's reply
