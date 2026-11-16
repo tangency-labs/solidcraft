@@ -30,6 +30,7 @@ solidcraft-doc = { path = "crates/doc" }
 # Versioned file formats: the format tag, the version registry and its upgrade, a newer file told
 solidcraft-format = { path = "crates/format" }
 solidcraft-io = { path = "crates/io" }
+solidcraft-exchange = { path = "crates/exchange" }
 solidcraft-engine = { path = "crates/engine" }
 solidcraft-ui-egui = { path = "crates/ui-egui" }
 solidcraft-ui-kit = { path = "crates/ui-kit" }
