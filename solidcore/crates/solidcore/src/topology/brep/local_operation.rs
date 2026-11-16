@@ -3118,6 +3118,7 @@ mod tests {
     /// established and the operation was refused.)
     #[test]
     fn a_side_moved_off_its_round_gets_a_step_wall() {
+        use crate::topology::brep::validation::{check_brep, CheckLevel};
         let mut k = Kernel::default();
         let mut b = cube_rounded_r5(&mut k);
         let side = face_on_x(&k, &b, 20.0);
@@ -3128,7 +3129,6 @@ mod tests {
         let want = 8000.0 - 20.0 * (25.0 - 25.0 * crate::math::PI / 4.0) + 0.1 * 15.0 * 20.0;
         assert!(manifold && (v - want).abs() <= 1e-9 * want, "{v} vs {want}");
         // and the body built is clean at check level 2
-        use crate::topology::brep::validation::{check_brep, CheckLevel};
         b.use_arena_naming().unwrap();
         let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
             .unwrap()

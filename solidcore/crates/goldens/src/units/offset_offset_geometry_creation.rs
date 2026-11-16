@@ -4629,7 +4629,7 @@ mod tests {
 
     /// The goldens case `name` of this unit, as the goldens run generates it.
     fn golden_case(name: &str) -> Inputs {
-        let ctx = crate::CaseContext {
+        let ctx = CaseContext {
             root: crate::case::repo_root(),
             seeds: 16,
         };
