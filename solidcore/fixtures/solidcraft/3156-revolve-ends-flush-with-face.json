@@ -1,0 +1,476 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/3156",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/3224",
+ "test": "crates/kernel/src/coplanar_tests.rs: a_revolve_joined_flush_with_the_face_its_axis_lies_in_is_exact, a_revolve_cut_flush_with_the_face_its_axis_lies_in_is_exact; crates/engine/src/tests/boolean_diagnostics.rs: a_revolve_ended_flush_with_the_face_its_axis_lies_in_needs_no_retry (draft PR, kernel-paused under tangency-labs/solidcraft#3992)",
+ "summary": "A profile revolved +-90 degrees about an axis lying in a plate's top face and joined to the plate has both planar end faces flush in that face. SolidCraft's truck kernel could not separate the coincident faces (the revolve's curved walls were judged to reach past the plane) and fell back to a tool nudge (2e-4 mm), so the result was moved; at 80 or 89.5 degrees the join was exact. Geometry is the issue's repro and PR #3224's tests: the plate x -50..-40, y -50..50, z 41..47, the axis y = 0, z = 47 along X, a 4 x 7 rectangle (or the issue's trapezoid) at x -47..-43, 30 to 37 from the axis. The runner has no symmetric revolve, so the profile is drawn in z = 47 at y 30..37 (the +90 degree end face) and turned 180 degrees about -X, under the axis, to y -37..-30: the same solid. Each volume is the plate, plus the half turn for a join (Pappus), less O, the half turn inside the plate: the ring r from the axis lies in the 6 mm plate for the angle asin(6/r) on each side, so O = int_30^37 2*w(r)*r*asin(6/r) dr, integrated in closed form. Cross-checked by Cartesian slicing (depth outer, y inner, Simpson) to 1e-9 mm^3. The control raises the axis 1 mm, so the end faces lie clear above the plate. Only lumps and volume are expected. The tolerance is 0.01 mm^3, as in the other boolean cases.",
+ "cases": [
+  {
+   "name": "rectangle_join_axis_raised",
+   "note": "Control: the axis and profile 1 mm higher (z = 48). The half turn's end faces lie 1 mm above the plate's top face, and its walls cross that face.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      -50.0,
+      -50.0,
+      41.0
+     ],
+     "size": [
+      10.0,
+      100.0,
+      6.0
+     ]
+    },
+    {
+     "op": "revolve",
+     "id": "turn",
+     "plane": "xy",
+     "origin": [
+      0.0,
+      0.0,
+      48.0
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      48.0
+     ],
+     "axis_dir": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "angle_deg": 180.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -47.0,
+         30.0
+        ],
+        [
+         -43.0,
+         30.0
+        ],
+        [
+         -43.0,
+         37.0
+        ],
+        [
+         -47.0,
+         37.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "plate",
+     "b": "turn"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 8607.87847834816,
+     "tol": 0.01,
+     "formula": "6000 + T - O, the plate (10 x 100 x 6) joined to the half turn (T = 2946.813909067, 938*pi (Pappus: 4*(37^2 - 30^2)/2*pi)), O = 338.935430719 the half turn inside the plate: on each side of the axis the ring r from it lies in the plate for the angle asin(7/r) - asin(1/r) below the axis's horizontal, so O = int_30^37 2*w(r)*r*(asin(7/r) - asin(1/r)) dr = 8*[F1(r, 7) - F1(r, 1)]_30^37, F1(r, a) = r^2/2*asin(a/r) + a/2*sqrt(r^2 - a^2) = int r*asin(a/r) dr"
+    }
+   }
+  },
+  {
+   "name": "rectangle_join_flush",
+   "note": "#3156 (the issue's repro): a 4 x 7 rectangle 30 to 37 from the axis y = 0, z = 47 along X, turned 180 degrees under the axis (SolidCraft's +-90 degrees). Both end faces lie flush in the plate's top face z = 47.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      -50.0,
+      -50.0,
+      41.0
+     ],
+     "size": [
+      10.0,
+      100.0,
+      6.0
+     ]
+    },
+    {
+     "op": "revolve",
+     "id": "turn",
+     "plane": "xy",
+     "origin": [
+      0.0,
+      0.0,
+      47.0
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      47.0
+     ],
+     "axis_dir": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "angle_deg": 180.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -47.0,
+         30.0
+        ],
+        [
+         -43.0,
+         30.0
+        ],
+        [
+         -43.0,
+         37.0
+        ],
+        [
+         -47.0,
+         37.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "plate",
+     "b": "turn"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 8608.970248730224,
+     "tol": 0.01,
+     "formula": "6000 + T - O, the plate (10 x 100 x 6) joined to the half turn (T = 2946.813909067, 938*pi (Pappus: 4*(37^2 - 30^2)/2*pi)), O = 337.843660337 the half turn inside the plate: on each side of the axis the ring r from it lies in the plate for the angle asin(6/r) below the axis's horizontal, so O = int_30^37 2*w(r)*r*(asin(6/r)) dr = 8*[F1(r, 6)]_30^37, F1(r, a) = r^2/2*asin(a/r) + a/2*sqrt(r^2 - a^2) = int r*asin(a/r) dr"
+    }
+   }
+  },
+  {
+   "name": "trapezoid_join_flush",
+   "note": "#3156 with the issue's trapezoid (4 wide 30 from the axis, 2 wide 37 from it): the revolve's side walls are cones. Both end faces lie flush in z = 47.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      -50.0,
+      -50.0,
+      41.0
+     ],
+     "size": [
+      10.0,
+      100.0,
+      6.0
+     ]
+    },
+    {
+     "op": "revolve",
+     "id": "turn",
+     "plane": "xy",
+     "origin": [
+      0.0,
+      0.0,
+      47.0
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      47.0
+     ],
+     "axis_dir": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "angle_deg": 180.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -47.0,
+         30.0
+        ],
+        [
+         -43.0,
+         30.0
+        ],
+        [
+         -44.0,
+         37.0
+        ],
+        [
+         -46.0,
+         37.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "plate",
+     "b": "turn"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 7931.038689844514,
+     "tol": 0.01,
+     "formula": "6000 + T - O, the plate (10 x 100 x 6) joined to the half turn (T = 2184.454091796, pi/7*[44*r^2 - 2*r^3/3]_30^37 (Pappus ring by ring, width w(r) = (88 - 2*r)/7)), O = 253.415401952 the half turn inside the plate: on each side of the axis the ring r from it lies in the plate for the angle asin(6/r) below the axis's horizontal, so O = int_30^37 2*w(r)*r*(asin(6/r)) dr = 2*[88/7*F1(r, 6) - 2/7*F2(r, 6)]_30^37, F1(r, a) = r^2/2*asin(a/r) + a/2*sqrt(r^2 - a^2) = int r*asin(a/r) dr, F2(r, a) = r^3/3*asin(a/r) + a/3*(r/2*sqrt(r^2 - a^2) + a^2/2*ln(r + sqrt(r^2 - a^2))) = int r^2*asin(a/r) dr"
+    }
+   }
+  },
+  {
+   "name": "rectangle_cut_flush",
+   "note": "The same half turn cut from the plate: a groove through the top face, with its end faces in it. The groove goes through the plate's bottom face but leaves the plate's sides x < -47 and x > -43, so the plate stays one piece.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      -50.0,
+      -50.0,
+      41.0
+     ],
+     "size": [
+      10.0,
+      100.0,
+      6.0
+     ]
+    },
+    {
+     "op": "revolve",
+     "id": "turn",
+     "plane": "xy",
+     "origin": [
+      0.0,
+      0.0,
+      47.0
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      47.0
+     ],
+     "axis_dir": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "angle_deg": 180.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -47.0,
+         30.0
+        ],
+        [
+         -43.0,
+         30.0
+        ],
+        [
+         -43.0,
+         37.0
+        ],
+        [
+         -47.0,
+         37.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "plate",
+     "b": "turn"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 5662.156339662997,
+     "tol": 0.01,
+     "formula": "6000 - O, the plate (10 x 100 x 6) less the half turn (T = 2946.813909067, 938*pi (Pappus: 4*(37^2 - 30^2)/2*pi)), O = 337.843660337 the half turn inside the plate: on each side of the axis the ring r from it lies in the plate for the angle asin(6/r) below the axis's horizontal, so O = int_30^37 2*w(r)*r*(asin(6/r)) dr = 8*[F1(r, 6)]_30^37, F1(r, a) = r^2/2*asin(a/r) + a/2*sqrt(r^2 - a^2) = int r*asin(a/r) dr"
+    }
+   }
+  },
+  {
+   "name": "rectangle_join_flush_large_plate",
+   "note": "PR #3224's second case: the flush join on a 104 x 104 plate, where SolidCraft's coplanar push grows with the bodies' size and still nudged.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      -52.0,
+      -52.0,
+      41.0
+     ],
+     "size": [
+      104.0,
+      104.0,
+      6.0
+     ]
+    },
+    {
+     "op": "revolve",
+     "id": "turn",
+     "plane": "xy",
+     "origin": [
+      0.0,
+      0.0,
+      47.0
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      47.0
+     ],
+     "axis_dir": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "angle_deg": 180.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -47.0,
+         30.0
+        ],
+        [
+         -43.0,
+         30.0
+        ],
+        [
+         -43.0,
+         37.0
+        ],
+        [
+         -47.0,
+         37.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "plate",
+     "b": "turn"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 67504.97024873021,
+     "tol": 0.01,
+     "formula": "104*104*6 + T - O, the plate (104 x 104 x 6) joined to the half turn (T = 2946.813909067, 938*pi (Pappus: 4*(37^2 - 30^2)/2*pi)), O = 337.843660337 the half turn inside the plate: on each side of the axis the ring r from it lies in the plate for the angle asin(6/r) below the axis's horizontal, so O = int_30^37 2*w(r)*r*(asin(6/r)) dr = 8*[F1(r, 6)]_30^37, F1(r, a) = r^2/2*asin(a/r) + a/2*sqrt(r^2 - a^2) = int r*asin(a/r) dr"
+    }
+   }
+  },
+  {
+   "name": "rectangle_cut_flush_large_plate",
+   "note": "The flush cut on the 104 x 104 plate (nudged in SolidCraft before PR #3224).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      -52.0,
+      -52.0,
+      41.0
+     ],
+     "size": [
+      104.0,
+      104.0,
+      6.0
+     ]
+    },
+    {
+     "op": "revolve",
+     "id": "turn",
+     "plane": "xy",
+     "origin": [
+      0.0,
+      0.0,
+      47.0
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      47.0
+     ],
+     "axis_dir": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "angle_deg": 180.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -47.0,
+         30.0
+        ],
+        [
+         -43.0,
+         30.0
+        ],
+        [
+         -43.0,
+         37.0
+        ],
+        [
+         -47.0,
+         37.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "plate",
+     "b": "turn"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 64558.156339663,
+     "tol": 0.01,
+     "formula": "104*104*6 - O, the plate (104 x 104 x 6) less the half turn (T = 2946.813909067, 938*pi (Pappus: 4*(37^2 - 30^2)/2*pi)), O = 337.843660337 the half turn inside the plate: on each side of the axis the ring r from it lies in the plate for the angle asin(6/r) below the axis's horizontal, so O = int_30^37 2*w(r)*r*(asin(6/r)) dr = 8*[F1(r, 6)]_30^37, F1(r, a) = r^2/2*asin(a/r) + a/2*sqrt(r^2 - a^2) = int r*asin(a/r) dr"
+    }
+   }
+  }
+ ]
+}

@@ -195,10 +195,16 @@ fn urdf_forward_kinematics_match_the_assembly() {
 #[test]
 fn urdf_limits_convert_units() {
     let mut s = two_cubes();
-    joint(&mut s, "slider", "Rail", json!([[10, 0]]));
+    joint(&mut s, "slider", "Rail", json!([[0, 10]]));
     let x = package(&s).xml;
     assert!(x.contains(r#"<joint name="Rail" type="prismatic">"#), "{x}");
     assert!(x.contains(r#"<limit lower="0" upper="0.01" effort="1000" velocity="10"/>"#), "{x}");
+
+    // Older documents can contain reversed limits even though joint commands now reject them.
+    let mut doc = (*s.doc).clone();
+    doc.assembly.joints[0].limits = vec![Some((10.0, 0.0))];
+    let p = solidcraft_io::urdf(&doc, &s.doc.painted(&s.model.state()), "t", &UrdfOptions::default()).unwrap();
+    assert!(p.xml.contains(r#"<limit lower="0" upper="0.01" effort="1000" velocity="10"/>"#), "{}", p.xml);
 
     let mut s = two_cubes();
     joint(&mut s, "revolute", "Turn", json!([[-30, 45]]));
@@ -571,6 +577,7 @@ fn urdf_warns_when_placements_are_cut_off() {
             name: format!("C{k}:1"),
             transform: solidcraft_doc::IDENTITY,
             grounded: false,
+            expressed_moves: Vec::new(),
         });
     }
     // A component placed twice with a part nested in it, next to the deep chain: its copy is
@@ -579,7 +586,15 @@ fn urdf_warns_when_placements_are_cut_off() {
     doc.components.push(solidcraft_doc::Component { id: 3002, name: "Foot".into(), parent: 3001, ..Default::default() });
     // Listed first, so the walk (a stack) goes down the chain before reaching them.
     for (id, component, parent, name) in [(4003, 3002, 3001, "Foot:1"), (4002, 3001, 0, "Leg:2"), (4001, 3001, 0, "Leg:1")] {
-        let o = solidcraft_doc::Occurrence { id, component, parent, name: name.into(), transform: solidcraft_doc::IDENTITY, grounded: false };
+        let o = solidcraft_doc::Occurrence {
+            id,
+            component,
+            parent,
+            name: name.into(),
+            transform: solidcraft_doc::IDENTITY,
+            grounded: false,
+            expressed_moves: Vec::new(),
+        };
         doc.occurrences.insert(0, o);
     }
     let p = solidcraft_io::urdf(&doc, &s.model.state(), "t", &UrdfOptions::default()).unwrap();

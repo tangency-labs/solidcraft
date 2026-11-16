@@ -1,0 +1,552 @@
+{
+ "cases": [
+  {
+   "name": "issue2177_crescent_on_top_of_rim_checked",
+   "note": "#2177: a cylinder r 10, z 0..10, united with a crescent prism on its top rim, z 10..15, skinned (degree 1, capped) between two profiles of the r 10 arc about the origin and the r 6 arc about (10, 0) from SmApiCreateArc (+-34.9 and +-107.5 degrees, the curves crates/solidcore/tests/issue_2177_crescent_on_top_of_rim.rs sweeps), so its corners lie on the rim and it touches the cylinder only along the r 10 arc through the seam vertex (10, 0, 10). At the default fixes (upstream behaviour) CloseIntersectionLoop relates the rim's long arc with the crescent's r 6 arc (WR-528): SmBrep #59 and #82 at offset 38.157568 and the volume fails with 1001, on both sides. Compares the failed tests of SMLib's capi check (level 2) of the union with the port's.",
+   "inputs": {
+    "api": "checked",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 10.0,
+     "height": 10.0
+    },
+    "b": {
+     "kind": "skin",
+     "counts": [
+      2,
+      2
+     ],
+     "curves": [
+      {
+       "p": 2,
+       "cpts": [
+        [
+         8.2,
+         -5.723635208501674,
+         10.0
+        ],
+        [
+         10.0,
+         0.0,
+         8.2
+        ],
+        [
+         8.2,
+         5.723635208501674,
+         10.0
+        ]
+       ],
+       "weights": [
+        1.0,
+        0.82,
+        1.0
+       ],
+       "knots": [
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0
+       ]
+      },
+      {
+       "p": 2,
+       "cpts": [
+        [
+         8.2,
+         -5.723635208501674,
+         10.0
+        ],
+        [
+         9.99875534900998,
+         -5.6945241599205465,
+         8.108677416203719
+        ],
+        [
+         14.86520644972223,
+         -3.5113766818131626,
+         10.0
+        ],
+        [
+         14.108677416203719,
+         -1.8004880733454784e-15,
+         8.108677416203719
+        ],
+        [
+         14.865206449722232,
+         3.51137668181316,
+         10.0
+        ],
+        [
+         9.998755349009983,
+         5.694524159920545,
+         8.108677416203719
+        ],
+        [
+         8.200000000000003,
+         5.723635208501674,
+         10.0
+        ]
+       ],
+       "weights": [
+        1.0,
+        0.8108677416203718,
+        1.0,
+        0.8108677416203718,
+        1.0,
+        0.8108677416203718,
+        1.0
+       ],
+       "knots": [
+        0.0,
+        0.0,
+        0.0,
+        0.3333333333333333,
+        0.3333333333333333,
+        0.6666666666666666,
+        0.6666666666666666,
+        1.0,
+        1.0,
+        1.0
+       ]
+      },
+      {
+       "p": 2,
+       "cpts": [
+        [
+         8.2,
+         -5.723635208501674,
+         15.0
+        ],
+        [
+         10.0,
+         0.0,
+         12.299999999999999
+        ],
+        [
+         8.2,
+         5.723635208501674,
+         15.0
+        ]
+       ],
+       "weights": [
+        1.0,
+        0.82,
+        1.0
+       ],
+       "knots": [
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0
+       ]
+      },
+      {
+       "p": 2,
+       "cpts": [
+        [
+         8.2,
+         -5.723635208501674,
+         15.0
+        ],
+        [
+         9.99875534900998,
+         -5.6945241599205465,
+         12.163016124305576
+        ],
+        [
+         14.86520644972223,
+         -3.5113766818131626,
+         15.0
+        ],
+        [
+         14.108677416203719,
+         -1.8004880733454784e-15,
+         12.163016124305576
+        ],
+        [
+         14.865206449722232,
+         3.51137668181316,
+         15.0
+        ],
+        [
+         9.998755349009983,
+         5.694524159920545,
+         12.163016124305576
+        ],
+        [
+         8.200000000000003,
+         5.723635208501674,
+         15.0
+        ]
+       ],
+       "weights": [
+        1.0,
+        0.8108677416203718,
+        1.0,
+        0.8108677416203718,
+        1.0,
+        0.8108677416203718,
+        1.0
+       ],
+       "knots": [
+        0.0,
+        0.0,
+        0.0,
+        0.3333333333333333,
+        0.3333333333333333,
+        0.6666666666666666,
+        0.6666666666666666,
+        1.0,
+        1.0,
+        1.0
+       ]
+      }
+     ],
+     "degree": 1,
+     "cap_ends": true
+    },
+    "operation": 1,
+    "level": 2
+   }
+  },
+  {
+   "name": "issue2177_crescent_on_top_of_rim_measured",
+   "note": "#2177: a cylinder r 10, z 0..10, united with a crescent prism on its top rim, z 10..15, skinned (degree 1, capped) between two profiles of the r 10 arc about the origin and the r 6 arc about (10, 0) from SmApiCreateArc (+-34.9 and +-107.5 degrees, the curves crates/solidcore/tests/issue_2177_crescent_on_top_of_rim.rs sweeps), so its corners lie on the rim and it touches the cylinder only along the r 10 arc through the seam vertex (10, 0, 10). At the default fixes (upstream behaviour) CloseIntersectionLoop relates the rim's long arc with the crescent's r 6 arc (WR-528): SmBrep #59 and #82 at offset 38.157568 and the volume fails with 1001, on both sides. Compares the union's status, counts, volume status and face areas.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 10.0,
+     "height": 10.0
+    },
+    "b": {
+     "kind": "skin",
+     "counts": [
+      2,
+      2
+     ],
+     "curves": [
+      {
+       "p": 2,
+       "cpts": [
+        [
+         8.2,
+         -5.723635208501674,
+         10.0
+        ],
+        [
+         10.0,
+         0.0,
+         8.2
+        ],
+        [
+         8.2,
+         5.723635208501674,
+         10.0
+        ]
+       ],
+       "weights": [
+        1.0,
+        0.82,
+        1.0
+       ],
+       "knots": [
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0
+       ]
+      },
+      {
+       "p": 2,
+       "cpts": [
+        [
+         8.2,
+         -5.723635208501674,
+         10.0
+        ],
+        [
+         9.99875534900998,
+         -5.6945241599205465,
+         8.108677416203719
+        ],
+        [
+         14.86520644972223,
+         -3.5113766818131626,
+         10.0
+        ],
+        [
+         14.108677416203719,
+         -1.8004880733454784e-15,
+         8.108677416203719
+        ],
+        [
+         14.865206449722232,
+         3.51137668181316,
+         10.0
+        ],
+        [
+         9.998755349009983,
+         5.694524159920545,
+         8.108677416203719
+        ],
+        [
+         8.200000000000003,
+         5.723635208501674,
+         10.0
+        ]
+       ],
+       "weights": [
+        1.0,
+        0.8108677416203718,
+        1.0,
+        0.8108677416203718,
+        1.0,
+        0.8108677416203718,
+        1.0
+       ],
+       "knots": [
+        0.0,
+        0.0,
+        0.0,
+        0.3333333333333333,
+        0.3333333333333333,
+        0.6666666666666666,
+        0.6666666666666666,
+        1.0,
+        1.0,
+        1.0
+       ]
+      },
+      {
+       "p": 2,
+       "cpts": [
+        [
+         8.2,
+         -5.723635208501674,
+         15.0
+        ],
+        [
+         10.0,
+         0.0,
+         12.299999999999999
+        ],
+        [
+         8.2,
+         5.723635208501674,
+         15.0
+        ]
+       ],
+       "weights": [
+        1.0,
+        0.82,
+        1.0
+       ],
+       "knots": [
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0
+       ]
+      },
+      {
+       "p": 2,
+       "cpts": [
+        [
+         8.2,
+         -5.723635208501674,
+         15.0
+        ],
+        [
+         9.99875534900998,
+         -5.6945241599205465,
+         12.163016124305576
+        ],
+        [
+         14.86520644972223,
+         -3.5113766818131626,
+         15.0
+        ],
+        [
+         14.108677416203719,
+         -1.8004880733454784e-15,
+         12.163016124305576
+        ],
+        [
+         14.865206449722232,
+         3.51137668181316,
+         15.0
+        ],
+        [
+         9.998755349009983,
+         5.694524159920545,
+         12.163016124305576
+        ],
+        [
+         8.200000000000003,
+         5.723635208501674,
+         15.0
+        ]
+       ],
+       "weights": [
+        1.0,
+        0.8108677416203718,
+        1.0,
+        0.8108677416203718,
+        1.0,
+        0.8108677416203718,
+        1.0
+       ],
+       "knots": [
+        0.0,
+        0.0,
+        0.0,
+        0.3333333333333333,
+        0.3333333333333333,
+        0.6666666666666666,
+        0.6666666666666666,
+        1.0,
+        1.0,
+        1.0
+       ]
+      }
+     ],
+     "degree": 1,
+     "cap_ends": true
+    },
+    "operation": 1
+   }
+  },
+  {
+   "name": "issue2177_crescent_on_top_of_rim_booleaned_checked",
+   "note": "#2177: a cylinder r 10, z 0..10, united with a crescent prism on its top rim, z 10..15 (the r 6 cylinder centred at (10, 0) less the r 10 cylinder, both 5 tall, moved up 10), touching it only along the r 10 arc through the cylinder's seam vertex at (10, 0, 10). This crescent, built by a difference, has its vertices elsewhere and joins cleanly on both sides (a contrast to the skinned cases); compares the failed tests of SMLib's capi check (level 2) of the union with the port's.",
+   "inputs": {
+    "api": "checked",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 10.0,
+     "height": 10.0
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "translate": {
+        "vector": [
+         0.0,
+         0.0,
+         10.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "boolean",
+      "operation": 3,
+      "a": {
+       "kind": "cylinder",
+       "origin": [
+        10.0,
+        0.0,
+        0.0
+       ],
+       "radius": 6.0,
+       "height": 5.0
+      },
+      "b": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "radius": 10.0,
+       "height": 5.0
+      }
+     }
+    },
+    "operation": 1,
+    "level": 2
+   }
+  },
+  {
+   "name": "issue2177_crescent_on_top_of_rim_booleaned_measured",
+   "note": "#2177: a cylinder r 10, z 0..10, united with a crescent prism on its top rim, z 10..15 (the r 6 cylinder centred at (10, 0) less the r 10 cylinder, both 5 tall, moved up 10), touching it only along the r 10 arc through the cylinder's seam vertex at (10, 0, 10). This crescent, built by a difference, has its vertices elsewhere and joins cleanly on both sides (a contrast to the skinned cases); compares the union's status, counts, volume and face areas.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 10.0,
+     "height": 10.0
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "translate": {
+        "vector": [
+         0.0,
+         0.0,
+         10.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "boolean",
+      "operation": 3,
+      "a": {
+       "kind": "cylinder",
+       "origin": [
+        10.0,
+        0.0,
+        0.0
+       ],
+       "radius": 6.0,
+       "height": 5.0
+      },
+      "b": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "radius": 10.0,
+       "height": 5.0
+      }
+     }
+    },
+    "operation": 1
+   }
+  }
+ ]
+}

@@ -1,0 +1,409 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b13"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  15.0,
+                  0.0,
+                  10.0
+                ],
+                [
+                  15.0,
+                  20.0,
+                  10.0
+                ]
+              ],
+              "index": 7
+            },
+            {
+              "at": [
+                [
+                  15.0,
+                  0.0,
+                  10.0
+                ],
+                [
+                  30.0,
+                  0.0,
+                  10.0
+                ]
+              ],
+              "index": 8
+            },
+            {
+              "at": [
+                [
+                  15.0,
+                  0.0,
+                  10.0
+                ],
+                [
+                  15.0,
+                  0.0,
+                  20.0
+                ]
+              ],
+              "index": 16
+            }
+          ],
+          "points": [
+            [
+              15.0,
+              10.0,
+              10.0
+            ],
+            [
+              22.5,
+              0.0,
+              10.0
+            ],
+            [
+              15.0,
+              0.0,
+              15.0
+            ]
+          ],
+          "tolerance": 2.06255281280883
+        },
+        "kind": "curvature",
+        "sizes": [
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-fillet-g2-mixed-corner",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g2"
+    },
+    "faces": 17,
+    "method": "a 30 x 20 x 10 box with a 15 x 20 x 10 box joined on its top at x 0..15; the three edges at (15, 0, 10); the fillet type curvature (G2 sections and G2 corner patches): every seam of a round and of the corner patch with its neighbours G2, one valid body Replayed through the kernel: the 3 edges at the corner (the concave step edge and two convex edges: mixed convexity) rounded 2 with the curvature section (blend_dropping, kind curvature), the corner the blend corner's Setback at the rule's setbacks (3), its hole filled by the setback split to order 2 at the rounds and the faces, a finite spring curve on every face, the saddle's normal certified regular and one-signed: 8 faces + 3 rounds + 6 fill patches = 17; the fill's seams with the faces and between its own parts (15 edges within 8 mm of the corner) graded G1 (normals and gaps); their G2 grade, the curvature jump by the kernel's measure, is not in this rig yet.",
+    "seams": [
+      {
+        "ends": [
+          [
+            15.0,
+            2.0000000000000004,
+            13.0
+          ],
+          [
+            15.0,
+            1.6545301936934063,
+            11.374246994593545
+          ]
+        ],
+        "max_edge_tolerance_mm": 0.0001,
+        "max_gap_mm": 0.0001,
+        "normal_dot": 1.0,
+        "normal_dot_abs": 1e-09,
+        "position_abs_mm": 1e-06
+      },
+      {
+        "ends": [
+          [
+            12.999999999999996,
+            0.0,
+            13.0
+          ],
+          [
+            14.960724742996266,
+            4.996003610813204e-16,
+            9.960724742996316
+          ]
+        ],
+        "max_edge_tolerance_mm": 0.0001,
+        "max_gap_mm": 0.0001,
+        "normal_dot": 1.0,
+        "normal_dot_abs": 1e-09,
+        "position_abs_mm": 1e-06
+      },
+      {
+        "ends": [
+          [
+            15.003510549461991,
+            0.5403844582208284,
+            10.866568781583155
+          ],
+          [
+            14.960724742996266,
+            4.996003610813204e-16,
+            9.960724742996316
+          ]
+        ],
+        "max_edge_tolerance_mm": 0.0001,
+        "max_gap_mm": 0.0001,
+        "normal_dot": 1.0,
+        "normal_dot_abs": 1e-09,
+        "position_abs_mm": 1e-06
+      },
+      {
+        "ends": [
+          [
+            15.003510549461991,
+            0.5403844582208284,
+            10.866568781583155
+          ],
+          [
+            15.0,
+            1.6545301936934063,
+            11.374246994593545
+          ]
+        ],
+        "max_edge_tolerance_mm": 0.0001,
+        "max_gap_mm": 0.0001,
+        "normal_dot": 1.0,
+        "normal_dot_abs": 1e-09,
+        "position_abs_mm": 1e-06
+      },
+      {
+        "ends": [
+          [
+            15.230797842128887,
+            0.8250286781243845,
+            10.230797842128974
+          ],
+          [
+            15.003510549461991,
+            0.5403844582208284,
+            10.866568781583155
+          ]
+        ],
+        "max_edge_tolerance_mm": 0.0001,
+        "max_gap_mm": 0.0001,
+        "normal_dot": 1.0,
+        "normal_dot_abs": 1e-09,
+        "position_abs_mm": 1e-06
+      },
+      {
+        "ends": [
+          [
+            15.230797842128887,
+            0.8250286781243845,
+            10.230797842128974
+          ],
+          [
+            15.238822234327655,
+            1.503471830075865,
+            10.238822234327657
+          ]
+        ],
+        "max_edge_tolerance_mm": 0.0001,
+        "max_gap_mm": 0.0001,
+        "normal_dot": 1.0,
+        "normal_dot_abs": 1e-09,
+        "position_abs_mm": 1e-06
+      },
+      {
+        "ends": [
+          [
+            15.238822234327655,
+            1.503471830075865,
+            10.238822234327657
+          ],
+          [
+            15.0,
+            1.6545301936934063,
+            11.374246994593545
+          ]
+        ],
+        "max_edge_tolerance_mm": 0.0001,
+        "max_gap_mm": 0.0001,
+        "normal_dot": 1.0,
+        "normal_dot_abs": 1e-09,
+        "position_abs_mm": 1e-06
+      },
+      {
+        "ends": [
+          [
+            17.0,
+            2.999999999999999,
+            10.0
+          ],
+          [
+            16.37424699459343,
+            1.6545301936934043,
+            9.999999999999998
+          ]
+        ],
+        "max_edge_tolerance_mm": 0.0001,
+        "max_gap_mm": 0.0001,
+        "normal_dot": 1.0,
+        "normal_dot_abs": 1e-09,
+        "position_abs_mm": 1e-06
+      },
+      {
+        "ends": [
+          [
+            15.000000000000002,
+            2.9999999999999987,
+            11.999999999999998
+          ],
+          [
+            15.0,
+            1.6545301936934063,
+            11.374246994593545
+          ]
+        ],
+        "max_edge_tolerance_mm": 0.0001,
+        "max_gap_mm": 0.0001,
+        "normal_dot": 1.0,
+        "normal_dot_abs": 1e-09,
+        "position_abs_mm": 1e-06
+      },
+      {
+        "ends": [
+          [
+            16.37424699459343,
+            1.6545301936934043,
+            9.999999999999998
+          ],
+          [
+            15.238822234327655,
+            1.503471830075865,
+            10.238822234327657
+          ]
+        ],
+        "max_edge_tolerance_mm": 0.0001,
+        "max_gap_mm": 0.0001,
+        "normal_dot": 1.0,
+        "normal_dot_abs": 1e-09,
+        "position_abs_mm": 1e-06
+      },
+      {
+        "ends": [
+          [
+            15.230797842128887,
+            0.8250286781243845,
+            10.230797842128974
+          ],
+          [
+            15.866568781582988,
+            0.5403844582208276,
+            10.003510549461996
+          ]
+        ],
+        "max_edge_tolerance_mm": 0.0001,
+        "max_gap_mm": 0.0001,
+        "normal_dot": 1.0,
+        "normal_dot_abs": 1e-09,
+        "position_abs_mm": 1e-06
+      },
+      {
+        "ends": [
+          [
+            15.866568781582988,
+            0.5403844582208276,
+            10.003510549461996
+          ],
+          [
+            16.37424699459343,
+            1.6545301936934043,
+            9.999999999999998
+          ]
+        ],
+        "max_edge_tolerance_mm": 0.0001,
+        "max_gap_mm": 0.0001,
+        "normal_dot": 1.0,
+        "normal_dot_abs": 1e-09,
+        "position_abs_mm": 1e-06
+      },
+      {
+        "ends": [
+          [
+            18.0,
+            0.0,
+            8.0
+          ],
+          [
+            14.960724742996266,
+            4.996003610813204e-16,
+            9.960724742996316
+          ]
+        ],
+        "max_edge_tolerance_mm": 0.0001,
+        "max_gap_mm": 0.0001,
+        "normal_dot": 1.0,
+        "normal_dot_abs": 1e-09,
+        "position_abs_mm": 1e-06
+      },
+      {
+        "ends": [
+          [
+            18.000000000000004,
+            1.9999999999999998,
+            10.0
+          ],
+          [
+            16.37424699459343,
+            1.6545301936934043,
+            9.999999999999998
+          ]
+        ],
+        "max_edge_tolerance_mm": 0.0001,
+        "max_gap_mm": 0.0001,
+        "normal_dot": 1.0,
+        "normal_dot_abs": 1e-09,
+        "position_abs_mm": 1e-06
+      },
+      {
+        "ends": [
+          [
+            14.960724742996266,
+            4.996003610813204e-16,
+            9.960724742996316
+          ],
+          [
+            15.866568781582988,
+            0.5403844582208276,
+            10.003510549461996
+          ]
+        ],
+        "max_edge_tolerance_mm": 0.0001,
+        "max_gap_mm": 0.0001,
+        "normal_dot": 1.0,
+        "normal_dot_abs": 1e-09,
+        "position_abs_mm": 1e-06
+      }
+    ],
+    "source": "invariants",
+    "what": "a step's corner (the concave step edge, the lower box's convex front top edge, the upper box's convex upright edge) filleted 2 as a curvature-continuous (G2) fillet"
+  },
+  "expressible": true,
+  "gallery_note": "the kernel's G2 setback fill at a corner of mixed convexity: finite spring curves on every face, the saddle's normal certified regular and to the material's side, the fill certified off the kept parts of the faces where a convex and a concave round meet",
+  "operation_expressible": true,
+  "records": "cov-fillet-g2-mixed-corner.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b13"
+    }
+  ],
+  "sources": null,
+  "ungraded": [
+    "continuity: the rounds' rails (G2 by their section) are not graded here",
+    "continuity: the fill's seams' curvature jump (G2) is not graded by this rig yet"
+  ],
+  "what": "a step's corner (the concave step edge, the lower box's convex front top edge, the upper box's convex upright edge) filleted 2 as a curvature-continuous (G2) fillet",
+  "why_not": []
+}

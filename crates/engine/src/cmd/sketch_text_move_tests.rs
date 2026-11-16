@@ -226,6 +226,8 @@ fn text_style_parameters_are_checked() {
         (json!({"link":link,"bold":true}), "no bold face"),
         (json!({"link":link,"bold":"yes"}), "`bold` must be true or false"),
         (json!({"link":link,"align":"justify"}), "`align` must be left, center or right"),
+        (json!({"link":link,"vertical_align":"above"}), "`vertical_align` must be baseline, top, middle or bottom"),
+        (json!({"link":link,"vertical_align":1}), "`vertical_align` must be baseline, top, middle or bottom"),
         (json!({"link":link,"line_spacing":0}), "`line_spacing` must be a positive factor"),
         (json!({"link":link,"letter_spacing":"wide"}), "`letter_spacing` must be a length"),
         (json!({"link":link,"path":"no-such-curve"}), "not a curve of this sketch"),
@@ -235,14 +237,19 @@ fn text_style_parameters_are_checked() {
         assert!(e.contains(error), "{params}: {e}");
         assert_eq!(s.doc.to_json(), before);
     }
-    run(&mut s, "sketch.edit_text", json!({"link":link,"italic":true,"align":"right","letter_spacing":1.5,"line_spacing":1.2}));
+    run(
+        &mut s,
+        "sketch.edit_text",
+        json!({"link":link,"italic":true,"align":"right","vertical_align":"middle","letter_spacing":1.5,"line_spacing":1.2}),
+    );
     let LinkSource::Text { style, text, .. } = &s.doc.sketch(1).unwrap().link(&link).unwrap().source else { panic!() };
     assert_eq!(text, "II");
     assert!(style.italic && style.align == solidcraft_sketch::TextAlign::Right && style.letter_spacing == 1.5 && style.line_spacing == 1.2);
+    assert_eq!(style.vertical_align, solidcraft_sketch::TextVerticalAlign::Middle);
     // Left out, a style stays.
     run(&mut s, "sketch.edit_text", json!({"link":link,"text":"I"}));
     let LinkSource::Text { style, .. } = &s.doc.sketch(1).unwrap().link(&link).unwrap().source else { panic!() };
-    assert!(style.italic && style.letter_spacing == 1.5);
+    assert!(style.italic && style.letter_spacing == 1.5 && style.vertical_align == solidcraft_sketch::TextVerticalAlign::Middle);
 }
 
 /// `base` with the keys of `extra` set (a null `extra` value is sent as null).

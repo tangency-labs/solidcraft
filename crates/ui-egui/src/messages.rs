@@ -8,7 +8,7 @@ use egui::{RichText, vec2};
 use serde_json::{Value, json};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 use solidcraft_ui_text::{format, tr};
 
 /// Messages kept (the oldest go first).
@@ -77,7 +77,7 @@ fn line(m: &Message) -> String {
 }
 
 /// How long ago `at` was, at `now` (both ms): seconds, minutes or hours.
-fn ago(now: f64, at: f64) -> String {
+pub(crate) fn ago(now: f64, at: f64) -> String {
     let s = ((now - at) / 1000.0).max(0.0).floor();
     let (id, n) = if s < 60.0 {
         ("messages.ago_s", s)
@@ -130,7 +130,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui.label(RichText::new(tr("messages.none")).color(t.text_dim));
                 return;
             }
-            egui::ScrollArea::vertical().max_height(crate::theme::Tokens::get().form_card_width).auto_shrink([false, true]).show(ui, |ui| {
+            egui::ScrollArea::vertical().max_height(solidcraft_theme::Tokens::get().form_card_width).auto_shrink([false, true]).show(ui, |ui| {
                 for m in app.messages.iter().rev() {
                     ui.horizontal_top(|ui| {
                         ui.add_sized(vec2(70.0, 14.0), egui::Label::new(RichText::new(ago(now, m.at)).small().color(t.text_dim)));

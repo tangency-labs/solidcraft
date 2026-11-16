@@ -1,0 +1,116 @@
+{
+  "area": "continuity",
+  "bodies": {
+    "b11": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b11"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b12"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "stitch",
+      "outputs": [
+        "b13"
+      ],
+      "params": {
+        "tolerance": 0.00005774724662924184
+      }
+    }
+  ],
+  "case": "g3-patch-g3-on-a-hole-in-one-sheet",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "edges": [
+        [
+          20,
+          12,
+          0.0
+        ],
+        [
+          28,
+          20,
+          2.002857
+        ],
+        [
+          20,
+          28,
+          0.0
+        ],
+        [
+          12,
+          20,
+          -2.002857
+        ]
+      ],
+      "order": "g3"
+    },
+    "method": "the sheet: a single-span cubic Bezier through control points (0,0), (13,8), (27,-8), (40,0) on XZ, extruded 40 as a surface; trimmed by the square x, y 12..28 swept along Z, keeping the outside. The hole's sides are two copies of the profile's middle (at y = 12 and 28) and two straight rulings (x = 12 and 28), all on the one face. Patched g3 from its four edges and stitched in. Each corner's two sides lie on the same surface, so they agree to every order and the fill holds the order asked up to the corners. Not exact: a fill may read higher where it happens to.",
+    "source": "invariants",
+    "sources": [],
+    "what": "a square hole in one smooth sheet, patched g3 (Curvature change): every seam reaches g3, corners included, since round the hole there is only the one surface and its corners ask nothing it cannot give"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 8,
+      "faces": 2,
+      "vertices": 8
+    }
+  },
+  "records": "g3-patch-g3-on-a-hole-in-one-sheet.bodies.json.gz",
+  "result": [
+    {
+      "body": "Sheet",
+      "made": "b13"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1655.9342682158344,
+      "body_count": 1,
+      "edges": 2,
+      "faces": 2,
+      "vertices": 2,
+      "volume_mm3": 0.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "split_faces",
+    "copy",
+    "copy",
+    "tagged",
+    "stitch"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a square hole in one smooth sheet, patched g3 (Curvature change): every seam reaches g3, corners included, since round the hole there is only the one surface and its corners ask nothing it cannot give",
+  "why_not": []
+}

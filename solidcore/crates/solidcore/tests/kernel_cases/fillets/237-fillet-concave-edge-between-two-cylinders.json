@@ -1,0 +1,148 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  16.250324167975684,
+                  5.452243981674467,
+                  0.0
+                ],
+                [
+                  16.250324167975684,
+                  5.452243981674467,
+                  10.0
+                ]
+              ],
+              "index": 2
+            }
+          ],
+          "points": [
+            [
+              16.250324167975684,
+              5.452243981674467,
+              5.0
+            ]
+          ],
+          "tolerance": 2.6315740917793478
+        },
+        "kind": "round",
+        "sizes": [
+          6.0
+        ]
+      }
+    }
+  ],
+  "case": "237-fillet-concave-edge-between-two-cylinders",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "sketch of two arcs (R1 = 17.1406 about the origin and R2 = 9.6669 about (10.7158, 13.3781), which lies on the first circle) closing at A and B: the outline of the union of the two discs, 10 high. Union area = pi R1^2 + pi R2^2 - lens(R1, R2, d) = 1087.5019. The edge at B (reflex corner) is concave: the R6 round fills the corner with the circle tangent externally to both walls (centre at distance R1+6 and R2+6 from the two centres). Area added = polygon area of the region bounded by the two wall arcs (B to the tangent points) and the R6 arc = 1.4755 (120000-point shoelace). V = 10*(union + added) = 10889.773. The round stays on the walls (the tangent points lie on the outline part of each circle).",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#237",
+      "tangency-labs/solidcraft#238"
+    ],
+    "volume_mm3": 10889.773289961511,
+    "what": "an R6 round on the vertical edge where two cylinder walls meet (the concave corner of two merged discs), the two walls meeting at an angle"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 9,
+      "faces": 5,
+      "vertices": 6
+    }
+  },
+  "records": "237-fillet-concave-edge-between-two-cylinders.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3411.5114650806236,
+      "body_count": 1,
+      "edges": 9,
+      "faces": 5,
+      "vertices": 6,
+      "volume_mm3": 10889.773289880006
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#237",
+    "tangency-labs/solidcraft#238"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "an R6 round on the vertical edge where two cylinder walls meet (the concave corner of two merged discs), the two walls meeting at an angle",
+  "why_not": []
+}

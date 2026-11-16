@@ -1,0 +1,12 @@
+id = "surface.b_spline_volume"
+upstream = ["source/SMLib/inc/SmBSplineVolume.h", "source/SMLib/src/SmBSplineVolume.cpp"]
+rust_module = "surface::b_spline_volume"
+depends_on = ["geom.extent3d", "geom.pseudo_box", "geom.transform", "geom.vector3d", "surface.volume_p1"]
+soft_depends_on = ["geom.tol", "nlib.math", "nlib.spiral", "nurbs.nurbs_crv"]
+est_lines = 1226
+layer = 16
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = "swarm-surface.b_spline_volume-a1"
+claimed_at = "2026-10-13T03:04:36Z"
+notes = "23 fns; largest: SmBSplineVolume::EvaluateSimple, SmBSplineVolume::ReadFromDB, SmBSplineVolume::EvaluateIsoParametricCurveSimple, SmBSplineVolume::EvaluateBoundingBoxSimple; unit-SCC #22 (220 units); only 201 of 1226 lines survive RTA (reached via virtual dispatch to classes no in-scope entry point constructs); low priority / likely deferrable; 319 upstream test entry points reach this unit; GREEN: difftest 2333 cases (333 fixture: unit cube, rational Bezier, knots needing fixup, coincident control points, degree 0, unclamped, closest-point ties, oriented + compounded volumes over info/copy/equal/eval/bbox/iso/guess/transform/predicate ops + 2000 generated), all bit-identical (max_rel_err 0), 0 deferred; 30,333-case run clean; --perturb SENSITIVE. Upstream builds without USE_VOLUMES: EvaluateSimple, EvaluateIsoParametricCurveSimple, ReadFromDB, sm_LoadNLibTransform (so TransformSimple) return SM_ERR and AreEqual_gw_VOLUME is FALSE (findings.md). The SmBSplineVolume UNPORTED stub in surface.volume_p1 now only covers the surface.b_spline_volume_n_lib overrides (HasDiscontinuitiesSimple, IsCurveInParamDomainSimple); no unit deferred on surface.b_spline_volume"

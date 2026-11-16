@@ -1,0 +1,2427 @@
+{
+ "cases": [
+  {
+   "name": "canonical_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "state",
+    "types": [
+     14024,
+     14033,
+     14001,
+     14010,
+     14020,
+     14021,
+     14022,
+     14023,
+     14034,
+     15001,
+     16016,
+     0
+    ],
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      1
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "canonical_adjust_m1_2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "adjust",
+    "ivl": [
+     -1,
+     2
+    ],
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      1
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "canonical_adjust_same",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "adjust",
+    "ivl": [
+     -1,
+     1
+    ],
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      1
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_eval_step_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "eval_step",
+    "t": -1.0,
+    "nd": 3,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_gps_intersect_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "gps",
+    "ivl": [
+     -1,
+     2
+    ],
+    "sop": 0,
+    "p": [
+     -1.5430806348152437,
+     0.0,
+     -1.1752011936438014
+    ],
+    "tol": 1e-06,
+    "req": 1,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_step_inv_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "step_inv",
+    "p": [
+     -1.5430806348152437,
+     0.0,
+     -1.1752011936438014
+    ],
+    "classify": false,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_eval_step_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "eval_step",
+    "t": -0.7,
+    "nd": 3,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_gps_intersect_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "gps",
+    "ivl": [
+     -1,
+     2
+    ],
+    "sop": 0,
+    "p": [
+     -1.255169005630943,
+     0.0,
+     -0.7585837018395334
+    ],
+    "tol": 1e-06,
+    "req": 1,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_step_inv_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "step_inv",
+    "p": [
+     -1.255169005630943,
+     0.0,
+     -0.7585837018395334
+    ],
+    "classify": false,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_eval_step_2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "eval_step",
+    "t": -0.4,
+    "nd": 3,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_gps_intersect_2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "gps",
+    "ivl": [
+     -1,
+     2
+    ],
+    "sop": 0,
+    "p": [
+     -1.081072371838455,
+     0.0,
+     -0.4107523258028155
+    ],
+    "tol": 1e-06,
+    "req": 1,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_step_inv_2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "step_inv",
+    "p": [
+     -1.081072371838455,
+     0.0,
+     -0.4107523258028155
+    ],
+    "classify": false,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_eval_step_3",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "eval_step",
+    "t": -0.10000000000000009,
+    "nd": 3,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_gps_intersect_3",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "gps",
+    "ivl": [
+     -1,
+     2
+    ],
+    "sop": 0,
+    "p": [
+     -1.0050041680558035,
+     0.0,
+     -0.10016675001984413
+    ],
+    "tol": 1e-06,
+    "req": 1,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_step_inv_3",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "step_inv",
+    "p": [
+     -1.0050041680558035,
+     0.0,
+     -0.10016675001984413
+    ],
+    "classify": false,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_eval_step_4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "eval_step",
+    "t": 0.19999999999999996,
+    "nd": 3,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_gps_intersect_4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "gps",
+    "ivl": [
+     -1,
+     2
+    ],
+    "sop": 0,
+    "p": [
+     -1.020066755619076,
+     0.0,
+     0.20133600254109393
+    ],
+    "tol": 1e-06,
+    "req": 1,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_step_inv_4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "step_inv",
+    "p": [
+     -1.020066755619076,
+     0.0,
+     0.20133600254109393
+    ],
+    "classify": false,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_eval_step_5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "eval_step",
+    "t": 0.5,
+    "nd": 3,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_gps_intersect_5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "gps",
+    "ivl": [
+     -1,
+     2
+    ],
+    "sop": 0,
+    "p": [
+     -1.1276259652063807,
+     0.0,
+     0.5210953054937474
+    ],
+    "tol": 1e-06,
+    "req": 1,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_step_inv_5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "step_inv",
+    "p": [
+     -1.1276259652063807,
+     0.0,
+     0.5210953054937474
+    ],
+    "classify": false,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_eval_step_6",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "eval_step",
+    "t": 0.7999999999999998,
+    "nd": 3,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_gps_intersect_6",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "gps",
+    "ivl": [
+     -1,
+     2
+    ],
+    "sop": 0,
+    "p": [
+     -1.3374349463048445,
+     0.0,
+     0.8881059821876228
+    ],
+    "tol": 1e-06,
+    "req": 1,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_step_inv_6",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "step_inv",
+    "p": [
+     -1.3374349463048445,
+     0.0,
+     0.8881059821876228
+    ],
+    "classify": false,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_eval_step_7",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "eval_step",
+    "t": 1.1,
+    "nd": 3,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_gps_intersect_7",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "gps",
+    "ivl": [
+     -1,
+     2
+    ],
+    "sop": 0,
+    "p": [
+     -1.6685185538222564,
+     0.0,
+     1.335647470124177
+    ],
+    "tol": 1e-06,
+    "req": 1,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_step_inv_7",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "step_inv",
+    "p": [
+     -1.6685185538222564,
+     0.0,
+     1.335647470124177
+    ],
+    "classify": false,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_eval_step_8",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "eval_step",
+    "t": 1.4,
+    "nd": 3,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_gps_intersect_8",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "gps",
+    "ivl": [
+     -1,
+     2
+    ],
+    "sop": 0,
+    "p": [
+     -2.1508984653931407,
+     0.0,
+     1.9043015014515339
+    ],
+    "tol": 1e-06,
+    "req": 1,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_step_inv_8",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "step_inv",
+    "p": [
+     -2.1508984653931407,
+     0.0,
+     1.9043015014515339
+    ],
+    "classify": false,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_eval_step_9",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "eval_step",
+    "t": 1.6999999999999997,
+    "nd": 3,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_gps_intersect_9",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "gps",
+    "ivl": [
+     -1,
+     2
+    ],
+    "sop": 0,
+    "p": [
+     -2.8283154578899663,
+     0.0,
+     2.645631933837232
+    ],
+    "tol": 1e-06,
+    "req": 1,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_step_inv_9",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "step_inv",
+    "p": [
+     -2.8283154578899663,
+     0.0,
+     2.645631933837232
+    ],
+    "classify": false,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_eval_step_10",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "eval_step",
+    "t": 2.0,
+    "nd": 3,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_gps_intersect_10",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "gps",
+    "ivl": [
+     -1,
+     2
+    ],
+    "sop": 0,
+    "p": [
+     -3.7621956910836314,
+     0.0,
+     3.626860407847019
+    ],
+    "tol": 1e-06,
+    "req": 1,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_step_inv_10",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "step_inv",
+    "p": [
+     -3.7621956910836314,
+     0.0,
+     3.626860407847019
+    ],
+    "classify": false,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_reverse",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "reverse",
+    "ivl": [
+     -1,
+     2
+    ],
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_copy",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "copy",
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_eq_self",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "eq",
+    "other": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    },
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_eq_canonical",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "eq",
+    "other": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      1
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    },
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_classify_outside",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "step_inv",
+    "p": [
+     -10.067661995777765,
+     0.0,
+     10.017874927409903
+    ],
+    "classify": true,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjusted_classify_inside",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve)",
+   "inputs": {
+    "op": "step_inv",
+    "p": [
+     -1.1276259652063807,
+     0.0,
+     0.5210953054937474
+    ],
+    "classify": true,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "surface_gen_state",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5584 (commented hyperbola generator of a surface of extrusion)",
+   "inputs": {
+    "op": "state",
+    "types": [
+     14024,
+     14033,
+     14001,
+     14010,
+     14020,
+     14021,
+     14022,
+     14023,
+     14034,
+     15001,
+     16016,
+     0
+    ],
+    "this": {
+     "center": [
+      -1,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      1
+     ],
+     "a": 0.4,
+     "b": 0.5,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "surface_gen_adjust_0_2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5584 (commented hyperbola generator of a surface of extrusion)",
+   "inputs": {
+    "op": "adjust",
+    "ivl": [
+     0,
+     2
+    ],
+    "this": {
+     "center": [
+      -1,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      1
+     ],
+     "a": 0.4,
+     "b": 0.5,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "surface_gen_eval",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5584 (commented hyperbola generator of a surface of extrusion)",
+   "inputs": {
+    "op": "eval_step",
+    "t": 1.25,
+    "nd": 2,
+    "this": {
+     "center": [
+      -1,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      2
+     ],
+     "a": 0.4,
+     "b": 0.5,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "surface_gen_transform_uniform",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5584 (commented hyperbola generator of a surface of extrusion)",
+   "inputs": {
+    "op": "transform",
+    "o": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     1,
+     0
+    ],
+    "y": [
+     0,
+     0,
+     1
+    ],
+    "scale": [
+     2,
+     2,
+     2
+    ],
+    "this": {
+     "center": [
+      -1,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      2
+     ],
+     "a": 0.4,
+     "b": 0.5,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "surface_gen_transform_nonuniform",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5584 (commented hyperbola generator of a surface of extrusion)",
+   "inputs": {
+    "op": "transform",
+    "o": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     1,
+     0
+    ],
+    "y": [
+     0,
+     0,
+     1
+    ],
+    "scale": [
+     2,
+     1,
+     2
+    ],
+    "this": {
+     "center": [
+      -1,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      2
+     ],
+     "a": 0.4,
+     "b": 0.5,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "surface_gen_transform_identity",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5584 (commented hyperbola generator of a surface of extrusion)",
+   "inputs": {
+    "op": "transform",
+    "o": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "this": {
+     "center": [
+      -1,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      2
+     ],
+     "a": 0.4,
+     "b": 0.5,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "surface_gen_reverse",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5584 (commented hyperbola generator of a surface of extrusion)",
+   "inputs": {
+    "op": "reverse",
+    "ivl": [
+     0,
+     2
+    ],
+    "this": {
+     "center": [
+      -1,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      2
+     ],
+     "a": 0.4,
+     "b": 0.5,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "degenerate_domain",
+   "upstream_ref": "edge case (SmHyperbola.cpp MakeNurb / EvaluateSTEP / Transform branches)",
+   "inputs": {
+    "op": "state",
+    "types": [
+     14024,
+     14033,
+     14001,
+     14010,
+     14020,
+     14021,
+     14022,
+     14023,
+     14034,
+     15001,
+     16016,
+     0
+    ],
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0.5,
+      0.5
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "eval_step_too_many_derivs",
+   "upstream_ref": "edge case (SmHyperbola.cpp MakeNurb / EvaluateSTEP / Transform branches)",
+   "inputs": {
+    "op": "eval_step",
+    "t": 0.0,
+    "nd": 4,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      1
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "eval_step_clamped_low",
+   "upstream_ref": "edge case (SmHyperbola.cpp MakeNurb / EvaluateSTEP / Transform branches)",
+   "inputs": {
+    "op": "eval_step",
+    "t": -3.0,
+    "nd": 1,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      1
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "eval_step_clamped_high",
+   "upstream_ref": "edge case (SmHyperbola.cpp MakeNurb / EvaluateSTEP / Transform branches)",
+   "inputs": {
+    "op": "eval_step",
+    "t": 7.5,
+    "nd": 3,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      1
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "wide_domain",
+   "upstream_ref": "edge case (SmHyperbola.cpp MakeNurb / EvaluateSTEP / Transform branches)",
+   "inputs": {
+    "op": "state",
+    "types": [
+     14024,
+     14033,
+     14001,
+     14010,
+     14020,
+     14021,
+     14022,
+     14023,
+     14034,
+     15001,
+     16016,
+     0
+    ],
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -7,
+      7
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "two_d",
+   "upstream_ref": "edge case (SmHyperbola.cpp MakeNurb / EvaluateSTEP / Transform branches)",
+   "inputs": {
+    "op": "copy",
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 2
+    }
+   }
+  },
+  {
+   "name": "zero_image_axis",
+   "upstream_ref": "edge case (SmHyperbola.cpp MakeNurb / EvaluateSTEP / Transform branches)",
+   "inputs": {
+    "op": "step_inv",
+    "p": [
+     1,
+     0,
+     0
+    ],
+    "classify": false,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      1
+     ],
+     "a": 1.0,
+     "b": 0.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "skew_axes",
+   "upstream_ref": "edge case (SmHyperbola.cpp MakeNurb / EvaluateSTEP / Transform branches)",
+   "inputs": {
+    "op": "eval_step",
+    "t": 0.3,
+    "nd": 3,
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      1,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      1
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "adjust_to_degenerate",
+   "upstream_ref": "edge case (SmHyperbola.cpp MakeNurb / EvaluateSTEP / Transform branches)",
+   "inputs": {
+    "op": "adjust",
+    "ivl": [
+     0.2,
+     0.2
+    ],
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      1
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "reverse_inverted_interval_order",
+   "upstream_ref": "edge case (SmHyperbola.cpp MakeNurb / EvaluateSTEP / Transform branches)",
+   "inputs": {
+    "op": "reverse",
+    "ivl": [
+     2,
+     -1
+    ],
+    "this": {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      -1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -1,
+      2
+     ],
+     "a": 1.0,
+     "b": 1.0,
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "read_db_ascii_v33",
+   "upstream_ref": "edge case (SmHyperbola.cpp MakeNurb / EvaluateSTEP / Transform branches)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 33,
+    "record": {
+     "head": [
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      1,
+      0,
+      -1,
+      1,
+      2,
+      3
+     ],
+     "n": 2,
+     "p": 2,
+     "rat": 1,
+     "dim": 3,
+     "kt": 1,
+     "form": 4,
+     "vals": [
+      1,
+      2,
+      3,
+      1,
+      4,
+      5,
+      6,
+      0.5,
+      7,
+      8,
+      9,
+      1,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_binary_v33",
+   "upstream_ref": "edge case (SmHyperbola.cpp MakeNurb / EvaluateSTEP / Transform branches)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": true,
+    "version": 33,
+    "record": {
+     "head": [
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      1,
+      0,
+      -1,
+      1,
+      2,
+      3
+     ],
+     "n": 2,
+     "p": 2,
+     "rat": 1,
+     "dim": 3,
+     "kt": 1,
+     "form": 4,
+     "vals": [
+      1,
+      2,
+      3,
+      1,
+      4,
+      5,
+      6,
+      0.5,
+      7,
+      8,
+      9,
+      1,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_ascii_v32_dim2",
+   "upstream_ref": "edge case (SmHyperbola.cpp MakeNurb / EvaluateSTEP / Transform branches)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": false,
+    "version": 32,
+    "record": {
+     "head": [
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      1,
+      0,
+      -1,
+      1,
+      2,
+      3
+     ],
+     "n": 2,
+     "p": 2,
+     "rat": 1,
+     "dim": 3,
+     "kt": 1,
+     "form": 4,
+     "vals": [
+      1,
+      2,
+      3,
+      1,
+      4,
+      5,
+      6,
+      0.5,
+      7,
+      8,
+      9,
+      1,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  }
+ ]
+}

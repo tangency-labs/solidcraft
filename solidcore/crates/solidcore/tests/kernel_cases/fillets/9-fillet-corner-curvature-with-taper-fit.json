@@ -1,0 +1,39 @@
+{
+  "area": "fillets",
+  "bodies": {},
+  "calls": [],
+  "case": "9-fillet-corner-curvature-with-taper-fit",
+  "expected": {
+    "body_count": 1,
+    "faces": 10,
+    "method": "the radius fits, so fit taper would keep r2 and the corner is 07-fillets/015's at r2: one valid body, 10 faces",
+    "missing": "solid.fillet builds `corner: g2` with `fit: exact` only",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#9"
+    ],
+    "what": "three r2 rounds at a box corner, curvature (g2) corner, fit taper (the radius fits)"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true
+  },
+  "result": [],
+  "rig": {
+    "error": "solid.fillet builds `corner: g2` with `fit: exact` only",
+    "known_failing": "[unsupported] solid.fillet builds `corner: g2` with `fit: exact` only",
+    "measured": null,
+    "refused_with": null,
+    "status": "unsupported"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#9"
+  ],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "three r2 rounds at a box corner, curvature (g2) corner, fit taper (the radius fits)",
+  "why_not": [
+    "SolidCraft has no command for it yet: solid.fillet builds `corner: g2` with `fit: exact` only"
+  ]
+}

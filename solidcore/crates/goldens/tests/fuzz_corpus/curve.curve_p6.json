@@ -1,0 +1,6 @@
+{
+  "unit": "curve.curve_p6",
+  "cases": [
+    {"name": "fuzz01743_bad_index_count_2147483648", "origin": "fuzz-out/n2000/curve.curve_p6/fuzz01743.json (timeout: rust: no result after 20 s)", "cpp": "harness: invalid argument: bad index/count 2147483648", "rust": "harness: 2147483648 samples", "inputs": {"c1": {"bspline": {"cpts": [[1.84, 7.43, -6.79, 1.0], [0.163, 7.34, -6.56, 0.943], [-1.36, 7.1, -6.65, 1.0]], "dim": 3, "p": 2, "u": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]}}, "e": 1.83, "ivl": [0.41, 0.821], "nsamp": 2147483648, "op": "max_dist", "s": 0.467}}
+  ]
+}

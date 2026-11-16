@@ -1,0 +1,151 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "2801-prism-edge-in-round-cornered-slab-end-face",
+  "expected": {
+    "body_count": 1,
+    "method": "prism: triangle (y,z) = (-63,0), (-3,0), (-63,60) extruded 1.2 along x (x 4.4..5.6): 1.2*0.5*60*60 = 2160. slab: rounded rectangle 10x64 (y -67..-3), r 4.9, 0.4 thick: 0.4*(640-(4-pi)*4.9^2). The prism's sloped face is z = -3-y, so at height z it reaches y = -3-z; overlap = Int over z in 0..0.4 of the area of {x in 4.4..5.6, -63 <= y <= -3-z} inside the slab (the corner arcs, centres (4.9,-7.9) and (5.1,-7.9), narrow it for y > -7.9), integrated numerically with Simpson = 28.704. Union = prism + slab - overlap",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2801"
+    ],
+    "volume_mm3": 2379.051921236255,
+    "what": "a join of a triangular prism and a thin slab with rounded corners (r 4.9) that share their bottom plane, the prism's edge in that plane lying in the slab's end face"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 43,
+      "faces": 18,
+      "vertices": 28
+    }
+  },
+  "records": "2801-prism-edge-in-round-cornered-slab-end-face.bodies.json.gz",
+  "result": [
+    {
+      "body": "Prism",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4947.93154831818,
+      "body_count": 1,
+      "edges": 43,
+      "faces": 18,
+      "vertices": 28,
+      "volume_mm3": 2379.0519211197297
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2801"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a join of a triangular prism and a thin slab with rounded corners (r 4.9) that share their bottom plane, the prism's edge in that plane lying in the slab's end face",
+  "why_not": []
+}

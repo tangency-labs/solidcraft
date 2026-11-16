@@ -1,0 +1,184 @@
+{
+  "area": "threads",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b22": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b24"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b25"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b26"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b27"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b26"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b28"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b27",
+        "b28"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b29"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "1995-m8x1-thread-in-7mm-hole",
+  "expected": {
+    "bbox": {
+      "max": [
+        10,
+        10,
+        10
+      ],
+      "min": [
+        -10,
+        -10,
+        0
+      ]
+    },
+    "body_count": 1,
+    "center_of_mass": [
+      0,
+      0,
+      5.0
+    ],
+    "method": "ISO 68-1 basic profile: H = P sqrt3/2, basic depth 5H/8. Internal groove: P/8 wide at the major radius d/2, widening by 2 tan30 per unit of radius toward the axis (3P/4 at the minor radius d/2 - 5H/8 = 3.4587), cut only where there is material (r >= hole radius 3.5). Volume per turn = 2 pi * integral from 3.5 to 4 of (P/8 + 2 tan30 (4 - r)) r dr = 4.79792 mm3 for P=1. Block 20x20x10 with a 7 mm through hole (rho=3.5), M8x1 over the full 10 mm (10 turns, both ends free): V = 4000 - pi 3.5^2 10 - 10 x 4.79792 = 3567.1757 mm3. The outer surface is untouched: the bbox stays the block's 20x20x10 and COM stays on the axis at z=5. Tolerance 1%: a modelled thread is a faceted helical solid (radial chord error up to 1% of the pitch on every wall).",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1995"
+    ],
+    "tolerance": {
+      "rel": 0.01
+    },
+    "volume_mm3": 3567.1757,
+    "what": "an M8x1 modelled thread in a 7 mm hole through a block (the report: the thread also changed the block's outer surface and made too many faces)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 197,
+      "faces": 81,
+      "vertices": 118
+    }
+  },
+  "records": "1995-m8x1-thread-in-7mm-hole.bodies.json.gz",
+  "result": [
+    {
+      "body": "Block",
+      "made": "b29"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1882.5613482374856,
+      "body_count": 1,
+      "edges": 144,
+      "faces": 50,
+      "vertices": 96,
+      "volume_mm3": 3567.1758076764704
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1995"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "screw_sweep",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "an M8x1 modelled thread in a 7 mm hole through a block (the report: the thread also changed the block's outer surface and made too many faces)",
+  "why_not": []
+}

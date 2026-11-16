@@ -56,8 +56,9 @@ The raw runtime adapter instead binds an exact captured ordinal and body name.
 These are separate binding lanes; mixing them is refused. Runtime overrides do
 not change design appearances, engineering materials, mass or geometry.
 
-The common runtime command contract admits at most eight overrides. Internal GPU
-scene capacities are not a promise that a saved or runtime command accepts more.
+The saved and runtime contracts admit up to 128 optical targets for CPU Path and GPU.
+Simultaneous containment remains limited to 16 layers, independently of the 64-event
+camera/light path-depth ceiling. The absent-Path CPU producer retains eight targets.
 CPU and GPU retain their individual memory, geometry, work and path-depth bounds.
 Certification failure preserves authored input and produces no partial proof.
 

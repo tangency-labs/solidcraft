@@ -316,10 +316,11 @@ impl<'a> Blend<'a> {
                     - point(self.sections, i - 1, s)?)
                     * (1.0 / cube)
             }
-            // Only behind: the same the other way round.
+            // Only behind: the backward four-point stencil at the second-to-last of them, the same
+            // difference of the same four stations (#13447).
             (Some(k), false) => {
-                (point(self.sections, k, s)? - point(self.sections, i - 1, s)? * 3.0 + point(self.sections, i, s)? * 3.0
-                    - point(self.sections, i + 1, s)?)
+                (point(self.sections, i + 1, s)? - point(self.sections, i, s)? * 3.0 + point(self.sections, i - 1, s)? * 3.0
+                    - point(self.sections, k, s)?)
                     * (1.0 / cube)
             }
             (None, false) => return Err(KernelError::Failed("loft blend: no fourth station for a change of curvature".into())),

@@ -1,0 +1,809 @@
+//! Runner for primitive p3: the offset ruled-surface helper and the primitive entry
+//! points through the production arena adapter, ported from upstream; checked against
+//! its golden. Successful builds record owning-list topology counts and sampled vertex/edge/face geometry;
+//! unavailable continuations remain deferred and early exits retain their status.
+#![allow(clippy::indexing_slicing)] // the record layout is checked by `layout_ok` first
+
+use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use solidcore::curve::curve::Curve;
+use solidcore::error::{Result, SolidError};
+#[cfg(test)]
+use solidcore::geom::attribute::TagData;
+use solidcore::geom::axis2_placement::Axis2Placement;
+#[cfg(test)]
+use solidcore::geom::context::MarkType;
+use solidcore::kernel::Kernel;
+use solidcore::math::Vec3;
+use solidcore::nurbs::b_spline_curve::p1::{BSplineCurve, NurbCircleParam};
+#[cfg(test)]
+use solidcore::primitive::primitive_creation::p3::PrimitiveAccess;
+use solidcore::primitive::primitive_creation::{
+    model::PrimitiveModel,
+    p1::PrimitiveCreation,
+    p3::{self as api, RepeatedSweepOptions},
+    SweepOptions,
+};
+use solidcore::surface::surface::Surface;
+use solidcore::sweep::topology_sweep::access::SweepAccess;
+#[cfg(test)]
+use solidcore::sweep::topology_sweep::{
+    access::{EdgeRef, FaceRef, SweepMergeId},
+    SweepEntity,
+};
+use solidcore::topology::Brep;
+#[cfg(test)]
+use solidcore::topology::{BrepId, FaceId, Region};
+
+/// Differential runner.
+pub struct Runner;
+#[derive(Serialize, Deserialize)]
+struct Inputs {
+    #[serde(default)]
+    expected_rejection: bool,
+    op: i32,
+    data: Vec<f64>,
+}
+fn error(e: &SolidError) -> f64 {
+    match e {
+        e if solidcore::error::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
+        SolidError::InvalidInput { .. } => 1007.,
+        _ => 1001.,
+    }
+}
+fn curve(data: &[f64]) -> Result<BSplineCurve> {
+    let [kind, x, y, z, a, b, c] = data else {
+        return Err(SolidError::sm_err("fixture"));
+    };
+    if *kind == 0. {
+        BSplineCurve::create_line_segment(3, Vec3::new(*x, *y, *z), Vec3::new(*a, *b, *c))
+    } else {
+        BSplineCurve::create_circle_segment(
+            3,
+            &Axis2Placement::new(Vec3::new(*x, *y, *z), Vec3::X, Vec3::Y),
+            *a,
+            *b,
+            *c,
+            NurbCircleParam::Quadratic,
+        )
+    }
+}
+fn samples(curve: &BSplineCurve, out: &mut Vec<f64>) -> Result<()> {
+    let ivl = curve.natural_interval();
+    out.extend([
+        ivl.min(),
+        ivl.max(),
+        curve.degree()? as f64,
+        curve.number_control_points()? as f64,
+        f64::from(curve.is_rational()?),
+    ]);
+    for i in 0..=4 {
+        for point in curve.evaluate(ivl.evaluate(f64::from(i) / 4.0), 1, true, false)? {
+            out.extend(point.to_array());
+        }
+    }
+    Ok(())
+}
+/// Whether `d` has the record layout of op `op` (its lengths and the swung profile
+/// count), so that [`ruled`] and [`entry`] can index it.
+fn layout_ok(op: i32, d: &[f64]) -> bool {
+    match op {
+        0 => d.len() == 41,
+        6 => {
+            d.len() >= 10
+                && d[2].fract() == 0.0
+                && (0.0..=((d.len() - 10) / 7) as f64).contains(&d[2])
+        }
+        1..=7 => d.len() >= 10,
+        _ => false,
+    }
+}
+fn ruled(data: &[f64]) -> Result<Vec<f64>> {
+    let k = Kernel::default();
+    let mut offset = curve(&data[20..27])?;
+    let mut generators = [curve(&data[27..34])?, curve(&data[34..41])?];
+    let mut unmarried = [data[6] != 0., data[7] != 0.];
+    let mut missing = data[5] != 0.;
+    let intervals = [
+        generators[0].natural_interval(),
+        generators[1].natural_interval(),
+    ];
+    let rational = generators[0].is_rational()?;
+    let map = (data[1] != 0.).then(|| {
+        solidcore::curve::composite_curve::OffsetMapAttribute::new(
+            0,
+            data[0] != 0.,
+            false,
+            0,
+            data[2] as u64,
+            data[3] as u64,
+            None,
+            0.,
+        )
+    });
+    let result = api::ruled_surface_from_offset(
+        &k,
+        &mut offset,
+        map,
+        &mut generators,
+        intervals,
+        rational,
+        &mut unmarried,
+        &mut missing,
+        api::OffsetRuleOptions {
+            tolerance: data[8],
+            same_point_tolerance: data[9],
+            offset: data[10],
+            movement: Axis2Placement::new(
+                Vec3::new(data[11], data[12], data[13]),
+                Vec3::new(data[14], data[15], data[16]),
+                Vec3::new(data[17], data[18], data[19]),
+            ),
+            surface_intersection: data[4] != 0.,
+        },
+    );
+    if let Err(e) = &result {
+        if e.is_unported() {
+            return Err(e.clone());
+        }
+    }
+    let mut out = vec![
+        result.as_ref().err().map_or(0., error),
+        f64::from(missing),
+        f64::from(unmarried[0]),
+        f64::from(unmarried[1]),
+    ];
+    samples(&offset, &mut out)?;
+    for generator in &generators {
+        samples(generator, &mut out)?;
+    }
+    out.push(f64::from(result.is_ok()));
+    if let Ok((surface, map)) = result {
+        let surface = Surface::from(surface);
+        let domain = surface.natural_uv_domain_with_nurb(&k)?;
+        out.extend([
+            domain.min().x,
+            domain.min().y,
+            domain.max().x,
+            domain.max().y,
+        ]);
+        for u in 0..=4 {
+            for v in 0..=4 {
+                out.extend(
+                    surface
+                        .evaluate_point(
+                            &k,
+                            domain.evaluate(f64::from(u) / 4.0, f64::from(v) / 4.0),
+                        )?
+                        .to_array(),
+                );
+            }
+        }
+        out.push(f64::from(map.is_some()));
+    }
+    Ok(out)
+}
+
+// Minimal caller used only by the default-adapter regression tests below.
+// Differential entry points use the production PrimitiveModel.
+#[cfg(test)]
+struct EmptyModel {
+    k: Kernel,
+    notification_records: solidcore::topology::topology::NotifyRecords,
+    notification_attributes: solidcore::geom::attribute::AttributeStore,
+    // `SmAObject` tag attributes of the swept topology (none on the fresh B-rep).
+    tags: std::collections::BTreeMap<SweepEntity, TagData>,
+    b: Brep,
+}
+fn unavailable<T>() -> Result<T> {
+    Err(SolidError::invalid_input(
+        "primitive_p3_fixture",
+        "fixture has no topology/service for this call",
+    ))
+}
+// The fixture owns this face-key namespace, including future allocations.
+#[cfg(test)]
+fn fixture_face(face: FaceId) -> solidcore::geom::object::ObjectRef {
+    solidcore::geom::object::ObjectRef {
+        type_code: solidcore::geom::assert_array::labels::FACE_TYPE,
+        key: solidcore::geom::attribute::ObjectKey(100_000 + u64::from(face.index()) * 97),
+    }
+}
+#[cfg(test)]
+fn fixture_key(entity: solidcore::EntityRef) -> solidcore::geom::object::ObjectRef {
+    if let solidcore::EntityRef::Face(face) = entity {
+        fixture_face(face)
+    } else {
+        super::boolean_topology_intersector_p1::p9_entity_ref(entity)
+    }
+}
+#[cfg(test)]
+impl EmptyModel {
+    fn new() -> Result<Self> {
+        let mut b = Brep::new();
+        let region = b.add_region_record(Region {
+            in_brep: true,
+            ..Default::default()
+        })?;
+        b.set_infinite_region(Some(region));
+        Ok(Self {
+            k: Kernel::default(),
+            notification_records: solidcore::topology::topology::NotifyRecords::new(),
+            notification_attributes: solidcore::geom::attribute::AttributeStore::default(),
+            tags: std::collections::BTreeMap::default(),
+            b,
+        })
+    }
+}
+#[cfg(test)]
+impl SweepAccess for EmptyModel {
+    fn brep(&self, _: BrepId) -> Result<&Brep> {
+        Ok(&self.b)
+    }
+    fn brep_mut(&mut self, _: BrepId) -> Result<&mut Brep> {
+        Ok(&mut self.b)
+    }
+    fn kernel(&self, _: BrepId) -> Result<&Kernel> {
+        Ok(&self.k)
+    }
+    fn kernel_mut(&mut self, _: BrepId) -> Result<&mut Kernel> {
+        Ok(&mut self.k)
+    }
+    fn with_brep_mut<T>(
+        &mut self,
+        id: BrepId,
+        body: impl FnOnce(
+            &mut Kernel,
+            &mut Brep,
+            &dyn Fn(FaceId) -> solidcore::geom::object::ObjectRef,
+            &mut solidcore::topology::edge::NotifyEnv<'_>,
+        ) -> Result<T>,
+    ) -> Result<T> {
+        if id != BrepId::from_index(0) {
+            return unavailable();
+        }
+        let mut notifications = solidcore::topology::edge::NotifyEnv {
+            records: &mut self.notification_records,
+            attributes: &mut self.notification_attributes,
+            context: None,
+            key_of: &fixture_key,
+        };
+        body(&mut self.k, &mut self.b, &fixture_face, &mut notifications)
+    }
+    fn with_breps_mut<T>(
+        &mut self,
+        _source: BrepId,
+        _destination: BrepId,
+        _body: impl FnOnce(
+            &mut Kernel,
+            &mut Brep,
+            &mut Brep,
+            &dyn Fn(solidcore::EntityRef) -> solidcore::geom::object::ObjectRef,
+            &dyn Fn(FaceId) -> solidcore::geom::object::ObjectRef,
+            Option<&mut solidcore::geom::context::Context>,
+            &mut solidcore::topology::edge::NotifyEnv<'_>,
+        ) -> Result<T>,
+    ) -> Result<T> {
+        // This fixture has one B-rep; no distinct pair can be resolved.
+        unavailable()
+    }
+    fn with_brep_notifications<T>(
+        &mut self,
+        id: BrepId,
+        body: impl FnOnce(&mut Brep, &mut solidcore::topology::edge::NotifyEnv<'_>) -> Result<T>,
+    ) -> Result<T> {
+        if id != BrepId::from_index(0) {
+            return unavailable();
+        }
+        let mut env = solidcore::topology::edge::NotifyEnv {
+            records: &mut self.notification_records,
+            attributes: &mut self.notification_attributes,
+            context: Some(&mut self.k.context),
+            key_of: &fixture_key,
+        };
+        body(&mut self.b, &mut env)
+    }
+    fn retain_hcr(&mut self, _: BrepId, _: solidcore::blend::hcr::Hcr) -> Result<BrepId> {
+        unavailable()
+    }
+    fn hcr_session(&self, _: BrepId) -> Result<&solidcore::blend::hcr::Hcr> {
+        unavailable()
+    }
+    fn new_brep(&mut self, _: BrepId) -> Result<BrepId> {
+        unavailable()
+    }
+    fn delete_brep(&mut self, _: BrepId) {}
+    fn new_merge(
+        &mut self,
+        _: BrepId,
+        _: BrepId,
+        _: BrepId,
+        _: f64,
+        _: f64,
+    ) -> Result<SweepMergeId> {
+        Err(SolidError::invalid_input(
+            "primitive fixture",
+            "no merge engine",
+        ))
+    }
+    fn merge_operands(&self, _: SweepMergeId) -> Result<(BrepId, BrepId)> {
+        Err(SolidError::invalid_input(
+            "primitive fixture",
+            "no merge engine",
+        ))
+    }
+    fn merge_relations(
+        &mut self,
+        _: SweepMergeId,
+    ) -> Result<&mut solidcore::boolean::topology_intersector::p1::Relations> {
+        Err(SolidError::invalid_input(
+            "primitive fixture",
+            "no merge engine",
+        ))
+    }
+    fn piecewise_merge(&mut self, _: SweepMergeId, _: bool, _: bool) -> Result<BrepId> {
+        Err(SolidError::invalid_input(
+            "primitive fixture",
+            "no merge engine",
+        ))
+    }
+    fn union(&mut self, _: SweepMergeId) -> Result<BrepId> {
+        Err(SolidError::invalid_input(
+            "primitive fixture",
+            "no merge engine",
+        ))
+    }
+    fn copy_faces(
+        &mut self,
+        source: BrepId,
+        _: &[FaceId],
+        destination: BrepId,
+        _: SweepMergeId,
+        _: &mut solidcore::sweep::topology_sweep::access::BTreeEdgeMap,
+    ) -> Result<()> {
+        self.brep(source)?;
+        self.brep(destination)?;
+        Err(SolidError::invalid_input("fixture", "no merge engine"))
+    }
+    fn delete_merge(&mut self, _: SweepMergeId) {}
+    fn tag(&self, e: SweepEntity) -> Result<Option<TagData>> {
+        Ok(self.tags.get(&e).copied())
+    }
+    fn add_tag(&mut self, e: SweepEntity, tag: TagData) -> Result<()> {
+        self.tags.insert(e, tag);
+        Ok(())
+    }
+    fn curve_tag(&self, edge: EdgeRef) -> Result<Option<TagData>> {
+        // The fixture's curves carry no tag attributes.
+        self.brep(edge.0)?
+            .edge(edge.1)?
+            .curve
+            .as_ref()
+            .ok_or_else(|| SolidError::null_pointer("primitive_p3_fixture"))?;
+        Ok(None)
+    }
+    fn set_editing(&mut self, _: BrepId, value: bool) -> Result<bool> {
+        let previous = self.b.editing_enabled();
+        self.b.set_editing_enabled(value);
+        Ok(previous)
+    }
+    fn lock_mark(&mut self, _: BrepId, _: i32) -> Result<MarkType> {
+        unavailable()
+    }
+    fn unlock_mark(&mut self, _: BrepId, _: MarkType) -> Result<()> {
+        unavailable()
+    }
+    fn is_marked(&self, _: SweepEntity, _: MarkType) -> Result<bool> {
+        unavailable()
+    }
+    fn mark(&mut self, _: SweepEntity, _: MarkType) -> Result<()> {
+        unavailable()
+    }
+    fn collect_faces(&mut self, _: FaceRef, _: MarkType, _: &mut Vec<FaceId>) -> Result<()> {
+        unavailable()
+    }
+}
+#[cfg(test)]
+impl PrimitiveAccess for EmptyModel {
+    fn delete_primitive_faces(&mut self, id: BrepId, faces: &[FaceId]) -> Result<()> {
+        if id != BrepId::from_index(0) {
+            return unavailable();
+        }
+        // `SmTopologyIntersector::DeleteFaces` under the fixture's own face keys.
+        solidcore::boolean::merge::p4::KernelManifoldIntersector::delete_faces_with_keys(
+            &mut self.k,
+            &mut self.b,
+            faces,
+            &mut self.notification_records,
+            &mut self.notification_attributes,
+            &fixture_key,
+        )
+    }
+    fn with_primitive_brep<T>(
+        &mut self,
+        _: BrepId,
+        body: impl FnOnce(&mut Kernel, &mut Brep) -> Result<T>,
+    ) -> Result<T> {
+        body(&mut self.k, &mut self.b)
+    }
+}
+// Keep evaluation errors in the record; missing ported dispatch remains an
+// honest deferred result rather than being normalized to an upstream error.
+fn geometry_point(out: &mut Vec<f64>, value: Result<Vec3>) -> Result<()> {
+    match value {
+        Ok(point) => {
+            out.push(0.0);
+            out.extend(point.to_array());
+        }
+        Err(e) if e.is_unported() => return Err(e),
+        Err(e) => out.push(error(&e)),
+    }
+    Ok(())
+}
+
+// Native owning-list order, with actual evaluated geometry on successful builds.
+// Failed operations still compare their partial owning-list counts without attempting
+// to evaluate geometry the operation did not finish constructing.
+fn construction_geometry(k: &Kernel, b: &Brep, success: bool, out: &mut Vec<f64>) -> Result<()> {
+    out.extend([
+        b.face_list().len() as f64,
+        b.edge_list().len() as f64,
+        b.vertex_list().len() as f64,
+    ]);
+    if !success {
+        return Ok(());
+    }
+    for &id in b.vertex_list() {
+        out.push(1.0); // Native owning lists contain non-null vertices.
+        out.extend(b.vertex(id)?.point.to_array());
+    }
+    for &id in b.edge_list() {
+        let edge = b.edge(id)?;
+        out.push(f64::from(edge.curve.is_some()));
+        if let Some(curve) = &edge.curve {
+            out.extend([edge.interval.min(), edge.interval.max()]);
+            for i in 0..=4 {
+                geometry_point(
+                    out,
+                    curve.evaluate_point(k, edge.interval.evaluate(f64::from(i) / 4.0)),
+                )?;
+            }
+        }
+    }
+    for &id in b.face_list() {
+        let face = b.face(id)?;
+        out.push(f64::from(face.surface.is_some()));
+        if let Some(surface) = &face.surface {
+            let domain = face.uv_domain;
+            out.extend([
+                domain.min().x,
+                domain.min().y,
+                domain.max().x,
+                domain.max().y,
+            ]);
+            for u in 0..=2 {
+                for v in 0..=2 {
+                    geometry_point(
+                        out,
+                        surface.evaluate_point(
+                            k,
+                            domain.evaluate(f64::from(u) / 2.0, f64::from(v) / 2.0),
+                        ),
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn entry(i: &Inputs) -> Result<Vec<f64>> {
+    let data = &i.data;
+    // Match the native SmBrep constructor and Pc3Probe(region, 0, false).
+    // The production model resolves the real topology services; the minimal
+    // EmptyModel below is retained only for focused default-adapter tests.
+    let mut kernel = Kernel::default();
+    let brep = solidcore::topology::brep::p3::new_brep(
+        &mut kernel,
+        solidcore::geom::tol::USE_DEFAULT,
+        solidcore::geom::tol::USE_DEFAULT,
+    )?;
+    let mut primitive = PrimitiveCreation::new(brep.infinite_region(), 0, false);
+    let mut model = PrimitiveModel::new(&mut kernel, brep);
+    let mut curves: Vec<_> = data[10..]
+        .as_chunks::<7>()
+        .0
+        .iter()
+        .map(|v| curve(v).map(|c| Some(Curve::from(c))))
+        .collect::<Result<_>>()?;
+    let b = PrimitiveModel::MAIN;
+    let mut starts = Vec::new();
+    let mut sides = Vec::new();
+    let mut ends = Vec::new();
+    let result = match i.op {
+        1 => primitive.create_repeated_linear_sweep(
+            &mut model,
+            b,
+            &mut curves,
+            Vec3::new(data[0], data[1], data[2]),
+            data[3],
+            RepeatedSweepOptions {
+                repetitions: data[4] as u64,
+                cap_ends: data[5] != 0.,
+                test_continuity: data[6] != 0.,
+            },
+        ),
+        2 => primitive.create_rotational_sweep(
+            &mut model,
+            b,
+            &mut curves,
+            Vec3::new(data[0], data[1], data[2]),
+            Vec3::new(data[3], data[4], data[5]),
+        ),
+        3 => primitive.create_partial_rotational_sweep(
+            &mut model,
+            b,
+            &mut curves,
+            Vec3::new(data[0], data[1], data[2]),
+            Vec3::new(data[3], data[4], data[5]),
+            data[6],
+            RepeatedSweepOptions {
+                repetitions: data[7] as u64,
+                cap_ends: data[8] != 0.,
+                test_continuity: data[9] != 0.,
+            },
+        ),
+        4 => {
+            let profiles: Vec<_> = curves
+                .iter()
+                .flatten()
+                .filter_map(|c| {
+                    if let solidcore::curve::curve::CurveKind::BSpline(c) = c.kind() {
+                        Some(c.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            primitive.create_skin_from_faces(
+                &mut model,
+                b,
+                &[],
+                &profiles,
+                data[0],
+                data[1] as usize,
+                &mut sides,
+            )
+        }
+        5 => primitive.create_curve_sweep(
+            &mut model,
+            b,
+            &curves,
+            &BSplineCurve::create_line_segment(3, Vec3::ZERO, 2. * Vec3::Z)?,
+            None,
+            None,
+            data[0],
+            SweepOptions {
+                translational_sweep: true,
+                ..Default::default()
+            },
+            data[1] != 0.,
+            &mut starts,
+            &mut sides,
+            &mut ends,
+        ),
+        6 => primitive.create_swung_primitive(
+            &mut model,
+            b,
+            &curves[..data[2] as usize],
+            &curves[data[2] as usize..],
+            data[0],
+            data[1],
+        ),
+        7 => primitive.create_blend_primitive(
+            &mut model,
+            b,
+            None,
+            None,
+            &mut None,
+            api::BlendPrimitiveOptions {
+                curvature: solidcore::surface::surface::p2::CurvatureType::from_code(
+                    data[0] as u64,
+                )
+                .ok_or_else(|| SolidError::sm_err("fixture"))?,
+                ends: solidcore::surface::surface::p2::BlendEndType::from_code(data[1] as u64)
+                    .ok_or_else(|| SolidError::sm_err("fixture"))?,
+                curves_direction: data[2] as u64,
+                start_tangent_length: data[3],
+                end_tangent_length: data[4],
+            },
+        ),
+        _ => return unavailable(),
+    };
+    if let Err(e) = &result {
+        if e.is_unported() {
+            return Err(e.clone());
+        }
+    }
+    let mut record = vec![
+        result.as_ref().err().map_or(0., error),
+        f64::from(model.brep(b)?.editing_enabled()),
+        f64::from(model.kernel(b)?.context.doing_boolean()),
+        starts.len() as f64,
+        sides.len() as f64,
+        ends.len() as f64,
+    ];
+    construction_geometry(
+        model.kernel(b)?,
+        model.brep(b)?,
+        result.is_ok(),
+        &mut record,
+    )?;
+    Ok(record)
+}
+impl UnitDiff for Runner {
+    fn id(&self) -> &'static str {
+        "primitive.primitive_creation_p3"
+    }
+    fn cases(
+        &self,
+        ctx: &crate::case::CaseContext,
+    ) -> std::result::Result<Vec<Case>, HarnessError> {
+        crate::runner::default_cases(
+            self,
+            &crate::case::CaseContext {
+                seeds: ctx.seeds.max(256),
+                ..ctx.clone()
+            },
+        )
+    }
+    fn run_rust(&self, case: &Case) -> std::result::Result<Output, HarnessError> {
+        let i: Inputs = case.parse()?;
+        let result = if !layout_ok(i.op, &i.data) {
+            Err(SolidError::invalid_input(
+                "difftest::primitive_p3",
+                "record layout",
+            ))
+        } else if i.op == 0 {
+            ruled(&i.data)
+        } else {
+            entry(&i)
+        };
+        match result {
+            Ok(values) => Ok(Output::new().values("record", values)),
+            Err(e) => {
+                if let Some(deferred) = Output::unported(&e) {
+                    Ok(deferred)
+                } else {
+                    Err(HarnessError::new(e.to_string()))
+                }
+            }
+        }
+    }
+    fn generate(&self, rng: &mut Rng) -> Option<Value> {
+        let scale = 10f64.powi(rng.range_i64(-6, 6) as i32);
+        let corner = rng.below(3) == 0;
+        let mut data = vec![
+            f64::from(corner),
+            1.,
+            0.,
+            1.,
+            f64::from(rng.below(2) != 0),
+            0.,
+            1.,
+            1.,
+            scale * 1e-5,
+            scale * 1e-8,
+            scale,
+            0.,
+            0.,
+            rng.uniform(-3., 3.) * scale,
+            1.,
+            0.,
+            0.,
+            0.,
+            1.,
+            0.,
+        ];
+        if rng.below(8) == 0 {
+            data[1] = 0.;
+        }
+        if rng.below(8) == 0 {
+            data[6] = 0.;
+        }
+        if rng.below(8) == 0 {
+            data[5] = 1.;
+        }
+        if corner {
+            data.extend([1., 2. * scale, 0., 0., scale, 0., 90.]);
+        } else {
+            data.extend([0., 0., scale, 0., 2. * scale, scale, 0.]);
+        }
+        data.extend([0., 0., 0., 0., 2. * scale, 0., 0.]);
+        data.extend([0., 2. * scale, 0., 0., 2. * scale, 2. * scale, 0.]);
+        serde_json::to_value(Inputs {
+            op: 0,
+            data,
+            expected_rejection: false,
+        })
+        .ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore::sweep::topology_sweep::{TopologySweep, TopologySweepOptions};
+
+    #[test]
+    fn production_constructions_record_nonempty_geometry() {
+        let context = crate::CaseContext {
+            root: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."),
+            seeds: 0,
+        };
+        let cases = context.fixture_cases(Runner.id()).unwrap();
+        for (name, counts) in [
+            ("linear_repeated_wire", [2.0, 7.0, 6.0]),
+            ("partial_rotation_line", [1.0, 4.0, 4.0]),
+            ("skin_two_lines", [1.0, 4.0, 4.0]),
+            ("curve_sweep_line", [1.0, 4.0, 4.0]),
+            ("swung_one_path_profile", [1.0, 4.0, 4.0]),
+            ("zero_curve_sweep_approximation_tolerance", [1.0, 4.0, 4.0]),
+            (
+                "negative_curve_sweep_approximation_tolerance",
+                [1.0, 4.0, 4.0],
+            ),
+            ("negative_skin_approximation_tolerance", [1.0, 4.0, 4.0]),
+            ("negative_swung_tolerance_with_profile", [1.0, 4.0, 4.0]),
+        ] {
+            let case = cases.iter().find(|case| case.name == name).unwrap();
+            let inputs: Inputs = case.parse().unwrap();
+            let rust = entry(&inputs).unwrap();
+            assert_eq!(&rust[6..9], &counts, "{name}: topology");
+            assert_eq!(rust[0], 0.0, "{name}: construction success");
+            // Includes actual vertex positions, curve intervals/points and face
+            // domains/points, rather than an empty or status-only success.
+            assert!(rust.len() > 100, "{name}: geometry was not recorded");
+        }
+    }
+
+    #[test]
+    fn face_box_default_resolves_the_selected_face_and_uses_the_normal_box() {
+        let mut model = EmptyModel::new().unwrap();
+        let shell = model.b.add_shell().unwrap();
+        let _without_surface = model.b.add_face(shell).unwrap();
+        let selected = model.b.add_face(shell).unwrap();
+        let plane =
+            solidcore::surface::plane::Plane::create_canonical(&Axis2Placement::IDENTITY).unwrap();
+        model.b.face_mut(selected).unwrap().surface = Some(Surface::from(plane));
+        // A linear surface without trims has an empty normal box. The leading
+        // face has no surface, so resolving face zero would fail this check.
+        let bound = model
+            .primitive_face_box((BrepId::from_index(0), selected))
+            .unwrap();
+        assert_eq!(bound, solidcore::geom::extent3d::Extent3d::new());
+        assert!(matches!(
+            model.primitive_face_box((BrepId::from_index(1), selected)),
+            Err(SolidError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn linear_cap_stitch_completes_for_empty_brep_and_restores_caller_state() {
+        let mut model = EmptyModel::new().unwrap();
+        let mut sweep = TopologySweep::new(TopologySweepOptions::default());
+        for editing in [false, true] {
+            for doing_boolean in [false, true] {
+                model.b.set_editing_enabled(editing);
+                model.k.context.set_doing_boolean(doing_boolean);
+                let result = model.stitch_linear_caps(BrepId::from_index(0), &mut sweep, 0.125);
+                assert!(result.is_ok(), "stitch result: {result:?}");
+                assert_eq!(model.b.editing_enabled(), editing);
+                assert_eq!(model.k.context.doing_boolean(), doing_boolean);
+            }
+        }
+    }
+}

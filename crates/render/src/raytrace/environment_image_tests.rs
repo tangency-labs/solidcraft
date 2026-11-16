@@ -32,14 +32,14 @@ fn scene() -> ProductScene {
     }
 }
 fn request() -> ImageRequest {
-    let mut camera = crate::Camera { distance: 50.0, ..Default::default() };
-    camera.set_view(crate::StandardView::Top);
+    let mut camera = solidcraft_viewport::Camera { distance: 50.0, ..Default::default() };
+    camera.set_view(solidcraft_viewport::StandardView::Top);
     ImageRequest {
         studio_weights: None,
         environment: None,
         textures: None,
         integrator: job::Integrator::Raytrace,
-        raytrace: Some(RaytraceOptions { lights: Some(Vec::new()), ..Default::default() }),
+        raytrace: Some(RaytraceOptions { threads: 1, lights: Some(Vec::new()), ..Default::default() }),
         camera,
         width: 9,
         height: 9,

@@ -1,0 +1,1413 @@
+{
+  "cases": [
+    {
+      "name": "empty_forest",
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "options": null,
+        "a": [],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "all_unused",
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          },
+          {
+            "point": [
+              4,
+              8,
+              -4
+            ]
+          },
+          {
+            "point": [
+              9,
+              18,
+              -9
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "reverse_leaf_order",
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          },
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          },
+          {
+            "point": [
+              3,
+              6,
+              -3
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          2,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "unused_appended_in_input_order",
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          },
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          },
+          {
+            "point": [
+              3,
+              6,
+              -3
+            ]
+          },
+          {
+            "point": [
+              4,
+              8,
+              -4
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          2,
+          0
+        ]
+      }
+    },
+    {
+      "name": "repeated_leaf_without_dereference",
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          },
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "underflow",
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          0,
+          -1
+        ]
+      }
+    },
+    {
+      "name": "empty_underflow",
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "options": null,
+        "a": [],
+        "b": [],
+        "tree": [
+          -1
+        ]
+      }
+    },
+    {
+      "name": "unreachable_bad_leaf",
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          -1,
+          64
+        ]
+      }
+    },
+    {
+      "name": "upstream_merge_breps_operation_0",
+      "inputs": {
+        "family": 1,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "size": [
+              10,
+              10,
+              10
+            ]
+          },
+          {
+            "point": [
+              8,
+              6,
+              3
+            ],
+            "size": [
+              4,
+              8,
+              6
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:766 (TestMergeBrepsOperation geometry; result path deferred)"
+    },
+    {
+      "name": "upstream_merge_breps_operation_1",
+      "inputs": {
+        "family": 1,
+        "operation": 1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "size": [
+              10,
+              10,
+              10
+            ]
+          },
+          {
+            "point": [
+              8,
+              6,
+              3
+            ],
+            "size": [
+              4,
+              8,
+              6
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:766 (TestMergeBrepsOperation geometry; result path deferred)"
+    },
+    {
+      "name": "upstream_merge_breps_operation_2",
+      "inputs": {
+        "family": 1,
+        "operation": 2,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "size": [
+              10,
+              10,
+              10
+            ]
+          },
+          {
+            "point": [
+              8,
+              6,
+              3
+            ],
+            "size": [
+              4,
+              8,
+              6
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:766 (TestMergeBrepsOperation geometry; result path deferred)"
+    },
+    {
+      "name": "upstream_merge_breps_operation_3",
+      "inputs": {
+        "family": 1,
+        "operation": 3,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "size": [
+              10,
+              10,
+              10
+            ]
+          },
+          {
+            "point": [
+              8,
+              6,
+              3
+            ],
+            "size": [
+              4,
+              8,
+              6
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:766 (TestMergeBrepsOperation geometry; result path deferred)"
+    },
+    {
+      "name": "rejected_operation_-1",
+      "inputs": {
+        "family": 1,
+        "operation": -1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          },
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "rejected_operation_4",
+      "inputs": {
+        "family": 1,
+        "operation": 4,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          },
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "rejected_operation_64",
+      "inputs": {
+        "family": 1,
+        "operation": 64,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          },
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "rejected_singleton",
+      "inputs": {
+        "family": 1,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "rejected_empty",
+      "inputs": {
+        "family": 1,
+        "operation": 0,
+        "options": null,
+        "a": [],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "binary_operator_1",
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "options": 31,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          },
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          0,
+          1,
+          -1
+        ]
+      }
+    },
+    {
+      "name": "binary_operator_2",
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "options": 31,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          },
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          0,
+          1,
+          -2
+        ]
+      }
+    },
+    {
+      "name": "binary_operator_3",
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "options": 31,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          },
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          0,
+          1,
+          -3
+        ]
+      }
+    },
+    {
+      "name": "binary_operator_4",
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "options": 31,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          },
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          0,
+          1,
+          -4
+        ]
+      }
+    },
+    {
+      "name": "binary_operator_5",
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "options": 31,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          },
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          0,
+          1,
+          -5
+        ]
+      }
+    },
+    {
+      "name": "binary_operator_6",
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "options": 31,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          },
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          0,
+          1,
+          -6
+        ]
+      }
+    },
+    {
+      "name": "binary_operator_7",
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "options": 31,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          },
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          0,
+          1,
+          -7
+        ]
+      }
+    },
+    {
+      "name": "empty_lists",
+      "inputs": {
+        "family": 2,
+        "operation": 0,
+        "options": null,
+        "a": [],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "upstream_boolean_lists_boxes",
+      "inputs": {
+        "family": 2,
+        "operation": 1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "size": [
+              10,
+              10,
+              10
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              5,
+              0,
+              0
+            ],
+            "size": [
+              10,
+              10,
+              10
+            ]
+          }
+        ],
+        "tree": []
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2509 (TestSmBooleanLists; result path deferred)"
+    },
+    {
+      "name": "nonmanifold_0",
+      "inputs": {
+        "family": 3,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "nonmanifold_1",
+      "inputs": {
+        "family": 3,
+        "operation": 1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "nonmanifold_2",
+      "inputs": {
+        "family": 3,
+        "operation": 2,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "nonmanifold_3",
+      "inputs": {
+        "family": 3,
+        "operation": 3,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "nonmanifold_4",
+      "inputs": {
+        "family": 3,
+        "operation": 4,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "nonmanifold_5",
+      "inputs": {
+        "family": 3,
+        "operation": 5,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "nonmanifold_6",
+      "inputs": {
+        "family": 3,
+        "operation": 6,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "nonmanifold_7",
+      "inputs": {
+        "family": 3,
+        "operation": 7,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "nonmanifold_8",
+      "inputs": {
+        "family": 3,
+        "operation": 8,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "nonmanifold_9",
+      "inputs": {
+        "family": 3,
+        "operation": 9,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "nonmanifold_10",
+      "inputs": {
+        "family": 3,
+        "operation": 10,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1,
+              2,
+              -1
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              2,
+              4,
+              -2
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "upstream_piecewise_boxes_0",
+      "inputs": {
+        "family": 4,
+        "operation": 0,
+        "options": 0,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "size": [
+              10,
+              10,
+              10
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              5,
+              0,
+              0
+            ],
+            "size": [
+              10,
+              10,
+              10
+            ]
+          }
+        ],
+        "tree": []
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2485 (TestSmPiecewiseMerge geometry with both piecewise flags; result path deferred)"
+    },
+    {
+      "name": "upstream_piecewise_boxes_1",
+      "inputs": {
+        "family": 4,
+        "operation": 0,
+        "options": 1,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "size": [
+              10,
+              10,
+              10
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              5,
+              0,
+              0
+            ],
+            "size": [
+              10,
+              10,
+              10
+            ]
+          }
+        ],
+        "tree": []
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2485 (TestSmPiecewiseMerge geometry with both piecewise flags; result path deferred)"
+    },
+    {
+      "name": "upstream_piecewise_boxes_2",
+      "inputs": {
+        "family": 4,
+        "operation": 0,
+        "options": 2,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "size": [
+              10,
+              10,
+              10
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              5,
+              0,
+              0
+            ],
+            "size": [
+              10,
+              10,
+              10
+            ]
+          }
+        ],
+        "tree": [],
+        "expected_refusal": "UB-190"
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2485 (TestSmPiecewiseMerge geometry with both piecewise flags; result path deferred)"
+    },
+    {
+      "name": "upstream_piecewise_boxes_3",
+      "inputs": {
+        "family": 4,
+        "operation": 0,
+        "options": 3,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "size": [
+              10,
+              10,
+              10
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              5,
+              0,
+              0
+            ],
+            "size": [
+              10,
+              10,
+              10
+            ]
+          }
+        ],
+        "tree": [],
+        "expected_refusal": "UB-190"
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2485 (TestSmPiecewiseMerge geometry with both piecewise flags; result path deferred)"
+    },
+    {
+      "name": "box_leaf_tree",
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "size": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "point": [
+              10,
+              0,
+              0
+            ],
+            "size": [
+              3,
+              2,
+              1
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "upstream_piecewise_boxes_2_keep_other",
+      "inputs": {
+        "family": 4,
+        "operation": 0,
+        "options": 18,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "size": [
+              10,
+              10,
+              10
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              5,
+              0,
+              0
+            ],
+            "size": [
+              10,
+              10,
+              10
+            ]
+          }
+        ],
+        "tree": []
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2485 (TestSmPiecewiseMerge geometry with both piecewise flags; result path deferred)"
+    },
+    {
+      "name": "upstream_piecewise_boxes_3_keep_other",
+      "inputs": {
+        "family": 4,
+        "operation": 0,
+        "options": 19,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "size": [
+              10,
+              10,
+              10
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              5,
+              0,
+              0
+            ],
+            "size": [
+              10,
+              10,
+              10
+            ]
+          }
+        ],
+        "tree": []
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2485 (TestSmPiecewiseMerge geometry with both piecewise flags; result path deferred)"
+    },
+    {
+      "name": "piecewise_point_other_shell_vertex_imprint_2",
+      "inputs": {
+        "family": 4,
+        "operation": 0,
+        "options": 2,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              5,
+              0,
+              0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "piecewise_box_other_shell_vertex_imprint_2",
+      "inputs": {
+        "family": 4,
+        "operation": 0,
+        "options": 2,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "size": [
+              10,
+              10,
+              10
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              5,
+              0,
+              0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "piecewise_point_other_shell_vertex_imprint_3",
+      "inputs": {
+        "family": 4,
+        "operation": 0,
+        "options": 3,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              5,
+              0,
+              0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "piecewise_box_other_shell_vertex_imprint_3",
+      "inputs": {
+        "family": 4,
+        "operation": 0,
+        "options": 3,
+        "a": [
+          {
+            "point": [
+              0,
+              0,
+              0
+            ],
+            "size": [
+              10,
+              10,
+              10
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              5,
+              0,
+              0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    }
+  ]
+}

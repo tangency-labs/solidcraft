@@ -32,6 +32,14 @@ impl Body {
     pub fn is_surface(&self) -> bool {
         !self.is_mesh() && self.record().edges.iter().any(|e| e.uses.len() == 1)
     }
+
+    /// The number of open boundary edges, read from exact topology. A face's periodic seam
+    /// is used twice and is not open. Mesh bodies and topology the kernel cannot read are errors.
+    pub fn open_edge_count(&self) -> Result<usize> {
+        self.require_brep("open boundary edges")?;
+        let (body, _) = self.ops_body().ok_or_else(|| failed("open boundary edges: the body's topology could not be read"))?;
+        solidcore_ops::stitch::open_edges(body).map(|edges| edges.len()).map_err(|e| failed(format!("open boundary edges: {e}")))
+    }
 }
 
 fn invalid(what: impl Into<String>) -> KernelError {
@@ -701,11 +709,18 @@ const SAMPLES: usize = 64;
 
 /// The parameter of the curve's point nearest `p` inside `interval`, and the distance: the
 /// nearest of evenly spaced samples, then a golden-section search between its neighbours.
-pub(crate) fn nearest_parameter(c: &CurveEval, [a, b]: [f64; 2], p: Vec3) -> Option<(f64, f64)> {
+pub(crate) fn nearest_parameter(c: &CurveEval, interval: [f64; 2], p: Vec3) -> Option<(f64, f64)> {
+    nearest_parameter_in(c, interval, p, SAMPLES)
+}
+
+/// [`nearest_parameter`] from `samples` evenly spaced samples: a curve of many spans needs
+/// several in each, or the search can settle beside the point on the wrong span.
+pub(crate) fn nearest_parameter_in(c: &CurveEval, [a, b]: [f64; 2], p: Vec3, samples: usize) -> Option<(f64, f64)> {
+    let samples = samples.max(1);
     let dist = |t: f64| c.point(t).map_or(f64::INFINITY, |q| q.dist(p));
-    let at = |k: usize| a + (b - a) * k as f64 / SAMPLES as f64;
-    let best = (0..=SAMPLES).min_by(|&i, &j| dist(at(i)).total_cmp(&dist(at(j))))?;
-    let (mut lo, mut hi) = (at(best.saturating_sub(1)), at((best + 1).min(SAMPLES)));
+    let at = |k: usize| a + (b - a) * k as f64 / samples as f64;
+    let best = (0..=samples).min_by(|&i, &j| dist(at(i)).total_cmp(&dist(at(j))))?;
+    let (mut lo, mut hi) = (at(best.saturating_sub(1)), at((best + 1).min(samples)));
     let ratio = 0.5 * (5f64.sqrt() - 1.0);
     for _ in 0..80 {
         let (x, y) = (hi - ratio * (hi - lo), lo + ratio * (hi - lo));
@@ -858,7 +873,7 @@ pub fn extend(body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
         .iter()
         .enumerate()
         .map(|(i, e)| {
-            Ok(solidcraft_geom::brep::pcurve::EdgeUse {
+            Ok(solidcore_ops::pcurve::EdgeUse {
                 edge: index(i)?,
                 curve: e.parameters(),
                 interval: e.interval,
@@ -869,7 +884,7 @@ pub fn extend(body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
         })
         .collect::<Result<Vec<_>>>()?;
     let surface = b::Surface::Plane { origin: a3(origin), u_axis: a3(du), v_axis: a3(dv) };
-    let pcurves = solidcraft_geom::brep::pcurve::pcurves(&surface, &[uses], r.tolerance).map_err(|e| failed(format!("extend: {e}")))?;
+    let pcurves = solidcore_ops::pcurve::pcurves(&surface, &[uses], r.tolerance).map_err(|e| failed(format!("extend: {e}")))?;
     let edges = pcurves
         .into_iter()
         .flatten()
@@ -1254,6 +1269,16 @@ mod imp {
         r.to_native().map_err(|e| failed(format!("SMLib {what}: {e}")))
     }
 
+    /// [`checked`] for a body a stitch produced: its gaps are held to the sums of the zones they
+    /// span, each proven to reach no topology it does not bound (`Brep::check_stitched`).
+    fn checked_stitched(r: &SmBrep, what: &'static str) -> Result<Brep> {
+        let check = r.check_stitched(CheckLevel::All).map_err(sm(what))?;
+        if !check.is_valid() {
+            return Err(failed(format!("SMLib {what}: SMLib's check refuses the result: {check}")));
+        }
+        r.to_native().map_err(|e| failed(format!("SMLib {what}: {e}")))
+    }
+
     /// Whether two records of one body number its faces, edges and vertices alike: the same
     /// loops of the same edges, run the same ways, and each edge between the same vertices.
     fn same_numbering(a: &Brep, b: &Brep) -> bool {
@@ -1277,7 +1302,7 @@ mod imp {
     /// and edges by their index in `r`); none where SMLib's import of `r` does not number it as
     /// `r` does.
     pub(super) fn stitched(r: &Brep, tol: f64) -> Result<(Body, Option<History>)> {
-        stitched_with(r, tol, |_, sewn| checked(sewn, "stitch").map(|_| ()))
+        stitched_with(r, tol, |_, sewn| checked_stitched(sewn, "stitch").map(|_| ()))
     }
 
     /// [`stitched`], taking a result whose check fails no more tests outside `exempt` than the
@@ -1931,6 +1956,53 @@ mod tests {
             let t = thicken(&corner, t, symmetric).unwrap();
             let v = measure(&t).unwrap().volume;
             assert!(rel(v, want) < 1e-9 && t.validity().is_empty(), "{v} vs {want}");
+        }
+    }
+
+    /// A half circle of radius 5 extruded 10 as a sheet on each origin plane, thickened by 1, 2
+    /// and 4 out, in and half each way: a half tube between radii r0 and r1, π/2·(r1² − r0²)·10,
+    /// closed by a half ring at each end and a strip along each side (6 faces, 12 edges, 8
+    /// vertices), that every check accepts. The end rings lie square to the extrusion whatever
+    /// axis it runs along (#13348: off the XY plane the rings went onto planes through the axis).
+    #[test]
+    fn thicken_a_half_tube_on_every_origin_plane() {
+        use std::f64::consts::PI;
+        let arc = vec![Seg2::Arc { center: Vec2::new(0.0, 0.0), radius: 5.0, start: 0.0, sweep: PI }];
+        for (name, plane) in [("XY", Plane::XY), ("YZ", Plane::YZ), ("XZ", Plane::XZ)] {
+            let sheet = extrude_sheet(&plane, std::slice::from_ref(&arc), 0.0, 10.0).unwrap();
+            for t in [1.0, 2.0, 4.0] {
+                for (thickness, symmetric, r0, r1) in [(t, false, 5.0, 5.0 + t), (-t, false, 5.0 - t, 5.0), (t, true, 5.0 - t / 2.0, 5.0 + t / 2.0)] {
+                    let what = format!("{name}, {thickness} mm, symmetric {symmetric}");
+                    let b = thicken(&sheet, thickness, symmetric).unwrap_or_else(|e| panic!("{what}: {e}"));
+                    assert!(!b.is_surface() && b.shell_count() == 1, "{what}");
+                    assert_eq!((b.face_count(), b.edge_count(), b.vertex_count()), (6, 12, 8), "{what}");
+                    assert!(b.validity().is_empty(), "{what}: {:?}", b.validity());
+                    let (v, want) = (measure(&b).unwrap().volume, PI / 2.0 * (r1 * r1 - r0 * r0) * 10.0);
+                    assert!(rel(v, want) < 1e-9, "{what}: {v} vs {want}");
+                    // The four flat faces: the rings square to the extrusion at 0 and 10 along it,
+                    // the strips in the sketch's x axis' plane through the axis.
+                    let n = plane.normal().normalized().unwrap();
+                    let mut rings = Vec::new();
+                    let mut strips = 0;
+                    for f in (0..b.face_count()).filter_map(|i| b.planar_face(i)) {
+                        let m = f.normal().normalized().unwrap();
+                        if (m.dot(n).abs() - 1.0).abs() < 1e-9 {
+                            rings.push(f.origin.dot(n));
+                        } else {
+                            assert!(
+                                (m.dot(plane.y).abs() - 1.0).abs() < 1e-9 && f.origin.dot(plane.y).abs() < 1e-9,
+                                "{what}: a strip off the axis plane: {f:?}"
+                            );
+                            strips += 1;
+                        }
+                    }
+                    rings.sort_by(f64::total_cmp);
+                    assert!(
+                        rings.len() == 2 && rings[0].abs() < 1e-9 && (rings[1] - 10.0).abs() < 1e-9 && strips == 2,
+                        "{what}: rings at {rings:?}, {strips} strips"
+                    );
+                }
+            }
         }
     }
 

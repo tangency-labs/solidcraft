@@ -55,6 +55,33 @@ fn split_a_face_by_sketch_curves() {
     assert!((v - 24000.0).abs() < 1e-6 * 24000.0, "{v}");
 }
 
+/// A triangle of three lines on the top: by default each side is extended across the face; with
+/// `loops` the sides are joined first and the closed loop cuts out the triangle only. Open curves
+/// are extended either way.
+#[test]
+fn split_a_face_by_a_closed_loop_of_lines() {
+    let split = |loops: bool| {
+        let mut s = boxed();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Loop"}));
+        run(&mut s, "sketch.line", json!({"points": [[10, 5], [30, 5], [20, 25]], "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.split_face", json!({"faces": [[20, 12, 20]], "body": "B", "sketch": "Loop", "loops": loops}));
+        faces_volume(&mut s, "B")
+    };
+    let (f, v) = split(true);
+    assert_eq!(f, 7, "the triangle and the rest of the top");
+    assert!((v - 24000.0).abs() < 1e-6 * 24000.0, "{v}");
+    assert!(split(false).0 > 7, "each side extended across the top");
+
+    let mut s = boxed();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Cuts"}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 10], [10, 20]]}));
+    run(&mut s, "sketch.line", json!({"points": [[30, 10], [30, 20]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.split_face", json!({"faces": [[20, 15, 20]], "body": "B", "sketch": "Cuts", "loops": true}));
+    assert_eq!(faces_volume(&mut s, "B").0, 8, "two open lines still cut across the top");
+}
+
 #[test]
 fn a_tool_that_misses_is_refused() {
     let mut s = boxed();

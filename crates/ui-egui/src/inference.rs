@@ -13,8 +13,8 @@ use solidcore_record::Vec2;
 use solidcraft_engine::sketch::{CurveKind, Sketch};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::viewport::Proj;
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Kind {
@@ -78,7 +78,8 @@ fn line_ends(sk: &Sketch, c: usize) -> Option<(Vec2, Vec2)> {
 }
 
 /// Tangent from the previous point `prev` to a circle or arc, when the cursor `lp` is near the
-/// tangent point (within `tol`).
+/// tangent point (within `tol`). When `prev` is on the circle or arc itself (a line started at an
+/// arc's end), the curve's tangent there, when the cursor is near that direction.
 pub fn tangent(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
     let mut best: Option<Inference> = None;
     for (i, c) in sk.curves.iter().enumerate() {
@@ -87,6 +88,18 @@ pub fn tangent(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference>
         }
         let (Some(o), Some(r)) = (sk.center(i), sk.radius(i)) else { continue };
         let d = prev.dist(o);
+        // Standing on the curve: the line leaves it along its tangent, either way (#12179).
+        if (d - r).abs() <= 1e-6 * r.max(1.0) {
+            let on_arc = sk.shape(i).is_none_or(|sh| sh.dist(prev) < 1e-6);
+            let Some(dir) = (prev - o).normalized().map(|n| n.perp()) else { continue };
+            let along = (lp - prev).dot(dir);
+            let at = prev + dir * along;
+            let e = at.dist(lp);
+            if on_arc && along.abs() > tol && e < tol && best.as_ref().is_none_or(|b| e < b.dist) {
+                best = Some(Inference { kind: Kind::Tangent, curve: c.id.clone(), at, dist: e, guide: (prev, at), arg: None });
+            }
+            continue;
+        }
         if d <= r + 1e-9 {
             continue;
         }
@@ -316,6 +329,21 @@ impl Tracking {
                 Self::point_references(sk).get(index).copied().unwrap_or(false).then(|| sk.point(index)).flatten()
             }
         }
+    }
+
+    /// The straight edges whose midpoint guides are live, with those midpoints, so a point placed
+    /// on such a guide can stay lined up with it (#13413).
+    pub(crate) fn line_midpoints(&self, sk: &Sketch) -> Vec<(String, Vec2)> {
+        [&self.anchor, &self.previous]
+            .into_iter()
+            .flatten()
+            .filter_map(|reference| {
+                let TrackRef::Curve(id) = reference else { return None };
+                let index = sk.curve_index(id)?;
+                matches!(sk.curves.get(index)?.kind, CurveKind::Line { .. }).then_some(())?;
+                Some((id.clone(), Self::reference(sk, index)?))
+            })
+            .collect()
     }
 
     /// Keep `reference` as one of the two remembered references. Hovering the older one swaps
@@ -676,6 +704,66 @@ mod tests {
         assert_eq!(i.kind, Kind::Tangent);
         assert!(i.at.dist(t) < 1e-9);
         assert!((i.at - Vec2::new(30.0, 0.0)).dot(i.at - prev).abs() < 1e-9);
+    }
+
+    /// #12179: a line started on an arc (at its end point) or on a circle snaps along the
+    /// curve's tangent there, so it leaves the curve smoothly.
+    #[test]
+    fn a_line_started_on_an_arc_or_circle_snaps_along_its_tangent() {
+        let mut s = Sketch::new();
+        // A half circle over the X axis, centre (0, 0), radius 10, from (10, 0) to (-10, 0).
+        let _ = s.add_arc(Vec2::ZERO, Vec2::new(10.0, 0.0), Vec2::new(-10.0, 0.0), [None, None, None], Some("a1"));
+        let end = Vec2::new(10.0, 0.0);
+        // The tangent at (10, 0) is vertical: straight down from the arc's end.
+        let i = tangent(&s, end, Vec2::new(10.3, -20.0), 0.5).expect("tangent at the arc's end");
+        assert_eq!((i.kind.clone(), i.curve.as_str()), (Kind::Tangent, "a1"));
+        assert!(i.at.dist(Vec2::new(10.0, -20.0)) < 1e-9, "{:?}", i.at);
+        assert_eq!(i.guide.0, end);
+        // Off the tangent, or still at the start point, nothing.
+        assert!(tangent(&s, end, Vec2::new(14.0, -20.0), 0.5).is_none());
+        assert!(tangent(&s, end, Vec2::new(10.1, 0.1), 0.5).is_none());
+        // On a circle, anywhere on it: the tangent at (0, 10) is horizontal.
+        let mut c = Sketch::new();
+        let _ = c.add_circle(Vec2::ZERO, 10.0, None, Some("c1"));
+        let i = tangent(&c, Vec2::new(0.0, 10.0), Vec2::new(-15.0, 10.2), 0.5).expect("tangent on the circle");
+        assert!(i.at.dist(Vec2::new(-15.0, 10.0)) < 1e-9, "{:?}", i.at);
+        // A point on the arc's circle but off the arc itself takes nothing from it.
+        assert!(tangent(&s, Vec2::new(0.0, -10.0), Vec2::new(20.0, -10.2), 0.5).is_none());
+    }
+
+    /// #12179 in the app: the Line tool started on an arc's end and clicked near the arc's
+    /// tangent there draws the line along that tangent, with a Tangent constraint. The end is at
+    /// 45°, so no horizontal or vertical snap can stand in for the tangent one.
+    #[test]
+    fn the_line_tool_leaves_an_arcs_end_tangent_to_it() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        let k = 10.0 / 2f64.sqrt();
+        h.app.run("sketch.arc.three_point", json!({"start": [k, k], "end": [-10, 0], "through": [0, 10]})).unwrap();
+        h.app.cam.distance = 120.0;
+        h.settle();
+        h.step(&json!({"start": "sketch.line"})).unwrap();
+        // The tangent at (k, k) runs along (1, -1); the second click is a little off it.
+        for at in [[k, k], [k + 14.0, k - 14.3]] {
+            h.step(&json!({"move": {"sketch": at}})).unwrap();
+            h.frames(2);
+            h.step(&json!({"click": {"sketch": at}})).unwrap();
+            h.frames(2);
+        }
+        let sid = h.app.session.active_sketch.unwrap();
+        let st = h.app.session.model.state();
+        let sk = &st.sketch(sid).unwrap().sketch;
+        let line = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Line { .. })).expect("a line");
+        let arc = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Arc { .. })).expect("the arc");
+        let CurveKind::Line { a, b } = sk.curves[line].kind else { panic!("not a line") };
+        let (a, b) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+        assert!(a.dist(Vec2::new(k, k)) < 1e-6, "{a:?}");
+        assert!(((b - a).x + (b - a).y).abs() < 1e-6 && b.x > a.x + 10.0, "along the tangent: {a:?} {b:?}");
+        assert!(
+            sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Tangent { a: x, b: y } if (x, y) == (arc, line) || (x, y) == (line, arc))),
+            "{:?}",
+            sk.constraints
+        );
     }
 
     fn circle() -> Sketch {

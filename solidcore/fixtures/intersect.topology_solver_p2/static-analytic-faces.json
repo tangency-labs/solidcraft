@@ -1,0 +1,10176 @@
+{
+ "cases": [
+  {
+   "name": "analytic_face_cyl_x_5_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cyl_x_5_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cyl_x_5_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cyl_x_5_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cyl_x_6_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cyl_x_6_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cyl_x_6_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cyl_x_6_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cyl_x_7_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cyl_x_7_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cyl_x_7_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cyl_x_7_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cyl_x_8_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cyl_x_8_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cyl_x_8_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cyl_x_8_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cyl_x_5_14_swap",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 14,
+    "swap": true,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cyl_x_8_14_swap",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 14,
+    "swap": true,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cyl_x_5_8_rayfire",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 8,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cyl_x_5_12_directed",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 12,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_halfcyl_x_5_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_halfcyl_x_5_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_halfcyl_x_5_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_halfcyl_x_5_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_halfcyl_x_6_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_halfcyl_x_6_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_halfcyl_x_6_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_halfcyl_x_6_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_halfcyl_x_7_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_halfcyl_x_7_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_halfcyl_x_7_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_halfcyl_x_7_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_halfcyl_x_8_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_halfcyl_x_8_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_halfcyl_x_8_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_halfcyl_x_8_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_halfcyl_x_5_14_swap",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 14,
+    "swap": true,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_halfcyl_x_8_14_swap",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 14,
+    "swap": true,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_halfcyl_x_5_8_rayfire",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 8,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_halfcyl_x_5_12_directed",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 12,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cone_x_5_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cone_x_5_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cone_x_5_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cone_x_5_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cone_x_6_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cone_x_6_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cone_x_6_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cone_x_6_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cone_x_7_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cone_x_7_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cone_x_7_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cone_x_7_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cone_x_8_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cone_x_8_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cone_x_8_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cone_x_8_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cone_x_5_14_swap",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 14,
+    "swap": true,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cone_x_8_14_swap",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 14,
+    "swap": true,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cone_x_5_8_rayfire",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 8,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_cone_x_5_12_directed",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 12,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_band_5_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_band_5_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_band_5_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_band_5_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_band_6_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_band_6_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_band_6_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_band_6_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_band_7_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_band_7_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_band_7_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_band_7_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_band_8_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_band_8_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_band_8_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_band_8_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_band_5_14_swap",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 14,
+    "swap": true,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_band_8_14_swap",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 14,
+    "swap": true,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_band_5_8_rayfire",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 8,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_band_5_12_directed",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 12,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_quarter_5_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_quarter_5_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_quarter_5_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_quarter_5_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_quarter_6_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_quarter_6_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_quarter_6_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_quarter_6_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_quarter_7_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_quarter_7_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_quarter_7_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_quarter_7_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_quarter_8_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_quarter_8_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_quarter_8_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_quarter_8_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_quarter_5_14_swap",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 14,
+    "swap": true,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_quarter_8_14_swap",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 14,
+    "swap": true,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_quarter_5_8_rayfire",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 8,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_sphere_quarter_5_12_directed",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 12,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_x_5_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_x_5_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_x_5_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_x_5_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_x_6_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_x_6_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_x_6_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_x_6_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_x_7_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_x_7_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_x_7_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_x_7_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_x_8_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_x_8_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_x_8_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_x_8_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_x_5_14_swap",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 14,
+    "swap": true,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_x_8_14_swap",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 14,
+    "swap": true,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_x_5_8_rayfire",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 8,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_x_5_12_directed",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 12,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_half_x_5_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_half_x_5_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_half_x_5_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_half_x_5_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_half_x_6_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_half_x_6_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_half_x_6_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_half_x_6_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 6,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_half_x_7_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_half_x_7_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_half_x_7_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_half_x_7_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 7,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_half_x_8_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_half_x_8_15",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 15,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_half_x_8_11",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 11,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_half_x_8_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_half_x_5_14_swap",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 14,
+    "swap": true,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_half_x_8_14_swap",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 14,
+    "swap": true,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_half_x_5_8_rayfire",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 8,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_face_torus_half_x_5_12_directed",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 5,
+    "operation": 12,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     },
+     {
+      "kind": "plane"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_faces_cyl_x_sphere_band_8_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_faces_cyl_x_sphere_band_8_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     },
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_faces_cone_x_torus_x_8_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_faces_cone_x_torus_x_8_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "cone",
+      "apex": [
+       -1.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       1.5
+      ]
+     },
+     {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       -2.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "major_radius": 1.0,
+      "minor_radius": 0.25,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_faces_sphere_quarter_halfcyl_x_8_14",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 14,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_faces_sphere_quarter_halfcyl_x_8_3",
+   "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:33-108 (sm_GetFaceSilhouettes), 661 (SmTLSPointFace::SolveIt), 944, 1412, 1803, 1859",
+   "inputs": {
+    "op": "static",
+    "request": 0,
+    "tolerance": 1e-05,
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "first": [
+     [
+      0.2,
+      0.3,
+      2.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "second": [
+     [
+      0.0,
+      0.0,
+      3.0
+     ]
+    ],
+    "included": true,
+    "entry": 8,
+    "operation": 3,
+    "swap": false,
+    "faces": [
+     {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 0.5,
+      "lon": [
+       0.0,
+       180.0
+      ],
+      "lat": [
+       -45.0,
+       45.0
+      ]
+     },
+     {
+      "kind": "cylinder",
+      "origin": [
+       -0.5,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "radius": 0.5,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

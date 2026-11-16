@@ -1,0 +1,237 @@
+{
+  "area": "ladder/11-cumulative-parts",
+  "bodies": {
+    "b102": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b102"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b103"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b103"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b104"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b104"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b105"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b105"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b106"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  15.0,
+                  0.0,
+                  10.0
+                ],
+                [
+                  15.0,
+                  0.0,
+                  10.0
+                ]
+              ],
+              "index": 2
+            }
+          ],
+          "points": [
+            [
+              -15.0,
+              -9.769962616701378e-15,
+              10.0
+            ]
+          ],
+          "tolerance": 5.853349955359814
+        },
+        "kind": "round",
+        "sizes": [
+          3.0
+        ]
+      }
+    }
+  ],
+  "case": "002-flange",
+  "expected": {
+    "body_count": 1,
+    "faces": 14,
+    "method": "pi((40^2-8^2)10 + (15^2-8^2)20) - 6 pi 4^2 10 - 1.125 * 2 pi 14.5 (chamfer, Pappus) + (1-pi/4) 9 * 2 pi (15 + 3(10-3pi)/(12-3pi)) (concave round)",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 55442.531825321,
+    "what": "a revolved flange and hub with a bore, six bolt holes, a hub chamfer and a hub-root round"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 16258.852952888834,
+      "body_count": 1,
+      "edges": 31,
+      "faces": 14,
+      "vertices": 20,
+      "volume_mm3": 55442.53182466392
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 31,
+      "faces": 14,
+      "vertices": 20
+    }
+  },
+  "records": "002-flange.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b106"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 16258.852952888834,
+      "body_count": 1,
+      "edges": 31,
+      "faces": 14,
+      "vertices": 20,
+      "volume_mm3": 55442.53182466392
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "revolve",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "a revolved flange and hub with a bore, six bolt holes, a hub chamfer and a hub-root round",
+  "why_not": []
+}

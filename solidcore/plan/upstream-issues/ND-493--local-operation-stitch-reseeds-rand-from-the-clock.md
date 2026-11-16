@@ -1,0 +1,9 @@
+#### ND-493. `SmBrep::LocalOperation` on a filleted solid: the merge stitch's inner-shell test reseeds `rand()` from the clock
+- **Severity:** Nondeterminism
+- **Area:** Local operations
+- **Location:** `source/SMLib/src/SmFace.cpp:21471` (`SmFace::GetPointsInFace`, `srand((unsigned)time(NULL))`), reached from `SmTopologyTraverser::IsInnerShell` ← `SmBrep::TestClosureSplitRegion` ← `SmBrep::GlueEdgesGeneral` ← `SmStitch::DoStitching` ← `SmStitch::StitchIntoSolid` ← `SmOffsetExecutive::PiecewiseMerge`, inside `SmBrep::LocalOperation`. Same mechanism as ND-1, on a path ND-1 does not list.
+- **What happens:** the sample points of the inner-shell test are dithered with `rand()` reseeded from the wall clock, so the stitched result depends on the second the call runs in. For `topology.brep_local_operation` case `nurb_fillet_face5_same` (Solids/nurb_fillet.smb, face 5 offset onto its own surface), one geometry value comes out as `1.0308646e-3` (the Rust result) in most runs and as `1.0335321e-3` in others.
+- **Trigger:** a local operation whose piecewise merge stitches into a solid and asks `IsInnerShell` on a split region.
+- **How found:** main CI's `difftest-sweep` failed intermittently on that case (runs at c47d6d3b5 and 7ca6ce7a9 failed, ac7113d51 passed) with the same two values. Locally the case passed in 120 consecutive fresh-process runs but failed in 2 of 12 runs within one batch; a breakpoint on `srand` showed the call stack above.
+- **Confirmed:** yes, on the C++ reference (Ubuntu x86_64 prebuilt, glibc): `srand` is called with `time(NULL)` on this path for this case (gdb), and the Rust side's output digest was identical in 32 runs, including the runs where C++ disagreed.
+- **Rust port:** draws from the seeded `kernel.rng` (ND-1), so it is deterministic. The difftest parks the case (`crates/difftest/known_mismatches/topology.brep_local_operation.toml`).

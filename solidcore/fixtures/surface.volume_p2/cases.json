@@ -1,0 +1,3492 @@
+{
+ "cases": [
+  {
+   "name": "transform_rot45y_box_all_outputs",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:398 (TestSmTransform)",
+   "inputs": {
+    "op": "eval_bbox",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0.7071067811865476,
+        0,
+        -0.7071067811865475
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0.7071067811865475,
+        0,
+        0.7071067811865476
+       ]
+      ]
+     }
+    ],
+    "bx": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      5,
+      10,
+      15
+     ]
+    ],
+    "ppb": {
+     "basis": [
+      [
+       1,
+       0,
+       0
+      ],
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       0,
+       0,
+       1
+      ]
+     ],
+     "ivl": [
+      [
+       0,
+       5
+      ],
+      [
+       0,
+       10
+      ],
+      [
+       0,
+       15
+      ]
+     ]
+    },
+    "want": [
+     true,
+     true,
+     true,
+     true
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "transform_rot45y_box_unaligned_ppb",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:398 (TestSmTransform)",
+   "inputs": {
+    "op": "eval_bbox",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0.7071067811865476,
+        0,
+        -0.7071067811865475
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0.7071067811865475,
+        0,
+        0.7071067811865476
+       ]
+      ]
+     }
+    ],
+    "bx": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      5,
+      10,
+      15
+     ]
+    ],
+    "ppb": {
+     "basis": [
+      [
+       0.7071067811865476,
+       0.7071067811865475,
+       0
+      ],
+      [
+       -0.7071067811865475,
+       0.7071067811865476,
+       0
+      ],
+      [
+       0,
+       0,
+       1
+      ]
+     ],
+     "ivl": [
+      [
+       0,
+       5
+      ],
+      [
+       0,
+       10
+      ],
+      [
+       0,
+       15
+      ]
+     ]
+    },
+    "want": [
+     true,
+     true,
+     true,
+     true
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "transform_rot45y_orient_translate_chain",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:398 (TestSmTransform)",
+   "inputs": {
+    "op": "eval_bbox",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0.7071067811865476,
+        0,
+        -0.7071067811865475
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0.7071067811865475,
+        0,
+        0.7071067811865476
+       ]
+      ],
+      "orient": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     },
+     {
+      "kind": 1,
+      "t": [
+       [
+        3,
+        -2,
+        5
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     }
+    ],
+    "bx": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      5,
+      10,
+      15
+     ]
+    ],
+    "ppb": {
+     "basis": [
+      [
+       1,
+       0,
+       0
+      ],
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       0,
+       0,
+       1
+      ]
+     ],
+     "ivl": [
+      [
+       0,
+       5
+      ],
+      [
+       0,
+       10
+      ],
+      [
+       0,
+       15
+      ]
+     ]
+    },
+    "want": [
+     true,
+     true,
+     true,
+     true
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "transform_rot45y_chain_no_compounding",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:398 (TestSmTransform)",
+   "inputs": {
+    "op": "eval_bbox",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0.7071067811865476,
+        0,
+        -0.7071067811865475
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0.7071067811865475,
+        0,
+        0.7071067811865476
+       ]
+      ],
+      "orient": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     },
+     {
+      "kind": 1,
+      "t": [
+       [
+        3,
+        -2,
+        5
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     }
+    ],
+    "bx": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      5,
+      10,
+      15
+     ]
+    ],
+    "ppb": {
+     "basis": [
+      [
+       1,
+       0,
+       0
+      ],
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       0,
+       0,
+       1
+      ]
+     ],
+     "ivl": [
+      [
+       0,
+       5
+      ],
+      [
+       0,
+       10
+      ],
+      [
+       0,
+       15
+      ]
+     ]
+    },
+    "want": [
+     true,
+     true,
+     false,
+     false
+    ],
+    "comp": false
+   }
+  },
+  {
+   "name": "translate_line_start",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:398 (TestSmTransform)",
+   "inputs": {
+    "op": "eval_point",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     }
+    ],
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "translate_line_end",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:398 (TestSmTransform)",
+   "inputs": {
+    "op": "eval_point",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     }
+    ],
+    "p": [
+     2,
+     0,
+     0
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "translate_inverse_line_start",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:398 (TestSmTransform)",
+   "inputs": {
+    "op": "inv_eval",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     }
+    ],
+    "p": [
+     1,
+     2,
+     3
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "translate_surface_mid",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:398 (TestSmTransform)",
+   "inputs": {
+    "op": "inv_map",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        3,
+        -2,
+        5
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     }
+    ],
+    "p": [
+     4,
+     -1,
+     5
+    ],
+    "guess": [
+     1,
+     1,
+     0
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "rot45y_global",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:398 (TestSmTransform)",
+   "inputs": {
+    "op": "global",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0.7071067811865476,
+        0,
+        -0.7071067811865475
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0.7071067811865475,
+        0,
+        0.7071067811865476
+       ]
+      ]
+     },
+     {
+      "kind": 1,
+      "t": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     }
+    ],
+    "p": [
+     1,
+     2,
+     3
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "rot45y_global_with_domain",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:398 (TestSmTransform)",
+   "inputs": {
+    "op": "global",
+    "vol": [
+     {
+      "kind": 2,
+      "tw": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        1,
+        0
+       ],
+       "mid": [
+        1,
+        0,
+        0
+       ],
+       "period": 10.0,
+       "min": 0.001
+      }
+     },
+     {
+      "kind": 1,
+      "t": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     }
+    ],
+    "p": [
+     1,
+     2,
+     3
+    ],
+    "dom": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      5,
+      10,
+      15
+     ]
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "base_bbox_simple_bounded",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "bbox_simple",
+    "vol": [
+     {
+      "kind": 0
+     }
+    ],
+    "bx": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      1
+     ]
+    ],
+    "want": [
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "base_bbox_simple_unbounded",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "bbox_simple",
+    "vol": [
+     {
+      "kind": 0
+     }
+    ],
+    "bx": [
+     [
+      -1234567.0,
+      -1234567.0,
+      -1234567.0
+     ],
+     [
+      1234567.0,
+      1234567.0,
+      1234567.0
+     ]
+    ],
+    "want": [
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "base_with_next_samples_undefined",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "bbox_simple",
+    "vol": [
+     {
+      "kind": 0
+     },
+     {
+      "kind": 1,
+      "t": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        0,
+        3,
+        0
+       ],
+       [
+        0,
+        0,
+        4
+       ]
+      ]
+     }
+    ],
+    "bx": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      1
+     ]
+    ],
+    "ppb": {
+     "basis": [
+      [
+       0.7071067811865476,
+       0.7071067811865475,
+       0
+      ],
+      [
+       -0.7071067811865475,
+       0.7071067811865476,
+       0
+      ],
+      [
+       0,
+       0,
+       1
+      ]
+     ],
+     "ivl": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       1
+      ]
+     ]
+    },
+    "want": [
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "twist_bbox_simple_unbounded_box_only",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "bbox_simple",
+    "vol": [
+     {
+      "kind": 2,
+      "tw": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        0,
+        1
+       ],
+       "mid": [
+        1,
+        0,
+        0
+       ],
+       "period": 10.0,
+       "min": 0.001
+      }
+     }
+    ],
+    "bx": [
+     [
+      -1234567.0,
+      -1234567.0,
+      -1234567.0
+     ],
+     [
+      1234567.0,
+      1234567.0,
+      1234567.0
+     ]
+    ],
+    "want": [
+     true,
+     false
+    ]
+   }
+  },
+  {
+   "name": "twist_full_turn_box",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "eval_bbox",
+    "vol": [
+     {
+      "kind": 2,
+      "tw": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        0,
+        1
+       ],
+       "mid": [
+        1,
+        0,
+        0
+       ],
+       "period": 1.0,
+       "min": 0.001
+      }
+     }
+    ],
+    "bx": [
+     [
+      -1,
+      -1,
+      0
+     ],
+     [
+      1,
+      1,
+      3
+     ]
+    ],
+    "want": [
+     true,
+     true,
+     true,
+     true
+    ],
+    "comp": true,
+    "ppb": {
+     "basis": [
+      [
+       1,
+       0,
+       0
+      ],
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       0,
+       0,
+       1
+      ]
+     ],
+     "ivl": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       1
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "twist_zero_period",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "eval_point",
+    "vol": [
+     {
+      "kind": 2,
+      "tw": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        0,
+        1
+       ],
+       "mid": [
+        1,
+        0,
+        0
+       ],
+       "period": 0.0,
+       "min": 0.0
+      }
+     }
+    ],
+    "p": [
+     1,
+     2,
+     3
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "twist_zero_axis",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "eval1st",
+    "vol": [
+     {
+      "kind": 2,
+      "tw": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        0,
+        0
+       ],
+       "mid": [
+        1,
+        0,
+        0
+       ],
+       "period": 10.0,
+       "min": 0.001
+      }
+     }
+    ],
+    "p": [
+     1,
+     2,
+     3
+    ],
+    "left": [
+     true,
+     true,
+     true
+    ],
+    "nz": true,
+    "comp": true
+   }
+  },
+  {
+   "name": "twist_then_base_partial_point",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "pbox_simple",
+    "vol": [
+     {
+      "kind": 2,
+      "tw": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        0,
+        1
+       ],
+       "mid": [
+        1,
+        0,
+        0
+       ],
+       "period": 10.0,
+       "min": 0.001
+      }
+     },
+     {
+      "kind": 0
+     }
+    ],
+    "pb": {
+     "basis": [
+      [
+       1,
+       0,
+       0
+      ],
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       0,
+       0,
+       1
+      ]
+     ],
+     "ivl": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       1
+      ]
+     ]
+    },
+    "want": [
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "twist_then_base_point_in_param",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "pt_in_param",
+    "vol": [
+     {
+      "kind": 2,
+      "tw": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        0,
+        1
+       ],
+       "mid": [
+        1,
+        0,
+        0
+       ],
+       "period": 10.0,
+       "min": 0.001
+      }
+     },
+     {
+      "kind": 0
+     }
+    ],
+    "p": [
+     1,
+     1,
+     1
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "twist_inverse_chain",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "inv_eval",
+    "vol": [
+     {
+      "kind": 2,
+      "tw": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        0,
+        1
+       ],
+       "mid": [
+        1,
+        0,
+        0
+       ],
+       "period": 10.0,
+       "min": 0.001
+      }
+     },
+     {
+      "kind": 1,
+      "t": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        0,
+        3,
+        0
+       ],
+       [
+        0,
+        0,
+        4
+       ]
+      ],
+      "orient": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     },
+     {
+      "kind": 2,
+      "tw": {
+       "o": [
+        1,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        0,
+        1
+       ],
+       "mid": [
+        1,
+        0,
+        0
+       ],
+       "period": -7.0,
+       "min": 0.001
+      }
+     }
+    ],
+    "p": [
+     3,
+     1,
+     -2
+    ],
+    "guess": [
+     0,
+     0,
+     0
+    ],
+    "dom": [
+     [
+      -5,
+      -5,
+      -5
+     ],
+     [
+      5,
+      5,
+      5
+     ]
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "twist_inv_map_domain",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "inv_map",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        0,
+        3,
+        0
+       ],
+       [
+        0,
+        0,
+        4
+       ]
+      ],
+      "orient": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     },
+     {
+      "kind": 2,
+      "tw": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        0,
+        1
+       ],
+       "mid": [
+        1,
+        0,
+        0
+       ],
+       "period": 10.0,
+       "min": 0.001
+      }
+     }
+    ],
+    "p": [
+     3,
+     1,
+     -2
+    ],
+    "dom": {
+     "basis": [
+      [
+       0.7071067811865476,
+       0.7071067811865475,
+       0
+      ],
+      [
+       -0.7071067811865475,
+       0.7071067811865476,
+       0
+      ],
+      [
+       0,
+       0,
+       1
+      ]
+     ],
+     "ivl": [
+      [
+       -2,
+       2
+      ],
+      [
+       -2,
+       2
+      ],
+      [
+       -2,
+       2
+      ]
+     ]
+    },
+    "comp": true
+   }
+  },
+  {
+   "name": "twist_global_simple_outside_domain",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "global_simple",
+    "vol": [
+     {
+      "kind": 2,
+      "tw": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        0,
+        1
+       ],
+       "mid": [
+        1,
+        0,
+        0
+       ],
+       "period": 10.0,
+       "min": 0.001
+      }
+     }
+    ],
+    "p": [
+     3,
+     1,
+     2
+    ],
+    "dom": [
+     [
+      10,
+      10,
+      10
+     ],
+     [
+      11,
+      11,
+      11
+     ]
+    ]
+   }
+  },
+  {
+   "name": "twist_local_simple",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "local_simple",
+    "vol": [
+     {
+      "kind": 2,
+      "tw": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        0,
+        1
+       ],
+       "mid": [
+        1,
+        0,
+        0
+       ],
+       "period": 10.0,
+       "min": 0.001
+      }
+     }
+    ],
+    "p": [
+     3,
+     1,
+     2
+    ],
+    "g": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "singular_transform_inverse",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "inv_eval",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     }
+    ],
+    "p": [
+     1,
+     2,
+     3
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "singular_transform_local",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "local_simple",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     }
+    ],
+    "p": [
+     1,
+     2,
+     3
+    ],
+    "g": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "tiny_scale_inverse",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "inv_eval_simple",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1e-06,
+        0,
+        0
+       ],
+       [
+        0,
+        1e-06,
+        0
+       ],
+       [
+        0,
+        0,
+        1e-06
+       ]
+      ]
+     }
+    ],
+    "p": [
+     1e-06,
+     2e-06,
+     3e-06
+    ],
+    "guess": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "huge_scale_bbox",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "eval_bbox",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        1,
+        1,
+        1
+       ],
+       [
+        100000.0,
+        0,
+        0
+       ],
+       [
+        0,
+        100000.0,
+        0
+       ],
+       [
+        0,
+        0,
+        100000.0
+       ]
+      ]
+     }
+    ],
+    "bx": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      1
+     ]
+    ],
+    "ppb": {
+     "basis": [
+      [
+       0.7071067811865476,
+       0.7071067811865475,
+       0
+      ],
+      [
+       -0.7071067811865475,
+       0.7071067811865476,
+       0
+      ],
+      [
+       0,
+       0,
+       1
+      ]
+     ],
+     "ivl": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       1
+      ]
+     ]
+    },
+    "want": [
+     true,
+     true,
+     false,
+     false
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "point_sized_box",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "eval_bbox",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        0,
+        3,
+        0
+       ],
+       [
+        0,
+        0,
+        4
+       ]
+      ]
+     },
+     {
+      "kind": 1,
+      "t": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     }
+    ],
+    "bx": [
+     [
+      1,
+      1,
+      1
+     ],
+     [
+      1,
+      1,
+      1
+     ]
+    ],
+    "ppb": {
+     "basis": [
+      [
+       1,
+       0,
+       0
+      ],
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       0,
+       0,
+       1
+      ]
+     ],
+     "ivl": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       1
+      ]
+     ]
+    },
+    "want": [
+     true,
+     true,
+     true,
+     true
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "partially_unbounded_box_in_space",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "eval_bbox",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        0,
+        3,
+        0
+       ],
+       [
+        0,
+        0,
+        4
+       ]
+      ]
+     }
+    ],
+    "bx": [
+     [
+      -1234567.0,
+      0,
+      0
+     ],
+     [
+      1234567.0,
+      1,
+      1
+     ]
+    ],
+    "ppb": {
+     "basis": [
+      [
+       1,
+       0,
+       0
+      ],
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       0,
+       0,
+       1
+      ]
+     ],
+     "ivl": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       1
+      ]
+     ]
+    },
+    "want": [
+     false,
+     false,
+     true,
+     true
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "partially_unbounded_box_permuted_basis",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "eval_bbox",
+    "vol": [
+     {
+      "kind": 0
+     }
+    ],
+    "bx": [
+     [
+      -1234567.0,
+      0,
+      0
+     ],
+     [
+      1234567.0,
+      1,
+      1
+     ]
+    ],
+    "ppb": {
+     "basis": [
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       0,
+       0,
+       -1
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ],
+     "ivl": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       1
+      ]
+     ]
+    },
+    "want": [
+     false,
+     false,
+     true,
+     true
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "unbounded_box_unaligned_in_space",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "eval_bbox",
+    "vol": [
+     {
+      "kind": 0
+     }
+    ],
+    "bx": [
+     [
+      -1234567.0,
+      -1234567.0,
+      -1234567.0
+     ],
+     [
+      1234567.0,
+      1234567.0,
+      1234567.0
+     ]
+    ],
+    "ppb": {
+     "basis": [
+      [
+       0.7071067811865476,
+       0.7071067811865475,
+       0
+      ],
+      [
+       -0.7071067811865475,
+       0.7071067811865476,
+       0
+      ],
+      [
+       0,
+       0,
+       1
+      ]
+     ],
+     "ivl": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       1
+      ]
+     ]
+    },
+    "want": [
+     false,
+     false,
+     false,
+     true
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "box_check_fails_on_base_next",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "eval_bbox",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        0,
+        3,
+        0
+       ],
+       [
+        0,
+        0,
+        4
+       ]
+      ]
+     },
+     {
+      "kind": 0
+     }
+    ],
+    "bx": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      1
+     ]
+    ],
+    "want": [
+     true,
+     true,
+     false,
+     false
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "bspline_box_in_domain",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "box_in_param",
+    "vol": [
+     {
+      "kind": 3,
+      "bs": {
+       "hi": [
+        1,
+        1,
+        1
+       ],
+       "deg": [
+        1,
+        1,
+        1
+       ],
+       "knots": [
+        [
+         0,
+         0,
+         1,
+         1
+        ],
+        [
+         0,
+         0,
+         1,
+         1
+        ],
+        [
+         0,
+         0,
+         1,
+         1
+        ]
+       ],
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         1,
+         1
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0,
+         1,
+         1,
+         1
+        ],
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1,
+         0,
+         1,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         1,
+         1
+        ]
+       ]
+      }
+     }
+    ],
+    "bx": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      1
+     ]
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "bspline_box_outside_domain",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "box_in_param",
+    "vol": [
+     {
+      "kind": 3,
+      "bs": {
+       "hi": [
+        1,
+        1,
+        1
+       ],
+       "deg": [
+        1,
+        1,
+        1
+       ],
+       "knots": [
+        [
+         0,
+         0,
+         1,
+         1
+        ],
+        [
+         0,
+         0,
+         1,
+         1
+        ],
+        [
+         0,
+         0,
+         1,
+         1
+        ]
+       ],
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         1,
+         1
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0,
+         1,
+         1,
+         1
+        ],
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1,
+         0,
+         1,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         1,
+         1
+        ]
+       ]
+      }
+     }
+    ],
+    "bx": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      2,
+      1,
+      1
+     ]
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "bspline_bbox_control_points",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "eval_bbox",
+    "vol": [
+     {
+      "kind": 3,
+      "bs": {
+       "hi": [
+        1,
+        1,
+        1
+       ],
+       "deg": [
+        1,
+        1,
+        1
+       ],
+       "knots": [
+        [
+         0,
+         0,
+         1,
+         1
+        ],
+        [
+         0,
+         0,
+         1,
+         1
+        ],
+        [
+         0,
+         0,
+         1,
+         1
+        ]
+       ],
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         1,
+         1
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0,
+         1,
+         1,
+         1
+        ],
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1,
+         0,
+         1,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         1,
+         1
+        ]
+       ]
+      }
+     }
+    ],
+    "bx": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      1
+     ]
+    ],
+    "want": [
+     true,
+     true,
+     false,
+     false
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "bspline_local_newton_fails",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "local_simple",
+    "vol": [
+     {
+      "kind": 3,
+      "bs": {
+       "hi": [
+        1,
+        1,
+        1
+       ],
+       "deg": [
+        1,
+        1,
+        1
+       ],
+       "knots": [
+        [
+         0,
+         0,
+         1,
+         1
+        ],
+        [
+         0,
+         0,
+         1,
+         1
+        ],
+        [
+         0,
+         0,
+         1,
+         1
+        ]
+       ],
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         1,
+         1
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0,
+         1,
+         1,
+         1
+        ],
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1,
+         0,
+         1,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         1,
+         1
+        ]
+       ]
+      }
+     }
+    ],
+    "p": [
+     0.5,
+     0.5,
+     0.5
+    ],
+    "g": [
+     0.4,
+     0.4,
+     0.4
+    ]
+   }
+  },
+  {
+   "name": "bspline_global_simple",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "global_simple",
+    "vol": [
+     {
+      "kind": 3,
+      "bs": {
+       "hi": [
+        1,
+        1,
+        1
+       ],
+       "deg": [
+        1,
+        1,
+        1
+       ],
+       "knots": [
+        [
+         0,
+         0,
+         1,
+         1
+        ],
+        [
+         0,
+         0,
+         1,
+         1
+        ],
+        [
+         0,
+         0,
+         1,
+         1
+        ]
+       ],
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         1,
+         1
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0,
+         1,
+         1,
+         1
+        ],
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1,
+         0,
+         1,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         1,
+         1
+        ]
+       ]
+      }
+     }
+    ],
+    "p": [
+     0.5,
+     0.5,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "bspline_has_disc_deferred",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "has_disc",
+    "vol": [
+     {
+      "kind": 3,
+      "bs": {
+       "hi": [
+        1,
+        1,
+        1
+       ],
+       "deg": [
+        1,
+        1,
+        1
+       ],
+       "knots": [
+        [
+         0,
+         0,
+         1,
+         1
+        ],
+        [
+         0,
+         0,
+         1,
+         1
+        ],
+        [
+         0,
+         0,
+         1,
+         1
+        ]
+       ],
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         1,
+         1
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0,
+         1,
+         1,
+         1
+        ],
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1,
+         0,
+         1,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         1,
+         1
+        ]
+       ]
+      }
+     }
+    ],
+    "want": true,
+    "geometric": true
+   }
+  },
+  {
+   "name": "unbend_eval_deferred",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "eval_point",
+    "vol": [
+     {
+      "kind": 4
+     }
+    ],
+    "p": [
+     1,
+     2,
+     3
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "has_disc_chain",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "has_disc",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        0,
+        3,
+        0
+       ],
+       [
+        0,
+        0,
+        4
+       ]
+      ]
+     },
+     {
+      "kind": 2,
+      "tw": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        0,
+        1
+       ],
+       "mid": [
+        1,
+        0,
+        0
+       ],
+       "period": 10.0,
+       "min": 0.001
+      }
+     },
+     {
+      "kind": 1,
+      "t": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     }
+    ],
+    "want": true,
+    "geometric": false
+   }
+  },
+  {
+   "name": "has_disc_no_details",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "has_disc",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        0,
+        3,
+        0
+       ],
+       [
+        0,
+        0,
+        4
+       ]
+      ]
+     },
+     {
+      "kind": 2,
+      "tw": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        0,
+        1
+       ],
+       "mid": [
+        1,
+        0,
+        0
+       ],
+       "period": 10.0,
+       "min": 0.001
+      }
+     }
+    ],
+    "want": false,
+    "geometric": true
+   }
+  },
+  {
+   "name": "map_pbox_trim_orient",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "map_pbox",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        0,
+        3,
+        0
+       ],
+       [
+        0,
+        0,
+        4
+       ]
+      ],
+      "orient": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     },
+     {
+      "kind": 1,
+      "t": [
+       [
+        3,
+        -2,
+        5
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "orient": [
+       [
+        0,
+        0,
+        1
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        -1,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     }
+    ],
+    "pb": {
+     "basis": [
+      [
+       0.7071067811865476,
+       0.7071067811865475,
+       0
+      ],
+      [
+       -0.7071067811865475,
+       0.7071067811865476,
+       0
+      ],
+      [
+       0,
+       0,
+       1
+      ]
+     ],
+     "ivl": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       2
+      ],
+      [
+       0,
+       3
+      ]
+     ]
+    },
+    "want": [
+     true,
+     true
+    ],
+    "comp": true,
+    "trim": true
+   }
+  },
+  {
+   "name": "map_pbox_no_trim",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "map_pbox",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        0,
+        3,
+        0
+       ],
+       [
+        0,
+        0,
+        4
+       ]
+      ],
+      "orient": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     },
+     {
+      "kind": 2,
+      "tw": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        0,
+        1
+       ],
+       "mid": [
+        1,
+        0,
+        0
+       ],
+       "period": 10.0,
+       "min": 0.001
+      }
+     }
+    ],
+    "pb": {
+     "basis": [
+      [
+       1,
+       0,
+       0
+      ],
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       0,
+       0,
+       1
+      ]
+     ],
+     "ivl": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       2
+      ],
+      [
+       0,
+       3
+      ]
+     ]
+    },
+    "want": [
+     true,
+     true
+    ],
+    "comp": true,
+    "trim": false
+   }
+  },
+  {
+   "name": "pbox_simple_rotated",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "pbox_simple",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0.7071067811865476,
+        0,
+        -0.7071067811865475
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0.7071067811865475,
+        0,
+        0.7071067811865476
+       ]
+      ]
+     }
+    ],
+    "pb": {
+     "basis": [
+      [
+       0.7071067811865476,
+       0.7071067811865475,
+       0
+      ],
+      [
+       -0.7071067811865475,
+       0.7071067811865476,
+       0
+      ],
+      [
+       0,
+       0,
+       1
+      ]
+     ],
+     "ivl": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       2
+      ],
+      [
+       0,
+       3
+      ]
+     ]
+    },
+    "want": [
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "line_in_in_space_oriented",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "line_in_in_space",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        0,
+        3,
+        0
+       ],
+       [
+        0,
+        0,
+        4
+       ]
+      ],
+      "orient": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     },
+     {
+      "kind": 1,
+      "t": [
+       [
+        3,
+        -2,
+        5
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ]
+     }
+    ],
+    "a": [
+     0,
+     0,
+     0
+    ],
+    "b": [
+     1,
+     2,
+     3
+    ],
+    "comp": true
+   }
+  },
+  {
+   "name": "pbox_in_in_space_base_next",
+   "upstream_ref": "unit edge case (no upstream test calls SmVolume directly)",
+   "inputs": {
+    "op": "pbox_in_in_space",
+    "vol": [
+     {
+      "kind": 1,
+      "t": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        0,
+        3,
+        0
+       ],
+       [
+        0,
+        0,
+        4
+       ]
+      ]
+     },
+     {
+      "kind": 0
+     }
+    ],
+    "pb": {
+     "basis": [
+      [
+       1,
+       0,
+       0
+      ],
+      [
+       0,
+       1,
+       0
+      ],
+      [
+       0,
+       0,
+       1
+      ]
+     ],
+     "ivl": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       1
+      ]
+     ]
+    },
+    "comp": true
+   }
+  },
+  {
+   "name": "read_transform_simple",
+   "upstream_ref": "source/SMLib/src/SmVolume.cpp:8104",
+   "inputs": {
+    "op": "read_db",
+    "type": 22008,
+    "data": "2 0 0 0\n0 3 0 0\n0 0 4 0\n1 2 3 1\n0\n0\n"
+   }
+  },
+  {
+   "name": "read_transform_next_and_orient",
+   "upstream_ref": "source/SMLib/src/SmVolume.cpp:8104",
+   "inputs": {
+    "op": "read_db",
+    "type": 22008,
+    "data": "2 0 0 0\n0 3 0 0\n0 0 4 0\n1 2 3 1\n1\nObject Type 22008\n1 0 0 0\n0 1 0 0\n0 0 1 0\n1 2 3 1\n0\n0\n1\nObject Type 22008\n0.7071067811865476 0 -0.7071067811865475 0\n0 1 0 0\n0.7071067811865475 0 0.7071067811865476 0\n0 0 0 1\n0\n0\n"
+   }
+  },
+  {
+   "name": "read_twist_with_next",
+   "upstream_ref": "source/SMLib/src/SmVolume.cpp:8104",
+   "inputs": {
+    "op": "read_db",
+    "type": 22011,
+    "data": "12.5\n0.001\n1\nObject Type 22008\n1 0 0 0\n0 1 0 0\n0 0 1 0\n1 2 3 1\n0\n0\n"
+   }
+  },
+  {
+   "name": "read_next_bspline_fails",
+   "upstream_ref": "source/SMLib/src/SmVolume.cpp:8104",
+   "inputs": {
+    "op": "read_db",
+    "type": 22008,
+    "data": "2 0 0 0\n0 3 0 0\n0 0 4 0\n1 2 3 1\n1\nObject Type 22004\n0\n"
+   }
+  },
+  {
+   "name": "read_next_unknown_type",
+   "upstream_ref": "source/SMLib/src/SmVolume.cpp:8104",
+   "inputs": {
+    "op": "read_db",
+    "type": 22008,
+    "data": "2 0 0 0\n0 3 0 0\n0 0 4 0\n1 2 3 1\n1\nObject Type 99\n0\n"
+   }
+  },
+  {
+   "name": "read_truncated_matrix",
+   "upstream_ref": "source/SMLib/src/SmVolume.cpp:8104",
+   "inputs": {
+    "op": "read_db",
+    "type": 22008,
+    "data": "2 0 0 0\n0 2 0\n"
+   }
+  },
+  {
+   "name": "read_empty",
+   "upstream_ref": "source/SMLib/src/SmVolume.cpp:8104",
+   "inputs": {
+    "op": "read_db",
+    "type": 22008,
+    "data": ""
+   }
+  },
+  {
+   "name": "read_bspline",
+   "upstream_ref": "source/SMLib/src/SmVolume.cpp:8104",
+   "inputs": {
+    "op": "read_db",
+    "type": 22004,
+    "data": "0\n0\n"
+   }
+  },
+  {
+   "name": "read_unknown",
+   "upstream_ref": "source/SMLib/src/SmVolume.cpp:8104",
+   "inputs": {
+    "op": "read_db",
+    "type": 1,
+    "data": "0\n0\n"
+   }
+  }
+ ]
+}

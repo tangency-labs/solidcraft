@@ -1,0 +1,1304 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/5126",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the issue's",
+ "summary": "Joining a ring of eight level-1 Menger cells (15 mm cubes with three crossing 5 x 5 bars cut through) gave different results depending on the order the tools were joined in, on SolidCraft's truck kernel (#5126). Cells at (15 i, 15 j) round the 3 x 3 square without its centre, joined onto the cell at (0, 15) in the issue's failing order and in ring order. The cells only touch, so the result is one solid of 8 x 2500.",
+ "cases": [
+  {
+   "name": "issue_order",
+   "note": "Joined in the issue's order onto the cell at (0, 15).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "c0",
+     "origin": [
+      0,
+      15,
+      0
+     ],
+     "size": [
+      15,
+      15,
+      15
+     ]
+    },
+    {
+     "op": "box",
+     "id": "c0a",
+     "origin": [
+      5,
+      20,
+      -1
+     ],
+     "size": [
+      5,
+      5,
+      17
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c0",
+     "a": "c0",
+     "b": "c0a"
+    },
+    {
+     "op": "box",
+     "id": "c0b",
+     "origin": [
+      5,
+      14,
+      5
+     ],
+     "size": [
+      5,
+      17,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c0",
+     "a": "c0",
+     "b": "c0b"
+    },
+    {
+     "op": "box",
+     "id": "c0c",
+     "origin": [
+      -1,
+      20,
+      5
+     ],
+     "size": [
+      17,
+      5,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c0",
+     "a": "c0",
+     "b": "c0c"
+    },
+    {
+     "op": "box",
+     "id": "c1",
+     "origin": [
+      0,
+      30,
+      0
+     ],
+     "size": [
+      15,
+      15,
+      15
+     ]
+    },
+    {
+     "op": "box",
+     "id": "c1a",
+     "origin": [
+      5,
+      35,
+      -1
+     ],
+     "size": [
+      5,
+      5,
+      17
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c1",
+     "a": "c1",
+     "b": "c1a"
+    },
+    {
+     "op": "box",
+     "id": "c1b",
+     "origin": [
+      5,
+      29,
+      5
+     ],
+     "size": [
+      5,
+      17,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c1",
+     "a": "c1",
+     "b": "c1b"
+    },
+    {
+     "op": "box",
+     "id": "c1c",
+     "origin": [
+      -1,
+      35,
+      5
+     ],
+     "size": [
+      17,
+      5,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c1",
+     "a": "c1",
+     "b": "c1c"
+    },
+    {
+     "op": "box",
+     "id": "c2",
+     "origin": [
+      15,
+      30,
+      0
+     ],
+     "size": [
+      15,
+      15,
+      15
+     ]
+    },
+    {
+     "op": "box",
+     "id": "c2a",
+     "origin": [
+      20,
+      35,
+      -1
+     ],
+     "size": [
+      5,
+      5,
+      17
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c2",
+     "a": "c2",
+     "b": "c2a"
+    },
+    {
+     "op": "box",
+     "id": "c2b",
+     "origin": [
+      20,
+      29,
+      5
+     ],
+     "size": [
+      5,
+      17,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c2",
+     "a": "c2",
+     "b": "c2b"
+    },
+    {
+     "op": "box",
+     "id": "c2c",
+     "origin": [
+      14,
+      35,
+      5
+     ],
+     "size": [
+      17,
+      5,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c2",
+     "a": "c2",
+     "b": "c2c"
+    },
+    {
+     "op": "box",
+     "id": "c3",
+     "origin": [
+      30,
+      30,
+      0
+     ],
+     "size": [
+      15,
+      15,
+      15
+     ]
+    },
+    {
+     "op": "box",
+     "id": "c3a",
+     "origin": [
+      35,
+      35,
+      -1
+     ],
+     "size": [
+      5,
+      5,
+      17
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c3",
+     "a": "c3",
+     "b": "c3a"
+    },
+    {
+     "op": "box",
+     "id": "c3b",
+     "origin": [
+      35,
+      29,
+      5
+     ],
+     "size": [
+      5,
+      17,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c3",
+     "a": "c3",
+     "b": "c3b"
+    },
+    {
+     "op": "box",
+     "id": "c3c",
+     "origin": [
+      29,
+      35,
+      5
+     ],
+     "size": [
+      17,
+      5,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c3",
+     "a": "c3",
+     "b": "c3c"
+    },
+    {
+     "op": "box",
+     "id": "c4",
+     "origin": [
+      30,
+      15,
+      0
+     ],
+     "size": [
+      15,
+      15,
+      15
+     ]
+    },
+    {
+     "op": "box",
+     "id": "c4a",
+     "origin": [
+      35,
+      20,
+      -1
+     ],
+     "size": [
+      5,
+      5,
+      17
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c4",
+     "a": "c4",
+     "b": "c4a"
+    },
+    {
+     "op": "box",
+     "id": "c4b",
+     "origin": [
+      35,
+      14,
+      5
+     ],
+     "size": [
+      5,
+      17,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c4",
+     "a": "c4",
+     "b": "c4b"
+    },
+    {
+     "op": "box",
+     "id": "c4c",
+     "origin": [
+      29,
+      20,
+      5
+     ],
+     "size": [
+      17,
+      5,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c4",
+     "a": "c4",
+     "b": "c4c"
+    },
+    {
+     "op": "box",
+     "id": "c5",
+     "origin": [
+      30,
+      0,
+      0
+     ],
+     "size": [
+      15,
+      15,
+      15
+     ]
+    },
+    {
+     "op": "box",
+     "id": "c5a",
+     "origin": [
+      35,
+      5,
+      -1
+     ],
+     "size": [
+      5,
+      5,
+      17
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c5",
+     "a": "c5",
+     "b": "c5a"
+    },
+    {
+     "op": "box",
+     "id": "c5b",
+     "origin": [
+      35,
+      -1,
+      5
+     ],
+     "size": [
+      5,
+      17,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c5",
+     "a": "c5",
+     "b": "c5b"
+    },
+    {
+     "op": "box",
+     "id": "c5c",
+     "origin": [
+      29,
+      5,
+      5
+     ],
+     "size": [
+      17,
+      5,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c5",
+     "a": "c5",
+     "b": "c5c"
+    },
+    {
+     "op": "box",
+     "id": "c6",
+     "origin": [
+      15,
+      0,
+      0
+     ],
+     "size": [
+      15,
+      15,
+      15
+     ]
+    },
+    {
+     "op": "box",
+     "id": "c6a",
+     "origin": [
+      20,
+      5,
+      -1
+     ],
+     "size": [
+      5,
+      5,
+      17
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c6",
+     "a": "c6",
+     "b": "c6a"
+    },
+    {
+     "op": "box",
+     "id": "c6b",
+     "origin": [
+      20,
+      -1,
+      5
+     ],
+     "size": [
+      5,
+      17,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c6",
+     "a": "c6",
+     "b": "c6b"
+    },
+    {
+     "op": "box",
+     "id": "c6c",
+     "origin": [
+      14,
+      5,
+      5
+     ],
+     "size": [
+      17,
+      5,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c6",
+     "a": "c6",
+     "b": "c6c"
+    },
+    {
+     "op": "box",
+     "id": "c7",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      15,
+      15,
+      15
+     ]
+    },
+    {
+     "op": "box",
+     "id": "c7a",
+     "origin": [
+      5,
+      5,
+      -1
+     ],
+     "size": [
+      5,
+      5,
+      17
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c7",
+     "a": "c7",
+     "b": "c7a"
+    },
+    {
+     "op": "box",
+     "id": "c7b",
+     "origin": [
+      5,
+      -1,
+      5
+     ],
+     "size": [
+      5,
+      17,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c7",
+     "a": "c7",
+     "b": "c7b"
+    },
+    {
+     "op": "box",
+     "id": "c7c",
+     "origin": [
+      -1,
+      5,
+      5
+     ],
+     "size": [
+      17,
+      5,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c7",
+     "a": "c7",
+     "b": "c7c"
+    },
+    {
+     "op": "union",
+     "id": "ring",
+     "a": "c0",
+     "b": "c3"
+    },
+    {
+     "op": "union",
+     "id": "ring",
+     "a": "ring",
+     "b": "c2"
+    },
+    {
+     "op": "union",
+     "id": "ring",
+     "a": "ring",
+     "b": "c1"
+    },
+    {
+     "op": "union",
+     "id": "ring",
+     "a": "ring",
+     "b": "c7"
+    },
+    {
+     "op": "union",
+     "id": "ring",
+     "a": "ring",
+     "b": "c4"
+    },
+    {
+     "op": "union",
+     "id": "ring",
+     "a": "ring",
+     "b": "c5"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "ring",
+     "b": "c6"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 20000,
+     "tol": 1e-06,
+     "formula": "8 cells of 15^3 - 3*5*5*15 + 2*5^3 (three crossing 5 x 5 bars), touching face to face"
+    }
+   }
+  },
+  {
+   "name": "ring_order",
+   "note": "Joined in order round the ring.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "c0",
+     "origin": [
+      0,
+      15,
+      0
+     ],
+     "size": [
+      15,
+      15,
+      15
+     ]
+    },
+    {
+     "op": "box",
+     "id": "c0a",
+     "origin": [
+      5,
+      20,
+      -1
+     ],
+     "size": [
+      5,
+      5,
+      17
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c0",
+     "a": "c0",
+     "b": "c0a"
+    },
+    {
+     "op": "box",
+     "id": "c0b",
+     "origin": [
+      5,
+      14,
+      5
+     ],
+     "size": [
+      5,
+      17,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c0",
+     "a": "c0",
+     "b": "c0b"
+    },
+    {
+     "op": "box",
+     "id": "c0c",
+     "origin": [
+      -1,
+      20,
+      5
+     ],
+     "size": [
+      17,
+      5,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c0",
+     "a": "c0",
+     "b": "c0c"
+    },
+    {
+     "op": "box",
+     "id": "c1",
+     "origin": [
+      0,
+      30,
+      0
+     ],
+     "size": [
+      15,
+      15,
+      15
+     ]
+    },
+    {
+     "op": "box",
+     "id": "c1a",
+     "origin": [
+      5,
+      35,
+      -1
+     ],
+     "size": [
+      5,
+      5,
+      17
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c1",
+     "a": "c1",
+     "b": "c1a"
+    },
+    {
+     "op": "box",
+     "id": "c1b",
+     "origin": [
+      5,
+      29,
+      5
+     ],
+     "size": [
+      5,
+      17,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c1",
+     "a": "c1",
+     "b": "c1b"
+    },
+    {
+     "op": "box",
+     "id": "c1c",
+     "origin": [
+      -1,
+      35,
+      5
+     ],
+     "size": [
+      17,
+      5,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c1",
+     "a": "c1",
+     "b": "c1c"
+    },
+    {
+     "op": "box",
+     "id": "c2",
+     "origin": [
+      15,
+      30,
+      0
+     ],
+     "size": [
+      15,
+      15,
+      15
+     ]
+    },
+    {
+     "op": "box",
+     "id": "c2a",
+     "origin": [
+      20,
+      35,
+      -1
+     ],
+     "size": [
+      5,
+      5,
+      17
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c2",
+     "a": "c2",
+     "b": "c2a"
+    },
+    {
+     "op": "box",
+     "id": "c2b",
+     "origin": [
+      20,
+      29,
+      5
+     ],
+     "size": [
+      5,
+      17,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c2",
+     "a": "c2",
+     "b": "c2b"
+    },
+    {
+     "op": "box",
+     "id": "c2c",
+     "origin": [
+      14,
+      35,
+      5
+     ],
+     "size": [
+      17,
+      5,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c2",
+     "a": "c2",
+     "b": "c2c"
+    },
+    {
+     "op": "box",
+     "id": "c3",
+     "origin": [
+      30,
+      30,
+      0
+     ],
+     "size": [
+      15,
+      15,
+      15
+     ]
+    },
+    {
+     "op": "box",
+     "id": "c3a",
+     "origin": [
+      35,
+      35,
+      -1
+     ],
+     "size": [
+      5,
+      5,
+      17
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c3",
+     "a": "c3",
+     "b": "c3a"
+    },
+    {
+     "op": "box",
+     "id": "c3b",
+     "origin": [
+      35,
+      29,
+      5
+     ],
+     "size": [
+      5,
+      17,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c3",
+     "a": "c3",
+     "b": "c3b"
+    },
+    {
+     "op": "box",
+     "id": "c3c",
+     "origin": [
+      29,
+      35,
+      5
+     ],
+     "size": [
+      17,
+      5,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c3",
+     "a": "c3",
+     "b": "c3c"
+    },
+    {
+     "op": "box",
+     "id": "c4",
+     "origin": [
+      30,
+      15,
+      0
+     ],
+     "size": [
+      15,
+      15,
+      15
+     ]
+    },
+    {
+     "op": "box",
+     "id": "c4a",
+     "origin": [
+      35,
+      20,
+      -1
+     ],
+     "size": [
+      5,
+      5,
+      17
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c4",
+     "a": "c4",
+     "b": "c4a"
+    },
+    {
+     "op": "box",
+     "id": "c4b",
+     "origin": [
+      35,
+      14,
+      5
+     ],
+     "size": [
+      5,
+      17,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c4",
+     "a": "c4",
+     "b": "c4b"
+    },
+    {
+     "op": "box",
+     "id": "c4c",
+     "origin": [
+      29,
+      20,
+      5
+     ],
+     "size": [
+      17,
+      5,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c4",
+     "a": "c4",
+     "b": "c4c"
+    },
+    {
+     "op": "box",
+     "id": "c5",
+     "origin": [
+      30,
+      0,
+      0
+     ],
+     "size": [
+      15,
+      15,
+      15
+     ]
+    },
+    {
+     "op": "box",
+     "id": "c5a",
+     "origin": [
+      35,
+      5,
+      -1
+     ],
+     "size": [
+      5,
+      5,
+      17
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c5",
+     "a": "c5",
+     "b": "c5a"
+    },
+    {
+     "op": "box",
+     "id": "c5b",
+     "origin": [
+      35,
+      -1,
+      5
+     ],
+     "size": [
+      5,
+      17,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c5",
+     "a": "c5",
+     "b": "c5b"
+    },
+    {
+     "op": "box",
+     "id": "c5c",
+     "origin": [
+      29,
+      5,
+      5
+     ],
+     "size": [
+      17,
+      5,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c5",
+     "a": "c5",
+     "b": "c5c"
+    },
+    {
+     "op": "box",
+     "id": "c6",
+     "origin": [
+      15,
+      0,
+      0
+     ],
+     "size": [
+      15,
+      15,
+      15
+     ]
+    },
+    {
+     "op": "box",
+     "id": "c6a",
+     "origin": [
+      20,
+      5,
+      -1
+     ],
+     "size": [
+      5,
+      5,
+      17
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c6",
+     "a": "c6",
+     "b": "c6a"
+    },
+    {
+     "op": "box",
+     "id": "c6b",
+     "origin": [
+      20,
+      -1,
+      5
+     ],
+     "size": [
+      5,
+      17,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c6",
+     "a": "c6",
+     "b": "c6b"
+    },
+    {
+     "op": "box",
+     "id": "c6c",
+     "origin": [
+      14,
+      5,
+      5
+     ],
+     "size": [
+      17,
+      5,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c6",
+     "a": "c6",
+     "b": "c6c"
+    },
+    {
+     "op": "box",
+     "id": "c7",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      15,
+      15,
+      15
+     ]
+    },
+    {
+     "op": "box",
+     "id": "c7a",
+     "origin": [
+      5,
+      5,
+      -1
+     ],
+     "size": [
+      5,
+      5,
+      17
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c7",
+     "a": "c7",
+     "b": "c7a"
+    },
+    {
+     "op": "box",
+     "id": "c7b",
+     "origin": [
+      5,
+      -1,
+      5
+     ],
+     "size": [
+      5,
+      17,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c7",
+     "a": "c7",
+     "b": "c7b"
+    },
+    {
+     "op": "box",
+     "id": "c7c",
+     "origin": [
+      -1,
+      5,
+      5
+     ],
+     "size": [
+      17,
+      5,
+      5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "c7",
+     "a": "c7",
+     "b": "c7c"
+    },
+    {
+     "op": "union",
+     "id": "ring",
+     "a": "c0",
+     "b": "c1"
+    },
+    {
+     "op": "union",
+     "id": "ring",
+     "a": "ring",
+     "b": "c2"
+    },
+    {
+     "op": "union",
+     "id": "ring",
+     "a": "ring",
+     "b": "c3"
+    },
+    {
+     "op": "union",
+     "id": "ring",
+     "a": "ring",
+     "b": "c4"
+    },
+    {
+     "op": "union",
+     "id": "ring",
+     "a": "ring",
+     "b": "c5"
+    },
+    {
+     "op": "union",
+     "id": "ring",
+     "a": "ring",
+     "b": "c6"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "ring",
+     "b": "c7"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 20000,
+     "tol": 1e-06,
+     "formula": "8 cells of 15^3 - 3*5*5*15 + 2*5^3 (three crossing 5 x 5 bars), touching face to face"
+    }
+   }
+  }
+ ]
+}

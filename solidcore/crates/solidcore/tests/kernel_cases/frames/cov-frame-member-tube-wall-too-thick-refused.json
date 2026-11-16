@@ -1,0 +1,35 @@
+{
+  "area": "frames",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-frame-member-tube-wall-too-thick-refused",
+  "expected": {
+    "method": "the wall must be under half the smaller side (20): a clean refusal naming it",
+    "outcome": "refused",
+    "refusal": "must be less than half the smaller side",
+    "source": "analytic",
+    "sources": [],
+    "what": "a 40x40 tube with a 20 mm wall has no hole: refused"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 4 (frame.member): invalid parameters for `frame.member`: profile `wall` (20) must be less than half the smaller side (20)",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 4 (frame.member): invalid parameters for `frame.member`: profile `wall` (20) must be less than half the smaller side (20)",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "a 40x40 tube with a 20 mm wall has no hole: refused",
+  "why_not": [
+    "no kernel operation ran before the failure: step 4 (frame.member): invalid parameters for `frame.member`: profile `wall` (20) must be less than half the smaller side (20)"
+  ]
+}

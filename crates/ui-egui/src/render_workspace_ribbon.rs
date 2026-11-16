@@ -79,7 +79,7 @@ pub(super) fn busy(app: &SolveApp) -> bool {
 /// Reads only current host/job metadata and the numerical draft. No preflight,
 /// scene preparation, device discovery, resource IO or rendering during painting.
 pub(super) fn action_ready(app: &SolveApp, id: &str) -> Result<(), String> {
-    if app.file_load.busy() || app.file_picker.is_some() || inspector::confirmation_open(app) {
+    if app.file_load_holds() || app.file_picker.is_some() || inspector::confirmation_open(app) {
         return Err(app.tr("render.ribbon_finish_dialog").into());
     }
     match id {
@@ -125,6 +125,12 @@ pub(super) fn action_ready(app: &SolveApp, id: &str) -> Result<(), String> {
             }
             if id == "render.export" && app.render_workspace.view.studio.export_exr && !studio::linear_export_available(app) {
                 return Err(app.tr("render.linear_unavailable").into());
+            }
+            if id == "render.export" && app.render_workspace.view.studio.export_denoise_mask && !super::quality::mask_available(app) {
+                return Err(app.tr("render.denoise_mask_unavailable").into());
+            }
+            if id == "render.result.copy" && super::quality::mask_active(app) {
+                return Err(app.tr("render.denoise_mask_copy_help").into());
             }
             Ok(())
         }
@@ -220,7 +226,9 @@ pub(super) fn perform_job(app: &mut SolveApp, id: &str) -> Result<(), String> {
         "render.export" => {
             let job = app.render_workspace.view.completed.ok_or_else(|| app.tr("render.ribbon_no_result").to_string())?;
             let overwrite = app.render_workspace.view.overwrite;
-            if app.render_workspace.view.studio.export_exr {
+            if app.render_workspace.view.studio.export_denoise_mask {
+                super::export_denoise_mask(app, job, overwrite);
+            } else if app.render_workspace.view.studio.export_exr {
                 super::export_linear_image(app, job, overwrite);
             } else {
                 super::export_image(app, job, overwrite);

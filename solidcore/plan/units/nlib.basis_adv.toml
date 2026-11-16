@@ -1,0 +1,12 @@
+id = "nlib.basis_adv"
+upstream = ["source/SMLib/src/NL_BasisAdv.cpp"]
+rust_module = "nurbs::basis_adv"
+depends_on = ["nlib.knots"]
+soft_depends_on = ["nlib.basis_basic", "nlib.geom", "nlib.math"]
+est_lines = 361
+layer = 3
+tests = ["SM_API_test:TestSmCreateSurfaceFromRandomPoints", "SM_API_test:TestSmCreateSkinSurface", "SM_API_test:TestSmCreateExtrude", "SM_API_test:TestSmCreateSkinFromFaces", "prog_test:my_test_ss_nurb", "prog_test:my_test_surface_point_intersect"]
+status = "green"
+claimed_by = "swarm-nlib.basis_adv-a1"
+claimed_at = "2026-10-12T20:17:12Z"
+notes = "4 fns; green: 1751 difftest cases (251 fixture + 1500 generated), 0 deferred, bit-identical (max_rel_err 0); 100,251-case run and --fuzz 100000 also clean (issue #182). See plan/findings.md"

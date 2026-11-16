@@ -1,0 +1,356 @@
+{
+  "cases": [
+    {
+      "name": "issue-880-half-arc-rim-0-setbacks-1-2",
+      "upstream_ref": "source/SM_API/inc/SmApiBrep.h:214 (SmApiCreateLinearSweep); source/SMLib/inc/SmFilletStandardSolver.h:30 (SmConstantRadiusFS pdOptSecondRadius)",
+      "note": "tangency-labs/solidcore#880, closer rebuild: SolidCraft's build::cylinder (6c60f1a9) extrudes Loop2::circle_from(0, 5, SEAM_ANGLE = 0.6131 rad), two half-circle arcs, on Plane::from_normal((0, 0, -10), (1, 0, 2)) (x = Z x n = (0, 1, 0), y = n x x), 40 along the normal; cut by the box above z = 10. The rim is two half-ellipse edges meeting at the seam lines; this case chamfers the first (rim_nth 0). Setback 1 on the cut face (leaning along +Z) and 2 down the wall, as the issue.",
+      "inputs": {
+        "two_offset_chamfer": {
+          "radius": 5.0,
+          "height": 40.0,
+          "origin": [
+            0.0,
+            0.0,
+            -10.0
+          ],
+          "x_axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "y_axis": [
+            -0.8944271909999159,
+            0.0,
+            0.4472135954999579
+          ],
+          "box_origin": [
+            -50.0,
+            -50.0,
+            10.0
+          ],
+          "box_size": [
+            100.0,
+            100.0,
+            40.0
+          ],
+          "rim_z": 10.0,
+          "setbacks": {
+            "up": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "along_up": 1.0,
+            "other": 2.0
+          },
+          "body": {
+            "half_arc_sweep": {
+              "seam_deg": 35.12804241947077
+            }
+          },
+          "rim_nth": 0
+        }
+      }
+    },
+    {
+      "name": "issue-880-half-arc-rim-0-setbacks-1-1",
+      "upstream_ref": "source/SM_API/inc/SmApiBrep.h:214 (SmApiCreateLinearSweep); source/SMLib/inc/SmFilletStandardSolver.h:30 (SmConstantRadiusFS pdOptSecondRadius)",
+      "note": "tangency-labs/solidcore#880, closer rebuild: SolidCraft's build::cylinder (6c60f1a9) extrudes Loop2::circle_from(0, 5, SEAM_ANGLE = 0.6131 rad), two half-circle arcs, on Plane::from_normal((0, 0, -10), (1, 0, 2)) (x = Z x n = (0, 1, 0), y = n x x), 40 along the normal; cut by the box above z = 10. The rim is two half-ellipse edges meeting at the seam lines; this case chamfers the first (rim_nth 0). Control: equal setbacks.",
+      "inputs": {
+        "two_offset_chamfer": {
+          "radius": 5.0,
+          "height": 40.0,
+          "origin": [
+            0.0,
+            0.0,
+            -10.0
+          ],
+          "x_axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "y_axis": [
+            -0.8944271909999159,
+            0.0,
+            0.4472135954999579
+          ],
+          "box_origin": [
+            -50.0,
+            -50.0,
+            10.0
+          ],
+          "box_size": [
+            100.0,
+            100.0,
+            40.0
+          ],
+          "rim_z": 10.0,
+          "setbacks": {
+            "up": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "along_up": 1.0,
+            "other": 1.0
+          },
+          "body": {
+            "half_arc_sweep": {
+              "seam_deg": 35.12804241947077
+            }
+          },
+          "rim_nth": 0
+        }
+      }
+    },
+    {
+      "name": "issue-880-half-arc-rim-1-setbacks-1-2",
+      "upstream_ref": "source/SM_API/inc/SmApiBrep.h:214 (SmApiCreateLinearSweep); source/SMLib/inc/SmFilletStandardSolver.h:30 (SmConstantRadiusFS pdOptSecondRadius)",
+      "note": "tangency-labs/solidcore#880, closer rebuild: SolidCraft's build::cylinder (6c60f1a9) extrudes Loop2::circle_from(0, 5, SEAM_ANGLE = 0.6131 rad), two half-circle arcs, on Plane::from_normal((0, 0, -10), (1, 0, 2)) (x = Z x n = (0, 1, 0), y = n x x), 40 along the normal; cut by the box above z = 10. The rim is two half-ellipse edges meeting at the seam lines; this case chamfers the second (rim_nth 1). Setback 1 on the cut face (leaning along +Z) and 2 down the wall, as the issue.",
+      "inputs": {
+        "two_offset_chamfer": {
+          "radius": 5.0,
+          "height": 40.0,
+          "origin": [
+            0.0,
+            0.0,
+            -10.0
+          ],
+          "x_axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "y_axis": [
+            -0.8944271909999159,
+            0.0,
+            0.4472135954999579
+          ],
+          "box_origin": [
+            -50.0,
+            -50.0,
+            10.0
+          ],
+          "box_size": [
+            100.0,
+            100.0,
+            40.0
+          ],
+          "rim_z": 10.0,
+          "setbacks": {
+            "up": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "along_up": 1.0,
+            "other": 2.0
+          },
+          "body": {
+            "half_arc_sweep": {
+              "seam_deg": 35.12804241947077
+            }
+          },
+          "rim_nth": 1
+        }
+      }
+    },
+    {
+      "name": "issue-880-half-arc-rim-1-setbacks-1-1",
+      "upstream_ref": "source/SM_API/inc/SmApiBrep.h:214 (SmApiCreateLinearSweep); source/SMLib/inc/SmFilletStandardSolver.h:30 (SmConstantRadiusFS pdOptSecondRadius)",
+      "note": "tangency-labs/solidcore#880, closer rebuild: SolidCraft's build::cylinder (6c60f1a9) extrudes Loop2::circle_from(0, 5, SEAM_ANGLE = 0.6131 rad), two half-circle arcs, on Plane::from_normal((0, 0, -10), (1, 0, 2)) (x = Z x n = (0, 1, 0), y = n x x), 40 along the normal; cut by the box above z = 10. The rim is two half-ellipse edges meeting at the seam lines; this case chamfers the second (rim_nth 1). Control: equal setbacks.",
+      "inputs": {
+        "two_offset_chamfer": {
+          "radius": 5.0,
+          "height": 40.0,
+          "origin": [
+            0.0,
+            0.0,
+            -10.0
+          ],
+          "x_axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "y_axis": [
+            -0.8944271909999159,
+            0.0,
+            0.4472135954999579
+          ],
+          "box_origin": [
+            -50.0,
+            -50.0,
+            10.0
+          ],
+          "box_size": [
+            100.0,
+            100.0,
+            40.0
+          ],
+          "rim_z": 10.0,
+          "setbacks": {
+            "up": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "along_up": 1.0,
+            "other": 1.0
+          },
+          "body": {
+            "half_arc_sweep": {
+              "seam_deg": 35.12804241947077
+            }
+          },
+          "rim_nth": 1
+        }
+      }
+    },
+    {
+      "name": "issue-880-half-arc-rim-whole-offsets-1-1",
+      "upstream_ref": "source/SM_API/inc/SmApiBrep.h:214 (SmApiCreateLinearSweep); source/SMLib/inc/SmFilletStandardSolver.h:30 (SmConstantRadiusFS pdOptSecondRadius)",
+      "note": "tangency-labs/solidcore#880: the same body; both half-ellipse rim edges (the whole smooth rim, as the fork's C API chamfered a pick before fc43974 grew it by its tangent chain) chamfered in one executive, each by the offsets 1.0, 1.0 (first on its blend edge use's face). Where the half edges alone are refused (1001), the whole chain should build.",
+      "inputs": {
+        "two_offset_chamfer": {
+          "radius": 5.0,
+          "height": 40.0,
+          "origin": [
+            0.0,
+            0.0,
+            -10.0
+          ],
+          "x_axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "y_axis": [
+            -0.8944271909999159,
+            0.0,
+            0.4472135954999579
+          ],
+          "box_origin": [
+            -50.0,
+            -50.0,
+            10.0
+          ],
+          "box_size": [
+            100.0,
+            100.0,
+            40.0
+          ],
+          "rim_z": 10.0,
+          "body": {
+            "half_arc_sweep": {
+              "seam_deg": 35.12804241947077
+            }
+          },
+          "rim_nth": 0,
+          "offsets": [
+            1.0,
+            1.0
+          ],
+          "rim_all": true
+        }
+      }
+    },
+    {
+      "name": "issue-880-half-arc-rim-whole-offsets-1.4437-1.4437",
+      "upstream_ref": "source/SM_API/inc/SmApiBrep.h:214 (SmApiCreateLinearSweep); source/SMLib/inc/SmFilletStandardSolver.h:30 (SmConstantRadiusFS pdOptSecondRadius)",
+      "note": "tangency-labs/solidcore#880: the same body; both half-ellipse rim edges (the whole smooth rim, as the fork's C API chamfered a pick before fc43974 grew it by its tangent chain) chamfered in one executive, each by the offsets 1.4437306849540357, 1.4437306849540357 (first on its blend edge use's face). Where the half edges alone are refused (1001), the whole chain should build.",
+      "inputs": {
+        "two_offset_chamfer": {
+          "radius": 5.0,
+          "height": 40.0,
+          "origin": [
+            0.0,
+            0.0,
+            -10.0
+          ],
+          "x_axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "y_axis": [
+            -0.8944271909999159,
+            0.0,
+            0.4472135954999579
+          ],
+          "box_origin": [
+            -50.0,
+            -50.0,
+            10.0
+          ],
+          "box_size": [
+            100.0,
+            100.0,
+            40.0
+          ],
+          "rim_z": 10.0,
+          "body": {
+            "half_arc_sweep": {
+              "seam_deg": 35.12804241947077
+            }
+          },
+          "rim_nth": 0,
+          "offsets": [
+            1.4437306849540357,
+            1.4437306849540357
+          ],
+          "rim_all": true
+        }
+      }
+    },
+    {
+      "name": "issue-880-half-arc-rim-whole-offsets-1-2",
+      "upstream_ref": "source/SM_API/inc/SmApiBrep.h:214 (SmApiCreateLinearSweep); source/SMLib/inc/SmFilletStandardSolver.h:30 (SmConstantRadiusFS pdOptSecondRadius)",
+      "note": "tangency-labs/solidcore#880: the same body; both half-ellipse rim edges (the whole smooth rim, as the fork's C API chamfered a pick before fc43974 grew it by its tangent chain) chamfered in one executive, each by the offsets 1.0, 2.0 (first on its blend edge use's face). Where the half edges alone are refused (1001), the whole chain should build.",
+      "inputs": {
+        "two_offset_chamfer": {
+          "radius": 5.0,
+          "height": 40.0,
+          "origin": [
+            0.0,
+            0.0,
+            -10.0
+          ],
+          "x_axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "y_axis": [
+            -0.8944271909999159,
+            0.0,
+            0.4472135954999579
+          ],
+          "box_origin": [
+            -50.0,
+            -50.0,
+            10.0
+          ],
+          "box_size": [
+            100.0,
+            100.0,
+            40.0
+          ],
+          "rim_z": 10.0,
+          "body": {
+            "half_arc_sweep": {
+              "seam_deg": 35.12804241947077
+            }
+          },
+          "rim_nth": 0,
+          "offsets": [
+            1.0,
+            2.0
+          ],
+          "rim_all": true
+        }
+      }
+    }
+  ]
+}

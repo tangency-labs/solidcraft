@@ -1,0 +1,171 @@
+{
+  "area": "plastic",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 3.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                60.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                60.0,
+                40.0,
+                0.0
+              ],
+              "start": [
+                60.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                40.0,
+                0.0
+              ],
+              "start": [
+                60.0,
+                40.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                40.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-plastic-rules-lists-library-design-and-assigned",
+  "expected": {
+    "body_count": 1,
+    "method": "the list is the library as the design has it (6 rules, ABS (1.5mm) first) and then the design's own (Housing, from ABS with a 3 deg draft: thickness 1.5, nominal radius 0.75); no rule was made active; Plate is assigned Housing. The plate is unchanged: V = 60*40*3",
+    "results": [
+      {
+        "json": {
+          "active": null,
+          "assigned": {
+            "Plate": "Housing"
+          },
+          "rules": [
+            {
+              "library": true,
+              "name": "ABS (1.5mm)"
+            },
+            {
+              "library": true
+            },
+            {
+              "library": true
+            },
+            {
+              "library": true
+            },
+            {
+              "library": true
+            },
+            {
+              "library": true
+            },
+            {
+              "library": false,
+              "name": "Housing",
+              "values": {
+                "draft_deg": 3.0,
+                "nominal_radius": 0.75,
+                "thickness": 1.5
+              }
+            }
+          ]
+        },
+        "step": 4
+      }
+    ],
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 7200.0,
+    "what": "plastic.rules after a design rule is made and assigned to a body: the six library rules, then the design's own, the active one and the assignment"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8
+    }
+  },
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5400.0,
+      "body_count": 1,
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8,
+      "volume_mm3": 7200.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "plastic.rules after a design rule is made and assigned to a body: the six library rules, then the design's own, the active one and the assignment",
+  "why_not": []
+}

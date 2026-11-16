@@ -1,0 +1,140 @@
+{
+  "area": "ladder/09-shells-and-offsets",
+  "bodies": {
+    "b7": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "shell",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "open_faces": {
+          "kind": "face",
+          "picked": [
+            {
+              "at": [],
+              "index": 3
+            }
+          ],
+          "points": [
+            [
+              13.370319793988706,
+              7.468680126225857,
+              20.0
+            ]
+          ],
+          "tolerance": 0.07483414773547883
+        },
+        "thickness": -2.0
+      }
+    }
+  ],
+  "case": "005-shell-rounds-r5-t2",
+  "expected": {
+    "body_count": 1,
+    "faces": 19,
+    "method": "the cavity is the 56x36 rounded rectangle with r 5-2 = 3 corners, 18 deep",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 11421.858316913,
+    "what": "the box with r5 vertical rounds shelled 2 mm open at the top: the inner corners r3"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 11804.690170039057,
+      "body_count": 1,
+      "edges": 48,
+      "faces": 19,
+      "vertices": 32,
+      "volume_mm3": 11421.858316690608
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 48,
+      "faces": 19,
+      "vertices": 32
+    }
+  },
+  "records": "005-shell-rounds-r5-t2.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 11804.690170038988,
+      "body_count": 1,
+      "edges": 48,
+      "faces": 19,
+      "vertices": 32,
+      "volume_mm3": 11421.858316690621
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "shell"
+  ],
+  "ungraded": [],
+  "what": "the box with r5 vertical rounds shelled 2 mm open at the top: the inner corners r3",
+  "why_not": []
+}

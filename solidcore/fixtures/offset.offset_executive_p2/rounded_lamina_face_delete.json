@@ -1,0 +1,215 @@
+{
+ "coverage": "Rounded DoSolidOffset (merge results) of Boolean/extrudeHoles1.smb faces 0 and 3 by 24.7 and Defeature/extrusion.smb face 0 by 2.5 (TestFiles/pt_TestFiles), each face kept as a shell face, in and out, plus two unstitched (bSkipStitchMerge) runs: BuildOffsetOfFaceuse deletes an offset face whose lamina edge point (0.4567) lies nearer the original surface than the offset distance less twice the approximation tolerance, through SmTopologyIntersector::DeleteFaces.",
+ "cases": [
+  {
+   "name": "defeature_extrusion_face0_inset2_5_rounded",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Defeature/extrusion.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 2.5,
+     "member_approx_tol": 0.0001,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "defeature_extrusion_face0_outset2_5_rounded",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Defeature/extrusion.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 2.5,
+     "member_approx_tol": 0.0001,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "extrude_holes1_face0_inset24_7_rounded",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Boolean/extrudeHoles1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.0059574935488984,
+    "config": {
+     "member_distance": 24.7,
+     "member_approx_tol": 0.0059574935488984,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "extrude_holes1_face0_outset24_7_rounded",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Boolean/extrudeHoles1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.0059574935488984,
+    "config": {
+     "member_distance": 24.7,
+     "member_approx_tol": 0.0059574935488984,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "extrude_holes1_face3_inset24_7_rounded",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Boolean/extrudeHoles1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 3
+     }
+    ],
+    "tolerance": 0.0059574935488984,
+    "config": {
+     "member_distance": 24.7,
+     "member_approx_tol": 0.0059574935488984,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "extrude_holes1_face3_outset24_7_rounded",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Boolean/extrudeHoles1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 3
+     }
+    ],
+    "tolerance": 0.0059574935488984,
+    "config": {
+     "member_distance": 24.7,
+     "member_approx_tol": 0.0059574935488984,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "defeature_extrusion_face0_inset2_5_rounded_unstitched",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Defeature/extrusion.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 2.5,
+     "member_approx_tol": 0.0001,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true,
+     "skip_stitch_merge": true
+    }
+   }
+  },
+  {
+   "name": "extrude_holes1_face0_outset24_7_rounded_unstitched",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Boolean/extrudeHoles1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.0059574935488984,
+    "config": {
+     "member_distance": 24.7,
+     "member_approx_tol": 0.0059574935488984,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true,
+     "skip_stitch_merge": true
+    }
+   }
+  }
+ ]
+}

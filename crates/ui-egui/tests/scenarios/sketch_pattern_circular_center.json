@@ -6,7 +6,7 @@
   {"call":"engine.execute","params":{"command":"sketch.constraint.fix","params":{"entities":["axis_center"]}}},
   {"call":"ui.view","params":{"view":"top"}},
   {"note":"Keep the seed and centre exposed beside the left pattern dialog in the full-bleed shell."},
-  {"call":"ui.camera","params":{"target":[-20,0,0],"distance":180}},
+  {"call":"ui.camera","params":{"target":[18,0,0],"distance":180}},
   {"start":"sketch.pattern.circular"},
   {"click":{"sketch":[42,0]}},
   {"click":{"handle":"dialog:Center"}},

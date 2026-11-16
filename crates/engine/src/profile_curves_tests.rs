@@ -2,6 +2,7 @@
 //! sketch, where a pick by point can land in another region.
 
 use serde_json::{Value, json};
+use solidcraft_geom::MeshGeom;
 
 use crate::Session;
 use solidcraft_doc::{FeatureKind, ProfileSel};

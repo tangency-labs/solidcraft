@@ -214,11 +214,14 @@ pub(in crate::render_workspace) fn dialog(app: &mut SolveApp, ctx: &egui::Contex
         title: &title,
         name: &draft.name,
         subtitle: &subtitle,
+        replaces_label: solidcraft_ui_text::tr("render.stage_panels.replaces"),
         replaces: &replaces,
+        kept_label: solidcraft_ui_text::tr("render.stage_panels.kept"),
         kept: &kept,
         acknowledgement: &acknowledgement,
+        acknowledge_handle: "render:review:acknowledge",
         apply: &apply_label,
-        copy: draft.variant == "physical",
+        secondary: (draft.variant == "physical").then(|| solidcraft_ui_text::tr("render.physical_copy_plan")),
         notice: (draft.variant == "physical").then_some(physical_notice.as_str()),
     };
     let can_apply = current && (!needs_indirect || draft.enable_indirect);

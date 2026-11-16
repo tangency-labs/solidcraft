@@ -1,0 +1,256 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "intersect"
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b16"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b18"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b18",
+        "b19"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "op": "intersect"
+      }
+    }
+  ],
+  "case": "793-coil-split-by-a-plane-across-its-axis",
+  "expected": {
+    "bbox": {
+      "max": [
+        21,
+        21,
+        25
+      ],
+      "min": [
+        -21,
+        -21,
+        -1
+      ]
+    },
+    "body_count": 2,
+    "method": "the wire is a circle of radius 1 turned by a screw motion about Z (section in a plane through the axis): V = pi r^2 * 2 pi R * N = pi * 2 pi 20 * 6 = 2368.7. Splitting does not change the total, the plane cuts the helix obliquely and each half stays one connected spiral: two bodies whose volumes add up to the coil.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#793"
+    ],
+    "volume_mm3": 2368.705056261446,
+    "what": "a 6-turn coil (centre diameter 40, wire 2 mm, pitch 4) split by the plane z = 12.5 square to its axis (\"boolean Intersect: no result\")"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 6,
+      "faces": 6,
+      "vertices": 4
+    }
+  },
+  "records": "793-coil-split-by-a-plane-across-its-axis.bodies.json.gz",
+  "result": [
+    {
+      "body": "Spring",
+      "made": "b11"
+    },
+    {
+      "body": "Spring (1)",
+      "made": "b20"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4942.293756267092,
+      "body_count": 2,
+      "edges": 6,
+      "faces": 6,
+      "vertices": 4,
+      "volume_mm3": 2368.705056373321
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#793"
+  ],
+  "traced_ops": [
+    "screw_sweep",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a 6-turn coil (centre diameter 40, wire 2 mm, pitch 4) split by the plane z = 12.5 square to its axis (\"boolean Intersect: no result\")",
+  "why_not": []
+}

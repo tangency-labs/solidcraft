@@ -1,0 +1,7 @@
+{
+  "unit": "nurbs.b_spline_curve_p1",
+  "cases": [
+    {"name": "fuzz01503_canonical_one_multiplicity_per_knot", "origin": "fuzz-out/n2000/nurbs.b_spline_curve_p1/fuzz01503.json (crash: rust: killed by signal 6 (memory allocation of 4294967296 bytes failed))", "cpp": "harness: canonical: one multiplicity per knot", "rust": "ok", "inputs": {"cps": [[5, -1, -1]], "deg": 3, "dim": 3, "form": 6, "knots": [0.5, 1], "kt": 1, "mults": [4294967296], "op": "canonical"}},
+    {"name": "fuzz01870_bad_index_count_2147483648", "origin": "fuzz-out/n2000/nurbs.b_spline_curve_p1/fuzz01870.json (crash: rust: killed by signal 6 (memory allocation of 4294967296 bytes failed))", "cpp": "harness: invalid argument: bad index/count 2147483648", "rust": "ok", "inputs": {"cps": [[7.44, -6.73, 6.86]], "deg": 5, "dim": 3, "form": 5, "knots": [0.808, 1.89], "kt": 3, "mults": [2147483648, 6], "op": "canonical"}}
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "unit": "nurbs.nurbs_srf",
+  "cases": [
+    {"name": "fuzz00748_ffi_rejected_bad_index_count_9223372036854776000", "origin": "fuzz-out/n2000/nurbs.nurbs_srf/fuzz00748.json (panic: rust: capacity overflow)", "cpp": "harness: ffi rejected: bad index/count 9223372036854776000", "rust": "harness: allocate: nurbs::nurbs_srf::allocate_nurb_surface: invalid input: index too large", "inputs": {"dims": [8, 5, 0, 8, 9223372036854775807, 4], "op": "allocate"}}
+  ]
+}

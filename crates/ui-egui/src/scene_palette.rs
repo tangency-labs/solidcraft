@@ -1,6 +1,6 @@
 //! Stable palette slots for the model scene.
 //!
-//! Cached block bytes index a scene palette (`solidcraft_gpu::view::Palette`). A body's faces,
+//! Cached block bytes index a scene palette (`solidcraft_viewport_gpu::view::Palette`). A body's faces,
 //! edges and placement keep their slots while the scene rebuilds, so an appearance or theme edit
 //! changes only palette entries — never a block's vertex bytes. Slots are append-only for the
 //! session and are reset when a different design replaces the one they belonged to.
@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 
-use crate::gpu::{MAX_PALETTE, PaletteIndex};
+use crate::gpu::{MAX_PALETTE, Material, PaletteIndex};
 
 /// The stable slots of one body: its own colour, its face range, its edges and its instances.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,6 +40,8 @@ impl BodySlots {
 pub(crate) struct PaletteArena {
     entries: Vec<[u8; 4]>,
     bodies: HashMap<String, BodySlots>,
+    /// PBR finishes by slot (none past its end): the model and highlight scenes both draw them.
+    materials: Vec<Material>,
     /// Bumped when the arena is reset (a different design); cached blocks must rebuild then.
     generation: u64,
 }
@@ -127,6 +129,26 @@ impl PaletteArena {
         }
     }
 
+    /// Set a slot's PBR finish (`Material::default()`: none). The list grows only for a real
+    /// finish, so a design without one keeps it empty.
+    pub fn set_material(&mut self, slot: PaletteIndex, m: Material) {
+        let at = slot.0 as usize;
+        if at >= self.materials.len() {
+            if !m.pbr || at >= self.entries.len() {
+                return;
+            }
+            self.materials.resize(at + 1, Material::default());
+        }
+        if let Some(entry) = self.materials.get_mut(at) {
+            *entry = m;
+        }
+    }
+
+    /// The PBR finishes by slot, for the scene's palette.
+    pub fn materials(&self) -> Vec<Material> {
+        self.materials.clone()
+    }
+
     /// Drop every body when the scene belongs to a different design (no body name survives).
     /// A design that removed every body and then adds one keeps its slots (the empty set does
     /// not reset the arena).
@@ -140,6 +162,7 @@ impl PaletteArena {
         }
         if !names.any(|n| self.bodies.contains_key(n)) {
             self.entries.clear();
+            self.materials.clear();
             self.bodies.clear();
             self.generation = self.generation.wrapping_add(1);
         }
@@ -164,11 +187,19 @@ mod tests {
         let grown = arena.body("A", 4);
         assert_eq!(grown.faces, first.faces);
         assert_ne!(grown.face(3), grown.body);
+        // A plain slot leaves the finishes empty; a real one grows them to its slot, no further.
+        arena.set_material(grown.face(3), Material::default());
+        assert!(arena.materials().is_empty());
+        let brass = Material { metallic: 1.0, roughness: 0.3, pbr: true, ..Default::default() };
+        arena.set_material(grown.face(3), brass);
+        arena.set_material(PaletteIndex(u32::MAX), brass);
+        assert_eq!(arena.materials().len(), grown.face(3).0 as usize + 1);
+        assert_eq!(arena.materials().last(), Some(&brass));
         // A new design with no shared names resets the slots.
         let generation = arena.generation();
         arena.sync(["B"]);
         assert_eq!(arena.generation(), generation.wrapping_add(1));
-        assert!(arena.entries().is_empty());
+        assert!(arena.entries().is_empty() && arena.materials().is_empty());
         // An empty scene does not reset.
         let before = arena.generation();
         arena.sync([]);

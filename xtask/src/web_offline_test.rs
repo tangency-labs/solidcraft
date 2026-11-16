@@ -102,6 +102,7 @@ pub fn run_api(site: &str) -> Result<(), String> {
     // Use the app's normal backend selection, including WebGPU where available.
     cdp.call("Page.navigate", json!({"url": format!("http://127.0.0.1:{}{PREFIX}", server.port)}))?;
     wait_for(&mut cdp, "!!window.solidcraft && !document.getElementById('solidcraft_loading')", "the browser API is ready", |v| v == true)?;
+    println!("web-api-test: mouse buttons: {}", mouse_test(&mut cdp)?);
     let result = cdp.eval(API_TEST)?;
     let path = downloads.join("Untitled-view.dxf");
     let started = Instant::now();
@@ -121,6 +122,88 @@ pub fn run_api(site: &str) -> Result<(), String> {
     let keys = cdp.eval(KEYS_TEST)?;
     println!("web-api-test: {keys}");
     Ok(())
+}
+
+/// The app's mouse buttons follow the browser's: a chord leaves none held (a second button
+/// pressed while one is held fires `pointermove`, not `pointerdown`), and so do a drag let go
+/// outside the window, a release the page never heard of and the window losing focus. The focus
+/// moving inside the page lets go of none (#16209).
+fn mouse_test(cdp: &mut Cdp) -> Result<String, String> {
+    // The model viewport, not the start page, under the pointer.
+    let ui = cdp.eval("window.solidcraft.request('ui.home', {open: false}).then(() => window.solidcraft.request('ui.inspect'))")?;
+    let at = |i: usize| ui["viewport"][i].as_f64().ok_or("web-api-test: no model viewport");
+    let (x, y) = (at(0)? + at(2)? / 2.0, at(1)? + at(3)? / 2.0);
+    let mouse = |cdp: &mut Cdp, kind: &str, (x, y): (f64, f64), button: &str, buttons: u32| {
+        let clicks = if kind == "mouseMoved" { 0 } else { 1 };
+        cdp.call("Input.dispatchMouseEvent", json!({"type": kind, "x": x, "y": y, "button": button, "buttons": buttons, "clickCount": clicks}))
+            .map(|_| ())
+    };
+    // The buttons egui holds once two frames have run.
+    let held = |cdp: &mut Cdp| -> Result<u64, String> {
+        let v = cdp.eval("(async () => { await window.solidcraft.request('ui.inspect'); await window.solidcraft.request('ui.inspect'); return window.solidcraft.buttons(); })()")?;
+        v.as_u64().ok_or_else(|| format!("web-api-test: buttons() gave {v}"))
+    };
+    let expect = |cdp: &mut Cdp, want: u64, what: &str| -> Result<(), String> {
+        let got = held(cdp)?;
+        if got == want { Ok(()) } else { Err(format!("web-api-test: {what}: the app holds buttons {got:#b}, the browser {want:#b}")) }
+    };
+    let c = (x, y);
+    mouse(cdp, "mouseMoved", c, "none", 0)?;
+    // Right, then left; right let go, then left.
+    mouse(cdp, "mousePressed", c, "right", 2)?;
+    mouse(cdp, "mousePressed", c, "left", 3)?;
+    expect(cdp, 3, "a chord's second button")?;
+    mouse(cdp, "mouseReleased", c, "right", 1)?;
+    expect(cdp, 1, "one of a chord's buttons let go")?;
+    mouse(cdp, "mouseReleased", c, "left", 0)?;
+    expect(cdp, 0, "right then left, let go in the same order")?;
+    // Left, then right; let go in reverse order.
+    mouse(cdp, "mousePressed", c, "left", 1)?;
+    mouse(cdp, "mousePressed", c, "right", 3)?;
+    mouse(cdp, "mouseReleased", c, "right", 1)?;
+    mouse(cdp, "mouseReleased", c, "left", 0)?;
+    expect(cdp, 0, "left then right, let go in reverse order")?;
+    // A right drag let go outside the window: the canvas has the pointer, so the release arrives.
+    mouse(cdp, "mousePressed", c, "right", 2)?;
+    mouse(cdp, "mouseMoved", (x + 40.0, y + 20.0), "right", 2)?;
+    mouse(cdp, "mouseMoved", (-30.0, -30.0), "right", 2)?;
+    expect(cdp, 2, "a drag outside the window")?;
+    mouse(cdp, "mouseReleased", (-30.0, -30.0), "right", 0)?;
+    expect(cdp, 0, "a drag let go outside the window")?;
+    // A release the page never heard of: the next move has no buttons held.
+    mouse(cdp, "mouseMoved", c, "none", 0)?;
+    mouse(cdp, "mousePressed", c, "right", 2)?;
+    mouse(cdp, "mouseMoved", (x + 10.0, y), "none", 0)?;
+    expect(cdp, 0, "a move with no buttons after a lost release")?;
+    mouse(cdp, "mouseReleased", (x + 10.0, y), "right", 0)?;
+    // The focus moves inside the page with a button held, as when a value box takes the keyboard
+    // while its manipulator is dragged (#16209): eframe gives it to its hidden text input, the
+    // canvas's next sibling, and back to the canvas, and the window hears each blur too.
+    let focus = |cdp: &mut Cdp, to: &str| -> Result<(), String> {
+        let js = format!(
+            "(() => {{ const c = document.getElementById('solidcraft_canvas'), t = c && c.nextElementSibling; if (!t || t.tagName !== 'INPUT') return 'no hidden text input after the canvas'; const e = {to}; e.focus(); return document.activeElement === e ? 'ok' : 'the focus did not move to ' + e.tagName; }})()"
+        );
+        match cdp.eval(&js)? {
+            Value::String(s) if s == "ok" => Ok(()),
+            v => Err(format!("web-api-test: {v}")),
+        }
+    };
+    focus(cdp, "c")?;
+    mouse(cdp, "mousePressed", c, "middle", 4)?;
+    focus(cdp, "t")?;
+    expect(cdp, 4, "the focus moved to the hidden text input")?;
+    focus(cdp, "c")?;
+    expect(cdp, 4, "the focus came back to the canvas")?;
+    mouse(cdp, "mouseReleased", c, "middle", 0)?;
+    expect(cdp, 0, "let go after the focus moved inside the page")?;
+    // The window loses focus with a button held.
+    mouse(cdp, "mousePressed", c, "middle", 4)?;
+    cdp.eval("window.dispatchEvent(new Event('blur'))")?;
+    expect(cdp, 0, "the window lost focus")?;
+    mouse(cdp, "mouseReleased", c, "middle", 0)?;
+    cdp.call("Input.dispatchKeyEvent", json!({"type": "keyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}))?;
+    cdp.call("Input.dispatchKeyEvent", json!({"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}))?;
+    Ok("chords, a drag let go outside, a lost release and blur leave none held; focus moving inside the page lets go of none".into())
 }
 
 /// The browser's own tab switching keys reach it while the app has the keyboard (#5227): their
@@ -259,6 +342,12 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
                 // than `index.html`; copies of one build don't. A file of its own per copy lets
                 // a step hold back what one build has and the next lacks (step 13).
                 std::fs::write(to.join(format!("own-{build}.txt")), format!("{build}\n")).map_err(|e| format!("{}: {e}", to.display()))?;
+                // And a file of one name with each build's own content, as the stand-in has
+                // (`shared.js`): the update-in-another-tab step asks for it to tell which build's
+                // copy answered. A real build has no such file, and the network's 404 would fail
+                // the step whatever the worker does.
+                std::fs::write(to.join("shared.js"), format!("document.documentElement.dataset.shared = \"{build}\";\n"))
+                    .map_err(|e| format!("{}: {e}", to.display()))?;
                 let index = to.join("index.html");
                 let html = std::fs::read_to_string(&index).map_err(|e| format!("{}: {e}", index.display()))?;
                 std::fs::write(&index, mark(&html, build)?).map_err(|e| format!("{}: {e}", index.display()))?;
@@ -301,6 +390,9 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     }
     let state_js = STATE_JS.replace("STARTED", started).replace("BUILD_FILES", &json!(files.into_iter().collect::<Vec<_>>()).to_string());
     let count = std::cell::Cell::new(0);
+    // Run once, just before the next launch's page navigation is issued (see the update in another
+    // tab below).
+    let on_navigate: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);
     let launch_at = |cdp: &mut Cdp, at: &str, build: &str| -> Result<Duration, String> {
         let n = count.get() + 1;
         count.set(n);
@@ -310,6 +402,9 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
         // One retry: on a heavily loaded machine a launch can stall past the timeout. Loading the
         // same page again must still start the same build.
         for attempt in 1..=2 {
+            if let Some(f) = on_navigate.borrow_mut().take() {
+                f();
+            }
             let r = cdp.call("Page.navigate", json!({ "url": format!("http://127.0.0.1:{}{at}?launch={n}", server.port) }))?;
             if let Some(e) = r["errorText"].as_str().filter(|e| !e.is_empty()) {
                 return Err(format!("launch {n} (build {build}): the page didn't load: {e}"));
@@ -416,11 +511,22 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     other.eval(age)?;
     cdp.call("Page.navigate", json!({ "url": "about:blank" }))?;
     // The other tab updates once the launch is waiting for build.json, and leaves.
+    // Only a check made after this launch's navigation begins counts: another tab's check, late on a
+    // loaded machine, must not start the update before the launch has loaded its files (the new
+    // worker would then serve the new build's files to the old build's page).
     let waiting = server.checks.clone();
-    let before = waiting.load(Ordering::SeqCst);
+    let before = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(usize::MAX));
+    *on_navigate.borrow_mut() = Some(Box::new({
+        let (before, waiting) = (before.clone(), waiting.clone());
+        move || before.store(waiting.load(Ordering::SeqCst), Ordering::SeqCst)
+    }));
     let updater = std::thread::spawn(move || -> Result<Cdp, String> {
         let t = Instant::now();
-        while waiting.load(Ordering::SeqCst) <= before {
+        loop {
+            let b = before.load(Ordering::SeqCst);
+            if b != usize::MAX && waiting.load(Ordering::SeqCst) > b {
+                break;
+            }
             if t.elapsed() > LAUNCH_TIMEOUT {
                 return Err("the launch never asked for build.json".into());
             }
@@ -440,8 +546,36 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     wait_for(&mut cdp, &state_js, "v4's worker keeps v4, v3's copy retired", |s| {
         s["kept"].as_object().is_some_and(|k| k.len() == 1 && k.contains_key(&name4))
             && s["retired"].as_array().is_some_and(|r| r.contains(&json!(name3)))
+            && s["settled"] == true
     })?;
     step("update in another tab: the kept v3 still starts; its copy is retired, not deleted", t);
+    // The page still open is v3's: a file it asks for now comes from v3's copy, not from v4 which the
+    // worker has taken over with (nor from the network, which serves v4).
+    let shared = cdp.eval("fetch('shared.js?later', { cache: 'no-store' }).then((r) => r.text())")?;
+    if !shared.as_str().is_some_and(|text| text.contains("\"v3\"")) {
+        let records = cdp
+            .eval(
+                "caches.keys().then(async (ks) => { const out = {}; for (const k of ks) if (k.startsWith('solidcraft-app-pages ')) { const c = await caches.open(k); for (const r of await c.keys()) out[r.url] = await (await c.match(r)).text(); } return out; })",
+            )
+            .unwrap_or_default();
+        // Whether the request went through the worker at all (workerStart is 0 when it did not).
+        let how = cdp
+            .eval(
+                "(async () => { const e = performance.getEntriesByType('resource').filter((r) => r.name.includes('shared.js?later')).pop(); const reg = await navigator.serviceWorker.getRegistration(); return { workerStart: e ? e.workerStart : null, controller: navigator.serviceWorker.controller ? navigator.serviceWorker.controller.state : null, active: reg && reg.active ? reg.active.state : null, installing: Boolean(reg && reg.installing), waiting: Boolean(reg && reg.waiting) }; })()",
+            )
+            .unwrap_or_default();
+        return Err(format!("the open v3 page was given another build's file after the update: {shared}; page records: {records}; request: {how}"));
+    }
+    // A page whose record is lost never gets the worker's build instead: its request fails visibly.
+    let lost = cdp.eval(
+        "caches.keys().then(async (ks) => {
+          for (const k of ks) if (k.startsWith('solidcraft-app-pages ')) { const c = await caches.open(k); for (const r of await c.keys()) await c.delete(r); }
+          return (await fetch('shared.js?lost', { cache: 'no-store' })).status;
+        })",
+    )?;
+    if lost != json!(503) {
+        return Err(format!("a page with no remembered build was answered with status {lost}, not the visible failure (503)"));
+    }
     other.call("Page.close", json!({}))?;
 
     server.set(Mode::Serve(v4));
@@ -538,7 +672,10 @@ const STATE_JS: &str = "(async () => {
     scriptStartedBuild: document.documentElement.dataset.started ?? null,
     scriptSharedBuild: document.documentElement.dataset.shared ?? null,
     started: STARTED, controlled: !!navigator.serviceWorker.controller, caches: caches_, kept, retired, complete, filling,
-    registered: (await navigator.serviceWorker.getRegistrations()).filter((r) => r.scope === scope).length };
+    registered: (await navigator.serviceWorker.getRegistrations()).filter((r) => r.scope === scope).length,
+    // The newest worker is active and controls this page (not still taking over from an older one).
+    settled: await navigator.serviceWorker.getRegistration(scope).then((r) => Boolean(r && r.active && r.active.state === 'activated'
+      && !r.installing && !r.waiting && navigator.serviceWorker.controller && navigator.serviceWorker.controller.state === 'activated')) };
 })()";
 
 /// Every file this build downloads, including names shared with the next build.

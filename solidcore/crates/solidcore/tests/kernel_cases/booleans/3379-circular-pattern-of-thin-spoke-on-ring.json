@@ -1,0 +1,293 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b33": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b37": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b41": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b45": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b49": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b33"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b34"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b34"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b35"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b35"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b36"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b37"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b38"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b38"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b39"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b39"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b40"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b41"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b42"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b42"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b43"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b43"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b44"
+      ],
+      "params": {
+        "operand": 2
+      }
+    },
+    {
+      "inputs": [
+        "b45"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b46"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b46"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b47"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b47"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b48"
+      ],
+      "params": {
+        "operand": 3
+      }
+    },
+    {
+      "inputs": [
+        "b49"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b50"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b50"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b51"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b51"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b52"
+      ],
+      "params": {
+        "operand": 4
+      }
+    },
+    {
+      "inputs": [
+        "b36",
+        "b40",
+        "b44",
+        "b48",
+        "b52"
+      ],
+      "op": "union_all",
+      "outputs": [
+        "b53"
+      ],
+      "params": {}
+    }
+  ],
+  "case": "3379-circular-pattern-of-thin-spoke-on-ring",
+  "expected": {
+    "body_count": 1,
+    "method": "ring pi*(66^2-63^2)*3 + hub pi*12^2*3 + 5 spokes. A spoke is the box 53x2x2.5 (x 11..64, z +-1.25, y 0.5..2.5; the issue starts it at x=12, tangent to the hub, which joins the hub by a line only, so it starts at 11 here to overlap it). It overlaps the ring by 5.021 and the hub by 4.891 (width * Int over z in -1.25..1.25 of 64 - sqrt(63^2-z^2) and of sqrt(12^2-z^2) - 11). V = ring + hub + 5*(265 - overlaps), one body",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3379"
+    ],
+    "volume_mm3": 6279.997172312351,
+    "what": "a circular pattern (count 5) of a spoke thinner than the ring it joins (faces 0.5 mm inside the rim and hub faces)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 75,
+      "faces": 27,
+      "vertices": 50
+    }
+  },
+  "records": "3379-circular-pattern-of-thin-spoke-on-ring.bodies.json.gz",
+  "result": [
+    {
+      "body": "rim",
+      "made": "b53"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 8240.60938174116,
+      "body_count": 1,
+      "edges": 75,
+      "faces": 27,
+      "vertices": 50,
+      "volume_mm3": 6279.997172671102
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3379"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "union_all"
+  ],
+  "ungraded": [],
+  "what": "a circular pattern (count 5) of a spoke thinner than the ring it joins (faces 0.5 mm inside the rim and hub faces)",
+  "why_not": []
+}

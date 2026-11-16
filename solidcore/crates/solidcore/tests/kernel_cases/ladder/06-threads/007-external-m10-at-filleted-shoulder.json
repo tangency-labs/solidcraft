@@ -1,0 +1,201 @@
+{
+  "area": "ladder/06-threads",
+  "bodies": {
+    "b18": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b32": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b33"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b33"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b34"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b32"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b35"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b35"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b36"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b34"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b37"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b36"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b38"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b37",
+        "b38"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b39"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "007-external-m10-at-filleted-shoulder",
+  "expected": {
+    "bbox": {
+      "max": [
+        8,
+        8,
+        35
+      ],
+      "min": [
+        -8,
+        -8,
+        0
+      ]
+    },
+    "body_count": 1,
+    "center_of_mass": [
+      0,
+      0,
+      12.813982957360412
+    ],
+    "method": "the fillet's ring: the corner square [5,6]x[10,11] less the quarter disc about (6,11), V_f = 2 pi (5.5 - pi/4 (6 - 4/(3 pi))), its centroid z from the same moments; the cylinder face starts at z=11, where the fillet meets it. the shaft's lower end (z=11) is a shoulder (the fillet and the collar lies past it, in the groove's way), so the groove stops there with its widest part clear of it: its centre w = (P/4 + 2 (d/2 + 0.05P - r_root) tan30)/2 = 0.699551 mm above the shoulder (its half width at the tool's outer edge, 0.05 P past the crest), and the square stop inside material removes exactly as if the groove ended at its centre (see 003); the top end is free, the groove runs out into the air. V = pi 8^2 10 + V_f + pi 5^2 (1 + w) + 2 pi int_{11+w}^35 int r m(r) dr dz. Tolerance 0.05%: SMLib's exact screw sweep",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 0.0005
+    },
+    "volume_mm3": 3668.971737351,
+    "what": "a modelled M10 thread on a d10 shaft whose root at the d16 shoulder has an r1 fillet: it stops clear of the fillet"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 2018.7759940693177,
+      "body_count": 1,
+      "edges": 203,
+      "faces": 71,
+      "vertices": 135,
+      "volume_mm3": 3668.971297386959
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 280,
+      "faces": 117,
+      "vertices": 166
+    }
+  },
+  "records": "007-external-m10-at-filleted-shoulder.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b39"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2018.7759940693177,
+      "body_count": 1,
+      "edges": 203,
+      "faces": 71,
+      "vertices": 135,
+      "volume_mm3": 3668.971297386959
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "screw_sweep",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a modelled M10 thread on a d10 shaft whose root at the d16 shoulder has an r1 fillet: it stops clear of the fillet",
+  "why_not": []
+}

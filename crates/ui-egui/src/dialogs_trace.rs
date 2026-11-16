@@ -12,8 +12,8 @@ use solidcraft_engine::{Sel, Session};
 use super::{Hover, body_of, capital, movable, num, pt, sel_items, snap_of};
 use crate::dialogs::{combo, form_row};
 use crate::selection::SelInput;
-use crate::theme::Tokens;
 use crate::viewport::Proj;
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Debug)]
 pub struct TraceForm {
@@ -112,6 +112,15 @@ pub fn params(s: &Session, f: &TraceForm, inputs: &[SelInput]) -> Result<Value, 
     Ok(p)
 }
 
+/// The preview's `motion.trace` parameters: OK's, less `point_ref`, which only
+/// `motion.trace.keep` reads.
+pub(crate) fn preview_params(mut p: Value) -> Value {
+    if let Some(o) = p.as_object_mut() {
+        o.remove("point_ref");
+    }
+    p
+}
+
 /// The picked point as `motion.trace` and `motion.plot` take it: `{occurrence, point}`.
 pub fn picked_point(s: &Session, inputs: &[SelInput]) -> Result<Value, String> {
     let (path, at, shown, placed) = placement(s, inputs).ok_or("select a point on a component")?;
@@ -183,7 +192,7 @@ pub fn rows(app: &mut crate::SolveApp, ui: &mut egui::Ui, f: &mut TraceForm, inp
     let p = params(s, f, inputs);
     let key = format!("{}:{p:?}", s.revision);
     if f.shown.as_ref().is_none_or(|(k, _)| *k != key) {
-        let r = p.and_then(|p| s.scratch().execute("motion.trace", &p).map_err(|e| e.to_string()));
+        let r = p.and_then(|p| s.scratch().execute("motion.trace", &preview_params(p)).map_err(|e| e.to_string()));
         f.shown = Some((key, r));
         f.view = placement(s, inputs).and_then(|(_, _, shown, placed)| Some((shown, mat_inverse(&placed)?)));
     }

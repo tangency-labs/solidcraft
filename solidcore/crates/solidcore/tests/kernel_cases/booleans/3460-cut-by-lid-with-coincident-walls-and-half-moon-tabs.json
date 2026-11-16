@@ -1,0 +1,283 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b44": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b47": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b53": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b54": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b44"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b45"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b45"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b46"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b47"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b48"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b48"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b49"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b46"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b50"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b49"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b51"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b50",
+        "b51"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b52"
+      ],
+      "params": {
+        "op": "union"
+      }
+    },
+    {
+      "inputs": [
+        "b54"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b55"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b55"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b56"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b53"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b57"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b57"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b58"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b56"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b59"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b58"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b60"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b59",
+        "b60"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b61"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "3460-cut-by-lid-with-coincident-walls-and-half-moon-tabs",
+  "expected": {
+    "body_count": 2,
+    "method": "enclosure 40x30x20 minus cavity 36x26x18 = 7152; lid insert 36x26x8 flush with the cavity walls and top, plus four vertical cylinders r=2.5, 6 tall, centred 2 mm inside each wall so each pokes 0.5 mm into the wall: overlap per tab is a circular segment (chord 3, sagitta 0.5) of area 2.5^2*acos(0.8) - 2*1.5 = 1.0219, times 6. The cut moves 4*6*1.0219 = 24.5 mm3 from the enclosure into nothing and the lid is kept, so the two bodies together hold 7152 + 36*26*8 + 24.5 - 24.5 = 14640 (an unchanged target would total 14664.5). Graded with rel 5e-4 so a no-op cut is caught; body_count 2",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3460"
+    ],
+    "tolerance": {
+      "rel": 0.0005
+    },
+    "volume_mm3": 14640.0,
+    "what": "Combine cut (keep tools) of an enclosure by its lid whose insert is flush with the inner walls and carries four small half-moon tabs that cross them; the cut must not return the target unchanged"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 90,
+      "faces": 43,
+      "vertices": 60
+    }
+  },
+  "records": "3460-cut-by-lid-with-coincident-walls-and-half-moon-tabs.bodies.json.gz",
+  "result": [
+    {
+      "body": "Enc",
+      "made": "b61"
+    },
+    {
+      "body": "Lid",
+      "made": "b52"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 10322.790376987665,
+      "body_count": 2,
+      "edges": 84,
+      "faces": 41,
+      "vertices": 56,
+      "volume_mm3": 14640.000000000271
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3460"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "Combine cut (keep tools) of an enclosure by its lid whose insert is flush with the inner walls and carries four small half-moon tabs that cross them; the cut must not return the target unchanged",
+  "why_not": []
+}

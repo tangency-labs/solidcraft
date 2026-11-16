@@ -1,0 +1,38 @@
+{
+  "area": "assemblies",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-joint-two-origins-on-one-part-refused",
+  "expected": {
+    "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); a joint needs two different occurrences: both origins on Arm is refused",
+    "outcome": "refused",
+    "refusal": "two different occurrences",
+    "source": "analytic",
+    "sources": [],
+    "what": "a joint whose two origins are on the same occurrence"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 8 (joint.create): invalid parameters for `joint.create`: a joint needs two different occurrences: both origins are on one component; give each part a component of its own first (component.from_bodies)",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 8 (joint.create): invalid parameters for `joint.create`: a joint needs two different occurrences: both origins are on one component; give each part a component of its own first (component.from_bodies)",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "a joint whose two origins are on the same occurrence",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 8 (joint.create): invalid parameters for `joint.create`: a joint needs two different occurrences: both origins are on one component; give each part a component of its own first (component.from_bodies)"
+  ]
+}

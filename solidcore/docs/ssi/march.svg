@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="600" viewBox="0 0 1000 600">
+  <title>march</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M0 0 L1000 0 L1000 600 L0 600 Z" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 40 50)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">Start points and the march</tspan></text>
+    <path d="M60 430 L460 430 L600 300 L200 300 Z" fill="#f2f2f2" stroke="#999999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M116 378 C230 330 400 420 544 352 L544 162 C400 230 230 140 116 188 Z" fill="#e6e6e6" stroke="#999999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M152 388 L248 388 L248 432 L152 432 Z" fill="none" stroke="#999999" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 4"/>
+    <path d="M160 394 L240 394 L240 426 L160 426 Z" fill="none" stroke="#999999" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 4"/>
+    <path d="M116 378 C230 330 400 420 544 352" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M165 410 C165 404.477 180.67 400 200 400 C219.33 400 235 404.477 235 410 C235 415.523 219.33 420 200 420 C180.67 420 165 415.523 165 410 Z" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <g>
+      <g>
+        <path d="M340.25 375 L340.25 369 C340.25 368.586 340.586 368.25 341 368.25 C341.414 368.25 341.75 368.586 341.75 369 L341.75 375 C341.75 375.414 341.414 375.75 341 375.75 C340.586 375.75 340.25 375.414 340.25 375 M340.25 365 L340.25 359 C340.25 358.586 340.586 358.25 341 358.25 C341.414 358.25 341.75 358.586 341.75 359 L341.75 365 C341.75 365.414 341.414 365.75 341 365.75 C340.586 365.75 340.25 365.414 340.25 365 M340.25 355 L340.25 349 C340.25 348.586 340.586 348.25 341 348.25 C341.414 348.25 341.75 348.586 341.75 349 L341.75 355 C341.75 355.414 341.414 355.75 341 355.75 C340.586 355.75 340.25 355.414 340.25 355 M340.25 345 L340.25 339 C340.25 338.586 340.586 338.25 341 338.25 C341.414 338.25 341.75 338.586 341.75 339 L341.75 345 C341.75 345.414 341.414 345.75 341 345.75 C340.586 345.75 340.25 345.414 340.25 345 M340.25 335 L340.25 329 C340.25 328.586 340.586 328.25 341 328.25 C341.414 328.25 341.75 328.586 341.75 329 L341.75 335 C341.75 335.414 341.414 335.75 341 335.75 C340.586 335.75 340.25 335.414 340.25 335 M340.25 325 L340.25 319 C340.25 318.586 340.586 318.25 341 318.25 C341.414 318.25 341.75 318.586 341.75 319 L341.75 325 C341.75 325.414 341.414 325.75 341 325.75 C340.586 325.75 340.25 325.414 340.25 325 M340.25 315 L340.25 310 C340.25 309.586 340.586 309.25 341 309.25 C341.414 309.25 341.75 309.586 341.75 310 L341.75 315 C341.75 315.414 341.414 315.75 341 315.75 C340.586 315.75 340.25 315.414 340.25 315" fill="#999999"/>
+        <path d="M341 307.9 L344 313.9 L341 312.1 L338 313.9 Z" fill="#999999"/>
+      </g>
+    </g>
+    <text transform="matrix(1 0 0 1 347 322)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">n1</tspan></text>
+    <g>
+      <g>
+        <path d="M341.733 375.158 L340.47 381.023 C340.383 381.428 339.984 381.686 339.579 381.599 C339.174 381.511 338.916 381.113 339.003 380.708 L340.267 374.842 C340.354 374.437 340.753 374.18 341.158 374.267 C341.563 374.354 341.82 374.753 341.733 375.158 M339.628 384.934 L338.364 390.799 C338.277 391.204 337.878 391.462 337.473 391.374 C337.068 391.287 336.811 390.888 336.898 390.483 L338.161 384.618 C338.248 384.213 338.647 383.955 339.052 384.043 C339.457 384.13 339.715 384.529 339.628 384.934 M337.522 394.71 L336.259 400.575 C336.172 400.98 335.773 401.238 335.368 401.15 C334.963 401.063 334.705 400.664 334.792 400.259 L336.056 394.394 C336.143 393.989 336.542 393.731 336.947 393.818 C337.352 393.906 337.609 394.305 337.522 394.71 M335.417 404.485 L334.153 410.351 C334.066 410.756 333.667 411.013 333.262 410.926 C332.857 410.839 332.6 410.44 332.687 410.035 L333.95 404.17 C334.037 403.765 334.436 403.507 334.841 403.594 C335.246 403.681 335.504 404.08 335.417 404.485 M333.311 414.261 L332.048 420.127 C331.96 420.532 331.561 420.789 331.157 420.702 C330.752 420.615 330.494 420.216 330.581 419.811 L331.845 413.945 C331.932 413.54 332.331 413.283 332.736 413.37 C333.141 413.457 333.398 413.856 333.311 414.261 M331.205 424.037 L329.942 429.902 C329.855 430.307 329.456 430.565 329.051 430.478 C328.646 430.391 328.388 429.992 328.476 429.587 L329.739 423.721 C329.826 423.316 330.225 423.059 330.63 423.146 C331.035 423.233 331.293 423.632 331.205 424.037 M329.1 433.813 L327.836 439.678 C327.749 440.083 327.35 440.341 326.945 440.254 C326.54 440.166 326.283 439.767 326.37 439.362 L327.633 433.497 C327.721 433.092 328.12 432.835 328.525 432.922 C328.929 433.009 329.187 433.408 329.1 433.813" fill="#999999"/>
+        <path d="M326.558 442.053 L324.888 435.556 L327.442 437.947 L330.754 436.819 Z" fill="#999999"/>
+      </g>
+    </g>
+    <text transform="matrix(1 0 0 1 306 452)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">n2</tspan></text>
+    <g>
+      <g>
+        <path d="M341.247 374.031 L439.247 399.031 C439.782 399.168 440.105 399.712 439.969 400.247 C439.832 400.782 439.288 401.105 438.753 400.969 L340.753 375.969 C340.218 375.832 339.895 375.288 340.031 374.753 C340.168 374.218 340.712 373.895 341.247 374.031" fill="#000000"/>
+        <path d="M441.713 400.692 L432.973 402.591 L436.287 399.308 L434.95 394.839 Z" fill="#000000"/>
+      </g>
+    </g>
+    <path d="M442 401 L441.5 383" fill="none" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="2 3"/>
+    <path d="M336 375 C336 372.239 338.239 370 341 370 C343.761 370 346 372.239 346 375 C346 377.761 343.761 380 341 380 C338.239 380 336 377.761 336 375 Z" fill="#ffffff" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M436.5 377.5 C436.5 374.739 438.739 372.5 441.5 372.5 C444.261 372.5 446.5 374.739 446.5 377.5 C446.5 380.261 444.261 382.5 441.5 382.5 C438.739 382.5 436.5 380.261 436.5 377.5 Z" fill="#ffffff" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M248 365.6 C248 362.839 250.239 360.6 253 360.6 C255.761 360.6 258 362.839 258 365.6 C258 368.361 255.761 370.6 253 370.6 C250.239 370.6 248 368.361 248 365.6 Z" fill="#ffffff" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M110 378 C110 374.686 112.686 372 116 372 C119.314 372 122 374.686 122 378 C122 381.314 119.314 384 116 384 C112.686 384 110 381.314 110 378 Z" fill="#555555"/>
+    <path d="M229 410 C229 406.686 231.686 404 235 404 C238.314 404 241 406.686 241 410 C241 413.314 238.314 416 235 416 C231.686 416 229 413.314 229 410 Z" fill="#555555"/>
+    <text transform="matrix(1 0 0 1 300 360)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">p_k</tspan></text>
+    <text transform="matrix(1 0 0 1 426 360)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">p_k+1</tspan></text>
+    <text transform="matrix(1 0 0 1 372 414)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">predictor</tspan></text>
+    <text transform="matrix(1 0 0 1 452 400)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">corrector</tspan></text>
+    <text transform="matrix(1 0 0 1 95 424)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">S1</tspan></text>
+    <text transform="matrix(1 0 0 1 300 215)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">S2</tspan></text>
+    <text transform="matrix(1 0 0 1 240 352)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">C</tspan></text>
+    <text transform="matrix(1 0 0 1 256 424)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">L</tspan></text>
+    <text transform="matrix(1 0 0 1 20 300)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">boundary</tspan></text>
+    <text transform="matrix(1 0 0 1 20 318)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">start point</tspan></text>
+    <path d="M80 324 L112 372" fill="none" stroke="#999999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 230 505)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">interior start point</tspan></text>
+    <path d="M270 490 L237 416" fill="none" stroke="#999999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 60 505)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">leaf pair</tspan></text>
+    <path d="M95 490 L152 433" fill="none" stroke="#999999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M660 125 L700 125" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 712 130)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">true intersection curves C and L</tspan></text>
+    <path d="M675 163 C675 160.239 677.239 158 680 158 C682.761 158 685 160.239 685 163 C685 165.761 682.761 168 680 168 C677.239 168 675 165.761 675 163 Z" fill="#ffffff" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 712 168)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">marched points: Newton roots</tspan></text>
+    <g>
+      <g>
+        <path d="M660 200 L696 200 C696.552 200 697 200.448 697 201 C697 201.552 696.552 202 696 202 L660 202 C659.448 202 659 201.552 659 201 C659 200.448 659.448 200 660 200" fill="#000000"/>
+        <path d="M698.8 201 L690.8 205 L693.2 201 L690.8 197 Z" fill="#000000"/>
+      </g>
+    </g>
+    <text transform="matrix(1 0 0 1 712 206)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">predictor: a step along n1 × n2</tspan></text>
+    <path d="M660 239 L700 239" fill="none" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="2 3"/>
+    <text transform="matrix(1 0 0 1 712 244)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">corrector: Newton back onto S1 and S2</tspan></text>
+    <path d="M674 277 C674 273.686 676.686 271 680 271 C683.314 271 686 273.686 686 277 C686 280.314 683.314 283 680 283 C676.686 283 674 280.314 674 277 Z" fill="#555555"/>
+    <text transform="matrix(1 0 0 1 712 282)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">start points: boundary and interior</tspan></text>
+    <path d="M664 306 L696 306 L696 324 L664 324 Z" fill="none" stroke="#999999" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="6 4"/>
+    <text transform="matrix(1 0 0 1 712 320)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">leaf pair: a box of the subdivision</tspan></text>
+    <g>
+      <g>
+        <path d="M660 352.25 L666 352.25 C666.414 352.25 666.75 352.586 666.75 353 C666.75 353.414 666.414 353.75 666 353.75 L660 353.75 C659.586 353.75 659.25 353.414 659.25 353 C659.25 352.586 659.586 352.25 660 352.25 M670 352.25 L676 352.25 C676.414 352.25 676.75 352.586 676.75 353 C676.75 353.414 676.414 353.75 676 353.75 L670 353.75 C669.586 353.75 669.25 353.414 669.25 353 C669.25 352.586 669.586 352.25 670 352.25 M680 352.25 L686 352.25 C686.414 352.25 686.75 352.586 686.75 353 C686.75 353.414 686.414 353.75 686 353.75 L680 353.75 C679.586 353.75 679.25 353.414 679.25 353 C679.25 352.586 679.586 352.25 680 352.25 M690 352.25 L696 352.25 C696.414 352.25 696.75 352.586 696.75 353 C696.75 353.414 696.414 353.75 696 353.75 L690 353.75 C689.586 353.75 689.25 353.414 689.25 353 C689.25 352.586 689.586 352.25 690 352.25" fill="#999999"/>
+        <path d="M698.1 353 L692.1 356 L693.9 353 L692.1 350 Z" fill="#999999"/>
+      </g>
+    </g>
+    <text transform="matrix(1 0 0 1 712 358)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">normals n1 and n2</tspan></text>
+    <text transform="matrix(1 0 0 1 40 575)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">Subdivision finds a start point on every component; marching follows each one.</tspan></text>
+  </g>
+</svg>

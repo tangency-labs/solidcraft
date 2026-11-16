@@ -1,0 +1,1042 @@
+{
+  "cases": [
+    {
+      "name": "attributed-box-edge0-r2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 2.0,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-box-edge3-r2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 2.0,
+          "edges": [
+            3
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-box-edge7-r2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 2.0,
+          "edges": [
+            7
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-box-edge11-r2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 2.0,
+          "edges": [
+            11
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-box-edge0-behavior0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "behavior": 0,
+          "radius": 2.0,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-box-edge0-behavior1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "behavior": 1,
+          "radius": 2.0,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-box-edge0-behavior2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "behavior": 2,
+          "radius": 2.0,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-box-edge0-behavior3",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "behavior": 3,
+          "radius": 2.0,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-box-edge0-behavior4",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "behavior": 4,
+          "radius": 2.0,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-box-edges-0-1-2-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "edges": [
+            0,
+            1,
+            2
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-box-all-edges-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "edges": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-box-edge0-linear",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 2.0,
+          "xsect": 0,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-box-edge0-blend-g2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 2.0,
+          "xsect": 2,
+          "continuity": 2,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-per-edge-box-edge0-circular",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdgesPerEdge)",
+      "inputs": {
+        "attributed": {
+          "api": "per_edge",
+          "body": {
+            "box": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 2.0,
+          "xsect": 2,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-per-edge-box-edges-4-5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdgesPerEdge)",
+      "inputs": {
+        "attributed": {
+          "api": "per_edge",
+          "body": {
+            "box": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.5,
+          "xsect": 2,
+          "edges": [
+            4,
+            5
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-variable-box-edge0-1-to-2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiVariableRadiusFillet)",
+      "inputs": {
+        "attributed": {
+          "api": "variable_radius",
+          "body": {
+            "box": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "radius_end": 2.0,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-variable-box-edge6-2-to-1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiVariableRadiusFillet)",
+      "inputs": {
+        "attributed": {
+          "api": "variable_radius",
+          "body": {
+            "box": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 2.0,
+          "radius_end": 1.0,
+          "edges": [
+            6
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-circular-box-r1",
+      "upstream_ref": "source/SM_API/src/SmApiFillets.cpp (SmApiCircularFillet)",
+      "inputs": {
+        "attributed": {
+          "api": "circular",
+          "body": {
+            "box": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "attributed-chamfer-box-d1",
+      "upstream_ref": "source/SM_API/src/SmApiFillets.cpp (SmApiChamferFillet)",
+      "inputs": {
+        "attributed": {
+          "api": "chamfer",
+          "body": {
+            "box": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "attributed-chamfer-box-d1-reference",
+      "upstream_ref": "source/SM_API/src/SmApiFillets.cpp (SmApiChamferFillet)",
+      "inputs": {
+        "attributed": {
+          "api": "chamfer",
+          "body": {
+            "box": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "behavior": 1,
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "attributed-cylinder-edge0-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "cylinder": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "radius": 5.0,
+              "height": 10.0
+            }
+          },
+          "radius": 1.0,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-cylinder-edge1-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "cylinder": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "radius": 5.0,
+              "height": 10.0
+            }
+          },
+          "radius": 1.0,
+          "edges": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-cylinder-edge2-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "cylinder": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "radius": 5.0,
+              "height": 10.0
+            }
+          },
+          "radius": 1.0,
+          "edges": [
+            2
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-chamfer-cylinder-d1",
+      "upstream_ref": "source/SM_API/src/SmApiFillets.cpp (SmApiChamferFillet)",
+      "inputs": {
+        "attributed": {
+          "api": "chamfer",
+          "body": {
+            "cylinder": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "radius": 5.0,
+              "height": 10.0
+            }
+          },
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "attributed-circular-cylinder-r1",
+      "upstream_ref": "source/SM_API/src/SmApiFillets.cpp (SmApiCircularFillet)",
+      "inputs": {
+        "attributed": {
+          "api": "circular",
+          "body": {
+            "cylinder": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "radius": 5.0,
+              "height": 10.0
+            }
+          },
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "attributed-step-edge0-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box_union": {
+              "a": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  10,
+                  10,
+                  10
+                ]
+              ],
+              "b": [
+                [
+                  10,
+                  0,
+                  0
+                ],
+                [
+                  10,
+                  10,
+                  5
+                ]
+              ]
+            }
+          },
+          "radius": 1.0,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-step-edge4-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box_union": {
+              "a": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  10,
+                  10,
+                  10
+                ]
+              ],
+              "b": [
+                [
+                  10,
+                  0,
+                  0
+                ],
+                [
+                  10,
+                  10,
+                  5
+                ]
+              ]
+            }
+          },
+          "radius": 1.0,
+          "edges": [
+            4
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-step-edge9-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box_union": {
+              "a": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  10,
+                  10,
+                  10
+                ]
+              ],
+              "b": [
+                [
+                  10,
+                  0,
+                  0
+                ],
+                [
+                  10,
+                  10,
+                  5
+                ]
+              ]
+            }
+          },
+          "radius": 1.0,
+          "edges": [
+            9
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-step-edge14-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box_union": {
+              "a": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  10,
+                  10,
+                  10
+                ]
+              ],
+              "b": [
+                [
+                  10,
+                  0,
+                  0
+                ],
+                [
+                  10,
+                  10,
+                  5
+                ]
+              ]
+            }
+          },
+          "radius": 1.0,
+          "edges": [
+            14
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-chamfer-step-d1",
+      "upstream_ref": "source/SM_API/src/SmApiFillets.cpp (SmApiChamferFillet)",
+      "inputs": {
+        "attributed": {
+          "api": "chamfer",
+          "body": {
+            "box_union": {
+              "a": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  10,
+                  10,
+                  10
+                ]
+              ],
+              "b": [
+                [
+                  10,
+                  0,
+                  0
+                ],
+                [
+                  10,
+                  10,
+                  5
+                ]
+              ]
+            }
+          },
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "attributed-pocket-edge0-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box_difference": {
+              "a": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  20,
+                  20,
+                  10
+                ]
+              ],
+              "b": [
+                [
+                  5,
+                  5,
+                  5
+                ],
+                [
+                  10,
+                  10,
+                  10
+                ]
+              ]
+            }
+          },
+          "radius": 1.0,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-pocket-edge12-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box_difference": {
+              "a": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  20,
+                  20,
+                  10
+                ]
+              ],
+              "b": [
+                [
+                  5,
+                  5,
+                  5
+                ],
+                [
+                  10,
+                  10,
+                  10
+                ]
+              ]
+            }
+          },
+          "radius": 1.0,
+          "edges": [
+            12
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-pocket-edge16-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box_difference": {
+              "a": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  20,
+                  20,
+                  10
+                ]
+              ],
+              "b": [
+                [
+                  5,
+                  5,
+                  5
+                ],
+                [
+                  10,
+                  10,
+                  10
+                ]
+              ]
+            }
+          },
+          "radius": 1.0,
+          "edges": [
+            16
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-pocket-edge20-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdges)",
+      "inputs": {
+        "attributed": {
+          "api": "fillet_edges",
+          "body": {
+            "box_difference": {
+              "a": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  20,
+                  20,
+                  10
+                ]
+              ],
+              "b": [
+                [
+                  5,
+                  5,
+                  5
+                ],
+                [
+                  10,
+                  10,
+                  10
+                ]
+              ]
+            }
+          },
+          "radius": 1.0,
+          "edges": [
+            20
+          ]
+        }
+      }
+    }
+  ]
+}

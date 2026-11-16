@@ -1,0 +1,130 @@
+{
+  "area": "shell",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "shell",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "open_faces": {
+          "kind": "face",
+          "picked": [
+            {
+              "at": [],
+              "index": 0
+            }
+          ],
+          "points": [
+            [
+              -3.333333333333334,
+              -6.666666666666666,
+              80.0
+            ]
+          ],
+          "tolerance": 0.09798058971132713
+        },
+        "thickness": -2.0
+      }
+    }
+  ],
+  "case": "3669-shell-lofted-square-frustum",
+  "expected": {
+    "body_count": 1,
+    "faces": 11,
+    "method": "a ruled loft of two squares is a square pyramid frustum (4 planar walls). Outer V=80/3*(1600+800+400). Walls offset 2 normal to the faces: tan(a)=10/80, half-width w(z)=20-z/8-2/cos(a), floor at z=2, cavity a frustum of height 78 with areas (2w(2))^2 and (2w(80))^2: V=outer-78/3*(A1+sqrt(A1*A2)+A2); faces 4 outer walls + base + top ring + 4 inner walls + floor = 11",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3669",
+      "tangency-labs/solidcraft#2990"
+    ],
+    "volume_mm3": 20601.135771593457,
+    "what": "a loft between a 40 mm and a 20 mm square 80 mm apart, shelled 2 mm open at the small end"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 11,
+      "vertices": 16
+    }
+  },
+  "records": "3669-shell-lofted-square-frustum.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 20764.480001985172,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 11,
+      "vertices": 16,
+      "volume_mm3": 20601.135720230042
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3669",
+    "tangency-labs/solidcraft#2990"
+  ],
+  "traced_ops": [
+    "loft",
+    "copy",
+    "copy",
+    "tagged",
+    "shell"
+  ],
+  "ungraded": [],
+  "what": "a loft between a 40 mm and a 20 mm square 80 mm apart, shelled 2 mm open at the small end",
+  "why_not": []
+}

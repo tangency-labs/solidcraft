@@ -1,0 +1,211 @@
+{
+ "cases": [
+  {
+   "name": "cov_trimmed_almost_straight_corner_ends_meet",
+   "upstream_ref": "source/SMLib/src/SmCompositeCurve.cpp:2864 (coverage: crates/solidcore/src/curve/composite_curve/p2.rs:556)",
+   "inputs": {
+    "op": "trimmed",
+    "comp": {
+     "dim": 3,
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         0,
+         0,
+         0
+        ],
+        "b": [
+         1,
+         0,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         0,
+         0
+        ],
+        "b": [
+         2,
+         0.0001745329243133368,
+         0
+        ]
+       }
+      }
+     ]
+    },
+    "direction": 0,
+    "params": {
+     "xtol": 0.001,
+     "atol": 0.001,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "corner": 0,
+     "trim": true,
+     "dist": 0.5
+    }
+   }
+  },
+  {
+   "name": "cov_read_ascii_hermite_segment_transition_0",
+   "upstream_ref": "source/SMLib/src/SmCompositeCurve.cpp:164 (coverage: crates/solidcore/src/curve/composite_curve/p2.rs:110)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 42,
+    "text": "1 count\n0 closed\n0 t\n1 s\n0 g\n0 g\n1 has\n conv\nObject Type 14034\nCurve Dim 3\n0 0 0\n1 0 0\n1 0 0\n1 0 0\n0 0 0\n0 0 0\n"
+   }
+  },
+  {
+   "name": "cov_read_ascii_hermite_segment_transition_1",
+   "upstream_ref": "source/SMLib/src/SmCompositeCurve.cpp:164 (coverage: crates/solidcore/src/curve/composite_curve/p2.rs:111)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 42,
+    "text": "1 count\n0 closed\n1 t\n1 s\n0 g\n0 g\n1 has\n conv\nObject Type 14034\nCurve Dim 3\n0 0 0\n1 0 0\n1 0 0\n1 0 0\n0 0 0\n0 0 0\n"
+   }
+  },
+  {
+   "name": "cov_read_ascii_hermite_segment_transition_2",
+   "upstream_ref": "source/SMLib/src/SmCompositeCurve.cpp:164 (coverage: crates/solidcore/src/curve/composite_curve/p2.rs:112)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 42,
+    "text": "1 count\n0 closed\n2 t\n1 s\n0 g\n0 g\n1 has\n conv\nObject Type 14034\nCurve Dim 3\n0 0 0\n1 0 0\n1 0 0\n1 0 0\n0 0 0\n0 0 0\n"
+   }
+  },
+  {
+   "name": "cov_read_ascii_hermite_segment_transition_3",
+   "upstream_ref": "source/SMLib/src/SmCompositeCurve.cpp:164 (coverage: crates/solidcore/src/curve/composite_curve/p2.rs:113)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 42,
+    "text": "1 count\n0 closed\n3 t\n1 s\n0 g\n0 g\n1 has\n conv\nObject Type 14034\nCurve Dim 3\n0 0 0\n1 0 0\n1 0 0\n1 0 0\n0 0 0\n0 0 0\n"
+   }
+  },
+  {
+   "name": "cov_read_ascii_hermite_segment_transition_4",
+   "upstream_ref": "source/SMLib/src/SmCompositeCurve.cpp:164 (coverage: crates/solidcore/src/curve/composite_curve/p2.rs:114)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 42,
+    "text": "1 count\n0 closed\n4 t\n1 s\n0 g\n0 g\n1 has\n conv\nObject Type 14034\nCurve Dim 3\n0 0 0\n1 0 0\n1 0 0\n1 0 0\n0 0 0\n0 0 0\n"
+   }
+  },
+  {
+   "name": "cov_read_ascii_hermite_segment_transition_5",
+   "upstream_ref": "source/SMLib/src/SmCompositeCurve.cpp:164 (coverage: crates/solidcore/src/curve/composite_curve/p2.rs:115)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 42,
+    "text": "1 count\n0 closed\n5 t\n1 s\n0 g\n0 g\n1 has\n conv\nObject Type 14034\nCurve Dim 3\n0 0 0\n1 0 0\n1 0 0\n1 0 0\n0 0 0\n0 0 0\n"
+   }
+  },
+  {
+   "name": "cov_read_ascii_hermite_segment_transition_6",
+   "upstream_ref": "source/SMLib/src/SmCompositeCurve.cpp:164 (coverage: crates/solidcore/src/curve/composite_curve/p2.rs:116)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 42,
+    "text": "1 count\n0 closed\n6 t\n1 s\n0 g\n0 g\n1 has\n conv\nObject Type 14034\nCurve Dim 3\n0 0 0\n1 0 0\n1 0 0\n1 0 0\n0 0 0\n0 0 0\n"
+   }
+  },
+  {
+   "name": "cov_read_ascii_hermite_segment_transition_7",
+   "upstream_ref": "source/SMLib/src/SmCompositeCurve.cpp:164 (coverage: crates/solidcore/src/curve/composite_curve/p2.rs:117)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 42,
+    "text": "1 count\n0 closed\n7 t\n1 s\n0 g\n0 g\n1 has\n conv\nObject Type 14034\nCurve Dim 3\n0 0 0\n1 0 0\n1 0 0\n1 0 0\n0 0 0\n0 0 0\n"
+   }
+  },
+  {
+   "name": "cov_read_ascii_hermite_segment_transition_8",
+   "upstream_ref": "source/SMLib/src/SmCompositeCurve.cpp:164 (coverage: crates/solidcore/src/curve/composite_curve/p2.rs:118)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 42,
+    "text": "1 count\n0 closed\n8 t\n1 s\n0 g\n0 g\n1 has\n conv\nObject Type 14034\nCurve Dim 3\n0 0 0\n1 0 0\n1 0 0\n1 0 0\n0 0 0\n0 0 0\n"
+   }
+  },
+  {
+   "name": "cov_read_ascii_hermite_segment_transition_9",
+   "upstream_ref": "source/SMLib/src/SmCompositeCurve.cpp:164 (coverage: crates/solidcore/src/curve/composite_curve/p2.rs:119)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 42,
+    "text": "1 count\n0 closed\n9 t\n1 s\n0 g\n0 g\n1 has\n conv\nObject Type 14034\nCurve Dim 3\n0 0 0\n1 0 0\n1 0 0\n1 0 0\n0 0 0\n0 0 0\n"
+   }
+  },
+  {
+   "name": "cov_read_ascii_hermite_segment_transition_10",
+   "upstream_ref": "source/SMLib/src/SmCompositeCurve.cpp:164 (coverage: crates/solidcore/src/curve/composite_curve/p2.rs:120)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 42,
+    "text": "1 count\n0 closed\n10 t\n1 s\n0 g\n0 g\n1 has\n conv\nObject Type 14034\nCurve Dim 3\n0 0 0\n1 0 0\n1 0 0\n1 0 0\n0 0 0\n0 0 0\n"
+   }
+  },
+  {
+   "name": "cov_read_ascii_hermite_segment_transition_11",
+   "upstream_ref": "source/SMLib/src/SmCompositeCurve.cpp:164 (coverage: crates/solidcore/src/curve/composite_curve/p2.rs:121)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 42,
+    "text": "1 count\n0 closed\n11 t\n1 s\n0 g\n0 g\n1 has\n conv\nObject Type 14034\nCurve Dim 3\n0 0 0\n1 0 0\n1 0 0\n1 0 0\n0 0 0\n0 0 0\n"
+   }
+  },
+  {
+   "name": "cov_read_ascii_hermite_segment_transition_12",
+   "upstream_ref": "source/SMLib/src/SmCompositeCurve.cpp:164 (coverage: crates/solidcore/src/curve/composite_curve/p2.rs:122)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 42,
+    "text": "1 count\n0 closed\n12 t\n1 s\n0 g\n0 g\n1 has\n conv\nObject Type 14034\nCurve Dim 3\n0 0 0\n1 0 0\n1 0 0\n1 0 0\n0 0 0\n0 0 0\n"
+   }
+  },
+  {
+   "name": "cov_read_ascii_hermite_segment_transition_13",
+   "upstream_ref": "source/SMLib/src/SmCompositeCurve.cpp:164 (coverage: crates/solidcore/src/curve/composite_curve/p2.rs:123)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 42,
+    "text": "1 count\n0 closed\n13 t\n1 s\n0 g\n0 g\n1 has\n conv\nObject Type 14034\nCurve Dim 3\n0 0 0\n1 0 0\n1 0 0\n1 0 0\n0 0 0\n0 0 0\n"
+   }
+  }
+ ]
+}

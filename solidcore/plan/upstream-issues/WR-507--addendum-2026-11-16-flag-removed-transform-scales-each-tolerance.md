@@ -1,0 +1,8 @@
+Updates: WR-507
+
+#### WR-507 (update, 2026-11-16). `transform_scales_each_tolerance` is removed
+
+The fix is the default and its flag is gone (tangency-labs/solidcraft#14246, batch topology-2). `SmBrep::Transform` (`topology/brep/p5.rs`) changes no tolerance under a scale of 1 (a rotation, reflection or move), and under a scale `s` sets each vertex, edge and face tolerance `t` to `max(zone, t * s)`; upstream's reset of every tolerance to the body tolerance whenever a scale is given is gone. SolidCraft's preset already had the flag on. Removed: the field `UpstreamFixes::transform_scales_each_tolerance`, SolidCraft's preset line, its entry in `fixes.json` and the `issue_2260` list, and every test setting of it.
+
+- **Results:** 58 goldens rows move with WR-508's (its addendum of the same date): `topology.proto_topology_p1` 32, `topology.brep_mirror` 25, `topology.brep_p5` 1. In 46 the tolerances are scaled. The other 12 are reflections: nothing changes, and the model size estimate stays unset where upstream set it from the vertex box. The goldens tests `every_transform_meets_the_wr507_wr508_certificate` (in `topology_brep_p5` and `topology_brep_mirror`) and `topology_proto_topology_p1::tests::every_case_meets_the_transform_certificate` replay every case of those units and check each transform's tolerances and model size against the closed form bit for bit (`topology_brep_p5::transform_certificate`).
+- **Tests:** `brep/p5.rs::tests::transform_scales_each_tolerance_wr507` and `tests/wr507_508_transform_matrix_tolerances.rs` run on the default kernel; their upstream halves are gone.

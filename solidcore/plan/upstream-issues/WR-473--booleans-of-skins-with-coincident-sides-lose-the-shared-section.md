@@ -1,0 +1,28 @@
+#### WR-473. Booleans of two skins whose side faces coincide lose the shared section: A − B is empty, A ∩ B is all of A, A ∪ B fails
+- **Severity:** Wrong result (and a failing union)
+- **Area:** Booleans, curve classification
+- **Location:**
+  - The intersection of A's and B's coincident side faces. `SmFace::CurveOnClassify` (`source/SMLib/src/SmFace.cpp:8666` at 3fd5b95, `:8525` at c9c5979) classifies each interval of the intersection curve against a face. An interval it cannot settle from its ends goes to `SmCurveClassification::ClassifyFaceInterval` (`:8961` at 3fd5b95, `:8820` at c9c5979).
+  - The union then fails in `SmBrep::MakeFaceTopology` (`source/SMLib/src/SmBrep.cpp:14414` at 3fd5b95).
+- **What happens:**
+  - The inputs are two capped degree-1 skins (`SmApiCreateSkinPrimitive`, one closed cubic interpolant per section, capped). A goes through sections 0..4 (z = 0..40). B goes through sections 2..6 (z = 20..60), so A and B share sections 2, 3 and 4, and their side faces coincide between z = 20 and z = 40.
+  - Both skins are valid closed solids: A has F/E/V 3/3/2 and volume 26136.268119037064; B has 3/3/2 and volume 22346.437437978195.
+  - `SmApiBooleanDifference(A, B)` succeeds with an empty B-rep (F/E/V 0/0/0, volume 0). The expected volume is about 14051.84, the part of A below z = 20.
+  - `SmApiBooleanIntersection(A, B)` succeeds with all of A (3/3/2, volume 26136.268142920293). The expected volume is about 12084.49.
+  - `SmApiBooleanUnion(A, B)` fails with `SM_ERR` (1001).
+  - With A imprinted (`SmApiBooleanWithOptions`, imprinting only), A's side face keeps 4 loops, with vertices at z 0, 20 and 40. The z = 20 section, where B's side starts, is imprinted only as 4 disconnected pieces. The intervals between them are never made into proto edges, so the face is not split there.
+- **Trigger:** the two skins above. Section i is a closed cubic interpolant (chord-length parameters) through 12 points of the ellipse with semi-axes 20(1 − 0.04 i) and 12(1 − 0.03 i) at z = 10 i. `fixtures/boolean.api_brep/issue_1036_coincident_skins.json` carries the exact section curves (written by `crates/difftest/tests/issue_1036_skin_fixture.rs`); `crates/solidcore/tests/issue_1036_coincident_skin_sides.rs` builds the skins in the port.
+- **How found:** tangency-labs/solidcore#1036. Traced in the port with gdb:
+  - the z = 20 vertex is placed correctly, on A's seam edge;
+  - none of the 8 proto edges made along the z = 20 curve covers the missing intervals.
+- **Confirmed:** yes. The C++ build of v1.0.1 (3fd5b95) gives exactly the results above for the same section curves. It was run on 2026-10-26 with a one-off, unmerged diagnostic probe (`issue_1036_cpp_probe`, shim `probe_issue_1036`) on the `pin/v1.0.1-tests` branch. The permanent C++-compared cases are `issue1036_coincident_skins_{difference,intersection,union}` (and their `_measured` variants) of `boolean.api_brep`, from the fixture above. The port gives the same results at c9c5979 and at 3fd5b95. 1.0.1 leaves `CurveOnClassify`, `ClassifyFaceInterval` and `EdgeCurveOnClassify` byte-identical to c9c5979.
+- **Where the section is lost (traced in the port, which gives the same results; 2026-10-27, A − B):**
+  - The face/face intersection never treats A's and B's side faces as coincident, although they are the same surface between z = 20 and z = 40 (two different skin surfaces, overlapping in part). Their pair gives one curve, along the seam (classes Vertex/Edge/Edge on A, Edge/Edge/Vertex on B), with the coincident flag off.
+  - The z = 20 section comes only from A's side face against B's bottom cap, where it runs along the cap's single boundary edge. It is split into 8 intervals, each with both ends on that edge. On B's cap, the midpoints of intervals 1, 3, 5 and 7 classify Unknown and the other 3 classify Face. The 4 Unknown ones are exactly the intervals that never become proto edges. The z = 40 section (A's top cap against B's side face) behaves the same way on A's cap.
+  - So two things fail. The overlap of the side faces is not found as a coincident region. And an intersection interval that runs along a face's boundary edge is classified against that face as Unknown or Face, never as on the edge.
+- **Fix:** none known. A candidate tried in an unshipped port branch does not fix it:
+  - The candidate: `CurveOnClassify` also classifies an interval as on edge E when its two ends are the two (distinct) vertices of E and its midpoint is within the intersection tolerance of E (with WR-305's `classify_edge_interval` on as well).
+  - With it, all three Booleans give the same results as without it (A − B empty; A ∩ B all of A, volume 26136.2681429203 against 26136.268142920293; A ∪ B `SM_ERR`), and A's imprinted side face still has 4 loops. WR-305 alone and WR-304 (`boolean_cleanup_removes_slits`) change nothing either (port run of 2026-10-27 at 3fd5b95).
+  - That candidate does not apply: the lost intervals end on the edge itself, not at its vertices. WR-305 does cover that case, yet changes nothing. Why it does not was not traced.
+- **Rust port:** faithful (same results as the C++; the `boolean.api_brep` cases above pass). The diagnostic probe `issue_1036_probe` in the test file above is `#[ignore]`d.
+- tangency-labs/solidcore#1036.

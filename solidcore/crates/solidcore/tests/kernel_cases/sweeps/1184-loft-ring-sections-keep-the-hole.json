@@ -1,0 +1,169 @@
+{
+  "area": "sweeps",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "loft",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "degree": 1,
+        "sections": [
+          [
+            {
+              "arc": {
+                "axis": [
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                "center": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "end": 6.283185307179586,
+                "radius": 20.0,
+                "reference": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "start": -3.756837589507936e-17
+              }
+            },
+            {
+              "arc": {
+                "axis": [
+                  -0.0,
+                  -0.0,
+                  -1.0
+                ],
+                "center": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "end": 0.0,
+                "radius": 12.0,
+                "reference": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "start": -6.283185307179586
+              }
+            }
+          ],
+          [
+            {
+              "arc": {
+                "axis": [
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                "center": [
+                  0.0,
+                  0.0,
+                  20.0
+                ],
+                "end": 6.283185307179586,
+                "radius": 20.0,
+                "reference": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "start": -7.513380663682734e-17
+              }
+            },
+            {
+              "arc": {
+                "axis": [
+                  -0.0,
+                  -0.0,
+                  -1.0
+                ],
+                "center": [
+                  0.0,
+                  0.0,
+                  20.0
+                ],
+                "end": 8.881784197001252e-16,
+                "radius": 12.0,
+                "reference": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "start": -6.283185307179585
+              }
+            }
+          ]
+        ]
+      }
+    }
+  ],
+  "case": "1184-loft-ring-sections-keep-the-hole",
+  "expected": {
+    "area_mm2": 5629.734035232909,
+    "body_count": 1,
+    "faces": 4,
+    "method": "a tube of outer r 20, inner r 12, length 20: V = pi (20^2 - 12^2) 20, A = 2 pi 20 20 + 2 pi 12 20 + 2 pi (20^2 - 12^2); faces: outer wall, bore, two annular caps.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1184",
+      "tangency-labs/solidcraft#1254",
+      "tangency-labs/solidcraft#2435",
+      "tangency-labs/solidcraft#2447"
+    ],
+    "volume_mm3": 16084.95438637974,
+    "what": "a loft between two ring sections (outer r 20, inner r 12) 20 mm apart (the hole was dropped and a solid disc built)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 6,
+      "faces": 4,
+      "vertices": 4
+    }
+  },
+  "result": [
+    {
+      "body": "Ring",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5629.734035247135,
+      "body_count": 1,
+      "edges": 6,
+      "faces": 4,
+      "vertices": 4,
+      "volume_mm3": 16084.954386270292
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1184",
+    "tangency-labs/solidcraft#1254",
+    "tangency-labs/solidcraft#2435",
+    "tangency-labs/solidcraft#2447"
+  ],
+  "traced_ops": [
+    "loft"
+  ],
+  "ungraded": [],
+  "what": "a loft between two ring sections (outer r 20, inner r 12) 20 mm apart (the hole was dropped and a solid disc built)",
+  "why_not": []
+}
