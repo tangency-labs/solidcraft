@@ -253,7 +253,11 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 settings: app_bar::BarButton { id: "settings", icon: "settings", tip: &prefs_tip, enabled: true, narrow: false, wide_only: false },
                 report: app_bar::Report {
                     label: solidcraft_ui_text::tr("ui.report_a_bug"),
-                    tip: solidcraft_ui_text::tr_label("Report a bug — review a screenshot and open a GitHub draft"),
+                    tip: if crate::issue_report::ticket::enabled(app) {
+                        solidcraft_ui_text::tr("report.pill_tip")
+                    } else {
+                        solidcraft_ui_text::tr_label("Report a bug — review a screenshot and open a GitHub draft")
+                    },
                     icon_only: app.header.report == ReportButton::Icon,
                 },
                 pills: crate::links::pills(app, r.width() >= app_bar::PILL_LABEL_MIN),
@@ -2439,6 +2443,10 @@ pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
     }
     if crate::select_other::is_open(app) {
         crate::select_other::close(app);
+    } else if !app.preferences.escape_closes_analyses && app.tool.as_ref().is_some_and(|t| t.cmd == "inspect.curvature_comb") {
+        // Escape puts the comb tool down and keeps its combs on; a right click or the button
+        // still turns them off. `escape_closes_analyses` brings back Escape turning them off.
+        app.tool = None;
     } else if app.tool.is_some() {
         crate::tools::finish(app);
     } else {
@@ -2651,7 +2659,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 // Not while a tool is still out (its first Esc only ended a chain): this press
                 // puts it down, and the next quick one finishes.
                 if again
-                    && !(crate::viewport_status::enabled(app) && (app.viewport_status.open_key.is_some() || crate::viewport_status::has_effect(app)))
+                    && !(crate::viewport_status::enabled(app) && crate::viewport_status::owns_escape(app))
                     && app.tool.is_none()
                     && app.dialog.is_none()
                     && let Some(sketch) = app.session.active_sketch

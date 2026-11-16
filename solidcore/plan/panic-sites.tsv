@@ -47,8 +47,8 @@ crates/solidcore-step/src/topology.rs	project	int-div	1	proven	MAX_SAMPLES / spa
 crates/solidcore-step/src/topology.rs	project	int-div	2	proven	div_ceil(MAX_SAMPLES)	constant non-zero divisor MAX_SAMPLES (4096)
 crates/solidcore-step/src/topology.rs	project	step_by	1	proven	step_by(stride)	ts.len() > MAX_SAMPLES just above, so stride = ts.len().div_ceil(MAX_SAMPLES) >= 1
 crates/solidcore-step/src/topology.rs	project	with_capacity	1	proven	Vec::with_capacity(spans * per + 1)	spans = breaks.len() + 1 of a list in memory, per <= 8
+crates/solidcore-step/src/topology.rs	read_at	with_capacity	1	proven	Vec::with_capacity(ids.len())	the length of a collection already in memory
 crates/solidcore-step/src/topology.rs	read_solids_in	with_capacity	1	proven	Vec::with_capacity(solids.len())	the length of a collection already in memory
-crates/solidcore-step/src/topology.rs	read_with	with_capacity	1	proven	Vec::with_capacity(ids.len())	the length of a collection already in memory
 crates/solidcore-step/src/topology.rs	seam_only	int-div	1	proven	uses.len() / 2	constant non-zero divisor
 crates/solidcore-step/src/topology.rs	tolerance	f64::clamp	1	proven	clamp(MIN_TOLERANCE, MAX_FIT_TOLERANCE)	constant bounds MIN_TOLERANCE (1e-7) <= MAX_FIT_TOLERANCE (1.0)
 crates/solidcore-step/src/topology.rs	uses_of	with_capacity	1	proven	Vec::with_capacity(edge_loops.len())	the length of a collection already in memory

@@ -2896,6 +2896,16 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         }
         // Joins, cuts and intersects meet their targets where those are placed (#3383).
         kind if drawn_tools_change_bodies(kind) => reads.drawn_targets(st, f),
+        // So does a hole at sketch points, in its sketch's frame (#17623).
+        FeatureKind::Hole { points: Some(sp), .. } => {
+            frame = doc.feature(sp.sketch.0).map(|s| doc.component_transform(s.component));
+            reads.drawn_targets(st, f);
+        }
+        // And a rib, which is built against the bodies where its sketch is drawn (#17655).
+        FeatureKind::Rib { sketch, .. } => {
+            frame = doc.feature(sketch.0).map(|s| doc.component_transform(s.component));
+            reads.drawn_targets(st, f);
+        }
         FeatureKind::Sketch { plane, sketch } => {
             match crate::face_anchor::plane_face_anchor(plane) {
                 // Read in the frame of the placement it was drawn in, its face through the
@@ -6421,6 +6431,11 @@ fn hole_feature_tools(
     f: &Feature,
 ) -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
     let FeatureKind::Hole { diameter, depth, hole, to, .. } = &f.kind else { return Err(DocError::Invalid("not a hole".into())) };
+    // A hole at sketch points is drilled in its sketch's frame: the bodies it cuts are met where
+    // they are shown, so a body of another, moved component is drilled only where the hole
+    // reaches it there (#17623).
+    let shown = targets_as_shown(st, f, &[])?;
+    let st: &ModelState = &shown;
     let (spots, dir) = hole_spots(doc, vals, st, f)?;
     if spots.is_empty() || spots.len() > 10_000 {
         return Err(DocError::Invalid("a hole needs 1…10000 points".into()));
@@ -10758,8 +10773,10 @@ fn eval_feature(
         }
         FeatureKind::FrameEndCap { .. } => crate::end_cap::evaluate(doc, vals, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
-        FeatureKind::BoundingSolid { bodies, margin } => {
+        FeatureKind::BoundingSolid { bodies, margin, margins } => {
             let m = val(vals, margin, Kind::Length)?;
+            let side = |i: usize| margins.as_ref().and_then(|ms| ms.get(i)).map_or(Ok(m), |e| val(vals, e, Kind::Length));
+            let (lo, hi) = (Vec3::new(side(0)?, side(2)?, side(4)?), Vec3::new(side(1)?, side(3)?, side(5)?));
             let mut bb = solidcraft_geom::Aabb3::EMPTY;
             for b in st.bodies.iter().filter(|b| bodies.is_empty() || bodies.iter().any(|t| *t == b.name)) {
                 bb = bb.union(&b.mesh().bounds());
@@ -10767,8 +10784,11 @@ fn eval_feature(
             if bb.is_empty() {
                 return Err(DocError::Invalid("no bodies to bound".into()));
             }
-            let pad = Vec3::new(m, m, m);
-            let b = crate::lineage::numbered_tool(kernel::box_solid(bb.min - pad, bb.max + pad)?);
+            let (min, max) = (bb.min - lo, bb.max + hi);
+            if !(min.x < max.x && min.y < max.y && min.z < max.z) {
+                return Err(DocError::Invalid("a side's margin reaches past the opposite side of the bodies".into()));
+            }
+            let b = crate::lineage::numbered_tool(kernel::box_solid(min, max)?);
             let name = unique_body_name(st, f.body_names.first().map(String::as_str).unwrap_or("Bounding"));
             st.bodies.push(ModelBody::traced_new(name, b, f.id));
             Ok(())
@@ -11191,18 +11211,31 @@ fn drawn_tools_change_bodies(kind: &FeatureKind) -> bool {
     }
 }
 
+/// The component whose frame a feature's drawn tools are made in: its own for a feature with
+/// drawn tools (see [`drawn_tools_change_bodies`]), and its sketch's for a hole at sketch points,
+/// whose points are kept in that sketch's frame (#17623), and for a rib (#17655). `None` for every other feature: a hole
+/// at a picked position is kept in the frame of the body it was picked on.
+fn tools_component(doc: &Document, f: &Feature) -> Option<u64> {
+    match &f.kind {
+        FeatureKind::Hole { points: Some(sp), .. } => doc.feature(sp.sketch.0).map(|s| s.component),
+        FeatureKind::Rib { sketch, .. } => doc.feature(sketch.0).map(|s| s.component),
+        kind if drawn_tools_change_bodies(kind) => Some(f.component),
+        _ => None,
+    }
+}
+
 /// The frames of [`TOOL_FRAMES`] for the feature being evaluated; what was there before is put
 /// back when it is dropped.
 struct ToolFrames(Vec<(String, Mat)>);
 
 impl ToolFrames {
-    /// For a feature with drawn tools (see [`drawn_tools_change_bodies`]): the bodies placed
-    /// differently from its component, so its tools meet them where they are shown (#3383).
+    /// For a feature with drawn tools (see [`tools_component`]): the bodies placed differently
+    /// from the component its tools are made in, so they meet them where they are shown (#3383).
     fn install(doc: &Document, f: &Feature, st: &ModelState) -> Option<ToolFrames> {
-        if !drawn_tools_change_bodies(&f.kind) || (doc.occurrences.is_empty() && doc.body_offsets.is_empty()) {
+        if doc.occurrences.is_empty() && doc.body_offsets.is_empty() {
             return None;
         }
-        let frame = doc.component_transform(f.component);
+        let frame = doc.component_transform(tools_component(doc, f)?);
         let frames: Vec<(String, Mat)> = st
             .bodies
             .iter()

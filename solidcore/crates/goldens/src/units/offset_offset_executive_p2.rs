@@ -2034,6 +2034,81 @@ mod tests {
     fn moved_cases_results_measured() {
         crate::soundness::probe(&Runner);
     }
+
+    /// WR-533's moved rows here (batch topology-1, `boolean_splits_definition_across_split`
+    /// removed): the rounded outward offsets of `extrudeHoles1` at k 0.36, with the result
+    /// bodies the soundness probe measures. `None` for a case that builds no body.
+    fn wr533_overlap_offsets() -> Vec<(String, i64, Option<crate::soundness::Soundness>, i64)> {
+        let ctx = CaseContext {
+            root: repo_root(),
+            seeds: 0,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        [0, 2, 3, 4, 5]
+            .into_iter()
+            .map(|f| {
+                let name = format!("overlap_pc_extrudeHoles1_f{f}_k0.36_out_rnd");
+                let case = cases.iter().find(|c| c.name == name).unwrap();
+                crate::soundness::start();
+                let out = Runner.run_rust(case).unwrap();
+                let mut found = crate::soundness::take();
+                assert!(found.len() <= 1, "{name}: at most one result body, got {}", found.len());
+                let (status, present) = (out.ints["status"][0], out.ints["result.present"][0]);
+                (name, status, found.pop(), present)
+            })
+            .collect()
+    }
+
+    /// With the fix each of WR-533's five moved offsets is refused (1001) and builds no
+    /// result body.
+    #[test]
+    fn wr533_overlap_offsets_are_refused() {
+        for (name, status, body, present) in wr533_overlap_offsets() {
+            assert_eq!(status, 1001, "{name}");
+            assert!(body.is_none(), "{name}: a refused case builds no result body");
+            assert_eq!(present, 0, "{name}");
+        }
+    }
+
+    /// Main's side of the same five offsets, run on main (before WR-533's retirement) to
+    /// show what the refusals replace: each builds a body that `check_brep` refuses on an
+    /// edge/edge gap far past its tolerance, and that is not manifold.
+    /// `SmTrimmingTools::CheckLoop` derives that tolerance from the two edges' zone
+    /// tolerances (`xsect_tol_3d_from_zones`: `xsect_tol3d(zone_prev + zone_cur)`) and
+    /// measures the gap between the evaluated end of one edge's 3D curve and the start of
+    /// the next, both at the trims' end parameters; no sampling enters either value, and
+    /// the factor of a thousand leaves no verdict to rounding. It fails with the fix, which
+    /// refuses them.
+    #[test]
+    #[ignore = "main's side, run on main before WR-533's retirement; the fix refuses these"]
+    fn wr533_overlap_offsets_fail_the_gap_check_on_main() {
+        for (name, status, body, _) in wr533_overlap_offsets() {
+            assert_eq!(status, i64::from(NATIVE_SUCCESS), "{name}");
+            let Some(body) = body else {
+                panic!("{name}: no result body")
+            };
+            let lines = body.check.as_ref().unwrap();
+            let gap = lines
+                .iter()
+                .find(|l| l.contains("Edge/Edge Gap"))
+                .unwrap_or_else(|| panic!("{name}: no edge/edge gap line in {lines:?}"));
+            let num = |key: &str| -> f64 {
+                let at = gap.find(key).unwrap() + key.len();
+                gap[at..]
+                    .split([',', ')'])
+                    .next()
+                    .unwrap()
+                    .trim()
+                    .parse()
+                    .unwrap()
+            };
+            let (offset, tolerance) = (num("offset="), num("tolerance="));
+            eprintln!("{name}: built, gap {offset} against {tolerance}");
+            assert!(offset > 1000.0 * tolerance, "{name}: {gap}");
+            assert_eq!(body.manifold, Some(false), "{name}");
+        }
+    }
+
     use std::collections::BTreeSet;
 
     use crate::case::repo_root;
@@ -2766,5 +2841,275 @@ mod tests {
         assert!(flags.len() >= 24);
         assert!(positive > MIN_GENERATED / 2 && early > MIN_GENERATED / 4);
         assert!(boxes > 25 && wires > 25 && negatives > 40 && negative_zeros > 5);
+    }
+
+    /// WR-346 (collapsed faces mated across, always on): the three moved insets past a
+    /// primitive's own radius.
+    ///
+    /// - The unit sphere's extended inset by 1.5: the inset set `{p : dist(p, outside) >=
+    ///   1.5}` of a ball of radius 1 is empty, and the call succeeds with a body of no
+    ///   faces, edges or vertices, only its one region (main: a bare 1001).
+    /// - The r 1, h 4 cylinder's extended inset by 1 or 1.5 collapses its side wall (offset
+    ///   radius `1 - d` is 0 or negative) with nothing beside it to mate across: still
+    ///   refused with `SM_ERR` (1001), now typed as `OffsetFailure::Collapses` (pinned by
+    ///   `offset_executive::p2::tests::wr346_unbridged_collapsed_wall_is_refused_as_collapses`).
+    ///   The executive's offset held at the refusal is no longer empty: it holds the caps'
+    ///   offsets built before the wall was found unbridged, two planes with vertices at
+    ///   `z = d` and `z = 4 - d` (`x = 1`, `y = 0`, the seam's end). That is the closed form
+    ///   of a cap's offset: its plane moved by `d` along its inward normal carries the seam
+    ///   vertex `(1, 0, 0)` to `(1, 0, d)` and `(1, 0, 4)` to `(1, 0, 4 - d)`; asserted to
+    ///   1e-12. That partial offset is what moved; it is no result.
+    #[test]
+    fn wr346_collapsed_insets_are_accounted_for() {
+        let context = CaseContext {
+            root: repo_root(),
+            seeds: 0,
+        };
+        let fixtures = context.fixture_cases(Runner.id()).unwrap();
+        let run = |name: &str| {
+            let case = fixtures.iter().find(|case| case.name == name).unwrap();
+            let output = Runner.run_rust(case).unwrap();
+            assert!(output.deferred.is_none() && output.error.is_none(), "{name}");
+            output
+        };
+
+        let sphere = run("extended_sphere_inset_past_radius");
+        assert_eq!(sphere.ints["status"], [1000]);
+        assert_eq!(sphere.ints["result.present"], [1]);
+        assert_eq!(sphere.ints["result.counts"], [1, 0, 0, 0, 0, 0, 0]);
+        // [input transferred, source lifetime, result origin]: the source is kept (1) and
+        // the empty body is a new allocation (1); main refused, so had no result (0)
+        assert_eq!(sphere.ints["ownership"], [0, 1, 1]);
+
+        for (name, d) in [
+            ("member_cylinder_extend_inset_at_radius", 1.0),
+            ("member_cylinder_extend_inset_past_radius", 1.5),
+        ] {
+            let cylinder = run(name);
+            assert_eq!(cylinder.ints["status"], [1001], "{name}");
+            assert_eq!(cylinder.ints["result.present"], [0], "{name}");
+            assert_eq!(cylinder.ints["executive_offset.present"], [1], "{name}");
+            assert_eq!(
+                cylinder.ints["executive_offset.counts"],
+                [1, 2, 2, 2, 2, 4, 2],
+                "{name}"
+            );
+            assert_eq!(cylinder.ints["executive_offset.face_kinds"], [1, 1], "{name}");
+            let g = &cylinder.values["executive_offset.geometry"];
+            // [tolerance, min x, min y, min z, max x, max y, max z] of the vertices
+            assert_eq!(g.len(), 7, "{name}");
+            let near = |a: f64, b: f64| (a - b).abs() <= 1e-12;
+            assert!(near(g[1], 1.0) && near(g[4], 1.0), "{name}: {g:?}");
+            assert!(near(g[2], 0.0) && near(g[5], 0.0), "{name}: {g:?}");
+            assert!(near(g[3], d) && near(g[6], 4.0 - d), "{name}: {g:?}");
+        }
+    }
+
+    /// WR-564 (planar side walls, always on): every case whose golden row the change
+    /// moved thickens a sheet whose side walls lie in planes. Each is checked on its own
+    /// result body:
+    ///
+    /// - the shell succeeds with one body that is sound (`check_brep` level 2 reports
+    ///   nothing, a manifold solid of positive volume: [`crate::soundness`]);
+    /// - its planar walls are planes (face kind 1), where they were ruled B-spline walls:
+    ///   on a plane sheet every face, on a cylinder sheet every face but the sheet's two
+    ///   copies, on the half pipes (whose walls along the bent rims are not flat) exactly
+    ///   the four walls along their two straight edges and two end arcs;
+    /// - the volume's certified enclosure holds the closed form: a plane sheet, area times
+    ///   thickness; a cylinder sheet r, h thickened by d, `pi |(r + d)^2 - r^2| h`; a half
+    ///   pipe, a radial thickening of a region of the r 25 cylinder, `((25 + d)^2 - 25^2) / 2`
+    ///   (sign taken to make it positive) times the region's integral over z of its angular
+    ///   width, enclosed by [`half_pipe_angular_integral`].
+    #[test]
+    fn wr564_thickened_sheet_walls_are_planes_and_sound() {
+        use solidcore::mass::enclosure::VolumeSign;
+        let context = CaseContext {
+            root: repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&context).unwrap();
+        let moved = [
+            "gen0038",
+            "gen0073",
+            "gen0175",
+            "issue2611_half_pipe_arc_r12_api_shell_in",
+            "issue2611_half_pipe_arc_r12_api_shell_out",
+            "issue2611_half_pipe_arc_r20_api_shell_in",
+            "issue2611_half_pipe_arc_r20_api_shell_out",
+            "shell_boundary_exactly_two_tol",
+            "static_shell_sheet_sidewalls",
+            "static_shell_thicken_cylinder_sheet_in",
+            "static_shell_thicken_cylinder_sheet_out",
+            "static_shell_thicken_cylinder_sheet_small_in",
+            "static_shell_thicken_cylinder_sheet_small_out",
+            "static_shell_thicken_plane_sheet_attributed_out_nomerge",
+        ];
+        for name in moved {
+            let case = cases.iter().find(|case| case.name == name).unwrap();
+            let inputs = &case.inputs;
+            let d = inputs["config"]["offset_distance"].as_f64().unwrap();
+            let f = |v: &Value| v.as_f64().unwrap();
+            let closed_form = match inputs["source"]["kind"].as_str().unwrap() {
+                "plane_sheet" => {
+                    let s = &inputs["source"];
+                    let (x, y) = (&s["x_axis"], &s["y_axis"]);
+                    let (x, y) = (
+                        [f(&x[0]), f(&x[1]), f(&x[2])],
+                        [f(&y[0]), f(&y[1]), f(&y[2])],
+                    );
+                    // `Plane::new` normalises its axes, so the area below needs them unit
+                    // and orthogonal as given (every `sheet` fixture's are coordinate axes)
+                    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+                    assert!(
+                        dot(x, x) == 1.0 && dot(y, y) == 1.0 && dot(x, y) == 0.0,
+                        "{name}: {x:?} {y:?}"
+                    );
+                    let dom = &s["domain"];
+                    let area = f(&s["scale"][0])
+                        * f(&s["scale"][1])
+                        * (f(&dom[2]) - f(&dom[0]))
+                        * (f(&dom[3]) - f(&dom[1]));
+                    Some(area * d.abs())
+                }
+                "cylinder_sheet" => {
+                    let (r, h) = (f(&inputs["source"]["radius"]), f(&inputs["source"]["height"]));
+                    Some(std::f64::consts::PI * ((r + d) * (r + d) - r * r).abs() * h)
+                }
+                _ => None,
+            };
+            // a half pipe: [lo, hi] holding its volume
+            let half_pipe = HALF_PIPE_ARC_RADII
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|&(_, arc)| {
+                    let (lo, hi) = half_pipe_angular_integral(arc);
+                    let ring = ((HALF_PIPE_R + d) * (HALF_PIPE_R + d) - HALF_PIPE_R * HALF_PIPE_R).abs()
+                        / 2.0;
+                    (ring * lo, ring * hi)
+                });
+            assert!(closed_form.is_some() != half_pipe.is_some(), "{name}");
+
+            // the half pipes' refinement ends at its cell budget long before 1e-9 (below)
+            crate::soundness::start_enclosing(if closed_form.is_some() { 1e-9 } else { 1e-6 });
+            let output = Runner.run_rust(case).unwrap();
+            let found = crate::soundness::take();
+            assert!(output.deferred.is_none() && output.error.is_none(), "{name}");
+            assert_eq!(output.ints["status"], [1000], "{name}");
+            assert_eq!(output.ints["result.present"], [1], "{name}");
+            let kinds = &output.ints["result.face_kinds"];
+            let planes = kinds.iter().filter(|&&k| k == 1).count();
+            if closed_form.is_some() {
+                // a plane or cylinder sheet: one face, so the sheet's face and its offset
+                // are two faces and every other face is a wall between a line or circle
+                // and its offset in one plane: a plane
+                assert_eq!(output.ints["source.before.counts"][0], 1, "{name}");
+                assert!(kinds.len() > 2, "{name}: {kinds:?}");
+                // a plane sheet's own two faces are planes too; a cylinder sheet's are not
+                let want = if inputs["source"]["kind"] == "plane_sheet" {
+                    kinds.len()
+                } else {
+                    kinds.len() - 2
+                };
+                assert_eq!(planes, want, "{name}: {kinds:?}");
+            } else {
+                // a half pipe's walls along its two straight edges (radial planes through
+                // the z axis) and its two end arcs (rings in z = -40 and z = ze) are flat:
+                // those four are planes; the walls along the two bent rims are not
+                assert_eq!(planes, 4, "{name}: {kinds:?}");
+            }
+            assert_eq!(found.len(), 1, "{name}: {found:?}");
+            let body = &found[0];
+            assert!(body.sound(), "{name}: {}", body.line());
+            assert_eq!(body.manifold, Some(true), "{name}");
+            assert!(
+                matches!(body.volume, Some(VolumeSign::Positive(_))),
+                "{name}: {:?}",
+                body.volume
+            );
+            // the certified enclosure, asked for 1e-9 of the volume (1e-6 on the half pipes)
+            let Some(Ok(e)) = &body.enclosure else {
+                panic!("{name}: {:?}", body.enclosure);
+            };
+            eprintln!("WR564 {name}: [{:e}, {:e}]", e.lo, e.hi);
+            // measured: the plane and cylinder sheets refine to 1.5e-8 of the volume or
+            // below (the 2e-6 slab is the widest); the half pipes' refinement ends at its
+            // cell budget, near 2e-6 (R 12) and 1e-4 (R 20) of it, on main as here. On the
+            // half pipes the closed form inside the enclosure so certifies the body's
+            // volume only to 2e-4 of it: acceptance slack set from the measured R 20 width.
+            // It is enough here (argued) because a wall is replaced only where its control
+            // points lie within SM_EFF_ZERO of the new plane, so the replacement moves the
+            // volume by at most the replaced walls' area times SM_EFF_ZERO
+            let width = if closed_form.is_some() { 1e-7 } else { 2e-4 };
+            assert!(e.lo > 0.0 && e.hi - e.lo <= width * e.hi, "{name}: [{}, {}]", e.lo, e.hi);
+            if let Some(v) = closed_form {
+                assert!(e.lo <= v && v <= e.hi, "{name}: {v} not in [{}, {}]", e.lo, e.hi);
+            }
+            if let Some((lo, hi)) = half_pipe {
+                // the closed form's own enclosure, inside the body's
+                eprintln!("WR564 {name}: closed form in [{lo:e}, {hi:e}]");
+                assert!(hi - lo <= 1e-7 * hi, "{name}: [{lo}, {hi}]");
+                assert!(
+                    e.lo <= lo && hi <= e.hi,
+                    "{name}: closed form [{lo}, {hi}] not in [{}, {}]",
+                    e.lo,
+                    e.hi
+                );
+            }
+        }
+    }
+
+    /// The `issue2611` half pipes' cylinder radius: the sheet is the outer face of a half
+    /// annulus r 23..25 about z (`tests/issue_2611_thicken_arc_trim.rs`).
+    const HALF_PIPE_R: f64 = 25.0;
+
+    /// The four `issue2611` half pipes and their trim arcs' radii (swept 45 degrees).
+    const HALF_PIPE_ARC_RADII: [(&str, f64); 4] = [
+        ("issue2611_half_pipe_arc_r12_api_shell_in", 12.0),
+        ("issue2611_half_pipe_arc_r12_api_shell_out", 12.0),
+        ("issue2611_half_pipe_arc_r20_api_shell_in", 20.0),
+        ("issue2611_half_pipe_arc_r20_api_shell_out", 20.0),
+    ];
+
+    /// A certified enclosure `[lo, hi]` of the integral over z of the `issue2611` sheet's
+    /// angular width, for its trim arc of radius `arc` (`tests/issue_2611_thicken_arc_trim.rs`
+    /// builds it): the sheet is the r 25 cylinder about z over z -40..40, cut away below
+    /// y = 1 for z < 0, below the arc `y = 1 + arc - sqrt(arc^2 - z^2)` for 0 <= z <= ze =
+    /// arc sin 45deg, and wholly past ze. At height y the cylinder's angular width above it
+    /// is `w(y) = pi - 2 asin(y / 25)`, so the integral is `40 w(1)` plus that of
+    /// `f(z) = w(1 + arc - sqrt(arc^2 - z^2))` over [0, ze].
+    ///
+    /// `f` decreases on [0, ze] (the arc rises with z for z < arc and `asin` increases), so
+    /// over each of 2^20 cells `[a, b]` the integral lies in `[(b - a) f(b), (b - a) f(a)]`.
+    /// Rounding: each term carries a few ulps (the `sqrt`, `asin` and products are well
+    /// conditioned here: `y / 25 <= 0.3`), and the sums at most `n` ulps of the total
+    /// (the a-priori bound of recursive summation), so both ends are widened outward by
+    /// `(n + 64) eps` of the upper total.
+    fn half_pipe_angular_integral(arc: f64) -> (f64, f64) {
+        use std::f64::consts::PI;
+        let w = |y: f64| PI - 2.0 * (y / HALF_PIPE_R).asin();
+        let f = |z: f64| w(1.0 + arc - (arc * arc - z * z).sqrt());
+        // as `arc_end` in the generator
+        let ze = arc * 45.0_f64.to_radians().sin();
+        let n: u32 = 1 << 20;
+        let z = |i: u32| {
+            if i == n {
+                ze
+            } else {
+                ze * (f64::from(i) / f64::from(n))
+            }
+        };
+        let (mut lo, mut hi) = (0.0, 0.0);
+        let mut fa = f(0.0);
+        for i in 0..n {
+            let (a, b) = (z(i), z(i + 1));
+            let fb = f(b);
+            lo += (b - a) * fb;
+            hi += (b - a) * fa;
+            fa = fb;
+        }
+        let straight = 40.0 * w(1.0);
+        let (lo, hi) = (straight + lo, straight + hi);
+        let margin = (f64::from(n) + 64.0) * f64::EPSILON * hi;
+        (lo - margin, hi + margin)
     }
 }
