@@ -1400,8 +1400,9 @@ preference_settings! {
     /// Constraints pinned to the sketch ribbon's Constrain panel are drawn as small cells in its
     /// constraint grid, like the default six. Off: they are full-size buttons, as before.
     pinned_constraints_in_grid: bool = true, PAGE_LAYOUT;
-    /// A double-click on a design tab renames the design in the tab; off, it maximizes the window
-    /// as the rest of the title bar does, as before.
+    /// A double-click on a design tab renames the design in the tab, and one on a view's sub-tab
+    /// renames the view; off, a double-click on a tab maximizes the window as the rest of the title
+    /// bar does, and one on a sub-tab only shows the view, as before.
     tab_double_click_renames: bool = true, PAGE_LAYOUT;
     /// A design's views (Model, Sketch, Sheet, Render, Animation) are tabs inside its tab; off, the
     /// design keeps one tab and a view switcher lists them.

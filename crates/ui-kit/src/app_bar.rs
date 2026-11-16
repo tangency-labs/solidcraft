@@ -742,7 +742,7 @@ pub struct TabStrip<'a> {
     /// The tabs are part of the window's title bar: dragging the only tab, or one mostly up or
     /// down, moves the window, and a double click maximizes it (unless it renames).
     pub title_bar: bool,
-    /// A double click on the selected tab renames it.
+    /// A double click on the selected tab renames it, and one on a view's sub-tab renames the view.
     pub double_click_renames: bool,
     pub rename: Option<TabRename<'a>>,
     pub menu: &'a [TabMenuRow<'a>],
@@ -805,6 +805,9 @@ pub enum TabAction {
     /// The selected design's view at this place was chosen, or its close button was.
     SelectView(usize),
     CloseView(usize),
+    /// The selected design's view at this place was double-clicked to rename it in its sub-tab
+    /// ([`TabStrip::double_click_renames`]).
+    StartViewRename(usize),
     /// The + was clicked and the strip has no menu for it.
     NewView,
     /// The name typed into view `view` of the selected design was kept, or the edit given up.
@@ -1285,7 +1288,8 @@ fn more_button(ui: &mut egui::Ui, strip: &TabStrip, rect: Rect, hidden: usize, p
 }
 
 /// One view's sub-tab in `vr`: icon, label, the shown view's underline and close button; a click
-/// shows it, a middle click closes it, a right click opens its menu, a drag starts a move.
+/// shows it, a double-click renames it (with [`TabStrip::double_click_renames`]), a middle click
+/// closes it, a right click opens its menu, a drag starts a move.
 fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: Rect, pen: &mut Pen) {
     let t = Tokens::get();
     let h = strip.handles;
@@ -1363,6 +1367,9 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
         pen.actions.push(TabAction::CloseView(k));
     } else if resp.secondary_clicked() {
         pen.popup = Some((Popup::View(k), pos2(vr.left(), pen.below), vr, ui.ctx().cumulative_frame_nr()));
+    } else if resp.double_clicked() && strip.double_click_renames {
+        // The first click of the two showed the view; the second names it, as on a design's tab.
+        pen.actions.push(TabAction::StartViewRename(k));
     } else if resp.clicked() {
         pen.actions.push(TabAction::SelectView(k));
     }

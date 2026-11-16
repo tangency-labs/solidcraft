@@ -71,6 +71,7 @@ pub fn handle(app: &mut SolveApp, action: TabAction) -> bool {
                 documents::view_activate(app, id);
             }
         }
+        TabAction::StartViewRename(i) => return view_menu(app, i, VIEW_RENAME),
         TabAction::CloseView(i) => {
             if let Some(id) = view_id(app, i) {
                 documents::view_close(app, id);

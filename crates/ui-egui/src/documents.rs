@@ -2634,6 +2634,37 @@ mod tests {
         assert!(!renaming_tab(&h.app) && crate::scenario::rect_of("tab:rename").is_none());
     }
 
+    /// A double-click on a view's sub-tab shows the view and opens its name in the sub-tab, as on
+    /// the design's own tab: typing replaces it and Enter keeps it. With the preference off, the
+    /// two clicks only show the view.
+    #[test]
+    fn double_clicking_a_view_sub_tab_renames_the_view() {
+        for renames in [true, false] {
+            let mut h = design_open();
+            h.app.preferences.design_views_as_tabs = true;
+            h.call("ui.prefs", json!({"tab_double_click_renames": renames}));
+            let call = |h: &mut crate::scenario::Harness, command: &str, params: Value| {
+                h.call("engine.execute", json!({"command": command, "params": params}))
+            };
+            let sheet = call(&mut h, "tab.view.open", json!({"kind": "sheet", "subject": "d1"}))["result"]["id"].as_u64().unwrap();
+            assert_eq!(call(&mut h, "tab.view.activate", json!({"index": 0}))["ok"], true, "the Model view is shown");
+            h.frames(2);
+            h.step(&json!({"click": {"handle": "tab:view:1"}, "double": true})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.docs.views.active().id, sheet, "renames: {renames}: the view is shown");
+            assert_eq!(h.app.docs.view_rename.as_ref().map(|r| r.view), renames.then_some(sheet), "renames: {renames}");
+            assert_eq!(crate::scenario::rect_of("tab:rename").is_some(), renames, "renames: {renames}: the field is in the sub-tab");
+            if renames {
+                h.step(&json!({"text": "Front drawing"})).unwrap();
+                h.step(&json!({"key": "Enter"})).unwrap();
+                h.frames(2);
+            }
+            let name = h.app.docs.views.get(sheet).map(|view| view.name.clone());
+            assert_eq!(name.as_deref(), Some(if renames { "Front drawing" } else { "Sheet 1" }), "renames: {renames}");
+            assert!(h.app.docs.view_rename.is_none(), "renames: {renames}: the field closed");
+        }
+    }
+
     /// #5868: a tab's tooltip says where its design is saved (home as `~`), or that it isn't
     /// yet, with the full name above when the tab cut the name short. #11408: a saved design with
     /// changes not saved yet says so below, since a cut name hides the tab's bullet.
