@@ -10,7 +10,7 @@ use std::sync::Arc;
 use serde_json::Value;
 use solidcraft_doc::{Document, FeatureKind, Model, Visibility};
 
-use super::{opened_design, read_design};
+use super::{Sheets, opened_design, read_design};
 use crate::params::bool_;
 use crate::{Result, Session};
 
@@ -34,6 +34,8 @@ pub struct OpenSteps {
     /// so landing the design does not hash its payloads on the window thread.
     verify: bool,
     checked: Option<Option<solidcraft_io::ProvenanceReport>>,
+    /// The drawings' lines the file keeps, none for a signed file (as its model cache).
+    sheets: Sheets,
 }
 
 impl OpenSteps {
@@ -54,7 +56,7 @@ impl OpenSteps {
         let verify = bool_(p, "verify").unwrap_or(false);
         // Stamped before it is read, as `doc.open` does.
         let disk = solidcraft_io::design_lock::stamp(path);
-        let (mut doc, saved) = read_design(&mut Session::default(), path)?;
+        let (mut doc, saved, sheets) = read_design(&mut Session::default(), path)?;
         // A file with provenance must not adopt its excluded cache: the shield would then vouch
         // for geometry the signature does not cover.
         let signed = solidcraft_io::has_design_provenance(path);
@@ -81,6 +83,7 @@ impl OpenSteps {
             model: adopted.unwrap_or_else(|| under(validation)),
             verify,
             checked,
+            sheets: if signed { Sheets::new() } else { sheets },
         };
         Ok(Some(steps))
     }
@@ -136,7 +139,8 @@ impl OpenSteps {
             // `Session::opened` keeps.
             self.model.evaluate_shared(&self.doc);
         }
-        let opened = Session::with_model(self.doc, self.visibility, self.model).located(Some(&self.path));
+        let mut opened = Session::with_model(self.doc, self.visibility, self.model).located(Some(&self.path));
+        opened.drawing_scenes.filed = self.sheets;
         opened_design(s, opened, &self.path, self.read_only, self.disk, self.verify, self.checked)
     }
 }

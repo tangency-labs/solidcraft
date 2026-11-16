@@ -2484,6 +2484,12 @@ impl Session {
         Session { drawing_scenes: self.drawing_scenes.shown_copy(self.open_drawing), ..self.scratch() }
     }
 
+    /// [`Session::scratch`], keeping the drawings' lines this session's file would keep
+    /// ([`drawing_scene::sheet_lines`]): the copy a save runs on beside the window.
+    pub fn scratch_for_save(&self) -> Session {
+        Session { drawing_scenes: drawing_scene::Cache::saving(drawing_scene::sheet_lines(self)), ..self.scratch() }
+    }
+
     /// Evaluate a feature dialog's complete transaction, including the dependent timeline.
     /// `marker` restores an editor's original marker before recording its undo snapshot.
     /// The source remains untouched, including its history and recovery journal.

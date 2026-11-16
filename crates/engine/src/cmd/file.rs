@@ -894,21 +894,27 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let verify = bool_(p, "verify").unwrap_or(false);
     // Stamped before it is read: a write while it is being read is a change too.
     let disk = solidcraft_io::design_lock::stamp(path);
-    let (doc, saved) = read_design(s, path)?;
+    let (doc, saved, sheets) = read_design(s, path)?;
     // A file with provenance is evaluated from its timeline, never from a cache the signature
     // does not cover.
-    let saved = if solidcraft_io::has_design_provenance(path) { None } else { saved };
-    let opened = Session::opened_at_validating(doc, saved.as_ref(), Some(path), s.validation());
+    let (saved, sheets) = if solidcraft_io::has_design_provenance(path) { (None, Default::default()) } else { (saved, sheets) };
+    let mut opened = Session::opened_at_validating(doc, saved.as_ref(), Some(path), s.validation());
+    opened.drawing_scenes.filed = sheets;
     opened_design(s, opened, path, read_only, disk, verify, None)
 }
 
-/// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own.
-fn read_design(s: &mut Session, path: &str) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
-    let (mut doc, saved) = solidcraft_io::read_design_file(path, s.open_preview.take()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+/// Each drawing's lines a design file keeps, unread ([`solidcraft_io::read_design_file_with_sheets`]).
+type Sheets = std::collections::BTreeMap<u64, std::sync::Arc<[u8]>>;
+
+/// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own,
+/// with the model and the drawings' lines the file keeps.
+fn read_design(s: &mut Session, path: &str) -> Result<(Document, Option<solidcraft_doc::SavedModel>, Sheets)> {
+    let read = solidcraft_io::read_design_file_with_sheets(path, s.open_preview.take());
+    let (mut doc, saved, sheets) = read.map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     if let Some(stem) = default_name_for(&doc.name, path) {
         doc.name = stem;
     }
-    Ok((doc, saved))
+    Ok((doc, saved, sheets))
 }
 
 /// `doc.open` of a design: `opened`, the design read from `path` and evaluated, takes `s`'s
@@ -1594,6 +1600,7 @@ impl Session {
         let geometry = cache.then(|| saved_geometry(self, &design)).flatten();
         let preview = preview.then(|| saved_preview(self)).flatten();
         let thumbnail = cache.then(|| thumbnail::saved(self)).flatten();
+        let sheets = if cache { crate::drawing_scene::sheet_lines(self) } else { Default::default() };
         match provenance {
             Some(save) => solidcraft_io::write_design_container_with_provenance(
                 &design,
@@ -1603,9 +1610,14 @@ impl Session {
                 thumbnail.as_deref(),
                 save,
             ),
-            None => {
-                solidcraft_io::write_design_container_with_thumbnail(&design, compression, preview.as_ref(), geometry.as_ref(), thumbnail.as_deref())
-            }
+            None => solidcraft_io::write_design_container_with_sheets(
+                &design,
+                compression,
+                preview.as_ref(),
+                geometry.as_ref(),
+                thumbnail.as_deref(),
+                &sheets,
+            ),
         }
     }
 }

@@ -1007,6 +1007,96 @@ fn closing_the_drawing_keeps_its_lines_for_when_it_opens_again() {
     assert_eq!((bytes(&after.scene), s.drawing_scenes.projections), (bytes(&before.scene), 0));
 }
 
+/// What a view shows is the same in the design saved and opened in another session, evaluated again or
+/// taken from the file's model cache: its bodies' geometry keys come from what made them and where
+/// they stand, never from the session (a hash map's seed differs in every one), so lines kept in the
+/// file can be checked against the model that opens with them.
+#[test]
+fn a_views_source_key_is_the_same_in_the_design_opened_again() {
+    let folder = crate::tests::Folder::new("source-key-opened");
+    let key = |s: &Session| SourceKey::of(&crate::drawing_view::shown(s));
+    // A block, and a sheet metal plate: a sketch, its base flange and a flange bent from it.
+    for (name, mut s) in [("block", front_and_top().0), ("plate", plate())] {
+        let saved = key(&s).expect("its bodies have geometry keys");
+        for (file, cache) in [("evaluated.sc", false), ("cached.sc", true)] {
+            let path = folder.path(&format!("{name}-{file}"));
+            run(&mut s, "file.save", json!({"path": path, "cache": cache}));
+            let mut opened = Session::default();
+            run(&mut opened, "doc.open", json!({"path": path}));
+            assert_eq!(key(&opened).as_deref(), Some(&*saved), "{name} {file}");
+        }
+    }
+}
+
+/// The block's drawing saved with its lines (the front view with a dimension, as
+/// [`closing_the_drawing_keeps_its_lines_for_when_it_opens_again`] has it), and the design opened
+/// from that file in another session: the scene before the save, the opened session, the sheet and
+/// the drawing.
+fn saved_and_opened(folder: &crate::tests::Folder) -> (SheetView, Session, u64, Value) {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    top_edge(&mut s, front);
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    let before = settled(&mut s, sheet);
+    run(&mut s, "file.save", json!({"path": folder.path("block.sc")}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": folder.path("block.sc")}));
+    (before, opened, sheet, drawing)
+}
+
+/// A drawing opened from its design's file shows the lines the file kept, up to date when its model
+/// shows the same, and draws no view: only its dimensions are read again.
+#[test]
+fn a_drawing_opened_from_its_file_draws_no_view_when_its_model_shows_the_same() {
+    let folder = crate::tests::Folder::new("sheet-lines-opened");
+    let (before, mut s, sheet, drawing) = saved_and_opened(&folder);
+    run(&mut s, "drawing.open", drawing);
+    let opened = extract(&mut s, sheet).unwrap();
+    assert!(opened.stale.is_empty(), "{:?}", opened.stale);
+    assert_eq!(opened.stale_dimensions.len(), 1);
+    let after = settled(&mut s, sheet);
+    assert_eq!((bytes(&after.scene), s.drawing_scenes.projections), (bytes(&before.scene), 0));
+}
+
+/// A model changed since the save shows the file's lines out of date, and each view is drawn once.
+/// So is a view drawn otherwise since (its scale, and so its top view's): the file's lines are not
+/// its lines.
+#[test]
+fn a_drawing_opened_from_its_file_draws_what_changed_since() {
+    let folder = crate::tests::Folder::new("sheet-lines-changed");
+    let (_, mut s, sheet, drawing) = saved_and_opened(&folder);
+    let block = s.doc.features[0].id;
+    run(&mut s, "timeline.edit", json!({"feature": block.to_string(), "set": {"height": 40}}));
+    run(&mut s, "drawing.open", drawing.clone());
+    let opened = extract(&mut s, sheet).unwrap();
+    assert_eq!(opened.stale.len(), 2, "40 tall shows otherwise");
+    assert!(opened.scene.groups.iter().any(|g| g.kind == ObjectKind::View), "the file's lines show meanwhile");
+    settled(&mut s, sheet);
+    assert_eq!(s.drawing_scenes.projections, 2);
+
+    let (_, mut s, sheet, drawing) = saved_and_opened(&crate::tests::Folder::new("sheet-lines-rescaled"));
+    run(&mut s, "drawing.open", drawing);
+    let views = s.drawing("test").unwrap().views.clone();
+    let front = views.iter().find(|v| matches!(v.kind, ViewKind::Base { .. })).unwrap().id;
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:4"}}));
+    settled(&mut s, sheet);
+    assert_eq!(s.drawing_scenes.projections, 2);
+}
+
+/// A drawing not opened since its design was keeps its file's lines through a save: the copy saved
+/// opens with them, drawing nothing. The save runs on a copy of the session, as the window's does.
+#[test]
+fn a_drawing_not_opened_keeps_its_files_lines_through_a_save() {
+    let folder = crate::tests::Folder::new("sheet-lines-kept");
+    let (before, s, sheet, drawing) = saved_and_opened(&folder);
+    let mut copy = s.scratch_for_save();
+    run(&mut copy, "file.save_as", json!({"path": folder.path("again.sc")}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": folder.path("again.sc")}));
+    run(&mut opened, "drawing.open", drawing);
+    let after = settled(&mut opened, sheet);
+    assert_eq!((bytes(&after.scene), opened.drawing_scenes.projections), (bytes(&before.scene), 0));
+}
+
 /// Opened again with nothing changed, before any sheet is drawn, `drawing.status` says its views are
 /// current: the lines kept for them show what the model shows, so none waits to be drawn.
 #[test]
@@ -1930,6 +2020,7 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
             stats: None,
             boundary: None,
             frame: None,
+            centre: Vec2::ZERO,
             owners: None,
             why: None,
         }
@@ -2317,6 +2408,7 @@ fn a_views_box_is_what_it_draws() {
             stats: None,
             boundary: Some(boundary),
             frame: None,
+            centre: Vec2::ZERO,
             owners: None,
             why: None,
         };
@@ -2515,6 +2607,7 @@ fn overfill(s: &mut Session, view: u64) -> Drawn {
             stats: None,
             boundary: None,
             frame: None,
+            centre: Vec2::ZERO,
             owners: None,
             why: None,
             hatches: Vec::new(),
@@ -2858,6 +2951,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
         stats: None,
         boundary: None,
         frame: Some(ViewFrame::new(solidcore_record::Plane::XY, "1:1".parse().unwrap(), Vec2::ZERO, Vec2::ZERO).unwrap()),
+        centre: Vec2::ZERO,
         owners: None,
         why: None,
     };
@@ -2903,6 +2997,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
         stats: None,
         boundary: None,
         frame: Some(frame),
+        centre: Vec2::ZERO,
         owners: None,
         why: None,
     };
@@ -4216,6 +4311,7 @@ fn sheet_sketch_assembly_budget_names_only_the_excluded_sketch_and_can_recover()
         stats: None,
         boundary: None,
         frame: None,
+        centre: Vec2::ZERO,
         owners: None,
         why: None,
     };

@@ -18,7 +18,7 @@ const MAX_UNIQUE: usize = 100_000;
 const MAX_MANIFEST: usize = 32 << 20;
 
 /// The build that wrote a cache (recorded; earlier builds read only their own caches).
-fn build() -> String {
+pub(super) fn build() -> String {
     format!("{}/{}-{}", env!("SOLIDCRAFT_SOURCE_COMMIT"), std::env::consts::ARCH, std::env::consts::OS)
 }
 
