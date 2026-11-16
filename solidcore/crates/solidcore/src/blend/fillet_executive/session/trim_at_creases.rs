@@ -59,8 +59,8 @@ use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_executive::p3::NoRoomReason;
 use crate::blend::fillet_geom::p1::{FilletEdgeType, FilletErrorType, FilletGeomId};
 use crate::blend::fillet_overflow::{
-    creases, edge_curve, edge_on_surface, extend, in_material, make_extension_face,
-    pieces_along_edges, pieces_in_face, ExtendOutcome, Extension, Rail,
+    creases, distance_to_surface, edge_curve, edge_on_surface, extend, in_material,
+    make_extension_face, pieces_along_edges, pieces_in_face, ExtendOutcome, Extension, Rail,
 };
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::Curve;
@@ -193,6 +193,191 @@ fn drop_on(
         SolverOperation::Minimize,
     )?;
     Ok(d.success.then_some((d.parameter, d.distance)))
+}
+
+/// The point where `crease` meets `other`, found from `start` by projecting onto each in
+/// turn over each curve's natural interval (the crease's piece and the edge's trimmed
+/// curve, neither run on past its ends): `None` when a drop fails, or the projections do
+/// not settle within `tol * 1e-6` of each other in 64 steps (a meet past either curve's
+/// end, or curves too near tangent to converge).
+fn crease_meets(
+    k: &Kernel,
+    crease: &Curve,
+    other: &Curve,
+    start: Point3,
+    tol: f64,
+) -> Result<Option<Point3>> {
+    let mut x = start;
+    for _ in 0..64 {
+        let Some((t, _)) = drop_on(k, crease, &crease.natural_interval(), x)? else {
+            return Ok(None);
+        };
+        let on_crease = crease.evaluate_point(k, t)?;
+        let Some((u, _)) = drop_on(k, other, &other.natural_interval(), on_crease)? else {
+            return Ok(None);
+        };
+        let on_other = other.evaluate_point(k, u)?;
+        let step = on_other.distance(x);
+        x = on_other;
+        if on_crease.distance(on_other) <= tol * 1e-6 && step <= tol * 1e-6 {
+            return Ok(Some(on_crease));
+        }
+    }
+    Ok(None)
+}
+
+/// `e`'s curve trimmed to run from `from` to `to` (each dropped onto it), reversed when
+/// they run against its parameter, as the edge's new 3D curve with its UV trims cleared
+/// (`SmBrep::ReplaceCurve`'s edit on the notification environment).
+fn replace_edge_curve(
+    k: &Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    e: EdgeId,
+    curve: &Curve,
+    from: Point3,
+    to: Point3,
+) -> Result<()> {
+    let natural = curve.natural_interval();
+    let (Some((t0, _)), Some((t1, _))) = (
+        drop_on(k, curve, &natural, from)?,
+        drop_on(k, curve, &natural, to)?,
+    ) else {
+        // an end that does not drop onto the curve it was found on
+        return Err(SolidError::blend(
+            OP,
+            crate::error::blend::BlendFailure::StageFailed,
+        ));
+    };
+    let mut piece = curve.copy(k)?;
+    let (lo, hi) = if t0 < t1 { (t0, t1) } else { (t1, t0) };
+    let mut ivl = crate::geom::extent1d::Extent1d::from_min_max(lo, hi);
+    if ivl != piece.natural_interval() {
+        piece.trim(
+            k,
+            &mut ivl,
+            crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+        )?;
+    }
+    if t0 > t1 {
+        let old = piece.natural_interval();
+        piece.reverse_parameterization(k, &old)?;
+    }
+    edge::replace_3d_curve(b, e, Some(piece), env)?;
+    for eu in edge::edgeuses(b, e, None, None)? {
+        let _ = eu1::set_uv_trim_curve(b, eu, eu1::UvTrimCurveArg::Null, 0.0, true, None)?;
+    }
+    Ok(())
+}
+
+/// WR-717 (#17633): moves the body edge `e` of face `f`, which `crease` runs along within
+/// the trim's tolerance, onto the crease, so that the sheet's boundary is imprinted and
+/// sewn where it is instead of being drawn to the edge. Each end vertex goes to where the
+/// crease meets one of the vertex's other edges on `f`, within that edge's curve (so the
+/// edge keeps its geometry and is only trimmed to it); the edge takes the crease's piece
+/// between them. Edges at a moved vertex whose curve passes through its new point are
+/// trimmed to it; the others, and the moved edge against its other faces, have their
+/// tolerances grown to the gap they are left at. Nothing moves when either end has no
+/// such meet within `on_tol` (the imprint then draws the section to the edge, as
+/// before).
+fn move_edge_onto_crease(
+    k: &Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    f: FaceId,
+    e: EdgeId,
+    crease: &Curve,
+    tol: f64,
+    on_tol: f64,
+) -> Result<bool> {
+    let (Some(sv), Some(ev)) = edge::start_end_vertices(b, e)? else {
+        return Ok(false);
+    };
+    if sv == ev {
+        return Ok(false);
+    }
+    let mut ends = Vec::with_capacity(2);
+    for v in [sv, ev] {
+        let p = vertex::point(b, v)?;
+        let mut q = None;
+        for e2 in vertex::edges(b, v, Some(f))? {
+            if e2 == e {
+                continue;
+            }
+            let other = edge_curve(k, b, e2)?;
+            q = crease_meets(k, crease, &other, p, tol)?;
+            if q.is_some() {
+                break;
+            }
+        }
+        let Some(q) = q else {
+            return Ok(false);
+        };
+        if q.distance(p) > on_tol {
+            return Ok(false);
+        }
+        ends.push((v, p, q));
+    }
+    if ends.iter().all(|&(_, p, q)| p.distance(q) <= tol * 1e-6) {
+        return Ok(false);
+    }
+    let (Some(&(_, _, qs)), Some(&(_, _, qe))) = (ends.first(), ends.get(1)) else {
+        return Ok(false);
+    };
+    replace_edge_curve(k, b, env, e, crease, qs, qe)?;
+    // the crease lies on `f`; against the edge's other faces it is off by up to the gap
+    let curve = edge_curve(k, b, e)?;
+    let ivl = edge::interval(b, e)?;
+    let mut gap = 0.0_f64;
+    for g in edge::faces(b, e, None)? {
+        if g == f {
+            continue;
+        }
+        for i in 0..=4u32 {
+            let p = curve.evaluate_point(k, ivl.evaluate(f64::from(i) / 4.0))?;
+            gap = smos_max(gap, distance_to_surface(k, b, g, p)?);
+        }
+    }
+    edge::set_tolerance(b, e, gap, true, true)?;
+    for &(v, _, q) in &ends {
+        let this = (env.key_of)(EntityRef::Vertex(v));
+        let key_of = env.key_of;
+        let vu_ref = |vu: crate::topology::VertexuseId| key_of(EntityRef::Vertexuse(vu));
+        vertex::set_point(
+            b,
+            v,
+            q,
+            &mut *env.records,
+            &mut *env.attributes,
+            env.context.as_deref_mut(),
+            this,
+            &vu_ref,
+        )?;
+        for e2 in vertex::edges(b, v, None)? {
+            if e2 == e {
+                continue;
+            }
+            let curve = edge_curve(k, b, e2)?;
+            let Some((_, dist)) = drop_on(k, &curve, &curve.natural_interval(), q)? else {
+                continue;
+            };
+            if dist > tol * 1e-6 {
+                // an edge off `f` the vertex left: its curve stays, within the gap
+                edge::set_tolerance(b, e2, dist, true, true)?;
+                continue;
+            }
+            let (Some(a), Some(z)) = edge::start_end_vertices(b, e2)? else {
+                continue;
+            };
+            if a == z {
+                // a closed edge through the vertex: its curve already runs through it
+                continue;
+            }
+            let (pa, pz) = (vertex::point(b, a)?, vertex::point(b, z)?);
+            replace_edge_curve(k, b, env, e2, &curve, pa, pz)?;
+        }
+    }
+    Ok(true)
 }
 
 /// A refusal with its fillet error and typed reason.
@@ -856,6 +1041,8 @@ impl FilletSession<'_> {
         let body_tol = self.objects.target.tolerance();
         // WR-717: the creases that run along an edge of the face they cross
         let mut edge_creases: Vec<Curve> = Vec::new();
+        // #17633: each such crease with the face it crosses
+        let mut face_creases: Vec<(FaceId, Curve)> = Vec::new();
         // WR-717: the body's edges those creases stand for
         let mut crease_edges: Vec<EdgeId> = Vec::new();
         for s in crate::topology::brep::p1::faces(&sheet, None)? {
@@ -946,6 +1133,7 @@ impl FilletSession<'_> {
                     }
                     for c in in_face.get(first..).unwrap_or_default() {
                         edge_creases.push(c.copy(k)?);
+                        face_creases.push((f, c.copy(k)?));
                     }
                 }
                 let before = pieces.len();
@@ -1138,6 +1326,44 @@ impl FilletSession<'_> {
                         }
                     }
                     extensions.extend(made);
+                }
+            }
+        }
+
+        // #17633 (WR-717): each body edge a crease runs along moves onto the crease
+        // first, so that the sheet's boundary is imprinted on its faces and sewn where it
+        // lies, not drawn the crease's gap to the edge (a section's end on an end face
+        // drawn to the old vertex skews the end face's outline by that gap)
+        // (each edge once: a second crease along it, on its other face, is left to the
+        // imprint)
+        let mut moved: BTreeSet<EdgeId> = BTreeSet::new();
+        for (f, c) in &face_creases {
+            for e in face::p4::edges(self.objects.target, *f, None, false, None)? {
+                if moved.contains(&e) {
+                    continue;
+                }
+                // the edge's ends and midpoint all within the trim's tolerance of the
+                // crease
+                let curve = edge_curve(k, self.objects.target, e)?;
+                let ivl = edge::interval(self.objects.target, e)?;
+                let mut along = true;
+                for at in [0.0, 0.5, 1.0] {
+                    let p = curve.evaluate_point(k, ivl.evaluate(at))?;
+                    along = matches!(
+                        drop_on(k, c, &c.natural_interval(), p)?,
+                        Some((_, dist)) if dist <= tol
+                    );
+                    if !along {
+                        break;
+                    }
+                }
+                if !along {
+                    continue;
+                }
+                if self.with_target_env(k, |k, b, env, _| {
+                    move_edge_onto_crease(k, b, env, *f, e, c, tol, on_tol)
+                })? {
+                    moved.insert(e);
                 }
             }
         }
