@@ -1,7 +1,7 @@
 //! tangency-labs/solidcore#1480 (#470, WR-498): the union of two crossing pleated loft
 //! skins. Where pleat ridges cross, two vertex definitions 3e-5 to 8e-5 apart fall in one
 //! proto vertex, which `Resolve` makes two vertices of; the proto vertex's position is
-//! their mean. With `imprint_extends_edge_to_proto_vertex` (and the end trim, WR-452) an
+//! their mean. With the end extension (WR-453) and the end trim (WR-452) an
 //! intersection curve that already ended on its own vertex was continued to that mean,
 //! leaving edge ends up to 8.06e-5 off their vertices and dropping 104 short edges
 //! (992 edges, 608 vertices). The fork's ffaf4e8, folded into both end fits, sends such an
@@ -127,48 +127,23 @@ fn union_edge_ends(k: &mut Kernel) -> (usize, usize, f64, f64) {
     (r.edge_list().len(), r.vertex_list().len(), worst, ratio)
 }
 
-/// The extension flag, with `new_edge_vertex_tolerance_covers_gap` (whose wider vertex
-/// tolerances gave the extension its reach in #1480's bisect). Without ffaf4e8 the
+/// The end extension (always on), with `new_edge_vertex_tolerance_covers_gap` (whose wider
+/// vertex tolerances gave the extension its reach in #1480's bisect). Without ffaf4e8 the
 /// extended union had 992 edges, 608 vertices and an edge end 8.061e-5 off its vertex. With
 /// every `UpstreamFixes` flag on (SolidCraft's set) the union is the C++ fork's: 1096 edges,
 /// 712 vertices, worst edge end 1.206e-5.
-fn kernel(extend: bool) -> Kernel {
+fn kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
-    k.fixes.imprint_extends_edge_to_proto_vertex = extend;
     k
 }
 
 #[test]
 fn issue_1480_union_edges_end_at_their_own_vertices() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let (edges, vertices, worst, ratio) = union_edge_ends(&mut k);
     assert_eq!((edges, vertices), (1096, 712));
     assert!(worst <= 2e-5, "worst edge end {worst:e} off its vertex");
-    assert!(
-        ratio <= 0.5,
-        "an edge end {ratio} of its vertex's tolerance away"
-    );
-}
-
-#[test]
-fn issue_1480_union_without_the_extension_keeps_upstream_s_topology() {
-    let mut k = kernel(false);
-    let (edges, vertices, worst, ratio) = union_edge_ends(&mut k);
-    // The end trim alone moves no curve end here: upstream's topology. (Named
-    // `..._keeps_upstream_s_ends` until #17888.) Every end was within 7.5e-6 until
-    // WR-306's absorb became the only path (#17888): the eight 1.43e-5 closed proto edges
-    // at the ridge crossings lie inside their vertex's tolerance, so they are absorbed and
-    // the vertex pairs fitted to their edges, which moves those ends to 1.2200e-5
-    // (MEASURED). Each stays within its vertex's tolerance (3.84e-5; worst
-    // gap / tolerance 0.436), and the union passes level 2 where upstream's had 1.73 mm
-    // vertex tolerances (see the WR-469 test below).
-    assert_eq!((edges, vertices), (1096, 712));
-    assert!(
-        close(worst, 1.2200330381431168e-5),
-        "worst edge end {worst:e} off its vertex"
-    );
-    // The property the pin stands for: every end within half its vertex's tolerance.
     assert!(
         ratio <= 0.5,
         "an edge end {ratio} of its vertex's tolerance away"
@@ -306,55 +281,57 @@ const WR469_VERTICES: [(f64, f64, f64, f64, f64); 8] = [
 /// The same eight vertices since #17888, in the same order, as `(x, y, z, tolerance)` in
 /// both runs: WR-306's absorb fits each to its edges, moving it 2.0e-6 or 5.4e-6 and growing its
 /// tolerance past the flag's "on" value above, so the flag (which only grows a tolerance)
-/// leaves it as it is.
+/// leaves it as it is. With the end extension (WR-453, always on since #14246) the fitted
+/// tolerances are 2.9944e-5 / 3.3237e-5 (MEASURED; 3.8427e-5 / 3.8508e-5 without it), the
+/// positions the same.
 const WR469_VERTICES_NOW: [(f64, f64, f64, f64); 8] = [
     (
         99.59291687949045,
         57.49996447286864,
         -0.30001043114010567,
-        3.84266947496713274e-5,
+        2.9944469066305617e-5,
     ),
     (
         57.49996743305864,
         99.59291618106259,
         -0.3000121926808409,
-        3.85082488974541789e-5,
+        3.323710466021156e-5,
     ),
     (
         -57.49996447286864,
         99.59291687949046,
         -0.3000104311401014,
-        3.84266947660207844e-5,
+        2.9944469011196064e-5,
     ),
     (
         -99.59291618106259,
         57.49996743305864,
         -0.3000121926808419,
-        3.85082489097913696e-5,
+        3.323710469548465e-5,
     ),
     (
         -99.59291687949046,
         -57.49996447286864,
         -0.3000104311401034,
-        3.84266947654568502e-5,
+        2.9944469025042095e-5,
     ),
     (
         -57.49996743305864,
         -99.59291618106259,
         -0.3000121926808419,
-        3.85082489193474260e-5,
+        3.3237104694946994e-5,
     ),
     (
         57.49996447286864,
         -99.59291687949045,
         -0.30001043114010123,
-        3.84266947534099953e-5,
+        2.9944469020331108e-5,
     ),
     (
         99.59291618106259,
         -57.49996743305864,
         -0.3000121926808419,
-        3.85082489193474260e-5,
+        3.3237104694946994e-5,
     ),
 ];
 
@@ -391,9 +368,19 @@ fn wr469_union_flag_alone_grows_eight_vertex_tolerances() {
     for (name, u) in [("off", &off), ("on", &on)] {
         assert_eq!((u.faces, u.edges, u.vertices), (388, 1096, 712), "{name}");
         assert!(u.manifold, "{name}");
-        // 7.4750471556652e-6 until #17888 (above).
+        // 7.4750471556652e-6 until the end extension (WR-453) became the only path
+        // (#14246): it continues an intersection curve that stopped short of its proto
+        // vertex to it, and the worst edge end is now nearer its vertex; topology, check,
+        // vertex tolerances and volume (4.5e-15 relative) are unchanged (MEASURED). The
+        // gap is the curve's point at each interval end against its vertex, exactly as
+        // `union_with_only_the_new_edge_flag` evaluates it. That gave 7.034859535377774e-6
+        // until WR-306's absorb became the only path (#17888): the eight 1.43e-5 closed
+        // proto edges at the ridge crossings lie inside their vertex's tolerance, so they
+        // are absorbed and the vertex pairs fitted to their edges (MEASURED; 1.2200e-5
+        // without the extension). Every end stays within half its vertex's tolerance,
+        // asserted in `issue_1480_union_edges_end_at_their_own_vertices`.
         assert!(
-            close(u.worst_end_gap, 1.2200330381431168e-5),
+            close(u.worst_end_gap, 1.2009422366085169e-5),
             "{name} worst end gap {:e}",
             u.worst_end_gap
         );

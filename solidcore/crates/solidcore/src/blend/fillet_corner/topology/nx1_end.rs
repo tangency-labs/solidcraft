@@ -349,12 +349,18 @@ pub(crate) fn rolled_rail_turns_back(
 ///   straight edge, and E is a line: the rail is then the line along the edge through the
 ///   ball's contact on S, in closed form ([`planar_section`]), and it crosses E's line at R;
 /// - R lies past W along E, by more than the body's tolerance;
-/// - at W, an edge N between P and a face other than S leaves W turned back along E's
-///   arriving tangent ([`turns_back`]): P's boundary turns back at W, so P does not reach R;
+/// - at W, an open edge N with a tangent there, between P and a face other than S, leaves W,
+///   and every such N leaves it more than 45 degrees from running on along E's arriving
+///   tangent (turned back, square to it or between, [`leaves_off_e`]): P's boundary stops at
+///   W, so P does not reach R (a foot round's contact circle turning back on P, or a boss's
+///   bottom edge square to E);
 /// - R lies inside S (classified in S's interior, not on its boundary, within the body's
 ///   tolerance), and no boundary edge of S crosses the open segment from W to R, the cap
 ///   edge's place on S's plane ([`edge_clear_of_segment`]).
-/// - P is a plane, so R, on E's line, is where the rail meets P's surface.
+/// - P is a plane, or a cylinder that holds E's line from W to R (R and the segment's midpoint
+///   lie on it within the body's tolerance, as W does, so the segment is one of its rulings
+///   to that tolerance), so R, on E's line, lies on P's surface: of the rail's crossings with
+///   P's surface (two on a cylinder), the one on E's line.
 ///
 /// The cap's edge then runs from the rail's end along E's continuation on S to W, then along
 /// E: [`TurnedBack`] with E as its edge (whose continuation past W leaves W against E's own
@@ -427,14 +433,16 @@ pub(crate) fn rail_passes_side_edge_end(
     let Some(&p_face) = e_faces.iter().find(|&&f| f != s_face) else {
         return Ok(None);
     };
-    // P a plane too: R, on E's line, is then where the rail meets P's surface
-    let p_planar = match target.face(p_face)?.surface.as_ref() {
-        Some(surface) => surface.is_planar(k, tol)?.is_planar,
-        None => false,
+    // P a plane too, or a cylinder holding E's line (checked at R below): R, on E's line, is
+    // then where the rail meets P's surface
+    let p_cylinder = match target.face(p_face)?.surface.as_ref() {
+        Some(surface) if surface.is_planar(k, tol)?.is_planar => None,
+        Some(surface) => match cylinder_of(surface) {
+            Some(cylinder) => Some(cylinder),
+            None => return Ok(None),
+        },
+        None => return Ok(None),
     };
-    if !p_planar {
-        return Ok(None);
-    }
     // the rail in closed form, and E's line
     let Some(section) = planar_section(k, target, filleted, faces, offsets)? else {
         return Ok(None);
@@ -472,8 +480,14 @@ pub(crate) fn rail_passes_side_edge_end(
     if past.is_nan() || past <= tol {
         return Ok(None);
     }
-    // N at W: between P and a face other than S, turned back along E
-    let mut turned = false;
+    // a cylindrical P holds E's line from W to R: R and the segment's midpoint on it
+    if let Some(cylinder) = p_cylinder {
+        if !(cylinder.holds(r, tol) && cylinder.holds(w + (r - w) * 0.5, tol)) {
+            return Ok(None);
+        }
+    }
+    // N at W: between P and a face other than S, one at least, none running on along E
+    let mut stops = false;
     for n in crate::topology::vertex::edges(target, far, None)? {
         if n == e || edge::is_closed(target, n)? {
             continue;
@@ -485,12 +499,12 @@ pub(crate) fn rail_passes_side_edge_end(
         let Some(tn) = tangent_leaving(k, target, n, far)? else {
             continue;
         };
-        if turns_back(u, tn) {
-            turned = true;
-            break;
+        if !leaves_off_e(u, tn) {
+            return Ok(None);
         }
+        stops = true;
     }
-    if !turned {
+    if !stops {
         return Ok(None);
     }
     // R on S
@@ -757,6 +771,55 @@ fn turns_back(te: Vec3, tn: Vec3) -> bool {
 /// The cosine of the largest angle from antiparallel, 45 degrees (midway between antiparallel
 /// and square), at which N's tangent counts as turned back along E's ([`turns_back`]).
 const TURNED_BACK_COS: f64 = std::f64::consts::FRAC_1_SQRT_2;
+
+/// Not upstream (solidcore-native, [`rail_passes_side_edge_end`]): whether N's tangent `tn`
+/// leaving W does not run on along E's tangent `te` arriving there: more than 45 degrees from
+/// parallel ([`TURNED_BACK_COS`]), `te·tn < cos(45°) |te| |tn|`, so turned back, square to E
+/// or between. The counterpart of [`turns_back`], divided at the same 45 degrees: here only a
+/// margin between an N that runs on along E (P continuing past W) and one that does not; a
+/// boss's bottom edge square to E lies 45 degrees from either side of it. A zero vector, and
+/// NaN, do not leave off E: the comparison fails.
+fn leaves_off_e(te: Vec3, tn: Vec3) -> bool {
+    te.dot(tn) < TURNED_BACK_COS * te.length() * tn.length()
+}
+
+/// A cylinder's axis, through `origin` along the unit `axis`, and its `radius`
+/// ([`cylinder_of`]).
+struct Cylinder {
+    origin: Point3,
+    axis: Vec3,
+    radius: f64,
+}
+
+impl Cylinder {
+    /// Whether `p` lies on the cylinder within `tol`: its distance from the axis is the radius.
+    /// NaN does not: the comparison fails.
+    fn holds(&self, p: Point3, tol: f64) -> bool {
+        let v = p - self.origin;
+        let off = (v - self.axis * v.dot(self.axis)).length();
+        (off - self.radius).abs() <= tol
+    }
+}
+
+/// The cylinder `surface` is (a cone of no semi-angle, `Cone::is_cylinder`), unbounded along
+/// its axis; `None` for any other surface, or an axis or radius that is not a finite, nonzero
+/// one.
+fn cylinder_of(surface: &Surface) -> Option<Cylinder> {
+    let crate::surface::surface::SurfaceKind::Cone(cone) = surface.kind() else {
+        return None;
+    };
+    if !cone.is_cylinder() {
+        return None;
+    }
+    let place = cone.rev().position();
+    let axis = place.z_axis().unitize().ok()?;
+    let radius = cone.radius(0.0);
+    (radius.is_finite() && radius > 0.0).then(|| Cylinder {
+        origin: place.origin(),
+        axis,
+        radius,
+    })
+}
 
 /// Not upstream (solidcore-native, [`TurnedBack`]): the tangent of the edge `edge` leaving its
 /// end `vertex`, along its curve away from it (the curve's tangent at its start, reversed at
@@ -1305,7 +1368,7 @@ impl FilletCorner {
 
 #[cfg(test)]
 mod tests {
-    use super::{rolled_rail_turns_back, tangent_leaving, turns_back, TurnedBack};
+    use super::{leaves_off_e, rolled_rail_turns_back, tangent_leaving, turns_back, TurnedBack};
     use crate::blend::fillet_solver::p1::test_manifold_tangent_rollover;
     use crate::boolean::api_brep::boolean_union;
     use crate::curve::curve::Curve;
@@ -1478,6 +1541,34 @@ mod tests {
         let nan = Vec3::new(f64::NAN, f64::NAN, f64::NAN);
         assert!(!turns_back(te, nan));
         assert!(!turns_back(nan, at(0.0)));
+    }
+
+    /// Leaving off E is the counterpart: N's tangent more than 45 degrees from E's own, turned
+    /// back, square or between, and nothing within 45 degrees of running on along E. Every
+    /// turned-back tangent leaves off E. Zero vectors and NaN do not.
+    #[test]
+    fn leaving_off_e_needs_to_be_farther_than_45_degrees_from_running_on() {
+        let te = Vec3::new(2.0, 0.0, 0.0);
+        let at = |deg: f64| {
+            let t = deg.to_radians();
+            Vec3::new(3.0 * t.cos(), 3.0 * t.sin(), 0.0)
+        };
+        // along E, and either side of 45 degrees from it
+        assert!(!leaves_off_e(te, at(0.0)));
+        assert!(!leaves_off_e(te, at(44.9)));
+        assert!(leaves_off_e(te, at(45.1)));
+        // square, past square, straight back
+        assert!(leaves_off_e(te, at(90.0)));
+        assert!(leaves_off_e(te, at(120.0)));
+        assert!(leaves_off_e(te, at(180.0)));
+        for deg in [135.1, 150.0, 180.0] {
+            assert!(turns_back(te, at(deg)) && leaves_off_e(te, at(deg)));
+        }
+        assert!(!leaves_off_e(te, Vec3::new(0.0, 0.0, 0.0)));
+        assert!(!leaves_off_e(Vec3::new(0.0, 0.0, 0.0), at(90.0)));
+        let nan = Vec3::new(f64::NAN, f64::NAN, f64::NAN);
+        assert!(!leaves_off_e(te, nan));
+        assert!(!leaves_off_e(nan, at(90.0)));
     }
 
     /// E and N at a T tangent only within the tolerance: P = z = 0 meets S (normal at `phi`

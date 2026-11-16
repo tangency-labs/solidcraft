@@ -297,16 +297,36 @@ fn files_component(write: bool, swallow_error: bool) -> Vec<u8> {
 }
 
 fn files_component_after(write: bool, swallow_error: bool, after: &str) -> Vec<u8> {
+    files_component_calls(&[write], swallow_error, after)
+}
+
+/// An entry that makes these file calls in order (`true`: write "changed" to `secret.txt` of the
+/// grant `project`; `false`: read it), ignoring what each returns unless it is the last.
+fn files_component_calls(writes: &[bool], swallow_error: bool, after: &str) -> Vec<u8> {
     let (package, version) = API.split_once('@').unwrap();
     let template = include_str!("../fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version);
     // Keep exactly the shared WIT types, then exercise the real files interface.
     let (types, _) = template.split_once(&format!("  (type $ty-{package}/commands@{version}")).unwrap();
-    let (operation, result, parameters, arguments) = if write {
-        ("write-file", "(result (error $error))", "(param \"data\" (list u8))", "i32.const 128 i32.const 7")
-    } else {
-        ("read-file", "(result (list u8) (error $error))", "", "")
-    };
-    let core_parameters = if write { "i32 i32 i32 i32 i32 i32 i32" } else { "i32 i32 i32 i32 i32" };
+    let (mut exports, mut aliases, mut lowered, mut host, mut imports, mut calls) =
+        (String::new(), String::new(), String::new(), String::new(), String::new(), String::new());
+    for write in [false, true].into_iter().filter(|write| writes.contains(write)) {
+        let (id, operation, result, parameters, core_parameters) = if write {
+            ("write", "write-file", "(result (error $error))", "(param \"data\" (list u8))", "i32 i32 i32 i32 i32 i32 i32")
+        } else {
+            ("read", "read-file", "(result (list u8) (error $error))", "", "i32 i32 i32 i32 i32")
+        };
+        exports += &format!(
+            "(type ${id}-result {result})\n(type ${id}-type (func (param \"grant\" string) (param \"path\" string) {parameters} (result ${id}-result)))\n(export \"{operation}\" (func (type ${id}-type)))\n"
+        );
+        aliases += &format!("  (alias export $files \"{operation}\" (func ${id}))\n");
+        lowered += &format!("  (core func ${id}-core (canon lower (func ${id}) (memory $memory) (realloc $realloc)))\n");
+        host += &format!("(export \"{id}\" (func ${id}-core)) ");
+        imports += &format!("(import \"host\" \"{id}\" (func ${id} (param {core_parameters})))\n");
+    }
+    for write in writes {
+        let (id, arguments) = if *write { ("write", "i32.const 128 i32.const 7") } else { ("read", "") };
+        calls += &format!("  i32.const 64 i32.const 7 i32.const 96 i32.const 10 {arguments} i32.const 0 call ${id}\n");
+    }
     let reply =
         if swallow_error { "i32.const 0 i32.const 0 i32.store i32.const 4 i32.const 160 i32.store i32.const 8 i32.const 2 i32.store" } else { "" };
     let source = format!(
@@ -314,13 +334,9 @@ fn files_component_after(write: bool, swallow_error: bool, after: &str) -> Vec<u
   (type $files-type (instance
 (alias outer 1 $plugin-error (type $error))
 (export "plugin-error" (type (eq $error)))
-(type $file-result {result})
-(type $operation (func (param "grant" string) (param "path" string) {parameters} (result $file-result)))
-(export "{operation}" (func (type $operation)))
-  ))
+{exports}  ))
   (import "{package}/files@{version}" (instance $files (type $files-type)))
-  (alias export $files "{operation}" (func $file))
-  (core module $allocation
+{aliases}  (core module $allocation
 (memory (export "memory") 1)
 (global $heap (mut i32) i32.const 4096)
 (func (export "realloc") (param i32 i32 i32 i32) (result i32)
@@ -330,18 +346,15 @@ fn files_component_after(write: bool, swallow_error: bool, after: &str) -> Vec<u
   (core instance $allocation (instantiate $allocation))
   (alias core export $allocation "memory" (core memory $memory))
   (alias core export $allocation "realloc" (core func $realloc))
-  (core func $file (canon lower (func $file) (memory $memory) (realloc $realloc)))
-  (core instance $imports (export "file" (func $file)) (export "memory" (memory $memory)))
+{lowered}  (core instance $imports {host}(export "memory" (memory $memory)))
   (core module $main
-(import "host" "file" (func $file (param {core_parameters})))
-(import "host" "memory" (memory 1))
+{imports}(import "host" "memory" (memory 1))
 (data (i32.const 64) "project")
 (data (i32.const 96) "secret.txt")
 (data (i32.const 128) "changed")
 (data (i32.const 160) "{{}}")
 (func (export "execute") (param i32 i32 i32 i32) (result i32)
-  i32.const 64 i32.const 7 i32.const 96 i32.const 10 {arguments} i32.const 0 call $file
-  {reply}
+{calls}  {reply}
   {after}
   i32.const 0)
   )
@@ -421,6 +434,55 @@ fn staged_file_writes_publish_after_commit_and_disappear_after_traps_or_commit_f
         assert_eq!((app.commits, app.rollbacks), if succeeds { (1, 0) } else { (0, 1) });
         assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1, "staged files must be removed");
     }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn reading_a_missing_file_is_an_answer_and_the_entry_can_then_write_it() {
+    // #17899: the first run of a plugin that keeps a file of its own has no file yet.
+    use files::Host;
+    let root = std::env::temp_dir().join(format!("craft-plugin-missing-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(root.join("folder")).unwrap();
+    let mut state = state(App::default());
+    state.folders.insert(
+        "data".into(),
+        Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+    );
+    for path in ["jobs.json", "none/jobs.json"] {
+        let missing = state.read_file("data".into(), path.into()).unwrap_err();
+        assert!(
+            matches!(&missing, PluginError::InvalidInput(types::FieldFailure { field, reason }) if field == "path" && reason == "no such file"),
+            "{missing:?}"
+        );
+        assert_eq!(state.failed, None, "{path}");
+    }
+    state.write_file("data".into(), "jobs.json".into(), b"[]".to_vec()).unwrap();
+    assert_eq!(state.read_file("data".into(), "jobs.json".into()).unwrap(), b"[]");
+    assert_eq!(state.failed, None);
+    // What was refused before still ends the run: a folder is not a file, and a path outside the grant.
+    assert!(matches!(state.read_file("data".into(), "folder".into()), Err(PluginError::PermissionDenied(_))));
+    assert!(matches!(state.failed.take(), Some(HostError::PermissionDenied { .. })));
+    assert!(matches!(state.read_file("data".into(), "../jobs.json".into()), Err(PluginError::PermissionDenied(_))));
+    assert_eq!(state.failed, Some(HostError::PermissionDenied { permission: "files.read:data".into() }));
+    state.discard_writes();
+    drop(state);
+
+    // A whole entry: it reads the file that is not there, writes it, and the run publishes it.
+    let target = root.join("secret.txt");
+    let mut manifest = manifest();
+    manifest.runtime.as_mut().unwrap().permissions.files.push(FilePermission { name: "project".into(), read: true, write: true });
+    let component = files_component_calls(&[false, true], true, "");
+    let mut app = App { grants: vec![FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true }], ..Default::default() };
+    assert_eq!(run(&mut app, &manifest, &component, "make", &json!({})).unwrap(), json!({}));
+    assert_eq!(std::fs::read(&target).unwrap(), b"changed");
+    assert_eq!((app.commits, app.rollbacks), (1, 0));
+    // The same entry with no read access still fails its run, and writes nothing.
+    std::fs::remove_file(&target).unwrap();
+    let mut app = App { grants: vec![FileGrant { name: "project".into(), folder: root.clone(), read: false, write: true }], ..Default::default() };
+    let failure = run(&mut app, &manifest, &component, "make", &json!({})).unwrap_err();
+    assert_eq!(failure, HostError::PermissionDenied { permission: "files.read:project".into() });
+    assert!(!target.exists());
+    assert_eq!((app.commits, app.rollbacks), (0, 1));
     std::fs::remove_dir_all(root).unwrap();
 }
 

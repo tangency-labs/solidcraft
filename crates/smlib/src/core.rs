@@ -86,7 +86,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.boolean_vertex_by_best_crossing = true;
     f.classify_edge_interval = true;
     f.new_edge_vertex_tolerance_covers_gap = true;
-    f.imprint_extends_edge_to_proto_vertex = true;
     f.fillet_point_step_per_point = true;
     f.analytic_copy_keeps_parameterization = true;
     f.offset_extension_from_base = true;

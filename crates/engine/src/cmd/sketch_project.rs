@@ -495,6 +495,10 @@ fn add_link_unless_present(
     // The link is the edge or vertex that was picked, not whichever is nearest the picked point later.
     let edge_name = solidcraft_doc::project::resolved_edge_name(&st, &r);
     let vertex_name = solidcraft_doc::project::resolved_vertex_name(&st, &r);
+    let sketch_placements = match frame {
+        Some((author, frame)) => solidcraft_doc::project::capture_link_sketch_placements(&doc, author, &frame, &r.source)?,
+        None => Vec::new(),
+    };
     let link = sk.add_link_with_wires(kind, r.source, &r.geom, &r.wires)?;
     // The wires' exact curves, as a refresh of the link gives them (an included edge's record
     // curve): a link made now is the one its sketch would resolve.
@@ -503,6 +507,7 @@ fn add_link_unless_present(
         l.face_name = name;
         l.edge_name = edge_name;
         l.vertex_name = vertex_name;
+        l.sketch_placements = sketch_placements;
     }
     Ok(Some(link))
 }

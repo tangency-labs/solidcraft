@@ -11333,12 +11333,18 @@ fn mesh_bodies(meshes: &[crate::MeshData]) -> Result<Vec<(String, Body)>> {
 
 /// The names an Import feature gives the file's bodies, added after the bodies of `st`, in the
 /// file's order: `None` for a body it skips (a later instance of a repeated part). `body_names`
-/// are the feature's stored names (by index), else the file's own.
+/// are the feature's stored names (by index), else the file's own; the ones past the file's
+/// bodies are kept for solids the reader left out.
 pub fn import_body_names(st: &ModelState, body_names: &[String], imp: &kernel::StepImport, skip: &[u64]) -> Vec<Option<String>> {
     let skip: std::collections::HashSet<u64> = skip.iter().copied().collect();
     // Files from board and assembly tools give thousands of bodies the same name: name them
     // from a set, not by searching the bodies for every candidate (cubic).
     let mut names = BodyNames::new(st);
+    // Names kept after the file's bodies belong to solids this reader leaves out (#16857): no
+    // other body takes them.
+    for kept in body_names.iter().skip(imp.bodies.len()).map(|n| n.trim()).filter(|n| !n.is_empty()) {
+        names.taken.insert(kept.to_string());
+    }
     imp.bodies
         .iter()
         .enumerate()
@@ -12134,7 +12140,8 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
 /// (under any offset or flip of it) given as the plane where that component puts it, in `comp`'s
 /// frame (#11734). A construction plane is kept in its own component's frame, as the axes are
 /// (`construction_axis_in`), so a plane read as it is would fall in the wrong place for a feature
-/// of a component placed differently.
+/// of a component placed differently. A captured construction plane is resolved directly in its
+/// saved frame by `resolve_plane_in`, keeping assembly motion out of the sketch's definition.
 fn construction_planes_in_frame<'a>(doc: &Document, st: &ModelState, comp: u64, plane: &'a PlaneRef) -> Result<std::borrow::Cow<'a, PlaneRef>> {
     use std::borrow::Cow;
     // The component of a feature, read from the timeline without `Document::feature`'s search counter.
@@ -12143,7 +12150,7 @@ fn construction_planes_in_frame<'a>(doc: &Document, st: &ModelState, comp: u64, 
     }
     fn foreign(doc: &Document, comp: u64, plane: &PlaneRef) -> bool {
         match plane {
-            PlaneRef::Construction { feature } => owner_of(doc, feature.0).is_some_and(|owner| owner != comp),
+            PlaneRef::Construction { feature, placement } => placement.is_none() && owner_of(doc, feature.0).is_some_and(|owner| owner != comp),
             PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::ThroughPoint { base, .. } => {
                 foreign(doc, comp, base)
             }
@@ -12152,7 +12159,10 @@ fn construction_planes_in_frame<'a>(doc: &Document, st: &ModelState, comp: u64, 
     }
     fn map(doc: &Document, st: &ModelState, comp: u64, plane: &mut PlaneRef) -> Result<()> {
         match plane {
-            PlaneRef::Construction { feature } => {
+            PlaneRef::Construction { feature, placement } => {
+                if placement.is_some() {
+                    return Ok(());
+                }
                 let owner = owner_of(doc, feature.0).unwrap_or(comp);
                 if owner == comp {
                     return Ok(());
