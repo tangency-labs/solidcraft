@@ -28,7 +28,9 @@ pub use file_model::{
     DxfFile, DxfGeometryBounds, DxfSourceBlock, DxfTextRecordKind, DxfTextSource, Entity as DxfFileEntity, EntityWeight as DxfEntityWeight,
     Layer as DxfFileLayer, LayerId as DxfLayerId, StandardWeight as DxfStandardWeight,
 };
+mod length_decimal;
 mod path;
+use length_decimal::length_decimal;
 
 pub use path::{DxfPath, DxfPathStyle, DxfVertex, admit_path, path_shapes};
 
@@ -411,8 +413,7 @@ pub(super) fn admit_bulged(vertices: &[DxfVertex], closed: bool) -> Result<()> {
     Ok(())
 }
 
-// Validate before sampling; Out::num's legacy non-finite substitution is never the
-// admission policy for a new bulged polyline. All fields here retain f64 round trips.
+// Validate before sampling.
 fn sample_bulged(vertices: &[DxfVertex], closed: bool, out: &mut Vec<Vec2>) -> Result<()> {
     if !(2..=path::MAX_PATH_ITEMS).contains(&vertices.len()) {
         return Err(IoError::Invalid("bulged polyline requires 2..=200000 vertices".into()));
@@ -468,7 +469,7 @@ impl std::fmt::Write for BoundedDxfString<'_> {
     }
 }
 
-/// The existing twelve-decimal DXF spelling, shared by output and owned admission.
+/// The dimensionless DXF spelling: twelve decimals, trimmed, never "-0.0" (lengths: `length_decimal`).
 fn number_value(value: f64) -> std::result::Result<String, &'static str> {
     let mut text = String::new();
     // A finite f64 in fixed notation needs at most 323 bytes, including sign.
@@ -494,17 +495,16 @@ struct Out {
     s: String,
     next: u64,
     limit: Option<usize>,
-    failure: Option<&'static str>,
-    legacy_numbers: bool,
+    failure: Option<std::borrow::Cow<'static, str>>,
 }
 
 impl Out {
     fn new(next: u64, limit: Option<usize>) -> Self {
-        Self { s: String::new(), next, limit, failure: None, legacy_numbers: false }
+        Self { s: String::new(), next, limit, failure: None }
     }
     fn check(&self) -> Result<()> {
-        match self.failure {
-            Some(message) => Err(IoError::Invalid(message.into())),
+        match &self.failure {
+            Some(message) => Err(IoError::Invalid(message.to_string())),
             None => Ok(()),
         }
     }
@@ -515,50 +515,48 @@ impl Out {
         if let Some(limit) = self.limit {
             let mut sink = BoundedDxfString { text: &mut self.s, limit, failure: None };
             if write!(sink, "{c:>3}\n{v}\n").is_err() {
-                self.failure = Some(sink.failure.unwrap_or("DXF file formatting failed"));
+                self.failure = Some(sink.failure.unwrap_or("DXF file formatting failed").into());
             }
         } else {
             let _ = write!(self.s, "{c:>3}\n{v}\n");
         }
     }
-    /// A real number: up to twelve decimals, at least one.
+    /// A dimensionless number (an angle, ratio, bulge, knot, weight or normal): up to twelve
+    /// decimals, at least one. A non-finite number is refused, never written.
     fn num(&mut self, c: i32, v: f64) {
         if self.failure.is_some() {
             return;
         }
-        if self.limit.is_some() && !self.legacy_numbers && !v.is_finite() {
-            self.failure = Some("DXF file contains a non-finite output number");
+        if !v.is_finite() {
+            self.failure = Some("DXF file contains a non-finite output number".into());
             return;
         }
-        match number_value(if v.is_finite() { v } else { 0.0 }) {
+        match number_value(v) {
             Ok(text) => self.code(c, text),
-            Err(error) => self.failure = Some(error),
+            Err(error) => self.failure = Some(error.into()),
         }
     }
-    /// New bulged-polyline fields retain their admitted f64 values. Keep the legacy
-    /// twelve-decimal formatter above unchanged for every pre-existing entity.
-    fn precise_num(&mut self, c: i32, value: f64) {
-        if value == 0.0 {
-            self.code(c, "0.0");
-        } else {
-            self.code(c, value);
+    /// A length (a coordinate, radius, height, extent or dash): on the 1e-9 grid of the file's
+    /// unit. A non-finite length, or one beyond ±9000000, is refused with its value.
+    fn len(&mut self, c: i32, v: f64) {
+        if self.failure.is_some() {
+            return;
         }
-    }
-    fn precise_point(&mut self, c: i32, point: Vec2) {
-        self.precise_num(c, point.x);
-        self.precise_num(c + 10, point.y);
-        self.precise_num(c + 20, 0.0);
+        match length_decimal(v).and_then(|decimal| decimal.as_str().map(|text| self.code(c, text))) {
+            Ok(()) => {}
+            Err(error) => self.failure = Some(format!("{error} (the value is {v})").into()),
+        }
     }
     /// A point in the plane at height 0: codes `c`, `c + 10`, `c + 20`.
     fn point(&mut self, c: i32, p: Vec2) {
-        self.num(c, p.x);
-        self.num(c + 10, p.y);
-        self.num(c + 20, 0.0);
+        self.len(c, p.x);
+        self.len(c + 10, p.y);
+        self.len(c + 20, 0.0);
     }
     /// A 2D point: codes `c` and `c + 10`.
     fn point2(&mut self, c: i32, p: Vec2) {
-        self.num(c, p.x);
-        self.num(c + 10, p.y);
+        self.len(c, p.x);
+        self.len(c + 10, p.y);
     }
     fn handle(&mut self) -> String {
         let h = format!("{:X}", self.next);
@@ -566,7 +564,7 @@ impl Out {
             match self.next.checked_add(1) {
                 Some(next) => self.next = next,
                 None => {
-                    self.failure.get_or_insert("DXF file handle space exhausted");
+                    self.failure.get_or_insert("DXF file handle space exhausted".into());
                 }
             }
         } else {
@@ -616,12 +614,12 @@ impl Out {
         self.code(4, "");
         self.code(6, "");
         for code in [40, 41, 42, 43] {
-            self.num(code, 0.0);
+            self.len(code, 0.0);
         }
-        self.num(44, SHEET.x);
-        self.num(45, SHEET.y);
+        self.len(44, SHEET.x);
+        self.len(45, SHEET.y);
         for code in [46, 47, 48, 49, 140, 141] {
-            self.num(code, 0.0);
+            self.len(code, 0.0);
         }
         self.num(142, 1.0);
         self.num(143, 1.0);
@@ -645,7 +643,7 @@ impl Out {
         let (lo, hi) = if l.paper { (Vec2::ZERO, Vec2::ZERO) } else { extents };
         self.point(14, lo);
         self.point(15, hi);
-        self.num(146, 0.0);
+        self.len(146, 0.0);
         self.point(13, Vec2::ZERO);
         self.point(16, Vec2::X);
         self.point(17, Vec2::Y);
@@ -790,7 +788,7 @@ pub fn write_dxf_drawing_units(layers: &[DxfLayer], entities: &[DxfEntity], insu
     }
     let layers = layer_list.iter().map(|l| LayerView { name: &l.name, color: l.color, linetype: l.linetype, weight: None });
     let entities = entities.iter().map(|e| Ok(EntityView { layer: &e.layer, shape: &e.shape, weight: None, source_text: None }));
-    write_drawing_views(layers, entities, None, extents.unwrap_or((Vec2::ZERO, Vec2::ZERO)), true, insunits)
+    write_drawing_views(layers, entities, None, extents.unwrap_or((Vec2::ZERO, Vec2::ZERO)), insunits)
 }
 
 // These limits bound the ordinary strict owned-file entry point. Explicit
@@ -818,7 +816,8 @@ struct EntityView<'a> {
 /// DxfFile::new() keep strict finite/encoded-geometry admission,1,024 layers,
 /// 1,000,000 entities/geometry values and 64 MiB output. Nothing relaxes those caps.
 /// Explicit flat-pattern/current-view constructors instead retain their immutable
-/// checked producer contracts and legacy accepted geometry/numeric/text spelling.
+/// checked producer contracts and legacy accepted geometry and text. Every file
+/// writes numbers by one rule, and none writes a non-finite number.
 /// AlignedText needs write_dxf_file_with_text_bounds and actual caller metrics.
 /// Extents remain the existing sampled/control-polygon approximation.
 pub fn write_dxf_file(file: &DxfFile<DxfShape>) -> Result<String> {
@@ -903,7 +902,7 @@ where
             source_text: entity.source_text(),
         })
     });
-    write_drawing_views(layers, entities, Some(bytes), extents.unwrap_or((Vec2::ZERO, Vec2::ZERO)), false, 4)
+    write_drawing_views(layers, entities, Some(bytes), extents.unwrap_or((Vec2::ZERO, Vec2::ZERO)), 4)
 }
 
 fn shape_preflight(shape: &DxfShape) -> Result<()> {
@@ -1006,22 +1005,68 @@ fn shape_work(shape: &DxfShape) -> Result<usize> {
     }
 }
 
+/// What a reader gets back from a length as `Out::len` writes it. Path admission uses it too, so
+/// both certify exactly what is written.
+fn written_length(value: f64) -> std::result::Result<f64, &'static str> {
+    let decimal = length_decimal(value).map_err(|error| error.message())?;
+    decimal.as_str().map_err(|error| error.message())?.parse::<f64>().map_err(|_| "DXF length cannot be read back")
+}
+
+/// What a reader gets back from a dimensionless number as `Out::num` writes it.
+fn written_number(value: f64) -> std::result::Result<f64, &'static str> {
+    number_value(value)?.parse::<f64>().ok().filter(|value| value.is_finite()).ok_or("DXF number cannot be read back")
+}
+
+fn emitted_length(value: f64) -> Result<f64> {
+    written_length(value).map_err(|message| IoError::Invalid(format!("{message} (the value is {value})")))
+}
+
 fn emitted_number(value: f64) -> Result<f64> {
-    let text = number_value(value).map_err(|message| IoError::Invalid(message.into()))?;
-    text.parse::<f64>()
-        .ok()
-        .filter(|value| value.is_finite())
-        .ok_or_else(|| IoError::Invalid("DXF number cannot be represented by the existing spelling".into()))
+    written_number(value).map_err(|message| IoError::Invalid(message.into()))
 }
 
 fn emitted_point(point: Vec2) -> Result<Vec2> {
-    Ok(Vec2::new(emitted_number(point.x)?, emitted_number(point.y)?))
+    Ok(Vec2::new(emitted_length(point.x)?, emitted_length(point.y)?))
 }
 
-// This is admission to the existing writer, not a new number-format policy.
+fn collapse() -> IoError {
+    IoError::Invalid("DXF geometry loses a required positive value or distinct point/knot span as written".into())
+}
+
+/// An LWPOLYLINE's vertices as written: distinct neighbours stay distinct, and a non-zero bulge is
+/// not written as zero. `skipped` is the bulge magnitude at or below which the writer leaves the
+/// bulge out.
+fn vertex_emission(vertices: impl Iterator<Item = (Vec2, f64)>, closed: bool, skipped: f64) -> Result<()> {
+    let mut first = None;
+    let mut previous = None;
+    for (point, bulge) in vertices {
+        let emitted = emitted_point(point)?;
+        if let Some((old, last)) = previous
+            && old != point
+            && last == emitted
+        {
+            return Err(collapse());
+        }
+        first.get_or_insert((point, emitted));
+        previous = Some((point, emitted));
+        if bulge != 0.0 && (bulge.abs() <= skipped || emitted_number(bulge)? == 0.0) {
+            return Err(collapse());
+        }
+    }
+    if closed
+        && let (Some((a, encoded_a)), Some((b, encoded_b))) = (first, previous)
+        && a != b
+        && encoded_a == encoded_b
+    {
+        return Err(collapse());
+    }
+    Ok(())
+}
+
+// The geometry a file holds must survive its own number rule: lengths on the grid, dimensionless
+// values at twelve decimals.
 fn shape_emission_preflight(shape: &DxfShape) -> Result<()> {
-    let collapse = || IoError::Invalid("DXF geometry loses a required positive value or distinct point/knot span at twelve decimals".into());
-    let positive = |value| -> Result<()> { if emitted_number(value)? > 0.0 { Ok(()) } else { Err(collapse()) } };
+    let positive = |written: f64| if written > 0.0 { Ok(()) } else { Err(collapse()) };
     match shape {
         DxfShape::Insert { .. }
         | DxfShape::SourceSpline { .. }
@@ -1030,33 +1075,9 @@ fn shape_emission_preflight(shape: &DxfShape) -> Result<()> {
         | DxfShape::SourceOmitted { .. } => {
             return Err(IoError::Invalid("not supported yet: source DXF records require their SketchImport projection".into()));
         }
-        // Fields use X1's round-trip spelling, not the legacy12decimal rule.
-        DxfShape::BulgedPolyline { .. } => {}
-        DxfShape::LwPolyline { verts, closed } => {
-            let mut first = None;
-            let mut previous = None;
-            for (point, bulge) in verts {
-                let emitted = emitted_point(*point)?;
-                if let Some((old, last)) = previous
-                    && old != *point
-                    && last == emitted
-                {
-                    return Err(collapse());
-                }
-                first.get_or_insert((*point, emitted));
-                previous = Some((*point, emitted));
-                if *bulge != 0.0 && (bulge.abs() <= 1e-12 || emitted_number(*bulge)? == 0.0) {
-                    return Err(collapse());
-                }
-            }
-            if *closed
-                && let (Some((a, encoded_a)), Some((b, encoded_b))) = (first, previous)
-                && a != b
-                && encoded_a == encoded_b
-            {
-                return Err(collapse());
-            }
-        }
+        DxfShape::BulgedPolyline { vertices, closed } => vertex_emission(vertices.iter().map(|v| (v.at, v.bulge)), *closed, 0.0)?,
+        // The legacy polyline leaves out a bulge of 1e-12 or less.
+        DxfShape::LwPolyline { verts, closed } => vertex_emission(verts.iter().copied(), *closed, 1e-12)?,
         DxfShape::Point(point) => {
             emitted_point(*point)?;
         }
@@ -1082,15 +1103,15 @@ fn shape_emission_preflight(shape: &DxfShape) -> Result<()> {
                 return Err(collapse());
             }
         }
-        DxfShape::Circle { r, .. } => positive(*r)?,
+        DxfShape::Circle { r, .. } => positive(emitted_length(*r)?)?,
         DxfShape::Arc { r, a0, a1, .. } => {
-            positive(*r)?;
+            positive(emitted_length(*r)?)?;
             if !solidcore_ops::export_geometry::distinct_degrees(emitted_number(*a0)?, emitted_number(*a1)?) {
                 return Err(collapse());
             }
         }
         DxfShape::Ellipse { major, ratio, t0, t1, .. } => {
-            positive(*ratio)?;
+            positive(emitted_number(*ratio)?)?;
             if emitted_point(*major)? == Vec2::ZERO || emitted_number(*t0)? == emitted_number(*t1)? {
                 return Err(collapse());
             }
@@ -1118,10 +1139,10 @@ fn shape_emission_preflight(shape: &DxfShape) -> Result<()> {
                 return Err(collapse());
             }
             for weight in weights.iter().flatten() {
-                positive(*weight)?;
+                positive(emitted_number(*weight)?)?;
             }
         }
-        DxfShape::Text { height, .. } | DxfShape::AlignedText { height, .. } => positive(*height)?,
+        DxfShape::Text { height, .. } | DxfShape::AlignedText { height, .. } => positive(emitted_length(*height)?)?,
     }
     Ok(())
 }
@@ -1143,26 +1164,15 @@ fn first_text_anchor(source: Option<&DxfTextSource>, at: Vec2) -> Result<Vec2> {
     }
 }
 
-fn write_drawing_views<'a, L, E>(
-    layers: L,
-    entities: E,
-    limit: Option<usize>,
-    extents: (Vec2, Vec2),
-    legacy_numbers: bool,
-    insunits: i32,
-) -> Result<String>
+fn write_drawing_views<'a, L, E>(layers: L, entities: E, limit: Option<usize>, extents: (Vec2, Vec2), insunits: i32) -> Result<String>
 where
     L: Iterator<Item = LayerView<'a>> + Clone + ExactSizeIterator,
     E: Iterator<Item = Result<EntityView<'a>>> + Clone,
 {
-    let precise_bounds = entities
-        .clone()
-        .try_fold(false, |found, entity| -> Result<bool> { Ok(found || matches!(entity?.shape, DxfShape::BulgedPolyline { .. })) })?;
     let (lo, hi) = extents;
 
     // Everything but the header, which needs the handle seed.
     let mut o = Out::new(0x20, limit);
-    o.legacy_numbers = legacy_numbers;
     let (model, paper) = (o.handle(), o.handle());
     let root = o.handle();
     // The objects the tables point at: the layout dictionary and the layout of each space, the
@@ -1204,13 +1214,11 @@ where
     o.num(16, 0.0);
     o.num(26, 0.0);
     o.num(36, 1.0);
-    o.num(17, 0.0);
-    o.num(27, 0.0);
-    o.num(37, 0.0);
+    o.point(17, Vec2::ZERO);
     const ASPECT: f64 = 1.5;
     let size = hi - lo;
     let height = (size.y.max(size.x / ASPECT) * 1.1).max(1.0);
-    o.num(40, if height.is_finite() { height } else { 1.0 });
+    o.len(40, if height.is_finite() { height } else { 1.0 });
     o.num(41, ASPECT);
     o.num(42, 50.0);
     o.num(43, 0.0);
@@ -1240,9 +1248,9 @@ where
         o.code(3, description);
         o.code(72, 65);
         o.code(73, pattern.len());
-        o.num(40, pattern.iter().map(|d| d.abs()).sum());
+        o.len(40, pattern.iter().map(|d| d.abs()).sum());
         for d in pattern {
-            o.num(49, *d);
+            o.len(49, *d);
             o.code(74, 0);
         }
     }
@@ -1265,11 +1273,11 @@ where
     o.record("STYLE", "AcDbTextStyleTableRecord", &t);
     o.code(2, "Standard");
     o.code(70, 0);
-    o.num(40, 0.0);
+    o.len(40, 0.0);
     o.num(41, 1.0);
     o.num(50, 0.0);
     o.code(71, 0);
-    o.num(42, 2.5);
+    o.len(42, 2.5);
     o.code(3, "txt");
     o.code(4, "");
     o.code(0, "ENDTAB");
@@ -1352,8 +1360,7 @@ where
                 // Autodesk DXF reference: bit 1 closed, bit 128 (PLINEGEN) continues dash pattern.
                 o.code(70, 128 + if *closed { 1 } else { 0 });
                 for (p, b) in verts {
-                    o.num(10, p.x);
-                    o.num(20, p.y);
+                    o.point2(10, *p);
                     if b.abs() > 1e-12 {
                         o.num(42, *b);
                     }
@@ -1371,9 +1378,8 @@ where
                 o.code(90, vertices.len());
                 o.code(70, 128 + i32::from(*closed));
                 for vertex in vertices {
-                    o.precise_num(10, vertex.at.x);
-                    o.precise_num(20, vertex.at.y);
-                    o.precise_num(42, vertex.bulge);
+                    o.point2(10, vertex.at);
+                    o.num(42, vertex.bulge);
                 }
             }
             DxfShape::AlignedText { at, height, angle_deg, text, horizontal, vertical } => {
@@ -1382,7 +1388,7 @@ where
                 // variant in sample(), before writing any final drawing.
                 o.code(100, "AcDbText");
                 o.point(10, first_text_anchor(e.source_text, *at)?);
-                o.num(40, *height);
+                o.len(40, *height);
                 let value =
                     text_value(text).map_err(|error| IoError::Invalid(format!("DXF TEXT entity {} on layer {:?}: {error}", index + 1, e.layer)))?;
                 o.code(1, value);
@@ -1407,8 +1413,7 @@ where
                 // Autodesk DXF reference: bit 128 (PLINEGEN) continues the dash pattern.
                 o.code(70, 128);
                 for p in points {
-                    o.num(10, p.x);
-                    o.num(20, p.y);
+                    o.point2(10, *p);
                 }
             }
             DxfShape::Line(a, b) => {
@@ -1419,12 +1424,12 @@ where
             DxfShape::Circle { c, r } => {
                 o.code(100, "AcDbCircle");
                 o.point(10, *c);
-                o.num(40, *r);
+                o.len(40, *r);
             }
             DxfShape::Arc { c, r, a0, a1 } => {
                 o.code(100, "AcDbCircle");
                 o.point(10, *c);
-                o.num(40, *r);
+                o.len(40, *r);
                 o.code(100, "AcDbArc");
                 o.num(50, *a0);
                 o.num(51, *a1);
@@ -1465,7 +1470,7 @@ where
             DxfShape::Text { at, height, angle_deg, text } => {
                 o.code(100, "AcDbText");
                 o.point(10, first_text_anchor(e.source_text, *at)?);
-                o.num(40, *height);
+                o.len(40, *height);
                 let value =
                     text_value(text).map_err(|error| IoError::Invalid(format!("DXF TEXT entity {} on layer {:?}: {error}", index + 1, e.layer)))?;
                 o.code(1, value);
@@ -1478,7 +1483,7 @@ where
                 o.code(73, 0);
             }
         }
-        o.check()?;
+        o.check().map_err(|error| IoError::Invalid(format!("DXF {kind} entity {} on layer {:?}: {error}", index + 1, e.layer)))?;
     }
     o.code(0, "ENDSEC");
 
@@ -1534,7 +1539,6 @@ where
 
     o.check()?;
     let mut head = Out::new(0, limit);
-    head.legacy_numbers = legacy_numbers;
     head.code(0, "SECTION");
     head.code(2, "HEADER");
     head.code(9, "$ACADVER");
@@ -1550,17 +1554,9 @@ where
     head.code(9, "$MEASUREMENT");
     head.code(70, if insunits == 1 || insunits == 2 { 0 } else { 1 });
     head.code(9, "$EXTMIN");
-    if precise_bounds {
-        head.precise_point(10, lo);
-    } else {
-        head.point(10, lo);
-    }
+    head.point(10, lo);
     head.code(9, "$EXTMAX");
-    if precise_bounds {
-        head.precise_point(10, hi);
-    } else {
-        head.point(10, hi);
-    }
+    head.point(10, hi);
     head.code(0, "ENDSEC");
     head.check()?;
     if let Some(limit) = limit {
@@ -1620,7 +1616,7 @@ mod tests {
 
     #[test]
     fn bulged_literal_groups_keep_signed_outgoing_values_and_closed_flag() {
-        for (bulge, spelling) in [(1.0, "1"), (-1.0, "-1")] {
+        for (bulge, spelling) in [(1.0, "1.0"), (-1.0, "-1.0")] {
             let mut file = DxfFile::new().unwrap();
             file.push(
                 file.default_layer(),
@@ -1636,9 +1632,14 @@ mod tests {
             let record = records.first().unwrap();
             assert_eq!(record.0, "LWPOLYLINE");
             assert_eq!((field(&record.1, 90), field(&record.1, 70)), ("2", "128"));
-            for (code, expected) in
-                [(90, vec!["2"]), (70, vec!["128"]), (10, vec!["-1", "1"]), (20, vec!["0.0", "0.0"]), (42, vec![spelling, "0.0"]), (370, vec!["-1"])]
-            {
+            for (code, expected) in [
+                (90, vec!["2"]),
+                (70, vec!["128"]),
+                (10, vec!["-1.0", "1.0"]),
+                (20, vec!["0.0", "0.0"]),
+                (42, vec![spelling, "0.0"]),
+                (370, vec!["-1"]),
+            ] {
                 assert_eq!(record.1.iter().filter(|(field, _)| *field == code).map(|(_, value)| value.as_str()).collect::<Vec<_>>(), expected);
             }
         }
@@ -1656,23 +1657,24 @@ mod tests {
         let min = groups.iter().position(|(code, value)| *code == 9 && value == "$EXTMIN").unwrap();
         let max = groups.iter().position(|(code, value)| *code == 9 && value == "$EXTMAX").unwrap();
         // X1 directed-cardinal sampling, not inflated supporting-circle boxes.
-        assert_eq!(&groups[min + 1..min + 4], &[(10, "-1".into()), (20, "-1".into()), (30, "0.0".into())]);
-        assert_eq!(&groups[max + 1..max + 4], &[(10, "1".into()), (20, "1".into()), (30, "0.0".into())]);
+        assert_eq!(&groups[min + 1..min + 4], &[(10, "-1.0".into()), (20, "-1.0".into()), (30, "0.0".into())]);
+        assert_eq!(&groups[max + 1..max + 4], &[(10, "1.0".into()), (20, "1.0".into()), (30, "0.0".into())]);
     }
 
     #[test]
-    fn bulged_zero_line_and_tiny_arcs_do_not_inherit_the_interval_refusal_domain() {
-        for (vertices, expected_x, expected_bulge) in [
-            (vec![DxfVertex { at: Vec2::ZERO, bulge: 0.0 }; 2], [0.0, 0.0], [0.0, 0.0]),
-            (vec![DxfVertex { at: Vec2::ZERO, bulge: 1e-200 }, DxfVertex { at: Vec2::new(1e-200, 0.0), bulge: 0.0 }], [0.0, 1e-200], [1e-200, 0.0]),
-        ] {
-            let mut file = DxfFile::new().unwrap();
-            file.push(file.default_layer(), DxfShape::BulgedPolyline { vertices, closed: false }, None).unwrap();
-            let output = write_dxf_file(&file).unwrap();
-            assert_eq!(field(&entities(&output)[0].1, 90), "2");
-            assert_eq!(values(&entities(&output)[0], 10), expected_x);
-            assert_eq!(values(&entities(&output)[0], 42), expected_bulge);
-        }
+    fn bulged_zero_line_is_written_and_a_tiny_arc_lost_on_the_grid_is_refused() {
+        let mut file = DxfFile::new().unwrap();
+        let repeated = vec![DxfVertex { at: Vec2::ZERO, bulge: 0.0 }; 2];
+        file.push(file.default_layer(), DxfShape::BulgedPolyline { vertices: repeated, closed: false }, None).unwrap();
+        let output = write_dxf_file(&file).unwrap();
+        assert_eq!(field(&entities(&output)[0].1, 90), "2");
+        assert_eq!(values(&entities(&output)[0], 10), [0.0, 0.0]);
+        assert_eq!(values(&entities(&output)[0], 42), [0.0, 0.0]);
+        // Two distinct vertices 1e-200 apart, and a bulge of 1e-200, are both written as zero.
+        let tiny = vec![DxfVertex { at: Vec2::ZERO, bulge: 1e-200 }, DxfVertex { at: Vec2::new(1e-200, 0.0), bulge: 0.0 }];
+        let mut file = DxfFile::new().unwrap();
+        file.push(file.default_layer(), DxfShape::BulgedPolyline { vertices: tiny, closed: false }, None).unwrap();
+        assert!(write_dxf_file(&file).unwrap_err().to_string().contains("as written"));
         let invalid = DxfShape::BulgedPolyline {
             vertices: vec![DxfVertex { at: Vec2::ZERO, bulge: 0.0 }, DxfVertex { at: Vec2::X, bulge: 0.0 }, DxfVertex { at: Vec2::ZERO, bulge: 0.0 }],
             closed: true,
@@ -1715,7 +1717,7 @@ mod tests {
     }
 
     #[test]
-    fn bulged_polyline_fields_and_bounds_keep_small_finite_coordinates() {
+    fn bulged_polyline_fields_and_bounds_are_written_on_the_length_grid() {
         let shape = DxfShape::BulgedPolyline {
             vertices: vec![DxfVertex { at: Vec2::new(1e-14, -0.0), bulge: 0.0 }, DxfVertex { at: Vec2::new(2e-14, 1e-14), bulge: 0.0 }],
             closed: false,
@@ -1724,15 +1726,15 @@ mod tests {
         let e = entities(&text);
         assert_eq!(e.len(), 1);
         assert_eq!(e[0].0, "LWPOLYLINE");
-        assert_eq!(values(&e[0], 10), vec![1e-14, 2e-14]);
-        assert_eq!(values(&e[0], 20), vec![0.0, 1e-14]);
+        assert_eq!(values(&e[0], 10), vec![0.0, 0.0]);
+        assert_eq!(values(&e[0], 20), vec![0.0, 0.0]);
         assert!(!values(&e[0], 20)[0].is_sign_negative());
         assert_eq!(values(&e[0], 42), vec![0.0, 0.0]);
         let pairs = pairs(&text);
         let min = pairs.iter().position(|p| *p == (9, "$EXTMIN".into())).unwrap();
         let max = pairs.iter().position(|p| *p == (9, "$EXTMAX".into())).unwrap();
-        assert_eq!(pairs[min + 1].1.parse::<f64>().unwrap(), 1e-14);
-        assert_eq!(pairs[max + 1].1.parse::<f64>().unwrap(), 2e-14);
+        assert_eq!(pairs[min + 1].1, "0.0");
+        assert_eq!(pairs[max + 1].1, "0.0");
     }
 
     #[test]
@@ -2827,8 +2829,10 @@ mod tests {
     fn owned_geometry_refuses_literal_positive_values_rounded_to_zero() {
         assert_eq!(number_value(1e-20).unwrap(), "0.0");
         let mut representable = DxfFile::new().unwrap();
-        representable.push(representable.default_layer(), DxfShape::Circle { c: Vec2::ZERO, r: 1e-12 }, None).unwrap();
+        representable.push(representable.default_layer(), DxfShape::Circle { c: Vec2::ZERO, r: 1e-9 }, None).unwrap();
         assert_eq!(number_value(1e-12).unwrap(), "0.000000000001");
+        assert_eq!(written_length(1e-9), Ok(1e-9));
+        assert_eq!(written_length(1e-12), Ok(0.0));
         assert!(write_dxf_file(&representable).is_ok());
         for shape in [
             DxfShape::Circle { c: Vec2::ZERO, r: 1e-20 },
@@ -2839,7 +2843,7 @@ mod tests {
         ] {
             let mut file = DxfFile::new().unwrap();
             file.push(file.default_layer(), shape.clone(), None).unwrap();
-            assert!(write_dxf_file(&file).unwrap_err().to_string().contains("twelve decimals"));
+            assert!(write_dxf_file(&file).unwrap_err().to_string().contains("as written"));
             // This stricter admission is exclusive to the owned API.
             assert!(write_dxf_drawing_units(&[], &[DxfEntity { layer: "0".into(), shape }], 4).is_ok());
         }
@@ -2863,16 +2867,16 @@ mod tests {
         ] {
             let mut file = DxfFile::new().unwrap();
             file.push(file.default_layer(), shape, None).unwrap();
-            assert!(write_dxf_file(&file).unwrap_err().to_string().contains("twelve decimals"));
+            assert!(write_dxf_file(&file).unwrap_err().to_string().contains("as written"));
         }
     }
 
     #[test]
-    fn legacy_layer_deduplication_and_permissive_numbers_stay_unchanged() {
+    fn legacy_layer_deduplication_stays_unchanged() {
+        // A non-finite number is refused on this route too: see
+        // a_length_outside_the_writable_range_or_not_finite_is_refused_naming_its_entity.
         let layers = [DxfLayer::new("0", 1), DxfLayer::new("中", 3), DxfLayer::new("中", 5), DxfLayer::new("cut", 1), DxfLayer::new("CUT", 2)];
-        let output =
-            write_dxf_drawing_units(&layers, &[DxfEntity { layer: " \t".into(), shape: DxfShape::Line(Vec2::new(f64::NAN, 0.0), Vec2::X) }], 4)
-                .unwrap();
+        let output = write_dxf_drawing_units(&layers, &[DxfEntity { layer: " \t".into(), shape: DxfShape::Line(Vec2::ZERO, Vec2::X) }], 4).unwrap();
         let p = pairs(&output);
         let layers = table_records(&p, "LAYER");
         assert_eq!(layers.iter().map(|r| field(r, 2)).collect::<Vec<_>>(), ["0", "中", "cut", "CUT"]);
@@ -3005,7 +3009,7 @@ mod tests {
             let shape = DxfShape::Line(Vec2::ZERO, end);
             let mut strict = DxfFile::new().unwrap();
             strict.push(strict.default_layer(), shape.clone(), None).unwrap();
-            assert!(write_dxf_file(&strict).unwrap_err().to_string().contains("twelve decimals"));
+            assert!(write_dxf_file(&strict).unwrap_err().to_string().contains("as written"));
             let mut view = DxfFile::for_current_view_export(1, 0, 0).unwrap();
             let layer = view.declare_layer("VISIBLE", 7, DxfLinetype::Continuous, None).unwrap();
             view.push(layer, shape.clone(), None).unwrap();
@@ -3168,5 +3172,105 @@ mod tests {
         let output = write_dxf_file(&file).unwrap();
         assert_eq!(entities(&output).len(), 668);
         assert!(output.len() < 1_000_000);
+    }
+
+    #[test]
+    fn lengths_are_written_on_the_grid_and_dimensionless_values_at_twelve_decimals() {
+        // A third has digits past both rules, so each field's decimals show which rule wrote it.
+        let third = 1.0 / 3.0;
+        let p = Vec2::new(10.0 + third, 20.0 + third);
+        let q = p + Vec2::new(5.0, 0.0);
+        let shapes: [(DxfShape, &[i32], &[i32]); 10] = [
+            (DxfShape::Point(p), &[10, 20], &[]),
+            (DxfShape::Line(p, q), &[10, 20, 11], &[]),
+            (DxfShape::Polyline { points: vec![p, q] }, &[10, 20], &[]),
+            (DxfShape::LwPolyline { verts: vec![(p, third), (q, 0.0)], closed: false }, &[10, 20], &[42]),
+            (
+                DxfShape::BulgedPolyline { vertices: vec![DxfVertex { at: p, bulge: third }, DxfVertex { at: q, bulge: 0.0 }], closed: false },
+                &[10, 20],
+                &[],
+            ),
+            (DxfShape::Circle { c: p, r: 1.0 + third }, &[10, 20, 40], &[]),
+            (DxfShape::Arc { c: p, r: 1.0 + third, a0: third, a1: 90.0 + third }, &[10, 20, 40], &[50, 51]),
+            (DxfShape::Ellipse { c: p, major: Vec2::new(2.0 + third, 0.0), ratio: third, t0: third, t1: PI }, &[10, 20, 11], &[40, 41]),
+            (bezier_spline(&[p, q], Some(vec![1.0, 1.0 + third])), &[10, 20], &[]),
+            (DxfShape::Text { at: p, height: 2.0 + third, angle_deg: third, text: "A".into() }, &[10, 20, 40, 11, 21], &[50]),
+        ];
+        let decimals = |text: &str| text.split_once('.').map_or(0, |(_, digits)| digits.len());
+        for (shape, lengths, numbers) in shapes {
+            let mut file = DxfFile::new().unwrap();
+            file.push(file.default_layer(), shape.clone(), None).unwrap();
+            let output = write_dxf_file(&file).unwrap();
+            let records = entities(&output);
+            let record = &records.first().unwrap().1;
+            for (codes, places) in [(lengths, 9), (numbers, 12)] {
+                for code in codes {
+                    let first = record.iter().find(|(c, _)| c == code).map(|(_, value)| value.as_str());
+                    assert_eq!(first.map(decimals), Some(places), "{shape:?}: group {code} is {first:?}");
+                }
+            }
+            // The header's extents are lengths too.
+            for name in ["$EXTMIN", "$EXTMAX"] {
+                let mut lines = output.lines().skip_while(|line| *line != name);
+                let (x, y) = (lines.nth(2).unwrap(), lines.nth(1).unwrap());
+                assert!(decimals(x) <= 9 && decimals(y) <= 9, "{shape:?}: {name} {x} {y}");
+            }
+        }
+        // A bulge, a knot and a weight stay dimensionless.
+        let bulged = DxfShape::BulgedPolyline { vertices: vec![DxfVertex { at: p, bulge: third }, DxfVertex { at: q, bulge: 0.0 }], closed: false };
+        let rational = bezier_spline(&[p, q], Some(vec![1.0, 1.0 + third]));
+        for (shape, code, expected) in [(bulged, 42, "0.333333333333"), (rational, 41, "1.333333333333")] {
+            let mut file = DxfFile::new().unwrap();
+            file.push(file.default_layer(), shape, None).unwrap();
+            let output = write_dxf_file(&file).unwrap();
+            assert!(entities(&output)[0].1.iter().any(|(c, value)| *c == code && value == expected), "{output}");
+        }
+    }
+
+    #[test]
+    fn a_length_outside_the_writable_range_or_not_finite_is_refused_naming_its_entity() {
+        let far = DxfShape::Circle { c: Vec2::new(9_000_001.0, 0.0), r: 1.0 };
+        let mut file = DxfFile::new().unwrap();
+        file.push(file.default_layer(), far.clone(), None).unwrap();
+        let error = write_dxf_file(&file).unwrap_err().to_string();
+        assert!(error.contains("entity 1") && error.contains("9000000"), "{error}");
+        // The legacy route no longer writes a non-finite or out-of-range length as a number.
+        for shape in [far, DxfShape::Line(Vec2::new(f64::NAN, 0.0), Vec2::X)] {
+            let error = write_dxf_drawing_units(&[], &[DxfEntity { layer: "0".into(), shape }], 4).unwrap_err().to_string();
+            assert!(error.contains("CIRCLE entity 1") || error.contains("LINE entity 1"), "{error}");
+        }
+        let mut out = Out::new(0x20, None);
+        out.len(10, 9_000_000.0);
+        assert_eq!(out.s, " 10\n9000000.0\n");
+        out.len(10, f64::INFINITY);
+        assert!(out.check().unwrap_err().to_string().contains("finite"));
+    }
+
+    #[test]
+    fn path_admission_and_the_writer_agree_at_half_a_tick() {
+        // Just under half a tick, both ends of a line are written as 0.0: the path converter
+        // refuses it as the writer's own admission does. Just over, it is one tick long.
+        let under = 0.5e-9_f64.next_down();
+        let over = 0.5e-9_f64.next_up();
+        let line = |x: f64| Seg2::Line { a: Vec2::ZERO, b: Vec2::new(x, 0.0) };
+        assert!(path_shapes(DxfPath::Open(&[line(under)]), DxfPathStyle::Exact).unwrap_err().to_string().contains("collapse"));
+        let mut file = DxfFile::new().unwrap();
+        file.push(file.default_layer(), DxfShape::Line(Vec2::ZERO, Vec2::new(under, 0.0)), None).unwrap();
+        assert!(write_dxf_file(&file).is_err());
+        let shapes = path_shapes(DxfPath::Open(&[line(over)]), DxfPathStyle::Exact).unwrap();
+        let mut file = DxfFile::new().unwrap();
+        for shape in shapes {
+            file.push(file.default_layer(), shape, None).unwrap();
+        }
+        assert_eq!(values(&entities(&write_dxf_file(&file).unwrap())[0], 11), [1e-9]);
+        // A bulged polyline's vertices that meet on the grid are refused, not written as one point.
+        let vertices = vec![
+            DxfVertex { at: Vec2::ZERO, bulge: 0.0 },
+            DxfVertex { at: Vec2::new(under, 0.0), bulge: 0.0 },
+            DxfVertex { at: Vec2::X, bulge: 0.0 },
+        ];
+        let mut file = DxfFile::new().unwrap();
+        file.push(file.default_layer(), DxfShape::BulgedPolyline { vertices, closed: false }, None).unwrap();
+        assert!(write_dxf_file(&file).unwrap_err().to_string().contains("distinct point"));
     }
 }
