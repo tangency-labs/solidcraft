@@ -1249,6 +1249,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
             fresh.active_occurrence_path = Some(fresh.doc.first_path(c));
         }
         fresh.undo.clear();
+        fresh.opened_from_import();
         s.replace_design(fresh);
         let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
         let r: ImportedFile = reply_from(r, "the import")?;
