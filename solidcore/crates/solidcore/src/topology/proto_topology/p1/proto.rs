@@ -3729,45 +3729,65 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         k: &Kernel,
         pass: bool,
     ) -> Result<()> {
-        // (each combine removes a listed proto vertex)
-        for _ in 0..self.pvs.len() {
-            let mut pair = None;
-            'find: for (of, region) in &self.regions {
-                if !self.pvs.contains(of) {
+        // sweeps over the regions until one combines nothing (each combine removes a
+        // listed proto vertex, so there are at most as many as proto vertices)
+        let mut combined = true;
+        while combined {
+            combined = false;
+            let mut i = 0;
+            while let Some(&(of, region)) = self.regions.get(i) {
+                let other = if self.pvs.contains(&of) {
+                    self.proto_vertex_not_apart_from(k, of, &region)?
+                } else {
+                    None
+                };
+                let Some(gone) = other else {
+                    i += 1;
                     continue;
-                }
-                let centre = region.a + (region.b - region.a) * 0.5;
-                for &id in &self.pvs {
-                    if id == *of {
-                        continue;
-                    }
-                    let pv = self.pv(Some(id))?;
-                    if !face_p2::proto_vertex_contains_point(self, pv, centre) {
-                        continue;
-                    }
-                    let own = DeclaredContact::of_point(pv.position, pv.tolerance(k));
-                    if region.overlaps(&own)
-                        || self
-                            .regions
-                            .iter()
-                            .any(|(at, r)| *at == id && region.overlaps(r))
-                    {
-                        pair = Some((*of, id));
-                        break 'find;
-                    }
-                }
+                };
+                // (the same region is compared again: its proto vertex now holds more)
+                ignore_soft(passed_on(self.combine_proto_vertex(of, gone), pass)?)?;
+                self.pv_mut(gone)?.clear_vertex_definitions();
+                ignore_soft(passed_on(self.remove_proto_vertex(gone), pass)?)?;
+                self.delete_proto_vertex_object(gone);
+                // (a region whose proto vertex is gone without a combine reaches nothing)
+                self.regions.retain(|(at, _)| *at != gone);
+                combined = true;
             }
-            let Some((kept, gone)) = pair else {
-                break;
-            };
-            ignore_soft(passed_on(self.combine_proto_vertex(kept, gone), pass)?)?;
-            self.pv_mut(gone)?.clear_vertex_definitions();
-            ignore_soft(passed_on(self.remove_proto_vertex(gone), pass)?)?;
-            self.delete_proto_vertex_object(gone);
-            // (a region whose proto vertex is gone without a combine reaches nothing)
-            self.regions.retain(|(at, _)| *at != gone);
         }
         Ok(())
+    }
+
+    /// Not upstream: a listed proto vertex other than `of` that `region` is not proved
+    /// apart from, looked for as [`ProtoTopologyManager::find_proto_vertex_within`] does
+    /// (within the capture distance of the region's point; its own ball, or a region of a
+    /// point it holds).
+    fn proto_vertex_not_apart_from(
+        &self,
+        k: &Kernel,
+        of: ProtoVertexId,
+        region: &DeclaredContact,
+    ) -> Result<Option<ProtoVertexId>> {
+        let centre = region.a + (region.b - region.a) * 0.5;
+        for &id in &self.pvs {
+            if id == of {
+                continue;
+            }
+            let pv = self.pv(Some(id))?;
+            if !face_p2::proto_vertex_contains_point(self, pv, centre) {
+                continue;
+            }
+            let own = DeclaredContact::of_point(pv.position, pv.tolerance(k));
+            if region.overlaps(&own)
+                || self
+                    .regions
+                    .iter()
+                    .any(|(at, r)| *at == id && region.overlaps(r))
+            {
+                return Ok(Some(id));
+            }
+        }
+        Ok(None)
     }
 
     /// The first edge definition (of the listed proto edges) whose B-rep `which`
