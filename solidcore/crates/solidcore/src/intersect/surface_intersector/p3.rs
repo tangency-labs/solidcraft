@@ -58,9 +58,9 @@
 //!   point is a local [`TsectPnt::zeroed`] value that gets its arena slot when it
 //!   becomes a start point.
 //! - **Touching points on a start point** (not upstream). `FindBoundaryStartPoints`
-//!   drops a touching point on a start point for good; here it is kept aside with
-//!   that start point, and `DoIntersection` adds it when the start point traced no
-//!   curve ([`SurfaceIntersector::add_deferred_touching_points`]).
+//!   drops a touching point on a start point for good; here it is kept aside, and
+//!   `DoIntersection` adds it at the end when no curve found covers it
+//!   ([`SurfaceIntersector::add_deferred_touching_points`]).
 //! - **Dead code.** The face edge branch of `FindBoundaryStartPoints`
 //!   (`static constexpr bGWCAddEdgeThroughPoints = FALSE`: target curves beyond the
 //!   four natural boundaries, `ApproximateCurve` of non-B-spline targets, through
@@ -267,13 +267,12 @@ struct DegeneratePoint {
 }
 
 /// A touching point [`SurfaceIntersector::find_boundary_start_points`] left out because
-/// the start point `start` lies on it. Upstream drops it for good, on the premise that
-/// the curve traced from that start point covers it; when the start point traces no
-/// curve, [`SurfaceIntersector::add_deferred_touching_points`] adds it after all.
+/// a start point lies on it. Upstream drops it for good, on the premise that the curve
+/// traced from that start point covers it;
+/// [`SurfaceIntersector::add_deferred_touching_points`] checks that premise once every
+/// curve is found.
 #[derive(Debug, Clone)]
 pub(crate) struct DeferredTouching {
-    /// The start point that lies on the touching point.
-    start: TsectId,
     /// The touching point: its 3D point (the average of the boundary curve point and
     /// the other surface's point) and the intersection point it came from.
     point: Point3,
@@ -706,9 +705,8 @@ impl SurfaceIntersector<'_> {
             // and, for now, points on a start point: the curve traced from it should
             // cover them, which DoIntersection checks once all curves are found
             let starts = self.start_points().to_vec();
-            if let Some(start) = self.matching_start_point(tsp, &starts, None)? {
+            if self.is_point_on_start_point(tsp, &starts, None)? {
                 self.deferred_touching.push(DeferredTouching {
-                    start,
                     point: degenerate_point,
                     tsp: tsp.clone(),
                 });
@@ -721,18 +719,16 @@ impl SurfaceIntersector<'_> {
     }
 
     /// Adds the touching points [`SurfaceIntersector::find_boundary_start_points`]
-    /// left out for a start point on them (in the order it found them) whose start
-    /// point is in `untraced` (it traced no curve), whose two surface points are
-    /// closer than `this_approx_tol_3d`, and which are on none of the curves found
-    /// (boundary, traced and interior).
+    /// left out for a start point on them (in the order it found them) whose two
+    /// surface points are closer than `this_approx_tol_3d` and which are on none of
+    /// the curves found (boundary, traced and interior); the list is emptied.
     ///
     /// Upstream drops a touching point on a start point for good, as the curve traced
-    /// from that start point is to cover it. A start point that traces nothing then
-    /// lost the only answer: two plane patches 9.9 apart at their corners, with a
-    /// tolerance of 2785, gave no curve at all. Only a point where the surfaces are
-    /// within the tolerance is a contact; the boundary classification also calls
-    /// points farther apart degenerate (a plane 0.5 off a surface of revolution's
-    /// bottom circle), and those stay dropped.
+    /// from that start point is to cover it ("due to seams"). A start point that traces
+    /// nothing, or a curve that leaves the point behind, then loses the only report of
+    /// that contact: two plane patches 9.9 apart at their corners, with a tolerance of
+    /// 2785, gave no curve at all. A point whose surface points are not within the
+    /// tolerance is no contact and stays dropped.
     ///
     /// # Errors
     ///
@@ -740,7 +736,6 @@ impl SurfaceIntersector<'_> {
     pub(crate) fn add_deferred_touching_points(
         &mut self,
         k: &Kernel,
-        untraced: &[TsectId],
         out: &mut TsectCurves,
     ) -> Result<()> {
         for d in core::mem::take(&mut self.deferred_touching) {
@@ -750,10 +745,7 @@ impl SurfaceIntersector<'_> {
                 .srf_pos(SrfIndex::First)
                 .distance(d.tsp.srf_pos(SrfIndex::Second));
             let contact = gap < self.this_approx_tol_3d;
-            if !untraced.contains(&d.start)
-                || !contact
-                || self.is_point_on_curve(k, d.point, &out.curves_3d, None)?
-            {
+            if !contact || self.is_point_on_curve(k, d.point, &out.curves_3d, None)? {
                 continue;
             }
             push_touching_curve(out, d.point, &d.tsp)?;
@@ -2277,6 +2269,46 @@ mod tests {
         assert!(si
             .update_tsect_point(&Kernel::default(), p0, p0, p0)
             .is_err());
+    }
+
+    /// WR-51: a touching point left out for a start point is added at the end only
+    /// when its surface points are within the tolerance and no curve found covers it;
+    /// a point too far apart, a NaN point and a covered point stay dropped.
+    #[test]
+    fn deferred_touching_points_are_added_only_as_uncovered_contacts() {
+        let k = &Kernel::default();
+        let (a, b) = two_planes();
+        let mut si = intersector(k, &a, &b);
+        let tol = si.this_approx_tol_3d;
+        assert!(tol > 0.0 && tol < 0.01, "{tol}");
+        let touching = |p: [f64; 3], gap: f64, uv: f64| {
+            let mut t = TsectPnt::new();
+            *t.srf_pos_mut(SrfIndex::First) = Vec3::from_array(p);
+            *t.srf_pos_mut(SrfIndex::Second) = Vec3::from_array(p) + Vec3::new(0.0, 0.0, gap);
+            *t.uv_pos_mut(SrfIndex::First) = Point2::new(uv, 0.5);
+            *t.uv_pos_mut(SrfIndex::Second) = Point2::new(uv, 0.5);
+            let point = (t.srf_pos(SrfIndex::First) + t.srf_pos(SrfIndex::Second)) / 2.0;
+            DeferredTouching { point, tsp: t }
+        };
+        // a curve already found at q
+        let q = Vec3::new(0.7, 0.5, 0.0);
+        let mut out = TsectCurves::default();
+        push_touching_curve(&mut out, q, &touching([0.7, 0.5, 0.0], 0.0, 0.7).tsp).unwrap();
+        si.deferred_touching = vec![
+            touching([0.2, 0.5, 0.0], 0.5 * tol, 0.2), // an uncovered contact
+            touching([0.4, 0.5, 0.0], 2.0 * tol, 0.4), // not within the tolerance
+            touching([f64::NAN, 0.5, 0.0], 0.0, 0.5),  // not a point
+            touching([0.7, 0.5, 0.0], 0.0, 0.7),       // on the curve at q
+        ];
+        si.add_deferred_touching_points(k, &mut out).unwrap();
+        assert!(si.deferred_touching.is_empty());
+        assert_eq!(out.curves_3d.len(), 2);
+        assert_eq!(out.curve_types, [TsectCurveType::Touching; 2]);
+        let p = out.curves_3d[1].evaluate_point(k, 0.0).unwrap();
+        assert_eq!(p, Vec3::new(0.2, 0.5, 0.25 * tol));
+        assert_eq!(out.deviations[1], 0.5 * tol);
+        let uv = out.uv_curves[0][1].evaluate_point(k, 0.0).unwrap();
+        assert_eq!((uv.x, uv.y), (0.2, 0.5));
     }
 
     #[test]

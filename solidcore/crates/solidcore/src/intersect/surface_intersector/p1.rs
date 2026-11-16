@@ -78,9 +78,8 @@
 //!   replaces the start point it clusters with when it ranks better and is dropped
 //!   otherwise (the SolidCraft fork's tangency-labs/smlib@0ce09f2). Off by default
 //!   (upstream behaviour).
-//! - **WR-51.** `IsPointOnStartPoint` compares a squared distance with the squared
-//!   tolerance (a real distance of `this_approx_tol_3d`), not with the tolerance
-//!   itself as upstream does.
+//! - **WR-51.** `IsPointOnStartPoint` compares each distance with the tolerance;
+//!   upstream compares the squared distance with the tolerance itself.
 //! - **WR-52.** [`SurfaceIntersector::is_point_on_curve`] (`SmSurfaceIntersector.cpp:7376`,
 //!   `:7391`) and [`is_point_on_tsect_curve`] (`SmSurfaceIntersector.cpp:4195`)
 //!   propagate a failing `EvaluatePoint`, `DropPoint`, or Hermite `LocalPointSolve`
@@ -697,8 +696,8 @@ pub struct SurfaceIntersector<'s> {
     /// `m_vThroughPoints`.
     pub(crate) through_points: Vec<TsectId>,
     /// Touching points [`SurfaceIntersector::find_boundary_start_points`] left out
-    /// because a start point lies on them, each with that start point: added at the
-    /// end of `DoIntersection` when that start point traced no curve
+    /// because a start point lies on them: added at the end of `DoIntersection` when
+    /// no curve found covers them
     /// ([`SurfaceIntersector::add_deferred_touching_points`]; not upstream, which
     /// drops them for good).
     pub(crate) deferred_touching: Vec<super::p3::DeferredTouching>,
@@ -1999,34 +1998,19 @@ impl<'s> SurfaceIntersector<'s> {
     }
 
     /// True when both surface points of `point` are closer than `this_approx_tol_3d`
-    /// to a start point in `start_points` (skipping position `skip`)
-    /// (`IsPointOnStartPoint`); see [`SurfaceIntersector::matching_start_point`].
+    /// to those of a start point in `start_points` (skipping position `skip`)
+    /// (`IsPointOnStartPoint`).
+    ///
+    /// The distances themselves are compared with the tolerance (WR-51). Upstream
+    /// compares the squared distance with the tolerance, whose radius is `sqrt(tol)`:
+    /// far wider than the tolerance below 1 and narrower above it.
     pub fn is_point_on_start_point(
         &self,
         point: &TsectPnt,
         start_points: &[TsectId],
         skip: Option<usize>,
     ) -> Result<bool> {
-        Ok(self
-            .matching_start_point(point, start_points, skip)?
-            .is_some())
-    }
-
-    /// The first start point in `start_points` (skipping position `skip`) whose two
-    /// surface points are both closer than `this_approx_tol_3d` to those of `point`
-    /// (`IsPointOnStartPoint`, which answers only whether there is one).
-    ///
-    /// Each squared distance is compared with the squared tolerance, so a point is
-    /// accepted within a real distance of `this_approx_tol_3d` (WR-51). Upstream
-    /// compares the squared distance with the tolerance itself: its radius is
-    /// `sqrt(tol)`, far wider than the tolerance below 1 and narrower above it.
-    pub fn matching_start_point(
-        &self,
-        point: &TsectPnt,
-        start_points: &[TsectId],
-        skip: Option<usize>,
-    ) -> Result<Option<TsectId>> {
-        let tol = self.this_approx_tol_3d * self.this_approx_tol_3d;
+        let tol = self.this_approx_tol_3d;
         let test_pt0 = point.srf_pos(SrfIndex::First);
         let test_pt1 = point.srf_pos(SrfIndex::Second);
         for (jj, &id) in start_points.iter().enumerate() {
@@ -2034,13 +2018,13 @@ impl<'s> SurfaceIntersector<'s> {
                 continue;
             }
             let sp = self.point(id)?;
-            if sp.srf_pos(SrfIndex::First).distance_squared(test_pt0) < tol
-                && sp.srf_pos(SrfIndex::Second).distance_squared(test_pt1) < tol
+            if sp.srf_pos(SrfIndex::First).distance(test_pt0) < tol
+                && sp.srf_pos(SrfIndex::Second).distance(test_pt1) < tol
             {
-                return Ok(Some(id));
+                return Ok(true);
             }
         }
-        Ok(None)
+        Ok(false)
     }
 
     // ---- fillet laws ---------------------------------------------------------------------------
@@ -2807,9 +2791,9 @@ mod tests {
         assert_eq!(e.upstream_status(), Some(SM_ERR));
     }
 
-    /// WR-51: `IsPointOnStartPoint` compares each squared distance with the squared
-    /// tolerance, so it accepts a point within a real distance of `tol` of a start
-    /// point on both surfaces, and refuses one between `tol` and `sqrt(tol)` (which the
+    /// WR-51: `IsPointOnStartPoint` compares each distance with the tolerance, so it
+    /// accepts a point within a real distance of `tol` of a start point on both
+    /// surfaces, and refuses one between `tol` and `sqrt(tol)` (which the
     /// pinned C++ accepted, comparing the squared distance with the tolerance itself).
     #[test]
     fn is_point_on_start_point_accepts_a_real_distance() {
@@ -2859,10 +2843,6 @@ mod tests {
         // Just inside and just outside the real distance `tol` on both surfaces.
         let inside = at(0.99 * tol, 0.99 * tol);
         assert!(si.is_point_on_start_point(&inside, &starts, None).unwrap());
-        assert_eq!(
-            si.matching_start_point(&inside, &starts, None).unwrap(),
-            Some(start_id)
-        );
         assert!(!si
             .is_point_on_start_point(&at(1.01 * tol, 1.01 * tol), &starts, None)
             .unwrap());

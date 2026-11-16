@@ -1811,25 +1811,35 @@ mod wr51_tests {
         };
         let mut flipped = Vec::new();
         let mut answers = 0;
+        // cases whose operands do not build (they record no answer) and scripts that
+        // stop at a harness failure
+        let (mut cases, mut unbuilt, mut stopped) = (0, 0, 0);
         for case in Runner.cases(&ctx).unwrap() {
+            cases += 1;
             let i: Inputs = case.parse().unwrap();
             let k = Kernel::default();
             let Ok(a) = rust_surface(&i.a) else {
+                unbuilt += 1;
                 continue;
             };
             let b_owned = match i.b.as_ref().map(rust_surface) {
                 Some(Ok(s)) => Some(s),
-                Some(Err(_)) => continue,
+                Some(Err(_)) => {
+                    unbuilt += 1;
+                    continue;
+                }
                 None => None,
             };
             let b_ref = b_owned.as_ref().unwrap_or(&a);
             let Ok(curves) = i.curves.iter().map(rust_curve).collect::<Result<Vec<_>, _>>()
             else {
+                unbuilt += 1;
                 continue;
             };
             let Ok(mut si) =
                 SurfaceIntersector::new(&k, &a, &ext(i.dom1), b_ref, &ext(i.dom2), i.fillet)
             else {
+                unbuilt += 1;
                 continue;
             };
             for p in &i.points {
@@ -1861,6 +1871,7 @@ mod wr51_tests {
                 let at = rec.len();
                 let mut o = Vec::new();
                 if run_op(&k, &mut si, &curves, op, &mut o).is_err() {
+                    stopped += 1;
                     break;
                 }
                 rec.extend_from_slice(&o);
@@ -1892,7 +1903,11 @@ mod wr51_tests {
                 flipped.push((case.name.clone(), flips, hidden));
             }
         }
-        assert!(answers > 600, "{answers} answers");
+        assert_eq!(
+            (cases, unbuilt, stopped, answers),
+            (1510, 0, 0, 652),
+            "cases, unbuilt, stopped, answers"
+        );
         let hidden = ["gen0450", "gen0673", "gen0942", "gen1039"];
         let expected: Vec<(String, usize, bool)> = [
             ("gen0135", 1),

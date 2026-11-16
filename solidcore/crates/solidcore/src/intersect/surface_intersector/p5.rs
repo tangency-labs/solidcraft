@@ -52,9 +52,10 @@
 //!   passes as `FindBoundaryStartPoints` made points.
 //! - **Touching points left for a start point** (not upstream). After the interior
 //!   curves, a touching point `FindBoundaryStartPoints` dropped because a start point
-//!   lies on it is added when that start point traced no curve, its surface points
-//!   are within the tolerance and it is on no curve found
-//!   ([`SurfaceIntersector::add_deferred_touching_points`]).
+//!   lies on it is added when its surface points are within the tolerance and it is
+//!   on no curve found ([`SurfaceIntersector::add_deferred_touching_points`]); such
+//!   points come after the traced curves, where upstream's boundary pass would have
+//!   put them first.
 //! - **Opt-in fix (WR-76, #392).** With
 //!   [`UpstreamFixes::ssi_trace_tangent_curves_once`](crate::kernel::UpstreamFixes::ssi_trace_tangent_curves_once)
 //!   a traced curve removes, before it is flushed, the start points left in a tangent
@@ -522,6 +523,8 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         trees_ready: bool,
     ) -> Result<SurfaceIntersection> {
         let mut result = SurfaceIntersection::default();
+        // filled by FindBoundaryStartPoints, read at the end (not upstream)
+        self.base.deferred_touching.clear();
         // filled by FindInteriorCurves, read by the tangential curve pass (WR-75)
         self.tangent_curve_seeds.clear();
 
@@ -720,9 +723,6 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         // out intersection curves (each pass pops one; none adds any)
         // (not upstream: one bound on the trace steps of all the start points, HANG-52)
         self.base.set_trace_budget(true);
-        // the start points that traced no curve (not upstream: for the touching points
-        // left out for them, `add_deferred_touching_points`)
-        let mut untraced = Vec::new();
         while let Some(&start) = self.base.start_points.last() {
             k.check_cancelled(OP_DI)?;
             // keep a copy of the start point (operator= into a fresh element)
@@ -773,7 +773,6 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
             // when an intersection curve was not generated from this startPoint
             if num_curves == out.curves_3d.len() {
                 self.base.through_points.push(tmp_id);
-                untraced.push(start);
             }
         }
 
@@ -836,8 +835,7 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         } = interior;
 
         // not upstream: a touching point left out because a start point lies on it is
-        // added, last, when that start point traced no curve and no curve found covers
-        // the point
+        // added, last, when no curve found covers it
         let mut found = TsectCurves {
             curves_3d: core::mem::take(&mut curves_3d),
             uv_curves: [
@@ -847,8 +845,7 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
             curve_types: core::mem::take(&mut curve_types),
             deviations: core::mem::take(&mut deviations),
         };
-        self.base
-            .add_deferred_touching_points(k, &untraced, &mut found)?;
+        self.base.add_deferred_touching_points(k, &mut found)?;
         let TsectCurves {
             curves_3d: found_3d,
             uv_curves: [found_uv1, found_uv2],

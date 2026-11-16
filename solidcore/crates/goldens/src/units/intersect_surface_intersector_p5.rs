@@ -1105,6 +1105,7 @@ pub(crate) fn certify_restored_touching_point(
     let slack = 1e-9 * (p1.length() + p2.length() + 1.0);
     assert!((p1.distance(p2) - dev).abs() <= slack, "{} vs {dev}", p1.distance(p2));
     assert!(dev < tol, "deviation {dev} not below the tolerance {tol}");
+    assert!(p1.distance(p2) < tol, "surface points not within the tolerance {tol}");
     assert!(p.distance((p1 + p2) / 2.0) <= slack + 1e-9 * dev, "{p:?} {p1:?} {p2:?}");
 }
 
