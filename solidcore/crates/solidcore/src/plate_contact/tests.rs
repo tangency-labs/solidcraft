@@ -421,7 +421,7 @@ fn the_footprint_on_p_is_the_faces_lying_in_it_facing_down() {
     let a = areas(&on([0.0, 0.0, 66.0], side, up));
     assert!(a.len() == 1 && (a[0] - 720.0).abs() < 1e-9, "{a:?}");
     assert!(on([0.0, 0.0, 6.5], up, side).is_empty());
-    assert!(on([0.0, 0.0, 6.0 + 0.5 * TOL], up, side).len() == 1);
+    assert_eq!(on([0.0, 0.0, 6.0 + 0.5 * TOL], up, side).len(), 1);
     assert!(footprint_on(&k, &wall, &frame_at([0.0; 3], up, side), 0.0).is_err());
 }
 

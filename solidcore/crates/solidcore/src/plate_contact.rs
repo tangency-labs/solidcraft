@@ -552,13 +552,13 @@ pub fn footprint_across(
     }
     let mut regions: Vec<Option<Region2>> = Vec::new();
     for (lp, held_by) in loops.iter().zip(&holders) {
-        regions.push(held_by.len().is_multiple_of(2).then(|| Region2 {
+        regions.push((held_by.len() % 2 == 0).then(|| Region2 {
             outer: lp.clone(),
             holes: Vec::new(),
         }));
     }
     for (lp, held_by) in loops.iter().zip(&holders) {
-        if held_by.len().is_multiple_of(2) {
+        if held_by.len() % 2 == 0 {
             continue;
         }
         let mut best: Option<(f64, usize)> = None;
