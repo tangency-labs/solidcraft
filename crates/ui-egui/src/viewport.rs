@@ -784,6 +784,9 @@ fn base_scene_key(app: &SolveApp) -> u64 {
     solidcraft_theme::vision().hash(&mut h);
     // Two themes may share a light/dark base while drawing different geometry colours.
     crate::theme_files::color_key(&Tokens::base()).hash(&mut h);
+    app.ui.show_grain.hash(&mut h);
+    serde_json::to_string(&app.session.doc.wood_grain).unwrap_or_default().hash(&mut h);
+    crate::dialogs_wood_grain::preview(app).map(|p| p.to_string()).hash(&mut h);
     app.session.active_sketch.hash(&mut h);
     crate::edit_in_place::scene_key(app).hash(&mut h);
     // A reset palette arena (another design) invalidates every cached block's indices.
@@ -1810,6 +1813,7 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     section_outlines(&mut sc, app, &st);
     continuity_seams(&mut sc, app);
     isocurves(&mut sc, app);
+    crate::grain_guides::draw(app, &mut sc);
     crate::edit_in_place::draw_context(app, &mut sc);
     sc
 }

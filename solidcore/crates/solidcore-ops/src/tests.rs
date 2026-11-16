@@ -975,3 +975,33 @@ fn pcurves_of_malformed_records_are_refused_as_invalid() {
     // And a well-formed one still gets its pcurve.
     assert!(one(&line, [0., 1.]).is_ok());
 }
+
+#[test]
+fn stock_box_follows_a_rotated_prism_without_meshes() {
+    all_fixes();
+    let b = make_box([0.0; 3], [600.0, 70.0, 35.0]).unwrap();
+    let q = std::f64::consts::FRAC_1_SQRT_2;
+    b.transform(&[
+        [q, q, 0.0, 0.0],
+        [-q, q, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [100.0, -200.0, 30.0, 1.0],
+    ])
+    .unwrap();
+    let s = b.stock_box().unwrap();
+    assert!(s.exact);
+    for (a, b) in s.dimensions.iter().zip([600.0, 70.0, 35.0]) {
+        assert!((a - b).abs() < 1e-7, "{s:?}");
+    }
+}
+
+#[test]
+fn stock_box_marks_curved_stock_approximate_and_encloses_a_sphere() {
+    all_fixes();
+    let b = make_sphere([0.0; 3], 20.0).unwrap();
+    let s = b.stock_box().unwrap();
+    assert!(!s.exact);
+    for d in s.dimensions {
+        assert!((d - 40.0).abs() < 1e-6, "{s:?}");
+    }
+}

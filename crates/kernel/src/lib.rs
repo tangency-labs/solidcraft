@@ -203,7 +203,7 @@ pub use iso::{IsoLine, MAX_ISO_COUNT, iso_curves, iso_grid};
 pub use lip::{LipRefusal, raise_band, rim_band};
 pub use loft_blend::loft_blend;
 pub use matchsurf::{match_surface, seam_continuity};
-pub use measure::{BodyMeasure, MassMeasure, measure, measure_mass};
+pub use measure::{BodyMeasure, MassMeasure, measure, measure_mass, stock_box};
 pub use mesh_convert::convert_prismatic_mesh;
 pub use meshbody::{MAX_TRIANGLES, mesh_body, mesh_body_with_normals};
 pub use native::{body_from_smlib, smlib_body};
