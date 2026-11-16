@@ -245,6 +245,13 @@ fn hostile_saved_constraints_are_refused() {
         sk.wire_constraints.push(WireConstraint { id: "k9".into(), kind: WireConstraintKind::AlongAxis { line: l.clone(), axis: Axis::X } });
     }
     assert!(sk.validate_wire_constraints().is_err(), "duplicate ids");
+    // A design made where the sketch limit was raised (#10874) holds more 3D constraints than
+    // the default limit: it opens up to the ceiling, and past it is refused.
+    let along = |i: usize| WireConstraint { id: format!("k{}", i + 1), kind: WireConstraintKind::AlongAxis { line: l.clone(), axis: Axis::X } };
+    sk.wire_constraints = (0..crate::MAX_CONSTRAINTS + 1).map(along).collect();
+    sk.validate_wire_constraints().unwrap();
+    sk.wire_constraints = (0..crate::CEILING_CONSTRAINTS + 1).map(along).collect();
+    assert!(matches!(sk.validate_wire_constraints(), Err(SketchError::TooLarge)));
 }
 
 #[test]
