@@ -5004,7 +5004,7 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
                     FilletCornerKind::NByOne | FilletCornerKind::Open
                 );
                 let end_patch = nx1
-                    && (corner.edges.len() == 3 || corner.turned_back_cap())
+                    && (corner.edges.len() == 3 || corner.wide_cap())
                     && corner.extended_surface_patch;
                 // The fork's (WR-697, 79d4763): a Ball's patch is its sphere's
                 // (SmBlendCorner::CreateBallPatch)

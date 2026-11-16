@@ -626,9 +626,7 @@ mod tests {
     /// names, whether or not the browser can write to the disk.
     #[test]
     fn writes_to_opfs_paths_still_go_to_opfs() {
-        for p in
-            ["/opfs/Bracket.solidcraft", "/opfs/Bracket (2).solidcraft", "/opfs/recovery.solidcraft", "/opfs/recovery.json", "/opfs/old.solvecraft"]
-        {
+        for p in ["/opfs/Bracket.solidcraft", "/opfs/Bracket (2).solidcraft", "/opfs/recovery.solidcraft", "/opfs/recovery.json", "/opfs/old.sc"] {
             assert_eq!(route(p), WriteTo::Opfs, "{p}");
         }
         // A design opened from OPFS saves to its own path; only a Save As can pick the disk.
@@ -679,7 +677,6 @@ mod tests {
         assert!(opens_design(&[]));
         assert!(opens_design(&["sc"]));
         assert!(opens_design(&["solidcraft"]));
-        assert!(opens_design(&["solvecraft"]));
         assert!(!opens_design(&["step", "stp"]));
         assert!(!opens_design(&["json"]));
     }

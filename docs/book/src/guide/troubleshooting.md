@@ -55,8 +55,7 @@ with a bug report.
 | Linux (Flatpak) | `~/.var/app/io.tangencylabs.solidcraft/data/solidcraft` | (the same folder) |
 
 On Windows, paste `%APPDATA%` or `%LOCALAPPDATA%` into the Explorer address bar to open the
-folder. Releases before the rename used `SolveCraft` folders next to these; SolidCraft only
-reads them, so you can leave them alone.
+folder.
 
 - The **`recovery`** folder holds autosaves of designs that were never saved. Rename the data
   folder rather than deleting it, so you can still open those autosaves (`.sc` files, or `.solidcraft` from earlier releases)
