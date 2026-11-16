@@ -277,7 +277,7 @@ impl FaceIndex {
 }
 
 fn face_count(b: &ModelBody) -> usize {
-    b.mesh().tri_face.iter().map(|f| *f as usize + 1).max().unwrap_or(0)
+    b.body.face_count()
 }
 
 /// Names of a body's faces (by B-rep face index).
@@ -931,7 +931,8 @@ pub(crate) fn along_spread(cs: Vec<(usize, Vec3)>) -> Vec<usize> {
 
 /// Each face's centre: the mean of the sampled centres of its triangles.
 pub(crate) fn face_centres(b: &ModelBody) -> Vec<Vec3> {
-    samples(&b.mesh(), face_count(b)).into_iter().map(|ps| ps.iter().fold(Vec3::ZERO, |a, p| a + *p) * (1.0 / ps.len().max(1) as f64)).collect()
+    let tol = (b.body.size() * 1e-3).max(1e-3);
+    b.body.faces(tol).map(|fs| fs.into_iter().map(|f| f.centroid).collect()).unwrap_or_default()
 }
 
 /// The name of a face new to `f` (a feature that went through `eval::naming_feature`).
