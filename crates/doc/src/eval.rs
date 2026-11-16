@@ -5467,23 +5467,22 @@ fn hole_on_surface_in(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String], fro
     let eps = size * 1e-6;
     let mut best: Option<Vec3> = None;
     for b in st.bodies.iter().filter(|b| in_hole_scope(scope, b)) {
-        let m = b.mesh();
-        // Every test below casts along the line through `p`: a mesh whose box that line misses
-        // has no triangle to hit, so skip it before scanning its triangles (in an assembly of
-        // hundreds of parts, these scans were most of a hole's time).
-        if !line_meets_box(p, dir, &m.bounds().inflated(eps * 8.0)) {
+        if let Ok(bounds) = b.body.exact_bounds()
+            && !line_meets_box(p, dir, &bounds.inflated(eps * 8.0))
+        {
             continue;
         }
         // Already on the surface: the drill enters right here.
-        if let Some((t, _)) = m.raycast(p - dir * eps, dir)
+        if let Some((t, _)) = b.body.raycast_face(p - dir * eps, dir)
             && t < eps * 4.0
         {
             return p;
         }
-        if !from_inside && m.contains(p) {
+        let inside = b.body.contains(p);
+        if !from_inside && inside {
             return p;
         }
-        let q = if m.contains(p) { m.raycast(p, -dir).map(|(t, _)| p - dir * t) } else { m.raycast(p, dir).map(|(t, _)| p + dir * t) };
+        let q = if inside { b.body.raycast_face(p, -dir).map(|(t, _)| p - dir * t) } else { b.body.raycast_face(p, dir).map(|(t, _)| p + dir * t) };
         if let Some(q) = q
             && best.is_none_or(|bq| q.dist(p) < bq.dist(p))
         {
@@ -6270,10 +6269,7 @@ fn hole_reaches(st: &ModelState, p: Vec3, d: Vec3, ahead: bool, scope: &[String]
     let size = st.bodies.iter().map(|b| b.body.size()).fold(1.0, f64::max);
     let eps = size * 1e-6;
     let q = p + d * eps;
-    st.bodies.iter().filter(|b| in_hole_scope(scope, b)).any(|b| {
-        let m = b.mesh();
-        m.contains(q) || (ahead && m.raycast(q, d).is_some())
-    })
+    st.bodies.iter().filter(|b| in_hole_scope(scope, b)).any(|b| b.body.contains(q) || (ahead && b.body.raycast_face(q, d).is_some()))
 }
 
 /// The side hole centres on a sketch drill to: into the material, whichever way the sketch plane
@@ -6428,9 +6424,8 @@ fn hole_depth_to(st: &ModelState, at: &Vec3, dir: Vec3, to: &Option<Vec3>, depth
     // The face at the To point, met along the axis.
     for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
         let Some(fi) = crate::appearance::face_index_at(b, *t) else { continue };
-        let m = b.mesh();
-        if let Some((h, tri)) = m.raycast(*at + dir * 1e-6, dir)
-            && m.tri_face.get(tri).is_some_and(|x| *x as usize == fi)
+        if let Some((h, hit_face)) = b.body.raycast_face(*at + dir * 1e-6, dir)
+            && hit_face == fi
         {
             d = h + 1e-6;
         }
@@ -9528,10 +9523,9 @@ fn height_at(st: &ModelState, face: Option<(usize, usize)>, plane: &Plane, centr
         return square.level;
     }
     // A curved or slanted face: where the profile's middle meets it.
-    let m = b.mesh();
     for dir in [n, n * -1.0] {
-        if let Some((t, tri)) = m.raycast(centre, dir)
-            && m.tri_face.get(tri).is_some_and(|x| *x as usize == fi)
+        if let Some((t, hit_face)) = b.body.raycast_face(centre, dir)
+            && hit_face == fi
         {
             return h(centre + dir * t);
         }
