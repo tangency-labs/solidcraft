@@ -2134,6 +2134,8 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
             c == "joint.drive" && (r["stopped_by_loop"].is_object() || r["stopped_by_contact"].is_object() || r["unconnected"].is_string())
         })
         .map(|(_, r)| r.clone());
+    // The last command's reply: what the view draws beside the preview (Arrange's sheets).
+    let reply = preview.replies.last().cloned();
     // A constraint's reply: how free its part is with the constraint the preview shows.
     let placed = cmds.iter().zip(&preview.replies).find(|((c, _), _)| c.starts_with("assembly.constraint.")).map(|(_, r)| r.clone());
     let (before, after) = (preview.before, preview.after);
@@ -2147,6 +2149,7 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
             }
             b.bounds = after.bodies.iter().fold(Aabb3::EMPTY, |acc, x| acc.union(&x.mesh().bounds()));
             b.stopped = stopped;
+            b.reply = reply;
             b.placed = placed;
             Ok(b)
         }

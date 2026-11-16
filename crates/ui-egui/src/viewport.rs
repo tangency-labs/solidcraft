@@ -5412,6 +5412,9 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     // looking each one up along the world's bodies made Select All on an assembly of thousands
     // of bodies quadratic (millions of name comparisons on every hover change).
     let mut by_name = BodiesByName::new(&st);
+    // Arrange's picked parts that found no place on the sheet: lit in the warning colour, so a
+    // part that does not fit reads apart from one only picked.
+    let unplaced = crate::arrange_sheet::unplaced(app);
     for x in &sel {
         match x {
             Sel::Face { body, index, .. } => {
@@ -5443,11 +5446,18 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                             edge_lines(&mut feedback, e, selected_edge, 2.0, &[]);
                         }
                     } else {
-                        let lit = WholeBody { selected: true, colour: c4(t.body_selected) };
-                        if !(gpu_lit(b) && light_whole_body(app, b, &active_bodies, lit, &body_slots, &mut feedback, &mut selected_instances)) {
+                        // The graphics card's whole-body highlight has the one selected colour, so a
+                        // part with no place is lit from its triangles here instead.
+                        let failed = unplaced.contains(name.as_str());
+                        let colour = c4(if failed { crate::arrange_sheet::no_place(&t) } else { t.body_selected });
+                        let lit = WholeBody { selected: true, colour };
+                        if !(gpu_lit(b)
+                            && !failed
+                            && light_whole_body(app, b, &active_bodies, lit, &body_slots, &mut feedback, &mut selected_instances))
+                        {
                             let m = shown(b);
                             let count = b.body.face_count();
-                            mesh_tris(&mut feedback, &m, c4(t.body_selected), true, |f| (f as usize) < count);
+                            mesh_tris(&mut feedback, &m, colour, true, |f| (f as usize) < count);
                         }
                         // Its hidden edges, dimmed, only when the user asks for them.
                         if app.preferences.show_selected_hidden_edges && !replaced(name) {
@@ -8072,6 +8082,7 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             painter.rect_filled(Rect::from_center_size(sp, vec2(4.0, 4.0)), 0.0, t.sketch);
         }
     }
+    crate::arrange_sheet::paint(app, painter, proj);
     let Some(sid) = app.session.active_sketch else { return };
     // While a dimension's value is typed, its points where that value puts them.
     let st = crate::dim_view::preview_world(app).unwrap_or(st);

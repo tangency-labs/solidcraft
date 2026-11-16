@@ -1098,6 +1098,21 @@ impl Body {
         Ok(b)
     }
 
+    /// The exact axis-aligned box of the body as [`crate::transform_matrix`] would move it by
+    /// `m`, without making that body: the body's own SMLib copy is moved and measured, so a body
+    /// measured in many turns is sent into SMLib once.
+    pub fn exact_bounds_moved(&self, m: &[[f64; 4]; 4]) -> Result<Aabb3> {
+        if self.is_mesh() {
+            return crate::transform_matrix(self, *m)?.exact_bounds();
+        }
+        if m.iter().flatten().any(|x| !x.is_finite()) {
+            return Err(KernelError::Invalid("non-finite transform".into()));
+        }
+        let moved = self.smlib()?.transformed(m).map_err(|e| KernelError::smlib("SMLib transform", e))?;
+        let (lo, hi) = moved.bounds().map_err(|e| KernelError::smlib("SMLib bounds", e))?;
+        Ok(Aabb3 { min: v3(lo), max: v3(hi) })
+    }
+
     /// The body's volume: measured with exact mass properties via SMLib for B-rep bodies,
     /// or from mesh triangles for mesh bodies.
     pub fn volume_at(&self, _tol: f64) -> Option<f64> {

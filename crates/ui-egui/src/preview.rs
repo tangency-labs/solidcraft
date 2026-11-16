@@ -127,6 +127,8 @@ pub struct Built {
     /// The reply of a previewed drive that stopped short of the asked values (the dialog says
     /// where and why, in the UI's language).
     pub stopped: Option<serde_json::Value>,
+    /// The previewed command's last reply (what Arrange placed and left out, for its dialog).
+    pub reply: Option<serde_json::Value>,
     /// For a Mirror of bodies: whether a copy meets the body it was made from, with the key of
     /// the bodies and plane it was worked out for ([`mirror_key`]).
     pub mirror_meets: Option<(u64, bool)>,
@@ -209,6 +211,8 @@ pub struct PreviewState {
     pub applied: Option<(f64, f64)>,
     /// The reply of a previewed drive that stopped short (see [`Built::stopped`]).
     pub stopped: Option<serde_json::Value>,
+    /// The previewed command's last reply (see [`Built::reply`]).
+    pub reply: Option<serde_json::Value>,
     /// The reply of a previewed assembly constraint (see [`Built::placed`]).
     pub placed: Option<serde_json::Value>,
     /// The radius splines the previewed fillet tapered its edges with.
@@ -318,6 +322,7 @@ impl PreviewState {
         self.error = None;
         self.applied = None;
         self.stopped = None;
+        self.reply = None;
         self.placed = None;
         self.tapered.clear();
         self.mirror_meets = None;
@@ -359,6 +364,7 @@ impl PreviewState {
                 self.error = b.error;
                 self.applied = b.applied;
                 self.stopped = b.stopped;
+                self.reply = b.reply;
                 self.placed = b.placed;
                 self.tapered = b.tapered;
                 self.mirror_meets = b.mirror_meets;
@@ -395,6 +401,7 @@ impl PreviewState {
                 self.error = Some(e);
                 self.applied = None;
                 self.stopped = None;
+                self.reply = None;
                 self.placed = None;
                 self.tapered.clear();
                 self.mirror_meets = None;
@@ -587,6 +594,10 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     }
     colors.tint_new = app.preferences.preview_tint_new_faces;
     colors.cut_tint = app.preferences.cut_preview_tint;
+    // Arrange: where a laid-out part stands now is the light red of a picked part.
+    if app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Arrange { .. })) {
+        colors.removed = crate::arrange_sheet::picked(&Tokens::get()).to_srgba_unmultiplied();
+    }
     let mut key = job_key(&cmds, app.session.revision, colors);
     // A Move is drawn as a layer where the view allows it (`move_preview::layered`), and built
     // where it lands where not: when the view changes between the two, it is computed again.
@@ -722,6 +733,7 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             let features = || p.replies.iter().filter_map(|r| r.get("feature").and_then(Value::as_u64));
             b.applied = features().find_map(|id| p.after.fitted_range(id));
             b.tapered = features().find_map(|id| p.after.tapered(id)).map(<[_]>::to_vec).unwrap_or_default();
+            b.reply = p.replies.last().cloned();
             Ok(b)
         }
     }
@@ -875,6 +887,7 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         applied: None,
         tapered: Vec::new(),
         stopped: None,
+        reply: None,
         mirror_meets: None,
         points: Vec::new(),
         placed: None,
@@ -927,6 +940,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         applied: None,
         tapered: Vec::new(),
         stopped: None,
+        reply: None,
         mirror_meets: None,
         points: Vec::new(),
         placed: None,
@@ -1193,6 +1207,7 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
         applied: None,
         tapered: Vec::new(),
         stopped: None,
+        reply: None,
         mirror_meets: None,
         points,
         placed: None,
@@ -1516,6 +1531,7 @@ mod tests {
             applied: None,
             tapered: Vec::new(),
             stopped: None,
+            reply: None,
             mirror_meets: None,
             points: Vec::new(),
             placed: None,
