@@ -323,9 +323,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_ribbon_search"), search));
             }
             // A newer release: its Update button stays before the right cluster, and the
-            // organization's Managed by badge before that.
+            // organization's Managed by badge left of it and of the link pills.
             let update = crate::update::button(app, ui, out.offer, out.offer_labeled);
-            let badge_span = update.map_or(out.offer, |u| Rect::from_min_max(out.offer.min, pos2(u.left() - 6.0, out.offer.max.y)));
+            let badge_right = update.map_or(out.controls_left, |u| u.left().min(out.controls_left)) - 6.0;
+            let badge_span = Rect::from_min_max(out.offer.min, pos2(badge_right.max(out.offer.min.x), out.offer.max.y));
             let badge = crate::policy::badge(app, ui, badge_span, out.offer_labeled);
             let tabs_end = badge.or(update).map_or(out.controls_left, |u| u.left()) - 8.0;
             // Narrow title bars can fit only part of the tab strip. Its hit regions must not

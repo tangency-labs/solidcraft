@@ -1935,6 +1935,8 @@ fn an_organizations_policy_says_managed_by_in_the_bar_preferences_and_about() {
     let badge = rect_of("titlebar:managed").expect("the bar says it is managed");
     let report = rect_of("titlebar:report").unwrap();
     assert!(badge.right() <= report.left(), "{badge:?} {report:?}");
+    let (donate, discord) = (rect_of("titlebar:kofi").unwrap(), rect_of("titlebar:discord").unwrap());
+    assert!(badge.right() < donate.left() && badge.right() < discord.left(), "the badge sits left of the link pills: {badge:?} {donate:?}");
     assert!(h.widget("Managed by ACME").is_some(), "a wide bar names the organization");
     assert!(!h.app.prefs_window.shell.open);
     h.step(&json!({"click":{"handle":"titlebar:managed"}})).unwrap();
