@@ -263,7 +263,7 @@ fn recover_after_focus(ctx: &egui::Context, raw: &mut egui::RawInput) {
         }
     };
     ctx.data_mut(|d| d.remove_temp::<bool>(stale_input_id()));
-    let (pos, modifiers) = ctx.input(|i| (i.pointer.latest_pos().or(i.pointer.interact_pos()).unwrap_or(Pos2::ZERO), i.modifiers));
+    let modifiers = ctx.input(|i| i.modifiers);
     let held: Vec<PointerButton> = [PointerButton::Primary, PointerButton::Secondary, PointerButton::Middle]
         .into_iter()
         .filter(|b| ctx.input(|i| i.pointer.button_down(*b)))
@@ -272,13 +272,21 @@ fn recover_after_focus(ctx: &egui::Context, raw: &mut egui::RawInput) {
     if !held.is_empty() {
         // The release must not complete the interrupted press as a click, which would activate
         // the widget under it: egui drops click eligibility once the pointer is far from the press.
-        let away = pos + egui::vec2(1000.0, 1000.0);
+        let away = away_from_press(ctx);
         recovery.push(egui::Event::PointerMoved(away));
         recovery.extend(held.into_iter().map(|button| egui::Event::PointerButton { pos: away, button, pressed: false, modifiers }));
         recovery.push(egui::Event::PointerGone);
     }
     recovery.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
     raw.events.splice(at..at, recovery);
+}
+
+/// A point far from the held press, for releasing it there so the release is no click. Measured
+/// from the press itself: a pointer that left the window a frame ago has no position any more,
+/// but egui keeps where the press was.
+fn away_from_press(ctx: &egui::Context) -> Pos2 {
+    let (origin, last) = ctx.input(|i| (i.pointer.press_origin(), i.pointer.latest_pos().or(i.pointer.interact_pos())));
+    origin.or(last).unwrap_or(Pos2::ZERO) + egui::vec2(1000.0, 1000.0)
 }
 
 fn left_holding_id() -> Id {
@@ -297,35 +305,33 @@ fn release_lost_presses(ctx: &egui::Context, raw: &mut egui::RawInput) {
     let window = raw.screen_rect.unwrap_or_else(|| ctx.viewport_rect());
     let mut held: Vec<PointerButton> = BUTTONS.into_iter().filter(|b| ctx.input(|i| i.pointer.button_down(*b))).collect();
     let mut left_holding = ctx.data(|d| d.get_temp::<bool>(left_holding_id())).unwrap_or(false);
-    let (last, modifiers) = ctx.input(|i| (i.pointer.latest_pos().or(i.pointer.interact_pos()).unwrap_or(Pos2::ZERO), i.modifiers));
-    let release_all = |held: &mut Vec<PointerButton>, at: Pos2, out: &mut Vec<egui::Event>| {
-        let away = at + egui::vec2(1000.0, 1000.0);
+    let modifiers = ctx.input(|i| i.modifiers);
+    // Far from the press being let go: the one egui holds, or a later one in this frame.
+    let mut away = away_from_press(ctx);
+    let release_all = |held: &mut Vec<PointerButton>, away: Pos2, out: &mut Vec<egui::Event>| {
         out.push(egui::Event::PointerMoved(away));
         out.extend(held.drain(..).map(|button| egui::Event::PointerButton { pos: away, button, pressed: false, modifiers }));
     };
     let mut events = Vec::with_capacity(raw.events.len());
-    let mut at = last;
     for event in std::mem::take(&mut raw.events) {
         match &event {
             egui::Event::PointerGone => left_holding = !held.is_empty(),
             egui::Event::PointerMoved(p) => {
                 if left_holding && !held.is_empty() && window.contains(*p) {
-                    release_all(&mut held, at, &mut events);
+                    release_all(&mut held, away, &mut events);
                 }
                 left_holding = false;
-                at = *p;
             }
             egui::Event::PointerButton { pos, button, pressed: true, .. } => {
                 if held.contains(button) {
                     held.retain(|b| b != button);
-                    let away = *pos + egui::vec2(1000.0, 1000.0);
                     events.push(egui::Event::PointerMoved(away));
                     events.push(egui::Event::PointerButton { pos: away, button: *button, pressed: false, modifiers });
                     events.push(egui::Event::PointerMoved(*pos));
                 }
                 held.push(*button);
                 left_holding = false;
-                at = *pos;
+                away = *pos + egui::vec2(1000.0, 1000.0);
             }
             egui::Event::PointerButton { button, pressed: false, .. } => held.retain(|b| b != button),
             _ => {}
@@ -783,6 +789,20 @@ mod tests {
         h.frame(vec![Event::PointerGone, Event::PointerMoved(pos2(450.0, 60.0))], true, |_| {});
         assert!(!released(&h.frame(vec![Event::PointerMoved(pos2(300.0, 60.0))], true, |_| {})));
         assert!(h.ctx.input(|i| i.pointer.primary_down()));
+    }
+
+    #[test]
+    fn a_pointer_back_after_an_empty_frame_lets_go_without_a_click() {
+        // After the pointer left and one frame went by, egui has no pointer position, only where
+        // the press was: the release must still land far from that press.
+        let mut h = Hooked::new();
+        h.frame(h.press(pos2(1000.0, 1000.0), Default::default()), true, |_| {});
+        h.frame(vec![Event::PointerGone], true, |_| {});
+        h.frame(vec![], true, |_| {});
+        assert_eq!(h.ctx.input(|i| i.pointer.interact_pos()), None);
+        h.frame(vec![Event::PointerMoved(pos2(70.0, 80.0))], true, |_| {});
+        assert!(!h.ctx.input(|i| i.pointer.primary_down()));
+        assert!(!h.ctx.input(|i| i.pointer.any_click()), "the recovered press is no click");
     }
 
     #[test]
