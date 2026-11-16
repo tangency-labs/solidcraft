@@ -1,4 +1,4 @@
-//! tangency-labs/solidcore#1818 under `Kernel::fixes.offset_extended_edges_mated` (WR-344):
+//! tangency-labs/solidcore#1818 under WR-344's mated extended edges (always on):
 //! a ruled loft from a 40 x 40 square at z = 0 to a circle r 15 at z = 60 (four curves a
 //! section, `create_skin_primitive`), shelled 1 inward open at its top with extended convex
 //! edges, merged results and the offset solid made (as SolidCraft's `smlib_shell` calls
@@ -13,9 +13,9 @@
 //! a sound body: eleven faces, valid at every check level, a manifold solid facing out,
 //! its volume the loft's less the cavity's, measured independently ([`assert_sound`]).
 //! solidcore is the reference here, not the fork's refusal. The circle-to-circle loft
-//! (a cone frustum r 15) is the control: it shells to the closed form under the flag.
-//! With loop-gap closure and the vertex splits always enabled, the default fixes
-//! now build the same sound eleven-face shell; the old flag-off refusal is gone.
+//! (a cone frustum r 15) is the control: it shells to the closed form. With loop-gap
+//! closure, the vertex splits and the mated edges always enabled, the default fixes build
+//! the sound eleven-face shell.
 
 #![allow(
     clippy::unwrap_used,
@@ -123,12 +123,6 @@ fn shell(fixes: &UpstreamFixes, square: bool) -> (Kernel, ShellOutcome) {
     (k, result)
 }
 
-fn mated() -> UpstreamFixes {
-    let mut f = UpstreamFixes::default();
-    f.offset_extended_edges_mated = true;
-    f
-}
-
 /// Default loop-gap closure now reaches the shell difference rather than the old early refusal.
 #[test]
 fn default_fixes_shell_the_square_to_circle_loft() {
@@ -166,7 +160,6 @@ fn assert_sound(k: &mut Kernel, mut wall: Brep, label: &str) {
     let ring = face_area(k, &mut wall, ring[0], 1e-10).unwrap();
 
     let mut k2 = Kernel::default();
-    k2.fixes.clone_from(&mated());
     let mut part = loft(&mut k2, true);
     let loft_volume = volume(&k2, &mut part).unwrap();
     let disk = planar_faces_at(&k2, &part, 2, 60.0);
@@ -189,20 +182,7 @@ fn assert_sound(k: &mut Kernel, mut wall: Brep, label: &str) {
     );
 }
 
-/// The flag alone: the shell is a sound body (it was the broken ten-face wall on the
-/// fitted extensions, refused).
-#[test]
-fn mated_offsets_alone_shell_the_square_to_circle_loft() {
-    let (mut k, result) = shell(&mated(), true);
-    assert!(result.input_ownership_transferred());
-    assert_sound(
-        &mut k,
-        result.result.unwrap(),
-        "offset_extended_edges_mated",
-    );
-}
-
-/// SolidCraft's fixes (`kernel_cases/fixes.json`, which include the flag): the same sound body, with loop-gap closure unconditional.
+/// SolidCraft's fixes (`kernel_cases/fixes.json`): the same sound body, with loop-gap closure unconditional.
 #[test]
 fn solidcraft_fixes_shell_the_square_to_circle_loft() {
     let (mut k, result) = shell(&solidcraft_fixes(), true);
@@ -210,19 +190,17 @@ fn solidcraft_fixes_shell_the_square_to_circle_loft() {
 }
 
 /// The control: the circle-to-circle loft (a cone frustum, here a cylinder r 15) shells
-/// under the flag to the closed form, as on the default path.
+/// to the closed form.
 #[test]
 fn mated_offsets_shell_the_circle_control() {
     let analytic = std::f64::consts::PI * (15.0 * 15.0 * 60.0 - 14.0 * 14.0 * 59.0);
-    for fixes in [UpstreamFixes::default(), mated()] {
-        let (k, result) = shell(&fixes, false);
-        let mut wall = result.result.unwrap();
-        wall.refresh_cached_topology();
-        assert!(solidcore::topology::integrity::check(&wall).is_ok());
-        assert!(brep_is_manifold_solid(&wall).unwrap());
-        let v = volume(&k, &mut wall).unwrap();
-        assert!((v - analytic).abs() < 1e-6 * analytic, "{v} vs {analytic}");
-    }
+    let (k, result) = shell(&UpstreamFixes::default(), false);
+    let mut wall = result.result.unwrap();
+    wall.refresh_cached_topology();
+    assert!(solidcore::topology::integrity::check(&wall).is_ok());
+    assert!(brep_is_manifold_solid(&wall).unwrap());
+    let v = volume(&k, &mut wall).unwrap();
+    assert!((v - analytic).abs() < 1e-6 * analytic, "{v} vs {analytic}");
 }
 
 /// The difftest operand (`offset.offset_executive_p2`, `issue1818.json`).

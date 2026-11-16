@@ -278,8 +278,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.local_operation_step_walls = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
     k.fixes.offset_analytic_mate_edges = true;
-    k.fixes.offset_collapsed_rounds_mated = true;
-    k.fixes.offset_extended_edges_mated = true;
     k.fixes.offset_extension_as_itself = true;
     k.fixes.offset_extension_from_base = true;
     k.fixes.offset_resolve_crossing_loops = true;
@@ -298,7 +296,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.ssi_tangent_contact_points = true;
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
-    k.fixes.thicken_planar_side_walls = true;
     k.fixes.transform_model_size_from_body_box = true;
     k.fixes.transform_scales_each_tolerance = true;
     k.fixes.uv_trim_corner_end_points_only = true;

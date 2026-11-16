@@ -985,7 +985,6 @@ fn closed_rounded_rectangle_has_no_internal_pole() {
     k.fixes.sweep_statuses_pass_on = true;
     k.fixes.uv_trim_corner_end_points_only = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
-    k.fixes.bspline_trim_keeps_rational_end_spans = true;
     k.fixes.closed_smooth_pole_tangent_limit = true;
     k.fixes.keep_exact_pcurves = true;
     k.fixes.face_swap_uv_transposes_trims = true;
