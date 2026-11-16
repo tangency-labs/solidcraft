@@ -484,6 +484,7 @@ pub fn merge_edge_with(
 
         // mate new edge with input otherBrep edge
         relations.relate_edges(brep, brep_edge, other, other_edge)?;
+        relations.copied_edges.insert(brep_edge);
         brep_edge
     };
 
@@ -1006,7 +1007,9 @@ pub fn make_faceuse_attempt_with(
 /// edge uses of `new_face`, just made in `brep` from the other operand's face use
 /// `other_fu`, the UV trim curves of the other edge uses they stand for. A trim is
 /// parameterised by its edge's curve on its face's surface, so it stays exact where
-/// the new edge is the primary mate of the other edge, runs on a copy of its curve
+/// the new edge is the primary mate of the other edge that `MergeEdge` copied from it
+/// (one of [`Relations::copied_edges`]: the other operand's own edge, not one the
+/// intersection made or related), runs on a copy of its curve
 /// (the same definition, [`Curve::same_definition`](crate::curve::curve::Curve::same_definition):
 /// a closed curve run the other way round, or a re-fit, is not one) over the same
 /// interval, has at least the other edge's tolerance, and the
@@ -1061,6 +1064,14 @@ fn copy_uv_trim_curves_of_other_face(
             continue;
         };
         if relations.edges.primary(other_edge) != Some(new_edge) {
+            continue;
+        }
+        // Only the other operand's own edges, which MergeEdge copied: an edge the
+        // intersection made or related has the intersector's UV curve on the other face,
+        // an approximation that can lie farther from the exact curve than MakeFace's
+        // trim dropped from the edge (#17896: a torus cut by a box's planes, 9.6e-7 off
+        // the plane against 7.1e-8), so it keeps MakeFace's trim
+        if !relations.copied_edges.contains(&new_edge) {
             continue;
         }
         let (other_record, new_record) = (other.edge(other_edge)?, brep.edge(new_edge)?);
