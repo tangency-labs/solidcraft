@@ -3,6 +3,18 @@
 //! view** sits on one side of its parent and looks from that side, or from the side away from it
 //! in first angle ([`Drawing::projection`], [`projected_basis`]); lined up with its parent, it saves
 //! only its place along the free axis, as the other comes from the parent ([`Drawing::view_centre`]).
+//! A **section view** (#13046) is cut along a [`CuttingLine`] drawn in its parent's plane, and looks
+//! the line's arrows' way ([`CuttingLine::basis`]); it is always placed at a point, and named by its
+//! letter.
+//!
+//! A **pictorial view** sits on one of its parent's four diagonals ([`Diagonal`]) and looks at it
+//! isometric from that corner, or from the opposite one in first angle ([`pictorial_basis`]); it is
+//! placed at a point, never lined up. Where a view made from a parent sits by it, of the eight, is a
+//! [`Beside`], and [`Beside::of_offset`] says which a point that far from the parent's centre gives.
+//! An **auxiliary view** is folded from its parent toward a side of its own, `toward`, a direction
+//! on the parent's paper, so it looks square to an edge or a face the parent shows as a line, or
+//! from the side away in first angle ([`auxiliary_basis`]); it is placed at a point, never lined up.
+//! Only the side is saved, never the edge or face it was made for: it is a direction on paper.
 //!
 //! What a view sets itself is in [`ViewOverrides`]: each setting it leaves out follows its parent,
 //! then the default, and [`Drawing::resolve_view`] is that one rule for every reader. A projected
@@ -12,8 +24,11 @@
 //!
 //! The rules, beside the record's: a view is on one of the drawing's sheets; a base view draws one
 //! of its sources, has a scale and looks from a direction that makes a view; every parent is a view
-//! of the drawing, no chain of parents loops, and a chain is at most [`MAX_VIEW_DEPTH`] views; a
-//! view lined up with its parent is on the parent's sheet; a view's place is on paper
+//! of the drawing, no chain of parents loops, and a chain is at most [`MAX_VIEW_DEPTH`] views; no
+//! view is made from a pictorial or flat pattern view yet ([`Drawing::can_project_from`]); a pictorial or auxiliary
+//! view is placed at a point; an auxiliary view's side is a direction of about unit length; a view
+//! lined up with its parent is on the parent's sheet; a section view is placed at a point, and its
+//! cutting line keeps [`CuttingLine::new`]'s rules; a view's place is on paper
 //! ([`is_paper_coordinate`]); a view's occurrence paths keep [`check_occurrence_paths`]; at most
 //! [`MAX_VIEWS`] views, listed by id ([`Drawing::add_views`]).
 
@@ -21,15 +36,17 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use solidcore_record::{Plane, Vec2};
-use solidcraft_geom::cell::check_label;
+use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_geom::cell::{Projection, check_label};
 use solidcraft_geom::drawing_sheet::view_letter;
 use solidcraft_geom::drawing_view::{ProjectedSide, Scale, is_paper_coordinate, projected_basis};
 use solidcraft_geom::paper::MAX_SIDE_MM;
 use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_render::VisualStyle;
 
+use super::cutting_line::CuttingLine;
 use super::dimension::{ModelEdge, check_edge};
+use super::fold::{auxiliary_basis, pictorial_basis};
 use super::{Drawing, add_by_id, in_id_order, require};
 use crate::drawing_view::{
     Exploded, MAX_JOINT_VALUES, MAX_POSE_JOINTS, MAX_POSE_VALUE, MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, Pose, TangentEdges, ViewConfiguration,
@@ -190,7 +207,7 @@ impl ViewLetters {
 }
 
 /// What a view draws, and from where.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ViewKind {
     /// The design of `source`, seen from `view`.
@@ -205,6 +222,214 @@ pub enum ViewKind {
         parent: u64,
         side: ProjectedSide,
     },
+    /// `parent` cut along `line`, drawn in `parent`'s plane, seen the way its arrows point.
+    Section {
+        #[serde(with = "crate::ids")]
+        parent: u64,
+        line: CuttingLine,
+    },
+    /// An isometric view of `parent` from `diagonal` of it, at its scale and settings, placed apart.
+    Pictorial {
+        #[serde(with = "crate::ids")]
+        parent: u64,
+        diagonal: Diagonal,
+    },
+    /// A view of `parent` folded toward the side `toward` of it (a unit along the parent's paper x
+    /// and y), at its scale and settings, placed apart ([`auxiliary_basis`]).
+    Auxiliary {
+        #[serde(with = "crate::ids")]
+        parent: u64,
+        toward: [f64; 2],
+    },
+    /// The flat pattern of sheet-metal body `body` of the design of `source` (#13030), turned `turn`.
+    Flat {
+        #[serde(with = "crate::ids")]
+        source: u64,
+        body: String,
+        turn: QuarterTurn,
+    },
+}
+
+impl ViewKind {
+    /// Its name in replies: `base`, `projected`, `section`, `pictorial`, `auxiliary` or `flat`.
+    pub fn name(&self) -> &'static str {
+        match self {
+            ViewKind::Base { .. } => "base",
+            ViewKind::Projected { .. } => "projected",
+            ViewKind::Section { .. } => "section",
+            ViewKind::Pictorial { .. } => "pictorial",
+            ViewKind::Auxiliary { .. } => "auxiliary",
+            ViewKind::Flat { .. } => "flat",
+        }
+    }
+
+    /// The view it comes from: none for a base or flat pattern view. The one place a view's parent is
+    /// read, so every rule about parents (the chain, deleting, copying, listing) holds for each kind
+    /// with one.
+    pub fn parent(&self) -> Option<u64> {
+        match self {
+            ViewKind::Base { .. } | ViewKind::Flat { .. } => None,
+            ViewKind::Projected { parent, .. }
+            | ViewKind::Section { parent, .. }
+            | ViewKind::Pictorial { parent, .. }
+            | ViewKind::Auxiliary { parent, .. } => Some(*parent),
+        }
+    }
+
+    /// Where it sits by its parent, of the eight names `drawing.view.projected` takes: none for a base
+    /// or flat pattern view, and none for a section or an auxiliary view, which is placed wherever its
+    /// command puts it.
+    pub fn beside(&self) -> Option<Beside> {
+        match self {
+            ViewKind::Base { .. } | ViewKind::Flat { .. } | ViewKind::Section { .. } | ViewKind::Auxiliary { .. } => None,
+            ViewKind::Projected { side, .. } => Some(Beside::Side(*side)),
+            ViewKind::Pictorial { diagonal, .. } => Some(Beside::Diagonal(*diagonal)),
+        }
+    }
+
+    /// What a view of this kind is called in messages, when it has no parent.
+    pub fn unparented(&self) -> Option<&'static str> {
+        match self {
+            ViewKind::Base { .. } => Some("a base view"),
+            ViewKind::Flat { .. } => Some("a flat pattern view"),
+            ViewKind::Projected { .. } | ViewKind::Section { .. } | ViewKind::Pictorial { .. } | ViewKind::Auxiliary { .. } => None,
+        }
+    }
+}
+
+/// The diagonal of its parent a pictorial view sits on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Diagonal {
+    AboveRight,
+    AboveLeft,
+    BelowRight,
+    BelowLeft,
+}
+
+impl Diagonal {
+    pub const ALL: [Diagonal; 4] = [Diagonal::AboveRight, Diagonal::AboveLeft, Diagonal::BelowRight, Diagonal::BelowLeft];
+
+    /// Which way along the parent's paper x and y it sits, each ±1: `(1, 1)` above right.
+    pub fn signs(self) -> (f64, f64) {
+        match self {
+            Diagonal::AboveRight => (1.0, 1.0),
+            Diagonal::AboveLeft => (-1.0, 1.0),
+            Diagonal::BelowRight => (1.0, -1.0),
+            Diagonal::BelowLeft => (-1.0, -1.0),
+        }
+    }
+}
+
+/// Where a view made from a parent sits by it, by the eight names `drawing.view.projected` takes:
+/// a side (a projected view) or a diagonal (a pictorial view). Read and written as the plain name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Beside {
+    Side(ProjectedSide),
+    Diagonal(Diagonal),
+}
+
+/// `tan 22.5°`: the slope halfway between a side and a diagonal.
+const EIGHTH: f64 = std::f64::consts::SQRT_2 - 1.0;
+
+impl Beside {
+    /// Which of the eight a paper offset from the parent's centre points to, the nearest of eight
+    /// equal sectors: a side when the offset is within 22.5° of its axis (on that line, the side, so
+    /// a view lined up wins a tie), else the diagonal of its signs. None on the centre, or for an
+    /// offset not finite.
+    pub fn of_offset(offset: Vec2) -> Option<Beside> {
+        let (dx, dy) = (offset.x, offset.y);
+        if !(dx.is_finite() && dy.is_finite()) || (dx == 0.0 && dy == 0.0) {
+            return None;
+        }
+        let (right, up) = (dx > 0.0, dy > 0.0);
+        Some(if dy.abs() <= EIGHTH * dx.abs() {
+            Beside::Side(if right { ProjectedSide::Right } else { ProjectedSide::Left })
+        } else if dx.abs() <= EIGHTH * dy.abs() {
+            Beside::Side(if up { ProjectedSide::Above } else { ProjectedSide::Below })
+        } else {
+            Beside::Diagonal(match (right, up) {
+                (true, true) => Diagonal::AboveRight,
+                (false, true) => Diagonal::AboveLeft,
+                (true, false) => Diagonal::BelowRight,
+                (false, false) => Diagonal::BelowLeft,
+            })
+        })
+    }
+
+    /// The basis of the view made here of a view whose basis is `parent`, in `projection`: the one
+    /// rule for a child's basis ([`projected_basis`], [`pictorial_basis`]).
+    pub fn basis(self, parent: &Plane, projection: Projection) -> Result<Plane> {
+        match self {
+            Beside::Side(side) => projected_basis(parent, side, projection).map_err(|e| DocError::Invalid(e.to_string())),
+            Beside::Diagonal(diagonal) => pictorial_basis(parent, diagonal.signs(), projection),
+        }
+    }
+}
+
+/// The longest body name a flat pattern view saves, in bytes.
+pub const MAX_BODY_BYTES: usize = 255;
+
+/// A flat pattern view's body and turn, as it draws ([`ResolvedView::flat`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlatOf {
+    pub body: String,
+    pub turn: QuarterTurn,
+}
+
+/// How far a flat pattern view turns its flat on paper, anticlockwise: a quarter turn at a time, so
+/// its points map exactly. Saved as its degrees, 0, 90, 180 or 270.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "u16", into = "u16")]
+pub enum QuarterTurn {
+    #[default]
+    None,
+    Quarter,
+    Half,
+    ThreeQuarters,
+}
+
+impl QuarterTurn {
+    pub const ALL: [QuarterTurn; 4] = [QuarterTurn::None, QuarterTurn::Quarter, QuarterTurn::Half, QuarterTurn::ThreeQuarters];
+
+    /// The basis that draws a flat lying on its own plane's x and y (z = 0) turned so: its axes are
+    /// signed unit axes, so each point's paper coordinates are its own, swapped or negated.
+    pub fn basis(self) -> Plane {
+        let (x, y) = match self {
+            QuarterTurn::None => (Vec3::X, Vec3::Y),
+            QuarterTurn::Quarter => (Vec3::new(0.0, -1.0, 0.0), Vec3::X),
+            QuarterTurn::Half => (Vec3::new(-1.0, 0.0, 0.0), Vec3::new(0.0, -1.0, 0.0)),
+            QuarterTurn::ThreeQuarters => (Vec3::Y, Vec3::new(-1.0, 0.0, 0.0)),
+        };
+        Plane { origin: Vec3::ZERO, x, y }
+    }
+}
+
+impl From<QuarterTurn> for u16 {
+    fn from(turn: QuarterTurn) -> u16 {
+        match turn {
+            QuarterTurn::None => 0,
+            QuarterTurn::Quarter => 90,
+            QuarterTurn::Half => 180,
+            QuarterTurn::ThreeQuarters => 270,
+        }
+    }
+}
+
+impl TryFrom<u16> for QuarterTurn {
+    type Error = &'static str;
+
+    fn try_from(degrees: u16) -> std::result::Result<QuarterTurn, &'static str> {
+        QuarterTurn::ALL.into_iter().find(|turn| u16::from(*turn) == degrees).ok_or("a turn is 0, 90, 180 or 270 degrees")
+    }
+}
+
+/// What body name a flat pattern view may draw, saved or asked for: 1 to [`MAX_BODY_BYTES`] bytes,
+/// with no control characters.
+pub fn check_flat_body(body: &str) -> Result<()> {
+    require((1..=MAX_BODY_BYTES).contains(&body.len()), || format!("its body is 1 to {MAX_BODY_BYTES} bytes"))?;
+    require(!body.chars().any(char::is_control), || "its body has no control characters".into())
 }
 
 /// Where a view's centre sits on its sheet, in paper millimetres.
@@ -240,11 +465,20 @@ pub struct Setting<T> {
     pub set_by: SetBy,
 }
 
+/// What a section view cuts with: its cutting line, and the plane it is drawn in, its parent's basis.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Cut {
+    pub line: CuttingLine,
+    pub parent: Plane,
+}
+
 /// A view as it draws: the source it draws, which way it looks, and each setting with who gave it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedView {
     pub source: u64,
     pub basis: Plane,
+    /// A section view's cut: none for any other view.
+    pub cut: Option<Cut>,
     pub scale: Setting<Scale>,
     pub visual_style: Setting<VisualStyle>,
     pub reference_style: Setting<VisualStyle>,
@@ -263,6 +497,8 @@ pub struct ResolvedView {
     pub pose: Setting<Pose>,
     /// The configuration of the design it draws: the active one, or a row of its table.
     pub configuration: Setting<ViewConfiguration>,
+    /// A flat pattern view's body and turn; none for a view of the model.
+    pub flat: Option<FlatOf>,
 }
 
 fn is_zero(v: &f64) -> bool {
@@ -271,11 +507,17 @@ fn is_zero(v: &f64) -> bool {
 
 impl View {
     /// Whether its label names it: it stands apart from its projection place, a projected view placed
-    /// at a point. A base view is the principal view and a view lined up with its parent is where its
-    /// projection puts it, so neither needs one (ISO 128-30). Each later kind of view placed apart
-    /// (auxiliary, section, detail) adds its arm here.
+    /// at a point, or it is a section view, which its cutting line names (`A–A`). A base view is the
+    /// principal view and a view lined up with its parent is where its projection puts it, so neither
+    /// needs one (ISO 128-30). A pictorial view needs none either: no arrow or cutting line points at
+    /// it, so nothing names it by its letter. An auxiliary view needs one: it is placed at a point,
+    /// apart from any of the four projection places. Each later kind of view placed apart (detail)
+    /// adds its arm here.
     pub fn needs_letter(&self) -> bool {
-        matches!((self.kind, self.place), (ViewKind::Projected { .. }, ViewPlace::At(_)))
+        matches!(
+            (&self.kind, self.place),
+            (ViewKind::Projected { .. }, ViewPlace::At(_)) | (ViewKind::Section { .. } | ViewKind::Auxiliary { .. }, _)
+        )
     }
 }
 
@@ -329,9 +571,9 @@ fn chain<'a>(id: u64, find: impl Fn(u64) -> Option<&'a View>) -> Result<Vec<&'a 
         })?;
         require(chain.iter().all(|v| v.id != at), || "its chain of parents loops".into())?;
         chain.push(view);
-        match view.kind {
-            ViewKind::Base { .. } => return Ok(chain),
-            ViewKind::Projected { parent, .. } => at = parent,
+        match view.kind.parent() {
+            None => return Ok(chain),
+            Some(parent) => at = parent,
         }
         require(chain.len() < MAX_VIEW_DEPTH, || format!("a chain of views is at most {MAX_VIEW_DEPTH} views"))?;
     }
@@ -363,7 +605,7 @@ impl Drawing {
         self.view_index(id).and_then(|i| self.views.get(i)).map(|v| &**v)
     }
 
-    /// `views` and every view projected from them, directly or through others. A parent can sort
+    /// `views` and every view projected or cut from them, directly or through others. A parent can sort
     /// after its child, so each pass over the views finds at least one more level of a chain, which
     /// is at most [`MAX_VIEW_DEPTH`] views.
     pub fn with_projected(&self, views: &BTreeSet<u64>) -> BTreeSet<u64> {
@@ -371,7 +613,7 @@ impl Drawing {
         for _ in 0..MAX_VIEW_DEPTH {
             let before = all.len();
             for view in &self.views {
-                if matches!(view.kind, ViewKind::Projected { parent, .. } if all.contains(&parent)) {
+                if view.kind.parent().is_some_and(|parent| all.contains(&parent)) {
                     all.insert(view.id);
                 }
             }
@@ -429,35 +671,93 @@ impl Drawing {
             let offset = label.offset.is_none_or(|[x, y]| is_paper_coordinate(x) && is_paper_coordinate(y));
             require(offset, || format!("its label's offset is at most {MAX_SIDE_MM} mm from the view's centre"))?;
         }
-        match view.kind {
+        match &view.kind {
             ViewKind::Base { source, view: direction } => {
-                let drawn = || format!("it draws source {}, which the drawing doesn't have", ids::encode(source));
-                require(self.sources.iter().any(|s| s.id == source), drawn)?;
-                require(view.settings.scale.is_some(), || "a base view has a scale".into())?;
-                require(matches!(view.place, ViewPlace::At(_)), || "a base view is placed at a point: it has no parent to line up with".into())?;
+                self.check_unparented(view, *source)?;
                 direction.basis().map(|_| ()).map_err(|e| DocError::Invalid(e.to_string()))
+            }
+            ViewKind::Flat { source, body, .. } => {
+                self.check_unparented(view, *source)?;
+                check_flat_body(body)
             }
             ViewKind::Projected { parent, .. } => {
                 self.chain_of(view.id)?;
-                let parent_sheet = self.view(parent).map(|p| p.sheet);
+                self.can_project_from(*parent)?;
+                let parent_sheet = self.view(*parent).map(|p| p.sheet);
                 let lined_up = matches!(view.place, ViewPlace::Aligned(_));
                 require(!lined_up || parent_sheet == Some(view.sheet), || "a view lined up with its parent is on its parent's sheet".into())
+            }
+            ViewKind::Section { parent, .. } => {
+                self.chain_of(view.id)?;
+                self.can_project_from(*parent)?;
+                require(matches!(view.place, ViewPlace::At(_)), || "a section view is placed at a point: it has no side to line up on".into())
+            }
+            ViewKind::Pictorial { parent, .. } => {
+                self.chain_of(view.id)?;
+                self.can_project_from(*parent)?;
+                require(matches!(view.place, ViewPlace::At(_)), || "a pictorial view is placed at a point: it isn't lined up with its parent".into())
+            }
+            ViewKind::Auxiliary { parent, toward } => {
+                self.chain_of(view.id)?;
+                self.can_project_from(*parent)?;
+                // A unit, as the command makes it, or near one: never so short that no fold is found.
+                let unit = toward.iter().all(|c| c.is_finite() && c.abs() <= 1.0) && toward.iter().any(|c| c.abs() >= 0.5);
+                require(unit, || {
+                    "an auxiliary view's toward is a direction of about unit length: each number at most 1 either way, one at least 0.5".into()
+                })?;
+                require(matches!(view.place, ViewPlace::At(_)), || "an auxiliary view is placed at a point: it isn't lined up with its parent".into())
             }
         }
     }
 
+    /// Whether a view can be made from view `parent`, the one rule a new view, a saved one and a
+    /// preview of one keep: `parent` is one of the drawing's views, its chain of parents has room for
+    /// one more view ([`MAX_VIEW_DEPTH`]), and it isn't a pictorial view or made from a flat pattern
+    /// view (neither supported yet; a flat pattern's plane isn't a model view, #13030).
+    pub fn can_project_from(&self, parent: u64) -> Result<()> {
+        let chain = self.chain_of(parent)?;
+        require(chain.len() < MAX_VIEW_DEPTH, || format!("a chain of views is at most {MAX_VIEW_DEPTH} views"))?;
+        let pictorial = matches!(chain.first().map(|view| &view.kind), Some(ViewKind::Pictorial { .. }));
+        require(!pictorial, || "not supported yet: a view projected from a pictorial view".into())?;
+        let flat = matches!(chain.last().map(|end| &end.kind), Some(ViewKind::Flat { .. }));
+        require(!flat, || "not supported yet: a view made from a flat pattern view".into())
+    }
+
+    /// The rules of a view that ends a chain, a base or flat pattern view: it draws one of the
+    /// drawing's sources, has a scale and is placed at a point.
+    fn check_unparented(&self, view: &View, source: u64) -> Result<()> {
+        let what = view.kind.unparented().unwrap_or("a view");
+        let drawn = || format!("it draws source {}, which the drawing doesn't have", ids::encode(source));
+        require(self.sources.iter().any(|s| s.id == source), drawn)?;
+        require(view.settings.scale.is_some(), || format!("{what} has a scale"))?;
+        require(matches!(view.place, ViewPlace::At(_)), || format!("{what} is placed at a point: it has no parent to line up with"))
+    }
+
     /// View `id` as it draws: its base view's source, its basis turned down its chain of parents
-    /// ([`projected_basis`], in the drawing's projection), and each setting from the nearest view
-    /// of the chain that sets it, then the default. One rule for every reader of a view.
+    /// ([`Beside::basis`] and [`auxiliary_basis`], in the drawing's projection; [`CuttingLine::basis`]
+    /// at a section view), and each setting from the nearest view of the chain that sets it, then the
+    /// default. A section view also gives its cut. One rule for every reader of a view.
     pub fn resolve_view(&self, id: u64) -> Result<ResolvedView> {
         let chain = self.chain_of(id)?;
-        let Some(ViewKind::Base { source, view: direction }) = chain.last().map(|base| base.kind) else {
-            return Err(DocError::Invalid(format!("view {} has no base view", ids::encode(id))));
+        let (source, mut basis, flat) = match chain.last().map(|end| &end.kind) {
+            Some(ViewKind::Base { source, view: direction }) => (*source, direction.basis().map_err(|e| DocError::Invalid(e.to_string()))?, None),
+            // A flat lies on its own plane, so the turn alone says which way it looks.
+            Some(ViewKind::Flat { source, body, turn }) => (*source, turn.basis(), Some(FlatOf { body: body.clone(), turn: *turn })),
+            _ => return Err(DocError::Invalid(format!("view {} has no base view", ids::encode(id)))),
         };
-        let mut basis = direction.basis().map_err(|e| DocError::Invalid(e.to_string()))?;
+        let mut cut = None;
         for view in chain.iter().rev() {
-            if let ViewKind::Projected { side, .. } = view.kind {
-                basis = projected_basis(&basis, side, self.projection).map_err(|e| DocError::Invalid(e.to_string()))?;
+            match &view.kind {
+                ViewKind::Base { .. } | ViewKind::Flat { .. } => {}
+                ViewKind::Projected { side, .. } => basis = Beside::Side(*side).basis(&basis, self.projection)?,
+                ViewKind::Pictorial { diagonal, .. } => basis = Beside::Diagonal(*diagonal).basis(&basis, self.projection)?,
+                ViewKind::Section { line, .. } => {
+                    let parent = basis;
+                    basis = line.basis(&parent)?;
+                    // Only the view itself is cut: a view projected from a section view isn't.
+                    cut = (view.id == id).then(|| Cut { line: line.clone(), parent });
+                }
+                ViewKind::Auxiliary { toward: [x, y], .. } => basis = auxiliary_basis(&basis, Vec2::new(*x, *y), self.projection)?,
             }
         }
         let scale = inherited(&chain, |s| s.scale).ok_or_else(|| DocError::Invalid(format!("view {} has no scale", ids::encode(id))))?;
@@ -470,6 +770,7 @@ impl Drawing {
         Ok(ResolvedView {
             source,
             basis,
+            cut,
             scale,
             visual_style: or_default(&chain, |s| s.visual_style, defaults.visual_style),
             reference_style: or_default(&chain, |s| s.reference_style, defaults.reference_style),
@@ -482,6 +783,7 @@ impl Drawing {
             exploded: or_default(&chain, |s| s.exploded, Exploded::Assembled),
             pose: or_default(&chain, |s| s.pose.clone(), Pose::Designed),
             configuration: or_default(&chain, |s| s.configuration, ViewConfiguration::Active),
+            flat,
         })
     }
 
@@ -493,11 +795,18 @@ impl Drawing {
         let mut centre = Vec2::ZERO;
         // From the base view down to this one, each lined up with the one before or placed apart.
         for view in self.chain_of(id)?.iter().rev() {
-            centre = match (view.place, view.kind) {
+            centre = match (view.place, &view.kind) {
                 (ViewPlace::At([x, y]), _) => Vec2::new(x, y),
                 (ViewPlace::Aligned(along), ViewKind::Projected { side, .. }) => side.on_free_axis(centre, along),
-                (ViewPlace::Aligned(_), ViewKind::Base { .. }) => {
-                    return Err(DocError::Invalid(format!("base view {} isn't placed at a point", ids::encode(view.id))));
+                (
+                    ViewPlace::Aligned(_),
+                    ViewKind::Base { .. }
+                    | ViewKind::Flat { .. }
+                    | ViewKind::Section { .. }
+                    | ViewKind::Pictorial { .. }
+                    | ViewKind::Auxiliary { .. },
+                ) => {
+                    return Err(DocError::Invalid(format!("{} view {} isn't placed at a point", view.kind.name(), ids::encode(view.id))));
                 }
             };
         }
@@ -510,7 +819,7 @@ impl Drawing {
     /// [`Self::view_centre`]'s rule, with no change to their records.
     pub fn place_moved_to(&self, id: u64, to: Vec2, break_alignment: bool) -> Result<ViewPlace> {
         let view = self.view(id).ok_or_else(|| DocError::Unknown(format!("view {}", ids::encode(id))))?;
-        Ok(match (view.place, view.kind) {
+        Ok(match (view.place, &view.kind) {
             (ViewPlace::Aligned(_), ViewKind::Projected { side, .. }) if !break_alignment => ViewPlace::Aligned(side.along(to)),
             _ => ViewPlace::At([to.x, to.y]),
         })

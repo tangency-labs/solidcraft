@@ -13,10 +13,7 @@ use solidcraft_geom::paper::annotate::{LANDING_PER_LINE_WIDTH, Leader};
 use solidcraft_geom::paper::{Group, Item, ObjectKind};
 use solidcraft_sketch::PaperFonts;
 
-use crate::drawing_dimension_paper::{ARROW, Layout, OnPaper, TEXT_MM, Text, placed};
-
-/// The gap between a note's text and its leader's end.
-const GAP_MM: f64 = 1.0;
+use crate::drawing_dimension_paper::{ARROW, GAP_MM, Layout, OnPaper, TEXT_MM, Text, placed};
 
 /// `note`, reading `text` (its content with its fields read), at its place (from its sheet's corner,
 /// or from its view's centre as its view's lines are), in lines `line_mm` wide, a leader ending at

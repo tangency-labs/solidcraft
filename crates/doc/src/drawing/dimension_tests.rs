@@ -33,7 +33,7 @@ fn measured() -> (Drawing, [u64; 3]) {
     let a3 = drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape);
     let mut d = Drawing::new("Box", "en", "Sheet 1", a3, None, &BTreeSet::new(), &mut id_source).unwrap();
     let source = d.allocate_id(&mut id_source).unwrap();
-    d.sources.push(Source { id: source });
+    d.sources.push(Source { id: source, path: None });
     let (view, sheet) = (d.allocate_id(&mut id_source).unwrap(), d.sheets[0].id);
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     let settings = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };

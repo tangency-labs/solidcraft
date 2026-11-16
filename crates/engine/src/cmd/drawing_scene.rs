@@ -15,11 +15,11 @@ use serde_json::Value;
 use solidcraft_doc::ids;
 
 use super::CommandSpec;
-use crate::drawing_scene::{CMD, DimensionState, NoteState};
+use crate::drawing_scene::{BalloonState, CMD, DimensionState, NoteState, TableState};
 use crate::schema::drawing_scene::{
     DimensionStatusResult, DrawingStatusParams, DrawingStatusResult, DrawingUpdateParams, DrawingUpdateResult, HitResult, LineHitResult,
-    SheetHitParams, SheetHitResult, SheetLineParams, SheetLineResult, SheetPaperScene, SheetSceneDimension, SheetSceneNote, SheetSceneParams,
-    SheetSceneResult, ViewStatusResult,
+    SheetHitParams, SheetHitResult, SheetLineParams, SheetLineResult, SheetPaperScene, SheetSceneBalloon, SheetSceneDimension, SheetSceneNote,
+    SheetSceneParams, SheetSceneResult, SheetSceneTable, ViewStatusResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -73,7 +73,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(STATUS, "Drawing Status
     .doc_only()
     .contract(&CONTRACT)
     .output(output_schema_for::<SheetSceneResult>)
-    .params("sheet: id or name → {sheet, scene: {size_mm, groups: [{object, kind: drawing_border|sheet_image|view|dimension|note|centre_mark|centre_line|title_block, items: [{kind: stroke, path, closed, width_mm, pattern?} or {kind: fill, region} or {kind: picture, source, rect: {min, max}, opacity} or {kind: text, font, scale, origin, angle, slant, glyphs, text, clusters, rtl}]}], fonts?: [the fonts its text names, by id, with their glyphs and never their bytes]} in paint order: the sheet's drawing border (object: the sheet), then each image on it by id (object and source: the placement), then each view on it by id (object: the view; its hidden lines dashed, under its visible ones), then the dimensions and notes of those views by view and id (object: the dimension or note; lines, arrowheads and text, set in the drawing's font and language, in paper millimetres at any scale; a note's fields read as its sheet's title block's do, its leader to where it points now), then centre marks and lines (manual ones by id, object: the centre mark or line; automatic marks use the view as their object), then the notes on the sheet by id, then its title block's lines (object: the sheet), views: [{view, status: drawn|placeholder|failed, reason?, stats?}], objects: [{object, kind, bounds_mm: {min, max}, boundary_mm?}], where the border, each view, each dimension, each note and each manual centre annotation sit on paper; automatic marks are not selectable, dimensions: [{dimension, view, status: ok|overridden|ambiguous|suppressed|lost|unmeasurable, drawn, why?}], notes?: [{note, view?: none on the sheet, status, drawn, why?}], annotation_failures?: [{object, view, kind, reason}]}. A view with nothing to measure, or one that can't be drawn yet, is left out and says why, and so is a dimension that isn't found again or whose view isn't drawn; one whose text the drawing's font can't set keeps its lines and says why. A note whose reference is lost keeps its text, with no leader. annotation_failures lists omitted centre annotations with their object, view, kind and reason; an automatic mark or scan failure names its view as the object. A deferred drawing keeps a view's annotations and their failures as last shown, with the view, until drawing.update (drawing.auto_center_mark.inspect reads the model as it is now). A view drawing its parts apart or another configuration draws no automatic marks: a saved rule on it reports a failure naming the view, and manual centre annotations on it are held back as before. Read-only; a view of another configuration evaluates a copy of the design; the design is unchanged. A deferred drawing draws only what drawing.update allows; out_of_date lists the views, dimensions and notes it shows as they last were.")];
+    .params("sheet: id or name → {sheet, scene: {size_mm, groups: [{object, kind: drawing_border|sheet_image|view|dimension|note|balloon|centre_mark|centre_line|parts_list|revision_table|title_block, items: [{kind: stroke, path, closed, width_mm} or {kind: fill, region} or {kind: picture, source, rect: {min, max}, opacity} or {kind: text, font, scale, origin, angle, slant, glyphs, text, clusters, rtl}]}], fonts?: [the fonts its text names, by id, with their glyphs and never their bytes]} in paint order: the sheet's drawing border (object: the sheet), then each image on it by id (object and source: the placement), then each view on it by id (object: the view; its hidden lines dashed, under its visible ones), then the dimensions, notes and balloons of those views by view and id (object: the dimension, note or balloon; lines, arrowheads and text, set in the drawing's font and language, in paper millimetres at any scale; a note's fields read as its sheet's title block's do, its leader to where it points now; a balloon's circle round its number in its parts list, its leader to its edge's middle), then centre marks and lines (automatic marks use the view as their object), then its parts lists and revision tables by id (object: the table; its lines and its words, where its place puts it), then the notes on the sheet by id, then its title block's lines (object: the sheet), views: [{view, status: drawn|placeholder|failed, reason?, stats?}], objects: [{object, kind, bounds_mm: {min, max}, boundary_mm?}], where the border, each view, each dimension, each note and each table sit on paper (what draws nothing and has no boundary isn't one), dimensions: [{dimension, view, status: ok|overridden|ambiguous|suppressed|lost|unmeasurable, drawn, why?}], notes?: [{note, view?: none on the sheet, status, drawn, why?}], balloons?: [{balloon, view, status, row_status: ok|no_list|not_found|reference|no_row|unread, item?, drawn, why?}], tables: [{table, status: ok|failed, drawn, why?}], annotation_failures?: [{object, view, kind, reason}]}. A table that can't be read or laid out says why, and the rest of the sheet still draws; one with a word the drawing's fonts can't set leaves that word off and says why. A view with nothing to measure, or one that can't be drawn yet, is left out and says why, and so is a dimension that isn't found again or whose view isn't drawn; one whose text the drawing's font can't set keeps its lines and says why. A note whose reference is lost keeps its text, with no leader, and a lost balloon keeps its circle and number; one with no row keeps an empty circle and says why. Read-only; a view of another configuration evaluates a copy of the design; the design is unchanged. A deferred drawing draws only what drawing.update allows; out_of_date lists the views, dimensions, notes and balloons it shows as they last were.")];
 
 fn status(s: &mut Session, p: &Value) -> Result<Value> {
     let _: DrawingStatusParams = crate::schema::read(STATUS, p)?;
@@ -166,6 +166,34 @@ pub(super) fn note_results(states: Vec<NoteState>) -> Vec<SheetSceneNote> {
     states.into_iter().map(one).collect()
 }
 
+/// Each balloon of a scene in the words of a reply.
+pub(super) fn balloon_results(states: Vec<BalloonState>) -> Vec<SheetSceneBalloon> {
+    let one = |state: BalloonState| {
+        let (status, why, _) = super::drawing_dimension::status_words(state.status);
+        SheetSceneBalloon {
+            balloon: ids::encode(state.balloon),
+            view: ids::encode(state.view),
+            status,
+            row_status: super::drawing_balloon::row_word(&state.row),
+            item: state.row.item().map(str::to_string),
+            drawn: state.drawn,
+            why: why.or(state.why),
+        }
+    };
+    states.into_iter().map(one).collect()
+}
+
+/// Each table of a scene in the words of a reply.
+pub(super) fn table_results(states: Vec<TableState>) -> Vec<SheetSceneTable> {
+    let one = |state: TableState| SheetSceneTable {
+        table: ids::encode(state.table),
+        status: if state.failed { "failed" } else { "ok" },
+        drawn: state.drawn,
+        why: state.why,
+    };
+    states.into_iter().map(one).collect()
+}
+
 fn scene(s: &mut Session, p: &Value) -> Result<Value> {
     let request: SheetSceneParams = crate::schema::read(CMD, p)?;
     let d = s.drawing(CMD)?.clone();
@@ -176,6 +204,8 @@ fn scene(s: &mut Session, p: &Value) -> Result<Value> {
     let objects = built.objects.into_iter().map(Into::into).collect();
     let dimensions = dimension_results(built.dimensions);
     let notes = note_results(built.notes);
+    let balloons = balloon_results(built.balloons);
+    let tables = table_results(built.tables);
     let reply = SheetSceneResult {
         sheet: ids::encode(sheet),
         scene: SheetPaperScene(built.scene),
@@ -184,6 +214,8 @@ fn scene(s: &mut Session, p: &Value) -> Result<Value> {
         dimensions,
         notes,
         annotation_failures: built.annotation_failures.into_iter().map(Into::into).collect(),
+        balloons,
+        tables,
         out_of_date,
         param_warnings: Vec::new(),
     };

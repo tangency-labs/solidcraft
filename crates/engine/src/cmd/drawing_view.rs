@@ -19,7 +19,16 @@
 //! `drawing.view.base` and `drawing.view.projected` (#4816) make a saved view: a base view of the
 //! drawing's design on a sheet, or a view projected from another, lined up with it a gap past its
 //! boundary unless placed. Each is one undo step, refused whole by the record's rules, and lists
-//! itself when it lies outside the sheet's drawing space.
+//! itself when it lies outside the sheet's drawing space. On a diagonal of its parent,
+//! `drawing.view.projected` makes a pictorial view: isometric, placed apart (#13044).
+//! `drawing.view.projection_for` (#13044) answers which view a point that far from the parent's
+//! centre would make, under the drawing's projection, by the record's one rule, for a preview.
+//! `drawing.view.auxiliary` (#13044) makes an auxiliary view: its parent folded toward the side that
+//! looks square to an edge or a face the parent shows as a line, read exactly from the model, and
+//! saved as that side alone; unfolded beside its parent, a gap past it, unless placed.
+//!
+//! `drawing.view.flat` (#13030) makes a flat pattern view: one sheet-metal body's flat pattern as
+//! `sheet.flat_pattern` reports it, on a sheet, turned a quarter at a time ([`crate::drawing_view::flat`]).
 //!
 //! What a saved view shows, its `source` and `hide`, is set when it is made or edited and follows
 //! the parent as any setting does. The occurrences are checked as they are chosen: one deleted later
@@ -43,8 +52,9 @@ use solidcraft_doc::drawing::balloon::Balloon;
 use solidcraft_doc::drawing::centre_line::CentreLine;
 use solidcraft_doc::drawing::centre_mark::CentreMark;
 use solidcraft_doc::drawing::dimension::{Dimension, LabelKind, MAX_DECIMALS, reading_label};
+use solidcraft_doc::drawing::fold::{FoldFor, FoldRefusal, FoldSide, auxiliary_side};
 use solidcraft_doc::drawing::note::Note;
-use solidcraft_doc::drawing::view::{ResolvedView, SetBy, Setting, View, ViewKind, ViewLabel, ViewPlace, check_occurrence_paths, check_pose};
+use solidcraft_doc::drawing::view::{Beside, ResolvedView, SetBy, Setting, View, ViewKind, ViewLabel, ViewPlace, check_occurrence_paths, check_pose};
 use solidcraft_doc::drawing_view::{
     Exploded, JointPose, Looking, MAX_POSE_JOINTS, OccurrencePaths, Pose, StudyStep, TangentEdges, ViewConfiguration, ViewDirection, ViewOverrides,
 };
@@ -54,7 +64,7 @@ use solidcraft_geom::drawing_measure::{self, AngleFrom, LinearDirection, Measure
 use solidcraft_geom::drawing_sheet::{DrawingBorderProfile, Sheet};
 use solidcraft_geom::drawing_view::{Invalid, NamedView, PRESETS, ProjectedSide, Scale};
 use solidcraft_geom::hlr::Visibility;
-use solidcraft_geom::paper::{MAX_COORDINATE_MM, Picture};
+use solidcraft_geom::paper::{MAX_COORDINATE_MM, MAX_SIDE_MM, Picture};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::CurveAccuracy;
 use solidcraft_io::paper::MAX_PICTURE_DPI;
@@ -66,12 +76,12 @@ use crate::drawing_view::{
 };
 use crate::params::bad;
 use crate::schema::drawing_view::{
-    AccuracyResult, AlongParam, AngleFromParam, BaseParams, BoxResult, ChoicesResult, ConfigurationParam, ConfigurationResult, CopyParams,
-    CreateResult, DPI_RANGE, DrawnJointResult, DrawnRowResult, EditParams, EditResult, ExplodedParam, ExtentsResult, FromResult, InspectParams,
-    InspectResult, LabelResult, LabelSet, LineResult, LinesStatusResult, MeasureParam, MeasurementResult, MoveParams, OutsideResult, PathSegResult,
-    PictureResult, PieceResult, PlaceParam, PoseParam, PoseResult, ProjectedParams, ScaleResult, SceneResult, SettingResult, SettingsResult,
-    SnapshotParams, SnapshotResult, SourceResult, StudyPoseParam, StudyStepResult, ToSheetResult, ViewLineParam, ViewMoveParams, ViewMoveResult,
-    ViewResult, ViewSet,
+    AccuracyResult, AlongParam, AngleFromParam, AuxiliaryParams, BaseParams, BoxResult, ChoicesResult, ConfigurationParam, ConfigurationResult,
+    CopyParams, CreateResult, DPI_RANGE, DrawnJointResult, DrawnRowResult, EditParams, EditResult, ExplodedParam, ExtentsResult, FlatParams,
+    FromResult, InspectParams, InspectResult, LabelResult, LabelSet, LineResult, LinesStatusResult, MeasureParam, MeasurementResult, MoveParams,
+    OutsideResult, PathSegResult, PictureResult, PieceResult, PlaceParam, PoseParam, PoseResult, ProjectedParams, ProjectionForParams,
+    ProjectionForResult, ScaleResult, SceneResult, SettingResult, SettingsResult, SnapshotParams, SnapshotResult, SourceResult, StudyPoseParam,
+    StudyStepResult, ToSheetResult, ViewLineParam, ViewMoveParams, ViewMoveResult, ViewResult, ViewSet,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -92,6 +102,16 @@ const BASE: &str = "drawing.view.base";
 const BASE_CONTRACT: TypedContract<BaseParams> = TypedContract::new();
 const PROJECTED: &str = "drawing.view.projected";
 const PROJECTED_CONTRACT: TypedContract<ProjectedParams> = TypedContract::new();
+const PROJECTION_FOR: &str = "drawing.view.projection_for";
+const PROJECTION_FOR_CONTRACT: TypedContract<ProjectionForParams> = TypedContract::new();
+const AUXILIARY: &str = "drawing.view.auxiliary";
+const AUXILIARY_CONTRACT: TypedContract<AuxiliaryParams> = TypedContract::new();
+const FLAT: &str = "drawing.view.flat";
+const FLAT_CONTRACT: TypedContract<FlatParams> = TypedContract::new();
+
+/// How far from its parent's centre `drawing.view.projection_for` takes a point, either way, in
+/// paper millimetres: the most two points of one sheet are apart along an axis.
+const MAX_OFFSET_MM: f64 = 2.0 * MAX_SIDE_MM;
 
 /// How far a new projected view's boundary is from its parent's, in paper millimetres, until a
 /// drawing style gives it.
@@ -110,7 +130,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .doc_only()
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<InspectResult>)
-        .params("view: a saved view's id → {view, sheet, kind: base|projected, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges, occurrences (null: every body), exploded (\"assembled\" or {view: id}), pose (\"designed\", {joints: [...]} as saved, in radians and mm, or {study: {id, step}}; with drawn?, skipped? and study? for a position of its own), configuration (\"active\" or {row: id}, with drawn: {id, name} or null, and errors?), hide: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|placeholder, provenance (a placeholder's reason: past_walk_limit, no_bodies, not_placed, nothing_chosen, no_exploded_view, not_posed, no_configuration or not_configured)} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], centre_marks: [its manual marks' ids], centre_lines: [its manual lines' ids], choices: {visual_style, scale}}. Read-only; a view of another configuration evaluates a copy of the design; the design is unchanged."),
+        .params("view: a saved view's id → {view, sheet, kind: base|projected|flat, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges, occurrences (null: every body), exploded (\"assembled\" or {view: id}), pose (\"designed\", {joints: [...]} as saved, in radians and mm, or {study: {id, step}}; with drawn?, skipped? and study? for a position of its own), configuration (\"active\" or {row: id}, with drawn: {id, name} or null, and errors?), hide: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|exact (a flat pattern view's)|placeholder, provenance (a placeholder's reason: past_walk_limit, no_bodies, not_placed, nothing_chosen, no_exploded_view, not_posed, no_configuration, not_configured or no_flat; a flat pattern view's: flat_pattern)} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], centre_marks: [its manual marks' ids], centre_lines: [its manual lines' ids], choices: {visual_style, scale}}. Read-only; a view of another configuration evaluates a copy of the design; the design is unchanged."),
     CommandSpec::new(EDIT, "Edit Drawing View", crate::checked!("drawing.view.edit", edit))
         .icon("edit")
         .in_drawing()
@@ -152,7 +172,29 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .doc_only()
         .contract(&PROJECTED_CONTRACT)
         .output(output_schema_for::<CreateResult>)
-        .params("parent: a saved view's id; side: left, right, above or below, where it sits (the drawing's projection says which side of the model it shows); place?: {at: [x, y]} or {aligned: n} (default: lined up with its parent, its boundary 20 mm past the parent's) → {view, sheet: its parent's, scale: its parent's, boundary_mm, outside?}. Its scale and display settings follow its parent; drawing.view.edit sets its own. One undo step; a view of another configuration evaluates a copy of the design; the design is unchanged."),
+        .params("parent: a saved view's id; side: left, right, above or below, where it sits (the drawing's projection says which side of the model it shows), or above_right, above_left, below_right or below_left for an isometric (pictorial) view on that diagonal, which shows what its two neighbours show and is never lined up; place?: {at: [x, y]} or {aligned: n} (a side's default: lined up with its parent, its boundary 20 mm past the parent's; a diagonal's: at the point that puts its boundary 20 mm past the parent's on both axes; a diagonal takes {at} only) → {view, sheet: its parent's, scale: its parent's, boundary_mm, outside?}. Its scale and display settings follow its parent; drawing.view.edit sets its own. No view is made from a pictorial or flat pattern view yet. One undo step; a view of another configuration evaluates a copy of the design; the design is unchanged."),
+    CommandSpec::new(PROJECTION_FOR, "Projected View at Point", crate::checked!("drawing.view.projection_for", projection_for))
+        .icon("inspect")
+        .in_drawing()
+        .noundo()
+        .doc_only()
+        .contract(&PROJECTION_FOR_CONTRACT)
+        .output(output_schema_for::<ProjectionForResult>)
+        .params("parent: a saved view's id; offset_mm: [dx, dy], paper mm from the parent's centre, each at most 10000 either way → {kind: orthographic|pictorial|none, side? (as drawing.view.projected takes it), lined_up, direction? (as drawing.view.inspect gives it), scale? (the parent's), projection: first|third, why? (for none: on the parent's centre, or why no view is made from that parent)}: which view drawing.view.projected would make there, the nearest of eight directions (sides within 22.5° of an axis, diagonals between), under the drawing's projection. Read-only; no model is evaluated."),
+    CommandSpec::new(AUXILIARY, "Auxiliary View", crate::checked!("drawing.view.auxiliary", auxiliary))
+        .icon("new")
+        .in_drawing()
+        .doc_only()
+        .contract(&AUXILIARY_CONTRACT)
+        .output(output_schema_for::<CreateResult>)
+        .params("parent: a saved view's id; edge?: a straight edge the parent shows as a line, as drawing.dimension.add takes one (a point on it [x, y, z], {point} or {body, index}, with path?): the view looks square to it, so it shows at its true length; face?: a flat face the parent shows edge-on, given as an edge is: the view looks along its normal, so it shows at its true shape (give one of edge and face); toward?: [dx, dy], the side of the parent it sits on, a direction on the parent's paper (default: the side away from the middle of what the parent shows); place?: {at: [x, y]} (default: unfolded from its parent, so each point lines up with the parent across the fold line, and moved along its side until its boundary is 20 mm past the parent's) → {view, sheet: its parent's, scale: its parent's, boundary_mm, outside?}. It saves only its side, not the edge or face; its scale and display settings follow its parent. Refused: an edge that isn't straight or that the parent shows end-on, a face that isn't flat or that the parent doesn't show edge-on (with its angle), a side along the fold line, a pictorial or flat pattern parent. One undo step; a view of another configuration evaluates a copy of the design; the design is unchanged."),
+    CommandSpec::new(FLAT, "Flat Pattern View", crate::checked!("drawing.view.flat", flat))
+        .icon("new")
+        .in_drawing()
+        .doc_only()
+        .contract(&FLAT_CONTRACT)
+        .output(output_schema_for::<CreateResult>)
+        .params("sheet: id or name; body?: a sheet-metal body's name (default the last one made); scale?: \"paper:model\" (default: the largest ISO 5455 preset at which it lies inside the sheet's drawing space and off its title block; saved either way); position_mm?: [x, y] for its centre (default the sheet's centre); turn?: 0 (default), 90, 180 or 270 degrees counter-clockwise → {view, sheet, scale: {text, factor, fitted}, boundary_mm, outside?}. The flat pattern as sheet.flat_pattern reports it: its outlines and cut-outs as visible lines, bends up as chain lines (long dash, dot) and bends down as double-chain lines (long dash, two dots), narrow. Refused as sheet.flat_pattern refuses the body. One undo step; no model is evaluated."),
 ];
 
 fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
@@ -241,7 +283,7 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
         sheet: request.sheet,
         visual_style: snake_name(settings.visual_style),
         reference_style: snake_name(settings.reference_style),
-        extents: extents_result(&extents, None),
+        extents: extents_result(&extents, None, false),
         boundary_mm: BoxResult { min: boundary.min.into(), max: boundary.max.into() },
         lines: line_results(&set, &drawn),
         status: LinesStatusResult {
@@ -341,8 +383,15 @@ fn measurements(s: &Session, request: &SnapshotParams, basis: &Plane, scale: Sca
 }
 
 /// Refused when saved view `view` of `record` doesn't draw a part that one of the occurrence paths
-/// `paths` places: an annotation attaches only to what its view draws.
+/// `paths` places: an annotation attaches only to what its view draws. With any path, refused too on
+/// a view that draws none of the model's edges ([`crate::drawing_view::no_model_edges`]).
 pub(super) fn check_drawn<'a>(record: &Drawing, view: u64, paths: impl IntoIterator<Item = &'a [u64]>, cmd: &str) -> Result<()> {
+    let mut paths = paths.into_iter().peekable();
+    if paths.peek().is_some()
+        && let Some(why) = record.view(view).and_then(crate::drawing_view::no_model_edges)
+    {
+        return Err(bad(cmd, why));
+    }
     match not_drawn(record, view, paths) {
         Some(why) => Err(bad(cmd, format!("view {} doesn't draw that part: {why}", ids::encode(view)))),
         None => Ok(()),
@@ -462,18 +511,18 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let placed = crate::drawing_view::on_sheet_from(&mut sessions, d, view.id, INSPECT)?;
     let pose = pose_result(s, &mut sessions, &resolved, view.settings.pose.clone());
     let configuration = configuration_result(&mut sessions, &resolved, view.settings.configuration);
-    let (parent, side) = match view.kind {
-        ViewKind::Base { .. } => (None, None),
-        ViewKind::Projected { parent, side } => (Some(ids::encode(parent)), Some(snake_name(side))),
-    };
     let own = &view.settings;
     let reply = InspectResult {
         view: ids::encode(view.id),
         sheet: ids::encode(view.sheet),
-        kind: if parent.is_some() { "projected" } else { "base" },
+        kind: view.kind.name(),
         source: ids::encode(resolved.source),
-        parent,
-        side,
+        parent: view.kind.parent().map(ids::encode),
+        side: view.kind.beside().map(snake_name),
+        toward: match &view.kind {
+            ViewKind::Auxiliary { toward, .. } => Some(*toward),
+            _ => None,
+        },
         direction: direction(&resolved.basis),
         place: view.place.into(),
         settings: SettingsResult {
@@ -491,8 +540,8 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         },
         reference_shown_percent: view.reference_shown_percent,
         boundary_mm: BoxResult { min: placed.boundary.min.into(), max: placed.boundary.max.into() },
-        extents: extents_result(&placed.extents, placed.unmeasured),
-        linked: matches!(view.kind, ViewKind::Projected { .. }).then(|| match display_set(own) {
+        extents: extents_result(&placed.extents, placed.unmeasured, resolved.flat.is_some()),
+        linked: view.kind.parent().is_some().then(|| match display_set(own) {
             0 => Value::Bool(true),
             DISPLAY_GROUP => Value::Bool(false),
             _ => Value::String("partly".into()),
@@ -587,8 +636,8 @@ fn find<'a>(d: &'a Drawing, id: u64, cmd: &str) -> Result<&'a View> {
     d.view(id).ok_or_else(|| bad(cmd, format!("the drawing has no view {}", ids::encode(id))))
 }
 
-/// The views projected from view `id`, directly or through others, in the drawing's order: each
-/// one `follows` takes, whose parent is `id` or one of them.
+/// The views projected or cut from view `id`, directly or through others, in the drawing's order:
+/// each one `follows` takes, whose parent is `id` or one of them.
 fn descendants(d: &Drawing, id: u64, follows: impl Fn(&View) -> bool) -> Vec<u64> {
     let mut found = vec![id];
     // Each pass adds the views whose parent is found; a chain is at most MAX_VIEW_DEPTH views.
@@ -596,7 +645,7 @@ fn descendants(d: &Drawing, id: u64, follows: impl Fn(&View) -> bool) -> Vec<u64
         let more: Vec<u64> = d
             .views
             .iter()
-            .filter(|v| !found.contains(&v.id) && matches!(v.kind, ViewKind::Projected { parent, .. } if found.contains(&parent)) && follows(v))
+            .filter(|v| !found.contains(&v.id) && v.kind.parent().is_some_and(|parent| found.contains(&parent)) && follows(v))
             .map(|v| v.id)
             .collect();
         if more.is_empty() {
@@ -631,11 +680,15 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet, found: &Found) -> Result<Vec<
     }
     let Some(view) = d.views.get_mut(at).map(std::sync::Arc::make_mut) else { return Ok(Vec::new()) };
     let before = view.clone();
-    let base = matches!(view.kind, ViewKind::Base { .. });
+    let unparented = view.kind.unparented();
+    let own_direction = match view.kind {
+        ViewKind::Flat { .. } => "a flat pattern view looks straight at its flat: only a base view's direction changes",
+        _ => "a projected view looks from its side of its parent: only a base view's direction changes",
+    };
     let own = &mut view.settings;
     if let Some(linked) = set.linked {
-        if base {
-            return Err(bad(EDIT, "a base view has no parent to follow: `linked` is a projected view's"));
+        if let Some(what) = unparented {
+            return Err(bad(EDIT, format!("{what} has no parent to follow: `linked` is a projected view's")));
         }
         // Following: the display settings cleared. Its own: each at the value it has now.
         own.visual_style = (!linked).then_some(resolved.visual_style.value);
@@ -645,8 +698,8 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet, found: &Found) -> Result<Vec<
         own.line_group = (!linked).then_some(resolved.line_group.value);
     }
     if let Some(scale) = set.scale {
-        if base && scale.is_none() {
-            return Err(bad(EDIT, "a base view has no parent to follow: it keeps a scale"));
+        if let Some(what) = unparented.filter(|_| scale.is_none()) {
+            return Err(bad(EDIT, format!("{what} has no parent to follow: it keeps a scale")));
         }
         own.scale = scale.map(|s| s.0);
     }
@@ -684,9 +737,7 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet, found: &Found) -> Result<Vec<
         view.reference_shown_percent = percent;
     }
     if let Some(direction) = set.view {
-        let ViewKind::Base { view: looking, .. } = &mut view.kind else {
-            return Err(bad(EDIT, "a projected view looks from its side of its parent: only a base view's direction changes"));
-        };
+        let ViewKind::Base { view: looking, .. } = &mut view.kind else { return Err(bad(EDIT, own_direction)) };
         *looking = direction.0;
     }
     if let Some(place) = set.place {
@@ -761,13 +812,15 @@ pub(super) fn outside_results(outside: Vec<(u64, OnSheet)>) -> Vec<OutsideResult
     outside.into_iter().map(result).collect()
 }
 
-fn extents_result(extents: &Extents, unmeasured: Option<Unmeasured>) -> ExtentsResult {
+/// A flat pattern view's extents are its flat's exact box.
+fn extents_result(extents: &Extents, unmeasured: Option<Unmeasured>, flat: bool) -> ExtentsResult {
+    let (status, measured_on) = if flat { ("exact", "flat_pattern") } else { ("approximate", "display_mesh") };
     ExtentsResult {
         min: extents.model.min.into(),
         max: extents.model.max.into(),
         error_mm: extents.error_mm,
-        status: if unmeasured.is_some() { "placeholder" } else { "approximate" },
-        provenance: unmeasured.map_or("display_mesh", Unmeasured::name),
+        status: if unmeasured.is_some() { "placeholder" } else { status },
+        provenance: unmeasured.map_or(measured_on, Unmeasured::name),
     }
 }
 
@@ -923,11 +976,14 @@ fn pose_result(s: &Session, sessions: &mut ViewSessions, view: &ResolvedView, ow
     PoseResult { setting, drawn: Some(drawn), skipped: Some(skipped), study }
 }
 
-/// Refuses a drawing in which one of `views` draws its parts apart in a way it can't draw yet
-/// ([`crate::drawing_view::not_drawable_apart`]).
+/// Refuses a drawing in which one of `views` draws its parts apart in a way it can't draw: a flat
+/// pattern view exploded, posed or configured ([`crate::drawing_view::not_drawable_flat`]), or a
+/// shaded view drawn apart ([`crate::drawing_view::not_drawable_apart`]).
 fn check_apart(d: &Drawing, views: impl Iterator<Item = u64>, cmd: &str) -> Result<()> {
     for view in views {
-        if let Some(why) = d.resolve_view(view).ok().as_ref().and_then(crate::drawing_view::not_drawable_apart) {
+        let Ok(resolved) = d.resolve_view(view) else { continue };
+        let why = crate::drawing_view::not_drawable_flat(&resolved).or_else(|| crate::drawing_view::not_drawable_apart(&resolved));
+        if let Some(why) = why {
             return Err(bad(cmd, why));
         }
         if let Some(apart) = crate::drawing_view::unsupported_centre_view(d, view)
@@ -964,10 +1020,13 @@ fn lined_up(d: &Drawing, id: u64) -> Vec<u64> {
 /// `view`'s place moved by `by`: a point moves, and a place lined up with a parent moves along
 /// its free axis, so the views lined up with a moved view stay where they were beside it.
 fn shifted(view: &View, by: Vec2) -> ViewPlace {
-    match (view.place, view.kind) {
+    match (view.place, &view.kind) {
         (ViewPlace::At([x, y]), _) => ViewPlace::At([x + by.x, y + by.y]),
         (ViewPlace::Aligned(along), ViewKind::Projected { side, .. }) => ViewPlace::Aligned(along + side.along(by)),
-        (ViewPlace::Aligned(along), ViewKind::Base { .. }) => ViewPlace::Aligned(along + by.y),
+        (
+            ViewPlace::Aligned(along),
+            ViewKind::Base { .. } | ViewKind::Section { .. } | ViewKind::Pictorial { .. } | ViewKind::Auxiliary { .. } | ViewKind::Flat { .. },
+        ) => ViewPlace::Aligned(along + by.y),
     }
 }
 
@@ -1086,12 +1145,13 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
             let original = find(d, *old, COPY)?;
             let mut view = View { id: *new, sheet, ..original.clone() };
             view.place = shifted(original, to - from);
-            match original.kind {
-                // The copy follows none of the views it came from: a projected view copied alone is
-                // a base view, looking the way it did, with the settings it had as its own. Its line
-                // group is its own only when its chain gave it: else it follows its new sheet, as a
-                // base view copied does.
-                ViewKind::Projected { .. } if *old == id => {
+            match &original.kind {
+                // The copy follows none of the views it came from: a projected, pictorial or auxiliary
+                // view copied alone is a base view, looking the way it did, with the settings it had as
+                // its own. Its line group is its own only when its chain gave it: else it follows its
+                // new sheet, as a base view copied does. A section view copied alone stays a section of
+                // its parent: its cut is what it shows.
+                ViewKind::Projected { .. } | ViewKind::Pictorial { .. } | ViewKind::Auxiliary { .. } if *old == id => {
                     view.kind = ViewKind::Base { source: resolved.source, view: looking(&resolved.basis) };
                     view.settings = ViewOverrides {
                         scale: Some(resolved.scale.value),
@@ -1108,8 +1168,17 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
                     };
                     view.place = ViewPlace::At([to.x, to.y]);
                 }
-                ViewKind::Projected { parent, side } => view.kind = ViewKind::Projected { parent: copy_of(parent).unwrap_or(parent), side },
-                ViewKind::Base { .. } => {}
+                ViewKind::Projected { parent, side } => view.kind = ViewKind::Projected { parent: copy_of(*parent).unwrap_or(*parent), side: *side },
+                ViewKind::Section { parent, line } => {
+                    view.kind = ViewKind::Section { parent: copy_of(*parent).unwrap_or(*parent), line: line.clone() }
+                }
+                ViewKind::Pictorial { parent, diagonal } => {
+                    view.kind = ViewKind::Pictorial { parent: copy_of(*parent).unwrap_or(*parent), diagonal: *diagonal }
+                }
+                ViewKind::Auxiliary { parent, toward } => {
+                    view.kind = ViewKind::Auxiliary { parent: copy_of(*parent).unwrap_or(*parent), toward: *toward }
+                }
+                ViewKind::Base { .. } | ViewKind::Flat { .. } => {}
             }
             // A copy never shares its original's letter: one that needs a letter is given its own below.
             if !view.needs_letter() {
@@ -1178,7 +1247,10 @@ fn base(s: &mut Session, p: &Value) -> Result<Value> {
     let request: BaseParams = crate::schema::read(BASE, p)?;
     let record = s.drawing(BASE)?.clone();
     let (sheet, middle) = sheet_named(&record, &request.sheet, BASE)?;
-    let source = record.sources.first().map(|source| source.id).ok_or_else(|| bad(BASE, "the drawing draws no design"))?;
+    // The design it is in, else the first it draws: read through the one accessor.
+    let source =
+        record.own_source().or_else(|| record.sources.first().map(|source| source.id)).ok_or_else(|| bad(BASE, "the drawing draws no design"))?;
+    s.drawn(&record, source).map_err(|why| bad(BASE, why.to_string()))?;
     let chosen = request.source.as_ref().map(|chosen| chosen.occurrences.as_slice());
     check_paths(s, chosen, request.hide.as_deref().unwrap_or_default(), BASE)?;
     let direction = request.view.unwrap_or_default().0;
@@ -1238,29 +1310,40 @@ fn projected(s: &mut Session, p: &Value) -> Result<Value> {
     let request: ProjectedParams = crate::schema::read(PROJECTED, p)?;
     let record = s.drawing(PROJECTED)?.clone();
     let (parent, sheet) = find(&record, request.parent.0, PROJECTED).map(|v| (v.id, v.sheet))?;
-    let side = request.side.0;
+    let beside = request.side.0;
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(PROJECTED, e.to_string()))?;
     let parent_centre = record.view_centre(parent).map_err(|e| bad(PROJECTED, e.to_string()))?;
+    let (kind, staged_place) = match beside {
+        Beside::Side(side) => (ViewKind::Projected { parent, side }, ViewPlace::Aligned(side.along(parent_centre))),
+        Beside::Diagonal(diagonal) => (ViewKind::Pictorial { parent, diagonal }, ViewPlace::At([parent_centre.x, parent_centre.y])),
+    };
     let place = match request.place {
         Some(PlaceParam::At(at)) => ViewPlace::At(at),
         Some(PlaceParam::Aligned(along)) => ViewPlace::Aligned(along),
-        None => ViewPlace::Aligned(side.along(parent_centre)),
+        None => staged_place,
     };
-    let kind = ViewKind::Projected { parent, side };
     let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, centre_marks: None, label: None };
     if request.place.is_none() {
-        // Staged on its parent's centre to measure it, then moved along the free axis until its
-        // boundary is the gap past its parent's.
+        // Staged on its parent's centre to measure it, then moved until its boundary is the gap past
+        // its parent's: along the free axis beside it, along both axes on a diagonal.
         let mut staged = Drawing::clone(&record);
         staged.add_views([Arc::new(view.clone())]);
         staged.validate().map_err(|e| bad(PROJECTED, e.to_string()))?;
         let theirs = crate::drawing_view::on_sheet(s, &staged, parent, PROJECTED)?.boundary;
         let ours = crate::drawing_view::on_sheet(s, &staged, id, PROJECTED)?.boundary;
-        let half = (side.along(ours.max) - side.along(ours.min)) / 2.0;
-        view.place = ViewPlace::Aligned(match side {
-            ProjectedSide::Right | ProjectedSide::Above => side.along(theirs.max) + DEFAULT_GAP_MM + half,
-            ProjectedSide::Left | ProjectedSide::Below => side.along(theirs.min) - DEFAULT_GAP_MM - half,
-        });
+        let half = (ours.max - ours.min) * 0.5;
+        // Past their boundary on the side `sign` says (1: after its max, -1: before its min).
+        let past = |sign: f64, min: f64, max: f64, half: f64| if sign > 0.0 { max + DEFAULT_GAP_MM + half } else { min - DEFAULT_GAP_MM - half };
+        view.place = match beside {
+            Beside::Side(side) => {
+                let sign = if matches!(side, ProjectedSide::Right | ProjectedSide::Above) { 1.0 } else { -1.0 };
+                ViewPlace::Aligned(past(sign, side.along(theirs.min), side.along(theirs.max), side.along(half)))
+            }
+            Beside::Diagonal(diagonal) => {
+                let (right, up) = diagonal.signs();
+                ViewPlace::At([past(right, theirs.min.x, theirs.max.x, half.x), past(up, theirs.min.y, theirs.max.y, half.y)])
+            }
+        };
     }
     s.edit_drawing(PROJECTED, |d| {
         d.add_views([Arc::new(view)]);
@@ -1269,15 +1352,213 @@ fn projected(s: &mut Session, p: &Value) -> Result<Value> {
     created(s, PROJECTED, id, false)
 }
 
+fn auxiliary(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: AuxiliaryParams = crate::schema::read(AUXILIARY, p)?;
+    let record = s.drawing(AUXILIARY)?.clone();
+    let (parent, sheet) = find(&record, request.parent.0, AUXILIARY).map(|v| (v.id, v.sheet))?;
+    record.can_project_from(parent).map_err(|e| bad(AUXILIARY, e.to_string()))?;
+    let basis = record.resolve_view(parent).map_err(|e| bad(AUXILIARY, e.to_string()))?.basis;
+    let id = record.allocate_id(&mut s.ids).map_err(|e| bad(AUXILIARY, e.to_string()))?;
+    // Every read draws from one set of sessions, so a parent of another configuration is copied once.
+    let mut sessions = ViewSessions::new(s);
+    // The edge or the face, exactly, from the model: which way the view looks is a model decision.
+    // Read on the session the parent draws from, as a dimension's pick is, so a posed, exploded or
+    // configured parent gives it where it draws it (#13048).
+    let what = {
+        let on = sessions.of_view(&record, parent);
+        match (&request.edge, &request.face) {
+            (Some(edge), None) => {
+                check_drawn(&record, parent, [edge.path.as_slice()], AUXILIARY)?;
+                let [start, end] = on.doc.edge_line(&on.model, &edge.pick, &edge.path).map_err(|why| bad(AUXILIARY, why.to_string()))?;
+                FoldFor::Line { start, end }
+            }
+            (None, Some(face)) => {
+                check_drawn(&record, parent, [face.path.as_slice()], AUXILIARY)?;
+                let (point, normal) = on.doc.face_plane(&on.model, &face.pick, &face.path).map_err(|why| bad(AUXILIARY, why.to_string()))?;
+                FoldFor::Face { point, normal }
+            }
+            _ => return Err(bad(AUXILIARY, "give the edge or the face to look square to: one of them")),
+        }
+    };
+    // What the parent shows, measured once: its middle picks the side and its boundary the place.
+    let theirs = crate::drawing_view::on_sheet_from(&mut sessions, &record, parent, AUXILIARY)?;
+    let side = match request.toward {
+        Some(toward) => FoldSide::Toward(Vec2::from(toward)),
+        None => FoldSide::AwayFrom(theirs.extents.model.center()),
+    };
+    let toward = auxiliary_side(&basis, what, side).map_err(fold_refused)?;
+    let parent_centre = record.view_centre(parent).map_err(|e| bad(AUXILIARY, e.to_string()))?;
+    let place = match request.place {
+        Some(PlaceParam::At(at)) => ViewPlace::At(at),
+        Some(PlaceParam::Aligned(along)) => ViewPlace::Aligned(along),
+        None => ViewPlace::At([parent_centre.x, parent_centre.y]),
+    };
+    let kind = ViewKind::Auxiliary { parent, toward: [toward.x, toward.y] };
+    let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, centre_marks: None, label: None };
+    // Staged (on its parent's centre unless placed): the record's rules, then measured to unfold it.
+    let mut staged = Drawing::clone(&record);
+    staged.add_views([Arc::new(view.clone())]);
+    staged.validate().map_err(|e| bad(AUXILIARY, e.to_string()))?;
+    if request.place.is_none() {
+        view.place = ViewPlace::At(unfolded(&mut sessions, &staged, parent, &theirs, id, toward)?);
+    }
+    s.edit_drawing(AUXILIARY, |d| {
+        d.add_views([Arc::new(view)]);
+        d.give_letter(id).map_err(|e| bad(AUXILIARY, e.to_string()))
+    })?;
+    created(s, AUXILIARY, id, false)
+}
+
+/// Where auxiliary view `id`, staged on its parent's centre in `staged`, goes: moved so the basis
+/// origin the two views share is at one place on paper, so each point of the model keeps its place
+/// along the fold line, as its parent unfolds; then along its side `toward` until its boundary is the
+/// gap past its parent's (`theirs`, as [`crate::drawing_view::on_sheet`] gives it) on the first axis
+/// it clears. Layout arithmetic only.
+fn unfolded(sessions: &mut ViewSessions, staged: &Drawing, parent: u64, theirs: &OnSheet, id: u64, toward: Vec2) -> Result<[f64; 2]> {
+    let origin = staged.resolve_view(parent).map_err(|e| bad(AUXILIARY, e.to_string()))?.basis.origin;
+    // Where a view placed as `placed` shows the shared origin.
+    let shows_origin = |view: u64, placed: &OnSheet| -> Result<Vec2> {
+        let resolved = staged.resolve_view(view).map_err(|e| bad(AUXILIARY, e.to_string()))?;
+        let centre = staged.view_centre(view).map_err(|e| bad(AUXILIARY, e.to_string()))?;
+        let frame = crate::drawing_view::frame(resolved.basis, resolved.scale.value, &placed.extents.model, centre, AUXILIARY)?;
+        Ok(frame.to_paper(origin))
+    };
+    let ours = crate::drawing_view::on_sheet_from(sessions, staged, id, AUXILIARY)?;
+    let shift = shows_origin(parent, theirs)? - shows_origin(id, &ours)?;
+    let (lo, hi) = (ours.boundary.min + shift, ours.boundary.max + shift);
+    let (their_lo, their_hi) = (theirs.boundary.min, theirs.boundary.max);
+    // How far along `toward` its box clears theirs by the gap on one axis: on an axis it doesn't
+    // move along, never. It is clear for any distance past the least of the two.
+    let clears = |q: f64, lo: f64, hi: f64, their_lo: f64, their_hi: f64| match q {
+        q if q > 0.0 => (their_hi + DEFAULT_GAP_MM - lo) / q,
+        q if q < 0.0 => (their_lo - DEFAULT_GAP_MM - hi) / q,
+        _ => f64::INFINITY,
+    };
+    let along = clears(toward.x, lo.x, hi.x, their_lo.x, their_hi.x).min(clears(toward.y, lo.y, hi.y, their_lo.y, their_hi.y));
+    let centre = staged.view_centre(id).map_err(|e| bad(AUXILIARY, e.to_string()))? + shift + toward * along;
+    Ok([centre.x, centre.y])
+}
+
+/// Why no auxiliary view looks square to what was given, in words, with what fits: the one place a
+/// [`FoldRefusal`] is worded.
+fn fold_refused(why: FoldRefusal) -> crate::EngineError {
+    let words = match why {
+        FoldRefusal::Frame => "the parent view's basis isn't orthonormal".to_string(),
+        FoldRefusal::Input => "toward has no length, or the edge or face isn't finite: give toward as a direction".to_string(),
+        FoldRefusal::EndOn => "the parent view sees the edge end-on, as a point: give an edge it shows as a line".to_string(),
+        FoldRefusal::NotEdgeOn { angle } => {
+            format!(
+                "the parent view doesn't see the face edge-on: it is turned {:.2}° from edge-on; give a face it shows as a line",
+                angle.to_degrees()
+            )
+        }
+        FoldRefusal::AlongFoldLine => "toward is along the fold line: give a side across it".to_string(),
+    };
+    bad(AUXILIARY, words)
+}
+
+/// Which view `drawing.view.projected` would make at a point `offset_mm` from its parent's centre:
+/// the nearest of eight directions ([`Beside::of_offset`]), its basis by the record's one rule
+/// ([`Beside::basis`]) and the parent's scale. A parent no view is made from answers `none` with the
+/// record's reason, so a preview asking each frame never meets an error for it.
+fn projection_for(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: ProjectionForParams = crate::schema::read(PROJECTION_FOR, p)?;
+    let d = s.drawing(PROJECTION_FOR)?;
+    let parent = find(d, request.parent.0, PROJECTION_FOR)?.id;
+    let [dx, dy] = request.offset_mm;
+    if ![dx, dy].iter().all(|v| v.is_finite() && v.abs() <= MAX_OFFSET_MM) {
+        return Err(bad(PROJECTION_FOR, format!("offset_mm is two numbers, each at most {MAX_OFFSET_MM} mm either way")));
+    }
+    let projection = snake_name(d.projection);
+    let none = |why: String| ProjectionForResult {
+        kind: "none",
+        side: None,
+        lined_up: false,
+        direction: None,
+        scale: None,
+        projection: projection.clone(),
+        why: Some(why),
+    };
+    let reply = match (Beside::of_offset(Vec2::new(dx, dy)), d.can_project_from(parent)) {
+        (_, Err(e)) => none(e.to_string()),
+        (None, Ok(())) => none("on the parent's centre".into()),
+        (Some(beside), Ok(())) => {
+            let resolved = d.resolve_view(parent).map_err(|e| bad(PROJECTION_FOR, e.to_string()))?;
+            let basis = beside.basis(&resolved.basis, d.projection).map_err(|e| bad(PROJECTION_FOR, e.to_string()))?;
+            let scale = resolved.scale.value;
+            let lined_up = matches!(beside, Beside::Side(_));
+            ProjectionForResult {
+                kind: if lined_up { "orthographic" } else { "pictorial" },
+                side: Some(snake_name(beside)),
+                lined_up,
+                direction: Some(direction(&basis)),
+                scale: Some(ScaleResult { text: scale.to_string(), factor: scale.factor(), fitted: false }),
+                projection: projection.clone(),
+                why: None,
+            }
+        }
+    };
+    serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
+}
+
+fn flat(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: FlatParams = crate::schema::read(FLAT, p)?;
+    let record = s.drawing(FLAT)?.clone();
+    let (sheet, middle) = sheet_named(&record, &request.sheet, FLAT)?;
+    let source = record.sources.first().map(|source| source.id).ok_or_else(|| bad(FLAT, "the drawing draws no design"))?;
+    // The body as sheet.flat_pattern finds it: the view saves its name, so it draws that body after
+    // others are made.
+    let reply = crate::cmd::flat_reply(s, request.body.as_deref(), FLAT)?;
+    let body = reply.get("body").and_then(Value::as_str).ok_or_else(|| bad(FLAT, "the flat pattern names no body"))?.to_string();
+    let turn = request.turn.map(|turn| turn.0).unwrap_or_default();
+    let position = request.position_mm.map_or(middle, |p| p.0);
+    let id = record.allocate_id(&mut s.ids).map_err(|e| bad(FLAT, e.to_string()))?;
+    let kind = ViewKind::Flat { source, body, turn };
+    let one = Scale::new(1.0, 1.0).map_err(|e| bad(FLAT, e.to_string()))?;
+    let settings = ViewOverrides { scale: Some(request.scale.map_or(one, |scale| scale.0)), ..ViewOverrides::default() };
+    let mut view = View {
+        id,
+        sheet,
+        kind,
+        place: ViewPlace::At([position.x, position.y]),
+        settings,
+        reference_shown_percent: 0.0,
+        centre_marks: None,
+        label: None,
+    };
+    // The record's rules first, at 1:1 unless a scale is given; then the fitted scale, which is saved.
+    let mut staged = Drawing::clone(&record);
+    staged.add_views([Arc::new(view.clone())]);
+    staged.validate().map_err(|e| bad(FLAT, e.to_string()))?;
+    // The flat is read once, for the fit and the reply both: a large flat takes seconds to read.
+    let flat = crate::drawing_view::flat_from(&reply, turn, FLAT)?;
+    if request.scale.is_none() {
+        let model = flat.model;
+        let room = Room::on(crate::drawing_view::sheet(&staged, sheet, FLAT)?, FLAT)?;
+        view.settings.scale = Some(fit(&Extents { model, error_mm: 0.0, bodies: 1 }, model, position, room, FLAT)?);
+    }
+    s.edit_drawing(FLAT, |d| {
+        d.add_views([Arc::new(view)]);
+        Ok(())
+    })?;
+    let placed = crate::drawing_view::flat_on_sheet(s.drawing(FLAT)?, id, &Ok(flat), FLAT)?;
+    created_at(s, FLAT, id, request.scale.is_none(), placed)
+}
+
 /// The reply for view `id`, just made by `cmd`: its sheet, its scale (`fitted` when worked out),
 /// its boundary, and itself when it leaves its sheet's drawing space.
 fn created(s: &Session, cmd: &str, id: u64, fitted: bool) -> Result<Value> {
+    let placed = crate::drawing_view::on_sheet(s, s.drawing(cmd)?, id, cmd)?;
+    created_at(s, cmd, id, fitted, placed)
+}
+
+/// [`created`] with the view's place on its sheet already worked out.
+fn created_at(s: &Session, cmd: &str, id: u64, fitted: bool, placed: OnSheet) -> Result<Value> {
     let d = s.drawing(cmd)?;
     let view = find(d, id, cmd)?;
     let (sheet_id, letter) = (view.sheet, view.label.as_ref().map(|label| label.letter.clone()));
     let sheet = crate::drawing_view::sheet(d, sheet_id, cmd)?;
     let scale = d.resolve_view(id).map_err(|e| bad(cmd, e.to_string()))?.scale.value;
-    let placed = crate::drawing_view::on_sheet(s, d, id, cmd)?;
     let outside = if crate::drawing_view::leaves(sheet, &placed, cmd)? { vec![(id, placed)] } else { Vec::new() };
     let reply = CreateResult {
         view: ids::encode(id),

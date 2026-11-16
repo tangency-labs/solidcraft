@@ -52,7 +52,7 @@ fn boxed() -> Fixture {
     let a3 = Sheet::standard(PaperSize::A3, Orientation::Landscape);
     let mut d = Drawing::new("Box", "en", "Sheet 1", a3, None, &BTreeSet::new(), &mut ids).unwrap();
     let source = d.allocate_id(&mut ids).unwrap();
-    d.sources.push(Source { id: source });
+    d.sources.push(Source { id: source, path: None });
     let sheet = d.sheets[0].id;
     let (front, right) = (d.allocate_id(&mut ids).unwrap(), d.allocate_id(&mut ids).unwrap());
     let half = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };

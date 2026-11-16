@@ -1493,10 +1493,7 @@ impl Session {
     pub(crate) fn design_at(&self, path: Option<&str>) -> std::borrow::Cow<'_, Document> {
         let mut design = crate::as_saved(&self.doc, &self.visibility, &self.dimension_values);
         if let Some(path) = path {
-            let links = super::design_link::rebased(&self.doc, self.path.as_deref(), path);
-            if links != self.doc.links {
-                design.to_mut().links = links;
-            }
+            super::design_link::filed(&mut design, self.path.as_deref(), path);
         }
         // Print faces not kept stay with this session: the file is saved without them (#11512).
         if !self.keep_print_faces && !design.print_faces.is_empty() {

@@ -45,6 +45,11 @@ pub struct DrawingCreateParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub font: Option<String>,
+    /// Another design file to draw instead of this design, which may then be empty: a design
+    /// file's path, at most 4096 bytes.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub source: Option<String>,
 }
 
 /// Change the open drawing's own settings: one undo step.

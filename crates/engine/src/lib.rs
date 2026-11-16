@@ -16,11 +16,13 @@ pub mod control_auth;
 pub mod control_pending;
 pub mod cosmetic_threads;
 pub mod crash;
+pub mod drawing_balloon_paper;
 pub mod drawing_dimension_paper;
 pub mod drawing_note_paper;
 pub mod drawing_picture;
 pub mod drawing_pictures;
 pub mod drawing_scene;
+mod drawing_table_paper;
 pub mod drawing_view;
 pub mod easyprint;
 pub mod frames;
@@ -149,6 +151,24 @@ impl From<solidcraft_io::IoError> for EngineError {
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;
+
+/// Why [`Session::drawn`] gives no design for a drawing's source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Undrawn {
+    /// The drawing has no source of that id.
+    NoSource,
+    /// The source is another design's file, which a drawing can't read yet.
+    Linked,
+}
+
+impl std::fmt::Display for Undrawn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Undrawn::NoSource => f.write_str("the drawing has no such source"),
+            Undrawn::Linked => f.write_str("not supported yet: reading a linked design (#3890)"),
+        }
+    }
+}
 
 /// Something selected in the model.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1280,6 +1300,24 @@ impl Session {
     /// The drawing open, for `cmd`.
     pub fn drawing(&self, cmd: &str) -> Result<&Arc<solidcraft_doc::drawing::Drawing>> {
         self.open_drawing.and_then(|id| self.doc.drawing(id)).ok_or_else(|| params::bad(cmd, "open a drawing first (drawing.open)"))
+    }
+
+    /// The design source `source` of drawing `d` names, to read from: this session for the design the
+    /// drawing is in. The one answer to "which design does this source mean": every reader of a
+    /// source's design (a view, a sheet's title block, a parts list) asks it here. Another design's
+    /// file can't be read yet (#3890): refused, never answered with this design.
+    pub(crate) fn drawn(&self, d: &solidcraft_doc::drawing::Drawing, source: u64) -> std::result::Result<&Session, Undrawn> {
+        match d.sources.iter().find(|named| named.id == source) {
+            None => Err(Undrawn::NoSource),
+            Some(named) if named.path.is_none() => Ok(self),
+            Some(_) => Err(Undrawn::Linked),
+        }
+    }
+
+    /// [`Self::drawn`] as doc's readers of a source's design take it: that design and its model
+    /// now, or why it can't be read, in words.
+    pub(crate) fn source_design(&self, d: &solidcraft_doc::drawing::Drawing, source: u64) -> solidcraft_doc::drawing::balloon::Design<'_> {
+        self.drawn(d, source).map(|on| (&*on.doc, on.model.state())).map_err(|why| why.to_string())
     }
 
     /// Whether `object` can be selected in `drawing`: a view, dimension or balloon of the drawing open.

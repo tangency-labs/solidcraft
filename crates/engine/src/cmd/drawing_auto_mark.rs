@@ -132,23 +132,39 @@ fn answer(s: &Session, cmd: &str, id: u64, changed: bool) -> Result<Value> {
     let mut exclusions = Vec::new();
     let mut reason = None;
     if let Some(rule) = &view.centre_marks {
-        let resolved = resolve_exclusions(&s.doc, &s.model, &rule.exclude).map_err(|e| bad(cmd, e.to_string()))?;
-        for (edge, r) in rule.exclude.iter().zip(resolved) {
-            let (status, why, candidates) = status_words(r.status);
-            exclusions.push(ExclusionResult {
-                reference: serde_json::to_value(edge).map_err(|e| EngineError::Other(e.to_string()))?,
-                status: status.into(),
-                why,
-                exact: r.exact,
-                candidates,
-            });
-        }
-        if let Err(e) = crate::drawing_scene::automatic_mark_candidates(s, id) {
-            let msg = match &e {
-                EngineError::BadParams { msg, .. } => msg.clone(),
-                _ => e.to_string(),
-            };
-            reason = Some(msg);
+        if crate::drawing_view::centre_on_another_design(d, id) {
+            // Saved references belong to the host design. Keep them available for cleanup, but
+            // never resolve them against host geometry when this view names another design.
+            let why = "not supported yet: automatic centre marks on a view of another design".to_string();
+            for edge in &rule.exclude {
+                exclusions.push(ExclusionResult {
+                    reference: serde_json::to_value(edge).map_err(|e| EngineError::Other(e.to_string()))?,
+                    status: "unmeasurable".into(),
+                    why: Some(why.clone()),
+                    exact: false,
+                    candidates: Vec::new(),
+                });
+            }
+            reason = Some(why);
+        } else {
+            let resolved = resolve_exclusions(&s.doc, &s.model, &rule.exclude).map_err(|e| bad(cmd, e.to_string()))?;
+            for (edge, r) in rule.exclude.iter().zip(resolved) {
+                let (status, why, candidates) = status_words(r.status);
+                exclusions.push(ExclusionResult {
+                    reference: serde_json::to_value(edge).map_err(|e| EngineError::Other(e.to_string()))?,
+                    status: status.into(),
+                    why,
+                    exact: r.exact,
+                    candidates,
+                });
+            }
+            if let Err(e) = crate::drawing_scene::automatic_mark_candidates(s, id) {
+                let msg = match &e {
+                    EngineError::BadParams { msg, .. } => msg.clone(),
+                    _ => e.to_string(),
+                };
+                reason = Some(msg);
+            }
         }
     }
     serde_json::to_value(RuleResult {

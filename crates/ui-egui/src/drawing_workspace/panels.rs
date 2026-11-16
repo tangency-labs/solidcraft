@@ -3,7 +3,7 @@ use solidcraft_engine::doc::drawing::{
     Drawing, MAX_DPI, MAX_NAME_BYTES, MIN_DPI, Sheet,
     dimension::DimensionKind,
     table::{Kind, MassFormat, PartsList},
-    view::{ViewKind, ViewPlace},
+    view::ViewPlace,
 };
 use solidcraft_engine::doc::{drawing_view::TangentEdges, ids};
 use solidcraft_engine::geom::{
@@ -180,7 +180,7 @@ fn edit_view(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, s
         selected.and_then(|id| drawing.view(id)).or_else(|| drawing.views.iter().find(|view| Some(view.sheet) == sheet).map(|view| view.as_ref()))
     });
     let settings = drawing.zip(view).and_then(|(drawing, view)| drawing.resolve_view(view.id).ok());
-    let projected = view.is_some_and(|view| matches!(view.kind, ViewKind::Projected { .. }));
+    let projected = view.is_some_and(|view| view.kind.parent().is_some());
     let mut reference = settings.as_ref().map_or(0.0, |settings| settings.reference_shown_percent);
     ui.add_enabled_ui(false, |ui| {
         ui_kit::section_heading(ui, tr("ui.drawing_panel.display"));

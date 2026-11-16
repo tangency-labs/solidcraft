@@ -113,7 +113,11 @@ pub(super) fn groups(
         groups.push(Mark { object: line.id, view: line.view, kind: ObjectKind::CentreLine, group, why });
     }
     for (id, (frame, at)) in frames {
-        let Some(rule) = drawing.view(*id).and_then(|view| view.centre_marks.as_ref()) else { continue };
+        let Some(view) = drawing.view(*id) else { continue };
+        if crate::drawing_view::no_model_edges(view).is_some() {
+            continue;
+        }
+        let Some(rule) = view.centre_marks.as_ref() else { continue };
         let result = (|| -> Result<Vec<Mark>> {
             let view = drawing.resolve_view(*id).map_err(|e| bad(CMD, e.to_string()))?;
             // A saved rule cannot scan a view that draws its parts in another configuration or placement.
@@ -211,6 +215,9 @@ pub(super) fn unframed(drawing: &Drawing, id: u64, status: &super::Status) -> Ve
 /// Eligible sources for a saved view, independent of exclusions.
 pub(super) fn candidates(s: &Session, id: u64) -> Result<Vec<MarkCandidate>> {
     let drawing = s.drawing(CMD)?;
+    if drawing.view(id).and_then(crate::drawing_view::no_model_edges).is_some() {
+        return Ok(Vec::new());
+    }
     let view = drawing.resolve_view(id).map_err(|e| bad(CMD, e.to_string()))?;
     if let Some(apart) = crate::drawing_view::unsupported_centre_view(drawing, id) {
         return Err(bad(CMD, apart_why(apart)));

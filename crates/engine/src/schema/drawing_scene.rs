@@ -25,9 +25,8 @@ pub struct SheetSceneParams {
 /// sheet's lower-left corner: the drawing border's (object: the sheet), then each image's picture
 /// (object and source: the placement), then each view's strokes (object: the view), then each
 /// dimension's lines and arrowheads (object: the dimension), each note of a view (object: the
-/// note) and each view's label (object: the view), then manual centre marks and centre lines,
-/// each by id, then each note on the sheet, then the title
-/// block's (object: the sheet).
+/// note), each view's label, balloons, centre marks and centre lines, then parts lists and revision
+/// tables, sheet notes and the title block.
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
 pub struct SheetPaperScene(pub solidcraft_geom::paper::Scene);
@@ -46,6 +45,9 @@ impl JsonSchema for SheetPaperScene {
             ObjectKind::ViewLabel,
             ObjectKind::CentreMark,
             ObjectKind::CentreLine,
+            ObjectKind::Balloon,
+            ObjectKind::PartsList,
+            ObjectKind::RevisionTable,
             ObjectKind::TitleBlock,
         ];
         paper_scene_schema(generator, &kinds, true)
@@ -130,6 +132,35 @@ impl From<crate::drawing_scene::AnnotationFailure> for SheetAnnotationFailure {
     fn from(failure: crate::drawing_scene::AnnotationFailure) -> Self {
         Self { object: ids::encode(failure.object), view: ids::encode(failure.view), kind: failure.kind, reason: failure.reason }
     }
+}
+
+/// One table on the sheet: `ok`, or `failed` when it can't be read or laid out, and whether its lines
+/// are in the scene, with why not. The rest of the sheet still draws.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetSceneTable {
+    pub table: String,
+    pub status: &'static str,
+    pub drawn: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+}
+
+/// One balloon of a view on the sheet: where the edge its arrow ends on stands with the model, in
+/// `drawing.dimension.inspect`'s words; what it reads of its parts list, in
+/// `drawing.balloon.inspect`'s words, and its number when it has one; and whether it is in the scene,
+/// with why not, or what of it is left out.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetSceneBalloon {
+    pub balloon: String,
+    pub view: String,
+    pub status: &'static str,
+    /// `ok`, `no_list`, `not_found`, `reference`, `no_row` or `unread` (its list's design can't be read).
+    pub row_status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item: Option<String>,
+    pub drawn: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
 }
 
 /// Where one object of the scene sits on paper: the box round what it draws, along its lines' paths
@@ -305,7 +336,12 @@ pub struct SheetSceneResult {
     /// Centre annotations omitted and why.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub annotation_failures: Vec<SheetAnnotationFailure>,
-    /// The views, dimensions and notes a deferred drawing shows as they last were.
+    /// Each balloon of a view on the sheet, by view and id.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub balloons: Vec<SheetSceneBalloon>,
+    /// Each table on the sheet, by id.
+    pub tables: Vec<SheetSceneTable>,
+    /// The views, dimensions, notes and balloons a deferred drawing shows as they last were.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub out_of_date: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

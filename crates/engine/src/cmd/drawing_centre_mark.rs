@@ -69,6 +69,9 @@ mod tests;
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let request: EditParams = crate::schema::read(EDIT, p)?;
     let id = request.mark.0;
+    let record = s.drawing(EDIT)?;
+    let view = record.centre_mark(id).ok_or_else(|| bad(EDIT, format!("no centre mark {}", ids::encode(id))))?.view;
+    crate::drawing_view::check_centre_source(record, view, "centre marks", EDIT)?;
     let changed = s.edit_drawing(EDIT, |d| {
         let index = d.centre_mark_index(id).ok_or_else(|| bad(EDIT, format!("no centre mark {}", ids::encode(id))))?;
         let mark = d.centre_marks.get_mut(index).map(Arc::make_mut).ok_or_else(|| bad(EDIT, "centre mark no longer exists"))?;
@@ -103,6 +106,7 @@ fn change_reply(id: u64, changed: Vec<String>) -> Result<Value> {
 fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
     let d = s.drawing(cmd)?;
     let mark = d.centre_mark(id).ok_or_else(|| bad(cmd, format!("no centre mark {}", ids::encode(id))))?;
+    crate::drawing_view::check_centre_source(d, mark.view, "centre marks", cmd)?;
     let r = s
         .doc
         .resolve_centre_marks(&s.model, d, &[id])

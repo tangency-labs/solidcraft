@@ -264,6 +264,97 @@ fn a_drawing_is_made_only_of_a_design_with_something_in_it() {
     assert!(Arc::ptr_eq(&s.doc, &full));
 }
 
+/// A drawing of another design's file (`source`) may be made in an empty design. Refused with
+/// nothing changed: a path the record can't take or longer than 4,096 bytes, a network location
+/// not allowed (judged from the text first, whatever the file's name, with nothing asked of the
+/// disk), a file that isn't a design, the design's own file, and a missing file. Its views wait for
+/// views of a linked design.
+#[test]
+fn a_drawing_of_another_designs_file_is_made_only_of_a_design_there() {
+    let folder = Folder::new("drawing-source-create");
+    run(&mut design(), "file.save", json!({"path": folder.path("plate.sc")}));
+    std::fs::write(folder.path("part.step"), b"ISO-10303-21;").unwrap();
+    std::fs::create_dir_all(folder.path("sub")).unwrap();
+    let mut s = Session::default();
+    run(&mut s, "file.save", json!({"path": folder.path("case.sc")}));
+    let before = s.doc.clone();
+    let fits = "x".repeat(4093) + ".sc";
+    let calls = solidcraft_io::vfs::file_calls();
+    for (source, says) in [(r"\\fileserver\share\p.sc".to_string(), "fileserver"), (r"\\fileserver\share\p.step".to_string(), "fileserver")] {
+        let e = refused(&mut s, "drawing.create", json!({"source": source}));
+        assert!(e.contains(says), "{source}: {e}");
+        assert!(Arc::ptr_eq(&s.doc, &before) && s.open_drawing.is_none(), "{source}: nothing changed");
+    }
+    assert_eq!(solidcraft_io::vfs::file_calls(), calls, "a network location asked the file system");
+    let path_rule = "not empty, not only spaces, without control characters";
+    for (source, says) in [
+        (String::new(), path_rule),
+        ("  ".into(), path_rule),
+        ("a\0b.sc".into(), path_rule),
+        ("x".repeat(4094) + ".sc", "at most 4096 bytes"),
+        (folder.path("part.step"), "not a .sc design"),
+        (folder.path("case.sc"), "the design it is in"),
+        (folder.path("sub/../case.sc"), "the design it is in"),
+        (folder.path("gone.sc"), "not found"),
+    ] {
+        let e = refused(&mut s, "drawing.create", json!({"source": source}));
+        assert!(e.contains(says), "{source:?}: {e}");
+        assert!(Arc::ptr_eq(&s.doc, &before) && s.open_drawing.is_none(), "{source:?}: nothing changed");
+    }
+    // 4,096 bytes is still a path to look for.
+    let e = refused(&mut s, "drawing.create", json!({"source": fits}));
+    assert!(!e.contains("at most 4096 bytes"), "{e}");
+    let made = run(&mut s, "drawing.create", json!({"source": folder.path("plate.sc")}));
+    assert_eq!(made["sources"], json!([{"id": made["sources"][0]["id"], "path": "plate.sc"}]), "kept beside the design");
+    assert_eq!(open_one(&s).own_source(), None);
+    let drawn = s.doc.clone();
+    let e = refused(&mut s, "drawing.view.base", json!({"sheet": made["sheets"][0]["id"]}));
+    assert!(e.contains("not supported yet") && e.contains("linked design"), "{e}");
+    assert!(Arc::ptr_eq(&s.doc, &drawn));
+}
+
+/// Which design a source means has one answer (`Session::drawn`): the design the drawing is in for
+/// its own source; for another design's file, until it can be read, a refusal that changes nothing.
+/// So a sheet never documents a linked source (its title block would show this design's name and
+/// mass as the other's), a parts list never lists one, and a sheet a file made that documents one
+/// shows its component's fields as it shows none, never this design's.
+#[test]
+fn a_linked_source_is_never_read_as_the_design_the_drawing_is_in() {
+    use solidcraft_doc::drawing::SheetComponent;
+    let folder = Folder::new("drawing-source-drawn");
+    run(&mut design(), "file.save", json!({"path": folder.path("plate.sc")}));
+    let mut s = design();
+    run(&mut s, "file.save", json!({"path": folder.path("case.sc")}));
+    let made = run(&mut s, "drawing.create", json!({"name": "Of the plate", "source": folder.path("plate.sc")}));
+    let (sheet, linked) = (made["sheets"][0]["id"].clone(), made["sources"][0]["id"].clone());
+    let before = s.doc.clone();
+    for (id, p) in [
+        ("drawing.sheet.set", json!({"sheet": sheet, "documents": {"source": linked}})),
+        ("drawing.sheet.add", json!({"documents": {"source": linked, "component": 0}})),
+        ("drawing.table.add", json!({"sheet": sheet, "kind": "parts_list"})),
+        ("drawing.view.base", json!({"sheet": sheet})),
+    ] {
+        let e = refused(&mut s, id, p);
+        assert!(e.contains("not supported yet") && e.contains("linked design"), "{id}: {e}");
+        assert!(Arc::ptr_eq(&s.doc, &before), "{id}: nothing changed");
+    }
+    // A sheet a file made that documents the linked design shows what a sheet that documents nothing shows.
+    let cells = |s: &mut Session| run(s, "drawing.inspect", json!({}))["sheets"][0]["title_block_cells"].clone();
+    let nothing = cells(&mut s);
+    let mut d = (*open_one(&s)).clone();
+    let source = ids::decode(linked.as_str().unwrap()).unwrap();
+    Arc::make_mut(&mut d.sheets[0]).documents = Some(SheetComponent { source, component: 0 });
+    d.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(d));
+    assert_eq!(cells(&mut s), nothing);
+    // Its own source reads the design it is in.
+    run(&mut s, "drawing.close", json!({}));
+    let made = run(&mut s, "drawing.create", json!({}));
+    let own = json!({"source": made["sources"][0]["id"]});
+    run(&mut s, "drawing.sheet.set", json!({"sheet": made["sheets"][0]["id"], "documents": own}));
+    assert_ne!(cells(&mut s), nothing, "the design's own fields");
+}
+
 /// `drawing.create` and `drawing.set` refuse a key they don't take, as every other drawing command
 /// does, naming it, with nothing changed: a typo is never taken for a setting left as it was. Every
 /// key they take still takes, in one call.
@@ -672,6 +763,86 @@ fn a_designs_drawings_are_saved_with_it_and_come_back() {
     }
 }
 
+/// A drawing's source of another design's file follows Save As as a component link does (#6860):
+/// in memory the path is whole, so Save As into other folders, undo, redo, a checkpoint and a
+/// recovered autosave all still name the same file, and saving never rewrites the design in memory
+/// or its history; the file keeps the path relative to the design's folder, in both forms.
+#[test]
+fn save_as_keeps_drawing_sources_through_undo_redo_and_checkpoints() {
+    use crate::cmd::design_link::{absolute, resolve};
+    for on_copy in [false, true] {
+        let folder = Folder::new(&format!("drawing-source-save-as-{on_copy}"));
+        let dir = folder.0.clone();
+        std::fs::create_dir_all(dir.join("parts")).unwrap();
+        std::fs::create_dir_all(dir.join("asm/sub/deeper")).unwrap();
+        let part = dir.join("parts/plate.sc");
+        run(&mut design(), "file.save", json!({"path": part}));
+        let case = dir.join("asm/case.sc");
+        let mut s = Session::default();
+        run(&mut s, "drawing.create", json!({"source": part}));
+        run(&mut s, "drawing.close", json!({}));
+        let on_disk = |path: &std::path::Path| {
+            let disk = solidcraft_io::read_design(&std::fs::read(path).unwrap()).unwrap();
+            disk.drawings[0].sources[0].path.clone().unwrap()
+        };
+        // As `drawing.inspect` lists it (as the file keeps it), and the file it names.
+        let source = |s: &mut Session| {
+            let id = s.doc.drawings[0].id;
+            let listed = run(s, "drawing.open", the(id))["sources"][0]["path"].as_str().unwrap().to_string();
+            run(s, "drawing.close", json!({}));
+            let file = absolute(&resolve(s.path.as_deref(), &listed));
+            (listed, file)
+        };
+        run(&mut s, "file.save", json!({"path": case}));
+        assert_eq!(on_disk(&case), "../parts/plate.sc");
+        // Opening starts from the relative path written to disk.
+        run(&mut s, "doc.open", json!({"path": case}));
+        assert_eq!(source(&mut s), ("../parts/plate.sc".to_string(), absolute(&part)));
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5}));
+        let checkpoint = s.checkpoint();
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0]}));
+        run(&mut s, "edit.undo", json!({}));
+        let before = s.doc.clone();
+        let undo_before = s.undo.last().unwrap().doc.clone();
+        for (sub, kept) in [("asm/sub", "../../parts/plate.sc"), ("asm/sub/deeper", "../../../parts/plate.sc")] {
+            let path = dir.join(sub).join("case.sc");
+            if on_copy {
+                let mut copy = s.scratch();
+                run(&mut copy, "file.save_as", json!({"path": path}));
+                s.adopt_save(&copy);
+            } else {
+                run(&mut s, "file.save_as", json!({"path": path}));
+            }
+            assert_eq!(on_disk(&path), kept, "{on_copy}, {sub}");
+            for command in ["edit.redo", "edit.undo", "edit.undo", "edit.redo"] {
+                run(&mut s, command, json!({}));
+                assert_eq!(source(&mut s), (kept.to_string(), absolute(&part)), "{on_copy}, {sub}, {command}");
+            }
+        }
+        assert!(Arc::ptr_eq(&s.doc, &before), "saving does not rewrite the live document");
+        assert!(Arc::ptr_eq(&s.undo.last().unwrap().doc, &undo_before), "saving does not copy the edit history");
+        s.restore_checkpoint(checkpoint).unwrap();
+        assert_eq!(source(&mut s).1, absolute(&part));
+        let path = s.path.clone().unwrap();
+        for format in ["json", "container"] {
+            run(&mut s, "file.save", json!({"format": format}));
+            assert_eq!(on_disk(Path::new(&path)), "../../../parts/plate.sc", "{format}");
+            run(&mut s, "doc.open", json!({"path": path}));
+            assert_eq!(source(&mut s).1, absolute(&part), "{format}");
+        }
+        // A recovered autosave holds the whole path and still names the file.
+        let recovery = dir.join("recovery");
+        let mut autosaver = crate::recovery::Autosaver::new(&recovery, std::time::Duration::ZERO).unwrap();
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [40, 0, 0]}));
+        assert!(autosaver.save(&s).unwrap());
+        drop(autosaver);
+        let entry = crate::recovery::orphans(&recovery).pop().unwrap();
+        let mut recovered = Session::default();
+        run(&mut recovered, "doc.recover", json!({"dir": recovery, "id": entry.id}));
+        assert_eq!(source(&mut recovered).1, absolute(&part));
+    }
+}
+
 /// A drawing's properties follow the design properties' rules: set, read and removed, each change
 /// one undo step, other tools' keys kept, and what the design's would refuse refused.
 #[test]
@@ -719,7 +890,7 @@ fn hostile_drawing_params_never_panic() {
     assert_eq!(s.scratch().open_drawing, s.open_drawing, "each copy has the drawing open");
     let keys = ["name", "language", "units", "drawing", "key", "value", "values", "keys", "checkpoint", "id"];
     // `drawing.create`'s and `drawing.set`'s other keys.
-    let keys = [&keys[..], &["template", "projection", "updates", "line_group", "font", "revision_numbering"]].concat();
+    let keys = [&keys[..], &["template", "projection", "updates", "line_group", "font", "revision_numbering", "source"]].concat();
     let skipped = |id: &str| matches!(id, "doc.open" | "file.save" | "file.save_as") || id.starts_with("doc.recover");
     let mut internal = Vec::new();
     for spec in command_specs().iter().filter(|spec| spec.part != Part::Model && !skipped(spec.id)) {

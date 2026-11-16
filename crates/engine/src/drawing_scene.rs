@@ -4,12 +4,13 @@
 //! before it: the sheet's drawing border ([`SheetLayout::paper`]); the images placed on it
 //! ([`groups`]), so a view's lines draw over a photo; each view on the sheet, its lines as
 //! [`paper_group`] makes them; the labels of the views placed apart from their projection place
-//! ([`Drawing::label_text`]), and the dimensions and notes of those views
-//! ([`crate::drawing_dimension_paper`], [`crate::drawing_note_paper`]), centre marks and lines; the sheet's tables, once they
-//! join; the notes on the sheet itself; then its title block's logos, lines and projection symbol, in
+//! ([`Drawing::label_text`]), and the dimensions, notes and balloons of those views
+//! ([`crate::drawing_dimension_paper`], [`crate::drawing_note_paper`], [`crate::drawing_balloon_paper`]);
+//! centre marks and lines; the sheet's parts lists and revision tables
+//! ([`crate::drawing_table_paper`]); sheet notes; then its title block, in
 //! the drawing's projection ([`TitleBlockLayout::paper`]), with its labels and values set on them
 //! ([`title_block_text`]). Within a band, groups paint in the order they join: views by id, their
-//! dimensions and notes by view and id. A shaded view's group holds its pictures under its lines;
+//! dimensions, notes and balloons by view and id. A shaded view's group holds its pictures under its lines;
 //! nothing here draws their pixels ([`crate::drawing_picture`]).
 //!
 //! [`build`] draws a sheet at once, each view the one way: its lines worked out centred on the view,
@@ -35,6 +36,11 @@
 //! them, and read again by the same rules, and also after any change to the document, as its text
 //! reads the drawing's and the design's fields. A note on a sheet reads no model: it is set with the
 //! sheet's title block ([`sheet_notes`]).
+//!
+//! A balloon (#3874) rides the same path as one more kind: read with its view, kept and read again
+//! by the same rules, and also after any change to the document, as its number reads a parts list and
+//! the design's parts ([`balloon_rows`]). Its circle, number and leader are
+//! [`crate::drawing_balloon_paper`]'s.
 //!
 //! A deferred drawing ([`Updates::Deferred`]) draws nothing once the model has moved on from its last
 //! `drawing.update`, which isn't saved: its last lines show, its views listed in `stale`, and every command
@@ -64,10 +70,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use solidcore_record::{Loop2, Region2, Seg2, Vec2};
-use solidcraft_doc::bom::Tree;
+use solidcraft_doc::bom::{Tree, Unlisted};
+use solidcraft_doc::drawing::balloon::{Balloon, RowRead, balloon_rows};
 use solidcraft_doc::drawing::dimension::{self, Dimension};
 use solidcraft_doc::drawing::note::{Anchor, Note};
-use solidcraft_doc::drawing::view::{ResolvedView, View};
+use solidcraft_doc::drawing::view::{FlatOf, ResolvedView, View};
 use solidcraft_doc::drawing::{Drawing, Sheet, Updates};
 use solidcraft_doc::drawing_view::TangentEdges;
 use solidcraft_doc::{DocError, Document, ModelState, ids};
@@ -82,6 +89,7 @@ use solidcraft_geom::{Aabb2, ArcMap};
 use solidcraft_sketch::PaperFonts;
 
 use crate::drawing_picture::{picture_items, view_parts};
+use crate::drawing_table_paper::SheetTables;
 use crate::drawing_view::{
     CHORD_MM, Choice, LineRequest, MIN_MODEL_CHORD_MM, Shown, ShownSet, Stats, Styles, Unmeasured, ViewSessions, copy_for, paper_lines,
 };
@@ -205,6 +213,33 @@ pub struct AnnotationFailure {
     pub reason: String,
 }
 
+/// One table on the sheet: drawn, or why not.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TableState {
+    pub table: u64,
+    /// Whether its lines are in the scene.
+    pub drawn: bool,
+    /// Whether it can't be read or laid out, rather than only left out for room.
+    pub failed: bool,
+    /// Why it isn't drawn.
+    pub why: Option<String>,
+}
+
+/// One balloon of a view on a sheet.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BalloonState {
+    pub balloon: u64,
+    pub view: u64,
+    /// Where the edge its arrow ends on stands with the model.
+    pub status: dimension::Status,
+    /// What it reads of its parts list: its number, or why it has none.
+    pub row: RowRead,
+    /// Whether it is in the scene. A lost balloon keeps its circle and number, without a leader.
+    pub drawn: bool,
+    /// Why not, or why its number or leader is left out.
+    pub why: Option<String>,
+}
+
 /// Where one object of a sheet's scene sits on paper, for picking and marking it. Beside the scene,
 /// not in it, so no writer sees it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -235,7 +270,7 @@ pub struct SheetScene {
     pub scene: Scene,
     /// Each view on the sheet, in id order.
     pub views: Vec<ViewState>,
-    /// The sheet's border, then each view on it, then each dimension and note drawn, in paint order:
+    /// The sheet's border, then each view on it, then each dimension, note, balloon and table drawn, in paint order:
     /// each that is on paper ([`SheetObject::on_paper`]).
     pub objects: Vec<SheetObject>,
     /// Each dimension of a view on the sheet, by view and id.
@@ -244,7 +279,11 @@ pub struct SheetScene {
     pub notes: Vec<NoteState>,
     /// Centre annotations omitted and why.
     pub annotation_failures: Vec<AnnotationFailure>,
-    /// The views, dimensions and notes a deferred drawing shows as they last were ([`as_shown`]).
+    /// Each balloon of a view on the sheet, by view and id.
+    pub balloons: Vec<BalloonState>,
+    /// Each table on the sheet, by id.
+    pub tables: Vec<TableState>,
+    /// The views, dimensions, notes and balloons a deferred drawing shows as they last were ([`as_shown`]).
     pub out_of_date: Vec<u64>,
     /// What each view whose lines are in the scene drew them from: its world state and its bodies.
     drawn: Vec<(Arc<ModelState>, Arc<Owners>)>,
@@ -284,7 +323,13 @@ pub struct SheetView {
     pub notes: Vec<NoteState>,
     /// The notes of views up to date that are out of date: [`step`] reads them with the dimensions.
     pub stale_notes: Vec<u64>,
-    /// A title block's, a dimension's or a note's text waits for the search for a font to fall back to: the
+    /// Each balloon of a view on the sheet read so far, by view and id, as it last was.
+    pub balloons: Vec<BalloonState>,
+    /// The balloons of views up to date that are out of date: [`step`] reads them with the dimensions.
+    pub stale_balloons: Vec<u64>,
+    /// Each table on the sheet, by id, as it last was.
+    pub tables: Vec<TableState>,
+    /// A title block's, a dimension's, a note's, a balloon's or a table's text waits for the search for a font to fall back to: the
     /// page extracts again on its next tick, and the text is set once the search has answered.
     pub waiting_for_fonts: bool,
     /// Centre annotations omitted and why, as last shown.
@@ -419,6 +464,7 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     let (text, _) = block_text(record, &lettering, &cell_texts(s, drawing, sheet), true)?;
     let (notes, _) = sheet_notes(s, drawing, sheet, &lettering, true);
     let (labels, _) = view_labels(drawing, drawing.views.iter().map(|v| &**v).filter(|v| v.sheet == sheet), &lettering, true);
+    let tables = sheet_tables(s, drawing, record, &lettering, true);
     let (images, logos) = (crate::drawing_pictures::groups(drawing, sheet), crate::drawing_pictures::logo_items(drawing, sheet));
     let mut assembly = assemble(record, drawing.projection, &text, &images, &logos, &labels, drawn)?;
     // After the views, as they need the views' frames: one read for the sheet's dimensions, each on
@@ -445,16 +491,17 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
         assembly.add_mark(mark);
     }
     // The sheet's own notes come after the centre annotations, as the provider adds them.
+    let tables = assembly.add_tables(&tables);
     assembly.add_sheet_notes(&notes);
     let annotation_failures = std::mem::take(&mut assembly.annotation_failures);
-    let (scene, views, objects, dimensions, notes) = assembly.finish()?;
+    let (scene, views, objects, dimensions, notes, balloons) = assembly.finish()?;
     // Drawn at once, so nothing is as it last was.
     let out_of_date = Vec::new();
     // Each drawn view's bodies with the world state of the session it drew from: a view that draws its
     // parts apart has its copy's, as the sheet shows them.
     let state_of = |choice: &Choice| Some(shown.get(choice)?.as_ref().ok()?.state.clone());
     let drawn = owners.into_iter().filter(|(id, ..)| in_scene(&views, *id)).filter_map(|(_, choice, of)| Some((state_of(&choice)?, of))).collect();
-    Ok(SheetScene { scene, views, objects, dimensions, notes, annotation_failures, out_of_date, drawn })
+    Ok(SheetScene { scene, views, objects, dimensions, notes, balloons, tables, annotation_failures, out_of_date, drawn })
 }
 
 /// Sheet `sheet` of `d`, the drawing open, as a command reads it: drawn at once ([`build`]), or for a
@@ -466,10 +513,10 @@ pub fn as_shown(s: &mut Session, d: &Drawing, sheet: u64) -> Result<SheetScene> 
     extract(s, sheet)?;
     settle(s, d);
     let shown = extract(s, sheet)?;
-    // A held view's dimensions and notes are out of date with it: listed after the views, never read
-    // again here against its old lines. `stale_dimensions` and `stale_notes` hold those of the views up
-    // to date.
-    let up_to_date = shown.stale_dimensions.into_iter().chain(shown.stale_notes);
+    // A held view's dimensions, notes and balloons are out of date with it: listed after the views,
+    // never read again here against its old lines. `stale_dimensions`, `stale_notes` and
+    // `stale_balloons` hold those of the views up to date.
+    let up_to_date = shown.stale_dimensions.into_iter().chain(shown.stale_notes).chain(shown.stale_balloons);
     let annotations = out_of_date_annotations(d, &shown.stale, up_to_date);
     let out_of_date = shown.stale.iter().copied().chain(annotations).collect();
     let (scene, objects) = (Arc::unwrap_or_clone(shown.scene), shown.objects.to_vec());
@@ -483,6 +530,8 @@ pub fn as_shown(s: &mut Session, d: &Drawing, sheet: u64) -> Result<SheetScene> 
         objects,
         dimensions: shown.dimensions,
         notes: shown.notes,
+        balloons: shown.balloons,
+        tables: shown.tables,
         annotation_failures: shown.annotation_failures,
         out_of_date,
         drawn,
@@ -534,13 +583,16 @@ struct Owners {
     items: Vec<Option<(usize, Source)>>,
 }
 
-/// A dimension's lines for a sheet scene, centred on its view, and how it read; or a note's.
+/// A dimension's lines for a sheet scene, centred on its view, and how it read; or a note's or a
+/// balloon's.
 #[derive(Clone, Debug)]
 struct DrawnDimension {
     dimension: u64,
     view: u64,
-    /// A dimension or a note.
+    /// A dimension, a note or a balloon.
     kind: ObjectKind,
+    /// A balloon's read of its parts list; none for the others.
+    row: Option<RowRead>,
     status: dimension::Status,
     group: Option<Arc<Group>>,
     /// The fonts its group's text uses.
@@ -551,11 +603,13 @@ struct DrawnDimension {
     layout: crate::drawing_dimension_paper::Layout,
 }
 
-/// What a view's dimensions path reads: a dimension, or a note that moves with the view, and the view.
+/// What a view's dimensions path reads: a dimension, a note that moves with the view (and the view),
+/// or a balloon.
 #[derive(Clone, Debug)]
 enum Annotation {
     Dimension(Arc<Dimension>),
     Note(Arc<Note>, u64),
+    Balloon(Arc<Balloon>),
 }
 
 impl Annotation {
@@ -563,6 +617,7 @@ impl Annotation {
         match self {
             Annotation::Dimension(record) => record.id,
             Annotation::Note(note, _) => note.id,
+            Annotation::Balloon(balloon) => balloon.id,
         }
     }
 
@@ -570,6 +625,7 @@ impl Annotation {
         match self {
             Annotation::Dimension(record) => record.view,
             Annotation::Note(_, view) => *view,
+            Annotation::Balloon(balloon) => balloon.view,
         }
     }
 
@@ -578,18 +634,28 @@ impl Annotation {
         match (self, other) {
             (Annotation::Dimension(a), Annotation::Dimension(b)) => Arc::ptr_eq(a, b),
             (Annotation::Note(a, _), Annotation::Note(b, _)) => Arc::ptr_eq(a, b),
+            (Annotation::Balloon(a), Annotation::Balloon(b)) => Arc::ptr_eq(a, b),
             _ => false,
         }
     }
 
-    fn is_note(&self) -> bool {
-        matches!(self, Annotation::Note(..))
+    fn kind(&self) -> ObjectKind {
+        match self {
+            Annotation::Dimension(_) => ObjectKind::Dimension,
+            Annotation::Note(..) => ObjectKind::Note,
+            Annotation::Balloon(_) => ObjectKind::Balloon,
+        }
     }
 
-    /// Whether what it shows reads the drawing's and the design's fields as well as the model: a
-    /// note's text with a field does, so it is read again after any change to the document.
-    fn reads_fields(&self) -> bool {
-        matches!(self, Annotation::Note(note, _) if note.content.0.iter().any(|part| matches!(part, Part::Field { .. })))
+    /// Whether what it shows reads the document as well as the model, so it is read again after any
+    /// change to it: a note's text with a field reads the drawing's and the design's fields, and a
+    /// balloon's number its parts list and the design's parts.
+    fn reads_document(&self) -> bool {
+        match self {
+            Annotation::Dimension(_) => false,
+            Annotation::Note(note, _) => note.content.0.iter().any(|part| matches!(part, Part::Field { .. })),
+            Annotation::Balloon(_) => true,
+        }
     }
 }
 
@@ -615,6 +681,9 @@ impl Lettering {
 /// [`MIN_MODEL_CHORD_MM`]; centred on the view ([`assemble`] moves them to its centre). Lines past
 /// the paper scene's [`MAX_RECORDS`] are refused here, so no view holds more than a scene takes.
 fn draw(s: &Session, failing: &[String], shown: &std::result::Result<ShownSet, Unmeasured>, id: u64, view: &ResolvedView) -> Drawn {
+    if let Some(of) = &view.flat {
+        return draw_flat(s, id, view, of);
+    }
     // What the view chooses to show ([`crate::drawing_view::measured`]), and its reference parts' reach.
     let measured = crate::drawing_view::measured(shown, view).map(|(set, extents)| {
         let around = crate::drawing_view::shows(&set, &view.basis, &extents, view.reference_shown_percent);
@@ -626,6 +695,7 @@ fn draw(s: &Session, failing: &[String], shown: &std::result::Result<ShownSet, U
     let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: why.clone() };
     let styles = Styles::from(view);
     let not_drawable = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value);
+    let not_drawable = not_drawable.or_else(|| crate::drawing_view::not_cut_yet(view));
     if let Some(why) = not_drawable.or_else(|| crate::drawing_view::not_drawable_apart(view)) {
         return none(Status::Failed(why.into()));
     }
@@ -667,6 +737,31 @@ fn draw(s: &Session, failing: &[String], shown: &std::result::Result<ShownSet, U
     }
 }
 
+/// Flat pattern view `id`, drawing as `view` does, of its body's flat `of` ([`crate::drawing_view::flat`]):
+/// centred on the view as [`draw`]'s lines are. Its lines name no body, so nothing is picked on them.
+fn draw_flat(s: &Session, id: u64, view: &ResolvedView, of: &FlatOf) -> Drawn {
+    let flat = crate::drawing_view::flat(s, of, CMD);
+    let placing = crate::drawing_view::flat_measured(&flat);
+    let boundary = crate::drawing_view::placed(view, placing, Vec2::ZERO, CMD).ok().map(|placed| placed.boundary);
+    let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: None };
+    if let Some(why) = crate::drawing_view::not_drawable_flat(view) {
+        return none(Status::Failed(why.into()));
+    }
+    let flat = match flat {
+        Ok(flat) => flat,
+        Err(e) => return none(Status::Failed(reason(e))),
+    };
+    let frame = match crate::drawing_view::frame(view.basis, view.scale.value, &flat.model, Vec2::ZERO, CMD) {
+        Ok(frame) => frame,
+        Err(e) => return none(Status::Failed(reason(e))),
+    };
+    let group = crate::drawing_view::flat_group(&flat, &frame, id, view.line_group.value);
+    if group.records() > MAX_RECORDS {
+        return none(Status::Failed(format!("its lines are more than a paper scene's {MAX_RECORDS} records: choose a smaller scale")));
+    }
+    Drawn { group: Some(Arc::new(group)), status: Status::Drawn, stats: None, boundary, frame: Some(frame), owners: None, why: None }
+}
+
 /// Why a sheet leaves out a dimension or a note whose view it doesn't draw.
 pub(crate) const NOT_DRAWN: &str = "its view isn't drawn";
 /// Why a sheet leaves out a dimension that measures something its view has no place to draw.
@@ -701,18 +796,24 @@ fn draw_dimensions(
 ) -> Vec<DrawnDimension> {
     let records: Vec<&Arc<Dimension>> = wanted.iter().filter_map(|a| if let Annotation::Dimension(r) = a { Some(r) } else { None }).collect();
     let notes: Vec<&Arc<Note>> = wanted.iter().filter_map(|a| if let Annotation::Note(n, _) = a { Some(n) } else { None }).collect();
+    let balloons: Vec<&Arc<Balloon>> = wanted.iter().filter_map(|a| if let Annotation::Balloon(b) = a { Some(b) } else { None }).collect();
     let on: Vec<(u64, u64)> = records.iter().map(|record| (record.id, record.view)).collect();
     let read = read_with(s, sessions.as_deref_mut(), d, &on, solidcraft_doc::Document::resolve_dimensions);
     let lettering = PaperFonts::new(&d.font, &d.language, wait);
-    let mut noted = drawn_notes(s, sessions, d, &notes, &frame, &lettering).into_iter();
+    let mut noted = drawn_notes(s, sessions.as_deref_mut(), d, &notes, &frame, &lettering).into_iter();
+    let mut ballooned = drawn_balloons(s, sessions, d, &balloons, &frame, &lettering).into_iter();
     let one = |at: usize, record: &Arc<Dimension>| match read.as_ref().map(|all| all.get(at)) {
         Ok(Some(resolved)) => {
+            // On a view that draws none of the model's edges, it has no place to draw.
+            let placed = !d.view(record.view).is_some_and(|view| crate::drawing_view::no_model_edges(view).is_some());
             let paper = frame(record.view)
+                .filter(|_| placed)
                 .and_then(|(frame, lines)| crate::drawing_dimension_paper::paper_group(record, resolved, &frame, lines, &lettering));
             let drawn = |group, fonts, why, pending, layout| DrawnDimension {
                 dimension: record.id,
                 view: record.view,
                 kind: ObjectKind::Dimension,
+                row: None,
                 status: resolved.status.clone(),
                 group,
                 fonts,
@@ -723,7 +824,7 @@ fn draw_dimensions(
             match paper {
                 Some(paper) => drawn(Some(Arc::new(paper.group)), paper.fonts, paper.why, paper.pending, paper.layout),
                 None => {
-                    let nothing = !resolved.points.is_empty() && frame(record.view).is_some();
+                    let nothing = !placed || (!resolved.points.is_empty() && frame(record.view).is_some());
                     drawn(None, Vec::new(), nothing.then(|| NO_PLACE.to_string()), false, Default::default())
                 }
             }
@@ -735,6 +836,7 @@ fn draw_dimensions(
                 dimension: record.id,
                 view: record.view,
                 kind,
+                row: None,
                 status,
                 group: None,
                 fonts: Vec::new(),
@@ -744,7 +846,7 @@ fn draw_dimensions(
             }
         }
     };
-    // Each dimension by its place among the dimensions read, each note in turn.
+    // Each dimension by its place among the dimensions read, each note and balloon in turn.
     let (mut lines, mut at) = (Vec::with_capacity(wanted.len()), 0);
     for record in wanted {
         match record {
@@ -753,14 +855,15 @@ fn draw_dimensions(
                 at += 1;
             }
             Annotation::Note(..) => lines.extend(noted.next()),
+            Annotation::Balloon(_) => lines.extend(ballooned.next()),
         }
     }
     lines
 }
 
-/// The dimensions and notes of `d` a sheet shows as they last were, by id: those of each view out of
-/// date (`stale_views`), as their view is, then `up_to_date`, those of the views up to date that were
-/// read from another record, model, drawing of their view, lettering or revision
+/// The dimensions, notes and balloons of `d` a sheet shows as they last were, by id: those of each
+/// view out of date (`stale_views`), as their view is, then `up_to_date`, those of the views up to
+/// date that were read from another record, model, drawing of their view, lettering or revision
 /// ([`Cache::stale_dimensions`]).
 fn out_of_date_annotations(d: &Drawing, stale_views: &[u64], up_to_date: impl IntoIterator<Item = u64>) -> Vec<u64> {
     let held = dimensions_on(d, stale_views.iter().copied()).into_iter().map(|record| record.id());
@@ -795,6 +898,7 @@ fn drawn_notes(
             dimension: note.id,
             view,
             kind: ObjectKind::Note,
+            row: None,
             status,
             group: None,
             fonts: Vec::new(),
@@ -802,11 +906,13 @@ fn drawn_notes(
             pending: false,
             layout: Default::default(),
         };
+        // A leader on a view that draws none of the model's edges has no place to end.
+        if note.paths().next().is_some() && d.view(view).and_then(crate::drawing_view::no_model_edges).is_some() {
+            return DrawnDimension { why: Some(NO_PLACE.to_string()), ..base };
+        }
         let (Some(resolved), Some((frame, group))) = (resolved, frame(view)) else { return base };
-        let text = d
-            .sheet_of(&note.anchor)
-            .and_then(|at| title_block_text::read(&s.doc, tree, d, at, std::iter::once(&note.content)).pop())
-            .unwrap_or_default();
+        let text =
+            d.sheet_of(&note.anchor).and_then(|at| title_block_text::read(s, tree, d, at, std::iter::once(&note.content)).pop()).unwrap_or_default();
         let tips: Vec<Vec2> =
             std::iter::once(&resolved.anchor).chain(&resolved.branches).filter_map(|end| end.point).map(|p| frame.to_paper(p)).collect();
         // Centred on the view, as its frame is: the scene moves it to the view's centre.
@@ -814,6 +920,72 @@ fn drawn_notes(
         DrawnDimension { group: Some(Arc::new(paper.group)), fonts: paper.fonts, why: paper.why, pending: paper.pending, ..base }
     };
     notes.iter().enumerate().map(|(at, note)| one(at, note, &mut tree)).collect()
+}
+
+/// `balloons`, each on its view (`frame`, as [`draw_dimensions`] gives it), read once, their edges
+/// as dimensions are ([`read_with`]): their rows by the one rule `drawing.balloon.inspect` reads them
+/// by ([`balloon_rows`]), and each one's leader to its edge's middle now, through the view's
+/// frame. One with no row has an empty circle and says why; one whose view isn't drawn has no lines;
+/// one that can't be read says so.
+fn drawn_balloons(
+    s: &Session,
+    sessions: Option<&mut ViewSessions>,
+    d: &Drawing,
+    balloons: &[&Arc<Balloon>],
+    frame: &impl Fn(u64) -> Option<(ViewFrame, LineGroup)>,
+    lettering: &PaperFonts,
+) -> Vec<DrawnDimension> {
+    if balloons.is_empty() {
+        return Vec::new();
+    }
+    let on: Vec<(u64, u64)> = balloons.iter().map(|balloon| (balloon.id, balloon.view)).collect();
+    let read = read_with(s, sessions, d, &on, solidcraft_doc::Document::resolve_balloons);
+    let records: Vec<&Balloon> = balloons.iter().map(|balloon| balloon.as_ref()).collect();
+    let rows = balloon_rows(d, &records, |source| s.source_design(d, source));
+    let one = |(at, (balloon, row)): (usize, (&Balloon, RowRead))| {
+        let unread = || dimension::Status::Unmeasurable(format!("balloon {} can't be read", ids::encode(balloon.id)));
+        let resolved = read.as_ref().ok().and_then(|all| all.get(at));
+        let status = resolved.map_or_else(unread, |r| r.status.clone());
+        let (view, why) = (balloon.view, row_why(&row));
+        let kind = ObjectKind::Balloon;
+        let base = DrawnDimension {
+            dimension: balloon.id,
+            view,
+            kind,
+            row: None,
+            status,
+            group: None,
+            fonts: Vec::new(),
+            why,
+            pending: false,
+            layout: Default::default(),
+        };
+        // Its leader ends on the model, which a view that draws none of its edges has no place for.
+        if d.view(view).and_then(crate::drawing_view::no_model_edges).is_some() {
+            return DrawnDimension { row: Some(row), why: Some(NO_PLACE.to_string()), ..base };
+        }
+        let (Some(resolved), Some((frame, group))) = (resolved, frame(view)) else { return DrawnDimension { row: Some(row), ..base } };
+        let tip = resolved.point.map(|p| frame.to_paper(p));
+        // Centred on the view, as its frame is: the scene moves it to the view's centre.
+        let paper = crate::drawing_balloon_paper::balloon_group(balloon, row.item(), tip, LineKind::Thin.width_mm(group), lettering);
+        let why = base.why.clone().or(paper.why);
+        DrawnDimension { row: Some(row), group: Some(Arc::new(paper.group)), fonts: paper.fonts, why, pending: paper.pending, ..base }
+    };
+    records.into_iter().zip(rows).enumerate().map(one).collect()
+}
+
+/// Why a balloon shows no number, in a sentence: none when it has one.
+pub(crate) fn row_why(row: &RowRead) -> Option<String> {
+    let why = match row {
+        RowRead::Item { .. } => return None,
+        RowRead::NoList(choices) if choices.is_empty() => "it has no parts list to read",
+        RowRead::NoList(_) => "it names no parts list, and its sheet and drawing have more than one",
+        RowRead::Unlisted { why: Unlisted::NotFound, .. } => "its parts list can't be read for its part",
+        RowRead::Unlisted { why: Unlisted::Reference, .. } => "it points at a reference, which no parts list counts",
+        RowRead::Unlisted { why: Unlisted::NoRow, .. } => "its parts list has no row for its part",
+        RowRead::Unread { why, .. } => return Some(format!("its parts list can't be read: {why}")),
+    };
+    Some(why.to_string())
 }
 
 /// A note on a sheet, set with the sheet's title block: it reads no model, so it is set again only
@@ -834,7 +1006,7 @@ fn sheet_notes(s: &Session, d: &Drawing, sheet: u64, lettering: &Lettering, wait
     let Some(at) = d.sheets.iter().position(|one| one.id == sheet).filter(|_| !on.is_empty()) else { return (Vec::new(), false) };
     let line_mm = LineKind::Thin.width_mm(d.sheets.get(at).and_then(|one| one.line_group).unwrap_or(d.line_group));
     let state = s.model.state();
-    let texts = title_block_text::read(&s.doc, &mut Tree::new(&s.doc, &state), d, at, on.iter().map(|note| &note.content));
+    let texts = title_block_text::read(s, &mut Tree::new(&s.doc, &state), d, at, on.iter().map(|note| &note.content));
     let fonts = PaperFonts::new(&lettering.font, &lettering.language, wait);
     let mut pending = false;
     let mut set = |(note, text): (&&Arc<Note>, String)| {
@@ -904,12 +1076,13 @@ pub(crate) fn label_box(d: &Drawing, id: u64, centre: Vec2, boundary: Aabb2) -> 
     Some(group_bounds(&moved(&label.group, at), &label.fonts))
 }
 
-/// The dimensions and the notes of `views` of `d`, by view and id.
+/// The dimensions, the notes and the balloons of `views` of `d`, by view and id.
 fn dimensions_on(d: &Drawing, views: impl Iterator<Item = u64>) -> Vec<Annotation> {
     let views: BTreeSet<u64> = views.collect();
     let dimensions = d.dimensions.iter().filter(|record| views.contains(&record.view)).map(|record| Annotation::Dimension(record.clone()));
     let notes = d.notes.iter().filter_map(|note| Some(Annotation::Note(note.clone(), note.anchor.view().filter(|view| views.contains(view))?)));
-    let mut on: Vec<Annotation> = dimensions.chain(notes).collect();
+    let balloons = d.balloons.iter().filter(|balloon| views.contains(&balloon.view)).map(|balloon| Annotation::Balloon(balloon.clone()));
+    let mut on: Vec<Annotation> = dimensions.chain(notes).chain(balloons).collect();
     on.sort_by_key(|record| (record.view(), record.id()));
     on
 }
@@ -935,6 +1108,7 @@ struct Assembly {
     annotation_failures: Vec<AnnotationFailure>,
     gap_obstacles: solidcraft_geom::drawing_centre_mark::GapObstacles,
     gap_checks: usize,
+    balloons: Vec<BalloonState>,
 }
 
 /// Why a group stayed out of a scene.
@@ -968,7 +1142,7 @@ impl Assembly {
         Ok(bounds)
     }
 
-    /// Adds `dimensions` (and the notes of views) after the views, each moved to its view's centre.
+    /// Adds `dimensions` (and the notes and balloons of views) after the views, each moved to its view's centre.
     /// One whose view isn't in the scene or that would take it past a paper scene's limits is left out
     /// and says why.
     fn add_dimensions<'a>(&mut self, dimensions: impl Iterator<Item = &'a DrawnDimension>) {
@@ -1001,6 +1175,10 @@ impl Assembly {
             let status = one.status.clone();
             match one.kind {
                 ObjectKind::Note => self.notes.push(NoteState { note: one.dimension, view: Some(one.view), status, drawn, why }),
+                ObjectKind::Balloon => {
+                    let row = one.row.clone().unwrap_or(RowRead::NoList(Vec::new()));
+                    self.balloons.push(BalloonState { balloon: one.dimension, view: one.view, status, row, drawn, why })
+                }
                 _ => self.dimensions.push(DimensionState { dimension: one.dimension, view: one.view, status, drawn, why }),
             }
         }
@@ -1087,12 +1265,37 @@ impl Assembly {
         }
     }
 
+    /// Adds the sheet's `tables`, each already where it stands on the sheet, in their own paint band
+    /// ([`ObjectKind::band`]), and gives each one's state. One that can't be read, or that would take
+    /// the scene past a paper scene's limits, is left out and says why; the rest still draw.
+    fn add_tables(&mut self, tables: &SheetTables) -> Vec<TableState> {
+        let mut states = Vec::with_capacity(tables.tables.len());
+        for (table, read) in &tables.tables {
+            let state = |drawn, failed, why| TableState { table: *table, drawn, failed, why };
+            states.push(match read {
+                Err(why) => state(false, true, Some(why.clone())),
+                Ok(on_paper) => match self.add(&on_paper.group, &on_paper.fonts, Vec2::ZERO, DrawnFor::Sheet) {
+                    Ok(bounds_mm) => {
+                        self.objects.extend(SheetObject::on_paper(*table, on_paper.group.kind, bounds_mm, None).map(banded(DrawnFor::Sheet)));
+                        state(true, false, on_paper.why.clone())
+                    }
+                    Err(LeftOut::TooManyRecords) => {
+                        state(false, false, Some(format!("with its lines the sheet is more than a paper scene's {MAX_RECORDS} records")))
+                    }
+                    Err(LeftOut::Invalid(e)) => state(false, false, Some(e)),
+                },
+            });
+        }
+        states
+    }
+
     /// The scene with its groups in paint order, checked whole, and its objects in the same order.
-    fn finish(self) -> Result<(Scene, Vec<ViewState>, Vec<SheetObject>, Vec<DimensionState>, Vec<NoteState>)> {
+    #[allow(clippy::type_complexity)]
+    fn finish(self) -> Result<(Scene, Vec<ViewState>, Vec<SheetObject>, Vec<DimensionState>, Vec<NoteState>, Vec<BalloonState>)> {
         let mut scene = self.scene;
         scene.groups = in_paint_order(self.groups);
         scene.validate().map_err(|e| bad(CMD, e.to_string()))?;
-        Ok((scene, self.states, in_paint_order(self.objects), self.dimensions, self.notes))
+        Ok((scene, self.states, in_paint_order(self.objects), self.dimensions, self.notes, self.balloons))
     }
 }
 
@@ -1152,7 +1355,7 @@ fn assemble<D: Borrow<Drawn>>(
     // The block's fonts, each once: all they hold counts, as the table held none before.
     scene.add_fonts(fonts);
     let records = records.saturating_add(alone.font_records_beyond(&scene.fonts));
-    let (states, placed, dimensions, notes) = (Vec::new(), BTreeMap::new(), Vec::new(), Vec::new());
+    let (states, placed, dimensions, notes, balloons) = (Vec::new(), BTreeMap::new(), Vec::new(), Vec::new(), Vec::new());
     let mut assembly = Assembly {
         scene,
         groups,
@@ -1163,6 +1366,7 @@ fn assemble<D: Borrow<Drawn>>(
         placed,
         dimensions,
         notes,
+        balloons,
         annotation_failures: Vec::new(),
         gap_obstacles: Default::default(),
         gap_checks: 0,
@@ -1240,7 +1444,7 @@ pub(crate) fn moved(group: &Group, by: Vec2) -> Group {
 fn cell_texts(s: &Session, d: &Drawing, sheet: u64) -> Vec<CellText> {
     let Some(at) = d.sheets.iter().position(|x| x.id == sheet && x.title_block.is_some()) else { return Vec::new() };
     let state = s.model.state();
-    title_block_text::shown(&s.doc, &mut Tree::new(&s.doc, &state), d, at)
+    title_block_text::shown(s, &mut Tree::new(&s.doc, &state), d, at)
 }
 
 /// Sheet `record`'s title block text, its cells as `cells` gives them, set on paper in `lettering`'s
@@ -1254,6 +1458,12 @@ fn block_text(record: &Sheet, lettering: &Lettering, cells: &[CellText], wait: b
         }
         _ => (Set::default(), false),
     })
+}
+
+/// The tables of sheet `record` of `d`, read from `s`'s design and measured in `lettering`'s font
+/// and language, as [`block_text`] sets the block's text; `wait` as there.
+fn sheet_tables(s: &Session, d: &Drawing, record: &Sheet, lettering: &Lettering, wait: bool) -> SheetTables {
+    crate::drawing_table_paper::sheet_tables(s, d, record, &PaperFonts::new(&lettering.font, &lettering.language, wait))
 }
 
 /// Sheet `sheet` of `d`.
@@ -1346,9 +1556,9 @@ impl Entry {
     }
 }
 
-/// A dimension's last drawing, or a note's, and what it was drawn from: its record, the world state,
-/// its view's drawing (by serial, which holds its frame), the drawing's lettering and, for a note,
-/// the document's revision ([`Annotation::reads_fields`]).
+/// A dimension's last drawing, or a note's or a balloon's, and what it was drawn from: its record, the
+/// world state, its view's drawing (by serial, which holds its frame), the drawing's lettering and, for
+/// one that reads the document, the document's revision ([`Annotation::reads_document`]).
 #[derive(Clone)]
 struct DimensionEntry {
     state: Arc<ModelState>,
@@ -1374,6 +1584,10 @@ struct Inputs {
     dimensions: Vec<(u64, u64)>,
     marks: Vec<Arc<solidcraft_doc::drawing::centre_mark::CentreMark>>,
     lines: Vec<Arc<solidcraft_doc::drawing::centre_line::CentreLine>>,
+    /// Views whose centre references cannot be read from the host design.
+    centre_foreign_views: Vec<u64>,
+    /// Views whose flat pattern has no model edges for centre references.
+    centre_flat_views: Vec<u64>,
     automatic: Vec<(u64, solidcraft_doc::drawing::view::AutoMarks)>,
 }
 
@@ -1393,8 +1607,10 @@ struct Assembled {
     notes: Arc<Vec<SheetNote>>,
     /// Its views' labels, set with its block.
     labels: Arc<Vec<SetLabel>>,
-    /// Whether a text of the block, of a note on the sheet or of a label waits for a font to fall back to: until it doesn't, the block is
-    /// set again on each [`extract`], and the sheet put together with it is never reused.
+    /// The sheet's tables, read with the block's text and for the same five.
+    tables: Arc<SheetTables>,
+    /// Whether a text of the block, of a note on the sheet, of a label or of a table waits for a font to fall back to: until it
+    /// doesn't, the block is set again on each [`extract`], and the sheet put together with it is never reused.
     pending: bool,
     serial: u64,
     inputs: Inputs,
@@ -1486,9 +1702,23 @@ impl Cache {
         let images = crate::drawing_pictures::groups(d, record.id);
         let logos = crate::drawing_pictures::logo_items(d, record.id);
         let views = on.iter().map(|(id, _, centre)| (*id, serial(id), *centre)).collect();
+        let centre_foreign_views = on.iter().filter_map(|(id, _, _)| crate::drawing_view::centre_on_another_design(d, *id).then_some(*id)).collect();
+        let centre_flat_views = on.iter().filter_map(|(id, _, _)| d.view(*id).and_then(crate::drawing_view::no_model_edges).map(|_| *id)).collect();
         let read = dimensions_on(d, on.iter().map(|(id, ..)| *id));
         let dimensions = read.iter().filter_map(|record| self.dimensions.get(&record.id()).map(|e| (record.id(), e.serial))).collect();
-        Inputs { sheet: record.clone(), projection: d.projection, images, logos, views, dimensions, marks, lines, automatic }
+        Inputs {
+            sheet: record.clone(),
+            projection: d.projection,
+            images,
+            logos,
+            views,
+            dimensions,
+            marks,
+            lines,
+            centre_foreign_views,
+            centre_flat_views,
+            automatic,
+        }
     }
 
     /// The views of the last scene assembled, while it is still its sheet's scene: the sheet as `d`
@@ -1561,7 +1791,7 @@ impl Cache {
         let current = |record: &Annotation, serial: u64| {
             let read_now =
                 |e: &&DimensionEntry| e.record.is(record) && Arc::ptr_eq(&e.state, state) && e.view_serial == serial && e.lettering == *lettering;
-            self.dimensions.get(&record.id()).filter(read_now).filter(|e| !record.reads_fields() || e.revision == revision)
+            self.dimensions.get(&record.id()).filter(read_now).filter(|e| !record.reads_document() || e.revision == revision)
         };
         let mut found = dimensions_on(d, serials.keys().copied());
         found.retain(|record| serials.get(&record.view()).is_some_and(|serial| keep(current(record, *serial))));
@@ -1586,7 +1816,7 @@ pub struct ViewStanding {
 pub struct Standing {
     /// Each view, in id order.
     pub views: Vec<ViewStanding>,
-    /// The dimensions and notes its sheets show as they last were ([`out_of_date_annotations`]).
+    /// The dimensions, notes and balloons its sheets show as they last were ([`out_of_date_annotations`]).
     pub annotations: Vec<u64>,
 }
 
@@ -1647,17 +1877,19 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     {
         return Ok(last.answer.clone());
     }
-    // The title block's cells, the sheet's notes and its views' labels are read and set again only for
-    // another sheet, drawing, design, model or lettering (a name or a mass can change them), not for
-    // each view drawn.
-    let (cells, text, notes, labels, pending) = match last {
-        Some(last) => (last.cells.clone(), last.text.clone(), last.notes.clone(), last.labels.clone(), false),
+    // The title block's cells, the sheet's notes, its views' labels and its tables are read and set again only for another
+    // sheet, drawing, design, model or lettering (a name or a mass can change them), not for each view drawn.
+    let (cells, text, notes, labels, tables, pending) = match last {
+        Some(last) => (last.cells.clone(), last.text.clone(), last.notes.clone(), last.labels.clone(), last.tables.clone(), false),
         None => {
             let cells = cell_texts(s, &d, sheet);
-            let (text, block_pending) = block_text(sheet_of(&d, sheet)?, &lettering, &cells, false)?;
+            let record = sheet_of(&d, sheet)?;
+            let (text, block_pending) = block_text(record, &lettering, &cells, false)?;
             let (notes, notes_pending) = sheet_notes(s, &d, sheet, &lettering, false);
             let (labels, labels_pending) = view_labels(&d, d.views.iter().map(|v| &**v).filter(|v| v.sheet == sheet), &lettering, false);
-            (cells, Arc::new(text), Arc::new(notes), Arc::new(labels), block_pending || notes_pending || labels_pending)
+            let tables = sheet_tables(s, &d, record, &lettering, false);
+            let pending = block_pending || notes_pending || labels_pending || tables.pending;
+            (cells, Arc::new(text), Arc::new(notes), Arc::new(labels), Arc::new(tables), pending)
         }
     };
     let doc = s.doc.clone();
@@ -1666,9 +1898,9 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     catch_up(s, &d, on.iter().map(|(id, ..)| *id), &state);
     let cache = &s.drawing_scenes;
     let stale = on.iter().filter(|(id, view, _)| !cache.fresh(*id, &state, view)).map(|(id, ..)| *id).collect();
-    let (stale_notes, stale_dimensions): (Vec<Annotation>, Vec<Annotation>) =
-        cache.stale_dimensions(&d, &on, &state, &lettering, revision).into_iter().partition(Annotation::is_note);
-    let (stale_dimensions, stale_notes) = (stale_dimensions.iter().map(Annotation::id).collect(), stale_notes.iter().map(Annotation::id).collect());
+    let out_of_date = cache.stale_dimensions(&d, &on, &state, &lettering, revision);
+    let of = |kind: ObjectKind| out_of_date.iter().filter(|record| record.kind() == kind).map(Annotation::id).collect::<Vec<u64>>();
+    let (stale_dimensions, stale_notes, stale_balloons) = (of(ObjectKind::Dimension), of(ObjectKind::Note), of(ObjectKind::Balloon));
     let waiting_for_fonts = pending || handed_back || !cache.waiting_dimensions(&d, &on, &state, &lettering, revision).is_empty();
     let inputs = cache.inputs(&d, record, &on);
     // The last answer is used again for the same inputs, cells, faces, sheet notes and reference
@@ -1681,16 +1913,19 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
             && last.text.faces() == text.faces()
             && last.notes == notes
             && last.labels == labels
+            && last.tables == tables
             && last.reference_statuses == reference_statuses
             && ((inputs.marks.is_empty() && inputs.lines.is_empty() && inputs.automatic.is_empty()) || Arc::ptr_eq(&last.state, &state))
     });
-    let (scene, views, objects, dimensions, notes_drawn, annotation_failures, generation) = if let Some(last) = reused {
+    let (scene, views, objects, dimensions, notes_drawn, balloons, table_states, annotation_failures, generation) = if let Some(last) = reused {
         (
             last.answer.scene.clone(),
             last.answer.views.clone(),
             last.answer.objects.clone(),
             last.answer.dimensions.clone(),
             last.answer.notes.clone(),
+            last.answer.balloons.clone(),
+            last.answer.tables.clone(),
             last.answer.annotation_failures.clone(),
             last.answer.generation,
         )
@@ -1704,9 +1939,10 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
         for mark in mark_groups {
             assembly.add_mark(mark);
         }
+        let table_states = assembly.add_tables(&tables);
         assembly.add_sheet_notes(&notes);
         let annotation_failures = std::mem::take(&mut assembly.annotation_failures);
-        let (scene, views, objects, dimensions, notes_drawn) = assembly.finish()?;
+        let (scene, views, objects, dimensions, notes_drawn, balloons) = assembly.finish()?;
         for (view, marks) in fresh_marks {
             if let Some(entry) = s.drawing_scenes.views.get_mut(&view) {
                 entry.marks = marks;
@@ -1718,6 +1954,8 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
             objects.into(),
             dimensions,
             notes_drawn,
+            balloons,
+            table_states,
             annotation_failures,
             GENERATION.fetch_add(1, Ordering::Relaxed).wrapping_add(1),
         )
@@ -1732,6 +1970,9 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
         stale_dimensions,
         notes: notes_drawn,
         stale_notes,
+        balloons,
+        stale_balloons,
+        tables: table_states,
         waiting_for_fonts,
         annotation_failures,
     };
@@ -1739,7 +1980,7 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     // Views, dimensions and notes no longer in the drawing are forgotten: each holds a world state.
     let kept: BTreeSet<u64> = d.views.iter().map(|v| v.id).collect();
     cache.views.retain(|id, _| kept.contains(id));
-    cache.dimensions.retain(|id, _| d.dimension(*id).is_some() || d.notes.by_id(*id).is_some());
+    cache.dimensions.retain(|id, _| d.dimension(*id).is_some() || d.notes.by_id(*id).is_some() || d.balloons.by_id(*id).is_some());
     let serial = cache.serial;
     cache.last = Some(Assembled {
         sheet,
@@ -1751,6 +1992,7 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
         text,
         notes,
         labels,
+        tables,
         pending,
         serial,
         inputs,
@@ -1818,6 +2060,20 @@ fn provider_marks(
         };
         // Without a frame only the accepted failures can be presented.
         groups.extend(local.into_iter().filter(|mark| mark.group.is_none() && owner(mark.object) == Some(state.view)));
+    }
+    // A retained host-model group must not survive if its view now names another design.
+    for group in &mut groups {
+        let why = if crate::drawing_view::centre_on_another_design(d, group.view) {
+            Some("centre annotations on a view of another design are not supported yet")
+        } else if d.view(group.view).and_then(crate::drawing_view::no_model_edges).is_some() {
+            Some("centre annotations on a flat pattern view are not supported yet")
+        } else {
+            None
+        };
+        if let Some(why) = why {
+            group.group = None;
+            group.why = Some(why.into());
+        }
     }
     groups.sort_by_key(|group| (matches!(group.kind, ObjectKind::CentreLine), group.object));
     (groups, updates)

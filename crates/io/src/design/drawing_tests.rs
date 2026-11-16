@@ -20,7 +20,7 @@ fn plate() -> Document {
         let taken: BTreeSet<u64> = doc.drawings.iter().map(|d| d.id).collect();
         let mut d = Drawing::new(name, "en-GB", "Sheet 1", a3, Some(DrawingBorderProfile::iso()), &taken, &mut ids).unwrap();
         let id = d.allocate_id(&mut ids).unwrap();
-        d.sources.push(Source { id });
+        d.sources.push(Source { id, path: None });
         doc.drawings.push(Arc::new(d));
     }
     doc
@@ -196,7 +196,7 @@ fn drawing() -> Drawing {
     let a3 = drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape);
     let mut d = Drawing::new("Plate assembly", "en-GB", "Assembly", a3, Some(DrawingBorderProfile::iso()), &BTreeSet::new(), &mut ids).unwrap();
     let id = d.allocate_id(&mut ids).unwrap();
-    d.sources.push(Source { id });
+    d.sources.push(Source { id, path: None });
     d
 }
 

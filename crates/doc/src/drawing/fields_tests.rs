@@ -213,7 +213,7 @@ fn a_sheets_scale_is_the_one_its_base_views_share() {
     assert_eq!(scale(&d), ["", "", ""]);
     let mut ids = IdSource::seeded(13059);
     let source = d.allocate_id(&mut ids).unwrap();
-    d.sources.push(DrawingSource { id: source });
+    d.sources.push(DrawingSource { id: source, path: None });
     let [side, front, other, top] = [(); 4].map(|()| d.allocate_id(&mut ids).unwrap());
     let (first, second) = (d.sheets[0].id, d.sheets[1].id);
     let view = |id, sheet, kind, scale: &str| {

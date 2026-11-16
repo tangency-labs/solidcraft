@@ -90,6 +90,9 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let request: EditParams = crate::schema::read(EDIT, p)?;
     let id = request.line.0;
+    let record = s.drawing(EDIT)?;
+    let view = record.centre_line(id).ok_or_else(|| bad(EDIT, format!("no centre line {}", ids::encode(id))))?.view;
+    crate::drawing_view::check_centre_source(record, view, "centre lines", EDIT)?;
     let changed = s.edit_drawing(EDIT, |d| {
         let index = d.centre_line_index(id).ok_or_else(|| bad(EDIT, format!("no centre line {}", ids::encode(id))))?;
         let line = d.centre_lines.get_mut(index).map(Arc::make_mut).ok_or_else(|| bad(EDIT, "centre line no longer exists"))?;
@@ -124,6 +127,7 @@ fn change_reply(id: u64, changed: Vec<String>) -> Result<Value> {
 fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
     let d = s.drawing(cmd)?;
     let line = d.centre_line(id).ok_or_else(|| bad(cmd, format!("no centre line {}", ids::encode(id))))?;
+    crate::drawing_view::check_centre_source(d, line.view, "centre lines", cmd)?;
     let r = s
         .doc
         .resolve_centre_lines(&s.model, d, &[id])

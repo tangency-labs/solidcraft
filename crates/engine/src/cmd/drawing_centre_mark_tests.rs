@@ -382,3 +382,74 @@ fn centre_marks_and_lines_warn_when_their_view_leaves_the_part_out_later() {
         assert!(restored_mark["warnings"].is_null() && restored_line["warnings"].is_null());
     }
 }
+
+/// Host references must not be read or retained as the geometry of another design's view.
+#[test]
+fn centre_annotations_do_not_read_or_reuse_host_geometry_for_another_design() {
+    let (mut s, view, edge) = fixture();
+    let mark = run(&mut s, ADD, json!({"view": ids::encode(view), "edge": {"body": "Box", "index": edge}, "overshoot_mm": 2.0}))["mark"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let line =
+        run(&mut s, "drawing.center_line.add", json!({"view": ids::encode(view), "a": [0, 0, 0], "b": [80, 0, 0], "overshoot_mm": 2.0}))["line"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+    let (mark_id, line_id) = (ids::decode(&mark).unwrap(), ids::decode(&line).unwrap());
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    crate::drawing_scene::extract(&mut s, sheet).unwrap();
+    let drawing = s.drawing("test").unwrap().clone();
+    crate::drawing_scene::settle(&mut s, &drawing);
+    let host = crate::drawing_scene::extract(&mut s, sheet).unwrap();
+    assert!(host.scene.groups.iter().any(|g| g.object == mark_id) && host.scene.groups.iter().any(|g| g.object == line_id));
+
+    // The linked design is a real, readable file with different geometry. Reading it as a
+    // drawing source is a later upstream feature; never substitute the host's references.
+    let folder = crate::tests::Folder::new("centre-another-design");
+    let path = folder.path("foreign.sc");
+    let mut foreign = Session::default();
+    run(&mut foreign, "solid.box", json!({"length": 24, "width": 12, "height": 8, "body_name": "Foreign"}));
+    run(&mut foreign, "file.save", json!({"path": path}));
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path": path}));
+    assert!(reopened.model.state().body("Foreign").is_some());
+    let mut drawing = (**s.drawing("test").unwrap()).clone();
+    drawing.sources[0].path = Some(path);
+    drawing.validate().unwrap();
+    let source = drawing.sources[0].id;
+    assert!(matches!(s.drawn(&drawing, source), Err(crate::Undrawn::Linked)));
+    s.doc_mut().put_drawing(Arc::new(drawing));
+    let saved = s.drawing("test").unwrap().to_json().unwrap();
+    for (cmd, params) in [
+        (ADD, json!({"view": ids::encode(view), "edge": {"body": "Box", "index": edge}, "overshoot_mm": 2.0})),
+        (EDIT, json!({"mark": mark, "overshoot_mm": 3.0})),
+        (INSPECT, json!({"mark": mark})),
+        ("drawing.center_line.add", json!({"view": ids::encode(view), "a": [0, 0, 0], "b": [80, 0, 0], "overshoot_mm": 2.0})),
+        ("drawing.center_line.edit", json!({"line": line, "overshoot_mm": 3.0})),
+        ("drawing.center_line.inspect", json!({"line": line})),
+    ] {
+        let why = s.execute(cmd, &params).unwrap_err().to_string();
+        assert!(why.contains("another design"), "{cmd}: {why}");
+        assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), saved, "{cmd} changed the drawing");
+    }
+    let drawing = s.drawing("test").unwrap().clone();
+    let once = crate::drawing_scene::build(&s, &drawing, sheet).unwrap();
+    let shown = crate::drawing_scene::extract(&mut s, sheet).unwrap();
+    for (path, scene) in [("one-shot", &once.scene), ("cached", shown.scene.as_ref())] {
+        assert!(!scene.groups.iter().any(|g| g.object == mark_id || g.object == line_id), "{path} retained host annotations");
+    }
+    for failures in [&once.annotation_failures, &shown.annotation_failures] {
+        for id in [mark_id, line_id] {
+            assert!(failures.iter().any(|f| f.object == id && f.reason.contains("another design")), "{failures:?}");
+        }
+    }
+    // Reusing the cached linked answer after returning to the host would hide valid annotations.
+    let mut drawing = (**s.drawing("test").unwrap()).clone();
+    drawing.sources[0].path = None;
+    drawing.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(drawing));
+    let restored = crate::drawing_scene::extract(&mut s, sheet).unwrap();
+    assert!(restored.scene.groups.iter().any(|g| g.object == mark_id));
+    assert!(restored.scene.groups.iter().any(|g| g.object == line_id));
+}
