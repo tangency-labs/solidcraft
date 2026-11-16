@@ -628,6 +628,28 @@ fn the_title_bar_offers_the_new_version_and_opens_the_update_window() {
     assert!(h.widget(&label).is_none(), "Remind me later hides it");
 }
 
+/// The Donate and Discord pills make room for the Update pill: they sit left of it, never under
+/// it (#17829, where a longer translation of "Update to" ran under Donate).
+#[test]
+fn the_link_pills_make_room_for_the_update_pill() {
+    let dir = scratch();
+    let (feed, _) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    h.app.updater.feed = Some(feed);
+    h.frame();
+    wait_for_check(&mut h);
+    for width in [1920.0, 1600.0, 1280.0] {
+        h.call("ui.resize", json!({"width": width, "height": 800}));
+        h.frames(3);
+        let pill = crate::scenario::rect_of("titlebar:update").unwrap_or_else(|| panic!("at {width}: no Update pill"));
+        let links: Vec<egui::Rect> = ["titlebar:kofi", "titlebar:discord"].into_iter().filter_map(crate::scenario::rect_of).collect();
+        assert!(width < 1900.0 || links.len() == 2, "at {width}: the link pills show on a wide bar");
+        for link in links {
+            assert!(link.right() <= pill.left(), "at {width}: link pill {link:?} runs under the Update pill {pill:?}");
+        }
+    }
+}
+
 #[test]
 fn the_pill_shortens_in_a_narrow_title_bar() {
     let dir = scratch();

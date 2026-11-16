@@ -342,6 +342,15 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             // A newer release: its Update button stays before the right cluster, and the
             // organization's Managed by badge left of it and of the link pills.
             let update = crate::update::button(app, ui, out.offer, out.offer_labeled);
+            // The bar places the link pills by this width next frame (#17829).
+            let offer_width = egui::Id::unique(solidcraft_ui_kit::app_bar::OFFER_WIDTH);
+            ui.ctx().data_mut(|d| {
+                if let Some(u) = update {
+                    d.insert_temp(offer_width, u.width());
+                } else {
+                    d.remove::<f32>(offer_width);
+                }
+            });
             let badge_right = update.map_or(out.controls_left, |u| u.left().min(out.controls_left)) - 6.0;
             let badge_span = Rect::from_min_max(out.offer.min, pos2(badge_right.max(out.offer.min.x), out.offer.max.y));
             let badge = crate::policy::badge(app, ui, badge_span, out.offer_labeled);
