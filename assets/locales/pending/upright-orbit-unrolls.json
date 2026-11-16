@@ -4,8 +4,8 @@
     "nav.upright_orbit_unrolls.label": "Orbiting stands a rolled view upright"
   },
   "ar": {
-    "nav.upright_orbit_unrolls.help": "عندما يكون العرض مائلاً حول محوره (النظر إلى رسم على مستوى مائل، أو أسهم التدوير في مكعب العرض)، يعيده الدوران قائماً أثناء السحب، ويدور النموذج في اتجاه المؤشر. عند الإيقاف: يحتفظ العرض المائل بميله أثناء الدوران، فيبقى العرض المقلوب مقلوباً.",
-    "nav.upright_orbit_unrolls.label": "الدوران يعيد العرض المائل قائماً"
+    "nav.upright_orbit_unrolls.help": "عندما يكون العرض مائلًا حول محور النظر («النظر إلى» رسم على مستوى مائل، أو أسهم الدوران في مكعب العرض)، يعيده التدوير قائمًا أثناء السحب، ويدور النموذج في اتجاه المؤشر. عند الإيقاف: يحتفظ العرض المائل بميله أثناء التدوير، فيبقى العرض المقلوب مقلوبًا.",
+    "nav.upright_orbit_unrolls.label": "التدوير يعيد العرض المائل قائمًا"
   },
   "de": {
     "nav.upright_orbit_unrolls.help": "Ist die Ansicht gekippt (Ausrichten auf eine Skizze auf einer geneigten Ebene oder die Drehpfeile des Ansichtswürfels), richtet das Orbiten sie beim Ziehen wieder auf, und das Modell dreht sich in Zeigerrichtung. Aus: Eine gekippte Ansicht behält beim Orbiten ihre Neigung, eine auf dem Kopf stehende Ansicht bleibt so.",
