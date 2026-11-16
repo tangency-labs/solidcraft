@@ -1129,6 +1129,27 @@ fn copies_of_a_boss_and_a_cut_up_to_its_top_make_both_copies() {
     }
 }
 
+/// #17692: a pocket cut up to the plate's top, then a chamfer round the pocket's mouth that cuts
+/// the top away where the cut's end was picked. The pattern comes after the chamfer and copies
+/// only the pocket: its copy ends at the plate's top, as the pocket does, so it is the same
+/// 22 × 22 × 5 pocket. The copy used to end at the chamfer's slope left at the pick and was
+/// refused ("the profile reaches past the To face").
+#[test]
+fn a_copied_cut_up_to_a_face_a_later_chamfer_cut_away_at_the_pick_ends_at_that_face() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 84, "width": 42, "height": 5, "corner": [0, 0, 0], "body_name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Cell"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [32, 32]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Cell", "profiles": [0], "to": [33, 21, 5], "operation": "cut", "name": "Pocket"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[21, 10, 5], [21, 32, 5], [10, 21, 5], [32, 21, 5]], "distance": 3, "name": "Lip"}));
+    let before = volume(&mut s);
+    let r = run(&mut s, "solid.pattern.rectangular", json!({"features": ["Pocket"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 42}));
+    assert!(r["error"].is_null() && r["warning"].is_null(), "{r}");
+    let after = volume(&mut s);
+    assert!(rel(before - after, 22.0 * 22.0 * 5.0) < 1e-9, "the copy removed {} mm³, expected {} mm³", before - after, 22.0 * 22.0 * 5.0);
+}
+
 /// #14305: in a component, a pattern or mirror of two cuts makes the copies of both. The first
 /// cut's copies used to hand the plate back outside its component, so the second cut's copies
 /// found no body there ("there is no body to cut or intersect").

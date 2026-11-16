@@ -243,10 +243,7 @@ pub fn create_face_in_region_from_surface(
         let mut uv_curves: Vec<Curve> = Vec::new();
         for (ii, mut uv) in natural.uv_curves.into_iter().enumerate() {
             let crv_domain = at(&natural.curves_3d, ii)?.natural_interval();
-            ignore_status(crate::error::passed_on(
-                uv.edit_parameterization(&crv_domain),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            uv.edit_parameterization(&crv_domain)?;
             uv_curves.push(Curve::from(uv));
         }
 
@@ -843,16 +840,10 @@ pub fn create_faces_with_curves(
             // For the outermost loop, the edges and vertices need to be deleted too:
             if l == big_loop {
                 for e in loop_edges.into_iter().flatten() {
-                    ignore_status(crate::error::passed_on(
-                        delete_edge(k, b, fenv.env, e),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    delete_edge(k, b, fenv.env, e)?;
                 }
                 for v in loop_vertices.into_iter().flatten() {
-                    ignore_status(crate::error::passed_on(
-                        delete_vertex(k, b, fenv.env, v),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    delete_vertex(k, b, fenv.env, v)?;
                 }
             }
         }
@@ -988,13 +979,10 @@ pub fn make_faces_with_curves(
             Curve::from(Line::from_points(lo, hi, 2))
         } else {
             // (status ignored upstream: a failed curve leaves a null pointer that is
-            // intersected next)
-            ignored(crate::error::passed_on(
-                surface.create_iso_parametric_curve(k, srf_dir, knot, 0.0, None, false),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?
-            .ok_or_else(|| invalid("iso curve failed (upstream dereferences null)"))?
-            .curve
+            // intersected next; fork 60a8a51 passes it on)
+            surface
+                .create_iso_parametric_curve(k, srf_dir, knot, 0.0, None, false)?
+                .curve
         };
         iso_keys.push(CurveKey(store.len()));
         store.push(iso);
@@ -1022,18 +1010,14 @@ pub fn make_faces_with_curves(
                     .ok_or_else(|| invalid("curve store"))?;
                 let crv_domain = loop_curve.natural_interval();
                 // Intersect the curves (status ignored upstream).
-                let mut sols = ignored(crate::error::passed_on(
-                    iso.global_curve_intersect::<LoopObject>(
-                        k,
-                        &iso_domain,
-                        loop_curve,
-                        &crv_domain,
-                        xsect_tol,
-                        &CurveIntersectOptions::default(),
-                    ),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?
-                .unwrap_or_default();
+                let mut sols = iso.global_curve_intersect::<LoopObject>(
+                    k,
+                    &iso_domain,
+                    loop_curve,
+                    &crv_domain,
+                    xsect_tol,
+                    &CurveIntersectOptions::default(),
+                )?;
                 for ll in 0..sols.len() {
                     if let Some(s) = sols.get_mut(ll) {
                         s.objects[0] = Some(LoopObject::Curve(iso_key));
@@ -1077,21 +1061,16 @@ pub fn make_faces_with_curves(
                     let c = store
                         .get_mut(loop_key.0)
                         .ok_or_else(|| invalid("curve store"))?;
-                    // (status ignored upstream: a null new curve then goes into the loops)
-                    ignored(crate::error::passed_on(
-                        c.create_by_split_curve(k, param),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?
-                    .ok_or_else(|| invalid("split failed (upstream inserts null)"))?
+                    // (status ignored upstream: a null new curve then goes into the loops;
+                    // fork 60a8a51 passes it on)
+                    c.create_by_split_curve(k, param)?
                 };
                 let new_key = CurveKey(store.len());
                 store.push(new_curve);
 
-                // insert the split LoopCurve children into the loops (status ignored)
-                ignore_status(crate::error::passed_on(
-                    loops.insert_into_loops(new_key, loop_key),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                // insert the split LoopCurve children into the loops (status ignored
+                // upstream; passed on here, WR-658)
+                loops.insert_into_loops(new_key, loop_key)?;
 
                 // add new Solution for the new curve to SolArray
                 let mut new_sol = sol;
@@ -1197,16 +1176,10 @@ pub fn make_faces_with_curves(
                     seg.end_enter = enter;
                     seg.end_leave = leave;
                     if iso_param1 > seg.interval.min() {
-                        ignore_status(crate::error::passed_on(
-                            seg.interval.set_max(iso_param1),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?;
+                        seg.interval.set_max(iso_param1)?;
                         seg.orient = OrientType::Same;
                     } else {
-                        ignore_status(crate::error::passed_on(
-                            seg.interval.set_min(iso_param1),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?;
+                        seg.interval.set_min(iso_param1)?;
                         seg.orient = OrientType::Opposite;
                     }
                     // the segment is complete - insert it into the loops
@@ -1221,10 +1194,7 @@ pub fn make_faces_with_curves(
                     };
                     seg.start_enter = enter;
                     seg.start_leave = leave;
-                    ignore_status(crate::error::passed_on(
-                        seg.interval.set_min_max(iso_param1, iso_param1),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    seg.interval.set_min_max(iso_param1, iso_param1)?;
                     in_segment = true;
                 }
             }
@@ -1257,7 +1227,6 @@ pub fn make_faces_with_curves(
     } else {
         Vec2::new(1.0, 0.0)
     };
-    let mut crv_pt: Option<Point3> = None;
     let mut loop_start = 0usize;
     for ii in 0..num_loops {
         let num_loop_curves = *at(&loops.loop_counts, ii)?;
@@ -1272,15 +1241,9 @@ pub fn make_faces_with_curves(
             let key = *at(&loops.curves, jj)?;
             let loop_curve = store.get(key.0).ok_or_else(|| invalid("curve store"))?;
             let crv_domain = loop_curve.natural_interval();
-            // near MidPt evaluation (status ignored: the previous point is kept)
-            if let Some(p) = ignored(crate::error::passed_on(
-                loop_curve.evaluate_point(k, crv_domain.evaluate(0.48)),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)? {
-                crv_pt = Some(p);
-            }
-            let pt = crv_pt
-                .ok_or_else(|| invalid("no curve point (upstream reads it uninitialised)"))?;
+            // near MidPt evaluation (status ignored upstream, which keeps the previous
+            // point; fork 60a8a51 passes it on: `SER`)
+            let pt = loop_curve.evaluate_point(k, crv_domain.evaluate(0.48))?;
             let mut pt_uv = Point2::new(pt.x, pt.y);
 
             for (kk, sub) in sub_patches.iter().enumerate() {
@@ -1342,10 +1305,7 @@ pub fn make_faces_with_curves(
         let mut patch_loops = CurveLoops::new();
         for (jj, &w) in which_sub_patch.iter().enumerate() {
             if w == ii {
-                ignore_status(crate::error::passed_on(
-                    patch_loops.append_loop(&loops, jj),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                patch_loops.append_loop(&loops, jj)?;
             }
         }
         if patch_loops.loop_counts.is_empty() {
@@ -1363,19 +1323,15 @@ pub fn make_faces_with_curves(
         }
 
         let mut ordered: Vec<usize> = patch_loops.curves.iter().map(|c| c.0).collect();
-        let outer_loop_counts = ignored(crate::error::passed_on(
-            find_outer_loops(
-                k,
-                &store,
-                &mut ordered,
-                &mut patch_loops.loop_counts,
-                &mut patch_loops.orients,
-                &mut norm,
-                zone_tol,
-            ),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?
-        .unwrap_or_default();
+        let outer_loop_counts = find_outer_loops(
+            k,
+            &store,
+            &mut ordered,
+            &mut patch_loops.loop_counts,
+            &mut patch_loops.orients,
+            &mut norm,
+            zone_tol,
+        )?;
         patch_loops.curves = ordered.into_iter().map(CurveKey).collect();
 
         // Create a Face for each outer loop group.
@@ -1384,10 +1340,7 @@ pub fn make_faces_with_curves(
         for &num_in_group in &outer_loop_counts {
             group.reset();
             for kk in 0..num_in_group {
-                ignore_status(crate::error::passed_on(
-                    group.append_loop(&patch_loops, group_start + kk),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                group.append_loop(&patch_loops, group_start + kk)?;
             }
             group_start += num_in_group;
 
