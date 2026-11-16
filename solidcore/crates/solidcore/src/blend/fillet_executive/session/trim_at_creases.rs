@@ -69,7 +69,7 @@ use crate::geom::attribute::ids;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::object::ObjectRef;
 use crate::kernel::Kernel;
-use crate::math::{Point3, BIG_DOUBLE};
+use crate::math::{Point3, Vec3, BIG_DOUBLE};
 use crate::nurbs::b_spline_curve::ControlPointForm;
 use crate::nurbs::knots::Side;
 use crate::query::brep::BrepIdentity;
@@ -268,7 +268,7 @@ fn piece_between(k: &Kernel, curve: &Curve, from: Point3, to: Point3) -> Result<
     ) else {
         return Ok(None);
     };
-    let distinct = t0 != t1;
+    let distinct = t0 < t1 || t1 < t0;
     if !distinct {
         return Ok(None);
     }
@@ -304,55 +304,96 @@ fn replace_edge_curve(
     Ok(())
 }
 
-/// An enclosed bound on the distance from every point of `crease` to the line through
-/// `a` and `b` (`None` when it cannot be bounded: not a B-spline, a weight that is not
-/// positive, or `a` and `b` one point). A B-spline with positive weights lies in its
-/// control points' convex hull, and the distance to a line is convex, so its greatest
-/// value over the curve is at most the greatest over the control points; each distance is
-/// computed in the line's own frame and counted up by `64 eps` of the largest coordinate
-/// for its rounding: `d = p - a` (each coordinate within 2 scale, its norm within
-/// 2 sqrt 3 scale) takes one rounding per coordinate, the unit direction a few ulps,
-/// `along` and the perpendicular `d - dir along` about eight roundings on that size, and
-/// a rational point its division by the weight; 64 eps of the scale covers them with
-/// room to spare.
-fn distance_to_line_bound(crease: &Curve, a: Point3, b: Point3) -> Result<Option<f64>> {
-    // the B-spline kinds' control polygons (a line's, a conic's, as an `SmBSplineCurve`)
-    let spline = match crease.kind() {
+/// The Euclidean control points of a B-spline kind (a line's or a conic's own
+/// `SmBSplineCurve` included) whose weights are all positive, with the largest coordinate
+/// among them: `None` for another kind, a base without its NURB, or a weight that is not
+/// positive (NaN included). Such a curve lies in their convex hull.
+fn hull_points(curve: &Curve) -> Option<(Vec<Point3>, f64)> {
+    let spline = match curve.kind() {
         CurveKind::BSpline(c) => c,
         CurveKind::Line(c) => c.base(),
         CurveKind::Ellipse(c) => c.base(),
         CurveKind::Parabola(c) => c.base(),
         CurveKind::Hyperbola(c) => c.base(),
-        _ => return Ok(None),
+        _ => return None,
     };
+    let n = spline.number_control_points().ok()?;
+    let mut points = Vec::new();
+    let mut scale = 0.0_f64;
+    for i in 0..n {
+        let (p, w) = spline
+            .control_point(ControlPointForm::EuclideanRational, i)
+            .ok()?;
+        let positive = w > 0.0;
+        if !positive && w != crate::nurbs::math::NOW {
+            return None;
+        }
+        scale = smos_max(scale, smos_max(p.x.abs(), smos_max(p.y.abs(), p.z.abs())));
+        points.push(p);
+    }
+    Some((points, scale))
+}
+
+/// The largest coordinate of `p`.
+fn coordinate_scale(p: Point3) -> f64 {
+    smos_max(p.x.abs(), smos_max(p.y.abs(), p.z.abs()))
+}
+
+/// An enclosed bound on the distance from every point of `crease` to the line through
+/// `a` and `b` (`None` when it cannot be bounded: see [`hull_points`], or `a` and `b` one
+/// point). A B-spline with positive weights lies in its control points' convex hull, and
+/// the distance to a line is convex, so its greatest value over the curve is at most the
+/// greatest over the control points. Each distance is computed in the line's own frame
+/// and counted up for its rounding by `64 eps s (1 + D / L)`, with `s` the largest
+/// coordinate, `L = |b - a|` and `D` the largest `|p - a|`: `b - a` and `p - a` take one
+/// rounding per coordinate on `s`, so the unit direction is off by about `eps s / L`,
+/// which moves the perpendicular of a point `D` away by `eps s D / L`; `along` and
+/// `d - dir along` take about eight roundings on `D` (at most `2 sqrt 3 s`), and a
+/// rational point one more for its weight. 64 of each covers them with room to spare.
+fn distance_to_line_bound(crease: &Curve, a: Point3, b: Point3) -> Option<f64> {
+    let (points, hull_scale) = hull_points(crease)?;
     let axis = b - a;
     let len = axis.length();
     let has_length = len > 0.0;
     if !has_length {
-        return Ok(None);
+        return None;
     }
     let dir = axis / len;
-    let mut bound = 0.0_f64;
-    let mut scale = smos_max(
-        smos_max(a.x.abs(), smos_max(a.y.abs(), a.z.abs())),
-        smos_max(b.x.abs(), smos_max(b.y.abs(), b.z.abs())),
+    let scale = smos_max(
+        hull_scale,
+        smos_max(coordinate_scale(a), coordinate_scale(b)),
     );
-    for i in 0..spline.number_control_points()? {
-        let (p, w) = spline.control_point(ControlPointForm::EuclideanRational, i)?;
-        let positive = w > 0.0;
-        if !positive && w != crate::nurbs::math::NOW {
-            return Ok(None);
-        }
+    let (mut bound, mut reach) = (0.0_f64, 0.0_f64);
+    for p in points {
         let d = p - a;
         let along = d.dot(dir);
         let off = (d - dir * along).length();
         if !off.is_finite() {
-            return Ok(None);
+            return None;
         }
         bound = smos_max(bound, off);
-        scale = smos_max(scale, smos_max(p.x.abs(), smos_max(p.y.abs(), p.z.abs())));
+        reach = smos_max(reach, d.length());
     }
-    Ok(Some(bound + 64.0 * f64::EPSILON * scale))
+    Some(bound + 64.0 * f64::EPSILON * scale * (1.0 + reach / len))
+}
+
+/// An enclosed bound on the distance from every point of `crease` to the plane through
+/// `at` with unit normal `normal` (`None` when it cannot be bounded, see [`hull_points`]):
+/// the distance to a plane is convex, so the control points' greatest bounds the curve's;
+/// each is counted up by `64 eps` of the largest coordinate for its rounding (one per
+/// coordinate of `p - at` and three for the dot product, on that size).
+fn distance_to_plane_bound(crease: &Curve, at: Point3, normal: Vec3) -> Option<f64> {
+    let (points, hull_scale) = hull_points(crease)?;
+    let scale = smos_max(hull_scale, coordinate_scale(at));
+    let mut bound = 0.0_f64;
+    for p in points {
+        let off = (p - at).dot(normal).abs();
+        if !off.is_finite() {
+            return None;
+        }
+        bound = smos_max(bound, off);
+    }
+    Some(bound + 64.0 * f64::EPSILON * scale)
 }
 
 /// Whether `curve` is straight: a line, or a B-spline whose control points all lie on the
@@ -371,7 +412,7 @@ fn straight_ends(k: &Kernel, curve: &Curve) -> Result<Option<(Point3, Point3, f6
                 smos_max(a.x.abs(), smos_max(a.y.abs(), a.z.abs())),
                 smos_max(b.x.abs(), smos_max(b.y.abs(), b.z.abs())),
             );
-            distance_to_line_bound(curve, a, b)?.filter(|&d| d <= 128.0 * f64::EPSILON * scale)
+            distance_to_line_bound(curve, a, b).filter(|&d| d <= 128.0 * f64::EPSILON * scale)
         }
         _ => None,
     };
@@ -385,8 +426,6 @@ fn straight_ends(k: &Kernel, curve: &Curve) -> Result<Option<(Point3, Point3, f6
 struct MovedEdges {
     /// The edges moved onto their creases.
     moved: BTreeSet<EdgeId>,
-    /// Each moved edge's faces other than the crease's: the crease is off them.
-    off_faces: Vec<FaceId>,
     /// The moved vertices: an edge through one whose curve misses its new point is off it.
     vertices: Vec<crate::topology::VertexId>,
     /// The crease pieces the edges took.
@@ -425,6 +464,15 @@ fn move_edge_onto_crease(
     let Some((ea, eb, straightness)) = straight_ends(k, &edge_curve(k, b, e)?)? else {
         return Ok(false);
     };
+    // the trim checks the moved edge's faces against their planes (below, after the
+    // faces past the creases are deleted): a crease on a curved face is not moved
+    let planar = match face::p2::surface(b, f)? {
+        Some(surface) => crate::blend::fillet_overflow::plane_of(k, surface)?.is_some(),
+        None => false,
+    };
+    if !planar {
+        return Ok(false);
+    }
     let mut ends = Vec::with_capacity(2);
     for v in [sv, ev] {
         let p = vertex::point(b, v)?;
@@ -459,7 +507,7 @@ fn move_edge_onto_crease(
     };
     // the crease's piece within `tol` of the edge over its whole length (its distance to the
     // edge's line, and the edge's own from that line)
-    if !matches!(distance_to_line_bound(&piece, ea, eb)?, Some(d) if d + straightness <= tol) {
+    if !matches!(distance_to_line_bound(&piece, ea, eb), Some(d) if d + straightness <= tol) {
         return Ok(false);
     }
     // what each moved vertex does to the edges through it, decided before anything moves
@@ -507,11 +555,6 @@ fn move_edge_onto_crease(
         pieces.push((e2, p));
     }
     // the move
-    for g in edge::faces(b, e, None)? {
-        if g != f {
-            record.off_faces.push(g);
-        }
-    }
     record.pieces.push(piece.copy(k)?);
     replace_edge_curve(b, env, e, piece)?;
     for &(v, _, q) in &ends {
@@ -1742,13 +1785,15 @@ impl FilletSession<'_> {
         // with the faces past the creases; anything left of it is refused, not kept
         // within a larger tolerance. Checked on the geometry, so that an edge or face the
         // imprint split is still found: every edge still at a moved vertex runs through
-        // it, and no face the crease is off still has an edge along a crease piece.
+        // it, and every edge along a crease piece (the moved edges and their pieces) lies,
+        // by the enclosed bound of its control points, on the plane of every face it
+        // bounds.
         {
             let target = &*self.objects.target;
             let on = tol * 1e-6;
             let mut kept_off = false;
-            for &v in &moves.vertices {
-                if kept_off || target.vertex(v).is_err() {
+            'vertices: for &v in &moves.vertices {
+                if target.vertex(v).is_err() {
                     continue;
                 }
                 let p = vertex::point(target, v)?;
@@ -1760,23 +1805,39 @@ impl FilletSession<'_> {
                     );
                     if !through {
                         kept_off = true;
-                        break;
+                        break 'vertices;
                     }
                 }
             }
-            for &g in &moves.off_faces {
-                if kept_off || target.face(g).is_err() {
-                    continue;
-                }
-                for e in face::p4::edges(target, g, None, false, None)? {
+            if !kept_off && !moves.pieces.is_empty() {
+                'edges: for e in crate::topology::brep::p1::edges(target, None)? {
                     let curve = edge_curve(k, target, e)?;
                     let mid = curve.evaluate_point(k, curve.natural_interval().evaluate(0.5))?;
+                    // picks the edges along a piece (the acceptance below is a bound)
+                    let mut along = false;
                     for piece in &moves.pieces {
-                        if matches!(
+                        along = matches!(
                             drop_on(k, piece, &piece.natural_interval(), mid)?,
                             Some((_, dist)) if dist <= on
-                        ) {
+                        );
+                        if along {
+                            break;
+                        }
+                    }
+                    if !along {
+                        continue;
+                    }
+                    for g in edge::faces(target, e, None)? {
+                        let plane = match face::p2::surface(target, g)? {
+                            Some(surface) => crate::blend::fillet_overflow::plane_of(k, surface)?,
+                            None => None,
+                        };
+                        let on_plane = plane.is_some_and(|(at, normal)| {
+                            matches!(distance_to_plane_bound(&curve, at, normal), Some(d) if d <= on)
+                        });
+                        if !on_plane {
                             kept_off = true;
+                            break 'edges;
                         }
                     }
                 }
@@ -2048,8 +2109,10 @@ mod tests {
         ))
     }
 
-    /// The move's gate is the control polygon's bound, not samples: a crease that meets
-    /// the edge's line at its ends and middle but bows off it between is not within `tol`.
+    /// The bound the move's gate compares with `tol` (`distance_to_line_bound`, plus
+    /// `straight_ends` for the edge) is over the whole curve, not samples: a crease that
+    /// meets the edge's line at its ends and middle but bows off it between is not within
+    /// `tol`, and is not taken as a straight edge.
     #[test]
     fn a_crease_on_the_line_at_three_points_but_bowed_between_is_not_moved_onto_it() {
         let k = Kernel::default();
@@ -2065,7 +2128,7 @@ mod tests {
             .map(|i| c.evaluate_point(&k, f64::from(i) / 1000.0).unwrap().y.abs())
             .fold(0.0_f64, f64::max);
         assert!(worst > tol, "the S bows {worst} off the line, past tol");
-        let bound = distance_to_line_bound(&c, a, b).unwrap().unwrap();
+        let bound = distance_to_line_bound(&c, a, b).unwrap();
         assert!(
             bound >= worst,
             "bound {bound} encloses the deviation {worst}"
