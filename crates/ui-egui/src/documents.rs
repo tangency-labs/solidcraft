@@ -221,6 +221,21 @@ pub(crate) struct ViewRename {
     view: u64,
     text: String,
     focused: bool,
+    /// The design it was begun in (see [`give_up_renames_of_other_designs`]).
+    session: u64,
+}
+
+/// Give up a rename begun in another design than the one shown (another tab, a design closed,
+/// opened, started or imported): a refused name stays in its field only while its design is
+/// shown, and the same id in another design names something else.
+pub(crate) fn give_up_renames_of_other_designs(app: &mut SolveApp) {
+    let shown = app.session.uid;
+    if app.menu.rename.as_ref().is_some_and(|r| r.session != shown) {
+        app.menu.rename = None;
+    }
+    if app.docs.view_rename.as_ref().is_some_and(|r| r.session != shown) {
+        app.docs.view_rename = None;
+    }
 }
 
 struct SaveGroup {
@@ -538,6 +553,8 @@ pub fn switch(app: &mut SolveApp, i: usize) {
     crate::linked_source::note_unread(app);
     let fit = incoming.fit;
     let out = swap_in(app, incoming);
+    // Give up the old design's renames now, before an editor drawn later in this frame commits one.
+    give_up_renames_of_other_designs(app);
     if fit {
         app.fit_view();
     }
@@ -762,7 +779,7 @@ pub fn view_rename(app: &mut SolveApp, id: u64, name: &str) -> bool {
 /// it is. False when there is no such view.
 pub fn view_rename_start(app: &mut SolveApp, id: u64) -> bool {
     let Some(name) = app.docs.views.get(id).map(|view| view.name.clone()) else { return false };
-    app.docs.view_rename = Some(ViewRename { view: id, text: name, focused: false });
+    app.docs.view_rename = Some(ViewRename { view: id, text: name, focused: false, session: app.session.uid });
     true
 }
 
@@ -999,6 +1016,7 @@ pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
         crate::design_properties::close_object(app);
         crate::sketch_attachment_ui::clear(app);
         app.session.replace_design(session);
+        give_up_renames_of_other_designs(app);
         reset_chat(app);
         // Another design in the tab: what waits for the blank one's tab no longer does.
         app.docs.active_tab = next_tab();
@@ -1159,6 +1177,7 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         app.tool = None;
         app.bom = None;
         app.session.replace_design(Session::default());
+        give_up_renames_of_other_designs(app);
         app.session.revision = rev + 1;
         crate::prefs::apply_new_design(app);
         app.cam = Camera::default();
@@ -1849,9 +1868,13 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         }
     }
     match (kept, rename) {
-        (Some(true), Some(done)) => {
-            if names.get(selected).is_some_and(|shown| done.text.trim() != shown.trim()) {
-                let _ = crate::context_menu::commit_rename(app, &done);
+        (Some(true), Some(mut done)) => {
+            // A refused name keeps the field open, focused with the name selected; the status
+            // line says why (a name another component has takes a number, which can make it too
+            // long).
+            if names.get(selected).is_some_and(|shown| done.text.trim() != shown.trim()) && crate::context_menu::commit_rename(app, &done).is_err() {
+                done.focused = false;
+                app.menu.rename = Some(done);
             }
         }
         (Some(false), _) | (_, None) => {}
@@ -1864,8 +1887,15 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         _ => None,
     });
     match (view_kept, view_edit) {
-        (Some(true), Some(done)) => {
-            view_rename(app, done.view, &done.text);
+        // A refused name (control characters pasted in) keeps the field open with the name
+        // selected, as the tab does; a blank one gives up, as it does for the tab.
+        (Some(true), Some(mut done)) => {
+            if !done.text.trim().is_empty() && !view_rename(app, done.view, &done.text) {
+                let why = app.tr("tab_strip.view_name_refused").to_string();
+                app.set_status(why, true);
+                done.focused = false;
+                app.docs.view_rename = Some(done);
+            }
         }
         (None, Some(editing)) => app.docs.view_rename = Some(editing),
         _ => {}
@@ -1936,6 +1966,7 @@ fn start_tab_rename(app: &mut SolveApp, name: &str, tab: Rect) {
         focused: false,
         inline: true,
         inline_id: None,
+        session: app.session.uid,
     });
 }
 
@@ -2635,6 +2666,120 @@ mod tests {
         h.frames(2);
         assert_eq!(h.app.session.doc.name, "ł".repeat(100));
         assert!(!renaming_tab(&h.app), "the field closed");
+    }
+
+    /// A refused name keeps the tab's field open with the name selected: the design takes a
+    /// number when a component already has the typed name, and a 128-character name with a
+    /// number is too long.
+    #[test]
+    fn a_refused_tab_name_keeps_the_field_open() {
+        let mut h = design_open();
+        let taken = "x".repeat(128);
+        h.app.run("component.create", json!({"name": taken, "activate": false})).unwrap();
+        let before = h.app.session.doc.name.clone();
+        double_click_tab(&mut h, 0);
+        h.step(&json!({"text": taken})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert!(renaming_tab(&h.app), "the field stays open after a refused name");
+        assert_eq!(h.app.session.doc.name, before);
+        let (text, _, error) = h.app.status.clone().expect("the refusal is shown");
+        assert!(error && text.contains("1…128 characters"), "{text}");
+        h.step(&json!({"text": "Short"})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.doc.name, "Short", "the next keystrokes replace the name");
+        assert!(!renaming_tab(&h.app));
+    }
+
+    /// A refused tab name is given up when another design is shown: it never lands on that
+    /// design's tab, and Enter there renames nothing.
+    #[test]
+    fn a_refused_tab_name_is_given_up_when_another_tab_is_shown() {
+        let mut h = design_open();
+        open_tab(&mut h.app, Session::default()).unwrap();
+        h.frames(2);
+        let taken = "x".repeat(128);
+        h.app.run("component.create", json!({"name": taken, "activate": false})).unwrap();
+        let names = |h: &crate::scenario::Harness| tabs_info(&h.app).into_iter().map(|(name, _)| name).collect::<Vec<_>>();
+        let before = names(&h);
+        double_click_tab(&mut h, 1);
+        h.step(&json!({"text": taken})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert!(renaming_tab(&h.app), "refused, so the field stays");
+        h.step(&json!({"click": {"handle": "tab:design:0"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.docs.active, 0);
+        assert!(!renaming_tab(&h.app), "the refused name is given up with its design");
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(names(&h), before, "no design was renamed");
+    }
+
+    /// A refused tab name is given up when the last design is closed: it never lands on the new
+    /// design that takes its place.
+    #[test]
+    fn a_refused_tab_name_is_given_up_when_the_last_design_closes() {
+        let mut h = design_open();
+        let taken = "x".repeat(128);
+        h.app.run("component.create", json!({"name": taken, "activate": false})).unwrap();
+        double_click_tab(&mut h, 0);
+        h.step(&json!({"text": taken})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert!(renaming_tab(&h.app), "refused, so the field stays");
+        close(&mut h.app, 0, true);
+        h.frames(2);
+        assert!(!renaming_tab(&h.app), "the refused name is given up with its design");
+        let fresh = h.app.session.doc.name.clone();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.doc.name, fresh, "the new design is not renamed");
+    }
+
+    /// Clicking away from a refused tab name commits it again, is refused again, and keeps the
+    /// field, as the other rename editors do.
+    #[test]
+    fn clicking_away_from_a_refused_tab_name_keeps_the_field() {
+        let mut h = design_open();
+        let taken = "x".repeat(128);
+        h.app.run("component.create", json!({"name": taken, "activate": false})).unwrap();
+        let before = h.app.session.doc.name.clone();
+        double_click_tab(&mut h, 0);
+        h.step(&json!({"text": taken})).unwrap();
+        h.step(&json!({"click": [700, 500]})).unwrap();
+        h.frames(2);
+        assert!(renaming_tab(&h.app), "the field stays after a refused click-away");
+        assert_eq!(h.app.session.doc.name, before);
+    }
+
+    /// A view's refused name (control characters pasted in) keeps its sub-tab's field open with
+    /// the name selected, as the design tab does; the next keystrokes replace it.
+    #[test]
+    fn a_refused_view_name_keeps_the_field_open() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.design_views_as_tabs = true;
+        h.app.home.open = false;
+        let call =
+            |h: &mut crate::scenario::Harness, command: &str, params: Value| h.call("engine.execute", json!({"command": command, "params": params}));
+        let id = call(&mut h, "tab.view.open", json!({"kind": "animation"}))["result"]["id"].as_u64().unwrap();
+        assert_eq!(call(&mut h, "tab.view.rename", json!({}))["ok"], true);
+        h.frames(2);
+        if let Some(r) = h.app.docs.view_rename.as_mut() {
+            r.text = "Bad\u{7}name".into();
+        }
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert!(h.app.docs.view_rename.is_some(), "the field stays open after a refused name");
+        let (text, _, error) = h.app.status.clone().expect("the refusal is shown");
+        assert!(error && text.contains("control characters"), "{text}");
+        assert_eq!(h.app.docs.views.get(id).map(|v| v.name.as_str()), Some("Animation 1"));
+        h.step(&json!({"text": "Good"})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.docs.views.get(id).map(|v| v.name.as_str()), Some("Good"), "the next keystrokes replace the name");
+        assert!(h.app.docs.view_rename.is_none());
     }
 
     #[test]

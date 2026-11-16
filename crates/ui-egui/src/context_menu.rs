@@ -234,6 +234,9 @@ pub struct Rename {
     /// Edited in the browser row itself, not in the floating box.
     pub(crate) inline: bool,
     pub(crate) inline_id: Option<egui::Id>,
+    /// The design it was begun in ([`solidcraft_engine::Session::uid`]): once another design is
+    /// shown the rename is given up, as the same id there names something else.
+    pub(crate) session: u64,
 }
 
 /// Radial slots, clockwise from the top.
@@ -2293,7 +2296,7 @@ pub fn start_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2) {
         RenameWhat::View(v) => v.clone(),
         RenameWhat::Joint(j) => doc.assembly.joints.iter().find(|x| x.id == *j).map(|x| x.name.clone()).unwrap_or_default(),
     };
-    app.menu.rename = Some(Rename { what, text, at, focused: false, inline: false, inline_id: None });
+    app.menu.rename = Some(Rename { what, text, at, focused: false, inline: false, inline_id: None, session: app.session.uid });
 }
 
 pub(crate) fn start_inline_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2, row_id: egui::Id) {
@@ -2324,10 +2327,7 @@ pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) -> Result<(), String
             let name = if taken(&name) { solidcraft_engine::doc::copy_name(&name, taken) } else { name };
             app.run("component.rename", json!({ "component": c, "name": name })).map(|_| ())
         }
-        RenameWhat::Group(g) => {
-            crate::browser::group_action(app, "ui.renameGroup", &json!({ "group": g, "name": name }));
-            Ok(())
-        }
+        RenameWhat::Group(g) => app.run("browser.rename_group", json!({ "group": g, "name": name })).map(|_| ()),
         RenameWhat::TimelineGroup(g) => app.run("timeline.rename_group", json!({ "group": g, "name": name })).map(|_| ()),
         RenameWhat::Canvas(c) => app.run("canvas.edit", json!({ "canvas": c, "name": name })).map(|_| ()),
         RenameWhat::View(v) => app.run("view.rename", json!({ "view": v, "name": name })).map(|_| ()),
@@ -2560,7 +2560,8 @@ pub fn describe(app: &SolveApp) -> Value {
         "target": app.menu.target,
         "radial": describe_items(radial),
         "items": describe_items(rows),
-        "rename": app.menu.rename.as_ref().map(|r| r.text.clone()),
+        // A rename begun in another design is given up at the next frame; never reported for this one.
+        "rename": app.menu.rename.as_ref().filter(|r| r.session == app.session.uid).map(|r| r.text.clone()),
     })
 }
 
@@ -3009,11 +3010,14 @@ fn show_rename(app: &mut SolveApp, ctx: &egui::Context) {
 /// Finish a rename from automation: commit (true) or cancel. A refused name is the error and
 /// leaves the rename in progress, as the box stays open for a person.
 pub fn finish_rename(app: &mut SolveApp, text: Option<&str>, commit: bool) -> Result<(), String> {
+    crate::documents::give_up_renames_of_other_designs(app);
     let Some(mut r) = app.menu.rename.take() else { return Err("no rename in progress".into()) };
     if let Some(s) = text {
         r.text = s.to_string();
     }
     if commit && let Err(e) = commit_rename(app, &r) {
+        // The box takes the keyboard again with the name selected, as after a refused Enter.
+        r.focused = false;
         app.menu.rename = Some(r);
         return Err(e);
     }

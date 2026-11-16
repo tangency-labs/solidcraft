@@ -137,6 +137,32 @@ fn a_refused_inline_rename_keeps_the_editor_and_shows_the_error() {
     assert!(h.app.session.world_state().unwrap().body("C").is_some(), "the name can be corrected at once; status {:?}", h.app.status);
 }
 
+/// A Browser group's inline editor keeps a refused name too, with the reason, and takes the
+/// corrected one.
+#[test]
+fn a_refused_inline_group_rename_keeps_the_editor() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"A"})).unwrap();
+    let group = h.app.run("browser.group", json!({"folder":"bodies","items":["A"],"name":"Held"})).unwrap()["group"].as_u64().unwrap();
+    h.app.preferences.browser_bodies_folders = crate::prefs::BodiesFolders::Always;
+    h.settle();
+    h.step(&json!({"click":{"handle":"row:Held (1)"}})).unwrap();
+    h.frames(30);
+    h.step(&json!({"click":{"handle":"row:Held (1)"}})).unwrap();
+    h.frames(30);
+    assert!(h.app.menu.rename.as_ref().is_some_and(|r| r.inline), "the group's row is being renamed");
+    h.step(&json!({"text":"x".repeat(200)})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_some(), "the editor stays open after a refused rename");
+    let (text, _, error) = h.app.status.clone().expect("the refusal is shown");
+    assert!(error && text.contains("1…128 characters"), "{text}");
+    h.step(&json!({"text":"Kept"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.doc.browser_group(group).map(|g| g.name.as_str()), Some("Kept"));
+}
+
 /// Renaming a component to a name another component has takes the next free number; a name
 /// nobody has stays as typed.
 #[test]
@@ -155,6 +181,7 @@ fn a_component_renamed_to_a_taken_name_takes_the_next_number() {
             focused: false,
             inline: true,
             inline_id: None,
+            session: h.app.session.uid,
         };
         crate::context_menu::commit_rename(&mut h.app, &r).unwrap();
     };

@@ -806,9 +806,6 @@ pub fn group_action(app: &mut SolveApp, action: &str, p: &Value) {
                 let _ = app.run("browser.ungroup", json!({ "group": g }));
             }
         }
-        "ui.renameGroup" => {
-            let _ = app.run("browser.rename_group", p.clone());
-        }
         _ => {}
     }
 }
@@ -3367,14 +3364,16 @@ fn entry_row(
         }
         // A double-click or a slower second click renames the row (sketch double-clicks edit
         // instead), like F2.
-        if (r.double || r.slow_rename) && !dialog_pick {
-            crate::context_menu::rename_selection(app, r.rect.map(|x| x.left_bottom()).unwrap_or_default());
-            if let Some(rename) = app.menu.rename.as_mut()
-                && let Some(row_id) = r.row_id
-            {
-                rename.inline = true;
-                rename.inline_id = Some(row_id);
-            }
+        // Only a rename this click started is edited in the row: a refused one still open belongs
+        // to its own row.
+        if (r.double || r.slow_rename)
+            && !dialog_pick
+            && crate::context_menu::rename_selection(app, r.rect.map(|x| x.left_bottom()).unwrap_or_default())
+            && let Some(rename) = app.menu.rename.as_mut()
+            && let Some(row_id) = r.row_id
+        {
+            rename.inline = true;
+            rename.inline_id = Some(row_id);
         }
     }
     inline_rename(app, rows.ui(), r.name_at(), &e.label);
