@@ -696,8 +696,10 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
             sketch.prune_wire_constraints();
         }
     }
-    for feature in &d.features {
-        if let crate::FeatureKind::Sketch { sketch, .. } = &feature.kind {
+    for feature in &mut d.features {
+        if let crate::FeatureKind::Sketch { sketch, .. } = &mut feature.kind {
+            sketch.upgrade_legacy_biarc_splines().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+            sketch.validate_biarc_splines().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_freeform_offsets().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_wires().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_wire_constraints().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
@@ -761,8 +763,21 @@ fn validate_sketch_sizes(value: &Value) -> Result<()> {
             // The 3D constraints too (#10608): refused here, before a typed list is built or
             // stale entries are pruned from it.
             || len("wire_constraints") > solidcraft_sketch::CEILING_CONSTRAINTS
+            || len("biarc_splines") > len("curves") / 2
         {
             return Err(invalid());
+        }
+        if let Some(splines) = sketch.get("biarc_splines").and_then(Value::as_array) {
+            let mut spans = 0usize;
+            for spline in splines {
+                let nodes = spline.get("nodes").and_then(Value::as_array).ok_or_else(invalid)?;
+                let intervals = spline.get("spans").and_then(Value::as_array).ok_or_else(invalid)?;
+                spans = spans.saturating_add(intervals.len());
+                if !(2..=solidcraft_sketch::MAX_BIARC_NODES).contains(&nodes.len()) || intervals.len() != nodes.len() - 1 || spans > len("curves") / 2
+                {
+                    return Err(invalid());
+                }
+            }
         }
         if let Some(curves) = sketch.get("curves").and_then(Value::as_array) {
             let mut point_references = 0usize;
@@ -1792,6 +1807,61 @@ mod tests {
         json["features"][0]["component"] = Value::from(0);
         json["features"][0]["transform"][0][0] = Value::from(2);
         assert!(read(&json.to_string()).unwrap_err().to_string().contains("rigid placement"));
+    }
+
+    #[test]
+    fn a_fixed_biarc_from_a_preview_reopens_with_movable_points_and_guides() {
+        use solidcore_record::Vec2;
+        use solidcraft_sketch::{MAX_POINTS, Sketch, solve};
+
+        let mut sketch = Sketch::new();
+        let points = [(Vec2::new(-10.0, 0.0), Vec2::Y), (Vec2::new(10.0, 0.0), -Vec2::Y), (Vec2::new(10.0, -10.0), -Vec2::Y)];
+        let spline = sketch.add_biarc_spline(&points, None, false).unwrap();
+        let mut legacy = sketch.biarc_splines.pop().unwrap();
+        let guides = legacy.handle_curves().map(|id| sketch.curve_index(id).unwrap()).collect::<Vec<_>>();
+        sketch.remove_curves(&guides);
+        let reserved = legacy.spans[1].centers.iter().flatten().map(|id| sketch.point_index(id).unwrap()).collect::<Vec<_>>();
+        sketch.remove_points(&reserved);
+        for node in &mut legacy.nodes {
+            node.handle = None;
+            let i = sketch.point_index(&node.point).unwrap();
+            sketch.points[i].fixed = true;
+        }
+        for span in &mut legacy.spans {
+            span.centers = [None, None];
+        }
+        for id in legacy.curves() {
+            let i = sketch.curve_index(id).unwrap();
+            sketch.curves[i].fixed = true;
+        }
+        sketch.biarc_splines.push(legacy);
+        let mut draft = Document::new("Fixed biarc preview");
+        let feature = draft.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
+        let upgraded = read(&draft.to_json()).unwrap();
+        let after = upgraded.sketch(feature).unwrap();
+        let migrated = after.biarc_spline(&spline.id).unwrap();
+        assert_eq!(spline.curves().collect::<Vec<_>>(), migrated.curves().collect::<Vec<_>>());
+        assert_eq!(spline.spans[0].centers, migrated.spans[0].centers);
+        assert!(migrated.spans[1].centers.iter().all(Option::is_some));
+        for node in &migrated.nodes {
+            assert!(!after.point_locked(after.point_index(&node.point).unwrap()));
+            let guide = after.curve_index(&node.handle.as_ref().unwrap().curve).unwrap();
+            assert!(after.curves[guide].construction);
+            assert!(!after.curve_locked(guide));
+        }
+        let report = solve(&mut after.clone());
+        assert!(report.ok(), "{report:?}");
+        assert_eq!(report.dof, 12);
+        assert_eq!(read(&upgraded.to_json()).unwrap(), upgraded);
+
+        let dense = edited(&draft, |v| {
+            let points = v["features"][0]["sketch"]["points"].as_array_mut().unwrap();
+            points.extend((points.len()..MAX_POINTS).map(|i| serde_json::json!({"id": format!("free-{i}"), "pos": [i as f64, 0.0]})));
+        });
+        let reopened = read(&dense).unwrap();
+        let sketch = reopened.sketch(feature).unwrap();
+        assert_eq!(sketch.points.len(), MAX_POINTS + 5, "three guide points and two dormant centers");
+        sketch.validate_biarc_splines().unwrap();
     }
 
     #[test]

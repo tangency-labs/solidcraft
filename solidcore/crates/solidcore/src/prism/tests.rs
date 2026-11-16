@@ -16,8 +16,10 @@ use super::measure::{equivalent, section};
 use super::placement::LoopPlacement;
 use super::profile::rational_curve;
 use super::profile::{
-    check_regions, curve_on_frame, largest_arc_sweep, smallest_arc_sweep, tapered_flange_ends,
-    Loop2, ProfileRefusal, Region2, Seg2,
+    arc_contacts_match, biarc, biarc_with_straight_piece, check_regions, chord, chord_point,
+    circle_curvature, curve_on_frame, largest_arc_sweep, left_unit_normal, lengthen_direction,
+    points_agree, ray_chord_parameter, smallest_arc_sweep, stored_arc, tangent_guide_tip,
+    tapered_flange_ends, translate_point, Loop2, ProfileRefusal, Region2, Seg2,
 };
 use super::read::{planar_curves, planar_pieces, PlanarPiece, Run};
 use super::sheet::{region_loops, sheet_regions};
@@ -44,6 +46,431 @@ fn xy() -> Frame {
 
 fn p(x: f64, y: f64) -> Point2 {
     Vec2::new(x, y)
+}
+
+#[test]
+fn planar_chord_operations_keep_the_directed_length_and_rounding() {
+    let a = p(5.0, 2.0);
+    let b = p(8.0, 6.0);
+    assert_eq!(chord(a, b), (p(3.0, 4.0), 5.0));
+    assert_eq!(chord_point(a, b, 0.5), p(6.5, 4.0));
+    assert_eq!(left_unit_normal(a, b, 1e-9), Some(p(-0.8, 0.6)));
+    assert_eq!(left_unit_normal(b, a, 1e-9), Some(p(0.8, -0.6)));
+    assert_eq!(left_unit_normal(a, b, 5.0), None);
+    assert_eq!(left_unit_normal(a, a, 0.0), None);
+    assert_eq!(left_unit_normal(a, p(f64::INFINITY, 0.0), 0.0), None);
+    assert_eq!(translate_point(a, b, 0.0), a);
+
+    let displacement = 1.0 + f64::EPSILON;
+    let fraction = 1.0 - f64::EPSILON;
+    assert_ne!(displacement.mul_add(fraction, -1.0), 0.0);
+    assert_eq!(
+        translate_point(p(-1.0, 0.0), p(displacement, 0.0), fraction),
+        Vec2::ZERO,
+    );
+}
+
+#[test]
+fn a_tangent_guide_keeps_an_admitted_length_and_tries_fallbacks_in_order() {
+    let fallbacks = [1.0, 0.1, 0.01];
+    let at = p(0.0, 1.0);
+    assert_eq!(
+        tangent_guide_tip(at, p(3.0, 4.0), 1e-6, &fallbacks, 10.0),
+        Some(p(3.0, 5.0)),
+    );
+    assert_eq!(
+        tangent_guide_tip(p(9.5, 0.0), p(7.0, 0.0), 1e-6, &fallbacks, 10.0),
+        Some(p(9.6, 0.0)),
+    );
+    assert_eq!(
+        tangent_guide_tip(at, p(0.0, -1e-300), 1e-6, &fallbacks, 10.0),
+        Some(Vec2::ZERO),
+    );
+    assert_eq!(
+        tangent_guide_tip(at, Vec2::ZERO, 1e-6, &fallbacks, 10.0),
+        None
+    );
+    assert_eq!(
+        tangent_guide_tip(at, p(f64::NAN, 1.0), 1e-6, &fallbacks, 10.0),
+        None
+    );
+    assert_eq!(
+        tangent_guide_tip(p(9.99, 0.0), p(7.0, 0.0), 1e-6, &fallbacks, 10.0),
+        None,
+    );
+
+    let lengthened = lengthen_direction(p(3.0, 4.0), 10.0);
+    assert_eq!(lengthened, p(6.0, 8.0));
+    assert_eq!(lengthen_direction(p(3.0, 4.0), 2.0), p(3.0, 4.0));
+    assert_eq!(lengthen_direction(Vec2::ZERO, 2.0), Vec2::ZERO);
+}
+
+#[test]
+fn stored_arcs_keep_their_direction_and_refuse_wrapped_readback() {
+    let center = p(10.0, 20.0);
+    let a = p(13.0, 20.0);
+    let ccw = stored_arc(center, a, p(10.0, 24.0), false);
+    assert_eq!(
+        ccw,
+        Seg2::Arc {
+            center,
+            radius: 3.0,
+            start: 0.0,
+            sweep: FRAC_PI_2
+        }
+    );
+    let cw = stored_arc(center, a, p(10.0, 16.0), true);
+    assert_eq!(
+        cw,
+        Seg2::Arc {
+            center,
+            radius: 4.0,
+            start: 0.0,
+            sweep: -FRAC_PI_2
+        }
+    );
+
+    let angle_tolerance = 1e-6;
+    assert!(arc_contacts_match(&cw, &cw, angle_tolerance));
+    assert!(!arc_contacts_match(&cw, &ccw, angle_tolerance));
+    let displaced = Seg2::Arc {
+        center,
+        radius: 4.0,
+        start: 0.75 * angle_tolerance,
+        sweep: -FRAC_PI_2,
+    };
+    assert!(!arc_contacts_match(&cw, &displaced, angle_tolerance));
+
+    let tiny = stored_arc(Vec2::ZERO, p(1.0, 0.0), p(1.0, 0.5e-12), false);
+    assert!(matches!(tiny, Seg2::Arc { sweep, .. } if sweep > TAU));
+    let branch_cut = stored_arc(Vec2::ZERO, p(-1.0, 0.0), p(-1.0, -0.0), false);
+    assert!(matches!(branch_cut, Seg2::Arc { sweep, .. } if sweep == TAU));
+    assert!(!arc_contacts_match(&tiny, &tiny, angle_tolerance));
+}
+
+#[test]
+fn stored_point_agreement_uses_coordinate_rounding_and_curvature_points_inward() {
+    let expected = p(-1e8, 0.0);
+    assert!(points_agree(p(expected.x + 1e-7, 0.0), expected, 1e-12));
+    assert!(!points_agree(p(expected.x + 1e-6, 0.0), expected, 1e-12));
+    assert!(!points_agree(Vec2::ZERO, p(f64::INFINITY, 0.0), 1e-12));
+    assert_eq!(circle_curvature(p(0.0, 4.0), Vec2::ZERO, 4.0), p(0.0, 0.25));
+    assert_eq!(circle_curvature(expected, expected, 0.0), Vec2::ZERO);
+    assert_eq!(
+        circle_curvature(p(1.0, 0.0), Vec2::ZERO, 0.0),
+        p(1.0 / 1e-24, 0.0)
+    );
+}
+
+#[test]
+fn ray_chord_fraction_uses_the_sketch_plane_and_can_extrapolate() {
+    let plane = Frame {
+        origin: [3.0, 2.0, 10.0],
+        x_axis: [0.0, 1.0, 0.0],
+        y_axis: [0.0, 0.0, 1.0],
+    };
+    let ray_origin = crate::math::Vec3::new(0.0, 4.0, 17.0);
+    let x = crate::math::Vec3::new(2.0, 0.0, 0.0);
+    let ends = [Vec2::ZERO, p(8.0, 0.0)];
+    assert_eq!(ray_chord_parameter(&plane, ray_origin, x, ends), Some(0.25));
+    assert_eq!(
+        ray_chord_parameter(&plane, ray_origin, -x, ends),
+        Some(0.25)
+    );
+    let outside = crate::math::Vec3::new(0.0, 14.0, 17.0);
+    assert_eq!(ray_chord_parameter(&plane, outside, x, ends), Some(1.5));
+    let near_parallel = crate::math::Vec3::new(0.5e-12, 1.0, 0.0);
+    assert_eq!(
+        ray_chord_parameter(&plane, ray_origin, near_parallel, ends),
+        None
+    );
+    assert_eq!(
+        ray_chord_parameter(&plane, ray_origin, x, [Vec2::ZERO; 2]),
+        None
+    );
+}
+
+fn forward_tangent(piece: Seg2, at_end: bool) -> Vec2 {
+    match piece {
+        Seg2::Line { a, b } => (b - a).unitize().unwrap(),
+        Seg2::Arc { start, sweep, .. } => {
+            let angle = if at_end { start + sweep } else { start };
+            p(-angle.sin(), angle.cos()) * sweep.signum()
+        }
+        _ => panic!("biarcs only contain arcs and lines"),
+    }
+}
+
+#[test]
+fn biarc_interpolates_two_contacts_at_each_ratio() {
+    let start = p(-5.0, 1.0);
+    let end = p(15.0, 6.0);
+    let from = p(1.0, 1.0);
+    let to = p(1.0, -0.25);
+    for ratio in [0.01, 0.3, 0.5, 0.7, 0.99] {
+        let (joint, [first, second]) = biarc(start, from, end, to, ratio).unwrap();
+        assert!(matches!(first, Seg2::Arc { .. }));
+        assert!(matches!(second, Seg2::Arc { .. }));
+        assert!(first.start().distance(start) < 1e-10);
+        assert!(second.end().distance(end) < 1e-10);
+        assert!(first.end().distance(second.start()) < 1e-10);
+        assert!(joint.distance(first.end()) < 1e-10);
+        let at_join = forward_tangent(first, true);
+        assert!(at_join.distance(forward_tangent(second, false)) < 1e-12);
+        assert!(forward_tangent(first, false).distance(from.unitize().unwrap()) < 1e-12);
+        assert!(forward_tangent(second, true).distance(to.unitize().unwrap()) < 1e-12);
+        // Intersect each endpoint tangent with the join tangent. Its signed distance
+        // along the endpoint tangent is the defining parameter checked independently.
+        let cross = |a: Vec2, b: Vec2| a.x * b.y - a.y * b.x;
+        let v = from.unitize().unwrap();
+        let w = -to.unitize().unwrap();
+        let d0 = cross(first.end() - start, at_join) / cross(v, at_join);
+        let d1 = cross(second.start() - end, at_join) / cross(w, at_join);
+        assert!((d0 / (d0 + d1) - ratio).abs() < 1e-11);
+    }
+}
+
+#[test]
+fn biarc_keeps_straight_pieces_and_semicircles_analytic() {
+    let (_, [first, second]) =
+        biarc(p(0.0, 0.0), p(4.0, 3.0), p(8.0, 6.0), p(8.0, 6.0), 0.25).unwrap();
+    assert_eq!(
+        first,
+        Seg2::Line {
+            a: p(0.0, 0.0),
+            b: p(2.0, 1.5)
+        }
+    );
+    assert_eq!(
+        second,
+        Seg2::Line {
+            a: p(2.0, 1.5),
+            b: p(8.0, 6.0)
+        }
+    );
+
+    let (_, [first, second]) =
+        biarc(p(0.0, 0.0), p(1.0, 0.0), p(3.0, 1.0), p(0.0, 1.0), 0.5).unwrap();
+    assert_eq!(
+        first,
+        Seg2::Line {
+            a: p(0.0, 0.0),
+            b: p(2.0, 0.0)
+        }
+    );
+    assert!(matches!(second, Seg2::Arc { center, radius, sweep, .. }
+        if center.distance(p(2.0, 1.0)) < 1e-12 && (radius - 1.0).abs() < 1e-12 && (sweep - FRAC_PI_2).abs() < 1e-12));
+
+    for ratio in [0.15, 0.5, 0.85] {
+        let (_, [first, second]) =
+            biarc(p(0.0, 0.0), p(0.0, 1.0), p(4.0, 0.0), p(0.0, -1.0), ratio).unwrap();
+        for piece in [first, second] {
+            assert!(matches!(piece, Seg2::Arc { center, radius, .. }
+                if center.distance(p(2.0, 0.0)) < 1e-12 && (radius - 2.0).abs() < 1e-12));
+        }
+        assert!(first.end().distance(second.start()) < 1e-12);
+        assert!(forward_tangent(first, true).distance(forward_tangent(second, false)) < 1e-12);
+    }
+
+    // Placing a straight two-piece curve far from the origin does not introduce curvature.
+    let origin = p(100_000.0, -100_000.0);
+    let direction = p(4.0, 3.0);
+    let (_, [first, second]) = biarc(
+        origin,
+        direction,
+        origin + direction * 10.0,
+        direction,
+        0.37,
+    )
+    .unwrap();
+    assert!(matches!(first, Seg2::Line { .. }));
+    assert!(matches!(second, Seg2::Line { .. }));
+}
+
+#[test]
+fn biarc_with_straight_piece_keeps_directed_contacts_in_both_orders() {
+    let start = p(0.0, 0.0);
+    let from = p(1.0, 0.0);
+    let cases = [
+        (
+            p(12.0, 4.0),
+            p(0.0, 1.0),
+            p(8.0, 0.0),
+            p(8.0, 4.0),
+            4.0,
+            FRAC_PI_2,
+        ),
+        // Opposite tangents fix the arc chord perpendicular to the line.
+        (p(5.0, 4.0), -from, p(5.0, 0.0), p(5.0, 2.0), 2.0, PI),
+        // The oriented circle travels clockwise through three quadrants.
+        (
+            p(3.0, -1.0),
+            p(0.0, 1.0),
+            p(4.0, 0.0),
+            p(4.0, -1.0),
+            1.0,
+            -3.0 * FRAC_PI_2,
+        ),
+        // A short arc follows a line a million times its radius.
+        (
+            p(1000.001, 0.001),
+            p(0.0, 1.0),
+            p(1000.0, 0.0),
+            p(1000.0, 0.001),
+            0.001,
+            FRAC_PI_2,
+        ),
+    ];
+    for (end, to, want_joint, want_center, want_radius, want_sweep) in cases {
+        for ratio in [0.17, 0.5, 0.83] {
+            let (joint, [first, second]) =
+                biarc_with_straight_piece(start, from, end, to, ratio, true).unwrap();
+            assert!(joint.distance(want_joint) < 1e-12);
+            assert_eq!(first, Seg2::Line { a: start, b: joint });
+            assert!(matches!(second, Seg2::Arc { center, radius, sweep, .. }
+                if center.distance(want_center) < 1e-12
+                    && (radius - want_radius).abs() < 1e-12 && (sweep - want_sweep).abs() < 1e-12));
+            assert!(second.start().distance(joint) < 1e-12);
+            assert!(second.end().distance(end) < 1e-12);
+            assert!(forward_tangent(second, false).distance(from) < 1e-12);
+            assert!(forward_tangent(second, true).distance(to) < 1e-12);
+
+            let (reverse_joint, [reverse_first, reverse_second]) =
+                biarc_with_straight_piece(end, -to, start, -from, ratio, false).unwrap();
+            assert!(reverse_joint.distance(want_joint) < 1e-12);
+            assert_eq!(
+                reverse_second,
+                Seg2::Line {
+                    a: reverse_joint,
+                    b: start
+                }
+            );
+            assert!(
+                matches!(reverse_first, Seg2::Arc { center, radius, sweep, .. }
+                if center.distance(want_center) < 1e-12
+                    && (radius - want_radius).abs() < 1e-12 && (sweep + want_sweep).abs() < 1e-12)
+            );
+            assert!(reverse_first.start().distance(end) < 1e-12);
+            assert!(reverse_first.end().distance(reverse_joint) < 1e-12);
+            assert!(forward_tangent(reverse_first, false).distance(-to) < 1e-12);
+            assert!(forward_tangent(reverse_first, true).distance(-from) < 1e-12);
+        }
+    }
+}
+
+#[test]
+fn biarc_with_straight_piece_uses_ratio_for_two_forward_lines() {
+    let start = p(0.0, 0.0);
+    let end = p(8.0, 6.0);
+    for straight_start in [false, true] {
+        for ratio in [0.25, 0.75] {
+            let (joint, [first, second]) =
+                biarc_with_straight_piece(start, p(4.0, 3.0), end, end, ratio, straight_start)
+                    .unwrap();
+            assert_eq!(joint, end * ratio);
+            assert_eq!(first, Seg2::Line { a: start, b: joint });
+            assert_eq!(second, Seg2::Line { a: joint, b: end });
+        }
+    }
+}
+
+#[test]
+fn biarc_with_straight_piece_refuses_infeasible_directed_contacts() {
+    let start = p(0.0, 0.0);
+    let east = p(1.0, 0.0);
+    let north = p(0.0, 1.0);
+    // The other mode would need a negative line length.
+    assert!(biarc_with_straight_piece(start, east, p(12.0, 4.0), north, 0.5, false).is_err());
+    for straight_start in [false, true] {
+        // Zero straight length, offset parallel tangents, and backwards collinear tangents.
+        for (from, end, to) in [
+            (east, p(3.0, 3.0), north),
+            (east, p(3.0, 1.0), east),
+            (-east, p(3.0, 0.0), -east),
+        ] {
+            assert!(biarc_with_straight_piece(start, from, end, to, 0.5, straight_start).is_err());
+        }
+    }
+    // The opposite tangent is valid for a semicircle, but this chord leaves no arc length.
+    assert!(biarc_with_straight_piece(start, east, p(4.0, 0.0), -east, 0.5, true).is_err());
+    for ratio in [0.0, 1.0, f64::NAN, f64::MIN_POSITIVE] {
+        assert!(biarc_with_straight_piece(start, east, p(4.0, 0.0), east, ratio, true).is_err());
+    }
+}
+
+#[test]
+fn biarc_keeps_shallow_bends_as_arcs() {
+    let start = p(0.0, 15.0);
+    let end = p(4.0, 15.000014);
+    let from = p(2.0, 0.0);
+    let to = p(2.0, 0.000021);
+    let (joint, [first, second]) = biarc(start, from, end, to, 0.5).unwrap();
+    for piece in [first, second] {
+        assert!(matches!(piece, Seg2::Arc { radius, sweep, .. }
+            if radius > 100_000.0 && (1e-6..1e-5).contains(&sweep)));
+    }
+    assert!(start.distance(first.start()) < 1e-8);
+    assert!(first.end().distance(joint) < 1e-8);
+    assert!(second.start().distance(joint) < 1e-8);
+    assert!(second.end().distance(end) < 1e-8);
+    assert!(forward_tangent(first, false).distance(from.unitize().unwrap()) < 1e-12);
+    assert!(forward_tangent(first, true).distance(forward_tangent(second, false)) < 1e-12);
+    assert!(forward_tangent(second, true).distance(to.unitize().unwrap()) < 1e-12);
+}
+
+#[test]
+fn biarc_arc_parameters_are_independent_of_a_representable_translation() {
+    let start = p(-0.03125, 0.125);
+    let end = p(0.0625, 0.15625);
+    let from = p(1.0, 0.25);
+    let to = p(0.5, 1.0);
+    let shift = p(1_000_000.0, -1_000_000.0);
+    let (_, local) = biarc(start, from, end, to, 0.37).unwrap();
+    let (joint, translated) = biarc(start + shift, from, end + shift, to, 0.37).unwrap();
+    for (local, translated) in local.into_iter().zip(translated) {
+        let Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } = local
+        else {
+            panic!("expected an arc");
+        };
+        assert_eq!(
+            translated,
+            Seg2::Arc {
+                center: center + shift,
+                radius,
+                start,
+                sweep,
+            }
+        );
+    }
+    let [first, second] = translated;
+    assert!(first.start().distance(start + shift) < 3e-10);
+    assert!(first.end().distance(joint) < 3e-10);
+    assert!(second.start().distance(joint) < 3e-10);
+    assert!(second.end().distance(end + shift) < 3e-10);
+    assert!(forward_tangent(first, true).distance(forward_tangent(second, false)) < 1e-12);
+}
+
+#[test]
+fn biarc_refuses_degenerate_and_non_finite_contacts() {
+    let start = p(0.0, 0.0);
+    let end = p(10.0, 0.0);
+    let east = p(1.0, 0.0);
+    let north = p(0.0, 1.0);
+    assert!(biarc(start, north, end, north, 0.5).is_err());
+    assert!(biarc(start, -east, end, -east, 0.5).is_err());
+    assert!(biarc(start, east, start, east, 0.5).is_err());
+    assert!(biarc(start, east, end, Vec2::ZERO, 0.5).is_err());
+    assert!(biarc(start, p(f64::INFINITY, 1.0), end, east, 0.5).is_err());
+    assert!(biarc(start, east, p(f64::NAN, 1.0), east, 0.5).is_err());
+    assert!(biarc(start, east, p(4.0, 4e-13), east, 0.5).is_err());
+    for ratio in [0.0, 1.0, -1.0, f64::NAN, f64::MIN_POSITIVE] {
+        assert!(biarc(start, east, end, east, ratio).is_err());
+    }
 }
 
 fn polygon(pts: &[Point2]) -> Loop2 {

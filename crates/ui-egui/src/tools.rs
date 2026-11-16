@@ -753,6 +753,7 @@ pub(crate) fn constraint_preselection(
         }
         ("sketch.constraint.horizontal_vertical", _) => crate::selection::alignment_points(selection).map(|points| json!({"points": points})),
         ("sketch.constraint.coincident", [_, _]) => crate::selection::coincident_operands(selection),
+        ("sketch.constraint.tangent", [_, _]) => crate::selection::biarc_tangent_operands(sketch?, selection),
         ("sketch.constraint.concentric", [SketchCurve { id: a, .. }, SketchPoint { id: b }] | [SketchPoint { id: a }, SketchCurve { id: b, .. }])
             if a != b =>
         {
@@ -998,11 +999,17 @@ fn curve_operands(cmd: &str, hits: Vec<Hit>) -> Vec<Hit> {
 /// Take back a pending spline point before undo or Backspace reaches the sketch.
 pub fn undo_spline_point(app: &mut SolveApp) -> bool {
     let Some(t) = app.tool.as_mut() else { return false };
-    if !matches!(t.cmd, "sketch.spline.fit_point" | "sketch.spline.control_point" | "sketch.spline.control_point_5") || t.pts.is_empty() {
+    if !matches!(t.cmd, crate::sketch_biarc_ui::COMMAND | "sketch.spline.fit_point" | "sketch.spline.control_point" | "sketch.spline.control_point_5")
+        || t.pts.is_empty()
+    {
         return false;
     }
     t.pts.pop();
     crate::sketch_dims::reset(t);
+    if t.cmd == crate::sketch_biarc_ui::COMMAND {
+        let hint = crate::sketch_biarc_ui::hint(t);
+        app.set_status(tr(hint).to_string(), false);
+    }
     true
 }
 
@@ -1048,10 +1055,16 @@ pub(crate) fn paint_preview_curve(
         curve.construction |= mode != 0 && !curve.centerline;
     }
     let mut budget = solidcraft_engine::render::SamplingBudget::new(4096, 65_536);
-    for index in 0..sketch.curves.len() {
-        paint_curve(&sketch, index, plane, painter, proj, stroke, &mut budget);
+    // The Biarc drawing tool already draws the guide arrows.
+    let guides: std::collections::HashSet<_> = sketch.biarc_splines.iter().flat_map(|spline| spline.handle_curves()).collect();
+    let mut drawn = 0;
+    for (index, curve) in sketch.curves.iter().enumerate() {
+        if !guides.contains(curve.id.as_str()) {
+            paint_curve(&sketch, index, plane, painter, proj, stroke, &mut budget);
+            drawn += 1;
+        }
     }
-    crate::scenario::publish_count("tool_preview_curves", sketch.curves.len() as f64);
+    crate::scenario::publish_count("tool_preview_curves", f64::from(drawn));
 }
 
 pub(crate) fn paint_sketch_path(points: &[solidcore_record::Vec3], mode: u8, painter: &egui::Painter, proj: &Proj, stroke: Stroke) {

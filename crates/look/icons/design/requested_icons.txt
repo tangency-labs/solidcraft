@@ -287,6 +287,7 @@ snap_fit	false
 sphere	false
 spin	false
 spline	false
+spline_biarc	false
 spline_cv	false
 split	false
 split_body	false

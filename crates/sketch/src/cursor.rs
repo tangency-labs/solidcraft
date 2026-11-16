@@ -149,8 +149,7 @@ fn move_cursor_towards(
         if residual >= TOL {
             trial_tol = ACCEPT;
         }
-        apply(&mut best, &lay, &x);
-        if !in_range(&best) || !valid(&problem, &best) {
+        if !apply(&mut best, &lay, &x) || !in_range(&best) || !valid(&problem, &best) {
             return false;
         }
     }
@@ -239,8 +238,7 @@ fn move_cursor_towards(
                     break 'search;
                 }
                 let mut candidate = best.clone();
-                apply(&mut candidate, &lay, &trial);
-                if !in_range(&candidate) || !valid(&best, &candidate) {
+                if !apply(&mut candidate, &lay, &trial) || !in_range(&candidate) || !valid(&best, &candidate) {
                     continue;
                 }
                 accepted = Some((trial, candidate, ((if probe { 1.0 } else { scale }) * alpha * 1.5).clamp(1e-8, 1e8)));
@@ -380,7 +378,7 @@ fn target_step(z: &[Vec<f64>], axes: &[(usize, Vec2)], error: Vec2) -> Vec<f64> 
     step
 }
 
-fn apply(sk: &mut Sketch, lay: &Layout, x: &[f64]) {
+fn apply(sk: &mut Sketch, lay: &Layout, x: &[f64]) -> bool {
     for (i, p) in sk.points.iter_mut().enumerate() {
         if let Some(v) = lay.pvar.get(i).copied().flatten()
             && let (Some(a), Some(b)) = (x.get(v), x.get(v + 1))
@@ -396,4 +394,5 @@ fn apply(sk: &mut Sketch, lay: &Layout, x: &[f64]) {
             *r = *value;
         }
     }
+    !lay.biarc.invalid && sk.place_biarc_plan(&lay.biarc.plans).is_ok()
 }

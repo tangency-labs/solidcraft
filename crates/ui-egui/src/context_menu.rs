@@ -1369,24 +1369,19 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     if let Some(curve) = crate::sketch_modify_ui::selected_equation(app) {
         v.push(act("ui.editEquationCurve", "Edit Equation Curve", "equation_curve").with(json!({ "curve": curve })));
     }
+    if crate::sketch_modify_ui::selected_biarc(app).is_some() {
+        v.push(cmd(app, crate::sketch_biarc_ui::EDIT, "cmd.sketch.spline.biarc.edit"));
+    }
     v.push(cmd(app, "sketch.move", "Move/Copy").key("M"));
     v.push(cmd(app, "sketch.transform", "Transform").key("G"));
-    if !curves.is_empty() {
+    if !curves.is_empty() && !curves.iter().any(|id| ss.sketch.biarc_guide_spline(id).is_some()) {
         v.push(cmd(app, "sketch.construction", "Normal / Construction").with(json!({ "curves": curves })));
     }
     // Infinite lines (#1359): the selected lines switch together.
-    let lines: Vec<String> = curves
-        .iter()
-        .filter(|id| {
-            ss.sketch
-                .curve_index(id)
-                .and_then(|i| ss.sketch.curves.get(i))
-                .is_some_and(|c| matches!(c.kind, solidcraft_engine::sketch::CurveKind::Line { .. }))
-        })
-        .cloned()
-        .collect();
-    if !lines.is_empty() {
-        v.push(cmd(app, "sketch.infinite", "Infinite Line").with(json!({ "curves": lines })));
+    let infinite_lines: Vec<_> =
+        lines.iter().filter(|id| ss.sketch.biarc_spline(id).is_none() && ss.sketch.biarc_guide_spline(id).is_none()).collect();
+    if !infinite_lines.is_empty() {
+        v.push(cmd(app, "sketch.infinite", "Infinite Line").with(json!({ "curves": infinite_lines })));
     }
     if curves.len() == 1 && ss.sketch.offset_distance(&curves[0]).is_some() {
         v.push(cmd(app, "sketch.offset.break", "Break Offset Association").with(json!({"curve":curves[0]})));
@@ -1494,6 +1489,9 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     }
     if r == 1 && p == 1 && n == 2 {
         c.push(cmd(app, "sketch.constraint.concentric", "Concentric").with(json!({ "a": picked[0], "b": picked[1] })));
+    }
+    if let Some(operands) = crate::selection::biarc_tangent_operands(&ss.sketch, &app.session.selection) {
+        c.push(cmd(app, "sketch.constraint.tangent", "Tangent").with(operands));
     }
     if l == 1 && r == 1 && n == 2 {
         c.push(cmd(app, "sketch.constraint.tangent", "Tangent").with(json!({ "a": picked[0], "b": picked[1] })));

@@ -336,6 +336,37 @@ While drawing a fit spline, click its starting point after three distinct sample
 it smoothly. Right-click finishes an ordinary natural fit. Offset accepts both ellipse
 handles and dense fitted curves; the second click sets the side and distance from the curve.
 
+Choose **Sketch › Create › Spline › Biarc Spline** in a planar sketch, or search for
+**Biarc Spline** in the command search. Click to place each point, then click in the direction the
+curve should travel through that point. Set at least two points and their tangents, then
+right-click to finish. Each span between consecutive points uses two circular arcs or straight
+lines. The tangent directions agree at every join (G1).
+
+Drag a point to move the curve, or drag the end of its tangent guide to turn the tangent.
+Apply ordinary sketch constraints and dimensions to the points and guides. Select a spline
+point and a circle and choose **Tangent** to join them tangentially at the point. The curve
+uses the usual colours for under-constrained and fully constrained geometry.
+**Construction Geometries** in the Sketch Palette controls the guide lines and their handles.
+
+Select a piece of an automatic span to see the line between its fit points. Drag the diamond
+along that line to move the join. For an S-shaped span with matching endpoint directions, the
+diamond lies at the join itself. Release to keep the preview or press Escape to cancel it.
+The two distances used along the endpoint tangents are equal by default (**50:50**).
+
+Right-click a piece or tangent guide and choose **Edit Biarc Spline**. In **Automatic**, enter a
+ratio between 0 and 1 for the selected span. A value of 0.25 allocates 25% of the distance to the
+start and 75% to the end. Choose **Straight start** or **Straight end** to keep one piece straight.
+The fit points and tangent directions determine where the line meets the circular arc. Adjust the
+tangent guides when they cannot make the chosen shape. Switching back to **Automatic** restores
+the span's ratio control and its saved value. The pieces can join other sketch geometry to form
+a profile.
+
+In scripts, `sketch.spline.biarc` takes ordered `nodes` such as
+`{"point": [20, 8], "tangent": [1, 0]}`. The optional `ratios` array takes one value per span
+in the same order. Use `sketch.spline.biarc.edit` with `curve` set to the spline ID or one of its
+curve IDs. Pass the full `ratios` array or edit one span with `span` (starting at 0), `ratio`, and
+`mode` (`auto`, `straight_start`, or `straight_end`). A single-span edit updates the fields you supply.
+
 **Equation Curve** draws a curve from formulas instead of clicks: x(t) and y(t) over a range of
 t, or y = f(x) over a range of x, using the design's parameters. [Equation curves](equation-curves.md)
 walks through it step by step, with pictures and examples (a line, a parabola, a wave, a circle,

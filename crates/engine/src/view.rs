@@ -788,8 +788,8 @@ pub fn spline_handle_display_line(sk: &Sketch, i: usize) -> Option<(Vec2, Vec2)>
 }
 
 /// Point roles shown and picked individually. Associated offsets keep their generated
-/// fit nodes private until their association is broken, except an open offset's two ends,
-/// which other curves snap and constrain to. Build once per sketch/frame.
+/// fit nodes private until their association is broken, except an open offset's two ends.
+/// Biarc splines show their input points and tangent handles. Build once per sketch/frame.
 pub struct SketchPointVisibility<'a> {
     hidden: std::collections::HashSet<&'a str>,
 }
@@ -821,6 +821,18 @@ impl<'a> SketchPointVisibility<'a> {
                 hidden.insert(point.id.as_str());
             }
         }
+        if !sk.biarc_splines.is_empty() {
+            hidden.extend(sk.points.iter().zip(sk.biarc_dependent_points()).filter(|(_, derived)| *derived).map(|(p, _)| p.id.as_str()));
+            if sk.view.hide_construction {
+                hidden.extend(
+                    sk.biarc_splines
+                        .iter()
+                        .flat_map(|spline| &spline.nodes)
+                        .filter_map(|node| node.handle.as_ref())
+                        .map(|handle| handle.point.as_str()),
+                );
+            }
+        }
         Self { hidden }
     }
 
@@ -829,8 +841,7 @@ impl<'a> SketchPointVisibility<'a> {
     }
 }
 
-/// Should sketch point `i` be drawn or picked individually? Text outlines and derived
-/// offset fit nodes (but an open offset's ends) are private. Batch callers use [`SketchPointVisibility`].
+/// Should sketch point `i` be drawn or picked individually? Batch callers use [`SketchPointVisibility`].
 pub fn sketch_point_visible(sk: &Sketch, i: usize) -> bool {
     sk.points.get(i).is_some_and(|p| SketchPointVisibility::new(sk).takes(p))
 }

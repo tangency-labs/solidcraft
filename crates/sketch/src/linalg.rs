@@ -158,14 +158,6 @@ pub fn rref_counted(a: &mut Mat, tol: f64, ops: &mut f64, budget: f64) -> Option
     Some(pivots)
 }
 
-/// For each column of `j`: is that variable fixed by the constraints (zero in every null-space
-/// vector)? Also returns the rank.
-pub fn determined_vars(j: &Mat, tol: f64) -> (Vec<bool>, usize) {
-    let mut a = j.clone();
-    let pivots = rref(&mut a, tol);
-    determined_from(&a, pivots, tol)
-}
-
 /// The rank of `j`, its row reduction's multiply-adds added to `ops`; `None` once they pass
 /// `budget`.
 pub fn rank_counted(j: &Mat, tol: f64, ops: &mut f64, budget: f64) -> Option<usize> {
@@ -173,25 +165,67 @@ pub fn rank_counted(j: &Mat, tol: f64, ops: &mut f64, budget: f64) -> Option<usi
     rref_counted(&mut a, tol, ops, budget).map(|p| p.len())
 }
 
-/// [`determined_vars`] from the reduced matrix and its pivots.
-fn determined_from(a: &Mat, pivots: Vec<usize>, tol: f64) -> (Vec<bool>, usize) {
-    let rank = pivots.len();
-    let free: Vec<usize> = (0..a.cols).filter(|c| !pivots.contains(c)).collect();
-    let mut det = vec![true; a.cols];
-    for f in &free {
-        if let Some(d) = det.get_mut(*f) {
-            *d = false;
-        }
+/// For each column of `j`: is that variable fixed by the constraints (zero in every null-space
+/// vector)? Also returns the rank.
+#[cfg(test)]
+pub fn determined_vars(j: &Mat, tol: f64) -> (Vec<bool>, usize) {
+    let space = NullSpace::new(j, tol);
+    (space.determined_vars(), space.rank())
+}
+
+/// The constraint Jacobian's remaining first-order motions.
+pub(crate) struct NullSpace {
+    reduced: Mat,
+    pivots: Vec<usize>,
+    free: Vec<usize>,
+    tolerance: f64,
+}
+
+impl NullSpace {
+    pub(crate) fn new(j: &Mat, tolerance: f64) -> Self {
+        let mut reduced = j.clone();
+        let pivots = rref(&mut reduced, tolerance);
+        let free = (0..j.cols).filter(|c| pivots.binary_search(c).is_err()).collect();
+        Self { reduced, pivots, free, tolerance }
     }
-    // Null vector for free column f: x_f = 1, x_pivot(r) = -a[r][f].
-    for (r, pc) in pivots.iter().enumerate() {
-        if free.iter().any(|f| a.get(r, *f).abs() > tol)
-            && let Some(d) = det.get_mut(*pc)
-        {
-            *d = false;
-        }
+
+    pub(crate) fn rank(&self) -> usize {
+        self.pivots.len()
     }
-    (det, rank)
+
+    pub(crate) fn determined_vars(&self) -> Vec<bool> {
+        let mut det = vec![true; self.reduced.cols];
+        for f in &self.free {
+            if let Some(d) = det.get_mut(*f) {
+                *d = false;
+            }
+        }
+        for (r, pc) in self.pivots.iter().enumerate() {
+            if self.free.iter().any(|&f| self.reduced.get(r, f).abs() > self.tolerance)
+                && let Some(d) = det.get_mut(*pc)
+            {
+                *d = false;
+            }
+        }
+        det
+    }
+
+    /// Does every remaining motion leave this linear combination of the columns unchanged?
+    /// `None` is a held coordinate that contributes no motion.
+    pub(crate) fn determines(&self, axes: [(Option<usize>, f64); 2]) -> bool {
+        let axes = axes.map(|(column, coefficient)| (column, column.and_then(|c| self.pivots.binary_search(&c).ok()), coefficient));
+        self.free.iter().all(|&f| {
+            let change: f64 = axes
+                .iter()
+                .filter_map(|&(column, pivot, coefficient)| {
+                    let column = column?;
+                    // In the null vector for f, x_f = 1 and x_pivot(r) = -reduced[r, f].
+                    Some(coefficient * pivot.map_or_else(|| f64::from(column == f), |r| -self.reduced.get(r, f)))
+                })
+                .sum();
+            change.abs() <= self.tolerance
+        })
+    }
 }
 
 #[cfg(test)]

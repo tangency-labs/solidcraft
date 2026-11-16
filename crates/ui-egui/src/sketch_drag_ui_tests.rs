@@ -253,6 +253,280 @@ fn a_viewport_drag_solves_the_sketch_live_and_rebuilds_the_model_on_release() {
 }
 
 #[test]
+fn a_biarc_node_drags_and_constrains_like_a_sketch_point() {
+    use crate::viewport::{self, Hit};
+    use solidcraft_engine::view::SketchPointVisibility;
+    use solidcraft_theme::Tokens;
+
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.set_origin_shown(false);
+    run(&mut h, "sketch.create", json!({"plane": "XY"}));
+    run(&mut h, "sketch.options", json!({"grid": false}));
+    run(
+        &mut h,
+        "sketch.spline.biarc",
+        json!({"nodes": [
+            {"point": [-36,-12], "tangent": [8,0]},
+            {"point": [-10,8], "tangent": [8,0]},
+            {"point": [18,-4], "tangent": [8,0]}
+        ]}),
+    );
+    let circle = h.app.run("sketch.circle.center", json!({"center": [-36,-21], "radius": 9})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+    run(&mut h, "sketch.constraint.fix", json!({"entity": circle, "fixed": true}));
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.camera", json!({"target":[-5,0,0],"distance":125}));
+    h.frames(3);
+
+    let sid = h.app.session.active_sketch.unwrap();
+    let state = h.app.session.world_state().unwrap();
+    let ss = state.sketch(sid).unwrap();
+    let sk = &ss.sketch;
+    let spline = &sk.biarc_splines[0];
+    let first = spline.nodes[0].point.clone();
+    let middle = spline.nodes[1].point.clone();
+    let handle = spline.nodes[1].handle.as_ref().unwrap().point.clone();
+    let members: Vec<_> = spline.curves().map(str::to_owned).collect();
+    let guides: Vec<_> = spline.handle_curves().map(str::to_owned).collect();
+    let piece = sk.curve_index(&members[1]).unwrap();
+    let original = sk.segs(piece);
+    let join = sk.resolve_point(&format!("{}.start", members[1])).unwrap();
+    let center = sk.resolve_point(&format!("{}.center", members[1])).unwrap();
+    let visible = SketchPointVisibility::new(sk);
+    for id in [&first, &middle, &handle] {
+        assert!(visible.takes(&sk.points[sk.point_index(id).unwrap()]));
+    }
+    for i in [join, center] {
+        assert!(!visible.takes(&sk.points[i]));
+        assert!(viewport::sel_hit(&h.app, &Sel::ExternalSketchPoint { sketch: sid, id: sk.points[i].id.clone() }).is_none());
+    }
+    let has_curve_colour = |h: &Harness, colour| {
+        let proj = viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        let scene = viewport::build_sketch_scene(&h.app, &proj);
+        scene.overlay.as_chunks::<{ crate::gpu::LINE_SIZE }>().0.iter().any(|line| {
+            let index = u32::from_le_bytes(line[24..28].try_into().unwrap());
+            scene.palette.get(crate::gpu::PaletteIndex(index)) == Some(viewport::c4(colour))
+        })
+    };
+    assert!(has_curve_colour(&h, Tokens::get().sketch));
+    assert!(ss.report.dof > 0);
+
+    let between = original[0].point_at(0.5);
+    h.step(&json!({"move":{"sketch":[between.x, between.y]}})).unwrap();
+    assert!(matches!(&h.app.viewport.hover, Some(Hit::SketchCurve { id, .. }) if id == &members[1]), "{:?}", h.app.viewport.hover);
+    assert!(h.app.viewport.woken_centre.is_none());
+
+    let old = point(&h, &middle);
+    let target = Vec2::new(-6., 15.);
+    let from = screen(&mut h, old.x, old.y);
+    let to = screen(&mut h, target.x, target.y);
+    let mut path = vec![from];
+    path.extend(steps(from, to, 6));
+    let undo = h.app.session.undo.len();
+    press_and_move(&mut h, &path);
+    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, ..)| id), Some(&middle));
+    release(&mut h, to);
+    assert!(point(&h, &middle).dist(target) < 0.1);
+    assert!(point(&h, &handle).dist(target + Vec2::new(8., 0.)) < 0.1);
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    let edited = h.app.session.doc.sketch(sid).unwrap();
+    assert_ne!(edited.segs(piece), original);
+    assert!(edited.validate_biarc_splines().is_ok());
+    assert_eq!(edited.biarc_splines[0].curves().collect::<Vec<_>>(), members);
+
+    h.step(&json!({"click":{"sketch":[-36,-12]}})).unwrap();
+    h.step(&json!({"click":{"sketch":[-45,-21]},"shift":true})).unwrap();
+    let menu = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    let tangent = menu.iter().find(|item| item.id == "sketch.constraint.tangent").expect("the point and circle offer Tangent");
+    assert_eq!(tangent.params.as_ref(), Some(&json!({"a": first, "b": circle})));
+    h.step(&json!({"start": "sketch.constraint.tangent"})).unwrap();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Tangent { .. })));
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::PointOnCurve { .. })));
+
+    run(&mut h, "sketch.constraint.fix", json!({"entities": guides, "fixed": true}));
+    h.settle();
+    let state = h.app.session.world_state().unwrap();
+    let ss = state.sketch(sid).unwrap();
+    assert!(ss.report.ok());
+    assert_eq!(ss.report.dof, 0);
+    assert!(members.iter().all(|id| ss.report.curve_determined[ss.sketch.curve_index(id).unwrap()]));
+    assert!(has_curve_colour(&h, Tokens::get().sketch_fixed));
+    assert!(!has_curve_colour(&h, Tokens::get().sketch));
+}
+
+#[test]
+fn a_biarc_ratio_drag_previews_one_span_and_applies_once_or_cancels() {
+    use crate::control::{ControlRequest, Outcome};
+    use crate::{scenario, sketch_biarc_edit};
+
+    let unfocused_frame = |h: &mut Harness| {
+        let mut raw = egui::RawInput {
+            screen_rect: Some(h.ctx.viewport_rect()),
+            time: Some(h.ctx.input(|i| i.time + 1.0 / 60.0)),
+            focused: false,
+            ..Default::default()
+        };
+        h.app.raw_input_hook(&mut raw);
+        let _ = h.ctx.run_ui(raw, |ui| {
+            h.app.logic(ui.ctx());
+            h.app.ui(ui);
+        });
+    };
+
+    for cancel in [false, true] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        run(&mut h, "sketch.create", json!({"plane": "XY"}));
+        run(
+            &mut h,
+            "sketch.spline.biarc",
+            json!({"nodes": [
+                {"point": [-36,-12], "tangent": [8,0]},
+                {"point": [-10,8], "tangent": [8,0]},
+                {"point": [18,-4], "tangent": [8,0]}
+            ]}),
+        );
+        h.call("ui.view", json!({"view": "top"}));
+        h.call("ui.camera", json!({"target": [-5,0,0], "distance": 125}));
+        h.frames(3);
+        assert!(scenario::handle_at("biarc-ratio").is_none());
+
+        let sid = h.app.session.active_sketch.unwrap();
+        let sk = h.app.session.doc.sketch(sid).unwrap();
+        let spline = sk.biarc_splines[0].clone();
+        let (index, a, b) =
+            if cancel { (1, Vec2::new(-10.0, 8.0), Vec2::new(18.0, -4.0)) } else { (0, Vec2::new(-36.0, -12.0), Vec2::new(-10.0, 8.0)) };
+        let curve = if cancel {
+            let guide = &spline.nodes[index].handle.as_ref().unwrap().curve;
+            // Select the guide itself rather than its independent midpoint pick.
+            h.app.session.selection = vec![Sel::SketchCurve { id: guide.clone(), sketch: Some(sid) }];
+            h.frames(1);
+            guide
+        } else {
+            let curve = &spline.spans[index].curves[0];
+            let pick = sk.segs(sk.curve_index(curve).unwrap())[0].point_at(0.5);
+            h.step(&json!({"click": {"sketch": [pick.x, pick.y]}})).unwrap();
+            curve
+        };
+        assert!(matches!(h.app.session.selection.as_slice(), [Sel::SketchCurve { id, .. }] if id == curve), "{:?}", h.app.session.selection);
+        let selection = h.app.session.selection.clone();
+        let before = h.app.session.doc.to_json();
+        let undo = h.app.session.undo.len();
+
+        let from = scenario::handle_at("biarc-ratio").expect("one selected Biarc span has a ratio handle");
+        let midpoint = (a + b) * 0.5;
+        assert!(from.distance(screen(&mut h, midpoint.x, midpoint.y)) < 1.0);
+        let desired = a + (b - a) * 0.72;
+        let to = screen(&mut h, desired.x, desired.y);
+        let edge = (to - from).normalized();
+        let cursor = to + edge.rot90() * 12.0;
+        if cancel {
+            let mut path = vec![from];
+            path.extend(steps(from, cursor, 6));
+            press_and_move(&mut h, &path);
+        } else {
+            // The desktop control channel can send this drag to a window without keyboard
+            // focus. The diamond on the curve must own it before the whole spline can move.
+            unfocused_frame(&mut h);
+            let (request, _) = ControlRequest::new("ui.drag", json!({"x0": from.x, "y0": from.y, "x1": cursor.x, "y1": cursor.y, "steps": 6}));
+            let outcome = crate::control::handle(&mut h.app, &h.ctx, &request);
+            assert!(matches!(outcome, Outcome::Done(reply) if reply["ok"] == true));
+            while h.app.synthetic.len() > 1 {
+                unfocused_frame(&mut h);
+            }
+        }
+
+        assert!(sketch_biarc_edit::dragging(&h.app));
+        assert_eq!(sketch_biarc_edit::replaced_members(&h.app, sid), Some(&spline.spans[index].curves));
+        assert!(scenario::handle_at("biarc-ratio").unwrap().distance(to) < 1.0);
+        assert!(h.app.viewport.point_drag.is_none() && h.app.viewport.boxsel.is_none());
+        assert_eq!(h.app.session.doc.to_json(), before);
+        assert_eq!(h.app.session.undo.len(), undo);
+
+        if cancel {
+            h.step(&json!({"key": "Escape"})).unwrap();
+            assert!(!sketch_biarc_edit::dragging(&h.app));
+            assert!(sketch_biarc_edit::replaced_members(&h.app, sid).is_none());
+            assert!(scenario::handle_at("biarc-ratio").unwrap().distance(from) < 1.0);
+            release(&mut h, cursor);
+        } else {
+            unfocused_frame(&mut h);
+        }
+        assert!(!sketch_biarc_edit::dragging(&h.app));
+        assert_eq!(h.app.session.active_sketch, Some(sid));
+        assert_eq!(h.app.session.selection, selection);
+        if cancel {
+            assert_eq!(h.app.session.doc.to_json(), before);
+            assert_eq!(h.app.session.undo.len(), undo);
+        } else {
+            let sk = h.app.session.doc.sketch(sid).unwrap();
+            let edited = sk.biarc_spline(&spline.id).unwrap();
+            assert!((edited.spans[index].ratio - 0.72).abs() < 0.015, "{}", edited.spans[index].ratio);
+            assert_eq!(edited.spans[1 - index], spline.spans[1 - index]);
+            assert_eq!(edited.nodes, spline.nodes);
+            for node in &spline.nodes {
+                let handle = node.handle.as_ref().unwrap();
+                assert_eq!(point(&h, &handle.point) - point(&h, &node.point), Vec2::new(8.0, 0.0));
+            }
+            assert_eq!(point(&h, &spline.nodes[index].point), a);
+            assert_eq!(point(&h, &spline.nodes[index + 1].point), b);
+            assert!(sk.validate_biarc_splines().is_ok());
+            assert_eq!(h.app.session.undo.len(), undo + 1);
+            run(&mut h, "edit.undo", json!({}));
+            assert_eq!(h.app.session.doc.to_json(), before);
+        }
+    }
+}
+
+#[test]
+fn a_biarc_ratio_handle_stays_with_its_active_automatic_span() {
+    use crate::{scenario, sketch_biarc_edit};
+
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    run(&mut h, "sketch.create", json!({"plane": "XY"}));
+    run(
+        &mut h,
+        "sketch.spline.biarc",
+        json!({"nodes": [
+            {"point": [2,4], "tangent": [6,0]},
+            {"point": [14,8], "tangent": [0,6]}
+        ]}),
+    );
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.camera", json!({"target": [8,5,0], "distance": 48}));
+    let sid = h.app.session.active_sketch.unwrap();
+    let spline = h.app.session.doc.sketch(sid).unwrap().biarc_splines[0].clone();
+    let selected = Sel::SketchCurve { id: spline.spans[0].curves[0].clone(), sketch: Some(sid) };
+    h.app.session.selection = vec![selected.clone()];
+    run(&mut h, "sketch.spline.biarc.edit", json!({"curve": spline.id, "span": 0, "mode": "straight_start"}));
+    h.frames(3);
+    assert!(scenario::handle_at("biarc-ratio").is_none());
+
+    run(&mut h, "sketch.spline.biarc.edit", json!({"curve": spline.id, "span": 0, "mode": "auto"}));
+    h.app.session.selection = vec![selected.clone()];
+    h.frames(3);
+    let from = scenario::handle_at("biarc-ratio").expect("automatic mode has a ratio handle");
+    h.app.session.selection.push(Sel::SketchCurve { id: spline.spans[0].curves[1].clone(), sketch: Some(sid) });
+    h.frame();
+    assert!(scenario::handle_at("biarc-ratio").is_none());
+
+    h.app.session.selection = vec![selected];
+    h.frames(2);
+    let to = screen(&mut h, 10.4, 6.8);
+    let mut path = vec![from];
+    path.extend(steps(from, to, 3));
+    press_and_move(&mut h, &path);
+    assert!(sketch_biarc_edit::dragging(&h.app));
+    run(&mut h, "sketch.finish", json!({}));
+    release(&mut h, to);
+    assert!(!sketch_biarc_edit::dragging(&h.app));
+    assert!(scenario::handle_at("biarc-ratio").is_none());
+    assert_eq!(h.app.session.doc.sketch(sid).unwrap().biarc_splines[0], spline);
+}
+
+#[test]
 fn a_dragged_line_that_stops_short_stays_under_the_cursor_when_it_can_follow_again() {
     let mut h = Harness::new();
     run(&mut h, "sketch.create", json!({"plane": "XY"}));

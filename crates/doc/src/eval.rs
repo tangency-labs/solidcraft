@@ -11136,6 +11136,7 @@ fn eval_sketch(
     if !warns.is_empty() {
         *warning = Some(warns.join("; "));
     }
+    sk.validate_biarc_splines()?;
     sk.validate_periodic_splines()?;
     // A group of touching curves too large to search whole says so, rather than
     // leaving profiles out silently (#6896).

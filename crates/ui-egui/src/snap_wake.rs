@@ -192,7 +192,26 @@ pub fn update(app: &mut SolveApp, hits: &[Hit], keep: bool, near: Option<(&Proj,
 /// The points an item offers, found where the design keeps it ([`in_model`]), and the holes'
 /// centres among them, each with a point on its rim (#11476).
 fn offered(app: &SolveApp, item: &Sel) -> (Vec<SnapPoint>, Vec<(Vec3, Vec3)>) {
-    let from = solidcraft_engine::snap::snap_points_from(&app.session, &in_model(app, item));
+    let mut from = solidcraft_engine::snap::snap_points_from(&app.session, &in_model(app, item));
+    // Another sketch's biarc pieces offer their visible ends and middles. The generated
+    // junction and center are not separate sketch points for snapping.
+    if let Sel::ExternalSketchCurve { sketch, id } = item {
+        let world = crate::open_meshing::session_world(&app.session);
+        if let Some(ss) = world.sketch(*sketch)
+            && ss.sketch.biarc_spline(id).is_some()
+            && let Some((a, b)) = ss.sketch.curve_index(id).and_then(|i| ss.sketch.curves.get(i)).and_then(|curve| curve.kind.ends())
+        {
+            from.retain(|(p, _)| p.kind == SnapKind::Middle);
+            let visible = solidcraft_engine::view::SketchPointVisibility::new(&ss.sketch);
+            from.extend(
+                [a, b]
+                    .into_iter()
+                    .filter_map(|i| ss.sketch.points.get(i))
+                    .filter(|point| visible.takes(point))
+                    .map(|point| (SnapPoint { at: ss.plane.to_world(point.pos), kind: SnapKind::End, body: String::new() }, Default::default())),
+            );
+        }
+    }
     let rims = from.iter().filter(|(p, _)| p.kind == SnapKind::Centre).filter_map(|(p, source)| source.edge.map(|e| (p.at, e))).collect();
     (from.into_iter().map(|(p, _)| p).collect(), rims)
 }

@@ -4,7 +4,9 @@
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
-use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, Shape, Sketch, TextAlign, TextExprs, TextStyle, TextVerticalAlign};
+use solidcraft_sketch::{
+    BiarcSpline, ConstraintKind, CurveKind, LinkKind, LinkSource, MAX_BIARC_NODES, Shape, Sketch, TextAlign, TextExprs, TextStyle, TextVerticalAlign,
+};
 
 /// The style parameters of `sketch.text` and `sketch.edit_text`.
 macro_rules! text_style_doc {
@@ -14,19 +16,19 @@ macro_rules! text_style_doc {
 }
 
 use super::sketch::{
-    add_c, circumcircle, corner_arg, edit, ids_of, length_expr, mark_construction, place_point, req_parg, slot_parts, slot_width,
+    add_c, circumcircle, corner_arg, edit, edit_with_model, ids_of, length_expr, mark_construction, place_point, req_parg, slot_parts, slot_width,
     slot_width_dimension,
 };
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, req_vec2, str_, string_list};
 use crate::schema::sketch_create::{
-    ArcSlotCenterParams, ArcSlotResult, ArcSlotThreePointParams, ArcTangentParams, BlendCurveParams, CenterlineParams, ConicParams,
-    ControlPointSplineParams, DrawResult, EditTextParams, EditTextResult, EllipseParams, FitPointSplineParams, InfiniteLineParams, LineTypeResult,
-    MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineHandlesParams, SplineHandlesResult, SplineInsertPointParams,
-    SplineInsertPointResult, SplineRemovePointParams, SplineRemovePointResult, SplineResetHandlesParams, SplineResetHandlesResult,
-    SplineReverseParams, SplineReverseResult, TextChange, TextEditsResult, TextExpressions, TextResult, ThreeTangentCircleParams,
-    TwoTangentCircleParams,
+    ArcSlotCenterParams, ArcSlotResult, ArcSlotThreePointParams, ArcTangentParams, BiarcSplineEditParams, BiarcSplineParams, BiarcSplineResult,
+    BlendCurveParams, CenterlineParams, ConicParams, ControlPointSplineParams, DrawResult, EditTextParams, EditTextResult, EllipseParams,
+    FitPointSplineParams, InfiniteLineParams, LineTypeResult, MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineHandlesParams,
+    SplineHandlesResult, SplineInsertPointParams, SplineInsertPointResult, SplineRemovePointParams, SplineRemovePointResult,
+    SplineResetHandlesParams, SplineResetHandlesResult, SplineReverseParams, SplineReverseResult, TextChange, TextEditsResult, TextExpressions,
+    TextResult, ThreeTangentCircleParams, TwoTangentCircleParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -49,6 +51,8 @@ const ARC_SLOT_CENTER_CONTRACT: TypedContract<ArcSlotCenterParams> = TypedContra
 const ELLIPSE_CONTRACT: TypedContract<EllipseParams> = TypedContract::new();
 const SPLINE_FIT_CONTRACT: TypedContract<FitPointSplineParams> = TypedContract::new();
 const SPLINE_CONTROL_CONTRACT: TypedContract<ControlPointSplineParams> = TypedContract::new();
+const BIARC_SPLINE_CONTRACT: TypedContract<BiarcSplineParams> = TypedContract::new();
+const BIARC_SPLINE_EDIT_CONTRACT: TypedContract<BiarcSplineEditParams> = TypedContract::new();
 const CONIC_CONTRACT: TypedContract<ConicParams> = TypedContract::new();
 const BLEND_CONTRACT: TypedContract<BlendCurveParams> = TypedContract::new();
 const CENTERLINE_CONTRACT: TypedContract<CenterlineParams> = TypedContract::new();
@@ -69,6 +73,22 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&MIDPOINT_LINE_CONTRACT)
         .output(output_schema_for::<DrawResult>)
         .params(concat!("mid: [x,y], point ref or snap (\"mid:<line>\", \"on:<curve>:x,y\", model vertex/edge); end: [x,y]; construction?", created_doc!())),
+    CommandSpec::new("sketch.spline.biarc", "Biarc Spline", crate::checked!("sketch.spline.biarc", biarc_spline))
+        .at("SKETCH", "CREATE")
+        .icon("spline_biarc")
+        .enabled(in_sketch)
+        .contract(&BIARC_SPLINE_CONTRACT)
+        .output(output_schema_for::<BiarcSplineResult>)
+        .params(concat!(
+            "nodes: ordered {point: [x,y] in mm, tangent: [dx,dy] in the direction of travel, reference?: sketch point ID or drawing snap (mid:, on:, x:, vertex:)}; ratios?: one number between 0 and 1 per pair of adjacent points, all 0.5 by default; construction?: bool; sketch?: id or name. Returns the spline ID, member curve IDs, ratios and span modes",
+            created_doc!()
+        )),
+    CommandSpec::new("sketch.spline.biarc.edit", "Edit Biarc Spline", crate::checked!("sketch.spline.biarc.edit", edit_biarc_spline))
+        .icon("spline_biarc")
+        .enabled(in_sketch)
+        .contract(&BIARC_SPLINE_EDIT_CONTRACT)
+        .output(output_schema_for::<BiarcSplineResult>)
+        .params("curve: spline ID or any member arc or line ID; ratios: one number per interval in order, or span: zero-based interval with ratio?: number and mode?: auto | straight_start | straight_end. Each ratio is greater than 0 and less than 1. Sketch?: id or name. Keeps the points, tangents and member IDs"),
     CommandSpec::new("sketch.arc.tangent", "Tangent Arc", crate::checked!("sketch.arc.tangent", arc_tangent))
         .at("SKETCH", "CREATE")
         .icon("arc_tangent")
@@ -705,6 +725,9 @@ fn centerline(s: &mut Session, p: &Value) -> Result<Value> {
     let want = crate::params::bool_(p, "value");
     let (n, info) = edit(s, p, cmd, false, |sk, _| {
         for id in &ids {
+            if sk.biarc_spline(id).is_some() || sk.biarc_guide_spline(id).is_some() {
+                return Err(bad(cmd, "a Biarc Spline and its tangent guides use finite segments"));
+            }
             let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
             let cu = sk.curves.get_mut(c).ok_or_else(|| bad(cmd, "curve"))?;
             if !matches!(cu.kind, CurveKind::Line { .. }) {
@@ -730,6 +753,9 @@ fn infinite_line(s: &mut Session, p: &Value) -> Result<Value> {
     let want = crate::params::bool_(p, "value");
     let (n, info) = edit(s, p, cmd, false, |sk, _| {
         for id in &ids {
+            if sk.biarc_spline(id).is_some() || sk.biarc_guide_spline(id).is_some() {
+                return Err(bad(cmd, "a Biarc Spline and its tangent guides use finite segments"));
+            }
             let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
             let cu = sk.curves.get_mut(c).ok_or_else(|| bad(cmd, "curve"))?;
             if !matches!(cu.kind, CurveKind::Line { .. }) {
@@ -868,6 +894,101 @@ fn spline_cv3(s: &mut Session, p: &Value) -> Result<Value> {
 }
 fn spline_cv5(s: &mut Session, p: &Value) -> Result<Value> {
     spline(s, p, "sketch.spline.control_point_5", true, 5)
+}
+
+fn biarc_ratio(cmd: &str, value: &Value) -> Result<f64> {
+    value.as_f64().filter(|ratio| *ratio > 0.0 && *ratio < 1.0).ok_or_else(|| bad(cmd, "each ratio must be greater than 0 and less than 1"))
+}
+
+fn biarc_ratios(cmd: &str, values: &Value, max: usize) -> Result<Vec<f64>> {
+    let values = values.as_array().ok_or_else(|| bad(cmd, "`ratios` must be an array"))?;
+    if values.is_empty() || values.len() > max {
+        return Err(bad(cmd, "`ratios` needs one value for each span"));
+    }
+    values.iter().map(|value| biarc_ratio(cmd, value)).collect()
+}
+
+fn biarc_spline_reply(spline: BiarcSpline, sketch: Value) -> Result<Value> {
+    let curves = spline.curves().map(str::to_string).collect();
+    reply(BiarcSplineResult {
+        curve: spline.id,
+        curves,
+        ratios: spline.spans.iter().map(|span| span.ratio).collect(),
+        modes: spline.spans.iter().map(|span| span.mode).collect(),
+        sketch,
+        created: None,
+        param_warnings: Vec::new(),
+    })
+}
+
+fn biarc_spline(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.spline.biarc";
+    let nodes = p.get("nodes").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`nodes` must be an array of points and tangents"))?;
+    if !(2..=MAX_BIARC_NODES).contains(&nodes.len()) {
+        return Err(bad(cmd, format!("a Biarc Spline needs 2 to {MAX_BIARC_NODES} points")));
+    }
+    let nodes = nodes
+        .iter()
+        .map(|node| {
+            let point = req_vec2(cmd, node, "point")?;
+            let tangent = req_vec2(cmd, node, "tangent")?;
+            let reference = match node.get("reference").filter(|v| !v.is_null()) {
+                None => None,
+                Some(v) if v.as_str().is_some_and(|id| !id.trim().is_empty() && id.len() <= 512) => Some(v),
+                Some(_) => return Err(bad(cmd, "a node's `reference` must be a nonempty point or snap reference of at most 512 bytes")),
+            };
+            Ok((point, tangent, reference))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let ratios = p.get("ratios").filter(|value| !value.is_null()).map(|v| biarc_ratios(cmd, v, nodes.len() - 1)).transpose()?;
+    let construction = match p.get("construction") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => return Err(bad(cmd, "`construction` must be true or false")),
+    };
+    let strict = nodes.iter().any(|(_, _, reference)| reference.is_some());
+    let (spline, sketch) = edit_with_model(s, p, cmd, strict, |session, sketch, sk, doc| {
+        let mut inputs = Vec::with_capacity(nodes.len());
+        let mut snaps = Vec::with_capacity(nodes.len());
+        for (point, tangent, reference) in nodes {
+            let snap = reference.map(|v| super::sketch_project::resolve_snap_reference(session, doc, sketch, sk, v, cmd)).transpose()?;
+            inputs.push((snap.as_ref().map_or(point, |snap| snap.at), tangent));
+            snaps.push(snap);
+        }
+        let spline = sk.add_biarc_spline(&inputs, ratios.as_deref(), construction).map_err(|e| bad(cmd, e.to_string()))?;
+        for (node, snap) in spline.nodes.iter().zip(snaps) {
+            if let Some(snap) = snap {
+                let point = sk.point_index(&node.point).ok_or_else(|| bad(cmd, "the new fit point is missing"))?;
+                snap.attach(sk, point)?;
+            }
+        }
+        Ok(spline)
+    })?;
+    biarc_spline_reply(spline, sketch)
+}
+
+fn edit_biarc_spline(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.spline.biarc.edit";
+    let curve = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a Biarc Spline or member curve ID"))?;
+    let value = |key| p.get(key).filter(|value| !value.is_null());
+    let ratio = value("ratio");
+    let mode = value("mode");
+    let (spline, sketch) = match (value("ratios"), value("span")) {
+        (Some(ratios), None) if ratio.is_none() && mode.is_none() => {
+            let ratios = biarc_ratios(cmd, ratios, MAX_BIARC_NODES - 1)?;
+            edit(s, p, cmd, true, |sk, _| sk.set_biarc_ratios(curve, &ratios).map_err(|e| bad(cmd, e.to_string())))?
+        }
+        (None, Some(span)) if ratio.is_some() || mode.is_some() => {
+            let span = span.as_u64().and_then(|i| usize::try_from(i).ok()).ok_or_else(|| bad(cmd, "`span` must be a zero-based integer index"))?;
+            let ratio = ratio.map(|ratio| biarc_ratio(cmd, ratio)).transpose()?;
+            let mode = mode
+                .map(|mode| serde::Deserialize::deserialize(mode).map_err(|_| bad(cmd, "`mode` must be auto, straight_start or straight_end")))
+                .transpose()?;
+            edit(s, p, cmd, true, |sk, _| sk.set_biarc_span(curve, span, ratio, mode).map_err(|e| bad(cmd, e.to_string())))?
+        }
+        _ => return Err(bad(cmd, "supply `ratios` for the whole spline or `span` with `ratio` or `mode`")),
+    };
+    biarc_spline_reply(spline, sketch)
 }
 
 fn spline_insert_point(s: &mut Session, p: &Value) -> Result<Value> {

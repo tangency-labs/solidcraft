@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
-use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, Sketch};
+use solidcraft_sketch::{BiarcSpanMode, BiarcSpline, ConstraintKind, CurveKind, LinkKind, Sketch};
 
 use crate::{Sel, Session};
 
@@ -235,9 +235,91 @@ fn cut_copies_and_deletes_in_one_step_and_pastes_back_in_place() {
     assert_eq!(sketch(&s, sid), &before);
 }
 
-/// Parameters that are not a JSON object (a number, text, a list) are an error, not a panic:
-/// `sketch.cut` and `sketch.paste` add keys to a copy of the parameters, and serde_json panics
-/// when a key is set on anything but an object (#1536, found by `hostile_params_never_panic`).
+fn biarc_drawing() -> (Session, u64, BiarcSpline) {
+    let mut s = Session::default();
+    let sid = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Biarcs"}))["sketch"].as_u64().unwrap();
+    let made = run(
+        &mut s,
+        "sketch.spline.biarc",
+        json!({"nodes": [
+            {"point": [0, 0], "tangent": [1, 0]},
+            {"point": [12, 4], "tangent": [0, 1]},
+            {"point": [12, 16], "tangent": [0, 1]}
+        ]}),
+    );
+    run(&mut s, "sketch.spline.biarc.edit", json!({"curve": made["curve"], "span": 0, "mode": "straight_start", "ratio": 0.25}));
+    let spline = sketch(&s, sid).biarc_splines[0].clone();
+    (s, sid, spline)
+}
+
+#[test]
+fn copying_one_biarc_member_pastes_an_independent_editable_spline() {
+    let (mut s, sid, original) = biarc_drawing();
+    let before = sketch(&s, sid).clone();
+    let copied = run(&mut s, "sketch.copy", json!({"entities": [&original.spans[0].curves[1]]}));
+    assert_eq!(copied["curves"], original.all_curves().count());
+    let pasted = run(&mut s, "sketch.paste", json!({"translate": [20, 30]}));
+    let sk = sketch(&s, sid);
+    let copy = sk.biarc_spline(strs(&pasted["curves"])[0].as_str()).unwrap().clone();
+    assert_ne!(copy.id, original.id);
+    assert_eq!(copy.spans[0].mode, BiarcSpanMode::StraightStart);
+    assert_eq!(copy.spans[0].ratio, 0.25);
+    assert_eq!(copy.all_curves().count(), 7);
+    for (old, new) in original.nodes.iter().zip(&copy.nodes) {
+        for (old, new) in [(&old.point, &new.point), (&old.handle.as_ref().unwrap().point, &new.handle.as_ref().unwrap().point)] {
+            let a = before.point(before.point_index(old).unwrap()).unwrap();
+            let b = sk.point(sk.point_index(new).unwrap()).unwrap();
+            assert_eq!(b - a, Vec2::new(20.0, 30.0));
+            assert_ne!(old, new);
+        }
+    }
+    sk.validate_biarc_splines().unwrap();
+    run(&mut s, "sketch.spline.biarc.edit", json!({"curve": copy.id, "span": 0, "mode": "auto"}));
+    let sk = sketch(&s, sid);
+    let restored = sk.biarc_spline(&copy.id).unwrap();
+    assert_eq!(restored.spans[0].mode, BiarcSpanMode::Auto);
+    assert_eq!(restored.spans[0].centers, copy.spans[0].centers);
+    assert_eq!(sk.biarc_spline(&original.id), Some(&original));
+    sk.validate_biarc_splines().unwrap();
+}
+
+#[test]
+fn cutting_a_reserved_biarc_center_pastes_the_spline_back_in_place() {
+    let (mut s, sid, spline) = biarc_drawing();
+    let before = sketch(&s, sid).clone();
+    let center = &spline.spans[0].centers[0];
+    let cut = run(&mut s, "sketch.cut", json!({"entities": [center]}));
+    assert_eq!(cut["curves"], spline.all_curves().count());
+    assert!(sketch(&s, sid).biarc_splines.is_empty());
+    let pasted = run(&mut s, "sketch.paste", json!({}));
+    assert_eq!(pasted["translate"], json!([0.0, 0.0]));
+    let sk = sketch(&s, sid);
+    let copy = &sk.biarc_splines[0];
+    assert_eq!(copy.spans[0].mode, BiarcSpanMode::StraightStart);
+    for (old, new) in spline.all_curves().zip(copy.all_curves()) {
+        assert_eq!(pos(&before, old), pos(sk, new));
+    }
+    sk.validate_biarc_splines().unwrap();
+}
+
+#[test]
+fn replacing_a_sketch_preserves_the_source_biarc_definition() {
+    let (mut s, source, spline) = biarc_drawing();
+    run(&mut s, "sketch.finish", json!({}));
+    let target = run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Target"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.replace", json!({"sketch": target, "from": source}));
+    let sk = sketch(&s, target);
+    let copy = &sk.biarc_splines[0];
+    assert_eq!((copy.spans[0].mode, copy.spans[0].ratio), (BiarcSpanMode::StraightStart, 0.25));
+    for (old, new) in spline.all_curves().zip(copy.all_curves()) {
+        assert_eq!(pos(sketch(&s, source), old), pos(sk, new));
+    }
+    sk.validate_biarc_splines().unwrap();
+}
+
+/// Parameters that are not a JSON object (a number, text, a list) are an error (#1536, found by
+/// `hostile_params_never_panic`).
 #[test]
 fn clipboard_commands_refuse_parameters_that_are_not_an_object() {
     let (mut s, rect, _) = drawing();

@@ -17,6 +17,7 @@ use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_engine::kernel::Continuity;
 
 use crate::SolveApp;
+use crate::sketch_biarc_ui;
 use crate::tool_modifiers::{Audit, Binding, Match, ModAction, ModifierCombo, Scope, ToolModifiers, Trigger};
 use crate::tools::{Kind, Tool};
 use crate::viewport::{Hit, Proj, pick_for_tool as pick, sketch_point_at};
@@ -73,6 +74,7 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "sketch.slot.center_point", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.slot.arc_three_point", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.slot.arc_center", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
+    ToolModifiers { tool: sketch_biarc_ui::COMMAND, scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.spline.fit_point", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.spline.control_point", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.spline.control_point_5", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
@@ -645,9 +647,14 @@ pub fn refine_snap(
     let mid_tol = if mid_only { tol * 1.5 } else { tol };
     let mut best: Option<(f64, &'static str, Vec2)> = None;
     let mut mid_of: Option<String> = None;
+    // Ordinary construction curves keep their snaps when hidden. Biarc's own hidden guides
+    // and construction pieces are unavailable until the user shows construction geometry.
+    let hidden_biarcs: std::collections::HashSet<_> =
+        sk.biarc_splines.iter().filter(|_| sk.view.hide_construction).flat_map(|spline| spline.all_curves()).collect();
+    let snap_curve = |i: usize| sk.curves.get(i).is_some_and(|c| !c.construction || !hidden_biarcs.contains(c.id.as_str()));
     // A crossing of two curves, before a midpoint or a point on one curve.
     if !mid_only
-        && let Some((q, i, j)) = solidcraft_engine::sketch::nearest_curve_intersection(sk, lp, tol)
+        && let Some((q, i, j)) = sk.nearest_curve_intersection(lp, tol, snap_curve)
         && let (Some(a), Some(b)) = (sk.curves.get(i), sk.curves.get(j))
     {
         best = Some((q.dist(lp), "X", q));
@@ -656,6 +663,7 @@ pub fn refine_snap(
     if best.is_none() {
         for (i, c) in sk.curves.iter().enumerate() {
             if let solidcraft_engine::sketch::CurveKind::Line { .. } = c.kind
+                && snap_curve(i)
                 && let Some(solidcraft_engine::sketch::Shape::Line { a, b }) = sk.shape(i)
             {
                 let m = (a + b) * 0.5;
@@ -714,6 +722,9 @@ pub fn refine_snap(
     // constraint then puts on the curve itself (#9321).
     if !mid_only && best.is_none() {
         for (i, c) in sk.curves.iter().enumerate() {
+            if !snap_curve(i) {
+                continue;
+            }
             let (d, q) = match sk.shape(i) {
                 Some(sh) => (sh.dist(lp), sh.project(lp)),
                 None if c.kind.is_freeform() => {
@@ -938,7 +949,7 @@ fn mode(id: &str) -> Option<Mode> {
         "sketch.arc.tangent" => Mode::Points(2),
         "sketch.ellipse" | "sketch.conic" | "sketch.slot.center_point" => Mode::Points(3),
         "sketch.slot.arc_three_point" | "sketch.slot.arc_center" => Mode::Points(4),
-        "sketch.spline.fit_point" | "sketch.spline.control_point" | "sketch.spline.control_point_5" => Mode::Points(0),
+        sketch_biarc_ui::COMMAND | "sketch.spline.fit_point" | "sketch.spline.control_point" | "sketch.spline.control_point_5" => Mode::Points(0),
         "sketch.text" => Mode::Points(1),
         "sketch.edit_text" => Mode::Entities(1),
         "sketch.blend_curve" => Mode::Points(2),
@@ -984,6 +995,9 @@ pub fn image_placement_finished(tool: &Tool) -> bool {
 }
 
 pub fn hint(id: &str) -> Option<String> {
+    if id == sketch_biarc_ui::COMMAND {
+        return Some(tr("sketch.biarc.point").to_string());
+    }
     if solidcraft_engine::cmd::construction_line_mode(id).is_some() {
         return Some(crate::sketch_construction::hint(id));
     }
@@ -1476,6 +1490,10 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
 /// Typed values are checked first, so a rejected one stays in its box to be corrected rather
 /// than reaching the command.
 pub(crate) fn place_point(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<String>)) {
+    if tool.cmd == sketch_biarc_ui::COMMAND {
+        sketch_biarc_ui::place(app, tool, p);
+        return;
+    }
     if solidcraft_engine::cmd::construction_line_mode(tool.cmd).is_some() {
         crate::sketch_construction::place_point(app, tool, p);
         return;
@@ -1591,6 +1609,9 @@ fn run_entities(app: &mut SolveApp, t: &Tool) -> bool {
 /// Right-click with an extra tool: finish a chain or move to the next stage. Returns false
 /// when the tool should be dropped.
 pub fn finish(app: &mut SolveApp, tool: &mut Tool) -> bool {
+    if tool.cmd == sketch_biarc_ui::COMMAND {
+        return sketch_biarc_ui::finish(app, tool);
+    }
     // Esc or a right click ends the comb tool and turns its analysis off.
     if tool.cmd == "inspect.curvature_comb" {
         let _ = app.run(tool.cmd, json!({"clear": true}));
@@ -1760,6 +1781,10 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     let Some(sid) = active_sketch(app) else { return };
     let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = st.sketch(sid) else { return };
+    if t.cmd == sketch_biarc_ui::COMMAND {
+        sketch_biarc_ui::preview(app, t, &ss.plane, painter, proj);
+        return;
+    }
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     let tk = solidcraft_theme::Tokens::get();
     if let Some(crate::viewport::Hit::SketchCurve { sketch, id, .. }) = &app.viewport.hover

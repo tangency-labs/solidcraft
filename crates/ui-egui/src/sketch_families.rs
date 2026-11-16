@@ -52,7 +52,10 @@ pub const FAMILIES: &[Family] = &[
         ],
     },
     Family { label: "Polygon", commands: &["sketch.polygon.inscribed", "sketch.polygon.circumscribed", "sketch.polygon.edge"] },
-    Family { label: "Spline", commands: &["sketch.spline.fit_point", "sketch.spline.control_point", "sketch.spline.control_point_5"] },
+    Family {
+        label: "Spline",
+        commands: &["sketch.spline.fit_point", "sketch.spline.control_point", "sketch.spline.control_point_5", "sketch.spline.biarc"],
+    },
 ];
 
 pub fn family(id: &str) -> Option<&'static Family> {

@@ -16,6 +16,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod biarc;
 mod construct;
 mod curves;
 mod decompose;
@@ -48,6 +49,7 @@ mod union_find;
 mod wire;
 mod wire_solve;
 
+pub use biarc::{BiarcNode, BiarcSpan, BiarcSpanMode, BiarcSpanPreview, BiarcSpline, MAX_BIARC_NODES};
 pub use curves::{
     MAX_SPLINE_POINTS, bspline_beziers, conic_point, conic_rho_from_point, ellipse_point, end_curvature, fit_beziers, fit_beziers_mode,
     fit_beziers_with_handles, fit_tangent_handles, spline_end_tangent, spline_end_tangent_mode, spline_end_tangent_with_handles, spline_point,

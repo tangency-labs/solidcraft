@@ -199,7 +199,7 @@ fn universal_panel_host_menus(requested: &mut BTreeMap<String, bool>) {
     assert!(opened_overflow > 0, "must traverse an actual overflow menu");
 }
 
-fn menu(h: &mut Harness, target: Value, surface: &str, requested: &mut BTreeMap<String, bool>) {
+fn menu(h: &mut Harness, target: Value, surface: &str, requested: &mut BTreeMap<String, bool>) -> Value {
     // Open on empty canvas so the picker cannot replace the prepared face/edge/sketch
     // selection with whatever happens to lie under the menu's anchor.
     let selection = h.app.session.selection.clone();
@@ -225,6 +225,7 @@ fn menu(h: &mut Harness, target: Value, surface: &str, requested: &mut BTreeMap<
     }
     collect(h, surface, requested);
     escape(h);
+    reply
 }
 
 /// The rows of an item's flyout, and of the flyouts inside it, all have real icons.
@@ -607,6 +608,20 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         }
         panels(&mut h, &mut requested);
     }
+    let mut biarc = harness();
+    biarc.app.home.open = false;
+    biarc.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    let spline = biarc.app.run("sketch.spline.biarc", json!({"nodes":[{"point":[0,0],"tangent":[1,0]},{"point":[20,20],"tangent":[1,0]}]})).unwrap();
+    biarc.app.run("select.set", json!({"items":[{"type":"sketch_curve","id":spline["curves"][0]}]})).unwrap();
+    biarc.frames(3);
+    let reply = menu(&mut biarc, json!({"type":"viewport"}), "Biarc Spline member", &mut requested);
+    assert!(
+        ["items", "radial"]
+            .iter()
+            .flat_map(|list| reply["result"][*list].as_array().unwrap())
+            .any(|item| item["id"] == "sketch.spline.biarc.edit" && item["icon"] == "spline_biarc"),
+        "the Biarc Spline member menu must offer the editor with its sketch icon"
+    );
     // Sheet and assembly contexts expose contextual tabs and browser row kinds that
     // a single solid part cannot offer. Use repository-owned public sample recipes.
     for sample in solidcraft_engine::sample::samples().into_iter().filter(|s| matches!(s.name, "Sheet Metal Bracket" | "Hinge Assembly")) {
