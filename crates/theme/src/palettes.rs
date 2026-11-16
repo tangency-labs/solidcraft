@@ -189,6 +189,8 @@ impl Tokens {
             construction_geom: icon_primary(strokes::CONSTRUCTION_PRIMARY[0]),
             body: Color32::from_rgb(176, 186, 198),
             body_edge: Color32::from_rgb(40, 44, 52),
+            // Halfway from the edge colour to the body's: about half the edges' contrast.
+            isoparm: Color32::from_rgb(108, 115, 125),
             manipulator: Color32::from_rgb(40, 110, 220),
             joint_manipulator: Color32::from_rgb(235, 157, 0),
             joint_axis: Color32::from_rgb(0, 95, 110),
@@ -196,10 +198,10 @@ impl Tokens {
             preview_new: Color32::from_rgb(240, 225, 105),
             preview_sketch: Color32::from_rgb(32, 190, 96),
             preview_cut: Color32::from_rgba_unmultiplied_const(232, 84, 44, 110),
-            cube_face: Color32::from_rgb(236, 239, 244),
-            cube_border: Color32::from_rgb(85, 94, 110),
-            cube_text: Color32::from_rgb(38, 42, 50),
-            cube_hover: Color32::from_rgb(190, 220, 252),
+            navigator_face: Color32::from_rgb(236, 239, 244),
+            navigator_border: Color32::from_rgb(85, 94, 110),
+            navigator_text: Color32::from_rgb(38, 42, 50),
+            navigator_hover: Color32::from_rgb(190, 220, 252),
             viewport_top: Color32::from_rgb(240, 243, 247),
             viewport_bottom: Color32::from_rgb(203, 210, 221),
             grid: Color32::from_rgb(196, 202, 212),
@@ -429,6 +431,7 @@ impl Tokens {
         t.grid_major = Color32::from_rgb(73, 79, 90);
         t.body = Color32::from_rgb(152, 156, 162);
         t.body_edge = Color32::from_rgb(16, 16, 18);
+        t.isoparm = Color32::from_rgb(84, 86, 90);
         t.sketch = Color32::from_rgb(92, 150, 255);
         t.sketch_fixed = Color32::from_rgb(232, 234, 238);
         t.sketch_halo = Color32::from_rgb(28, 32, 40);

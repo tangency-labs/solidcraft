@@ -310,7 +310,16 @@ pub struct ResolvedLabels {
 
 /// Shared controls can render supplied translations verbatim while retaining catalog messages.
 pub fn resolved_labels() -> ResolvedLabels {
-    let previous = RESOLVED_LABELS.with(|labels| labels.replace(true));
+    label_scope(true)
+}
+
+/// Restore catalog lookup for content embedded in a surface with pretranslated labels.
+pub fn catalog_labels() -> ResolvedLabels {
+    label_scope(false)
+}
+
+fn label_scope(resolved: bool) -> ResolvedLabels {
+    let previous = RESOLVED_LABELS.with(|labels| labels.replace(resolved));
     ResolvedLabels { previous, _thread: std::marker::PhantomData }
 }
 

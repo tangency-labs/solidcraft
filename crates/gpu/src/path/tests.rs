@@ -2361,46 +2361,69 @@ fn shader_validates_without_a_device() {
     naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&caustic).unwrap();
 }
 
+/// Visits every statement a native compiler inlines into `block`: nested blocks, and at each call
+/// site the callee's body again, as inlining copies it.
+fn each_inlined(module: &naga::Module, block: &naga::Block, visit: &mut impl FnMut(&naga::Statement)) {
+    for statement in block.iter() {
+        visit(statement);
+        match statement {
+            naga::Statement::Call { function, .. } => each_inlined(module, &module.functions[*function].body, visit),
+            naga::Statement::Block(inner) => each_inlined(module, inner, visit),
+            naga::Statement::If { accept, reject, .. } => {
+                each_inlined(module, accept, visit);
+                each_inlined(module, reject, visit);
+            }
+            naga::Statement::Switch { cases, .. } => cases.iter().for_each(|case| each_inlined(module, &case.body, visit)),
+            naga::Statement::Loop { body, continuing, .. } => {
+                each_inlined(module, body, visit);
+                each_inlined(module, continuing, visit);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// #6705: native compilers inline every call. With 33 inlined BVH walks in `main` (three path
 /// samples, a shadow walk per light source family) NVIDIA's Vulkan compiler crashed or ran out
 /// of memory and never built the pipeline. Count the walks `main` inlines, so another call site
 /// is a deliberate choice, checked on such a driver.
 #[test]
 fn main_inlines_few_bvh_walks() {
-    fn callees(block: &naga::Block, out: &mut Vec<naga::Handle<naga::Function>>) {
-        for statement in block.iter() {
-            match statement {
-                naga::Statement::Call { function, .. } => out.push(*function),
-                naga::Statement::Block(inner) => callees(inner, out),
-                naga::Statement::If { accept, reject, .. } => {
-                    callees(accept, out);
-                    callees(reject, out);
-                }
-                naga::Statement::Switch { cases, .. } => cases.iter().for_each(|case| callees(&case.body, out)),
-                naga::Statement::Loop { body, continuing, .. } => {
-                    callees(body, out);
-                    callees(continuing, out);
-                }
-                _ => {}
-            }
-        }
-    }
-    fn walks(module: &naga::Module, function: &naga::Function) -> usize {
-        let mut called = Vec::new();
-        callees(&function.body, &mut called);
-        called
-            .into_iter()
-            .map(|handle| {
-                let callee = &module.functions[handle];
-                let walk = matches!(callee.name.as_deref(), Some("trace_precise_within" | "trace_ordered_within" | "origin_boundary"));
-                usize::from(walk) + walks(module, callee)
-            })
-            .sum()
-    }
     let module = naga::front::wgsl::parse_str(SHADER).unwrap();
     let main = module.entry_points.iter().find(|entry| entry.name == "main").unwrap();
-    let inlined = walks(&module, &main.function);
+    let mut inlined = 0;
+    each_inlined(&module, &main.function.body, &mut |statement| {
+        if let naga::Statement::Call { function, .. } = statement {
+            let callee = module.functions[*function].name.as_deref();
+            inlined += usize::from(matches!(callee, Some("trace_precise_within" | "trace_ordered_within" | "origin_boundary")));
+        }
+    });
     assert!(inlined <= 5, "`main` inlines {inlined} BVH walks");
+}
+
+/// #14105: the walks' size matters too. A native compiler's time and memory grow faster than the
+/// statements it inlines: on one Vulkan driver the path programs took up to 17 minutes and 61 GB
+/// to compile. Each budget is about 1.5 times its entry point's count when #14105 was fixed, far
+/// below the count before (before -> fixed): path `main` 196,450 -> 28,414, `optical_resolve`
+/// 54,888 -> 7,777, `denoise_guides` 70,517 -> 7,906, caustic `main` 211,786 -> 33,386 and
+/// `photon_emit` 107,085 -> 14,782. A larger program is a deliberate choice, checked on such a driver.
+#[test]
+fn heavy_entry_points_inline_few_statements() {
+    let guides = format!("{SHADER}\n{}", denoise::GUIDES);
+    let caustics = photons::shader_source().unwrap();
+    for (program, source, entry, budget) in [
+        ("path", SHADER, "main", 45_000),
+        ("path", SHADER, "optical_resolve", 12_000),
+        ("denoise", guides.as_str(), "denoise_guides", 12_000),
+        ("caustic", caustics.as_str(), "main", 50_000),
+        ("caustic", caustics.as_str(), "photon_emit", 22_000),
+    ] {
+        let module = naga::front::wgsl::parse_str(source).unwrap();
+        let function = &module.entry_points.iter().find(|point| point.name == entry).unwrap().function;
+        let mut statements = 0usize;
+        each_inlined(&module, &function.body, &mut |_| statements += 1);
+        assert!(statements <= budget, "the {program} program's `{entry}` inlines {statements} statements, over its budget of {budget}");
+    }
 }
 
 #[test]
@@ -3952,23 +3975,27 @@ fn texture_admission_rejects_glass_and_stale_identity_and_honors_cancellation() 
     assert!(admission(&scene, &input, JobOptions::default()).is_err());
 }
 #[test]
-fn host_readiness_includes_unmapped_non_nested_glass() {
+fn host_readiness_includes_unmapped_glass() {
     let Some(executor) = executor() else { return };
     let context = &executor.context;
-    assert!(context.prepared_scene_pipeline(true, false, false, false).is_ok());
-    assert!(context.prepared_scene_pipeline(false, false, false, false).is_ok(), "a ready host must already prepare ordinary unmapped glass");
+    assert!(context.prepared_scene_pipeline(true, false, false).is_ok());
+    assert!(context.prepared_scene_pipeline(false, false, false).is_ok(), "a ready host must already prepare ordinary unmapped glass");
     assert!(context.clamped_pipelines.iter().all(|slot| slot.get().is_none()), "indirect-clamp programs stay lazy");
-    let plain = scene_pipeline_variant(false, false, false).unwrap();
+    let plain = scene_pipeline_variant(false, false).unwrap();
     assert!(context.scene_pipelines[plain].get().is_some());
-    for (opaque, maps, nested) in [(true, true, false), (false, false, true), (false, true, false), (false, true, true)] {
-        let variant = scene_pipeline_variant(opaque, maps, nested).unwrap();
-        assert!(context.scene_pipelines[variant].get().is_none(), "uncommon map/nesting programs stay lazy");
+    for (opaque, maps) in [(true, true), (false, true)] {
+        let variant = scene_pipeline_variant(opaque, maps).unwrap();
+        assert!(context.scene_pipelines[variant].get().is_none(), "the mapped program stays lazy");
     }
     let mut glass = sphere(white());
     glass.meshes[0].transmission = Some(clear_glass());
     let options = JobOptions { samples: 1, max_depth: 3, ..Default::default() };
+    // Nested media are a uniform: such a job runs the ready unmapped program, no second compile.
+    let nested = Task::new(context.clone(), glass.clone(), request(2), JobOptions { nested_media: true, ..options }, CancelToken::default()).unwrap();
+    assert_eq!(&nested.render_pipeline, context.prepared_scene_pipeline(false, false, false).unwrap());
     let mut task = Task::new(context.clone(), glass, request(2), options, CancelToken::default()).unwrap();
     assert!(!task.opaque_scene && !task.has_textures);
+    assert_eq!(task.render_pipeline, nested.render_pipeline);
     task.complete_sample().unwrap();
     let pixels = task.read_linear().unwrap();
     assert_eq!(pixels.len(), 4);
@@ -3977,7 +4004,7 @@ fn host_readiness_includes_unmapped_non_nested_glass() {
     let options = JobOptions { clamp_indirect: Some(2.0), ..options };
     let mut clamped = Task::new(context.clone(), sphere(white()), request(2), options, CancelToken::default()).unwrap();
     clamped.complete_sample().unwrap();
-    let opaque = clamped_pipeline_variant(true, false, false);
+    let opaque = clamped_pipeline_variant(true, false);
     for (index, slot) in context.clamped_pipelines.iter().enumerate() {
         assert_eq!(slot.get().is_some(), index == opaque, "clamped program {index}");
     }
@@ -4030,33 +4057,22 @@ fn opaque_scene_specialization_preserves_body_face_and_volume_media() {
     let mut variants = std::collections::BTreeSet::new();
     for opaque in [false, true] {
         for maps in [false, true] {
-            for nested in [false, true] {
-                let slot = scene_pipeline_variant(opaque, maps, nested);
-                assert_eq!(slot.is_none(), opaque && !maps, "only opaque/no-map uses the eager base");
-                assert!(slot.is_none_or(|index| index < SCENE_PIPELINE_CACHE_SLOTS));
-                variants.insert(slot);
-            }
-            if opaque {
-                assert_eq!(scene_pipeline_variant(opaque, maps, false), scene_pipeline_variant(opaque, maps, true));
-            } else {
-                assert_ne!(
-                    scene_pipeline_variant(opaque, maps, false),
-                    scene_pipeline_variant(opaque, maps, true),
-                    "disjoint and nested options retain separate scene cache entries"
-                );
-            }
+            let slot = scene_pipeline_variant(opaque, maps);
+            assert_eq!(slot.is_none(), opaque && !maps, "only opaque/no-map uses the eager base");
+            assert!(slot.is_none_or(|index| index < SCENE_PIPELINE_CACHE_SLOTS));
+            variants.insert(slot);
         }
     }
     assert_eq!(variants.len(), SCENE_PIPELINE_CACHE_SLOTS + 1);
-    // Each of the six programs has its own clamped slot.
+    // The slot is the program: an opaque scene with maps runs the full program with maps.
+    assert_eq!(scene_pipeline_variant(true, true), scene_pipeline_variant(false, true), "mapped opaque and glass compile one program");
+    // Each of the three programs has its own clamped slot.
     let mut clamped = std::collections::BTreeMap::new();
     for opaque in [false, true] {
         for maps in [false, true] {
-            for nested in [false, true] {
-                let slot = clamped_pipeline_variant(opaque, maps, nested);
-                assert!(slot < CLAMPED_PIPELINE_CACHE_SLOTS);
-                clamped.entry(slot).or_insert_with(std::collections::BTreeSet::new).insert(scene_pipeline_variant(opaque, maps, nested));
-            }
+            let slot = clamped_pipeline_variant(opaque, maps);
+            assert!(slot < CLAMPED_PIPELINE_CACHE_SLOTS);
+            clamped.entry(slot).or_insert_with(std::collections::BTreeSet::new).insert(scene_pipeline_variant(opaque, maps));
         }
     }
     assert_eq!(clamped.len(), CLAMPED_PIPELINE_CACHE_SLOTS);
@@ -7499,14 +7515,99 @@ fn gpu_punctual_offset_preserves_small_shift_after_large_local_barycentric_displ
 
 #[test]
 fn shared_bvh_node_walk_preserves_original_ordinary_and_compensated_hit_bits() {
-    // Frozen f53 policy, not re-derived from the new implementation. Only its
-    // test-local function name changes; it still calls the byte-identical old
-    // ordered walker for zero low parts. This reference entry inlines three
+    // Frozen f53 policy, not re-derived from the new implementation: the old
+    // precise and ordered walkers under test-local names, and the old
+    // triangle_ahead_precise the shader no longer needs. legacy_precise_policy
+    // sends zero low parts to legacy_ordered_within, as the old policy did; both
+    // keep three direct difference_products calls per candidate, which the shader
+    // now makes at one edge_weights call site. This reference entry inlines three
     // real walks, rather than compiling the historical seven-walk main.
-    let legacy = r#"fn legacy_precise_policy(o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>, any_hit: bool, excluded: u32, minimum: f32, inside: bool, limit: f32, blocker: f32) -> Hit {
+    let legacy = r#"fn triangle_ahead_precise(t: Triangle, o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>) -> bool {
+    if all(o_low==vec3<f32>(0.0)) { return triangle_ahead(t,o,d); }
+    let lo=precise_point_delta(min(t.p0.xyz,min(t.p1.xyz,t.p2.xyz)),vec3<f32>(0.0),o,o_low);
+    let hi=precise_point_delta(max(t.p0.xyz,max(t.p1.xyz,t.p2.xyz)),vec3<f32>(0.0),o,o_low);
+    if any((lo>=vec3<f32>(0.0))&(d<vec3<f32>(0.0))) || any((hi<=vec3<f32>(0.0))&(d>vec3<f32>(0.0))) { return false; }
+    if any((d==vec3<f32>(0.0))&((lo>vec3<f32>(0.0))|(hi<vec3<f32>(0.0)))) { return false; }
+    return true;
+}
+fn legacy_ordered_within(o: vec3<f32>, d: vec3<f32>, any_hit: bool, excluded: u32, minimum: f32, inside: bool, limit: f32, blocker: f32) -> Hit {
+    var hit = Hit(limit, 0xffffffffu, vec3<f32>(0.0));
+    let origin_error=max(max(abs(o.x),max(abs(o.y),abs(o.z))),1.0)*(1.0/1048576.0);
+    var source: Triangle;
+    if excluded!=0xffffffffu { source=triangle(excluded); }
+    // Project every candidate into the same ray-aligned 2D coordinate system.
+    // Shared edges then use identical products with opposite signs, avoiding the
+    // independently rounded barycentric comparisons of Moller-Trumbore.
+    var kz = 0u;
+    if abs(d.y)>abs(d.x) { kz=1u; }
+    if abs(d.z)>abs(d[kz]) { kz=2u; }
+    let kx=(kz+1u)%3u; let ky=(kx+1u)%3u;
+    let shear=vec3<f32>(d[kx]/d[kz],d[ky]/d[kz],1.0/d[kz]);
+    let order=select(-1.0,1.0,d[kz]>0.0);
+    var best=FAR;
+    // Children are tested at their parent and visited near-first. The build
+    // bounds tree depth to 30, so at most 31 nodes are pending.
+    var stack: array<u32, 32>;
+    var entry: array<f32, 32>;
+    if nodes[0].first == 0xffffffffu { return hit; }
+    entry[0] = box_entry_padded(nodes[0], o, d, hit.distance, u.lighting.x);
+    if entry[0] < 0.0 { return hit; }
+    stack[0] = 0u;
+    var size = 1u;
+    loop {
+        if size == 0u { break; }
+        size -= 1u;
+        if entry[size] > hit.distance { continue; }
+        let node = nodes[stack[size]];
+        if node.count == 0u {
+            if size + 2u > 32u { break; }
+            let left = box_entry_padded(nodes[node.first], o, d, hit.distance, u.lighting.x);
+            let right = box_entry_padded(nodes[node.first+1u], o, d, hit.distance, u.lighting.x);
+            var near_child = node.first; var near_entry = left;
+            var far_child = node.first+1u; var far_entry = right;
+            if right >= 0.0 && (left < 0.0 || right < left) {
+                near_child = node.first+1u; near_entry = right;
+                far_child = node.first; far_entry = left;
+            }
+            if far_entry >= 0.0 { stack[size] = far_child; entry[size] = far_entry; size += 1u; }
+            if near_entry >= 0.0 { stack[size] = near_child; entry[size] = near_entry; size += 1u; }
+            continue;
+        }
+        for (var i = node.first; i < node.first + node.count; i += 1u) {
+            if i == excluded { continue; }
+            // A straight continuation cannot revisit its producing exact plane.
+            // IDs join only connected, exactly coplanar uploaded f32 triangles
+            // of one body; curved facets and other bodies remain candidates.
+            if excluded!=0xffffffffu && geometry[geometry[3]+i]==geometry[geometry[3]+excluded] { continue; }
+            let t = triangle(i);
+            if !triangle_ahead(t,o,d) { continue; }
+            let pa=t.p0.xyz-o; let pb=t.p1.xyz-o; let pc=t.p2.xyz-o;
+            let a=vec2<f32>(pa[kx]-shear.x*pa[kz],pa[ky]-shear.y*pa[kz]);
+            let b=vec2<f32>(pb[kx]-shear.x*pb[kz],pb[ky]-shear.y*pb[kz]);
+            let c=vec2<f32>(pc[kx]-shear.x*pc[kz],pc[ky]-shear.y*pc[kz]);
+            let weights=vec3<f32>(difference_products(b.x,c.y,b.y,c.x),difference_products(c.x,a.y,c.y,a.x),difference_products(a.x,b.y,a.y,b.x));
+            if any(weights<vec3<f32>(0.0)) && any(weights>vec3<f32>(0.0)) { continue; }
+            let det=weights.x+weights.y+weights.z;
+            if det==0.0 { continue; }
+            // Retain all three directly evaluated weights: 1-u-v can erase a
+            // small corner clearance when the other two weights sum to one.
+            let bary=weights/det;
+            let depth=surface_ray_depth(t,bary,o,kz);
+            let distance=depth*shear.z;
+            let key=depth*order;
+            if excluded!=0xffffffffu && repeated_crossing(t,source,d,inside,distance,origin_error) { continue; }
+            if distance > minimum && distance < limit && (key < best || (key == best && tie_preferred(t,d,inside))) {
+                hit = Hit(distance,i,bary); best=key;
+                if any_hit || (distance < blocker && (t.base.w<=0.0 || t.coat.w<=0.0)) { return hit; }
+            }
+        }
+    }
+    return hit;
+}
+fn legacy_precise_policy(o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>, any_hit: bool, excluded: u32, minimum: f32, inside: bool, limit: f32, blocker: f32) -> Hit {
     // Dispatch once before traversal. Ordinary rays keep the original lean BVH
     // loop, without precision-helper branches inside every candidate/node test.
-    if all(o_low==vec3<f32>(0.0)) { return trace_ordered_within(o,d,any_hit,excluded,minimum,inside,limit,blocker); }
+    if all(o_low==vec3<f32>(0.0)) { return legacy_ordered_within(o,d,any_hit,excluded,minimum,inside,limit,blocker); }
     var hit = Hit(limit, 0xffffffffu, vec3<f32>(0.0));
     // Project every candidate into the same ray-aligned 2D coordinate system.
     // Shared edges then use identical products with opposite signs, avoiding the

@@ -1,7 +1,7 @@
 //! The cliff overflow's subtraction on the live session (not upstream): the fork's
 //! `SmFilletExecutive::SubtractRemovalRegion` and `sm_HoldsItsLaw`
 //! (`source/SMLib/src/SmFilletCliffOverflow.cpp`, tangency-labs/smlib `8ba4667`, `ae2a6de`,
-//! rev `68fb9162`; `fixes.fillet_cliff_overflow`, WR-631, WR-638). The construction steps
+//! rev `68fb9162`; WR-631, WR-638). The construction steps
 //! are in [`crate::blend::fillet_cliff_overflow`].
 //!
 //! | Rust                                       | Fork                                      |
@@ -10,8 +10,7 @@
 //! | `FilletSession::holds_its_law` (private)   | `sm_HoldsItsLaw`                          |
 //!
 //! Deviations:
-//! - **Section ends (not the fork's).** With `fixes.fillet_round_ends_at_tangent_continuation`
-//!   (WR-674, #2176) an open end noted as a section is cut by the plane through its vertex
+//! - **Section ends (not the fork's).** (WR-674, #2176) An open end noted as a section is cut by the plane through its vertex
 //!   normal to the filleted edge, and a round whose two ends are both such ends is closed by
 //!   `close_section_ended_round` instead of `close_removal_region`; any other combination
 //!   is refused as no room.
@@ -81,6 +80,7 @@ impl FilletSession<'_> {
         self.executive.error.code = refusal.code as i32;
         self.executive.error.comment = refusal.comment.into();
         self.executive.error.no_room = refusal.reason;
+        self.executive.error.no_room_without_site = true;
     }
 
     /// Note `note`'s refusal, if any, and pass `result` on.
@@ -387,6 +387,7 @@ impl FilletSession<'_> {
                 &end_surface,
                 vertex_point,
                 edge_mid,
+                solver_tol,
                 solver_tol,
                 &mut note,
             );

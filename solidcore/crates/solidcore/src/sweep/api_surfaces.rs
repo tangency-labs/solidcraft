@@ -275,6 +275,9 @@ fn skin_primitive(
             }
             Ok((start, side, end))
         })?;
+    // Not upstream: the flat side walls are their planes (WR-782).
+    let mut brep = brep;
+    crate::sweep::skin_flat_walls::flat_walls_as_planes(k, &mut brep, &side_faces)?;
     Ok(SkinPrimitive {
         brep,
         start_faces,
@@ -445,6 +448,7 @@ pub fn create_skin(k: &Kernel, profiles: &[BSplineCurve]) -> Result<BSplineSurfa
             intersections_with_rails: None,
             deriv_surfs: Some([None, None]), // derivative surfaces
             degree: 3,
+            section_params: None,
         },
     )
 }

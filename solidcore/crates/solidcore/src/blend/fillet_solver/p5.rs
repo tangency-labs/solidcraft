@@ -341,9 +341,7 @@ impl FilletSolver {
                 fillets.with_rail_classification(rail, |pseudo, cc| {
                     context.classify(k, target, pseudo, face, cc)
                 })?;
-                if k.fixes.fillet_rail_rim_on_face {
-                    join_intervals_on_face(fillets, rail)?;
-                }
+                join_intervals_on_face(fillets, rail)?;
                 finish_classification(
                     solver,
                     k,

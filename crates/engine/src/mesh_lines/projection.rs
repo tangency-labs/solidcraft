@@ -73,6 +73,11 @@ impl View {
         Ok(projected)
     }
 
+    /// The direction from `p` toward the eye, not normalised.
+    pub(super) fn toward(&self, p: Vec3) -> Vec3 {
+        self.perspective.map_or(self.back, |distance| self.origin + self.back * distance - p)
+    }
+
     /// Where the world origin lands in the view's right and up, so a drawing can be shifted to
     /// put its zero there.
     pub(crate) fn world_origin(&self) -> Result<Vec2, &'static str> {

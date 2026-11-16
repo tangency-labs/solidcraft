@@ -18,6 +18,7 @@ pub mod cases {
 }
 pub mod compare;
 pub mod constructor;
+pub mod dump;
 pub mod fixtures;
 pub mod flat;
 pub mod golden;

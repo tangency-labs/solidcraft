@@ -87,9 +87,11 @@ fn a_tolerance_or_width_not_finite_and_positive_is_refused() {
     all_fixes();
     let a = make_box([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
     let b = make_box([2.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
-    let invalid = Error::Status(solidcore::error::SM_ERR_INVALID_INPUT);
+    let refused = |e: Error| matches!(e, Error::Refused { reason, .. } if !reason.is_empty());
     for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
-        assert_eq!(a.meets(&b, bad).unwrap_err(), invalid, "{bad}");
-        assert_eq!(a.boundary_distance(&b, bad).unwrap_err(), invalid, "{bad}");
+        let e = a.meets(&b, bad).unwrap_err();
+        assert!(refused(e.clone()), "{bad}: {e:?}");
+        let e = a.boundary_distance(&b, bad).unwrap_err();
+        assert!(refused(e.clone()), "{bad}: {e:?}");
     }
 }

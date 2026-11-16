@@ -1,6 +1,5 @@
 //! WR-634 (the fork's tangency-labs/smlib@241f7ba): the executive's overflow-first hooks.
-//! With `fillet_refuse_rails_leaving_faces` and `fillet_cliff_overflow`, a session set to
-//! classify only (`set_classify_only`), or to put overflows first (`set_overflow_first`)
+//! A session set to classify only (`set_classify_only`), or to put overflows first (`set_overflow_first`)
 //! when blends of several edges overflow, stops after classifying the rails, builds
 //! nothing, reports `FilletErrorType::OverflowFirst` and the edges whose blends overflow
 //! (`overflow_edges`). The ordering is the caller's; the last test emulates the fork's C
@@ -25,12 +24,9 @@ use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
-fn kernel(cliff: bool) -> Kernel {
+fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = cliff;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = cliff;
     k
 }
 
@@ -125,7 +121,7 @@ fn r21_closed_form() -> f64 {
 
 #[test]
 fn classify_only_stops_after_classification_and_reports_overflowing_edges() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = cube(&mut k);
     let [ex, ey, ez] = corner_edges(&k, &b);
     // each edge alone: only the R21 overflows its faces
@@ -146,7 +142,7 @@ fn classify_only_stops_after_classification_and_reports_overflowing_edges() {
 
 #[test]
 fn overflow_first_stops_when_blends_of_several_edges_overflow() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = cube(&mut k);
     let edges = corner_edges(&k, &b);
     let r = run(&mut k, &mut b, &edges, &[21.0, 5.0, 5.0], false, true);
@@ -161,20 +157,13 @@ fn overflow_first_stops_when_blends_of_several_edges_overflow() {
 }
 
 #[test]
-fn hooks_off_or_without_the_flags_change_nothing() {
+fn hooks_off_change_nothing() {
     // hooks off: the three together are not stopped
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = cube(&mut k);
     let edges = corner_edges(&k, &b);
     let r = run(&mut k, &mut b, &edges, &[21.0, 5.0, 5.0], false, false);
     assert_ne!(r.code, STOP);
-    assert!(r.overflow.is_empty());
-    // without the cliff overflow flags the hooks do nothing: a fitting blend builds
-    let mut k = kernel(false);
-    let mut b = cube(&mut k);
-    let edges = corner_edges(&k, &b);
-    let r = run(&mut k, &mut b, &edges[1..2], &[5.0], true, true);
-    assert!(r.ok, "code {}", r.code);
     assert!(r.overflow.is_empty());
 }
 
@@ -184,7 +173,7 @@ fn hooks_off_or_without_the_flags_change_nothing() {
 /// R5 edges lie on, so they are gone and the result is the R21's alone.
 #[test]
 fn overflow_goes_first_on_a_cube_corner_matches_the_closed_form() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = cube(&mut k);
     let edges = corner_edges(&k, &b);
     let radii = [21.0, 5.0, 5.0];
