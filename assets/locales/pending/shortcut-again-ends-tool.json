@@ -2,5 +2,25 @@
   "en": {
     "prefs.sketch.shortcut_again_ends_tool": "Pressing an active tool's shortcut again closes it",
     "prefs.sketch.shortcut_again_ends_tool_tip": "Pressing the shortcut for the active tool or dialog again closes it, as Esc does. Off: pressing the shortcut restarts the tool or dialog."
+  },
+  "ar": {
+    "prefs.sketch.shortcut_again_ends_tool": "الضغط على اختصار الأداة النشطة مرة أخرى يغلقها",
+    "prefs.sketch.shortcut_again_ends_tool_tip": "الضغط مرة أخرى على اختصار الأداة أو مربع الحوار النشط يغلقه، كما يفعل مفتاح Esc. عند الإيقاف: يعيد الضغط تشغيل الأداة أو مربع الحوار."
+  },
+  "he": {
+    "prefs.sketch.shortcut_again_ends_tool": "לחיצה חוזרת על קיצור הדרך של הכלי הפעיל סוגרת אותו",
+    "prefs.sketch.shortcut_again_ends_tool_tip": "לחיצה חוזרת על קיצור הדרך של הכלי או החלון הפעיל סוגרת אותו, כמו Esc. כבוי: לחיצה מפעילה את הכלי או החלון מחדש."
+  },
+  "ja": {
+    "prefs.sketch.shortcut_again_ends_tool": "使用中のツールのショートカットをもう一度押すと閉じる",
+    "prefs.sketch.shortcut_again_ends_tool_tip": "使用中のツールまたはダイアログのショートカットをもう一度押すと、Esc と同様に閉じます。オフ: 押すとツールまたはダイアログを最初からやり直します。"
+  },
+  "vi": {
+    "prefs.sketch.shortcut_again_ends_tool": "Nhấn lại phím tắt của công cụ đang chạy sẽ đóng nó",
+    "prefs.sketch.shortcut_again_ends_tool_tip": "Nhấn lại phím tắt của công cụ hoặc hộp thoại đang mở sẽ đóng nó, giống như nhấn Esc. Tắt: nhấn lại sẽ khởi động lại công cụ hoặc hộp thoại."
+  },
+  "zh": {
+    "prefs.sketch.shortcut_again_ends_tool": "再次按下活动工具的快捷键将其关闭",
+    "prefs.sketch.shortcut_again_ends_tool_tip": "再次按下活动工具或对话框的快捷键会像按 Esc 一样将其关闭。关闭此项：再次按下会重新启动该工具或对话框。"
   }
 }

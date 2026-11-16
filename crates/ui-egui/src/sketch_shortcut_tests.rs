@@ -262,6 +262,8 @@ fn a_tools_shortcut_pressed_again_closes_it_by_default() {
     assert_eq!(tool(&h), Some("sketch.line"), "key repeat keeps the tool");
     press(&mut h, "L");
     assert_eq!(tool(&h), None, "pressing L again closes the tool");
+    crate::keymap::press(&mut h.app, "L", true);
+    assert_eq!(tool(&h), None, "key repeat after closing does not reopen the tool");
     h.app.finish_sketch();
     h.settle();
     press(&mut h, "E");
@@ -270,6 +272,8 @@ fn a_tools_shortcut_pressed_again_closes_it_by_default() {
     assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"), "key repeat keeps the dialog");
     press(&mut h, "E");
     assert!(h.app.dialog.is_none(), "pressing E again closes the extrude dialog");
+    crate::keymap::press(&mut h.app, "E", true);
+    assert!(h.app.dialog.is_none(), "key repeat after closing does not reopen the dialog");
     // The old way, behind the preference: pressing the key again restarts the tool.
     h.app.preferences.shortcut_again_ends_tool = false;
     h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
