@@ -989,6 +989,8 @@ fn split_uv_trim(k: &Kernel, b: &mut Brep, input: SplitUvInput) -> Result<()> {
         orientation,
         for_tessellation,
     );
+    // `error::ignored`, not `native_failure`, on purpose: the edge split must
+    // complete even when a trim split fails.
     if crate::error::ignored(split)?.is_none() {
         for eu in [original, new] {
             crate::error::ignored(crate::topology::edgeuse::p1::set_uv_trim_curve(

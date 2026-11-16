@@ -544,6 +544,7 @@ impl PlaneCutter {
 /// ([`p5::stitch_and_orient`]). Upstream ignores the stitch's status too; the port's
 /// stitch passes a failed first pass on before the second pass and the orientation
 /// (WR-658), so a cut that went on would hand back an unstitched, unoriented body.
+/// `b` may be partly edited (cut but not stitched or oriented) when this returns `Err`.
 #[allow(clippy::too_many_arguments)]
 pub fn do_cut(
     k: &mut Kernel,
@@ -712,7 +713,8 @@ fn stitch_cut(
 /// # Errors
 ///
 /// `SM_ERR_INVALID_INPUT` (a [`TopologyFailure`](crate::error::topology::TopologyFailure)) for a normal `Unitize` rejects,
-/// before `b` is touched; those of [`do_cut`].
+/// before `b` is touched; those of [`do_cut`]. `b` may be partly edited (cut but not
+/// stitched or oriented) when this returns `Err`.
 pub fn cut_notified(
     k: &mut Kernel,
     b: &mut Brep,
