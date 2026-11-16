@@ -3,10 +3,10 @@
 //! fork traced both to #977 (`RemoveExcessFaces` before the merge), whose closed-shell
 //! case the Rust port covers with `issue_977_closed_shell_excess_faces_after_merge`.
 //! The ladder part is not public; this probe takes the whole offset of #977's plate
-//! (30 x 20 x 6, an r1.5 through hole 1 from the front side) 1.5 inward, by default and
-//! with the #977 opt-in (with it, a manifold solid of the closed form's volume;
-//! plan/findings/offset.offset_executive_p2--issue-400-865-shell-probes.md). The offset
-//! faces' crossing loops (#854, WR-345) are always resolved.
+//! (30 x 20 x 6, an r1.5 through hole 1 from the front side) 1.5 inward: a manifold solid of
+//! the closed form's volume (plan/findings/offset.offset_executive_p2--issue-400-865-shell-probes.md).
+//! #977's excess faces are found after the merge and the offset faces' crossing loops
+//! (#854, WR-345) are resolved, both always.
 //!
 //! The inward offset is the plate shrunk by 1.5 (27 x 17 x 3) less the hole's offset
 //! (r 3 about (15, 2.5)), which crosses the front's offset at y = 1.5.
@@ -26,8 +26,7 @@ use offset_fixture::{offset_full, report, volume};
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::error::offset::{LoopCrossing, OffsetFailure};
 use solidcore::error::Reason;
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::object::ObjectRef;
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::math::Point3;
 use solidcore::offset::offset_executive::p1::{OffsetExecutive, OffsetOperation};
 use solidcore::offset::offset_executive::p2::SolidOffsetOptions;
@@ -39,7 +38,7 @@ use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::{Brep, EntityRef, Kernel};
+use solidcore::{Brep, Kernel};
 
 fn plate(k: &mut Kernel) -> Brep {
     let plate = create_box(k, Point3::new(0.0, 0.0, 0.0), 30.0, 20.0, 6.0).unwrap();
@@ -56,14 +55,13 @@ fn want() -> f64 {
     ((30.0 - 2.0 * t) * (20.0 - 2.0 * t) - disc_inside) * (6.0 - 2.0 * t)
 }
 
-fn run(fixed: bool) -> bool {
+fn run() -> bool {
     let mut k = Kernel::default();
-    k.fixes.offset_excess_faces_after_merge = fixed;
     let mut b = plate(&mut k);
     let result = offset_full(&mut k, &mut b, -1.5);
     report(
         &k,
-        &format!("issue_865 whole offset -1.5, opt-in={fixed}"),
+        "issue_865 whole offset -1.5",
         result,
         Some(want()),
         1e-6,
@@ -71,14 +69,8 @@ fn run(fixed: bool) -> bool {
 }
 
 #[test]
-fn issue_865_whole_offset_default() {
-    // without the #977 opt-in: reported only
-    let _ = run(false);
-}
-
-#[test]
 fn issue_865_whole_offset_with_fixes() {
-    assert!(run(true));
+    assert!(run());
 }
 
 /// The plate with a second through hole, r 1 about (15, 12), well clear of everything:
@@ -92,7 +84,6 @@ fn issue_865_whole_offset_with_fixes() {
 #[test]
 fn an_uncut_hole_beside_a_crossing_is_kept_whole() {
     let mut k = Kernel::default();
-    k.fixes.offset_excess_faces_after_merge = true;
     let first = plate(&mut k);
     let second = create_cylinder(&mut k, Point3::new(15.0, 12.0, -1.0), 1.0, 8.0).unwrap();
     let mut b = boolean_difference(&mut k, first, second).unwrap();
@@ -193,10 +184,7 @@ fn cyl_on_box(k: &mut Kernel, name: &str, tolerance: f64) -> Option<Brep> {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,

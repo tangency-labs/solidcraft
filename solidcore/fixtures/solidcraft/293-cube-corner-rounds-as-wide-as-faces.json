@@ -57,8 +57,6 @@
    "name": "corner_rounds_as_wide_as_faces_refused_with_their_fit",
    "note": "r 20 with step 6's crease trim and step 5's sizes: refused because the corners take the whole edge, fit 20 - 0.01.",
    "fixes": [
-    "fillet_refuse_rails_leaving_faces",
-    "fillet_cliff_overflow",
     "fillet_overflow_trim_at_creases"
    ],
    "steps": [
@@ -116,8 +114,6 @@
    "name": "corner_rounds_at_their_fit_build",
    "note": "r 19.99, the reported fit, with the same flags: one closed solid.",
    "fixes": [
-    "fillet_refuse_rails_leaving_faces",
-    "fillet_cliff_overflow",
     "fillet_overflow_trim_at_creases"
    ],
    "steps": [

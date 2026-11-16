@@ -192,7 +192,7 @@ pub(crate) fn picks_components(app: &SolveApp) -> bool {
 /// belongs to (copied as a component with Create Copy, see `targets`), otherwise the pick as it was.
 pub(crate) fn component_pick(app: &SolveApp, hit: &crate::viewport::Hit, sel: Sel) -> Sel {
     let (crate::viewport::Hit::Face { body, .. }, Sel::Body { .. }) = (hit, &sel) else { return sel };
-    if app.ui.pick_components && picks_components(app) {
+    if app.picks_components() && picks_components(app) {
         let occurrence = crate::viewport::component_selection(app, body);
         if matches!(occurrence, Sel::Occurrence { .. }) {
             return occurrence;
@@ -762,7 +762,7 @@ pub fn for_feature(
     feature: &solidcraft_engine::doc::FeatureKind,
     frame: &solidcraft_engine::doc::Mat,
 ) {
-    let solidcraft_engine::doc::FeatureKind::Move { bodies, translate, rotate_axis, origin, angle, copy } = feature else { return };
+    let solidcraft_engine::doc::FeatureKind::Move { bodies, translate, rotate_axis, origin, angle, copy, .. } = feature else { return };
     let mut translate = translate.clone();
     let mut origin = origin.clone();
     let mut axis = rotate_axis.map(Vec3::from).unwrap_or(Vec3::Z);
