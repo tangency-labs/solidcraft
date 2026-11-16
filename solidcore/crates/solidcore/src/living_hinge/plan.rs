@@ -218,12 +218,11 @@ pub fn plan(
         return Err(LivingHingeError::Plate("it has no edges".into()));
     }
     let found;
-    let closed = match closed {
-        Some(c) => c,
-        None => {
-            found = closed_edges(field, plate);
-            found.as_slice()
-        }
+    let closed = if let Some(c) = closed {
+        c
+    } else {
+        found = closed_edges(field, plate);
+        found.as_slice()
     };
     let b = frame_box(field);
     let lattice = match anchor {
