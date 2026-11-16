@@ -4155,6 +4155,90 @@ mod tests {
         );
     }
 
+    /// The one valid-to-refusal change of the edgeless branch is a face without edge boxes
+    /// whose loose box is not finite. A face made over a domain under the tolerance has no
+    /// edge, and its body fails `check_brep` at Level 2 on its topology (`SmBrep` test 126),
+    /// finite or with a NaN in its net, its domain or its tolerance; none of those NaN cases
+    /// reaches the refusal either, as the hull or the loose box stays finite.
+    #[test]
+    fn edgeless_face_bodies_fail_check_brep_level_2() {
+        use crate::topology::brep::p2::ArenaNotifyState;
+        use crate::topology::brep::p8::{create_face_from_surface, FaceBuildEnv};
+        use crate::topology::brep::validation::{check_brep, BrepCheck, CheckLevel};
+        let n = 4;
+        let knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let surface_with = |hole: f64| {
+            let net: Vec<Vec<CPoint>> = (0..n)
+                .map(|i| {
+                    (0..n)
+                        .map(|j| {
+                            let z = if (i, j) == (1, 2) { hole } else { 0.0 };
+                            CPoint::new(
+                                f64::from(i as u32) / 3.0,
+                                f64::from(j as u32) / 3.0,
+                                z,
+                                NOW,
+                            )
+                        })
+                        .collect()
+                })
+                .collect();
+            let nurb = NurbSurface::new(net, 3, 3, knots.clone(), knots.clone()).unwrap();
+            Surface::from(BSplineSurface::from_nurb(nurb, false))
+        };
+        // (the face is made on a finite net, which face making requires, and then given the
+        // net with the NaN, as a body read from a file can carry it)
+        let surface = surface_with(0.25);
+        let mut k = Kernel::default();
+        let mut b = crate::topology::brep::p3::new_brep(
+            &mut k,
+            crate::geom::tol::USE_DEFAULT,
+            crate::geom::tol::USE_DEFAULT,
+        )
+        .unwrap();
+        let domain = Extent2d::from_bounds(0.5, 0.5, 0.500_001, 0.500_001);
+        let f = {
+            let mut state = ArenaNotifyState::new(&b);
+            let mut env = state.env(None);
+            let mut marks = crate::topology::topology_traverser::Marks::default();
+            let this_face = |f: FaceId| loopuse::notify_ref(EntityRef::Face(f));
+            let mut fenv = FaceBuildEnv {
+                env: &mut env,
+                marks: &mut marks,
+                this_face: &this_face,
+            };
+            create_face_from_surface(&mut k, &mut b, Some(surface), &domain, &mut fenv).unwrap()
+        };
+        assert!(face_edges(&b, f).unwrap().is_empty(), "no edges");
+        let good = b.clone_standing_for_self().unwrap();
+        for variant in ["nan net", "nan domain", "nan tolerance"] {
+            let mut b = good.clone_standing_for_self().unwrap();
+            match variant {
+                "nan net" => b.face_mut(f).unwrap().surface = Some(surface_with(f64::NAN)),
+                "nan domain" => {
+                    b.face_mut(f).unwrap().uv_domain =
+                        Extent2d::from_bounds(0.5, 0.5, f64::NAN, 0.500_001);
+                }
+                _ => b.face_mut(f).unwrap().tolerance = f64::NAN,
+            }
+            let r = calculate_tight_bounding_box(&k, &b, f);
+            let check = check_brep(&mut k, &mut b, CheckLevel::Level2);
+            eprintln!(
+                "{variant}: tight box {r:?}; check_brep Level 2 valid {:?} lines {:?}",
+                check.as_ref().map(BrepCheck::is_valid),
+                check.as_ref().map(BrepCheck::lines)
+            );
+            // none of these reaches the refusal: the hull or the loose box is finite
+            assert!(r.is_ok(), "{variant}: {r:?}");
+            assert!(!check.unwrap().is_valid(), "{variant} passes Level 2");
+        }
+        // The edgeless body itself, finite as made, fails Level 2 (its faceuse has no
+        // loopuse, `SmBrep` test 126), as on main: the validation is not touched here.
+        let mut b = good;
+        let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        assert!(!check.is_valid(), "the edgeless body passes Level 2");
+    }
+
     #[test]
     fn sector_classification_into_the_face_is_inside() {
         let k = Kernel::default();
